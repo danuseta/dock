@@ -7,7 +7,7 @@ const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
 const OAUTH_STATE_NAMESPACE = 'google-oauth-state';
-const OAUTH_STATE_TTL_SECONDS = 10 * 60;
+const OAUTH_STATE_TTL_SECONDS = 30 * 60;
 
 interface OAuthState {
   value: string;
@@ -51,7 +51,7 @@ export class GoogleCalendarService {
 
   private async createState(): Promise<string> {
     const value = randomBytes(32).toString('base64url');
-    this.states.set(value, { value, expiresAt: Date.now() + 10 * 60 * 1000 });
+    this.states.set(value, { value, expiresAt: Date.now() + OAUTH_STATE_TTL_SECONDS * 1000 });
     for (const [key, state] of this.states) {
       if (state.expiresAt <= Date.now()) this.states.delete(key);
     }
