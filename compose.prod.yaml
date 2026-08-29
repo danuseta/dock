@@ -15,6 +15,7 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set}
       CORS_ORIGIN: ${PUBLIC_BASE_URL:-http://localhost:3101}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3101}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

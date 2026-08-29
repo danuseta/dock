@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import type { Request, Response } from 'express';
+import type { CookieOptions, Request, Response } from 'express';
 
 const SESSION_COOKIE = 'jidis_session';
 const DEFAULT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -13,6 +13,14 @@ interface Session {
 interface AttemptWindow {
   count: number;
   resetAt: number;
+}
+
+function defaultSecureCookie(): boolean {
+  const configured = process.env.SESSION_COOKIE_SECURE?.trim().toLowerCase();
+  if (!configured) return process.env.NODE_ENV === 'production';
+  if (configured === 'true') return true;
+  if (configured === 'false') return false;
+  throw new Error('SESSION_COOKIE_SECURE must be true or false');
 }
 
 function parseCookies(header?: string): Record<string, string> {
@@ -31,18 +39,34 @@ function parseCookies(header?: string): Record<string, string> {
 export class SessionManager {
   private readonly sessions = new Map<string, Session>();
 
-  constructor(private readonly ttlMs = DEFAULT_SESSION_TTL_MS) {}
+  constructor(
+    private readonly ttlMs = DEFAULT_SESSION_TTL_MS,
+    private readonly secureCookie = defaultSecureCookie(),
+  ) {}
 
-  create(response: Response, now = Date.now()): string {
-    const token = randomBytes(32).toString('base64url');
-    this.sessions.set(token, { expiresAt: now + this.ttlMs });
-    response.cookie(SESSION_COOKIE, token, {
+  private cookieOptions(): CookieOptions {
+    return {
       httpOnly: true,
       maxAge: this.ttlMs,
       path: '/',
       sameSite: 'strict',
-      secure: process.env.NODE_ENV === 'production',
-    });
+      secure: this.secureCookie,
+    };
+  }
+
+  private clearCookieOptions(): CookieOptions {
+    return {
+      httpOnly: true,
+      path: '/',
+      sameSite: 'strict',
+      secure: this.secureCookie,
+    };
+  }
+
+  create(response: Response, now = Date.now()): string {
+    const token = randomBytes(32).toString('base64url');
+    this.sessions.set(token, { expiresAt: now + this.ttlMs });
+    response.cookie(SESSION_COOKIE, token, this.cookieOptions());
     return token;
   }
 
@@ -62,7 +86,7 @@ export class SessionManager {
   clear(request: Request, response: Response): void {
     const token = parseCookies(request.headers.cookie)[SESSION_COOKIE];
     if (token) this.sessions.delete(token);
-    response.clearCookie(SESSION_COOKIE, { path: '/', sameSite: 'strict' });
+    response.clearCookie(SESSION_COOKIE, this.clearCookieOptions());
   }
 
   clearAll(): void {

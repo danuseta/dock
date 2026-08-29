@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@apollo/client';
+import { Loader2 } from 'lucide-react';
 import { GET_AUTH_STATUS } from './graphql/queries';
 import { VERIFY_MASTER_PIN } from './graphql/mutations';
 import { AppLayout } from './components/AppLayout';
@@ -11,9 +12,10 @@ import HomePage from './pages/HomePage';
 import CalendarPage from './pages/CalendarPage';
 import MonitoringPage from './pages/MonitoringPage';
 import { PinLockModal } from './components/PinLockModal';
+import { Button } from './components/ui';
 
 function App() {
-  const { data, refetch } = useQuery(GET_AUTH_STATUS, { fetchPolicy: 'network-only' });
+  const { data, error, refetch } = useQuery(GET_AUTH_STATUS, { fetchPolicy: 'network-only' });
   const [verifyMasterPin] = useMutation(VERIFY_MASTER_PIN);
 
   const getInitialRoute = () => {
@@ -31,7 +33,6 @@ function App() {
   const initialRoute = getInitialRoute();
   const [currentPath, setCurrentPath] = useState(initialRoute.path);
   const [selectedTicketKey, setSelectedTicketKey] = useState<string | null>(initialRoute.key);
-  const [isLocked, setIsLocked] = useState(true);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -43,17 +44,11 @@ function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  useEffect(() => {
-    if (!data?.authStatus) return;
-    setIsLocked(data.authStatus.hasMasterPin && !data.authStatus.authenticated);
-  }, [data]);
-
   const handleUnlock = async (pin: string): Promise<boolean> => {
     try {
       const res = await verifyMasterPin({ variables: { pin } });
       if (res.data?.verifyMasterPin) {
         await refetch();
-        setIsLocked(false);
         return true;
       }
       return false;
@@ -88,6 +83,31 @@ function App() {
       default: return <HomePage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;
     }
   };
+
+  if (!data?.authStatus) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-background p-6 text-foreground">
+        <div className="flex flex-col items-center gap-4 text-center" role="status" aria-live="polite">
+          <img src="/dock-logo.svg" alt="DOCK" className="size-14" />
+          {error ? (
+            <>
+              <p className="text-sm text-secondary-foreground">Unable to restore your DOCK session.</p>
+              <Button onClick={() => void refetch()}>
+                Retry
+              </Button>
+            </>
+          ) : (
+            <>
+              <Loader2 className="size-5 animate-spin text-accent" aria-hidden="true" />
+              <p className="text-sm text-secondary-foreground">Restoring your session...</p>
+            </>
+          )}
+        </div>
+      </main>
+    );
+  }
+
+  const isLocked = data.authStatus.hasMasterPin && !data.authStatus.authenticated;
 
   return (
     <AppLayout currentPath={currentPath === '/ticket' ? '/dashboard' : currentPath} onNavigate={handleNavigate}>

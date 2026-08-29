@@ -1,31 +1,35 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import type { Request, Response } from 'express';
+import type { CookieOptions, Request, Response } from 'express';
 import { PinRateLimiter, SessionManager } from '../auth/session';
 
 function responseStub() {
   const cookies: string[] = [];
   const cleared: string[] = [];
+  const cookieOptions: CookieOptions[] = [];
+  const clearOptions: CookieOptions[] = [];
   const response = {
-    cookie(name: string, value: string) {
+    cookie(name: string, value: string, options: CookieOptions) {
       cookies.push(`${name}=${value}`);
+      cookieOptions.push(options);
       return response;
     },
-    clearCookie(name: string) {
+    clearCookie(name: string, options: CookieOptions) {
       cleared.push(name);
+      clearOptions.push(options);
       return response;
     },
   } as unknown as Response;
-  return { response, cookies, cleared };
+  return { response, cookies, cleared, cookieOptions, clearOptions };
 }
 
 function requestWithCookie(cookie?: string): Request {
   return { headers: { cookie } } as Request;
 }
 
-test('server-side PIN sessions use opaque cookies and expire', () => {
-  const sessions = new SessionManager(1_000);
-  const { response, cookies, cleared } = responseStub();
+test('server-side PIN sessions use opaque secure cookies and expire', () => {
+  const sessions = new SessionManager(1_000, true);
+  const { response, cookies, cleared, cookieOptions, clearOptions } = responseStub();
   const token = sessions.create(response, 10_000);
 
   assert.ok(token.length >= 40);
@@ -38,6 +42,20 @@ test('server-side PIN sessions use opaque cookies and expire', () => {
   sessions.clear(request, response);
   assert.strictEqual(sessions.isAuthenticated(request, 20_001), false);
   assert.deepStrictEqual(cleared, ['jidis_session']);
+  assert.strictEqual(cookieOptions[0].secure, true);
+  assert.strictEqual(clearOptions[0].secure, true);
+  assert.strictEqual(clearOptions[0].maxAge, undefined);
+});
+
+test('PIN sessions can explicitly support a private HTTP tunnel', () => {
+  const sessions = new SessionManager(1_000, false);
+  const { response, cookieOptions } = responseStub();
+
+  sessions.create(response);
+
+  assert.strictEqual(cookieOptions[0].secure, false);
+  assert.strictEqual(cookieOptions[0].httpOnly, true);
+  assert.strictEqual(cookieOptions[0].sameSite, 'strict');
 });
 
 test('PIN limiter blocks only after the configured failed-attempt budget', () => {
