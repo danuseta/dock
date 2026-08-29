@@ -25,6 +25,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: npm run db:generate --workspace=backend/bff-graphql
       - run: npm run lint --workspace=frontend
       - run: npm run build:app
       - run: npm run test:all
