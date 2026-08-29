@@ -1,0 +1,660 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JIDIS — Home & Navigation Proposal</title>
+  <style>
+    :root {
+      --bg: #111111;
+      --surface-0: #171717;
+      --surface-1: #202020;
+      --surface-2: #292929;
+      --border: #353535;
+      --border-strong: #505050;
+      --text: #f2f2ef;
+      --secondary: #b5b5af;
+      --muted: #797974;
+      --accent: #e8e4d4;
+      --accent-ink: #171717;
+      --green: #75b98b;
+      --red: #c9796e;
+      --amber: #c5a66c;
+      --sidebar: 248px;
+      --sidebar-mini: 72px;
+      --radius: 12px;
+      --shadow: 0 14px 44px rgba(0, 0, 0, .34);
+    }
+
+    * { box-sizing: border-box; }
+    html { max-width: 100%; scroll-behavior: smooth; overflow-x: hidden; }
+    body {
+      margin: 0;
+      padding: 40px 22px 100px;
+      background: #0d0d0d;
+      color: var(--text);
+      font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    .proposal { width: 100%; max-width: 1440px; min-width: 0; margin: 0 auto; }
+    .proposal-head { max-width: 850px; margin-bottom: 26px; }
+    .eyebrow { margin: 0 0 8px; color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; }
+    h1, h2, h3, p { text-wrap: pretty; }
+    h1 { margin: 0 0 8px; font-size: clamp(28px, 4vw, 48px); line-height: 1.05; font-weight: 760; }
+    .lede { margin: 0; max-width: 75ch; color: var(--secondary); font-size: 15px; line-height: 1.7; }
+    .recommendation {
+      margin: 24px 0 28px;
+      padding: 18px 20px;
+      border: 1px solid #4c4a43;
+      border-radius: var(--radius);
+      background: #191918;
+      color: var(--secondary);
+    }
+    .recommendation strong { color: var(--accent); }
+    .proposal-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .segmented { display: flex; gap: 6px; flex-wrap: wrap; }
+    .segmented button, .control-button {
+      min-height: 38px;
+      padding: 8px 13px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-0);
+      cursor: pointer;
+    }
+    .segmented button:hover, .control-button:hover { border-color: var(--border-strong); }
+    .segmented button.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+    .control-button:disabled { opacity: .38; cursor: not-allowed; }
+
+    .demo-frame {
+      position: relative;
+      min-height: 790px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: var(--bg);
+      box-shadow: var(--shadow);
+    }
+    .app-shell { min-height: 790px; display: grid; background: var(--bg); }
+    .app-shell.mode-left { grid-template-columns: var(--sidebar) minmax(0, 1fr); }
+    .app-shell.mode-right { grid-template-columns: minmax(0, 1fr) var(--sidebar); }
+    .app-shell.mode-top { display: block; padding-top: 96px; }
+    .app-shell.mode-floating { display: block; padding-bottom: 96px; }
+    .app-shell.mode-left.collapsed { grid-template-columns: var(--sidebar-mini) minmax(0, 1fr); }
+    .app-shell.mode-right.collapsed { grid-template-columns: minmax(0, 1fr) var(--sidebar-mini); }
+
+    .navigation {
+      position: relative;
+      z-index: 10;
+      min-width: 0;
+      background: var(--surface-0);
+      border-color: var(--border);
+    }
+    .mode-left .navigation, .mode-right .navigation {
+      display: flex;
+      min-height: 790px;
+      flex-direction: column;
+      border-style: solid;
+      border-width: 0 1px 0 0;
+    }
+    .mode-right .navigation { grid-column: 2; grid-row: 1; border-width: 0 0 0 1px; }
+    .mode-right .home { grid-column: 1; grid-row: 1; }
+    .mode-top .navigation, .mode-floating .navigation {
+      position: absolute;
+      right: 50%;
+      display: flex;
+      align-items: center;
+      width: max-content;
+      max-width: calc(100% - 28px);
+      padding: 8px;
+      border: 1px solid var(--border-strong);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      transform: translateX(50%);
+    }
+    .mode-top .navigation { top: 18px; }
+    .mode-floating .navigation { bottom: 18px; }
+    .nav-brand {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 10px;
+      padding: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .mode-top .nav-brand, .mode-floating .nav-brand { display: none; }
+    .logo { width: 30px; height: 30px; flex: 0 0 auto; border-radius: 7px; object-fit: cover; border: 1px solid var(--border); }
+    .brand-copy { min-width: 0; }
+    .brand-name { font-size: 15px; font-weight: 800; line-height: 1.05; }
+    .brand-sub { margin-top: 3px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+    .nav-list { display: flex; gap: 4px; padding: 14px; }
+    .mode-left .nav-list, .mode-right .nav-list { flex: 1; flex-direction: column; }
+    .mode-top .nav-list, .mode-floating .nav-list { align-items: center; padding: 0; }
+    .nav-item {
+      position: relative;
+      display: flex;
+      min-width: 42px;
+      min-height: 42px;
+      align-items: center;
+      gap: 11px;
+      padding: 10px 12px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--secondary);
+      cursor: pointer;
+      text-align: left;
+      white-space: nowrap;
+    }
+    .nav-item:hover { background: var(--surface-1); color: var(--text); }
+    .nav-item.active { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+    .nav-item svg { width: 18px; height: 18px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.8; }
+    .mode-top .nav-label, .mode-floating .nav-label { display: none; }
+    .mode-top .nav-item:hover::after, .mode-floating .nav-item:hover::after {
+      content: attr(data-label);
+      position: absolute;
+      left: 50%;
+      padding: 5px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface-0);
+      color: var(--text);
+      font-size: 11px;
+      transform: translateX(-50%);
+    }
+    .mode-top .nav-item:hover::after { top: calc(100% + 10px); }
+    .mode-floating .nav-item:hover::after { bottom: calc(100% + 10px); }
+    .nav-footer {
+      display: flex;
+      min-height: 54px;
+      align-items: center;
+      justify-content: center;
+      padding: 14px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font: 700 11px ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+    .mode-top .nav-footer, .mode-floating .nav-footer { min-height: 42px; margin-left: 7px; padding: 0 8px 0 12px; border: 0; border-left: 1px solid var(--border); }
+    .collapse-button {
+      position: absolute;
+      top: 84px;
+      right: -14px;
+      z-index: 12;
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      background: var(--surface-1);
+      cursor: pointer;
+    }
+    .collapse-button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; }
+    .mode-right .collapse-button { right: auto; left: -14px; transform: rotate(180deg); }
+    .mode-top .collapse-button, .mode-floating .collapse-button { display: none; }
+    .collapsed .brand-copy, .collapsed .nav-label { display: none; }
+    .collapsed .nav-brand { justify-content: center; padding-inline: 10px; }
+    .collapsed .nav-list { align-items: center; padding-inline: 10px; }
+    .collapsed .nav-item { justify-content: center; padding-inline: 10px; }
+    .collapsed .collapse-button { transform: rotate(180deg); }
+    .mode-right.collapsed .collapse-button { transform: rotate(0deg); }
+    .collapsed .nav-footer { font-size: 9px; }
+
+    .home { min-width: 0; padding: clamp(22px, 3vw, 42px); background: var(--bg); }
+    .home-topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 30px; }
+    .home-topbar h2 { margin: 0; font-size: clamp(26px, 3vw, 38px); line-height: 1.1; }
+    .home-topbar p { margin: 7px 0 0; color: var(--secondary); }
+    .clock { text-align: right; }
+    .clock strong { display: block; font: 650 clamp(22px, 3vw, 34px) ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .clock span { color: var(--muted); font-size: 11px; }
+    .status-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-bottom: 24px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface-0);
+    }
+    .metric { padding: 17px 18px; border-right: 1px solid var(--border); }
+    .metric:last-child { border-right: 0; }
+    .metric b { display: block; margin-bottom: 3px; font-size: 23px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    .metric span { color: var(--muted); font-size: 11px; }
+    .metric b.good { color: var(--green); }
+    .metric b.alert { color: var(--red); }
+    .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+    .section-head h3 { margin: 0; font-size: 14px; }
+    .section-head button { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; }
+    .quick-section { width: max-content; max-width: 100%; }
+    .quick-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+    .quick-link {
+      display: grid;
+      width: 44px;
+      height: 44px;
+      flex: 0 0 44px;
+      place-items: center;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--surface-0);
+      color: var(--secondary);
+      cursor: pointer;
+      text-align: center;
+    }
+    .quick-link:hover { border-color: var(--border-strong); background: var(--surface-1); color: var(--text); }
+    .quick-link svg { width: 20px; height: 20px; fill: none; stroke: var(--accent); stroke-width: 1.7; }
+    .content-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 380px); gap: 14px; align-items: stretch; }
+    .stack { display: grid; gap: 14px; }
+    .left-stack { grid-template-rows: auto minmax(0, 1fr); }
+    .calendar-stack { width: 100%; max-width: 380px; justify-self: end; }
+    .panel { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-0); }
+    .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 15px 17px; border-bottom: 1px solid var(--border); }
+    .panel-head h3 { margin: 0; font-size: 13px; }
+    .panel-head span { color: var(--muted); font-size: 11px; }
+    .work-row { display: grid; grid-template-columns: 82px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 13px 17px; border-bottom: 1px solid var(--border); }
+    .work-row:last-child { border-bottom: 0; }
+    .ticket { color: var(--accent); font: 700 12px ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .work-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .status { padding: 3px 7px; border-radius: 5px; background: var(--surface-2); color: var(--secondary); font-size: 10px; }
+    .work-panel .panel-head { padding: 11px 14px; }
+    .work-panel { height: 100%; }
+    .work-panel .work-row { grid-template-columns: 82px minmax(0, 1fr) auto auto; gap: 10px; padding: 10px 14px; }
+    .work-panel .ticket { font-size: 11px; }
+    .work-panel .work-title { font-size: 13px; }
+    .work-panel .points { color: var(--muted); font: 700 10px ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .work-panel .status { padding: 2px 6px; font-size: 10px; }
+    .agenda-row, .service-row { display: flex; align-items: center; gap: 11px; padding: 12px 15px; border-bottom: 1px solid var(--border); }
+    .agenda-row:last-child, .service-row:last-child { border-bottom: 0; }
+    .time { width: 40px; color: var(--muted); font: 650 11px ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .row-copy { min-width: 0; flex: 1; }
+    .row-copy strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+    .row-copy small { color: var(--muted); }
+    .dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--muted); }
+    .dot.up { background: var(--green); }
+    .dot.down { background: var(--red); }
+    .latency { color: var(--muted); font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .calendar-body { padding: 8px 10px 10px; }
+    .calendar-weekdays, .calendar-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+    .calendar-weekdays { margin-bottom: 5px; }
+    .calendar-weekdays span { color: var(--muted); font-size: 9px; font-weight: 700; text-align: center; }
+    .calendar-day {
+      position: relative;
+      display: grid;
+      width: 100%;
+      min-width: 0;
+      aspect-ratio: 1;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--surface-1);
+      color: var(--secondary);
+      cursor: pointer;
+      font-size: 9px;
+      font-variant-numeric: tabular-nums;
+    }
+    .calendar-day:hover { border-color: var(--border-strong); background: var(--surface-1); color: var(--text); }
+    .calendar-day.muted { color: #565652; }
+    .calendar-day.today { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 800; }
+    .calendar-day.has-event::after { content: ""; position: absolute; bottom: 3px; width: 3px; height: 3px; border-radius: 50%; background: var(--amber); }
+    .calendar-day.today::after { background: var(--accent-ink); }
+    .calendar-day.has-event:hover,
+    .calendar-day.has-event:focus { z-index: 20; }
+    .event-popover {
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      z-index: 20;
+      width: 218px;
+      padding: 10px;
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      background: var(--surface-0);
+      box-shadow: var(--shadow);
+      color: var(--text);
+      text-align: left;
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transform: translate(-50%, 4px);
+      transition: opacity 140ms ease-out, transform 140ms ease-out, visibility 140ms;
+    }
+    .calendar-day.has-event:hover .event-popover,
+    .calendar-day.has-event:focus .event-popover {
+      opacity: 1;
+      visibility: visible;
+      transform: translate(-50%, 0);
+    }
+    .event-entry { display: block; }
+    .event-entry + .event-entry { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+    .event-entry strong { display: block; margin-bottom: 2px; font-size: 11px; line-height: 1.35; }
+    .event-entry small { display: block; color: var(--muted); font-size: 9px; line-height: 1.45; }
+    @media (prefers-reduced-motion: reduce) {
+      .event-popover { transition: none; }
+    }
+    .health-controls { display: flex; align-items: center; gap: 7px; }
+    .health-controls span { color: var(--muted); font: 10px ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .refresh-button { display: grid; width: 26px; height: 26px; place-items: center; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--secondary); cursor: pointer; }
+    .refresh-button:hover { border-color: var(--border-strong); color: var(--text); }
+    .refresh-button svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; }
+
+    .settings-panel {
+      position: absolute;
+      top: 0;
+      right: 0;
+      z-index: 30;
+      width: min(430px, 100%);
+      height: 100%;
+      padding: 24px;
+      overflow: auto;
+      border-left: 1px solid var(--border-strong);
+      background: #151515;
+      box-shadow: -18px 0 42px rgba(0, 0, 0, .42);
+      transform: translateX(101%);
+      transition: transform 160ms ease-out;
+    }
+    .settings-panel.open { transform: translateX(0); }
+    @media (prefers-reduced-motion: reduce) { .settings-panel { transition: none; } }
+    .settings-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 26px; }
+    .settings-head h2 { margin: 0; font-size: 21px; }
+    .settings-head p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+    .icon-button { display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-0); cursor: pointer; }
+    .setting-group { margin-top: 26px; }
+    .setting-group h3 { margin: 0 0 5px; font-size: 13px; }
+    .setting-group > p { margin: 0 0 13px; color: var(--muted); font-size: 12px; }
+    .layout-options { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+    .layout-option {
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--surface-0);
+      cursor: pointer;
+      text-align: left;
+    }
+    .layout-option.active { border-color: var(--accent); }
+    .layout-option strong { display: block; margin-bottom: 3px; font-size: 12px; }
+    .layout-option span { color: var(--muted); font-size: 10px; }
+    .mini-layout { position: relative; height: 54px; margin-bottom: 10px; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+    .mini-layout::before { content: ""; position: absolute; background: var(--surface-2); }
+    .layout-option[data-mode="left"] .mini-layout::before { inset: 0 auto 0 0; width: 18px; }
+    .layout-option[data-mode="right"] .mini-layout::before { inset: 0 0 0 auto; width: 18px; }
+    .layout-option[data-mode="top"] .mini-layout::before { top: 5px; right: 16px; left: 16px; height: 11px; border-radius: 5px; }
+    .layout-option[data-mode="floating"] .mini-layout::before { right: 16px; bottom: 5px; left: 16px; height: 11px; border-radius: 5px; }
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 0; border-top: 1px solid var(--border); }
+    .toggle-row strong { display: block; font-size: 12px; }
+    .toggle-row small { color: var(--muted); }
+    .switch { position: relative; width: 42px; height: 24px; flex: 0 0 auto; }
+    .switch input { position: absolute; opacity: 0; pointer-events: none; }
+    .switch span { position: absolute; inset: 0; border-radius: 999px; background: var(--surface-2); cursor: pointer; }
+    .switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--muted); transform: translateX(0); transition: transform 140ms ease-out; }
+    .switch input:checked + span { background: var(--accent); }
+    .switch input:checked + span::after { background: var(--accent-ink); transform: translateX(18px); }
+
+    .comparison { margin-top: 56px; }
+    .comparison h2 { margin: 0 0 8px; font-size: 25px; }
+    .comparison > p { margin: 0 0 18px; color: var(--secondary); }
+    .mode-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .mode-card { padding: 17px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-0); }
+    .mode-card.recommended { border-color: #5b584d; }
+    .mode-card .tag { display: inline-block; margin-bottom: 11px; padding: 3px 7px; border-radius: 5px; background: var(--accent); color: var(--accent-ink); font-size: 9px; font-weight: 800; text-transform: uppercase; }
+    .mode-card h3 { margin: 0 0 7px; font-size: 14px; }
+    .mode-card p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+
+    @media (max-width: 1080px) {
+      .mode-cards { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 760px) {
+      body { padding: 22px 10px 70px; }
+      .proposal,
+      .proposal-head,
+      .recommendation,
+      .proposal-controls,
+      .demo-frame,
+      .app-shell,
+      .home,
+      .status-strip,
+      .quick-grid,
+      .content-grid,
+      .stack,
+      .panel { width: 100%; max-width: 100%; min-width: 0; }
+      .proposal { overflow: hidden; }
+      h1, .lede, .recommendation { overflow-wrap: anywhere; }
+      .proposal-controls { align-items: stretch; }
+      .segmented { width: 100%; flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
+      .segmented button { flex: 0 0 auto; }
+      .demo-frame, .app-shell { min-height: 900px; }
+      .app-shell.mode-left, .app-shell.mode-right, .app-shell.mode-left.collapsed, .app-shell.mode-right.collapsed { display: block; padding-bottom: 92px; }
+      .mode-left .navigation, .mode-right .navigation { position: absolute; right: 50%; bottom: 14px; top: auto; display: flex; width: max-content; min-height: auto; max-width: calc(100% - 22px); flex-direction: row; padding: 7px; border: 1px solid var(--border-strong); border-radius: 14px; transform: translateX(50%); }
+      .mode-top .navigation { top: 14px; bottom: auto; max-width: calc(100% - 22px); padding: 7px; }
+      .nav-brand, .nav-footer, .collapse-button { display: none !important; }
+      .nav-list, .mode-left .nav-list, .mode-right .nav-list, .mode-top .nav-list { flex-direction: row; padding: 0; }
+      .nav-label { display: none; }
+      .home { padding: 22px 16px 110px; }
+      .home-topbar { display: grid; grid-template-columns: minmax(0, 1fr); }
+      .home-topbar p { max-width: 28ch; }
+      .clock { display: flex; align-items: baseline; gap: 10px; text-align: left; }
+      .clock strong { font-size: 22px; }
+      .status-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .metric { min-width: 0; border-bottom: 1px solid var(--border); }
+      .metric:nth-child(2) { border-right: 0; }
+      .metric:nth-child(n+3) { border-bottom: 0; }
+      .content-grid { grid-template-columns: 1fr; }
+      .calendar-stack { width: 100%; max-width: 360px; justify-self: center; }
+      .work-row { grid-template-columns: 72px minmax(0, 1fr); }
+      .work-panel .work-row { grid-template-columns: 72px minmax(0, 1fr) auto; }
+      .work-row .status { display: none; }
+      .layout-options { grid-template-columns: 1fr; }
+      .mode-cards { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="proposal">
+    <header class="proposal-head">
+      <p class="eyebrow">JIDIS UI proposal · Home + Navigation</p>
+      <h1>A calmer Home, with navigation that follows the way you work.</h1>
+      <p class="lede">This proposal does not change the React application yet. Every mode below is interactive: left or right sidebar and top or bottom floating dock. Collapse applies only to sidebars because both docks are already compact.</p>
+    </header>
+
+    <div class="recommendation"><strong>Recommended default: expanded left sidebar.</strong> Home uses a compact clock, four metrics in one strip, icon-only Quick Links, a monthly calendar, Current Work, and Service Health. The runtime panel is removed, and the sidebar footer shows only the version. On narrow screens, navigation becomes a floating dock.</div>
+
+    <div class="proposal-controls">
+      <div class="segmented" aria-label="Choose navigation mode">
+        <button class="active" data-mode-button="left">Left sidebar</button>
+        <button data-mode-button="right">Right sidebar</button>
+        <button data-mode-button="top">Top floating dock</button>
+        <button data-mode-button="floating">Bottom floating dock</button>
+      </div>
+      <div class="segmented">
+        <button id="collapseControl" class="control-button">Minimize sidebar</button>
+        <button id="openSettings" class="control-button">Open Appearance Settings</button>
+      </div>
+    </div>
+
+    <section class="demo-frame" aria-label="Interactive JIDIS proposal">
+      <div id="appShell" class="app-shell mode-left">
+        <nav class="navigation" aria-label="JIDIS navigation">
+          <div class="nav-brand">
+            <img class="logo" src="../../frontend/public/jidis_logo.jpg" alt="JIDIS logo">
+            <div class="brand-copy"><div class="brand-name">JIDIS</div><div class="brand-sub">Personal command center</div></div>
+          </div>
+          <button id="collapseEdge" class="collapse-button" aria-label="Minimize sidebar">
+            <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <div class="nav-list">
+            <button class="nav-item active" data-label="Home"><svg viewBox="0 0 24 24"><path d="m3 11 9-8 9 8v9a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></svg><span class="nav-label">Home</span></button>
+            <button class="nav-item" data-label="Board"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="10" rx="1"/></svg><span class="nav-label">Board</span></button>
+            <button class="nav-item" data-label="Calendar"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg><span class="nav-label">Calendar</span></button>
+            <button class="nav-item" data-label="Monitoring"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-6 4 12 2-6h6"/></svg><span class="nav-label">Monitoring</span></button>
+            <button class="nav-item" data-label="Attention"><svg viewBox="0 0 24 24"><path d="M12 3 2 21h20zM12 9v5M12 18h.01"/></svg><span class="nav-label">Needs Attention</span></button>
+            <button class="nav-item settings-nav" data-label="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.1A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.2.4.6.8 1 1 .3.2.7.3 1.1.3h.1v4h-.1c-.4 0-.8.1-1.1.3-.4.2-.8.6-1 1z"/></svg><span class="nav-label">System Settings</span></button>
+          </div>
+          <footer class="nav-footer"><span class="version-full">v1.0.1</span></footer>
+        </nav>
+
+        <section class="home">
+          <header class="home-topbar">
+            <div><h2>Good morning, Danu.</h2><p>Here is what needs your attention before you start working.</p></div>
+            <div class="clock"><strong id="clockTime">09:41:00</strong><span id="clockDate">Thursday, 27 August</span></div>
+          </header>
+
+          <div class="status-strip">
+            <div class="metric"><b>7</b><span>Active tickets</span></div>
+            <div class="metric"><b>18</b><span>Story points</span></div>
+            <div class="metric"><b class="alert">2</b><span>Needs attention</span></div>
+            <div class="metric"><b class="good">3/3</b><span>Services healthy</span></div>
+          </div>
+
+          <div class="content-grid">
+            <div class="stack left-stack">
+              <section class="quick-section" aria-labelledby="quickLinksTitle">
+                <div class="section-head"><h3 id="quickLinksTitle">Quick links</h3><button aria-label="Manage quick links" title="Manage quick links">＋</button></div>
+                <div class="quick-grid">
+                  <button class="quick-link" aria-label="Open Jira" title="Jira"><svg viewBox="0 0 24 24"><path d="m12 3 7 7-7 11-7-11zM8.5 10h7"/></svg></button>
+                  <button class="quick-link" aria-label="Open GitHub" title="GitHub"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M6 8v2c0 2 2 3 6 3s6-1 6-3V8M12 13v3"/></svg></button>
+                  <button class="quick-link" aria-label="Open Google Calendar" title="Google Calendar"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18M8 14h2M14 14h2M8 17h2"/></svg></button>
+                  <button class="quick-link" aria-label="Open Hermes" title="Hermes"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg></button>
+                  <button class="quick-link" aria-label="Open Paperclip" title="Paperclip"><svg viewBox="0 0 24 24"><path d="m9 12 6-6a4 4 0 0 1 6 6l-8 8a6 6 0 0 1-9-9l8-8"/><path d="m7 14 8-8a2 2 0 0 1 3 3l-8 8a3 3 0 0 1-4-4l7-7"/></svg></button>
+                  <button class="quick-link" aria-label="Open Obsidian" title="Obsidian"><svg viewBox="0 0 24 24"><path d="m12 2 7 6-2 11-5 3-5-3L5 8zM5 8l7 4 7-4M12 12v10"/></svg></button>
+                  <button class="quick-link" aria-label="Open Portfolio" title="Portfolio"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg></button>
+                  <button class="quick-link" aria-label="Open Grafana" title="Grafana"><svg viewBox="0 0 24 24"><path d="M4 18v-5M9 18V9M14 18v-3M19 18V5"/><path d="M3 20h18"/></svg></button>
+                </div>
+              </section>
+
+              <article class="panel work-panel">
+                <header class="panel-head"><h3>Current work</h3><span>Open board →</span></header>
+                <div class="work-row"><span class="ticket">QRD-1099</span><span class="work-title">Default model Luna migration</span><span class="points">5 SP</span><span class="status">In progress</span></div>
+                <div class="work-row"><span class="ticket">QRD-1104</span><span class="work-title">Fix workspace connection fallback</span><span class="points">5 SP</span><span class="status">Review</span></div>
+                <div class="work-row"><span class="ticket">QRD-1112</span><span class="work-title">Dashboard empty-state revision</span><span class="points">3 SP</span><span class="status">To do</span></div>
+                <div class="work-row"><span class="ticket">OPS-184</span><span class="work-title">Server agent observability</span><span class="points">5 SP</span><span class="status">To do</span></div>
+              </article>
+            </div>
+
+            <div class="stack calendar-stack">
+              <article class="panel">
+                <header class="panel-head"><h3>August 2026</h3><span>Google Calendar →</span></header>
+                <div class="calendar-body">
+                  <div class="calendar-weekdays" aria-hidden="true"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
+                  <div class="calendar-days" aria-label="August 2026 calendar">
+                    <button class="calendar-day muted" aria-label="27 July 2026">27</button><button class="calendar-day muted" aria-label="28 July 2026">28</button><button class="calendar-day muted" aria-label="29 July 2026">29</button><button class="calendar-day muted" aria-label="30 July 2026">30</button><button class="calendar-day muted" aria-label="31 July 2026">31</button><button class="calendar-day" aria-label="1 August 2026">1</button><button class="calendar-day" aria-label="2 August 2026">2</button>
+                    <button class="calendar-day" aria-label="3 August 2026">3</button><button class="calendar-day has-event" aria-label="4 August 2026, 1 event" aria-describedby="event-aug-4">4<span id="event-aug-4" class="event-popover" role="tooltip"><span class="event-entry"><strong>Daily engineering sync</strong><small>10:00–10:30 · Google Meet</small></span></span></button><button class="calendar-day" aria-label="5 August 2026">5</button><button class="calendar-day" aria-label="6 August 2026">6</button><button class="calendar-day" aria-label="7 August 2026">7</button><button class="calendar-day" aria-label="8 August 2026">8</button><button class="calendar-day" aria-label="9 August 2026">9</button>
+                    <button class="calendar-day" aria-label="10 August 2026">10</button><button class="calendar-day" aria-label="11 August 2026">11</button><button class="calendar-day has-event" aria-label="12 August 2026, 2 events" aria-describedby="event-aug-12">12<span id="event-aug-12" class="event-popover" role="tooltip"><span class="event-entry"><strong>Sprint planning</strong><small>09:30–10:30 · Google Meet</small></span><span class="event-entry"><strong>Architecture review</strong><small>15:00–16:00 · JIDIS</small></span></span></button><button class="calendar-day" aria-label="13 August 2026">13</button><button class="calendar-day" aria-label="14 August 2026">14</button><button class="calendar-day" aria-label="15 August 2026">15</button><button class="calendar-day" aria-label="16 August 2026">16</button>
+                    <button class="calendar-day" aria-label="17 August 2026">17</button><button class="calendar-day" aria-label="18 August 2026">18</button><button class="calendar-day" aria-label="19 August 2026">19</button><button class="calendar-day" aria-label="20 August 2026">20</button><button class="calendar-day has-event" aria-label="21 August 2026, 1 event" aria-describedby="event-aug-21">21<span id="event-aug-21" class="event-popover" role="tooltip"><span class="event-entry"><strong>Server maintenance</strong><small>22:00–23:00 · danuseta</small></span></span></button><button class="calendar-day" aria-label="22 August 2026">22</button><button class="calendar-day" aria-label="23 August 2026">23</button>
+                    <button class="calendar-day" aria-label="24 August 2026">24</button><button class="calendar-day" aria-label="25 August 2026">25</button><button class="calendar-day" aria-label="26 August 2026">26</button><button class="calendar-day today has-event" aria-label="27 August 2026, today, 2 events" aria-describedby="event-aug-27">27<span id="event-aug-27" class="event-popover" role="tooltip"><span class="event-entry"><strong>Daily engineering sync</strong><small>10:00–10:30 · Google Meet</small></span><span class="event-entry"><strong>Review QRD-1099</strong><small>15:30–16:00 · Qonflo</small></span></span></button><button class="calendar-day" aria-label="28 August 2026">28</button><button class="calendar-day" aria-label="29 August 2026">29</button><button class="calendar-day" aria-label="30 August 2026">30</button>
+                    <button class="calendar-day" aria-label="31 August 2026">31</button><button class="calendar-day muted" aria-label="1 September 2026">1</button><button class="calendar-day muted" aria-label="2 September 2026">2</button><button class="calendar-day muted" aria-label="3 September 2026">3</button><button class="calendar-day muted" aria-label="4 September 2026">4</button><button class="calendar-day muted" aria-label="5 September 2026">5</button><button class="calendar-day muted" aria-label="6 September 2026">6</button>
+                  </div>
+                </div>
+              </article>
+              <article class="panel">
+                <header class="panel-head"><h3>Service health</h3><div class="health-controls"><span id="healthCountdown">Refresh 60s</span><button id="refreshHealth" class="refresh-button" aria-label="Refresh service health now"><svg viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M7 7a7 7 0 0 1 11 2l2 3M17 17a7 7 0 0 1-11-2l-2-3"/></svg></button></div></header>
+                <div class="service-row"><span class="dot up"></span><span class="row-copy"><strong>Portfolio</strong><small>HTTP 200</small></span><span class="latency">42 ms</span></div>
+                <div class="service-row"><span class="dot up"></span><span class="row-copy"><strong>Hermes</strong><small>HTTP 200</small></span><span class="latency">61 ms</span></div>
+                <div class="service-row"><span class="dot up"></span><span class="row-copy"><strong>JIDIS</strong><small>HTTP 200</small></span><span class="latency">18 ms</span></div>
+              </article>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <aside id="settingsPanel" class="settings-panel" aria-hidden="true">
+        <header class="settings-head"><div><h2>Appearance</h2><p>System Settings / Interface</p></div><button id="closeSettings" class="icon-button" aria-label="Close appearance settings">✕</button></header>
+        <div class="setting-group">
+          <h3>Navigation placement</h3><p>Choose the primary navigation position. The preference is stored per browser.</p>
+          <div class="layout-options">
+            <button class="layout-option active" data-mode="left"><div class="mini-layout"></div><strong>Left sidebar</strong><span>Default and easiest to scan</span></button>
+            <button class="layout-option" data-mode="right"><div class="mini-layout"></div><strong>Right sidebar</strong><span>Content begins on the left</span></button>
+            <button class="layout-option" data-mode="top"><div class="mini-layout"></div><strong>Floating top</strong><span>Compact and centered</span></button>
+            <button class="layout-option" data-mode="floating"><div class="mini-layout"></div><strong>Floating bottom</strong><span>Compact and icon-first</span></button>
+          </div>
+        </div>
+        <div class="setting-group">
+          <h3>Sidebar behavior</h3><p>Applies only to the left or right sidebar.</p>
+          <label class="toggle-row"><span><strong>Start minimized</strong><small>Show only icons and the version</small></span><span class="switch"><input id="startMinimized" type="checkbox"><span></span></span></label>
+        </div>
+      </aside>
+    </section>
+
+    <section class="comparison">
+      <h2>Trade-offs across four modes</h2>
+      <p>All four modes can be available, but one default keeps the experience consistent across devices.</p>
+      <div class="mode-cards">
+        <article class="mode-card recommended"><span class="tag">Recommended</span><h3>Left sidebar</h3><p>Labels remain visible, the pattern is familiar, and it can collapse to 72px. This is the best desktop default.</p></article>
+        <article class="mode-card"><h3>Right sidebar</h3><p>The reading area starts cleanly from the left. It works well when controls and focus stay on the right.</p></article>
+        <article class="mode-card"><h3>Floating top</h3><p>Provides maximum board width through an icon dock that floats away from the top edge and stays centered.</p></article>
+        <article class="mode-card"><h3>Floating bottom</h3><p>The cleanest option for mobile. On desktop it relies on icons and tooltips, so discovery is slightly weaker.</p></article>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const shell = document.getElementById('appShell');
+    const collapseControl = document.getElementById('collapseControl');
+    const collapseEdge = document.getElementById('collapseEdge');
+    const settingsPanel = document.getElementById('settingsPanel');
+    const startMinimized = document.getElementById('startMinimized');
+    const healthCountdown = document.getElementById('healthCountdown');
+    const refreshHealth = document.getElementById('refreshHealth');
+    const clockTime = document.getElementById('clockTime');
+    const clockDate = document.getElementById('clockDate');
+    const modes = ['left', 'right', 'top', 'floating'];
+    let healthRefreshIn = 60;
+
+    function setMode(mode) {
+      modes.forEach((item) => shell.classList.remove(`mode-${item}`));
+      shell.classList.add(`mode-${mode}`);
+      document.querySelectorAll('[data-mode-button]').forEach((button) => button.classList.toggle('active', button.dataset.modeButton === mode));
+      document.querySelectorAll('.layout-option').forEach((button) => button.classList.toggle('active', button.dataset.mode === mode));
+      const isSidebar = mode === 'left' || mode === 'right';
+      collapseControl.disabled = !isSidebar;
+      collapseControl.textContent = shell.classList.contains('collapsed') ? 'Expand sidebar' : 'Minimize sidebar';
+    }
+
+    function toggleCollapse() {
+      if (!shell.classList.contains('mode-left') && !shell.classList.contains('mode-right')) return;
+      shell.classList.toggle('collapsed');
+      const collapsed = shell.classList.contains('collapsed');
+      startMinimized.checked = collapsed;
+      collapseControl.textContent = collapsed ? 'Expand sidebar' : 'Minimize sidebar';
+      collapseEdge.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Minimize sidebar');
+    }
+
+    function openSettings() { settingsPanel.classList.add('open'); settingsPanel.setAttribute('aria-hidden', 'false'); }
+    function closeSettings() { settingsPanel.classList.remove('open'); settingsPanel.setAttribute('aria-hidden', 'true'); }
+    function updateClock() {
+      const now = new Date();
+      clockTime.textContent = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+      clockDate.textContent = new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }).format(now);
+    }
+
+    document.querySelectorAll('[data-mode-button]').forEach((button) => button.addEventListener('click', () => setMode(button.dataset.modeButton)));
+    document.querySelectorAll('.layout-option').forEach((button) => button.addEventListener('click', () => setMode(button.dataset.mode)));
+    document.querySelectorAll('.settings-nav').forEach((button) => button.addEventListener('click', openSettings));
+    document.getElementById('openSettings').addEventListener('click', openSettings);
+    document.getElementById('closeSettings').addEventListener('click', closeSettings);
+    collapseControl.addEventListener('click', toggleCollapse);
+    collapseEdge.addEventListener('click', toggleCollapse);
+    startMinimized.addEventListener('change', () => {
+      shell.classList.toggle('collapsed', startMinimized.checked);
+      collapseControl.textContent = startMinimized.checked ? 'Expand sidebar' : 'Minimize sidebar';
+    });
+    refreshHealth.addEventListener('click', () => {
+      healthRefreshIn = 60;
+      healthCountdown.textContent = 'Refresh 60s';
+    });
+    updateClock();
+    window.setInterval(updateClock, 1000);
+    window.setInterval(() => {
+      healthRefreshIn = healthRefreshIn <= 1 ? 60 : healthRefreshIn - 1;
+      healthCountdown.textContent = `Refresh ${healthRefreshIn}s`;
+    }, 1000);
+  </script>
+</body>
+</html>

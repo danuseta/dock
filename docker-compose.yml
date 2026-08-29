@@ -1,0 +1,113 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-jidis}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-jidis}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - jidis-network
+
+  storage-service:
+    build:
+      context: ./backend/storage-service
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-jidis}?schema=public
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set}
+      - PORT=8004
+    command: ["sh", "-c", "npx prisma db push --skip-generate && npm start"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - jidis-network
+
+  jira-service:
+    build:
+      context: ./backend/jira-service
+    environment:
+      - PORT=8001
+      - STORAGE_SERVICE_URL=http://storage-service:8004
+      - JIRA_BASE_URL=${JIRA_BASE_URL:-}
+      - JIRA_USER_EMAIL=${JIRA_USER_EMAIL:-}
+      - JIRA_API_TOKEN=${JIRA_API_TOKEN:-}
+    depends_on:
+      - storage-service
+    networks:
+      - jidis-network
+
+  github-service:
+    build:
+      context: ./backend/github-service
+    environment:
+      - PORT=8002
+      - STORAGE_SERVICE_URL=http://storage-service:8004
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:-}
+    depends_on:
+      - storage-service
+    networks:
+      - jidis-network
+
+  discord-service:
+    build:
+      context: ./backend/discord-service
+    environment:
+      - PORT=8003
+      - STORAGE_SERVICE_URL=http://storage-service:8004
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID:-}
+    depends_on:
+      - storage-service
+    networks:
+      - jidis-network
+
+  bff-graphql:
+    build:
+      context: ./backend/bff-graphql
+    ports:
+      - "127.0.0.1:4000:4000"
+    environment:
+      - PORT=4000
+      - STORAGE_SERVICE_URL=http://storage-service:8004
+      - JIRA_SERVICE_URL=http://jira-service:8001
+      - GITHUB_SERVICE_URL=http://github-service:8002
+      - DISCORD_SERVICE_URL=http://discord-service:8003
+      - CORS_ORIGIN=http://localhost:3000
+    depends_on:
+      - storage-service
+      - jira-service
+      - github-service
+      - discord-service
+    networks:
+      - jidis-network
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_GRAPHQL_URL: http://localhost:4000/graphql
+    ports:
+      - "127.0.0.1:3000:80"
+    environment:
+      - VITE_GRAPHQL_URL=http://localhost:4000/graphql
+    depends_on:
+      - bff-graphql
+    networks:
+      - jidis-network
+
+volumes:
+  postgres_data:
+
+networks:
+  jidis-network:
+    driver: bridge

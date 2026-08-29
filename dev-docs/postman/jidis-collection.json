@@ -1,0 +1,140 @@
+{
+  "info": {
+    "_postman_id": "d0e14a27-0c1f-4f8a-9a8c-6e792c9b2d8e",
+    "name": "JIDIS API Collection",
+    "description": "Complete Postman collection with all BFF GraphQL queries/mutations and internal microservice REST endpoints for JIDIS.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "BFF GraphQL",
+      "item": [
+        {
+          "name": "Get User Profile",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "body": {
+              "mode": "graphql",
+              "graphql": {
+                "query": "query GetUserProfile { userProfile { id name email role } }",
+                "variables": ""
+              }
+            },
+            "url": {
+              "raw": "{{bff_url}}/graphql",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "graphql"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Login Mutation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "graphql",
+              "graphql": {
+                "query": "mutation Login($email: String!, $password: String!) { login(email: $email, password: $password) { token user { id name } } }",
+                "variables": "{\n  \"email\": \"admin@jidis.local\",\n  \"password\": \"securepassword\"\n}"
+              }
+            },
+            "url": {
+              "raw": "{{bff_url}}/graphql",
+              "host": [
+                "{{bff_url}}"
+              ],
+              "path": [
+                "graphql"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Auth Service (Internal REST)",
+      "item": [
+        {
+          "name": "Verify Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{auth_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{auth_service_url}}/api/v1/auth/verify",
+              "host": [
+                "{{auth_service_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "verify"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Data Service (Internal REST)",
+      "item": [
+        {
+          "name": "Get Dashboard Metrics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{data_service_url}}/api/v1/metrics",
+              "host": [
+                "{{data_service_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "metrics"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

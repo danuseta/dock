@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JIDIS — Settings Refactor Proposal</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --background: #111111;
+      --surface-0: #171717;
+      --surface-1: #202020;
+      --surface-2: #292929;
+      --border: #353535;
+      --border-strong: #505050;
+      --foreground: #f2f2ef;
+      --secondary: #b5b5af;
+      --muted: #8d8d87;
+      --accent: #e8e4d4;
+      --accent-dim: rgba(232, 228, 212, .08);
+      --accent-ink: #171717;
+      --green: #75b98b;
+      --discord: #8c8fce;
+      --danger: #c9796e;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 16px;
+      --shadow-card: 0 4px 20px rgba(0, 0, 0, .5), inset 0 1px 0 rgba(255, 255, 255, .04);
+    }
+
+    * { box-sizing: border-box; }
+    html { min-width: 320px; background: var(--background); }
+    body {
+      min-height: 100dvh;
+      margin: 0;
+      background: var(--background);
+      color: var(--foreground);
+      font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input, select { font: inherit; }
+    button { color: inherit; }
+    button, input, select { outline: none; }
+    button:focus-visible, input:focus-visible, select:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    h1, h2, h3, p { text-wrap: pretty; }
+    svg { display: block; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+
+    .app-shell { min-height: 100dvh; display: grid; grid-template-columns: 230px minmax(0, 1fr); }
+    .app-nav {
+      position: sticky;
+      top: 0;
+      display: flex;
+      height: 100dvh;
+      flex-direction: column;
+      border-right: 1px solid var(--border);
+      background: var(--surface-0);
+    }
+    .brand { display: flex; align-items: center; gap: 11px; padding: 20px; border-bottom: 1px solid var(--border); }
+    .brand-mark { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--accent); color: var(--accent-ink); font-weight: 900; }
+    .brand strong { display: block; font-size: 15px; }
+    .brand small { color: var(--muted); font-size: 10px; }
+    .main-links { display: grid; gap: 4px; padding: 14px; }
+    .main-link { display: flex; min-height: 42px; align-items: center; gap: 11px; padding: 10px 12px; border: 1px solid transparent; border-radius: 8px; color: var(--secondary); text-decoration: none; }
+    .main-link:hover { background: var(--surface-1); color: var(--foreground); }
+    .main-link.active { border-color: var(--border); background: var(--surface-1); color: var(--foreground); font-weight: 700; }
+    .version { margin-top: auto; padding: 17px; border-top: 1px solid var(--border); color: var(--muted); text-align: center; font: 700 10px ui-monospace, SFMono-Regular, Consolas, monospace; }
+
+    .main { min-width: 0; }
+    .page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; max-width: 1250px; margin: 0 auto; padding: 38px 42px 24px; }
+    .eyebrow { margin: 0 0 6px; color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; }
+    h1 { margin: 0; font-size: clamp(28px, 4vw, 38px); line-height: 1.1; }
+    .page-header p:last-child { max-width: 62ch; margin: 8px 0 0; color: var(--secondary); }
+    .save-state { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+    .save-state::before { width: 7px; height: 7px; border-radius: 50%; background: var(--green); content: ""; }
+
+    .settings-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 28px; max-width: 1250px; margin: 0 auto; padding: 0 42px 110px; }
+    .settings-nav { position: sticky; top: 24px; align-self: start; }
+    .settings-nav-title { margin: 0 0 9px 10px; color: var(--muted); font-size: 10px; font-weight: 800; text-transform: uppercase; }
+    .settings-tabs { display: grid; gap: 3px; }
+    .settings-tab { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 8px; width: 100%; min-height: 48px; padding: 8px 10px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--secondary); cursor: pointer; text-align: left; }
+    .settings-tab:hover { background: var(--surface-0); color: var(--foreground); }
+    .settings-tab.active { border-color: var(--border); background: var(--surface-1); color: var(--foreground); }
+    .tab-icon { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 7px; background: var(--surface-2); }
+    .tab-icon svg { width: 15px; height: 15px; }
+    .settings-tab strong { display: block; font-size: 13px; }
+    .settings-tab small { display: block; margin-top: 1px; color: var(--muted); font-size: 10px; }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+    .status-dot.connected { background: var(--green); }
+    .nav-divider { height: 1px; margin: 12px 10px; background: var(--border); }
+
+    .settings-content { min-width: 0; max-width: 820px; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .panel-heading { margin-bottom: 18px; }
+    .panel-heading h2 { margin: 0; font-size: 24px; }
+    .panel-heading p { margin: 5px 0 0; color: var(--secondary); }
+    .stack { display: grid; gap: 16px; }
+    .card { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-0); box-shadow: var(--shadow-card); }
+    .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 20px 22px; border-bottom: 1px solid var(--border); }
+    .title-group { display: flex; min-width: 0; gap: 11px; }
+    .title-icon { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border-radius: 8px; background: var(--surface-2); color: var(--accent); }
+    .title-icon svg { width: 17px; height: 17px; }
+    .card-head h3 { margin: 0; font-size: 16px; }
+    .card-head p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+    .badge { display: inline-flex; min-height: 24px; align-items: center; padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font: 700 10px ui-monospace, SFMono-Regular, Consolas, monospace; white-space: nowrap; }
+    .badge.good { border-color: rgba(117, 185, 139, .35); color: var(--green); }
+    .card-body { padding: 22px; }
+
+    .layout-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .layout-option { padding: 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); cursor: pointer; text-align: left; }
+    .layout-option:hover { border-color: var(--border-strong); }
+    .layout-option.active { border-color: var(--accent); background: var(--accent-dim); }
+    .layout-preview { display: flex; height: 34px; margin-bottom: 10px; padding: 4px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-0); }
+    .layout-bar { display: block; width: 5px; border-radius: 2px; background: var(--accent); }
+    .layout-option[data-mode="right"] .layout-bar { margin-left: auto; }
+    .layout-option[data-mode="top"] .layout-bar { width: 60%; height: 5px; margin: 0 auto; }
+    .layout-option[data-mode="bottom"] .layout-bar { width: 60%; height: 5px; margin: auto auto 0; }
+    .layout-option strong { display: block; font-size: 12px; }
+    .layout-option small { color: var(--muted); font-size: 10px; }
+    .check-row { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); cursor: pointer; }
+    .check-row input { width: 16px; height: 16px; accent-color: var(--accent); }
+    .check-row strong { display: block; font-size: 12px; }
+    .check-row small { color: var(--muted); }
+
+    .refresh-row { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(160px, .7fr); gap: 12px; max-width: 520px; }
+    .field label, .field-label { display: block; margin-bottom: 6px; color: var(--secondary); font-size: 12px; font-weight: 700; }
+    .input, .select-wrap select { width: 100%; height: 44px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--background); color: var(--foreground); }
+    .input { padding: 0 13px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .input:hover, .select-wrap select:hover { border-color: var(--border-strong); }
+    .select-wrap { position: relative; }
+    .select-wrap select { appearance: none; padding: 0 38px 0 13px; cursor: pointer; }
+    .select-wrap svg { position: absolute; top: 50%; right: 12px; width: 15px; height: 15px; pointer-events: none; transform: translateY(-50%); }
+    .field-hint { margin: 8px 0 0; color: var(--muted); font-size: 11px; }
+    .refresh-preview { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 18px; padding: 13px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); }
+    .refresh-preview span { color: var(--secondary); font-size: 12px; }
+    .refresh-preview strong { color: var(--accent); font: 700 12px ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .validation { min-height: 18px; margin: 7px 0 0; color: var(--danger); font-size: 11px; }
+
+    .connection-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .connection-card { display: flex; align-items: center; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); }
+    .connection-card .title-icon { color: var(--secondary); }
+    .connection-copy { min-width: 0; flex: 1; }
+    .connection-copy strong { display: block; }
+    .connection-copy small { color: var(--muted); }
+    .form-grid { display: grid; gap: 15px; }
+    .secret { position: relative; }
+    .secret .input { padding-right: 48px; }
+    .icon-button { position: absolute; top: 4px; right: 4px; display: grid; width: 36px; height: 36px; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+    .icon-button:hover { background: var(--surface-1); color: var(--foreground); }
+    .button { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; gap: 8px; padding: 8px 13px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface-1); cursor: pointer; font-weight: 700; }
+    .button:hover { background: var(--surface-2); }
+    .button.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+    .button.primary:hover { background: #f4f0df; }
+    .placeholder-copy { padding: 30px; color: var(--secondary); text-align: center; }
+
+    .save-bar { position: fixed; right: 26px; bottom: 24px; z-index: 20; display: flex; align-items: center; gap: 16px; padding: 9px 9px 9px 16px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface-1); box-shadow: 0 14px 44px rgba(0, 0, 0, .5); }
+    .save-bar span { color: var(--muted); font-size: 11px; }
+
+    @media (max-width: 1050px) {
+      .app-shell { grid-template-columns: 72px minmax(0, 1fr); }
+      .brand { justify-content: center; padding: 18px 10px; }
+      .brand-copy, .main-link span { display: none; }
+      .main-link { justify-content: center; padding: 10px; }
+      .version { font-size: 9px; }
+      .layout-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 760px) {
+      .app-shell { display: block; }
+      .app-nav { display: none; }
+      .page-header { padding: 26px 20px 20px; }
+      .save-state { display: none; }
+      .settings-layout { display: block; padding: 0 20px 100px; }
+      .settings-nav { position: static; margin-bottom: 22px; overflow-x: auto; }
+      .settings-nav-title, .settings-tab small, .status-dot, .nav-divider { display: none; }
+      .settings-tabs { display: flex; width: max-content; }
+      .settings-tab { display: flex; width: auto; min-height: 42px; }
+      .settings-tab .tab-icon { width: 27px; height: 27px; }
+      .refresh-row, .connection-grid { grid-template-columns: 1fr; }
+      .save-bar { right: 14px; bottom: max(14px, env(safe-area-inset-bottom)); left: 14px; justify-content: space-between; }
+    }
+    @media (max-width: 460px) {
+      .layout-options { grid-template-columns: 1fr 1fr; }
+      .card-head, .card-body { padding: 17px; }
+      .badge { display: none; }
+      .save-bar span { display: none; }
+      .save-bar .button { width: 100%; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute">
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8v9a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/></symbol>
+    <symbol id="i-board" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 8v8m8-8v5"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4m8-4v4M3 10h18"/></symbol>
+    <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.6v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.5-1H3v-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.5V3h4v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.5 1h.1v4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></symbol>
+    <symbol id="i-layout" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 4v16"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l2-2a5 5 0 0 0-7.07-7.07l-1.15 1.14m2.68 5.39a5 5 0 0 0-7.54-.54l-2 2a5 5 0 0 0 7.07 7.07l1.14-1.14"/></symbol>
+    <symbol id="i-jira" viewBox="0 0 24 24"><path d="M12 2 6.5 7.5 12 13l5.5-5.5ZM6.5 11 2 15.5 6.5 20 11 15.5Zm11 0L13 15.5l4.5 4.5 4.5-4.5Z"/></symbol>
+    <symbol id="i-github" viewBox="0 0 24 24"><path d="M9 19c-4.5 1.5-4.5-2.5-6-3m12 6v-4a3.5 3.5 0 0 0-1-2.7c3.3-.4 6.8-1.6 6.8-7.3A5.7 5.7 0 0 0 19.3 4 5.3 5.3 0 0 0 19.1 1S17.9.6 15 2.5a10.5 10.5 0 0 0-6 0C6.1.6 4.9 1 4.9 1a5.3 5.3 0 0 0-.2 3A5.7 5.7 0 0 0 3.2 8c0 5.7 3.5 6.9 6.8 7.3A3.5 3.5 0 0 0 9 18v4"/></symbol>
+    <symbol id="i-discord" viewBox="0 0 24 24"><path d="M8 8a9 9 0 0 1 8 0m-9.5 9c3.7 2.1 7.3 2.1 11 0M9 14h.01M15 14h.01M7 5c-2 3-3 6.7-3 10l3 2m10-12c2 3 3 6.7 3 10l-3 2"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 3h12l2 2v16H5Z"/><path d="M8 3v6h8V3m-8 18v-7h8v7"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  </svg>
+
+  <div class="app-shell">
+    <aside class="app-nav" aria-label="Primary navigation">
+      <div class="brand"><span class="brand-mark">J</span><span class="brand-copy"><strong>JIDIS</strong><small>Personal operations</small></span></div>
+      <nav class="main-links">
+        <a class="main-link" href="#"><svg><use href="#i-home"/></svg><span>Home</span></a>
+        <a class="main-link" href="#"><svg><use href="#i-board"/></svg><span>Current Work</span></a>
+        <a class="main-link" href="#"><svg><use href="#i-calendar"/></svg><span>Calendar</span></a>
+        <a class="main-link" href="#"><svg><use href="#i-pulse"/></svg><span>Services</span></a>
+        <a class="main-link active" href="#" aria-current="page"><svg><use href="#i-settings"/></svg><span>System Settings</span></a>
+      </nav>
+      <div class="version">v0.1.0</div>
+    </aside>
+
+    <main class="main">
+      <header class="page-header">
+        <div><p class="eyebrow">System</p><h1>Settings</h1><p>Manage your JIDIS experience, security, and connected services from one place.</p></div>
+        <span class="save-state">All changes saved</span>
+      </header>
+
+      <div class="settings-layout">
+        <aside class="settings-nav" aria-label="Settings categories">
+          <p class="settings-nav-title">Preferences</p>
+          <nav class="settings-tabs">
+            <button class="settings-tab active" type="button" data-panel="general"><span class="tab-icon"><svg><use href="#i-settings"/></svg></span><span><strong>General</strong><small>Appearance &amp; refresh</small></span><span class="status-dot connected"></span></button>
+            <button class="settings-tab" type="button" data-panel="security"><span class="tab-icon"><svg><use href="#i-lock"/></svg></span><span><strong>Security</strong><small>PIN &amp; local lock</small></span><span class="status-dot connected"></span></button>
+          </nav>
+          <div class="nav-divider"></div>
+          <p class="settings-nav-title">Connections</p>
+          <nav class="settings-tabs">
+            <button class="settings-tab" type="button" data-panel="jira"><span class="tab-icon"><svg><use href="#i-jira"/></svg></span><span><strong>Jira</strong><small>Projects &amp; tickets</small></span><span class="status-dot connected"></span></button>
+            <button class="settings-tab" type="button" data-panel="github"><span class="tab-icon"><svg><use href="#i-github"/></svg></span><span><strong>GitHub</strong><small>Repositories</small></span><span class="status-dot connected"></span></button>
+            <button class="settings-tab" type="button" data-panel="calendar"><span class="tab-icon"><svg><use href="#i-calendar"/></svg></span><span><strong>Calendar</strong><small>Google OAuth</small></span><span class="status-dot connected"></span></button>
+            <button class="settings-tab" type="button" data-panel="discord"><span class="tab-icon"><svg><use href="#i-discord"/></svg></span><span><strong>Discord</strong><small>Notifications</small></span><span class="status-dot"></span></button>
+          </nav>
+        </aside>
+
+        <section class="settings-content">
+          <div class="panel active" id="general-panel">
+            <header class="panel-heading"><h2>General</h2><p>Control how JIDIS looks and how often live service data is updated.</p></header>
+            <div class="stack">
+              <article class="card">
+                <header class="card-head"><div class="title-group"><span class="title-icon"><svg><use href="#i-layout"/></svg></span><div><h3>Navigation layout</h3><p>Choose where primary navigation appears across JIDIS.</p></div></div><span class="badge">INTERFACE</span></header>
+                <div class="card-body">
+                  <div class="layout-options" role="radiogroup" aria-label="Navigation layout">
+                    <button class="layout-option active" type="button" data-mode="left" role="radio" aria-checked="true"><span class="layout-preview"><span class="layout-bar"></span></span><strong>Left</strong><small>Sidebar</small></button>
+                    <button class="layout-option" type="button" data-mode="right" role="radio" aria-checked="false"><span class="layout-preview"><span class="layout-bar"></span></span><strong>Right</strong><small>Sidebar</small></button>
+                    <button class="layout-option" type="button" data-mode="top" role="radio" aria-checked="false"><span class="layout-preview"><span class="layout-bar"></span></span><strong>Top</strong><small>Floating dock</small></button>
+                    <button class="layout-option" type="button" data-mode="bottom" role="radio" aria-checked="false"><span class="layout-preview"><span class="layout-bar"></span></span><strong>Bottom</strong><small>Floating dock</small></button>
+                  </div>
+                  <label class="check-row"><input type="checkbox"><span><strong>Start with minimized sidebar</strong><small>Show icons only until the sidebar is expanded.</small></span></label>
+                </div>
+              </article>
+
+              <article class="card">
+                <header class="card-head"><div class="title-group"><span class="title-icon"><svg><use href="#i-pulse"/></svg></span><div><h3>Service health</h3><p>Set how often Home and Services automatically check upstream health.</p></div></div><span class="badge good">ACTIVE</span></header>
+                <div class="card-body">
+                  <div class="refresh-row">
+                    <div class="field"><label for="refresh-value">Refresh every</label><input class="input" id="refresh-value" type="number" min="5" max="1440" step="1" inputmode="numeric" value="30" aria-describedby="refresh-help refresh-error"></div>
+                    <div class="field"><label for="refresh-unit">Time unit</label><div class="select-wrap"><select id="refresh-unit" aria-describedby="refresh-help"><option value="seconds">Seconds</option><option value="minutes">Minutes</option></select><svg><use href="#i-chevron"/></svg></div></div>
+                  </div>
+                  <p class="validation" id="refresh-error" role="alert" aria-live="polite"></p>
+                  <p class="field-hint" id="refresh-help">Minimum interval: 5 seconds. Longer intervals reduce upstream requests.</p>
+                  <div class="refresh-preview"><span>Effective refresh interval</span><strong id="effective-interval">30 seconds</strong></div>
+                </div>
+              </article>
+
+              <article class="card">
+                <header class="card-head"><div class="title-group"><span class="title-icon"><svg><use href="#i-link"/></svg></span><div><h3>Connection overview</h3><p>Review integration status without opening every settings category.</p></div></div></header>
+                <div class="card-body connection-grid">
+                  <div class="connection-card"><span class="title-icon"><svg><use href="#i-jira"/></svg></span><span class="connection-copy"><strong>Jira Cloud</strong><small>2 projects selected</small></span><span class="badge good">CONNECTED</span></div>
+                  <div class="connection-card"><span class="title-icon"><svg><use href="#i-github"/></svg></span><span class="connection-copy"><strong>GitHub</strong><small>4 repositories monitored</small></span><span class="badge good">CONNECTED</span></div>
+                  <div class="connection-card"><span class="title-icon"><svg><use href="#i-calendar"/></svg></span><span class="connection-copy"><strong>Google Calendar</strong><small>Primary calendar</small></span><span class="badge good">CONNECTED</span></div>
+                  <div class="connection-card"><span class="title-icon"><svg><use href="#i-discord"/></svg></span><span class="connection-copy"><strong>Discord</strong><small>Webhook not configured</small></span><span class="badge">NOT SET</span></div>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <div class="panel" id="security-panel">
+            <header class="panel-heading"><h2>Security</h2><p>Protect access to your local dashboard and stored integration credentials.</p></header>
+            <article class="card"><header class="card-head"><div class="title-group"><span class="title-icon"><svg><use href="#i-lock"/></svg></span><div><h3>Master app passcode</h3><p>Require a 4–6 digit PIN before JIDIS can be opened.</p></div></div><span class="badge good">ACTIVE</span></header><div class="card-body"><div class="connection-card"><span class="connection-copy"><strong>PIN lock is enabled</strong><small>Your passcode is stored as a salted hash.</small></span><button class="button" type="button">Change PIN</button></div></div></article>
+          </div>
+
+          <div class="panel" id="jira-panel">
+            <header class="panel-heading"><h2>Jira Cloud</h2><p>Connect your account and select the projects used by Current Work.</p></header>
+            <article class="card"><header class="card-head"><div class="title-group"><span class="title-icon"><svg><use href="#i-jira"/></svg></span><div><h3>Account connection</h3><p>Credentials are encrypted before being saved.</p></div></div><span class="badge good">CONNECTED</span></header><div class="card-body form-grid"><div class="field"><label for="jira-domain">Domain URL</label><input class="input" id="jira-domain" value="workspace.atlassian.net"></div><div class="field"><label for="jira-email">User email</label><input class="input" id="jira-email" type="email" value="developer@example.com"></div><div class="field"><label for="jira-token">API token</label><div class="secret"><input class="input" id="jira-token" type="password" value="configured-token"><button class="icon-button" type="button" aria-label="Show Jira API token"><svg><use href="#i-eye"/></svg></button></div></div><div><button class="button" type="button">Test connection</button></div></div></article>
+          </div>
+
+          <div class="panel" id="github-panel"><header class="panel-heading"><h2>GitHub</h2><p>Manage the repositories included in JIDIS monitoring.</p></header><article class="card"><div class="placeholder-copy"><strong>GitHub configuration retains the current fields and repository picker.</strong><p>This proposal changes its placement and hierarchy, not its behavior.</p></div></article></div>
+          <div class="panel" id="calendar-panel"><header class="panel-heading"><h2>Google Calendar</h2><p>Configure read-only calendar access and connection status.</p></header><article class="card"><div class="placeholder-copy"><strong>Calendar configuration retains the current OAuth flow.</strong><p>Credentials, Calendar ID, connect, and disconnect actions live in this focused category.</p></div></article></div>
+          <div class="panel" id="discord-panel"><header class="panel-heading"><h2>Discord</h2><p>Configure the webhook used for ticket notifications.</p></header><article class="card"><div class="placeholder-copy"><strong>Discord configuration retains the current webhook test.</strong><p>The status dot makes an incomplete connection visible from every category.</p></div></article></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="save-bar" role="region" aria-label="Save settings"><span id="change-state">No unsaved changes</span><button class="button primary" id="save-button" type="button"><svg><use href="#i-save"/></svg>Save settings</button></div>
+
+  <script>
+    const tabs = [...document.querySelectorAll('.settings-tab')];
+    const panels = [...document.querySelectorAll('.panel')];
+    const changeState = document.querySelector('#change-state');
+    const refreshValue = document.querySelector('#refresh-value');
+    const refreshUnit = document.querySelector('#refresh-unit');
+    const refreshError = document.querySelector('#refresh-error');
+    const effectiveInterval = document.querySelector('#effective-interval');
+
+    const markChanged = () => { changeState.textContent = 'Unsaved changes'; };
+    const showPanel = (name) => {
+      tabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.panel === name));
+      panels.forEach((panel) => panel.classList.toggle('active', panel.id === `${name}-panel`));
+    };
+    tabs.forEach((tab) => tab.addEventListener('click', () => showPanel(tab.dataset.panel)));
+
+    document.querySelectorAll('.layout-option').forEach((option) => option.addEventListener('click', () => {
+      document.querySelectorAll('.layout-option').forEach((item) => {
+        const selected = item === option;
+        item.classList.toggle('active', selected);
+        item.setAttribute('aria-checked', String(selected));
+      });
+      markChanged();
+    }));
+
+    const updateRefreshPreview = () => {
+      const value = Number(refreshValue.value);
+      const unit = refreshUnit.value;
+      refreshValue.min = unit === 'minutes' ? '1' : '5';
+      const seconds = unit === 'minutes' ? value * 60 : value;
+      const invalid = !Number.isFinite(value) || value <= 0 || seconds < 5;
+      refreshError.textContent = invalid ? 'Enter an interval of at least 5 seconds.' : '';
+      refreshValue.setAttribute('aria-invalid', String(invalid));
+      effectiveInterval.textContent = invalid ? 'Invalid interval' : `${seconds.toLocaleString()} seconds`;
+      markChanged();
+    };
+    refreshValue.addEventListener('input', updateRefreshPreview);
+    refreshUnit.addEventListener('change', updateRefreshPreview);
+    document.querySelector('.check-row input').addEventListener('change', markChanged);
+
+    document.querySelector('#save-button').addEventListener('click', () => {
+      if (refreshValue.getAttribute('aria-invalid') === 'true') return refreshValue.focus();
+      changeState.textContent = 'Settings saved';
+    });
+  </script>
+</body>
+</html>

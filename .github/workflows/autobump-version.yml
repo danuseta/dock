@@ -1,0 +1,110 @@
+name: 🚀 CI/CD Monorepo Version Autobump
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - development
+      - develop
+      - dev
+    paths-ignore:
+      - 'dev-docs/ai/VERSION.md'
+      - '**/package.json'
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Semantic Version Bump Type (patch | minor | major | custom X.Y.Z)'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  autobump:
+    name: 📦 Autobump Monorepo Version & Git Tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: 📥 Checkout Code Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🛑 Check if Commit is Already a Release Bump
+        id: check_release
+        run: |
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          if [[ "$COMMIT_MSG" == chore\(release\)* ]] || [[ "$COMMIT_MSG" == *"[skip ci]"* ]]; then
+            echo "skip_bump=true" >> $GITHUB_OUTPUT
+            echo "⏭️ Detected previous automated release commit. Skipping version bump."
+          else
+            echo "skip_bump=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🔍 Determine Conventional Bump Type (If Push Triggered)
+        if: steps.check_release.outputs.skip_bump == 'false' && github.event_name == 'push'
+        id: parse_commits
+        run: |
+          RECENT_COMMITS=$(git log --format=%B -n 5)
+          if echo "$RECENT_COMMITS" | grep -iq -E "BREAKING CHANGE:|\[major\]"; then
+            echo "bump_type=major" >> $GITHUB_OUTPUT
+            echo "🚨 Breaking change detected! Triggering MAJOR version bump."
+          elif echo "$RECENT_COMMITS" | grep -iq -E "^feat(:| \()" || echo "$RECENT_COMMITS" | grep -iq "\[minor\]"; then
+            echo "bump_type=minor" >> $GITHUB_OUTPUT
+            echo "✨ New feature detected! Triggering MINOR version bump."
+          else
+            echo "bump_type=patch" >> $GITHUB_OUTPUT
+            echo "🛠️ Fix/Chore/Docs detected! Triggering PATCH version bump."
+          fi
+
+      - name: ⚙️ Setup Node.js Environment
+        if: steps.check_release.outputs.skip_bump == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 🚀 Execute JIDIS Monorepo Autobump Engine
+        if: steps.check_release.outputs.skip_bump == 'false'
+        id: execute_bump
+        env:
+          BUMP_TYPE: ${{ github.event.inputs.bump_type || steps.parse_commits.outputs.bump_type }}
+        run: |
+          node scripts/autobump-version.mjs $BUMP_TYPE
+
+      - name: 📤 Commit & Push Bumped Packages and Git Release Tag
+        if: steps.check_release.outputs.skip_bump == 'false'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          NEW_VERSION=${{ steps.execute_bump.outputs.new_version }}
+          GIT_TAG="v${NEW_VERSION}"
+          
+          git add -u
+          if git diff-index --quiet HEAD --; then
+            echo "ℹ️ No changes detected in package versions."
+          else
+            git commit -m "chore(release): bump monorepo version to v${NEW_VERSION} [skip ci]"
+            git tag -a "$GIT_TAG" -m "Release v${NEW_VERSION}"
+            
+            # Push commit and tags cleanly back to main/master branch
+            git push origin HEAD:${{ github.ref }} --tags
+            echo "🎉 Successfully pushed automated release tag $GIT_TAG!"
+          fi
+
+      - name: 📝 Generate Actions Release Summary
+        if: steps.check_release.outputs.skip_bump == 'false' && always()
+        run: |
+          echo "## 🚀 JIDIS Automated Version Bump Report" >> $GITHUB_STEP_SUMMARY
+          echo "- **Previous Version:** \`v${{ steps.execute_bump.outputs.old_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **New Released Version:** \`v${{ steps.execute_bump.outputs.new_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Git Release Tag Created:** \`${{ steps.execute_bump.outputs.git_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ✅ Successfully synchronized across all frontend, desktop, and backend microservices." >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,12 @@
+.beads
+.git
+.github
+**/node_modules
+**/dist
+**/*.log
+.env
+electron
+dev-docs
+docs-ai
+planning
+prod-docs

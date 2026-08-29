@@ -1,0 +1,84 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model TicketCache {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  summary     String
+  description String?
+  status      String
+  assignee    String?
+  reporter    String?
+  priority    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([key])
+  @@index([status])
+}
+
+model PullRequestCache {
+  id          String   @id @default(uuid())
+  number      Int
+  title       String
+  description String?
+  state       String
+  url         String
+  author      String
+  repository  String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  mergedAt    DateTime?
+
+  @@unique([repository, number])
+  @@index([repository])
+  @@index([state])
+}
+
+model DemoLink {
+  id        String   @id @default(uuid())
+  ticketKey String   @unique
+  url       String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ticketKey])
+}
+
+model AppSettings {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+
+  @@index([key])
+}
+
+model CacheEntry {
+  key       String   @id
+  value     Json
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([expiresAt])
+}
+
+model MonitoredRepository {
+  id            String   @id @default(uuid())
+  owner         String
+  name          String
+  webhookSecret String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([owner, name])
+}
