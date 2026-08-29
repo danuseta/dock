@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { buildASTSchema } from 'graphql';
+import { buildASTSchema, graphql } from 'graphql';
 import { typeDefs } from '../schema/typeDefs';
 import { resolvers } from '../resolvers';
 
@@ -24,6 +24,28 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       resolvers.MonitorTarget.lastCheckedAt({ lastCheckedAt: new Date('2026-08-27T00:00:00.000Z') }),
       '2026-08-27T00:00:00.000Z',
     );
+  });
+
+  await t.test('should serialize fractional Jira story points', async () => {
+    const schema = buildASTSchema(typeDefs);
+    const result = await graphql({
+      schema,
+      source: '{ dashboard { tickets { storyPoints } } }',
+      rootValue: {
+        dashboard: [{
+          status: 'In Progress',
+          tickets: [
+            { key: 'QRD-1', title: 'Quarter point', status: 'In Progress', url: 'https://example.test/QRD-1', storyPoints: 0.25 },
+            { key: 'QRD-2', title: 'Half point', status: 'In Progress', url: 'https://example.test/QRD-2', storyPoints: 0.5 },
+          ],
+        }],
+      },
+    });
+
+    assert.strictEqual(result.errors, undefined);
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(result.data)), {
+      dashboard: [{ tickets: [{ storyPoints: 0.25 }, { storyPoints: 0.5 }] }],
+    });
   });
 
   await t.test('should preserve the public query and mutation contract during shell consolidation', () => {

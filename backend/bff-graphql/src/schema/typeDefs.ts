@@ -12,7 +12,7 @@ export const typeDefs = gql`
     projectName: String
     sprintName: String
     sprintState: String
-    storyPoints: Int
+    storyPoints: Float
     pullRequests: [PullRequest!]
     demoLink: DemoLink
   }
