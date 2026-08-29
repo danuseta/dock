@@ -1,5 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
+import axios from 'axios';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { formatDiscordMessage } from '../integrations/discord';
@@ -89,6 +90,60 @@ test('internal integration behavior', async (t) => {
     assert.ok(url.searchParams.get('state'));
   });
 
+  await t.test('persists OAuth state so a callback survives an app restart', async () => {
+    const cache = new Map<string, unknown>();
+    const settings = [
+      { key: 'googleClientId', value: 'client-id.apps.googleusercontent.com' },
+      { key: 'googleClientSecret', value: 'client-secret' },
+    ];
+    const makeStorage = () => ({
+      getSettings: async () => settings,
+      upsertCache: async (namespace: string, key: string, value: unknown) => cache.set(`${namespace}:${key}`, value),
+      getCache: async (namespace: string, key: string) => cache.get(`${namespace}:${key}`) ?? null,
+      deleteCache: async (namespace: string, key: string) => { cache.delete(`${namespace}:${key}`); },
+      upsertSetting: async () => undefined,
+    });
+    const firstService = new GoogleCalendarService(makeStorage() as any);
+    const authorization = new URL(await firstService.authorizationUrl('https://jidis.test/auth/google/callback'));
+    const state = authorization.searchParams.get('state');
+    assert.ok(state);
+
+    const originalPost = axios.post;
+    (axios as any).post = async () => ({ data: { refresh_token: 'refresh-token' } });
+    try {
+      await new GoogleCalendarService(makeStorage() as any).completeAuthorization(
+        'authorization-code', state, 'https://jidis.test/auth/google/callback',
+      );
+    } finally {
+      axios.post = originalPost;
+    }
+    assert.strictEqual(cache.get('google-oauth-state:' + state), undefined);
+  });
+
+  await t.test('accepts a reauthorization response without replacing an existing refresh token', async () => {
+    let writes = 0;
+    const storage = {
+      getSettings: async () => [
+        { key: 'googleClientId', value: 'client-id.apps.googleusercontent.com' },
+        { key: 'googleClientSecret', value: 'client-secret' },
+        { key: 'googleRefreshToken', value: 'existing-refresh-token' },
+      ],
+      upsertSetting: async () => { writes += 1; },
+    };
+    const service = new GoogleCalendarService(storage as any);
+    const authorization = new URL(await service.authorizationUrl('https://jidis.test/auth/google/callback'));
+    const state = authorization.searchParams.get('state');
+    assert.ok(state);
+    const originalPost = axios.post;
+    (axios as any).post = async () => ({ data: { access_token: 'access-token' } });
+    try {
+      await service.completeAuthorization('authorization-code', state, 'https://jidis.test/auth/google/callback');
+    } finally {
+      axios.post = originalPost;
+    }
+    assert.strictEqual(writes, 0);
+  });
+
   await t.test('normalizes timed and all-day Google Calendar events', () => {
     const event = normalizeCalendarEvent({
       id: 'event-1', summary: 'Focus block', start: { date: '2026-08-28' }, end: { date: '2026-08-29' },
@@ -97,6 +152,41 @@ test('internal integration behavior', async (t) => {
       id: 'event-1', title: 'Focus block', start: '2026-08-28', end: '2026-08-29',
       allDay: true, location: null, url: null, calendarId: 'primary',
     });
+  });
+
+  await t.test('serves cached Google Calendar events without refreshing an access token', async () => {
+    const cachedEvents = [{
+      id: 'event-cached', title: 'Cached focus block', start: '2026-08-29T09:00:00Z', end: null,
+      allDay: false, location: null, url: null, calendarId: 'primary',
+    }];
+    let cacheKey = '';
+    const storage = {
+      getSettings: async () => [
+        { key: 'googleClientId', value: 'client-id.apps.googleusercontent.com' },
+        { key: 'googleClientSecret', value: 'client-secret' },
+        { key: 'googleRefreshToken', value: 'refresh-token' },
+        { key: 'googleCalendarId', value: 'primary' },
+      ],
+      getCache: async (namespace: string, key: string) => {
+        assert.strictEqual(namespace, 'google-calendar');
+        cacheKey = key;
+        return cachedEvents;
+      },
+    };
+    const originalPost = axios.post;
+    (axios as any).post = async () => { throw new Error('access token refresh should not run on a cache hit'); };
+
+    try {
+      const result = await new GoogleCalendarService(storage as any).listEvents(
+        '2026-08-29T00:00:00.000Z',
+        '2026-08-30T00:00:00.000Z',
+        25,
+      );
+      assert.deepStrictEqual(result, cachedEvents);
+      assert.match(cacheKey, /primary/);
+    } finally {
+      axios.post = originalPost;
+    }
   });
 
   await t.test('accepts only HTTP(S) quick-link targets', async () => {

@@ -1,11 +1,13 @@
 import axios from 'axios';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { StorageService } from '../storage/service';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
+const OAUTH_STATE_NAMESPACE = 'google-oauth-state';
+const OAUTH_STATE_TTL_SECONDS = 10 * 60;
 
 interface OAuthState {
   value: string;
@@ -47,21 +49,32 @@ export class GoogleCalendarService {
     return Object.fromEntries(items.map((item) => [item.key, item.value]));
   }
 
-  private createState(): string {
+  private async createState(): Promise<string> {
     const value = randomBytes(32).toString('base64url');
     this.states.set(value, { value, expiresAt: Date.now() + 10 * 60 * 1000 });
     for (const [key, state] of this.states) {
       if (state.expiresAt <= Date.now()) this.states.delete(key);
     }
+    const storage = this.storage as StorageService & {
+      upsertCache?: (namespace: string, key: string, state: unknown, ttlSeconds?: number) => Promise<unknown>;
+    };
+    await Promise.resolve(storage.upsertCache?.(OAUTH_STATE_NAMESPACE, value, value, OAUTH_STATE_TTL_SECONDS)).catch(() => undefined);
     return value;
   }
 
-  private consumeState(received: string): boolean {
+  private async consumeState(received: string): Promise<boolean> {
     const stored = this.states.get(received);
     this.states.delete(received);
-    if (!stored || stored.expiresAt <= Date.now()) return false;
+    const storage = this.storage as StorageService & {
+      getCache?: (namespace: string, key: string) => Promise<unknown>;
+      deleteCache?: (namespace: string, key: string) => Promise<unknown>;
+    };
+    const persisted = stored ? null : await Promise.resolve(storage.getCache?.(OAUTH_STATE_NAMESPACE, received)).catch(() => null);
+    await Promise.resolve(storage.deleteCache?.(OAUTH_STATE_NAMESPACE, received)).catch(() => undefined);
+    const candidate = stored && stored.expiresAt > Date.now() ? stored.value : persisted;
+    if (typeof candidate !== 'string') return false;
     const left = Buffer.from(received);
-    const right = Buffer.from(stored.value);
+    const right = Buffer.from(candidate);
     return left.length === right.length && timingSafeEqual(left, right);
   }
 
@@ -78,13 +91,13 @@ export class GoogleCalendarService {
       access_type: 'offline',
       prompt: 'consent',
       include_granted_scopes: 'true',
-      state: this.createState(),
+      state: await this.createState(),
     });
     return `${GOOGLE_AUTH_URL}?${query.toString()}`;
   }
 
   async completeAuthorization(code: string, state: string, redirectUri: string): Promise<void> {
-    if (!code || !state || !this.consumeState(state)) throw new Error('Invalid or expired OAuth state');
+    if (!code || !state || !await this.consumeState(state)) throw new Error('Invalid or expired OAuth state');
     const settings = await this.settings();
     if (!settings.googleClientId || !settings.googleClientSecret) throw new Error('Google OAuth is not configured');
     const body = new URLSearchParams({
@@ -98,20 +111,22 @@ export class GoogleCalendarService {
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       timeout: 10000,
     });
-    const refreshToken = response.data?.refresh_token;
+    const refreshToken = response.data?.refresh_token || settings.googleRefreshToken;
     if (!refreshToken) throw new Error('Google did not return a refresh token');
-    await this.storage.upsertSetting('googleRefreshToken', refreshToken, 'Google Calendar OAuth refresh token');
+    if (response.data?.refresh_token) {
+      await this.storage.upsertSetting('googleRefreshToken', refreshToken, 'Google Calendar OAuth refresh token');
+    }
   }
 
-  private async accessToken(): Promise<{ token: string; settings: Record<string, string> }> {
-    const settings = await this.settings();
-    if (!settings.googleClientId || !settings.googleClientSecret || !settings.googleRefreshToken) {
+  private async accessToken(settings?: Record<string, string>): Promise<string> {
+    const activeSettings = settings || await this.settings();
+    if (!activeSettings.googleClientId || !activeSettings.googleClientSecret || !activeSettings.googleRefreshToken) {
       throw new Error('Google Calendar is not connected');
     }
     const body = new URLSearchParams({
-      client_id: settings.googleClientId,
-      client_secret: settings.googleClientSecret,
-      refresh_token: settings.googleRefreshToken,
+      client_id: activeSettings.googleClientId,
+      client_secret: activeSettings.googleClientSecret,
+      refresh_token: activeSettings.googleRefreshToken,
       grant_type: 'refresh_token',
     });
     const response = await axios.post(GOOGLE_TOKEN_URL, body.toString(), {
@@ -119,17 +134,29 @@ export class GoogleCalendarService {
       timeout: 10000,
     });
     if (!response.data?.access_token) throw new Error('Google access token refresh failed');
-    return { token: response.data.access_token, settings };
+    return response.data.access_token;
   }
 
   async listEvents(timeMin?: string, timeMax?: string, maxResults = 25): Promise<CalendarEvent[]> {
-    const { token, settings } = await this.accessToken();
+    const settings = await this.settings();
+    if (!settings.googleClientId || !settings.googleClientSecret || !settings.googleRefreshToken) {
+      throw new Error('Google Calendar is not connected');
+    }
     const calendarId = settings.googleCalendarId?.trim() || 'primary';
-    const from = timeMin && !Number.isNaN(Date.parse(timeMin)) ? new Date(timeMin) : new Date();
-    const to = timeMax && !Number.isNaN(Date.parse(timeMax))
-      ? new Date(timeMax)
+    const validTimeMin = timeMin && !Number.isNaN(Date.parse(timeMin)) ? timeMin : undefined;
+    const validTimeMax = timeMax && !Number.isNaN(Date.parse(timeMax)) ? timeMax : undefined;
+    const from = validTimeMin ? new Date(validTimeMin) : new Date();
+    const to = validTimeMax
+      ? new Date(validTimeMax)
       : new Date(from.getTime() + 30 * 24 * 60 * 60 * 1000);
     if (to <= from) throw new Error('Calendar timeMax must be after timeMin');
+    const limit = Math.max(1, Math.min(maxResults, 50));
+    const credentialId = createHash('sha256').update(settings.googleRefreshToken).digest('hex').slice(0, 16);
+    const cacheKey = [credentialId, calendarId, validTimeMin || 'now', validTimeMax || '30d', limit].join('_');
+    const cached = await this.storage.getCache('google-calendar', cacheKey).catch(() => null);
+    if (Array.isArray(cached)) return cached;
+
+    const token = await this.accessToken(settings);
     const response = await axios.get(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
       {
@@ -139,14 +166,16 @@ export class GoogleCalendarService {
           timeMax: to.toISOString(),
           singleEvents: true,
           orderBy: 'startTime',
-          maxResults: Math.max(1, Math.min(maxResults, 50)),
+          maxResults: limit,
         },
         timeout: 10000,
       },
     );
-    return (response.data?.items || [])
+    const events = (response.data?.items || [])
       .map((event: any) => normalizeCalendarEvent(event, calendarId))
       .filter((event: CalendarEvent | null): event is CalendarEvent => event !== null);
+    await this.storage.upsertCache('google-calendar', cacheKey, events, 300).catch(() => undefined);
+    return events;
   }
 
   async disconnect(): Promise<void> {

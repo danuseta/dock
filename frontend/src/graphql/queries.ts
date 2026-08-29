@@ -160,6 +160,7 @@ export const GET_HOME = gql`
       allDay
       location
       url
+      calendarId
     }
     monitors(refresh: true) {
       id

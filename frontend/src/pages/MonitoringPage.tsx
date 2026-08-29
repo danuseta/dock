@@ -7,6 +7,7 @@ import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Button, Card, Dialog, IconButton, Input, Page, PageHeader } from '../components/ui';
 import { cn } from '../lib/cn';
 import { DEFAULT_SERVICE_HEALTH_REFRESH_SECONDS, normalizeServiceHealthRefreshSeconds } from '../lib/serviceHealthRefresh';
+import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 
 interface MonitorTarget {
   id: string;
@@ -42,9 +43,9 @@ const metricTones = ['text-accent', 'text-status-merged', 'text-status-conflict'
 const MonitoringPage: React.FC = () => {
   const [refreshSeconds, setRefreshSeconds] = useState(DEFAULT_SERVICE_HEALTH_REFRESH_SECONDS);
   const { data, loading, error, refetch } = useQuery(GET_MONITORS, {
+    ...CACHED_QUERY_OPTIONS,
     variables: { refresh: true },
     pollInterval: refreshSeconds * 1000,
-    fetchPolicy: 'cache-and-network',
   });
   const [addMonitor, { loading: adding }] = useMutation(ADD_MONITOR);
   const [updateMonitor, { loading: updating }] = useMutation(UPDATE_MONITOR);
@@ -96,7 +97,7 @@ const MonitoringPage: React.FC = () => {
     }
   };
 
-  if (loading && !data) return <Page width="wide"><LoadingSkeleton /></Page>;
+  if (isInitialQueryLoading(loading, data)) return <Page width="wide"><LoadingSkeleton /></Page>;
 
   const monitors: MonitorTarget[] = data?.monitors || [];
   const up = monitors.filter((monitor) => monitor.lastStatus === 'UP').length;

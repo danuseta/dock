@@ -4,17 +4,13 @@ import { CalendarDays, ExternalLink, MapPin } from 'lucide-react';
 import { GET_CALENDAR, GET_SETTINGS } from '../graphql/queries';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Button, Card, Page, PageHeader } from '../components/ui';
+import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 
 interface CalendarPageProps { onNavigate: (path: string) => void }
 
 const CalendarPage: React.FC<CalendarPageProps> = ({ onNavigate }) => {
-  const range = useMemo(() => {
-    const from = new Date();
-    const to = new Date(from.getTime() + 30 * 24 * 60 * 60 * 1000);
-    return { timeMin: from.toISOString(), timeMax: to.toISOString(), maxResults: 50 };
-  }, []);
   const { data: settingsData } = useQuery(GET_SETTINGS);
-  const { data, loading, error, refetch } = useQuery(GET_CALENDAR, { variables: range, fetchPolicy: 'cache-and-network' });
+  const { data, loading, error, refetch } = useQuery(GET_CALENDAR, { ...CACHED_QUERY_OPTIONS, variables: { maxResults: 50 } });
   const connected = settingsData?.settings?.googleCalendarConnected;
   const groups = useMemo(() => {
     const result: Record<string, any[]> = {};
@@ -25,7 +21,7 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onNavigate }) => {
     return result;
   }, [data]);
 
-  if (loading && !data) return <Page width="medium"><LoadingSkeleton /></Page>;
+  if (isInitialQueryLoading(loading, data)) return <Page width="medium"><LoadingSkeleton /></Page>;
 
   return (
     <Page width="medium">

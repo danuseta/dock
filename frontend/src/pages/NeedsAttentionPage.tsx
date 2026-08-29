@@ -7,18 +7,19 @@ import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { ConflictModal } from '../components/ConflictModal';
 import { Toast } from '../components/Toast';
 import { Badge, Button, Card, Page } from '../components/ui';
+import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 
 interface NeedsAttentionPageProps { onTicketClick: (key: string) => void }
 
 const NeedsAttentionPage: React.FC<NeedsAttentionPageProps> = ({ onTicketClick }) => {
-  const { data, loading, error } = useQuery(GET_NEEDS_ATTENTION, { pollInterval: 30000, fetchPolicy: 'cache-and-network' });
+  const { data, loading, error } = useQuery(GET_NEEDS_ATTENTION, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
   const [checkConflicts] = useMutation(CHECK_CONFLICTS);
   const [showConflictModal, setShowConflictModal] = useState(false);
   const [conflictMessage, setConflictMessage] = useState('');
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
 
-  if (loading && !data) return <Page><LoadingSkeleton /></Page>;
-  if (error) return <Page><Card className="border-status-conflict text-status-conflict" role="alert">Error: {error.message}</Card></Page>;
+  if (isInitialQueryLoading(loading, data)) return <Page><LoadingSkeleton /></Page>;
+  if (error && !data) return <Page><Card className="border-status-conflict text-status-conflict" role="alert">Error: {error.message}</Card></Page>;
 
   const items = data?.needsAttention || [];
   const handleInspectConflict = async (owner: string, repo: string, pullNumber: number) => {

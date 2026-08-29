@@ -1,11 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { BarChart3, CalendarDays, Gem, GitBranch, Globe, Link2, Paperclip, Plus, RefreshCw, TerminalSquare, Trash2, Workflow, X } from 'lucide-react';
+import { Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { GET_HOME } from '../graphql/queries';
 import { ADD_QUICK_LINK, REMOVE_QUICK_LINK } from '../graphql/mutations';
+import { GoogleSearch } from '../components/GoogleSearch';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
+import { WebsiteIcon } from '../components/WebsiteIcon';
 import { Button, Card, Dialog, IconButton, Input, Select } from '../components/ui';
 import { cn } from '../lib/cn';
+import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { DEFAULT_SERVICE_HEALTH_REFRESH_SECONDS, normalizeServiceHealthRefreshSeconds } from '../lib/serviceHealthRefresh';
 
 interface HomePageProps { onTicketClick: (key: string) => void; onNavigate: (path: string) => void; }
@@ -25,19 +28,6 @@ const panelTitleClass = 'text-balance font-display text-[0.82rem] font-bold';
 const textActionClass = 'h-6 border-0 px-0 py-0 text-[0.68rem] text-muted-foreground hover:border-transparent hover:bg-transparent hover:text-foreground';
 const dateKey = (date: Date) => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
 
-const quickLinkIcon = (title: string, url: string) => {
-  const value = `${title} ${url}`.toLowerCase();
-  if (value.includes('jira')) return Workflow;
-  if (value.includes('github')) return GitBranch;
-  if (value.includes('calendar')) return CalendarDays;
-  if (value.includes('hermes') || value.includes('terminal')) return TerminalSquare;
-  if (value.includes('paperclip')) return Paperclip;
-  if (value.includes('obsidian')) return Gem;
-  if (value.includes('grafana') || value.includes('monitor')) return BarChart3;
-  if (value.includes('portfolio')) return Globe;
-  return Link2;
-};
-
 const eventTime = (event: CalendarEvent) => {
   if (event.allDay) return `All day${event.location ? ` · ${event.location}` : ''}`;
   const start = new Date(event.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
@@ -47,7 +37,7 @@ const eventTime = (event: CalendarEvent) => {
 
 const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
   const [healthRefreshSeconds, setHealthRefreshSeconds] = useState(DEFAULT_SERVICE_HEALTH_REFRESH_SECONDS);
-  const { data, loading, error, refetch } = useQuery(GET_HOME, { pollInterval: healthRefreshSeconds * 1000, fetchPolicy: 'cache-and-network' });
+  const { data, loading, error, refetch } = useQuery(GET_HOME, { ...CACHED_QUERY_OPTIONS, pollInterval: healthRefreshSeconds * 1000 });
   const [addQuickLink, { loading: adding }] = useMutation(ADD_QUICK_LINK, { refetchQueries: [{ query: GET_HOME }] });
   const [removeQuickLink] = useMutation(REMOVE_QUICK_LINK, { refetchQueries: [{ query: GET_HOME }] });
   const [now, setNow] = useState(new Date());
@@ -108,8 +98,8 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
 
   const refreshHealth = async () => { setHealthCountdown(healthRefreshSeconds); await refetch(); };
 
-  if (loading && !data) return <div className="mx-auto w-full max-w-[1500px] p-6"><LoadingSkeleton /></div>;
-  if (error) return <div className="mx-auto w-full max-w-[1500px] p-6"><div className="rounded-md border border-status-conflict bg-status-conflict-bg p-6 text-pretty text-sm text-status-conflict" role="alert">Home data failed to load: {error.message}</div></div>;
+  if (isInitialQueryLoading(loading, data)) return <div className="mx-auto w-full max-w-[1500px] p-6"><LoadingSkeleton /></div>;
+  if (error && !data) return <div className="mx-auto w-full max-w-[1500px] p-6"><div className="rounded-md border border-status-conflict bg-status-conflict-bg p-6 text-pretty text-sm text-status-conflict" role="alert">Home data failed to load: {error.message}</div></div>;
 
   const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening';
   const monthLabel = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -133,6 +123,8 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
         </div>
       </header>
 
+      <GoogleSearch />
+
       <section className="mb-6 grid grid-cols-4 overflow-hidden rounded-md border border-border bg-surface-1 max-[600px]:grid-cols-2 [&>div]:border-r [&>div]:border-border [&>div:last-child]:border-r-0 max-[600px]:[&>div:nth-child(2)]:border-r-0 max-[600px]:[&>div:nth-child(-n+2)]:border-b" aria-label="Work overview">
         {metrics.map((metric) => (
           <div className="p-[18px]" key={metric.label}>
@@ -151,8 +143,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
             </div>
             <div className="flex flex-wrap gap-1.5">
               {(data?.quickLinks || []).map((link: any) => {
-                const Icon = quickLinkIcon(link.title, link.url);
-                return <span className="group relative" key={link.id}><a className="grid size-11 place-items-center rounded-[9px] border border-border bg-surface-0 text-accent transition-colors duration-150 ease-out hover:border-border-glow hover:bg-surface-1 hover:text-foreground" href={link.url} target="_blank" rel="noreferrer" aria-label={`Open ${link.title}`} title={link.title}><Icon size={20} aria-hidden="true" /></a><button className="absolute -top-[5px] -right-[5px] grid size-[17px] place-items-center rounded-full border border-border bg-surface-2 p-0 text-status-conflict opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100" type="button" aria-label={`Remove ${link.title}`} onClick={() => removeQuickLink({ variables: { id: link.id } })}><Trash2 size={10} aria-hidden="true" /></button></span>;
+                return <span className="group relative" key={link.id}><a className="grid size-11 place-items-center rounded-[9px] border border-border bg-surface-0 transition-colors duration-150 ease-out hover:border-border-glow hover:bg-surface-1" href={link.url} target="_blank" rel="noreferrer" aria-label={`Open ${link.title}`} title={link.title}><WebsiteIcon title={link.title} url={link.url} /></a><button className="absolute -top-[5px] -right-[5px] grid size-[17px] place-items-center rounded-full border border-border bg-surface-2 p-0 text-status-conflict opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100" type="button" aria-label={`Remove ${link.title}`} onClick={() => removeQuickLink({ variables: { id: link.id } })}><Trash2 size={10} aria-hidden="true" /></button></span>;
               })}
               {(data?.quickLinks || []).length === 0 && <button type="button" className="min-h-11 rounded-[9px] border border-dashed border-border bg-transparent px-3 text-muted-foreground" onClick={() => setShowForm(true)}>Add your first link</button>}
             </div>

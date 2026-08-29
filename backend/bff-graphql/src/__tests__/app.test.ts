@@ -88,6 +88,12 @@ test('DOCK monolith shell serves API and SPA from one Express app', async (t) =>
   await t.test('allows the state-protected Google callback without a cross-site session cookie', async () => {
     const callback = await fetch(`${runtime.baseUrl}/auth/google/callback`, { redirect: 'manual' });
     assert.strictEqual(callback.status, 302);
-    assert.strictEqual(callback.headers.get('location'), '/settings?google=failed');
+    assert.strictEqual(callback.headers.get('location'), '/settings?google=failed&reason=state-expired');
+  });
+
+  await t.test('preserves the provider error when Google denies authorization', async () => {
+    const callback = await fetch(`${runtime.baseUrl}/auth/google/callback?error=access_denied`, { redirect: 'manual' });
+    assert.strictEqual(callback.status, 302);
+    assert.strictEqual(callback.headers.get('location'), '/settings?google=failed&reason=access-denied');
   });
 });

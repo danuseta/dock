@@ -1,4 +1,4 @@
-import { Router, Request } from 'express';
+import { Request, Response, Router } from 'express';
 import { sessionManager } from './session';
 import { googleCalendarService } from '../integrations/google-calendar';
 import { StorageService } from '../storage/service';
@@ -10,6 +10,32 @@ function callbackUrl(request: Request): string {
   const protocol = (Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto)?.split(',')[0]
     || request.protocol;
   return `${protocol}://${request.get('host')}/auth/google/callback`;
+}
+
+function failureReason(error: unknown): string {
+  const responseData = (error as { response?: { data?: { error?: unknown; error_description?: unknown } } })?.response?.data;
+  const message = [responseData?.error, responseData?.error_description, error instanceof Error ? error.message : '']
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  if (message.includes('invalid or expired oauth state')) return 'state-expired';
+  if (message.includes('redirect_uri') || message.includes('redirect uri')) return 'redirect-uri';
+  if (message.includes('invalid_client') || message.includes('invalid client')) return 'invalid-client';
+  if (message.includes('refresh token')) return 'refresh-token';
+  if (message.includes('not configured')) return 'configuration';
+  return 'token-exchange';
+}
+
+function providerFailureReason(value: unknown): string {
+  const error = String(value || '').toLowerCase();
+  if (error === 'access_denied') return 'access-denied';
+  if (error === 'redirect_uri_mismatch') return 'redirect-uri';
+  if (error === 'invalid_client') return 'invalid-client';
+  return 'provider-error';
+}
+
+function redirectFailure(response: Response, reason: string): void {
+  response.redirect(`/settings?google=failed&reason=${encodeURIComponent(reason)}`);
 }
 
 export function createGoogleCalendarRouter(): Router {
@@ -30,6 +56,10 @@ export function createGoogleCalendarRouter(): Router {
 
   router.get('/callback', async (request, response) => {
     try {
+      if (request.query.error) {
+        redirectFailure(response, providerFailureReason(request.query.error));
+        return;
+      }
       // SameSite=Strict intentionally prevents the DOCK session cookie from
       // crossing back from Google. The one-time, expiring OAuth state protects
       // this callback; only /start requires an unlocked DOCK session.
@@ -39,8 +69,10 @@ export function createGoogleCalendarRouter(): Router {
         callbackUrl(request),
       );
       response.redirect('/settings?google=connected');
-    } catch {
-      response.redirect('/settings?google=failed');
+    } catch (error) {
+      const reason = failureReason(error);
+      console.warn(`[Google OAuth] callback failed: ${reason}`);
+      redirectFailure(response, reason);
     }
   });
 

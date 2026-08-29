@@ -18,6 +18,7 @@ import {
   MIN_SERVICE_HEALTH_REFRESH_SECONDS,
   normalizeServiceHealthRefreshSeconds,
 } from '../lib/serviceHealthRefresh';
+import { isInitialQueryLoading } from '../lib/queryPolicy';
 
 type SettingsSection = 'general' | 'security' | 'jira' | 'github' | 'calendar' | 'discord';
 type RefreshUnit = 'seconds' | 'minutes';
@@ -39,6 +40,17 @@ const settingsSections: Array<{
 
 const navigationPreview: Record<NavigationMode, string> = {
   left: 'h-full w-2', right: 'ml-auto h-full w-2', top: 'h-2 w-3/5', bottom: 'mt-auto h-2 w-3/5',
+};
+
+const googleFailureMessages: Record<string, string> = {
+  'access-denied': 'Google denied access. Confirm this account is allowed as a test user, then try again.',
+  'redirect-uri': 'Google rejected the redirect URI. Register the exact HTTPS callback shown below in Google Cloud.',
+  'invalid-client': 'Google rejected the OAuth client. Check the client ID and secret, then save settings again.',
+  'state-expired': 'The OAuth request expired or was interrupted. Start the connection again from this page.',
+  'refresh-token': 'Google did not return offline access. Revoke DOCK access in Google, then connect again.',
+  configuration: 'Google OAuth client credentials are missing. Save the client ID and secret first.',
+  'token-exchange': 'Google accepted the redirect but rejected the token exchange. Check the OAuth client configuration.',
+  'provider-error': 'Google returned an OAuth error. Confirm the account and OAuth consent-screen settings, then try again.',
 };
 
 const SectionTitle = ({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) => (
@@ -138,9 +150,13 @@ const SettingsPage: React.FC = () => {
   }, [data]);
 
   useEffect(() => {
-    const result = new URLSearchParams(window.location.search).get('google');
+    const params = new URLSearchParams(window.location.search);
+    const result = params.get('google');
     if (result === 'connected') setToast({ message: 'Google Calendar connected successfully.', type: 'success' });
-    if (result === 'failed') setToast({ message: 'Google Calendar connection failed. Check the OAuth redirect URI.', type: 'error' });
+    if (result === 'failed') {
+      const reason = params.get('reason') || 'token-exchange';
+      setToast({ message: googleFailureMessages[reason] || googleFailureMessages['token-exchange'], type: 'error' });
+    }
     if (result === 'configuration-required') setToast({ message: 'Save the Google OAuth client ID and secret first.', type: 'error' });
   }, []);
 
@@ -154,8 +170,8 @@ const SettingsPage: React.FC = () => {
     }
   }, [githubToken, fetchRepos]);
 
-  if (loading) return <Page width="medium"><LoadingSkeleton /></Page>;
-  if (error) return <Page width="medium"><Card className="border-status-conflict text-status-conflict" role="alert">Error: {error.message}</Card></Page>;
+  if (isInitialQueryLoading(loading, data)) return <Page width="medium"><LoadingSkeleton /></Page>;
+  if (error && !data) return <Page width="medium"><Card className="border-status-conflict text-status-conflict" role="alert">Error: {error.message}</Card></Page>;
 
   const hasMasterPin = isPinActive || data?.settings?.hasMasterPin || false;
   const serviceHealthRefreshSeconds = Number(serviceHealthRefreshValue)

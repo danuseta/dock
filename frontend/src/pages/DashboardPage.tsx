@@ -24,6 +24,7 @@ import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { EmptyStateIllustration } from '../components/EmptyStateIllustration';
 import { Button, Input, Page, PageHeader, Select } from '../components/ui';
 import { cn } from '../lib/cn';
+import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 
 interface DashboardPageProps {
   onTicketClick: (key: string) => void;
@@ -35,14 +36,14 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
   const [sprintFilter, setSprintFilter] = useState<string>('ALL');
   
   const { data, loading, error } = useQuery(GET_DASHBOARD, { 
+    ...CACHED_QUERY_OPTIONS,
     pollInterval: 30000,
-    fetchPolicy: 'cache-and-network'
   });
   const [refreshData, { loading: refreshing }] = useMutation(REFRESH_DATA, {
     refetchQueries: [{ query: GET_DASHBOARD }]
   });
 
-  if (error) return (
+  if (error && !data) return (
     <Page width="full">
       <div className="rounded-md border border-status-conflict bg-status-conflict-bg p-6" role="alert">
         <div className="mb-2 flex items-center gap-2">
@@ -54,7 +55,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
     </Page>
   );
 
-  if (loading && !data) return (
+  if (isInitialQueryLoading(loading, data)) return (
     <Page width="full">
       <LoadingSkeleton />
     </Page>

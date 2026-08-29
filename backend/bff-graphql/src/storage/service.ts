@@ -36,6 +36,10 @@ export class StorageService {
     });
   }
 
+  deleteCache(namespace: string, key: string) {
+    return this.db.cacheEntry.delete({ where: { key: this.cacheKey(namespace, key) } }).catch(() => undefined);
+  }
+
   getDemoLink(ticketKey: string) { return this.db.demoLink.findUnique({ where: { ticketKey } }); }
   upsertDemoLink(ticketKey: string, url: string) {
     return this.db.demoLink.upsert({ where: { ticketKey }, update: { url }, create: { ticketKey, url } });

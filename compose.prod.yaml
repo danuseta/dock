@@ -13,9 +13,10 @@ services:
       DATABASE_URL: file:/app/data/jidis.db
       JIDIS_DATA_DIR: /app/data
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set}
-      CORS_ORIGIN: ${PUBLIC_BASE_URL:-http://localhost:3101}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3101}
+      CORS_ORIGIN: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL must be set}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL must be set}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
+      TRUST_PROXY: "true"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -27,3 +28,4 @@ services:
 
 volumes:
   dock_data:
+    name: dock_dock_data

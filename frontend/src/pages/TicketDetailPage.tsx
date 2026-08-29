@@ -25,6 +25,7 @@ import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Toast } from '../components/Toast';
 import { Badge, Button, Card, Input, Page } from '../components/ui';
 import { cn } from '../lib/cn';
+import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 
 interface TicketDetailPageProps {
   ticketKey: string;
@@ -34,8 +35,8 @@ interface TicketDetailPageProps {
 const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const { data, loading, error, refetch } = useQuery(GET_TICKET_DETAIL, { 
+    ...CACHED_QUERY_OPTIONS,
     variables: { key: ticketKey },
-    fetchPolicy: 'cache-and-network'
   });
   const [saveDemoLink] = useMutation(SAVE_DEMO_LINK);
   const [sendToDiscord, { loading: sendingDiscord }] = useMutation(SEND_TO_DISCORD);
@@ -64,13 +65,13 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
     </button>
   ) : null;
 
-  if (loading && !data) return (
+  if (isInitialQueryLoading(loading, data)) return (
     <Page width="full">
       {renderBackButton()}
       <LoadingSkeleton />
     </Page>
   );
-  if (error) return (
+  if (error && !data) return (
     <Page width="full">
       {renderBackButton()}
       <Card className="border-status-conflict text-status-conflict" role="alert">Error loading ticket details: {error.message}</Card>
