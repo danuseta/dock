@@ -10,6 +10,10 @@ export function buildPullRequestCacheKey(token: string, repos: string[], ticketK
   return `prs_v3_${credentialCacheId(token)}_${repos.slice().sort().join(',')}_${ticketKey}`;
 }
 
+export interface SearchPRsOptions {
+  staleWhileRevalidate?: boolean;
+}
+
 export class GitHubClient {
   private readonly client: AxiosInstance;
   readonly rateLimit = { remaining: -1, reset: -1 };
@@ -152,23 +156,43 @@ export class GitHubClient {
 
 export class GitHubService {
   private readonly lastRefresh = new Map<string, number>();
-  private readonly refreshing = new Set<string>();
+  private readonly inFlight = new Map<string, Promise<any[]>>();
 
   constructor(private readonly storage = new StorageService()) {}
 
-  async searchPRs(pat: string, repos: string[], ticketKey: string) {
+  async searchPRs(
+    pat: string,
+    repos: string[],
+    ticketKey: string,
+    options: SearchPRsOptions = {},
+  ) {
     const cacheKey = buildPullRequestCacheKey(pat, repos, ticketKey);
     const cached = await this.storage.getCache('github', cacheKey).catch(() => null);
     if (Array.isArray(cached)) {
       const lastRefresh = this.lastRefresh.get(cacheKey) || 0;
-      if (Date.now() - lastRefresh > 45000 && !this.refreshing.has(cacheKey)) {
-        this.refreshing.add(cacheKey);
-        void this.fetchAndCachePRs(pat, repos, ticketKey, cacheKey)
-          .finally(() => this.refreshing.delete(cacheKey));
+      if (Date.now() - lastRefresh > 45000) {
+        void this.fetchAndCachePRsOnce(pat, repos, ticketKey, cacheKey);
       }
       return cached;
     }
-    return this.fetchAndCachePRs(pat, repos, ticketKey, cacheKey);
+
+    const pending = this.fetchAndCachePRsOnce(pat, repos, ticketKey, cacheKey);
+    if (options.staleWhileRevalidate) {
+      return [];
+    }
+    return pending;
+  }
+
+  private fetchAndCachePRsOnce(pat: string, repos: string[], ticketKey: string, cacheKey: string) {
+    const pending = this.inFlight.get(cacheKey);
+    if (pending) return pending;
+
+    const request = this.fetchAndCachePRs(pat, repos, ticketKey, cacheKey)
+      .finally(() => {
+        if (this.inFlight.get(cacheKey) === request) this.inFlight.delete(cacheKey);
+      });
+    this.inFlight.set(cacheKey, request);
+    return request;
   }
 
   private async fetchAndCachePRs(pat: string, repos: string[], ticketKey: string, cacheKey: string) {

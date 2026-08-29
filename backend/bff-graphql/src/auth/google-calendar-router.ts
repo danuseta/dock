@@ -1,5 +1,5 @@
 import { Request, Response, Router } from 'express';
-import { sessionManager } from './session';
+import { sessionManager, shouldRequirePin } from './session';
 import { googleCalendarService } from '../integrations/google-calendar';
 import { StorageService } from '../storage/service';
 
@@ -44,7 +44,7 @@ export function createGoogleCalendarRouter(): Router {
 
   router.get('/start', async (request, response) => {
     try {
-      if (await storage.hasMasterPin() && !sessionManager.isAuthenticated(request)) {
+      if (shouldRequirePin(request, await storage.hasMasterPin()) && !sessionManager.isAuthenticated(request)) {
         response.status(401).send('Unlock DOCK before connecting Google Calendar.');
         return;
       }

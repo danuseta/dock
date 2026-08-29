@@ -3,7 +3,7 @@ import { GitHubAPI } from '../datasources/GitHubAPI';
 import { DiscordAPI } from '../datasources/DiscordAPI';
 import { StorageAPI } from '../datasources/StorageAPI';
 import { GraphQLError } from 'graphql';
-import type { AuthContext } from '../auth/session';
+import { shouldRequirePin, type AuthContext } from '../auth/session';
 import { googleCalendarService } from '../integrations/google-calendar';
 import { upstreamMonitorService } from '../integrations/upstream-monitor';
 
@@ -18,7 +18,7 @@ async function hasMasterPin(): Promise<boolean> {
 }
 
 async function requireUnlocked(context: AuthContext): Promise<void> {
-  if (await hasMasterPin() && !context.authenticated) {
+  if (shouldRequirePin(context.request, await hasMasterPin()) && !context.authenticated) {
     throw new GraphQLError('Unlock DOCK to continue', {
       extensions: { code: 'UNAUTHENTICATED' },
     });
@@ -28,7 +28,7 @@ async function requireUnlocked(context: AuthContext): Promise<void> {
 export const resolvers = {
   Query: {
     authStatus: async (_: unknown, __: unknown, context: AuthContext) => {
-      const pinEnabled = await hasMasterPin();
+      const pinEnabled = shouldRequirePin(context.request, await hasMasterPin());
       return {
         authenticated: !pinEnabled || context.authenticated,
         hasMasterPin: pinEnabled,
@@ -70,7 +70,9 @@ export const resolvers = {
         .sort((a, b) => getStatusRank(a) - getStatusRank(b))
         .map(status => ({
           status,
-          tickets: groups[status]
+          // Dashboard cards may request PR badges, but uncached GitHub work
+          // must not keep the whole board in a loading state.
+          tickets: groups[status].map((ticket: any) => ({ ...ticket, __dashboard: true }))
         }));
     },
     ticketDetail: async (_: any, { key }: { key: string }) => {
@@ -105,7 +107,9 @@ export const resolvers = {
   
   Ticket: {
     pullRequests: async (parent: any) => {
-      return await githubAPI.getPullRequestsForTicket(parent.key);
+      return await githubAPI.getPullRequestsForTicket(parent.key, {
+        staleWhileRevalidate: parent.__dashboard === true,
+      });
     },
     demoLink: async (parent: any) => {
       return await storageAPI.getDemoLink(parent.key);

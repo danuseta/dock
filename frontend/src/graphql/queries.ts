@@ -16,10 +16,8 @@ export const GET_DASHBOARD = gql`
       tickets {
         key
         title
-        description
         status
         assignee
-        url
         sprintName
         sprintState
         storyPoints
@@ -34,10 +32,6 @@ export const GET_DASHBOARD = gql`
           pullNumber
           baseBranch
           headBranch
-        }
-        demoLink {
-          url
-          updatedAt
         }
       }
     }

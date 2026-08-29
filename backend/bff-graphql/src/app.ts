@@ -8,6 +8,7 @@ import { resolvers } from './resolvers';
 import { typeDefs } from './schema/typeDefs';
 import {
   AuthContext,
+  isTailscaleRequest,
   pinRateLimiter,
   sessionManager,
 } from './auth/session';
@@ -53,6 +54,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<JidisAp
       request: req,
       response: res,
       authenticated: sessionManager.isAuthenticated(req),
+      trustedNetwork: isTailscaleRequest(req),
       clientKey: req.ip || req.socket.remoteAddress || 'unknown',
       sessions: sessionManager,
       pinRateLimiter,

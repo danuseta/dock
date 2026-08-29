@@ -15,6 +15,65 @@ interface AttemptWindow {
   resetAt: number;
 }
 
+type PinMode = 'auto' | 'always' | 'disabled';
+
+function pinMode(): PinMode {
+  const configured = process.env.DOCK_PIN_MODE?.trim().toLowerCase();
+  if (configured === 'always' || configured === 'disabled') return configured;
+  return 'auto';
+}
+
+function headerValues(request: Request, name: string): string[] {
+  const value = request.headers[name];
+  if (Array.isArray(value)) return value;
+  return value ? value.split(',').map((item) => item.trim()).filter(Boolean) : [];
+}
+
+function isTailscaleAddress(address: string): boolean {
+  const normalized = address.trim().toLowerCase().replace(/^::ffff:/, '');
+  if (normalized.startsWith('fd7a:115c:a1e0:')) return true;
+
+  const octets = normalized.split('.').map(Number);
+  return octets.length === 4
+    && octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255)
+    && octets[0] === 100
+    && octets[1] >= 64
+    && octets[1] <= 127;
+}
+
+function isTailscaleHostname(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '').split(':')[0];
+  return normalized.endsWith('.ts.net');
+}
+
+/**
+ * Tailscale Serve keeps the app bound to loopback and forwards the client
+ * request. Trust only the documented tailnet address range or a .ts.net host;
+ * local/private HTTP requests still require the configured PIN.
+ */
+export function isTailscaleRequest(request: Request): boolean {
+  if (pinMode() !== 'auto') return false;
+
+  const hosts = [
+    ...headerValues(request, 'x-forwarded-host'),
+    ...headerValues(request, 'host'),
+  ];
+  if (hosts.some(isTailscaleHostname)) return true;
+
+  const addresses = [
+    request.ip,
+    request.socket?.remoteAddress,
+    ...headerValues(request, 'x-forwarded-for'),
+  ].filter((address): address is string => Boolean(address));
+  return addresses.some(isTailscaleAddress);
+}
+
+export function shouldRequirePin(request: Request, pinConfigured: boolean): boolean {
+  const mode = pinMode();
+  if (!pinConfigured || mode === 'disabled') return false;
+  return mode === 'always' || !isTailscaleRequest(request);
+}
+
 function defaultSecureCookie(): boolean {
   const configured = process.env.SESSION_COOKIE_SECURE?.trim().toLowerCase();
   if (!configured) return process.env.NODE_ENV === 'production';
@@ -131,6 +190,7 @@ export interface AuthContext {
   request: Request;
   response: Response;
   authenticated: boolean;
+  trustedNetwork: boolean;
   clientKey: string;
   sessions: SessionManager;
   pinRateLimiter: PinRateLimiter;

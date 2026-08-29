@@ -1,5 +1,5 @@
 import { StorageAPI } from './StorageAPI';
-import { GitHubService } from '../integrations/github';
+import { GitHubService, SearchPRsOptions } from '../integrations/github';
 
 export class GitHubAPI {
   private storageAPI: StorageAPI;
@@ -21,7 +21,7 @@ export class GitHubAPI {
     };
   }
 
-  async getPullRequestsForTicket(ticketKey: string) {
+  async getPullRequestsForTicket(ticketKey: string, options: SearchPRsOptions = {}) {
     try {
       const auth = await this.getAuth();
       if (!auth.hasToken || !auth.repos) return [];
@@ -29,6 +29,7 @@ export class GitHubAPI {
         auth.headers.Authorization.replace('Bearer ', ''),
         auth.repos.split(',').map((repo: string) => repo.trim()).filter(Boolean),
         ticketKey,
+        options,
       );
       if (!Array.isArray(items)) return [];
       return items.map((pr: any) => ({

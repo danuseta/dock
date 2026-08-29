@@ -19,11 +19,12 @@ export function WebsiteIcon({ title, url }: WebsiteIconProps) {
 
   return (
     <img
-      className="size-6 rounded-[5px] object-contain"
+      className="size-7 rounded-[6px] object-contain drop-shadow-[0_1px_2px_rgba(0,0,0,0.45)]"
       src={source}
       alt=""
       aria-hidden="true"
       loading="lazy"
+      decoding="async"
       referrerPolicy="no-referrer"
       onError={() => setSourceIndex((current) => current + 1)}
     />

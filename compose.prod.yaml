@@ -17,6 +17,7 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL must be set}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
       TRUST_PROXY: "true"
+      DOCK_PIN_MODE: ${DOCK_PIN_MODE:-auto}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

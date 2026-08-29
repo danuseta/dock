@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import test from 'node:test';
 import type { CookieOptions, Request, Response } from 'express';
-import { PinRateLimiter, SessionManager } from '../auth/session';
+import { isTailscaleRequest, PinRateLimiter, SessionManager, shouldRequirePin } from '../auth/session';
 
 function responseStub() {
   const cookies: string[] = [];
@@ -23,8 +23,8 @@ function responseStub() {
   return { response, cookies, cleared, cookieOptions, clearOptions };
 }
 
-function requestWithCookie(cookie?: string): Request {
-  return { headers: { cookie } } as Request;
+function requestWithCookie(cookie?: string, headers: Record<string, string> = {}): Request {
+  return { headers: { cookie, ...headers }, ip: headers['x-forwarded-for'] } as Request;
 }
 
 test('server-side PIN sessions use opaque secure cookies and expire', () => {
@@ -70,4 +70,28 @@ test('PIN limiter blocks only after the configured failed-attempt budget', () =>
   limiter.recordFailure('client', 7_000);
   limiter.reset('client');
   assert.strictEqual(limiter.retryAfterSeconds('client', 7_100), 0);
+});
+
+test('auto PIN mode trusts Tailscale requests but keeps local access protected', () => {
+  const previousMode = process.env.DOCK_PIN_MODE;
+  delete process.env.DOCK_PIN_MODE;
+
+  try {
+    const tailnetRequest = requestWithCookie(undefined, {
+      host: 'danuseta-dock.tail01220c.ts.net',
+      'x-forwarded-for': '100.105.125.100',
+    });
+    const localRequest = requestWithCookie(undefined, {
+      host: 'localhost:3101',
+      'x-forwarded-for': '192.168.1.20',
+    });
+
+    assert.strictEqual(isTailscaleRequest(tailnetRequest), true);
+    assert.strictEqual(shouldRequirePin(tailnetRequest, true), false);
+    assert.strictEqual(isTailscaleRequest(localRequest), false);
+    assert.strictEqual(shouldRequirePin(localRequest, true), true);
+  } finally {
+    if (previousMode === undefined) delete process.env.DOCK_PIN_MODE;
+    else process.env.DOCK_PIN_MODE = previousMode;
+  }
 });
