@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: jidis-ci-${{ github.ref }}
+  group: dock-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -29,7 +29,7 @@ jobs:
       - run: npm run build:app
       - run: npm run test:all
       - if: github.event_name == 'pull_request'
-        run: docker build --file backend/bff-graphql/Dockerfile.app --tag jidis:ci .
+        run: docker build --file backend/bff-graphql/Dockerfile.app --tag dock:ci .
 
   deploy:
     needs: validate
@@ -53,8 +53,8 @@ jobs:
           file: backend/bff-graphql/Dockerfile.app
           push: true
           tags: |
-            ghcr.io/danuseta/jidis:latest
-            ghcr.io/danuseta/jidis:${{ github.sha }}
+            ghcr.io/danuseta/dock:latest
+            ghcr.io/danuseta/dock:${{ github.sha }}
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -72,21 +72,21 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          ssh -i ~/.ssh/deploy "$DEPLOY_USER@$DEPLOY_HOST" 'mkdir -p ~/jidis'
-          scp -i ~/.ssh/deploy compose.prod.yaml "$DEPLOY_USER@$DEPLOY_HOST:~/jidis/compose.yaml"
-      - name: Restart JIDIS and verify health
+          ssh -i ~/.ssh/deploy "$DEPLOY_USER@$DEPLOY_HOST" 'mkdir -p ~/dock'
+          scp -i ~/.ssh/deploy compose.prod.yaml "$DEPLOY_USER@$DEPLOY_HOST:~/dock/compose.yaml"
+      - name: Restart DOCK and verify health
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: >-
           ssh -i ~/.ssh/deploy "$DEPLOY_USER@$DEPLOY_HOST"
           'set -e;
-          cd ~/jidis;
-          docker compose pull jidis-app;
-          docker compose up -d jidis-app;
+          cd ~/dock;
+          docker compose pull dock-app;
+          docker compose up -d dock-app;
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
             if curl -fsS http://127.0.0.1:3101/health >/dev/null; then exit 0; fi;
             sleep 3;
           done;
-          docker compose logs --tail=100 jidis-app;
+          docker compose logs --tail=100 dock-app;
           exit 1'

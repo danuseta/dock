@@ -19,7 +19,7 @@ export function createGoogleCalendarRouter(): Router {
   router.get('/start', async (request, response) => {
     try {
       if (await storage.hasMasterPin() && !sessionManager.isAuthenticated(request)) {
-        response.status(401).send('Unlock JIDIS before connecting Google Calendar.');
+        response.status(401).send('Unlock DOCK before connecting Google Calendar.');
         return;
       }
       response.redirect(await googleCalendarService.authorizationUrl(callbackUrl(request)));
@@ -30,9 +30,9 @@ export function createGoogleCalendarRouter(): Router {
 
   router.get('/callback', async (request, response) => {
     try {
-      // SameSite=Strict intentionally prevents the JIDIS session cookie from
+      // SameSite=Strict intentionally prevents the DOCK session cookie from
       // crossing back from Google. The one-time, expiring OAuth state protects
-      // this callback; only /start requires an unlocked JIDIS session.
+      // this callback; only /start requires an unlocked DOCK session.
       await googleCalendarService.completeAuthorization(
         String(request.query.code || ''),
         String(request.query.state || ''),

@@ -174,7 +174,7 @@ const MonitoringPage: React.FC = () => {
       <Dialog open={Boolean(removeTarget)} onClose={() => !removing && setRemoveTarget(null)} dismissible={!removing} labelledBy="remove-service-title" describedBy="remove-service-description">
         <Card className="w-[min(440px,calc(100vw-2rem))] shadow-card">
           <h2 id="remove-service-title" className="text-balance font-display text-xl font-bold">Remove service?</h2>
-          <p id="remove-service-description" className="mt-2 text-pretty text-sm text-muted-foreground">{removeTarget?.name} and its health history will be removed from JIDIS.</p>
+          <p id="remove-service-description" className="mt-2 text-pretty text-sm text-muted-foreground">{removeTarget?.name} and its health history will be removed from DOCK.</p>
           {actionError && <p className="mt-3 text-pretty text-sm text-status-conflict" role="alert">{actionError}</p>}
           <div className="mt-6 flex justify-end gap-2"><Button onClick={() => setRemoveTarget(null)} disabled={removing}>Cancel</Button><Button variant="danger" onClick={handleRemove} disabled={removing}>{removing ? 'Removing...' : 'Remove service'}</Button></div>
         </Card>

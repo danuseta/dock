@@ -78,9 +78,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, c
           onClick={() => onNavigate('/')}
           aria-label="Go to Home"
         >
-          <img className="size-8 flex-none rounded-sm border border-border object-cover min-[761px]:size-[30px]" src="/jidis_logo.jpg" alt="" />
+          <img className="size-8 flex-none rounded-sm border border-border object-cover min-[761px]:size-[30px]" src="/dock-logo.svg" alt="" />
           <span className={cn('hidden min-w-0', isSidebar && !preferences.collapsed && 'min-[761px]:block')}>
-            <strong className="block font-display leading-none">JIDIS</strong>
+            <strong className="block font-display leading-none">DOCK</strong>
             <small className="mt-1 block whitespace-nowrap text-[0.61rem] text-muted-foreground">Personal command center</small>
           </span>
         </button>

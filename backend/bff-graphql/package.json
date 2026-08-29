@@ -1,7 +1,7 @@
 {
-  "name": "bff-graphql",
+  "name": "dock-bff-graphql",
   "version": "1.0.1",
-  "description": "BFF GraphQL for JIDIS",
+  "description": "BFF GraphQL for DOCK",
   "main": "dist/index.js",
   "scripts": {
     "start": "node dist/index.js",

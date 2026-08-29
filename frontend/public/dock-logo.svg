@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150" role="img" aria-labelledby="dock-logo-title">
+  <title id="dock-logo-title">DOCK</title>
+  <rect width="150" height="150" rx="32" fill="#111111"/>
+  <path
+    transform="translate(35 25)"
+    d="M4 0h56a20 20 0 0 1 20 20v60a20 20 0 0 1-20 20H4a4 4 0 0 1-4-4V4a4 4 0 0 1 4-4Zm19 20a3 3 0 0 0-3 3v14a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3V23a3 3 0 0 0-3-3h-8Zm22 0a3 3 0 0 0-3 3v14a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V23a3 3 0 0 0-3-3H45ZM23 48a3 3 0 0 0-3 3v26a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3V51a3 3 0 0 0-3-3h-8Zm22 0a3 3 0 0 0-3 3v26a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V51a3 3 0 0 0-3-3H45Z"
+    fill="#E8E4D4"
+    fill-rule="evenodd"
+  />
+</svg>

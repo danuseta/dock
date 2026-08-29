@@ -1,8 +1,8 @@
-name: jidis
+name: dock
 
 services:
-  jidis-app:
-    image: ghcr.io/danuseta/jidis:${JIDIS_IMAGE_TAG:-latest}
+  dock-app:
+    image: ghcr.io/danuseta/dock:${DOCK_IMAGE_TAG:-latest}
     restart: unless-stopped
     init: true
     ports:
@@ -18,11 +18,11 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - jidis_data:/app/data
+      - dock_data:/app/data
     mem_limit: 384m
     cpus: 0.75
     security_opt:
       - no-new-privileges:true
 
 volumes:
-  jidis_data:
+  dock_data:

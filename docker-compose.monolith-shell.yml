@@ -1,5 +1,5 @@
 services:
-  jidis-app:
+  dock-app:
     build:
       context: .
       dockerfile: backend/bff-graphql/Dockerfile.app
@@ -16,13 +16,13 @@ services:
       - CORS_ORIGIN=http://localhost:3000
       - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://localhost:3000}
     networks:
-      - jidis-network
+      - dock-network
     volumes:
-      - jidis_data:/app/data
+      - dock_data:/app/data
 
 volumes:
-  jidis_data:
+  dock_data:
 
 networks:
-  jidis-network:
+  dock-network:
     driver: bridge

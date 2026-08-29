@@ -5,7 +5,7 @@ import { typeDefs } from '../schema/typeDefs';
 import { resolvers } from '../resolvers';
 
 test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t) => {
-  await t.test('should define valid GraphQL type definitions containing essential JIDIS domain types', () => {
+  await t.test('should define valid GraphQL type definitions containing essential DOCK domain types', () => {
     assert.ok(typeDefs, 'typeDefs must not be null or undefined');
     const schemaStr = typeDefs.loc?.source.body || JSON.stringify(typeDefs);
     assert.ok(schemaStr.includes('Ticket'), 'Schema must define Ticket GraphQL type');

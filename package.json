@@ -1,8 +1,8 @@
 {
-  "name": "jidis-monorepo",
+  "name": "dock-monorepo",
   "version": "1.0.1",
   "private": true,
-  "description": "JIDIS - Developer Task & PR Pipeline Kanban Dashboard Monorepo",
+  "description": "DOCK - Development Operations Control Kit",
   "workspaces": [
     "frontend",
     "backend/bff-graphql"
@@ -13,12 +13,12 @@
     "test:all": "npm test --workspaces --if-present"
   },
   "keywords": [
-    "jidis",
+    "dock",
     "kanban",
     "jira",
     "github",
     "monorepo"
   ],
-  "author": "JIDIS Engineering Team",
+  "author": "DOCK",
   "license": "MIT"
 }

@@ -8,6 +8,7 @@ build/
 .dev/
 .serena/
 docs-ai/
+dock-brand-overview.svg
 
 # Local project management and internal documentation
 .beads/

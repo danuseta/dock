@@ -21,11 +21,11 @@ async function listen(app: Express) {
   };
 }
 
-test('JIDIS monolith shell serves API and SPA from one Express app', async (t) => {
+test('DOCK monolith shell serves API and SPA from one Express app', async (t) => {
   const frontendDist = await mkdtemp(path.join(os.tmpdir(), 'jidis-spa-'));
   await mkdir(path.join(frontendDist, 'assets'));
-  await writeFile(path.join(frontendDist, 'index.html'), '<!doctype html><title>JIDIS shell</title>');
-  await writeFile(path.join(frontendDist, 'assets', 'app.js'), 'window.JIDIS = true;');
+  await writeFile(path.join(frontendDist, 'index.html'), '<!doctype html><title>DOCK shell</title>');
+  await writeFile(path.join(frontendDist, 'assets', 'app.js'), 'window.DOCK = true;');
 
   const shell = await createApp({ frontendDistPath: frontendDist });
   const runtime = await listen(shell.app);
@@ -45,11 +45,11 @@ test('JIDIS monolith shell serves API and SPA from one Express app', async (t) =
   await t.test('serves static assets and SPA route fallback', async () => {
     const asset = await fetch(`${runtime.baseUrl}/assets/app.js`);
     assert.strictEqual(asset.status, 200);
-    assert.match(await asset.text(), /window\.JIDIS/);
+    assert.match(await asset.text(), /window\.DOCK/);
 
     const route = await fetch(`${runtime.baseUrl}/work`);
     assert.strictEqual(route.status, 200);
-    assert.match(await route.text(), /JIDIS shell/);
+    assert.match(await route.text(), /DOCK shell/);
 
     const missingAsset = await fetch(`${runtime.baseUrl}/assets/missing.js`);
     assert.strictEqual(missingAsset.status, 404);

@@ -92,7 +92,7 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({ isOpen, onUnlock }) 
 
         <h2 id="pin-lock-title" className="text-balance font-display text-xl font-bold">App Locked</h2>
         <p id="pin-lock-description" className="mt-1 mb-4 text-pretty text-sm text-secondary-foreground">
-          Enter your Master Passcode PIN to access JIDIS.
+          Enter your Master Passcode PIN to access DOCK.
         </p>
 
         <div className="mb-6 flex justify-center gap-3" aria-label={`${pin.length} of 6 PIN digits entered`}>

@@ -19,7 +19,7 @@ async function hasMasterPin(): Promise<boolean> {
 
 async function requireUnlocked(context: AuthContext): Promise<void> {
   if (await hasMasterPin() && !context.authenticated) {
-    throw new GraphQLError('Unlock JIDIS to continue', {
+    throw new GraphQLError('Unlock DOCK to continue', {
       extensions: { code: 'UNAUTHENTICATED' },
     });
   }

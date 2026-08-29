@@ -8,7 +8,7 @@ export async function startServer(): Promise<void> {
 
   app.listen(port, () => {
     const shellStatus = frontendEnabled ? 'with React SPA' : 'API only';
-    console.log(`JIDIS GraphQL server running on port ${port} at /graphql (${shellStatus})`);
+    console.log(`DOCK GraphQL server running on port ${port} at /graphql (${shellStatus})`);
   });
 }
 
