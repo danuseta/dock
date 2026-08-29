@@ -1,6 +1,6 @@
 {
   "name": "jidis-monorepo",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
   "description": "JIDIS - Developer Task & PR Pipeline Kanban Dashboard Monorepo",
   "workspaces": [
