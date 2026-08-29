@@ -1,5 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
+import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { GoogleSearch } from '../components/GoogleSearch';
 
