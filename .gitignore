@@ -1,0 +1,44 @@
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+build/
+*.log
+.dev/
+.serena/
+docs-ai/
+
+# Local project management and internal documentation
+.beads/
+dev-docs/
+planning/
+prod-docs/
+scripts/
+*.md
+
+# Local development helpers
+start-dev.ps1
+start-dev.sh
+stop-dev.ps1
+stop-dev.sh
+
+# Retired desktop and microservice architecture
+electron/
+backend/discord-service/
+backend/github-service/
+backend/jira-service/
+backend/shared/
+backend/storage-service/
+docker-compose.yml
+
+# Retired automation
+.github/workflows/autobump-version.yml
+.github/workflows/unit-testing.yml
+
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/

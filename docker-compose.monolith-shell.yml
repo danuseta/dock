@@ -1,0 +1,28 @@
+services:
+  jidis-app:
+    build:
+      context: .
+      dockerfile: backend/bff-graphql/Dockerfile.app
+      args:
+        VITE_GRAPHQL_URL: /graphql
+    ports:
+      - "127.0.0.1:3000:4000"
+    environment:
+      - PORT=4000
+      - FRONTEND_DIST_PATH=/app/frontend-dist
+      - DATABASE_URL=file:/app/data/jidis.db
+      - JIDIS_DATA_DIR=/app/data
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set}
+      - CORS_ORIGIN=http://localhost:3000
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://localhost:3000}
+    networks:
+      - jidis-network
+    volumes:
+      - jidis_data:/app/data
+
+volumes:
+  jidis_data:
+
+networks:
+  jidis-network:
+    driver: bridge

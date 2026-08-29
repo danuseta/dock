@@ -1,0 +1,24 @@
+{
+  "name": "jidis-monorepo",
+  "version": "1.0.1",
+  "private": true,
+  "description": "JIDIS - Developer Task & PR Pipeline Kanban Dashboard Monorepo",
+  "workspaces": [
+    "frontend",
+    "backend/bff-graphql"
+  ],
+  "scripts": {
+    "build:app": "npm run build --workspace=frontend && npm run build --workspace=backend/bff-graphql",
+    "build:all": "npm run build --workspaces --if-present",
+    "test:all": "npm test --workspaces --if-present"
+  },
+  "keywords": [
+    "jidis",
+    "kanban",
+    "jira",
+    "github",
+    "monorepo"
+  ],
+  "author": "JIDIS Engineering Team",
+  "license": "MIT"
+}

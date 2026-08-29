@@ -1,0 +1,28 @@
+name: jidis
+
+services:
+  jidis-app:
+    image: ghcr.io/danuseta/jidis:${JIDIS_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    init: true
+    ports:
+      - "127.0.0.1:3101:4000"
+    environment:
+      PORT: 4000
+      FRONTEND_DIST_PATH: /app/frontend-dist
+      DATABASE_URL: file:/app/data/jidis.db
+      JIDIS_DATA_DIR: /app/data
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set}
+      CORS_ORIGIN: ${PUBLIC_BASE_URL:-http://localhost:3101}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3101}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - jidis_data:/app/data
+    mem_limit: 384m
+    cpus: 0.75
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  jidis_data:

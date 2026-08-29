@@ -1,0 +1,103 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model TicketCache {
+  id String @id @default(uuid())
+  key String @unique
+  summary String
+  description String?
+  status String
+  assignee String?
+  reporter String?
+  priority String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([status])
+}
+
+model PullRequestCache {
+  id String @id @default(uuid())
+  number Int
+  title String
+  description String?
+  state String
+  url String
+  author String
+  repository String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  mergedAt DateTime?
+  @@unique([repository, number])
+  @@index([repository])
+  @@index([state])
+}
+
+model DemoLink {
+  id String @id @default(uuid())
+  ticketKey String @unique
+  url String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model QuickLink {
+  id String @id @default(uuid())
+  title String
+  url String
+  color String @default("#60a5fa")
+  position Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([position])
+}
+
+model MonitorTarget {
+  id             String    @id @default(uuid())
+  name           String
+  url            String
+  expectedStatus Int       @default(200)
+  timeoutMs      Int       @default(5000)
+  lastStatus     String?
+  lastStatusCode Int?
+  lastLatencyMs  Int?
+  lastCheckedAt  DateTime?
+  lastError      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([name])
+}
+
+model AppSettings {
+  id String @id @default(uuid())
+  key String @unique
+  value String
+  description String?
+  updatedAt DateTime @updatedAt
+}
+
+model CacheEntry {
+  key String @id
+  value String
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([expiresAt])
+}
+
+model MonitoredRepository {
+  id String @id @default(uuid())
+  owner String
+  name String
+  webhookSecret String?
+  isActive Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([owner, name])
+}
