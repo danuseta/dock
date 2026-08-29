@@ -97,9 +97,10 @@ export class GoogleCalendarService {
   }
 
   async completeAuthorization(code: string, state: string, redirectUri: string): Promise<void> {
-    if (!code || !state || !await this.consumeState(state)) throw new Error('Invalid or expired OAuth state');
+    if (!code || !state) throw new Error('Invalid or expired OAuth state');
     const settings = await this.settings();
     if (!settings.googleClientId || !settings.googleClientSecret) throw new Error('Google OAuth is not configured');
+    if (!await this.consumeState(state)) throw new Error('Invalid or expired OAuth state');
     const body = new URLSearchParams({
       code,
       client_id: settings.googleClientId,

@@ -144,6 +144,32 @@ test('internal integration behavior', async (t) => {
     assert.strictEqual(writes, 0);
   });
 
+  await t.test('keeps OAuth state available when callback credentials are missing', async () => {
+    const cache = new Map<string, unknown>();
+    const settings = [
+      { key: 'googleClientId', value: 'client-id.apps.googleusercontent.com' },
+      { key: 'googleClientSecret', value: 'client-secret' },
+    ];
+    const storage = {
+      getSettings: async () => settings,
+      upsertCache: async (namespace: string, key: string, value: unknown) => cache.set(`${namespace}:${key}`, value),
+      getCache: async (namespace: string, key: string) => cache.get(`${namespace}:${key}`) ?? null,
+      deleteCache: async (namespace: string, key: string) => { cache.delete(`${namespace}:${key}`); },
+      upsertSetting: async () => undefined,
+    };
+    const service = new GoogleCalendarService(storage as any);
+    const authorization = new URL(await service.authorizationUrl('https://jidis.test/auth/google/callback'));
+    const state = authorization.searchParams.get('state');
+    assert.ok(state);
+    settings.splice(1, 1);
+
+    await assert.rejects(
+      service.completeAuthorization('authorization-code', state, 'https://jidis.test/auth/google/callback'),
+      /Google OAuth is not configured/,
+    );
+    assert.strictEqual(cache.get('google-oauth-state:' + state), state);
+  });
+
   await t.test('normalizes timed and all-day Google Calendar events', () => {
     const event = normalizeCalendarEvent({
       id: 'event-1', summary: 'Focus block', start: { date: '2026-08-28' }, end: { date: '2026-08-29' },

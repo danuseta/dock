@@ -49,7 +49,8 @@ export function createGoogleCalendarRouter(): Router {
         return;
       }
       response.redirect(await googleCalendarService.authorizationUrl(callbackUrl(request)));
-    } catch {
+    } catch (error) {
+      console.warn(`[Google OAuth] start failed: ${failureReason(error)}`);
       response.redirect('/settings?google=configuration-required');
     }
   });
