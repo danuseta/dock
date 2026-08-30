@@ -20,7 +20,7 @@ test('returns no remote icon sources for an invalid URL', () => {
 test('selects local vector marks for common quick-link services', () => {
   assert.equal(getWebsiteIconKind('https://github.com/danuseta'), 'github');
   assert.equal(getWebsiteIconKind('https://calendar.google.com/calendar/u/0'), 'calendar');
-  assert.equal(getWebsiteIconKind('https://company.atlassian.net/jira'), 'jira');
+  assert.equal(getWebsiteIconKind('https://mysales.atlassian.net/jira/software/projects/QRD/boards/40/backlog'), 'jira');
   assert.equal(getWebsiteIconKind('https://100.105.125.100:3101'), 'server');
 });
 
