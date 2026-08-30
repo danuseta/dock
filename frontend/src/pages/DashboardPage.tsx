@@ -33,7 +33,7 @@ interface DashboardPageProps {
 const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
   const { activeFilter, setActiveFilter } = useTicketStore();
   const [searchTerm, setSearchTerm] = useState('');
-  const [sprintFilter, setSprintFilter] = useState<string>('ALL');
+  const [sprintFilter, setSprintFilter] = useState<string>('CURRENT');
   
   const { data, loading, error } = useQuery(GET_DASHBOARD, { 
     ...CACHED_QUERY_OPTIONS,
@@ -72,11 +72,19 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
       .map((t: any) => t.sprintName)
       .filter((name?: string) => name && name !== 'No Sprint' && name.trim() !== '')
   )) as string[]).sort();
+  const hasCurrentSprint = rawTickets.some((ticket: any) => ticket.sprintState?.toUpperCase() === 'ACTIVE');
+  const effectiveSprintFilter = sprintFilter === 'CURRENT' && !hasCurrentSprint ? 'ALL' : sprintFilter;
+  const sprintOptions = [
+    ...(hasCurrentSprint ? [{ value: 'CURRENT', label: 'Current Sprint' }] : []),
+    { value: 'ALL', label: 'All Sprints' },
+    ...availableSprints.map((sprintName) => ({ value: sprintName, label: sprintName })),
+  ];
 
-  // Filter tickets by exact Sprint selection from dropdown or ALL
+  // Filter tickets by current sprint, exact sprint name, or all sprints.
   const sprintFilteredTickets = rawTickets.filter((t: any) => {
-    if (sprintFilter === 'ALL') return true;
-    return t.sprintName === sprintFilter;
+    if (effectiveSprintFilter === 'ALL') return true;
+    if (effectiveSprintFilter === 'CURRENT') return t.sprintState?.toUpperCase() === 'ACTIVE';
+    return t.sprintName === effectiveSprintFilter;
   });
 
   // Canonical Status Order & Styling configuration
@@ -186,16 +194,11 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
             <Calendar size={17} className="text-accent" aria-hidden="true" />
             <Select
               aria-label="Select sprint workload"
-              className="min-w-60 border-0 bg-transparent p-0 font-display text-[0.925rem] font-bold focus-visible:ring-0"
-              value={sprintFilter}
-              onChange={(e) => setSprintFilter(e.target.value)}
-            >
-              <option value="ALL">All Sprints</option>
-              {availableSprints.length > 0 && <option disabled>Available Sprints</option>}
-              {availableSprints.map((sprintName) => (
-                <option key={sprintName} value={sprintName}>{sprintName}</option>
-              ))}
-            </Select>
+              className="min-w-60 border-0 bg-transparent px-0 font-display text-[0.925rem] font-bold focus-visible:ring-0"
+              value={effectiveSprintFilter}
+              onValueChange={setSprintFilter}
+              options={sprintOptions}
+            />
           </div>
 
           <span className="font-mono text-[0.825rem] text-muted-foreground">

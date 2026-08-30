@@ -52,6 +52,8 @@ test('internal integration behavior', async (t) => {
     assert.match(message, /QRD-205/);
     assert.match(message, /org\/api/);
     assert.match(message, /demo\.example/);
+    assert.doesNotMatch(message, /OPEN|🟢|Demo Video|🎬/);
+    assert.match(message, /\[org\/api\] - \[QRD-205 API\]/);
   });
 
   await t.test('renders and validates a configurable Discord message template', () => {

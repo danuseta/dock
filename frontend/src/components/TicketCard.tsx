@@ -7,6 +7,7 @@ import {
 import { PRBadge } from './PRBadge';
 import { cn } from '../lib/cn';
 import { getApprovalLabels } from '../lib/ticketApprovals';
+import { displayAssignee } from '../lib/queryPolicy';
 
 interface TicketCardProps {
   ticket: {
@@ -83,7 +84,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({ ticket, onClick }) => {
       <div className="mt-auto flex items-center border-t border-border pt-2">
         <div className="flex items-center gap-1.5 font-mono text-xs text-secondary-foreground">
           <User size={12} className="text-muted-foreground" aria-hidden="true" />
-          <span className="font-semibold text-foreground">{ticket.assignee || 'Unassigned'}</span>
+          <span className="font-semibold text-foreground">{displayAssignee(ticket.assignee)}</span>
         </div>
       </div>
     </button>

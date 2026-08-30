@@ -11,6 +11,8 @@ test('renders saved Discord template fields for the editable preview', () => {
   assert.match(message, /QRD-1099 — Agent workflow/);
   assert.match(message, /Frontend Repositories/);
   assert.match(message, /demo\.example/);
+  assert.doesNotMatch(message, /OPEN|🟢|Demo Video|🎬/);
+  assert.match(message, /\[org\/frontend\] - \[QRD-1099 UI\]/);
 });
 
 test('rejects unknown Discord template fields before saving', () => {

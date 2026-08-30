@@ -4,12 +4,13 @@ import { useQuery } from '@apollo/client';
 import { GET_NEEDS_ATTENTION } from '../graphql/queries';
 import { NAVIGATION_PREFERENCES_EVENT, NavigationPreferences, readNavigationPreferences, saveNavigationPreferences } from '../lib/navigationPreferences';
 import { cn } from '../lib/cn';
+import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 
 interface AppLayoutProps { currentPath: string; onNavigate: (path: string) => void; children: React.ReactNode; }
 
 export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, children }) => {
   const [preferences, setPreferences] = useState(readNavigationPreferences);
-  const { data } = useQuery(GET_NEEDS_ATTENTION, { pollInterval: 30000 });
+  const { data } = useQuery(GET_NEEDS_ATTENTION, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
   const conflictCount = data?.needsAttention?.length || 0;
 
   useEffect(() => {

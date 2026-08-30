@@ -1,5 +1,6 @@
-import { Check, ChevronDown } from 'lucide-react';
-import { forwardRef, type InputHTMLAttributes, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
+import * as SelectPrimitive from '@radix-ui/react-select';
+import { Check, ChevronDown, ChevronUp } from 'lucide-react';
+import { forwardRef, type InputHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 import { cn } from '../../lib/cn';
 
 const controlClass = [
@@ -8,16 +9,98 @@ const controlClass = [
   'disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-status-conflict aria-invalid:ring-status-conflict/30',
 ].join(' ');
 
-export type SelectProps = SelectHTMLAttributes<HTMLSelectElement>;
+export interface SelectOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+}
 
-export const Select = forwardRef<HTMLSelectElement, SelectProps>(({ className, ...props }, ref) => (
-  <span className="relative block">
-    <select ref={ref} className={cn(controlClass, 'h-10 appearance-none pr-10', className)} {...props} />
-    <ChevronDown className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-  </span>
-));
+export interface SelectProps {
+  value?: string;
+  defaultValue?: string;
+  onValueChange?: (value: string) => void;
+  options: SelectOption[];
+  placeholder?: string;
+  disabled?: boolean;
+  name?: string;
+  className?: string;
+  contentClassName?: string;
+  id?: string;
+  'aria-label': string;
+  'aria-describedby'?: string;
+}
 
-Select.displayName = 'Select';
+export const Select = ({
+  value,
+  defaultValue,
+  onValueChange,
+  options,
+  placeholder,
+  disabled,
+  name,
+  className,
+  contentClassName,
+  id,
+  'aria-label': ariaLabel,
+  'aria-describedby': ariaDescribedBy,
+}: SelectProps) => (
+  <SelectPrimitive.Root
+    value={value}
+    defaultValue={defaultValue}
+    onValueChange={onValueChange}
+    disabled={disabled}
+    name={name}
+  >
+    <SelectPrimitive.Trigger
+      id={id}
+      aria-label={ariaLabel}
+      aria-describedby={ariaDescribedBy}
+      className={cn(
+        controlClass,
+        'flex h-10 items-center justify-between gap-3 pr-3 text-left data-[placeholder]:text-muted-foreground',
+        className,
+      )}
+    >
+      <SelectPrimitive.Value placeholder={placeholder} />
+      <SelectPrimitive.Icon asChild>
+        <ChevronDown className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      </SelectPrimitive.Icon>
+    </SelectPrimitive.Trigger>
+    <SelectPrimitive.Portal>
+      <SelectPrimitive.Content
+        position="popper"
+        align="start"
+        sideOffset={4}
+        className={cn(
+          'z-50 max-h-[min(20rem,var(--radix-select-content-available-height))] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-md border border-border bg-surface-1 p-1 text-foreground shadow-card',
+          contentClassName,
+        )}
+      >
+        <SelectPrimitive.ScrollUpButton className="flex h-7 items-center justify-center text-muted-foreground">
+          <ChevronUp className="size-4" aria-hidden="true" />
+        </SelectPrimitive.ScrollUpButton>
+        <SelectPrimitive.Viewport>
+          {options.map((option) => (
+            <SelectPrimitive.Item
+              key={option.value}
+              value={option.value}
+              disabled={option.disabled}
+              className="relative flex min-h-9 cursor-default select-none items-center rounded-sm py-2 pr-9 pl-3 text-sm outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-surface-hover data-[highlighted]:text-foreground"
+            >
+              <SelectPrimitive.ItemText>{option.label}</SelectPrimitive.ItemText>
+              <SelectPrimitive.ItemIndicator className="absolute right-3 inline-flex items-center text-accent">
+                <Check className="size-4" aria-hidden="true" />
+              </SelectPrimitive.ItemIndicator>
+            </SelectPrimitive.Item>
+          ))}
+        </SelectPrimitive.Viewport>
+        <SelectPrimitive.ScrollDownButton className="flex h-7 items-center justify-center text-muted-foreground">
+          <ChevronDown className="size-4" aria-hidden="true" />
+        </SelectPrimitive.ScrollDownButton>
+      </SelectPrimitive.Content>
+    </SelectPrimitive.Portal>
+  </SelectPrimitive.Root>
+);
 
 export type TextareaProps = TextareaHTMLAttributes<HTMLTextAreaElement>;
 

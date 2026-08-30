@@ -1,17 +1,21 @@
 import { useMemo, useState } from 'react';
 import { useLazyQuery, useQuery } from '@apollo/client';
 import { Box, Eye, RefreshCw, Search, Terminal, X } from 'lucide-react';
-import { GET_DOCKER_CONTAINER_LOGS, GET_DOCKER_RUNTIME } from '../graphql/queries';
+import { GET_DOCKER_CONTAINER_LOGS, GET_DOCKER_RUNTIME, GET_SETTINGS } from '../graphql/queries';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Button, Card, Dialog, IconButton, Input, Page, PageHeader, Select } from '../components/ui';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { cn } from '../lib/cn';
 import { dockerStatusTone, formatBytes, type DockerContainer, type DockerRuntime } from '../lib/dockerRuntime';
+import { normalizeServiceHealthRefreshSeconds } from '../lib/serviceHealthRefresh';
 
 const DockerServicesPage = () => {
+  const { data: settingsData } = useQuery(GET_SETTINGS, CACHED_QUERY_OPTIONS);
+  const refreshSeconds = normalizeServiceHealthRefreshSeconds(settingsData?.settings?.serviceHealthRefreshSeconds);
   const { data, loading, error, refetch } = useQuery(GET_DOCKER_RUNTIME, {
     ...CACHED_QUERY_OPTIONS,
     variables: { includeStats: true },
+    pollInterval: refreshSeconds * 1000,
   });
   const [loadLogs, { data: logsData, loading: logsLoading, error: logsError }] = useLazyQuery(GET_DOCKER_CONTAINER_LOGS, { fetchPolicy: 'network-only' });
   const [search, setSearch] = useState('');
@@ -45,7 +49,7 @@ const DockerServicesPage = () => {
   return (
     <Page width="full">
       <PageHeader>
-        <div><h1 className="text-balance font-display text-3xl font-black">Docker services</h1><p className="mt-1 text-pretty text-secondary-foreground">Read-only container inventory from {runtime?.serverName || 'the Docker host'}{runtime?.engineVersion ? ` · Engine ${runtime.engineVersion}` : ''}.</p></div>
+        <div><h1 className="text-balance font-display text-3xl font-black">Docker services</h1><p className="mt-1 text-pretty text-secondary-foreground">Read-only container inventory from {runtime?.serverName || 'the Docker host'}{runtime?.engineVersion ? ` · Engine ${runtime.engineVersion}` : ''}. Auto-refreshes every {refreshSeconds} seconds.</p></div>
         <Button onClick={() => void refetch()} disabled={loading}><RefreshCw size={16} className={cn(loading && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />Refresh inventory</Button>
       </PageHeader>
 
@@ -57,8 +61,8 @@ const DockerServicesPage = () => {
 
       <Card className="mb-4 grid grid-cols-[minmax(220px,1fr)_180px_220px] gap-3 max-[760px]:grid-cols-1">
         <label className="relative"><span className="sr-only">Search containers</span><Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input className="pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, image, project, or port" /></label>
-        <Select value={stateFilter} onChange={(event) => setStateFilter(event.target.value)} aria-label="Filter by container state"><option value="all">All states</option><option value="running">Running</option><option value="exited">Exited</option><option value="paused">Paused</option><option value="restarting">Restarting</option></Select>
-        <Select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)} aria-label="Filter by Compose project"><option value="all">All projects</option>{projects.map((project) => <option key={project} value={project}>{project}</option>)}</Select>
+        <Select value={stateFilter} onValueChange={setStateFilter} aria-label="Filter by container state" options={[{ value: 'all', label: 'All states' }, { value: 'running', label: 'Running' }, { value: 'exited', label: 'Exited' }, { value: 'paused', label: 'Paused' }, { value: 'restarting', label: 'Restarting' }]} />
+        <Select value={projectFilter} onValueChange={setProjectFilter} aria-label="Filter by Compose project" options={[{ value: 'all', label: 'All projects' }, ...projects.map((project) => ({ value: project, label: project }))]} />
       </Card>
 
       <Card className="overflow-hidden p-0">

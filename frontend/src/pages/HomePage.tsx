@@ -186,7 +186,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
           <form className="flex flex-col gap-4 p-5" onSubmit={handleAdd}>
             <label><span className="mb-1.5 block text-sm font-medium">Label</span><Input placeholder="GitHub" value={title} onChange={(event) => setTitle(event.target.value)} required maxLength={80} autoFocus /></label>
             <label><span className="mb-1.5 block text-sm font-medium">URL</span><Input className="font-mono" placeholder="https://..." value={url} onChange={(event) => setUrl(event.target.value)} required type="url" /></label>
-            <label><span className="mb-1.5 block text-sm font-medium">Highlight color</span><Select value={color} onChange={(event) => setColor(event.target.value)} aria-label="Highlight color">{highlightColors.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</Select></label>
+            <label><span className="mb-1.5 block text-sm font-medium">Highlight color</span><Select value={color} onValueChange={setColor} aria-label="Highlight color" options={highlightColors} /></label>
             {linkError && <p className="text-pretty text-sm text-status-conflict" role="alert">{linkError}</p>}
             <div className="flex justify-end gap-2 border-t border-border pt-4"><Button onClick={() => setShowForm(false)} disabled={adding}>Cancel</Button><Button type="submit" variant="primary" disabled={adding}>{adding ? 'Adding...' : 'Add link'}</Button></div>
           </form>

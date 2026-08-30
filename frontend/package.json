@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@apollo/client": "^3.8.7",
+    "@radix-ui/react-select": "^2.3.7",
     "clsx": "^2.0.0",
     "graphql": "^16.8.1",
     "lucide-react": "^0.292.0",

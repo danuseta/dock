@@ -59,14 +59,6 @@ export function normalizeDiscordMessageTemplate(value?: string | null): string {
   return template;
 }
 
-function statusBadge(status: string): string {
-  const badges: Record<string, string> = {
-    OPEN: '🟢 `OPEN`', MERGED: '🟣 `MERGED`', CLOSED: '🔴 `CLOSED`',
-    CONFLICT: '🔴 `CONFLICT`', DRAFT: '⚪ `DRAFT`',
-  };
-  return badges[(status || '').toUpperCase()] || '⚪ `UNKNOWN`';
-}
-
 function formatPullRequests(prs: PullRequestSummary[]): string {
   let message = '';
   const sections = [
@@ -78,7 +70,7 @@ function formatPullRequests(prs: PullRequestSummary[]): string {
     if (section.items.length === 0) continue;
     message += `**${section.label}:**\n`;
     for (const pr of section.items) {
-      message += `- [${pr.repo}] ${statusBadge(pr.status)} - [${pr.title}](${pr.url})\n`;
+      message += `- [${pr.repo}] - [${pr.title}](${pr.url})\n`;
     }
     message += '\n';
   }
@@ -98,7 +90,7 @@ export function formatDiscordMessage(summary: DiscordSummary, messageTemplate?: 
     ticketUrl: summary.ticket.url,
     relatedTickets: formatRelatedTickets(summary.relatedTickets),
     pullRequests: formatPullRequests(summary.prs),
-    demoUrl: summary.demoUrl ? `🎬 **Demo Video:**\n${summary.demoUrl}` : '',
+    demoUrl: summary.demoUrl || '',
   };
   const message = template
     .replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_match, field: string) => values[field] || '')

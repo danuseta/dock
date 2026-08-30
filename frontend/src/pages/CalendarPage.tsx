@@ -9,7 +9,7 @@ import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy'
 interface CalendarPageProps { onNavigate: (path: string) => void }
 
 const CalendarPage: React.FC<CalendarPageProps> = ({ onNavigate }) => {
-  const { data: settingsData } = useQuery(GET_SETTINGS);
+  const { data: settingsData } = useQuery(GET_SETTINGS, CACHED_QUERY_OPTIONS);
   const { data, loading, error, refetch } = useQuery(GET_CALENDAR, { ...CACHED_QUERY_OPTIONS, variables: { maxResults: 50 } });
   const connected = settingsData?.settings?.googleCalendarConnected;
   const groups = useMemo(() => {

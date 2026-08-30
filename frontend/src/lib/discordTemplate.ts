@@ -42,14 +42,6 @@ const formatRelatedTickets = (tickets?: DiscordTemplateData['relatedTickets']) =
   return `**Related Tickets:**\n${tickets.map((ticket) => `- [${ticket.key}](${ticket.url || '#'}) — ${ticket.title}`).join('\n')}`;
 };
 
-const statusBadge = (status?: string) => {
-  const badges: Record<string, string> = {
-    OPEN: '🟢 `OPEN`', MERGED: '🟣 `MERGED`', CLOSED: '🔴 `CLOSED`',
-    CONFLICT: '🔴 `CONFLICT`', DRAFT: '⚪ `DRAFT`',
-  };
-  return badges[(status || '').toUpperCase()] || '⚪ `UNKNOWN`';
-};
-
 const formatPullRequests = (pullRequests: DiscordTemplateData['pullRequests']) => {
   const sections = [
     { label: 'Frontend Repositories', items: pullRequests.filter((pr) => pr.type?.toUpperCase() === 'FE') },
@@ -57,7 +49,7 @@ const formatPullRequests = (pullRequests: DiscordTemplateData['pullRequests']) =
     { label: 'Pull Requests', items: pullRequests.filter((pr) => !['FE', 'BE'].includes(pr.type?.toUpperCase() || '')) },
   ];
   return sections.filter((section) => section.items.length > 0).map((section) => (
-    `**${section.label}:**\n${section.items.map((pr) => `- [${pr.repo || 'Repository'}] ${statusBadge(pr.status)} - [${pr.title || 'Pull request'}](${pr.url || '#'})`).join('\n')}`
+    `**${section.label}:**\n${section.items.map((pr) => `- [${pr.repo || 'Repository'}] - [${pr.title || 'Pull request'}](${pr.url || '#'})`).join('\n')}`
   )).join('\n\n');
 };
 
@@ -68,7 +60,7 @@ export const renderDiscordMessageTemplate = (template: string | null | undefined
     ticketUrl: data.ticket.url || `https://jira.example.com/browse/${data.ticket.key}`,
     relatedTickets: formatRelatedTickets(data.relatedTickets),
     pullRequests: formatPullRequests(data.pullRequests),
-    demoUrl: data.demoUrl ? `🎬 **Demo Video:**\n${data.demoUrl}` : '',
+    demoUrl: data.demoUrl || '',
   };
   return (template?.trim() || DEFAULT_DISCORD_MESSAGE_TEMPLATE)
     .replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_match, field: string) => values[field] || '')

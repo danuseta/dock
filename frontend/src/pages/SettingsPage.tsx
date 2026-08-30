@@ -18,8 +18,8 @@ import {
   MIN_SERVICE_HEALTH_REFRESH_SECONDS,
   normalizeServiceHealthRefreshSeconds,
 } from '../lib/serviceHealthRefresh';
-import { isInitialQueryLoading } from '../lib/queryPolicy';
-import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, getDiscordTemplateError } from '../lib/discordTemplate';
+import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
+import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, getDiscordTemplateError, renderDiscordMessageTemplate } from '../lib/discordTemplate';
 
 type SettingsSection = 'general' | 'security' | 'jira' | 'github' | 'calendar' | 'discord';
 type RefreshUnit = 'seconds' | 'minutes';
@@ -54,6 +54,21 @@ const googleFailureMessages: Record<string, string> = {
   'provider-error': 'Google returned an OAuth error. Confirm the account and OAuth consent-screen settings, then try again.',
 };
 
+const discordTemplatePreviewData = {
+  ticket: {
+    key: 'QRD-1055',
+    title: '[BE] Component Template: folder support',
+    url: 'https://mysales.atlassian.net/browse/QRD-1055',
+  },
+  pullRequests: [{
+    repo: 'ms-admin-worker-backend',
+    title: 'feat(QRD-1055): add folder support to the component template module',
+    url: 'https://github.com/qonekid/ms-admin-worker-backend/pull/969',
+    status: 'OPEN',
+  }],
+  demoUrl: '- **QRD-1055:** https://docs.google.com/document/u/0/',
+};
+
 const SectionTitle = ({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) => (
   <h2 className="mb-4 flex items-center gap-2 border-b border-border pb-2 font-display text-lg font-bold">{icon}{children}</h2>
 );
@@ -69,7 +84,7 @@ const SettingsHeading = ({ title, description }: { title: string; description: s
 const SettingsPage: React.FC = () => {
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
   const [navigationPreferences, setNavigationPreferences] = useState(readNavigationPreferences);
-  const { data, loading, error, refetch } = useQuery(GET_SETTINGS);
+  const { data, loading, error, refetch } = useQuery(GET_SETTINGS, CACHED_QUERY_OPTIONS);
   const [updateSettings] = useMutation(UPDATE_SETTINGS);
   const [validateJira, { loading: testingJira }] = useMutation(VALIDATE_JIRA);
   const [validateGitHub, { loading: testingGitHub }] = useMutation(VALIDATE_GITHUB);
@@ -135,7 +150,7 @@ const SettingsPage: React.FC = () => {
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
 
   useEffect(() => {
-    if (data?.settings) {
+    if (data?.settings && !hasUnsavedChanges) {
       setJiraUrl(data.settings.jiraUrl || '');
       setJiraEmail(data.settings.jiraEmail || '');
       setJiraProjectKeys(data.settings.jiraProjectKeys || '');
@@ -150,7 +165,7 @@ const SettingsPage: React.FC = () => {
       setIsPinActive(!!data.settings.hasMasterPin);
       setHasUnsavedChanges(false);
     }
-  }, [data]);
+  }, [data, hasUnsavedChanges]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -181,6 +196,9 @@ const SettingsPage: React.FC = () => {
     * (serviceHealthRefreshUnit === 'minutes' ? 60 : 1);
   const isRefreshIntervalValid = isValidServiceHealthRefreshSeconds(serviceHealthRefreshSeconds);
   const discordTemplateError = getDiscordTemplateError(discordMessageTemplate);
+  const discordTemplatePreview = discordTemplateError
+    ? ''
+    : renderDiscordMessageTemplate(discordMessageTemplate, discordTemplatePreviewData);
   const refreshMinimum = serviceHealthRefreshUnit === 'minutes' ? 1 : MIN_SERVICE_HEALTH_REFRESH_SECONDS;
   const refreshMaximum = serviceHealthRefreshUnit === 'minutes'
     ? MAX_SERVICE_HEALTH_REFRESH_SECONDS / 60
@@ -429,7 +447,7 @@ const SettingsPage: React.FC = () => {
                 <div className="mb-5 flex flex-wrap items-start justify-between gap-3"><div className="flex gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-sm bg-surface-2 text-accent"><Activity size={18} aria-hidden="true" /></span><div><h3 id="service-health-title" className="font-display text-lg font-bold">Service health</h3><p className="mt-1 text-pretty text-sm text-muted-foreground">Set how often Home and Services automatically check upstream health.</p></div></div><Badge variant="success">ACTIVE</Badge></div>
                 <div className="grid max-w-xl grid-cols-[minmax(180px,1fr)_minmax(150px,0.7fr)] gap-3 max-[520px]:grid-cols-1">
                   <Field label="Refresh every"><Input type="number" min={refreshMinimum} max={refreshMaximum} step={1} inputMode="numeric" className="font-mono tabular-nums" value={serviceHealthRefreshValue} aria-invalid={!isRefreshIntervalValid} aria-describedby="refresh-interval-hint refresh-interval-error" onChange={(event) => { setServiceHealthRefreshValue(event.target.value); markUnsaved(); }} /></Field>
-                  <Field label="Time unit"><Select value={serviceHealthRefreshUnit} onChange={(event) => { setServiceHealthRefreshUnit(event.target.value as RefreshUnit); markUnsaved(); }} aria-label="Service health refresh unit"><option value="seconds">Seconds</option><option value="minutes">Minutes</option></Select></Field>
+                  <Field label="Time unit"><Select value={serviceHealthRefreshUnit} onValueChange={(value) => { setServiceHealthRefreshUnit(value as RefreshUnit); markUnsaved(); }} aria-label="Service health refresh unit" options={[{ value: 'seconds', label: 'Seconds' }, { value: 'minutes', label: 'Minutes' }]} /></Field>
                 </div>
                 <p id="refresh-interval-error" role="alert" className="mt-2 min-h-4 text-xs text-status-conflict">{isRefreshIntervalValid ? '' : 'Enter a whole-number interval between 5 seconds and 24 hours.'}</p>
                 <p id="refresh-interval-hint" className="text-pretty text-xs text-muted-foreground">Minimum interval: 5 seconds. Longer intervals reduce upstream requests.</p>
@@ -492,6 +510,15 @@ const SettingsPage: React.FC = () => {
                   <p className="text-pretty text-xs text-muted-foreground">Available fields: <span className="font-mono text-secondary-foreground">{'{{ticketKey}} {{ticketTitle}} {{ticketUrl}} {{relatedTickets}} {{pullRequests}} {{demoUrl}}'}</span></p>
                   <span className="font-mono text-xs text-muted-foreground tabular-nums">{discordMessageTemplate.length}/2000</span>
                 </div>
+                <section className="rounded-md border border-border bg-surface-0 p-4" aria-labelledby="discord-template-preview-title">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <h3 id="discord-template-preview-title" className="text-balance font-display text-sm font-bold">Live template preview</h3>
+                    <Badge variant="neutral">Sample ticket</Badge>
+                  </div>
+                  {discordTemplateError
+                    ? <p className="text-pretty text-xs text-status-conflict">Fix the template error above to restore the preview.</p>
+                    : <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-6 text-secondary-foreground" aria-live="polite">{discordTemplatePreview}</pre>}
+                </section>
                 <div className="flex flex-wrap gap-2"><Button onClick={() => { setDiscordMessageTemplate(DEFAULT_DISCORD_MESSAGE_TEMPLATE); markUnsaved(); }}>Restore default format</Button><Button onClick={handleTestDiscord} disabled={testingDiscord}><Zap size={16} aria-hidden="true" />{testingDiscord ? 'Testing Webhook...' : 'Test Discord Webhook'}</Button></div>
                 <div className="rounded-sm border-l-[3px] border-status-discord bg-surface-0 p-3 text-[0.8125rem] text-secondary-foreground"><strong>Discord thread and forum posting:</strong> The ticket detail preview lets you send to an existing thread ID or create a new thread in a forum channel.</div>
               </div>

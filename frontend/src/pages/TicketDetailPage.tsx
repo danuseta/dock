@@ -16,7 +16,8 @@ import {
   FileText,
   ArrowRight,
   Link2,
-  Unlink
+  Unlink,
+  CheckCircle2,
 } from 'lucide-react';
 import { GET_TICKET_DETAIL } from '../graphql/queries';
 import { CLEAR_TICKET_DEPENDENCY, SAVE_DEMO_LINK, SEND_TO_DISCORD, SET_TICKET_DEPENDENCY, CHECK_CONFLICTS } from '../graphql/mutations';
@@ -27,7 +28,8 @@ import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Toast } from '../components/Toast';
 import { Badge, Button, Card, Input, Page, Select } from '../components/ui';
 import { cn } from '../lib/cn';
-import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
+import { CACHED_QUERY_OPTIONS, displayAssignee, isInitialQueryLoading } from '../lib/queryPolicy';
+import { getApprovalLabels } from '../lib/ticketApprovals';
 
 interface TicketDetailPageProps {
   ticketKey: string;
@@ -173,6 +175,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   };
 
   const isOldSprint = ticket.sprintState === 'CLOSED';
+  const approvalLabels = getApprovalLabels(ticket.labels);
   const relation = data?.ticketRelationGroup;
   const relationTickets = relation?.tickets?.length ? relation.tickets : [ticket];
   const isCombinedAnnouncement = relationTickets.length > 1;
@@ -201,10 +204,10 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
       <div className="flex flex-wrap items-start gap-7">
         <div className="flex min-w-0 flex-[1_1_640px] flex-col gap-6">
           <Card>
-            <div className="mb-3 flex flex-wrap items-center gap-3"><Badge variant="accent" className="px-3 py-1 font-bold text-base">{ticket.key}</Badge>{ticket.storyPoints != null && <Badge className="border-orange-300/35 bg-orange-300/10 text-orange-200">{ticket.storyPoints} SP</Badge>}<PRBadge status={ticket.status} /></div>
+            <div className="mb-3 flex flex-wrap items-center gap-3"><Badge variant="accent" className="px-3 py-1 font-bold text-base">{ticket.key}</Badge>{ticket.storyPoints != null && <Badge className="border-orange-300/35 bg-orange-300/10 text-orange-200">{ticket.storyPoints} SP</Badge>}<PRBadge status={ticket.status} />{approvalLabels.map((label) => <Badge key={label} variant="success" className="gap-1"><CheckCircle2 size={12} aria-hidden="true" />{label}</Badge>)}</div>
             <h1 className="text-balance font-display text-[1.65rem] leading-snug font-bold">{ticket.title}</h1>
             <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-border pt-3 font-mono text-sm text-muted-foreground">
-              <span className="flex items-center gap-1.5"><User size={15} className="text-secondary-foreground" aria-hidden="true" />Assignee: <strong className="text-foreground">{ticket.assignee || 'Unassigned'}</strong></span>
+              <span className="flex items-center gap-1.5"><User size={15} className="text-secondary-foreground" aria-hidden="true" />Assignee: <strong className="text-foreground">{displayAssignee(ticket.assignee)}</strong></span>
               {ticket.sprintName && ticket.sprintName !== 'No Sprint' && <span className={cn('text-[0.78rem] font-semibold', isOldSprint ? 'text-muted-foreground' : 'text-status-merged')}>{ticket.sprintName}</span>}
               {ticket.url && <a href={ticket.url} target="_blank" rel="noreferrer" className="flex min-h-6 items-center gap-1.5 font-bold text-accent hover:underline"><ExternalLink size={15} aria-hidden="true" />Open in Jira</a>}
             </div>
@@ -225,7 +228,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
           <Card>
             <div className="mb-3 flex items-center gap-2 border-b border-border pb-3"><Link2 size={19} className="text-accent" aria-hidden="true" /><h2 className="text-balance font-display text-lg font-bold">Ticket Dependency</h2></div>
             <p className="mb-3 text-pretty text-xs leading-5 text-muted-foreground">Link this ticket to its primary work item. Every ticket in the group will share one Discord announcement.</p>
-            <label><span className="mb-1.5 block font-mono text-xs text-muted-foreground">{ticket.key} depends on</span><Select value={dependsOnKey} onChange={(event) => setDependsOnKey(event.target.value)} disabled={savingDependency || clearingDependency} aria-label={`${ticket.key} depends on ticket`}><option value="">No dependency</option>{ticketChoices.map((item: any) => <option key={item.key} value={item.key}>{item.key} — {item.title}</option>)}</Select></label>
+            <label><span className="mb-1.5 block font-mono text-xs text-muted-foreground">{ticket.key} depends on</span><Select value={dependsOnKey || 'NONE'} onValueChange={(value) => setDependsOnKey(value === 'NONE' ? '' : value)} disabled={savingDependency || clearingDependency} aria-label={`${ticket.key} depends on ticket`} options={[{ value: 'NONE', label: 'No dependency' }, ...ticketChoices.map((item: any) => ({ value: item.key, label: `${item.key} — ${item.title}` }))]} /></label>
             <div className="mt-3 flex flex-wrap gap-2"><Button variant="primary" onClick={handleSaveDependency} disabled={!dependsOnKey || dependsOnKey === relation?.dependsOnKey || savingDependency || clearingDependency}><Save size={15} aria-hidden="true" />{savingDependency ? 'Saving...' : 'Save Dependency'}</Button>{relation?.dependsOnKey && <Button variant="danger" onClick={handleClearDependency} disabled={savingDependency || clearingDependency}><Unlink size={15} aria-hidden="true" />{clearingDependency ? 'Removing...' : 'Remove Dependency'}</Button>}</div>
             {relation?.ticketKeys?.length > 1 && <div className="mt-4 rounded-sm border border-border bg-surface-0 p-3"><p className="mb-2 font-mono text-[0.68rem] font-bold text-muted-foreground uppercase">Announcement group</p><div className="flex flex-wrap gap-1.5">{relation.ticketKeys.map((key: string) => <Badge key={key} variant={key === relation.primaryKey ? 'accent' : 'neutral'}>{key}{key === relation.primaryKey ? ' · PRIMARY' : ''}</Badge>)}</div></div>}
           </Card>
