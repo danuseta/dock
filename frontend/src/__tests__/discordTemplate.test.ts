@@ -17,3 +17,17 @@ test('rejects unknown Discord template fields before saving', () => {
   assert.match(getDiscordTemplateError('{{unknownField}}'), /Unsupported template field/);
   assert.strictEqual(getDiscordTemplateError('{{ticketKey}}'), '');
 });
+
+test('renders a related ticket group in one Discord preview', () => {
+  const message = renderDiscordMessageTemplate('{{ticketKey}}\n{{relatedTickets}}', {
+    ticket: { key: 'QRD-475 + QRD-476', title: 'Combined delivery', url: 'https://jira.example/QRD-475' },
+    relatedTickets: [
+      { key: 'QRD-475', title: 'Backend', url: 'https://jira.example/QRD-475' },
+      { key: 'QRD-476', title: 'Frontend', url: 'https://jira.example/QRD-476' },
+    ],
+    pullRequests: [],
+  });
+  assert.match(message, /Related Tickets/);
+  assert.match(message, /QRD-476/);
+  assert.strictEqual(getDiscordTemplateError('{{relatedTickets}}'), '');
+});

@@ -3,6 +3,13 @@ import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, normalizeDiscordMessageTemplate } fro
 
 const MIN_SERVICE_HEALTH_REFRESH_SECONDS = 5;
 const MAX_SERVICE_HEALTH_REFRESH_SECONDS = 86_400;
+const JIRA_TICKET_KEY = /^[A-Z][A-Z0-9_]{0,31}-[1-9]\d{0,9}$/;
+
+export const normalizeTicketKey = (value: unknown) => {
+  const key = String(value || '').trim().toUpperCase();
+  if (!JIRA_TICKET_KEY.test(key)) throw new Error('Invalid Jira ticket key');
+  return key;
+};
 
 export const isValidServiceHealthRefreshSeconds = (value: unknown) => {
   const seconds = Number(value);
@@ -27,6 +34,57 @@ export class StorageAPI {
       await this.storage.upsertDemoLink(ticketKey, url);
       return true;
     } catch { return false; }
+  }
+
+  async getTicketRelationGroup(ticketKeyInput: string) {
+    const ticketKey = normalizeTicketKey(ticketKeyInput);
+    const relations = await this.storage.getTicketDependencies();
+    const parentByTicket = new Map(relations.map((relation) => [relation.ticketKey, relation.dependsOnKey]));
+    const adjacency = new Map<string, Set<string>>();
+    const connect = (first: string, second: string) => {
+      if (!adjacency.has(first)) adjacency.set(first, new Set());
+      adjacency.get(first)?.add(second);
+    };
+    relations.forEach(({ ticketKey: child, dependsOnKey: parent }) => {
+      connect(child, parent);
+      connect(parent, child);
+    });
+
+    const group = new Set([ticketKey]);
+    const queue = [ticketKey];
+    while (queue.length > 0) {
+      const current = queue.shift() as string;
+      for (const related of adjacency.get(current) || []) {
+        if (group.has(related)) continue;
+        group.add(related);
+        queue.push(related);
+      }
+    }
+
+    let primaryKey = ticketKey;
+    const visited = new Set<string>();
+    while (parentByTicket.has(primaryKey) && !visited.has(primaryKey)) {
+      visited.add(primaryKey);
+      primaryKey = parentByTicket.get(primaryKey) as string;
+    }
+    const ticketKeys = [primaryKey, ...[...group].filter((key) => key !== primaryKey).sort()];
+    return { primaryKey, dependsOnKey: parentByTicket.get(ticketKey) || null, ticketKeys };
+  }
+
+  async setTicketDependency(ticketKeyInput: string, dependsOnKeyInput: string) {
+    const ticketKey = normalizeTicketKey(ticketKeyInput);
+    const dependsOnKey = normalizeTicketKey(dependsOnKeyInput);
+    if (ticketKey === dependsOnKey) throw new Error('A ticket cannot depend on itself');
+    const parentGroup = await this.getTicketRelationGroup(dependsOnKey);
+    if (parentGroup.ticketKeys.includes(ticketKey)) throw new Error('Ticket dependency would create a cycle');
+    await this.storage.upsertTicketDependency(ticketKey, dependsOnKey);
+    return this.getTicketRelationGroup(ticketKey);
+  }
+
+  async clearTicketDependency(ticketKeyInput: string) {
+    const ticketKey = normalizeTicketKey(ticketKeyInput);
+    await this.storage.deleteTicketDependency(ticketKey);
+    return this.getTicketRelationGroup(ticketKey);
   }
 
   async getSettings(): Promise<Record<string, any>> {

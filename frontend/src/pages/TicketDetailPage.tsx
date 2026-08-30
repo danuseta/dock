@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useQuery, useMutation } from '@apollo/client';
 import { 
   MessageSquare, 
@@ -14,16 +14,18 @@ import {
   FileCode, 
   GitBranch, 
   FileText,
-  ArrowRight
+  ArrowRight,
+  Link2,
+  Unlink
 } from 'lucide-react';
 import { GET_TICKET_DETAIL } from '../graphql/queries';
-import { SAVE_DEMO_LINK, SEND_TO_DISCORD, CHECK_CONFLICTS } from '../graphql/mutations';
+import { CLEAR_TICKET_DEPENDENCY, SAVE_DEMO_LINK, SEND_TO_DISCORD, SET_TICKET_DEPENDENCY, CHECK_CONFLICTS } from '../graphql/mutations';
 import { PRBadge } from '../components/PRBadge';
 import { ConflictModal } from '../components/ConflictModal';
 import { DiscordPreviewModal } from '../components/DiscordPreviewModal';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Toast } from '../components/Toast';
-import { Badge, Button, Card, Input, Page } from '../components/ui';
+import { Badge, Button, Card, Input, Page, Select } from '../components/ui';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 
@@ -40,14 +42,21 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   });
   const [saveDemoLink] = useMutation(SAVE_DEMO_LINK);
   const [sendToDiscord, { loading: sendingDiscord }] = useMutation(SEND_TO_DISCORD);
+  const [setTicketDependency, { loading: savingDependency }] = useMutation(SET_TICKET_DEPENDENCY);
+  const [clearTicketDependency, { loading: clearingDependency }] = useMutation(CLEAR_TICKET_DEPENDENCY);
   const [checkConflicts] = useMutation(CHECK_CONFLICTS);
   
   const [showConflictModal, setShowConflictModal] = useState(false);
   const [showDiscordModal, setShowDiscordModal] = useState(false);
   const [conflictMessage, setConflictMessage] = useState('');
   const [demoUrl, setDemoUrl] = useState('');
+  const [dependsOnKey, setDependsOnKey] = useState('');
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
   const [activePRTab, setActivePRTab] = useState<Record<string, 'commits' | 'files' | 'none'>>({});
+
+  useEffect(() => {
+    setDependsOnKey(data?.ticketRelationGroup?.dependsOnKey || '');
+  }, [data?.ticketRelationGroup?.dependsOnKey, ticketKey]);
 
   const togglePRTab = (prId: string, tab: 'commits' | 'files') => {
     setActivePRTab(prev => ({
@@ -115,6 +124,28 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
     setShowDiscordModal(true);
   };
 
+  const handleSaveDependency = async () => {
+    if (!dependsOnKey) return;
+    try {
+      await setTicketDependency({ variables: { ticketKey, dependsOnKey } });
+      await refetch();
+      setToast({ message: `${ticketKey} now depends on ${dependsOnKey}.`, type: 'success' });
+    } catch (err: any) {
+      setToast({ message: err.message || 'Failed to save ticket dependency', type: 'error' });
+    }
+  };
+
+  const handleClearDependency = async () => {
+    try {
+      await clearTicketDependency({ variables: { ticketKey } });
+      await refetch();
+      setDependsOnKey('');
+      setToast({ message: 'Ticket dependency removed.', type: 'success' });
+    } catch (err: any) {
+      setToast({ message: err.message || 'Failed to remove ticket dependency', type: 'error' });
+    }
+  };
+
   const handleConfirmDiscord = async (customMessage: string, threadId?: string, threadName?: string) => {
     try {
       const res = await sendToDiscord({ variables: { ticketKey, customMessage, threadId, threadName } });
@@ -142,6 +173,27 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   };
 
   const isOldSprint = ticket.sprintState === 'CLOSED';
+  const relation = data?.ticketRelationGroup;
+  const relationTickets = relation?.tickets?.length ? relation.tickets : [ticket];
+  const isCombinedAnnouncement = relationTickets.length > 1;
+  const primaryTicket = relationTickets.find((item: any) => item.key === relation?.primaryKey) || relationTickets[0];
+  const announcementTicket = {
+    key: isCombinedAnnouncement ? relationTickets.map((item: any) => item.key).join(' + ') : primaryTicket.key,
+    title: isCombinedAnnouncement ? `${primaryTicket.title} (+${relationTickets.length - 1} related)` : primaryTicket.title,
+    url: primaryTicket.url,
+  };
+  const announcementPullRequests = [...new Map(relationTickets
+    .flatMap((item: any) => item.pullRequests || [])
+    .map((pullRequest: any) => [pullRequest.url || pullRequest.id, pullRequest])).values()];
+  const announcementDemoUrl = relationTickets
+    .filter((item: any) => item.demoLink?.url || (item.key === ticket.key && demoUrl))
+    .map((item: any) => `- **${item.key}:** ${item.demoLink?.url || demoUrl}`)
+    .join('\n');
+  const ticketChoices = [...new Map((data?.dashboard || [])
+    .flatMap((group: any) => group.tickets || [])
+    .filter((item: any) => item.key !== ticket.key)
+    .map((item: any) => [item.key, item])).values()]
+    .sort((first: any, second: any) => first.key.localeCompare(second.key));
 
   return (
     <Page width="full">
@@ -166,8 +218,16 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
 
         <div className="flex min-w-0 flex-[1_1_400px] flex-col gap-6">
           <Card className="border-status-discord/40 bg-status-discord/15">
-            <Button className="h-12 w-full border-status-discord bg-status-discord text-base text-white hover:bg-status-discord/80" onClick={handleDiscordBroadcast}><MessageSquare size={20} aria-hidden="true" />Broadcast Summary to Discord</Button>
-            <p className="mt-2.5 text-center font-mono text-xs text-muted-foreground">Sends status, PR merge checks, and demo recordings to team channels.</p>
+            <Button className="h-12 w-full border-status-discord bg-status-discord text-base text-white hover:bg-status-discord/80" onClick={handleDiscordBroadcast}><MessageSquare size={20} aria-hidden="true" />{isCombinedAnnouncement ? `Broadcast ${relationTickets.length} Tickets to Discord` : 'Broadcast Summary to Discord'}</Button>
+            <p className="mt-2.5 text-center font-mono text-xs text-muted-foreground">{isCombinedAnnouncement ? `One combined announcement for ${relationTickets.map((item: any) => item.key).join(' + ')}.` : 'Sends status, PR merge checks, and demo recordings to team channels.'}</p>
+          </Card>
+
+          <Card>
+            <div className="mb-3 flex items-center gap-2 border-b border-border pb-3"><Link2 size={19} className="text-accent" aria-hidden="true" /><h2 className="text-balance font-display text-lg font-bold">Ticket Dependency</h2></div>
+            <p className="mb-3 text-pretty text-xs leading-5 text-muted-foreground">Link this ticket to its primary work item. Every ticket in the group will share one Discord announcement.</p>
+            <label><span className="mb-1.5 block font-mono text-xs text-muted-foreground">{ticket.key} depends on</span><Select value={dependsOnKey} onChange={(event) => setDependsOnKey(event.target.value)} disabled={savingDependency || clearingDependency} aria-label={`${ticket.key} depends on ticket`}><option value="">No dependency</option>{ticketChoices.map((item: any) => <option key={item.key} value={item.key}>{item.key} — {item.title}</option>)}</Select></label>
+            <div className="mt-3 flex flex-wrap gap-2"><Button variant="primary" onClick={handleSaveDependency} disabled={!dependsOnKey || dependsOnKey === relation?.dependsOnKey || savingDependency || clearingDependency}><Save size={15} aria-hidden="true" />{savingDependency ? 'Saving...' : 'Save Dependency'}</Button>{relation?.dependsOnKey && <Button variant="danger" onClick={handleClearDependency} disabled={savingDependency || clearingDependency}><Unlink size={15} aria-hidden="true" />{clearingDependency ? 'Removing...' : 'Remove Dependency'}</Button>}</div>
+            {relation?.ticketKeys?.length > 1 && <div className="mt-4 rounded-sm border border-border bg-surface-0 p-3"><p className="mb-2 font-mono text-[0.68rem] font-bold text-muted-foreground uppercase">Announcement group</p><div className="flex flex-wrap gap-1.5">{relation.ticketKeys.map((key: string) => <Badge key={key} variant={key === relation.primaryKey ? 'accent' : 'neutral'}>{key}{key === relation.primaryKey ? ' · PRIMARY' : ''}</Badge>)}</div></div>}
           </Card>
 
           <Card>
@@ -230,9 +290,10 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
         isOpen={showDiscordModal}
         onClose={() => setShowDiscordModal(false)}
         onConfirm={handleConfirmDiscord}
-        ticket={{ key: ticket.key, title: ticket.title, url: ticket.url }}
-        pullRequests={ticket.pullRequests || []}
-        demoUrl={ticket.demoLink?.url || demoUrl}
+        ticket={announcementTicket}
+        relatedTickets={relationTickets.map((item: any) => ({ key: item.key, title: item.title, url: item.url }))}
+        pullRequests={announcementPullRequests as any[]}
+        demoUrl={announcementDemoUrl || undefined}
         messageTemplate={data?.settings?.discordMessageTemplate}
         loading={sendingDiscord}
       />

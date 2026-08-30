@@ -46,6 +46,16 @@ model DemoLink {
   updatedAt DateTime @updatedAt
 }
 
+model TicketDependency {
+  id           String   @id @default(uuid())
+  ticketKey    String   @unique
+  dependsOnKey String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([dependsOnKey])
+}
+
 model QuickLink {
   id String @id @default(uuid())
   title String

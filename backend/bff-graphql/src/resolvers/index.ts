@@ -12,6 +12,7 @@ const jiraAPI = new JiraAPI();
 const githubAPI = new GitHubAPI();
 const discordAPI = new DiscordAPI();
 const storageAPI = new StorageAPI();
+const isPresent = <T>(value: T | null | undefined): value is T => value != null;
 
 async function hasMasterPin(): Promise<boolean> {
   const settings = await storageAPI.getPublicSettings();
@@ -79,6 +80,9 @@ export const resolvers = {
     ticketDetail: async (_: any, { key }: { key: string }) => {
       return await jiraAPI.getTicket(key);
     },
+    ticketRelationGroup: async (_: any, { ticketKey }: { ticketKey: string }) => {
+      return storageAPI.getTicketRelationGroup(ticketKey);
+    },
     needsAttention: async () => {
       return await githubAPI.getNeedsAttention();
     },
@@ -132,6 +136,13 @@ export const resolvers = {
     }
   },
 
+  TicketRelationGroup: {
+    tickets: async (parent: { ticketKeys: string[] }) => {
+      const tickets = await Promise.all(parent.ticketKeys.map((key) => jiraAPI.getTicket(key)));
+      return tickets.filter(Boolean);
+    },
+  },
+
   MonitorTarget: {
     lastCheckedAt: (parent: any) => parent.lastCheckedAt?.toISOString?.() || parent.lastCheckedAt || null,
   },
@@ -145,21 +156,38 @@ export const resolvers = {
       return await storageAPI.saveDemoLink(ticketKey, url);
     },
     sendToDiscord: async (_: any, { ticketKey, customMessage, threadId, threadName }: { ticketKey: string, customMessage?: string, threadId?: string, threadName?: string }) => {
-      const ticket = await jiraAPI.getTicket(ticketKey);
-      if (!ticket) return false;
+      const relation = await storageAPI.getTicketRelationGroup(ticketKey);
+      const tickets = (await Promise.all(relation.ticketKeys.map((key) => jiraAPI.getTicket(key)))).filter(isPresent);
+      if (tickets.length === 0) return false;
 
-      const prs = await githubAPI.getPullRequestsForTicket(ticketKey);
-      const demoLink = await storageAPI.getDemoLink(ticketKey);
+      const [pullRequestGroups, demoLinks] = await Promise.all([
+        Promise.all(tickets.map((ticket) => githubAPI.getPullRequestsForTicket(ticket.key))),
+        Promise.all(tickets.map((ticket) => storageAPI.getDemoLink(ticket.key))),
+      ]);
+      const prs = [...new Map(pullRequestGroups.flat().map((pr: any) => [pr.url || pr.id, pr])).values()];
+      const primaryTicket = tickets.find((ticket) => ticket.key === relation.primaryKey) || tickets[0];
+      if (!primaryTicket) return false;
+      const isCombined = tickets.length > 1;
       const settings = await storageAPI.getSettings();
-      
+
       const payload = {
         ticket: {
+          key: isCombined ? tickets.map((ticket) => ticket.key).join(' + ') : primaryTicket.key,
+          title: isCombined ? `${primaryTicket.title} (+${tickets.length - 1} related)` : primaryTicket.title,
+          url: primaryTicket.url || `https://jira.example.com/browse/${primaryTicket.key}`
+        },
+        relatedTickets: tickets.map((ticket) => ({
           key: ticket.key,
           title: ticket.title,
-          url: ticket.url || `https://jira.example.com/browse/${ticket.key}`
-        },
+          url: ticket.url || `https://jira.example.com/browse/${ticket.key}`,
+        })),
         prs,
-        demoUrl: demoLink?.url,
+        demoUrl: demoLinks
+          .map((demoLink, index) => demoLink?.url && tickets[index]
+            ? `- **${tickets[index].key}:** ${demoLink.url}`
+            : null)
+          .filter(Boolean)
+          .join('\n') || undefined,
         webhookUrl: settings.discordWebhookUrl,
         messageTemplate: settings.discordMessageTemplate,
         customMessage,
@@ -168,6 +196,24 @@ export const resolvers = {
       };
       
       return await discordAPI.sendSummary(payload);
+    },
+    setTicketDependency: async (_: unknown, { ticketKey, dependsOnKey }: { ticketKey: string; dependsOnKey: string }) => {
+      const [ticket, dependency] = await Promise.all([jiraAPI.getTicket(ticketKey), jiraAPI.getTicket(dependsOnKey)]);
+      if (!ticket || !dependency) {
+        throw new GraphQLError('Both Jira tickets must exist and be accessible', { extensions: { code: 'BAD_USER_INPUT' } });
+      }
+      try {
+        return await storageAPI.setTicketDependency(ticket.key, dependency.key);
+      } catch (error) {
+        throw new GraphQLError(error instanceof Error ? error.message : 'Invalid ticket dependency', { extensions: { code: 'BAD_USER_INPUT' } });
+      }
+    },
+    clearTicketDependency: async (_: unknown, { ticketKey }: { ticketKey: string }) => {
+      try {
+        return await storageAPI.clearTicketDependency(ticketKey);
+      } catch (error) {
+        throw new GraphQLError(error instanceof Error ? error.message : 'Invalid ticket dependency', { extensions: { code: 'BAD_USER_INPUT' } });
+      }
     },
     updateSettings: async (_: any, { input }: { input: any }) => {
       return await storageAPI.updateSettings(input);
@@ -247,12 +293,14 @@ export const resolvers = {
 };
 
 const protectedQueries = [
-  'dashboard', 'ticketDetail', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
+  'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs',
 ] as const;
 const protectedMutations = [
   'saveDemoLink',
   'sendToDiscord',
+  'setTicketDependency',
+  'clearTicketDependency',
   'updateSettings',
   'validateJira',
   'validateGitHub',

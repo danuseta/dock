@@ -7,7 +7,7 @@ export class DiscordAPI {
     try {
       if (!payload.webhookUrl) return false;
       await this.discordService.sendSummary(
-        { ticket: payload.ticket, prs: payload.prs, demoUrl: payload.demoUrl },
+        { ticket: payload.ticket, relatedTickets: payload.relatedTickets, prs: payload.prs, demoUrl: payload.demoUrl },
         payload.webhookUrl,
         { customMessage: payload.customMessage, messageTemplate: payload.messageTemplate, threadId: payload.threadId, threadName: payload.threadName },
       );

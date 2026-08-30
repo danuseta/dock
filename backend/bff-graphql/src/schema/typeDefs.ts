@@ -23,6 +23,13 @@ export const typeDefs = gql`
     tickets: [Ticket!]!
   }
 
+  type TicketRelationGroup {
+    primaryKey: String!
+    dependsOnKey: String
+    ticketKeys: [String!]!
+    tickets: [Ticket!]!
+  }
+
   type CommitInfo {
     sha: String!
     author: String
@@ -214,6 +221,7 @@ export const typeDefs = gql`
     authStatus: AuthStatus!
     dashboard: [TicketGroup!]!
     ticketDetail(key: String!): Ticket
+    ticketRelationGroup(ticketKey: String!): TicketRelationGroup!
     needsAttention: [NeedsAttentionItem!]!
     settings: Settings
     jiraProjects(url: String, email: String, token: String): [JiraProject!]!
@@ -229,6 +237,8 @@ export const typeDefs = gql`
     lockSession: Boolean!
     saveDemoLink(ticketKey: String!, url: String!): Boolean
     sendToDiscord(ticketKey: String!, customMessage: String, threadId: String, threadName: String): Boolean
+    setTicketDependency(ticketKey: String!, dependsOnKey: String!): TicketRelationGroup!
+    clearTicketDependency(ticketKey: String!): TicketRelationGroup!
     updateSettings(input: SettingsInput!): Boolean
     validateJira(url: String, email: String, token: String): ValidationResult
     validateGitHub(token: String): ValidationResult

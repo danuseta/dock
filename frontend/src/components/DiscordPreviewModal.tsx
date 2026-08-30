@@ -9,13 +9,14 @@ interface DiscordPreviewModalProps {
   onClose: () => void;
   onConfirm: (customMessage: string, threadId?: string, threadName?: string) => Promise<void>;
   ticket: { key: string; title: string; url?: string };
+  relatedTickets?: Array<{ key: string; title: string; url?: string }>;
   pullRequests: PullRequestItem[];
   demoUrl?: string;
   messageTemplate?: string;
   loading: boolean;
 }
 
-export const DiscordPreviewModal: React.FC<DiscordPreviewModalProps> = ({ isOpen, onClose, onConfirm, ticket, pullRequests, demoUrl, messageTemplate, loading }) => {
+export const DiscordPreviewModal: React.FC<DiscordPreviewModalProps> = ({ isOpen, onClose, onConfirm, ticket, relatedTickets, pullRequests, demoUrl, messageTemplate, loading }) => {
   const [message, setMessage] = useState('');
   const [threadId, setThreadId] = useState('');
   const [threadName, setThreadName] = useState('');
@@ -23,8 +24,8 @@ export const DiscordPreviewModal: React.FC<DiscordPreviewModalProps> = ({ isOpen
 
   useEffect(() => {
     if (!isOpen) return;
-    setMessage(renderDiscordMessageTemplate(messageTemplate, { ticket, pullRequests, demoUrl }));
-  }, [isOpen, ticket, pullRequests, demoUrl, messageTemplate]);
+    setMessage(renderDiscordMessageTemplate(messageTemplate, { ticket, relatedTickets, pullRequests, demoUrl }));
+  }, [isOpen, ticket, relatedTickets, pullRequests, demoUrl, messageTemplate]);
 
   const handleSubmit = async () => onConfirm(message, threadId.trim() || undefined, threadName.trim() || undefined);
 

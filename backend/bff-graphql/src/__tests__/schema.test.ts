@@ -16,6 +16,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
     assert.ok(schemaStr.includes('hasConflict'), 'Schema must support conflict check booleans');
     assert.ok(schemaStr.includes('DockerRuntime'), 'Schema must define Docker runtime inventory');
     assert.ok(schemaStr.includes('discordMessageTemplate'), 'Settings must expose the Discord message template');
+    assert.ok(schemaStr.includes('TicketRelationGroup'), 'Schema must expose ticket dependency groups');
   });
 
   await t.test('should provide complete resolver mapping for queries, mutations, and field resolvers', () => {
@@ -70,6 +71,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'quickLinks',
       'settings',
       'ticketDetail',
+      'ticketRelationGroup',
     ]);
     assert.deepStrictEqual(mutationFields, [
       'addMonitor',
@@ -77,6 +79,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'changeMasterPin',
       'checkConflicts',
       'checkMonitors',
+      'clearTicketDependency',
       'disconnectGoogleCalendar',
       'lockSession',
       'refreshData',
@@ -86,6 +89,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'saveDemoLink',
       'sendToDiscord',
       'setMasterPin',
+      'setTicketDependency',
       'updateMonitor',
       'updateSettings',
       'validateDiscord',

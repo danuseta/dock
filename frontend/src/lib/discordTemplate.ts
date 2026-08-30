@@ -2,10 +2,11 @@ export const DEFAULT_DISCORD_MESSAGE_TEMPLATE = `🚀 **Update: {{ticketKey}} - 
 
 **Jira Ticket:** [{{ticketKey}}]({{ticketUrl}})
 
+{{relatedTickets}}
 {{pullRequests}}
 {{demoUrl}}`;
 
-const ALLOWED_TEMPLATE_FIELDS = new Set(['ticketKey', 'ticketTitle', 'ticketUrl', 'pullRequests', 'demoUrl']);
+const ALLOWED_TEMPLATE_FIELDS = new Set(['ticketKey', 'ticketTitle', 'ticketUrl', 'relatedTickets', 'pullRequests', 'demoUrl']);
 
 export const getDiscordTemplateError = (template: string) => {
   if (!template.trim()) return 'Discord message template cannot be empty.';
@@ -18,9 +19,15 @@ export const getDiscordTemplateError = (template: string) => {
 
 interface DiscordTemplateData {
   ticket: { key: string; title: string; url?: string };
+  relatedTickets?: Array<{ key: string; title: string; url?: string }>;
   pullRequests: Array<{ repo?: string; title?: string; url?: string; status?: string; type?: string }>;
   demoUrl?: string;
 }
+
+const formatRelatedTickets = (tickets?: DiscordTemplateData['relatedTickets']) => {
+  if (!tickets || tickets.length < 2) return '';
+  return `**Related Tickets:**\n${tickets.map((ticket) => `- [${ticket.key}](${ticket.url || '#'}) — ${ticket.title}`).join('\n')}`;
+};
 
 const statusBadge = (status?: string) => {
   const badges: Record<string, string> = {
@@ -46,6 +53,7 @@ export const renderDiscordMessageTemplate = (template: string | null | undefined
     ticketKey: data.ticket.key,
     ticketTitle: data.ticket.title,
     ticketUrl: data.ticket.url || `https://jira.example.com/browse/${data.ticket.key}`,
+    relatedTickets: formatRelatedTickets(data.relatedTickets),
     pullRequests: formatPullRequests(data.pullRequests),
     demoUrl: data.demoUrl ? `🎬 **Demo Video:**\n${data.demoUrl}` : '',
   };

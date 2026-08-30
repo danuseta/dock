@@ -12,6 +12,26 @@ export const SEND_TO_DISCORD = gql`
   }
 `;
 
+export const SET_TICKET_DEPENDENCY = gql`
+  mutation SetTicketDependency($ticketKey: String!, $dependsOnKey: String!) {
+    setTicketDependency(ticketKey: $ticketKey, dependsOnKey: $dependsOnKey) {
+      primaryKey
+      dependsOnKey
+      ticketKeys
+    }
+  }
+`;
+
+export const CLEAR_TICKET_DEPENDENCY = gql`
+  mutation ClearTicketDependency($ticketKey: String!) {
+    clearTicketDependency(ticketKey: $ticketKey) {
+      primaryKey
+      dependsOnKey
+      ticketKeys
+    }
+  }
+`;
+
 export const UPDATE_SETTINGS = gql`
   mutation UpdateSettings($input: SettingsInput!) {
     updateSettings(input: $input)

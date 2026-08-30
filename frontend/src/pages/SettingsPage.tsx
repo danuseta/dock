@@ -489,7 +489,7 @@ const SettingsPage: React.FC = () => {
                 </Field>
                 {discordTemplateError && <p id="discord-template-error" className="text-pretty text-xs text-status-conflict" role="alert">{discordTemplateError}</p>}
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-pretty text-xs text-muted-foreground">Available fields: <span className="font-mono text-secondary-foreground">{'{{ticketKey}} {{ticketTitle}} {{ticketUrl}} {{pullRequests}} {{demoUrl}}'}</span></p>
+                  <p className="text-pretty text-xs text-muted-foreground">Available fields: <span className="font-mono text-secondary-foreground">{'{{ticketKey}} {{ticketTitle}} {{ticketUrl}} {{relatedTickets}} {{pullRequests}} {{demoUrl}}'}</span></p>
                   <span className="font-mono text-xs text-muted-foreground tabular-nums">{discordMessageTemplate.length}/2000</span>
                 </div>
                 <div className="flex flex-wrap gap-2"><Button onClick={() => { setDiscordMessageTemplate(DEFAULT_DISCORD_MESSAGE_TEMPLATE); markUnsaved(); }}>Restore default format</Button><Button onClick={handleTestDiscord} disabled={testingDiscord}><Zap size={16} aria-hidden="true" />{testingDiscord ? 'Testing Webhook...' : 'Test Discord Webhook'}</Button></div>

@@ -7,7 +7,19 @@ function credentialCacheId(token: string): string {
 }
 
 export function buildPullRequestCacheKey(token: string, repos: string[], ticketKey: string): string {
-  return `prs_v3_${credentialCacheId(token)}_${repos.slice().sort().join(',')}_${ticketKey}`;
+  return `prs_v4_${credentialCacheId(token)}_${repos.slice().sort().join(',')}_${ticketKey}`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function hasCanonicalTicketReference(pr: any, ticketKey: string): boolean {
+  const normalizedKey = ticketKey.trim().toUpperCase();
+  if (!normalizedKey) return false;
+  const exactKey = new RegExp(`(^|[^A-Z0-9_])${escapeRegExp(normalizedKey)}(?![A-Z0-9_])`, 'i');
+  return [pr?.title, pr?.head?.ref, pr?.body]
+    .some((value) => typeof value === 'string' && exactKey.test(value));
 }
 
 export interface SearchPRsOptions {
@@ -45,7 +57,6 @@ export class GitHubClient {
   }
 
   async searchPRsByTicketKey(repos: string[], ticketKey: string) {
-    const key = ticketKey.toLowerCase();
     const results = new Map<string, any>();
     try {
       const repoQuery = repos.map((repo) => `repo:${repo}`).join(' ');
@@ -53,7 +64,7 @@ export class GitHubClient {
         params: { q: `type:pr ${repoQuery} "${ticketKey}"`, per_page: 50 },
       });
       for (const item of response.data?.items || []) {
-        if (item.html_url) results.set(item.html_url, item);
+        if (item.html_url && hasCanonicalTicketReference(item, ticketKey)) results.set(item.html_url, item);
       }
     } catch (error: any) {
       console.error('[GitHub] Search API failed:', error.message);
@@ -65,7 +76,7 @@ export class GitHubClient {
           params: { state: 'all', per_page: 50 },
         });
         for (const pr of response.data || []) {
-          if ([pr.title, pr.head?.ref, pr.body].some((value) => value?.toLowerCase().includes(key))) {
+          if (hasCanonicalTicketReference(pr, ticketKey)) {
             pr.repository_url ||= `https://api.github.com/repos/${fullName}`;
             results.set(pr.html_url, pr);
           }

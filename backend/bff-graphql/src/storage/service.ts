@@ -46,6 +46,22 @@ export class StorageService {
   }
   deleteDemoLink(ticketKey: string) { return this.db.demoLink.delete({ where: { ticketKey } }); }
 
+  getTicketDependencies() {
+    return this.db.ticketDependency.findMany({ orderBy: [{ dependsOnKey: 'asc' }, { ticketKey: 'asc' }] });
+  }
+
+  upsertTicketDependency(ticketKey: string, dependsOnKey: string) {
+    return this.db.ticketDependency.upsert({
+      where: { ticketKey },
+      update: { dependsOnKey },
+      create: { ticketKey, dependsOnKey },
+    });
+  }
+
+  deleteTicketDependency(ticketKey: string) {
+    return this.db.ticketDependency.delete({ where: { ticketKey } }).catch(() => undefined);
+  }
+
   async getSettings() {
     const settings = await this.db.appSettings.findMany();
     return settings.map((setting) => SENSITIVE_KEYS.has(setting.key)

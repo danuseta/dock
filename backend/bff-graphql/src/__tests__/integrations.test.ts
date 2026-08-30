@@ -8,7 +8,7 @@ import {
   formatDiscordMessage,
   normalizeDiscordMessageTemplate,
 } from '../integrations/discord';
-import { buildPullRequestCacheKey } from '../integrations/github';
+import { buildPullRequestCacheKey, hasCanonicalTicketReference } from '../integrations/github';
 import { GoogleCalendarService, normalizeCalendarEvent } from '../integrations/google-calendar';
 import { isValidServiceHealthRefreshSeconds, StorageAPI } from '../datasources/StorageAPI';
 import { JiraService } from '../integrations/jira';
@@ -61,6 +61,20 @@ test('internal integration behavior', async (t) => {
     assert.throws(() => normalizeDiscordMessageTemplate('x'.repeat(2001)), /too long/);
   });
 
+  await t.test('renders related Jira tickets in one Discord message', () => {
+    const message = formatDiscordMessage({
+      ticket: { key: 'QRD-475 + QRD-476', title: 'Combined delivery', url: 'https://jira.example/QRD-475' },
+      relatedTickets: [
+        { key: 'QRD-475', title: 'Backend', url: 'https://jira.example/QRD-475' },
+        { key: 'QRD-476', title: 'Frontend', url: 'https://jira.example/QRD-476' },
+      ],
+      prs: [],
+    });
+    assert.match(message, /Related Tickets/);
+    assert.match(message, /QRD-475/);
+    assert.match(message, /QRD-476/);
+  });
+
   await t.test('passes the selected Jira projects to assigned-ticket lookup and cache identity', async () => {
     const cacheKeys: string[] = [];
     let receivedProjects: string[] = [];
@@ -104,12 +118,50 @@ test('internal integration behavior', async (t) => {
     assert.deepStrictEqual(tickets[0].labels, ['alvinPass', 'kenPass']);
   });
 
+  await t.test('groups ticket dependencies and rejects dependency cycles', async () => {
+    const relations = new Map<string, string>([['QRD-476', 'QRD-475']]);
+    const storage = {
+      getTicketDependencies: async () => [...relations].map(([ticketKey, dependsOnKey]) => ({ ticketKey, dependsOnKey })),
+      upsertTicketDependency: async (ticketKey: string, dependsOnKey: string) => { relations.set(ticketKey, dependsOnKey); },
+      deleteTicketDependency: async (ticketKey: string) => { relations.delete(ticketKey); },
+    };
+    const api = new StorageAPI(storage as any);
+
+    assert.deepStrictEqual(await api.getTicketRelationGroup('qrd-476'), {
+      primaryKey: 'QRD-475', dependsOnKey: 'QRD-475', ticketKeys: ['QRD-475', 'QRD-476'],
+    });
+    await assert.rejects(() => api.setTicketDependency('QRD-475', 'QRD-476'), /cycle/);
+    assert.deepStrictEqual(await api.clearTicketDependency('QRD-476'), {
+      primaryKey: 'QRD-476', dependsOnKey: null, ticketKeys: ['QRD-476'],
+    });
+  });
+
   await t.test('scopes PR cache identity to the active GitHub credential', async () => {
     const first = buildPullRequestCacheKey('github-token-one', ['org/repo'], 'QRD-1');
     const second = buildPullRequestCacheKey('github-token-two', ['org/repo'], 'QRD-1');
     assert.notStrictEqual(first, second);
     assert.ok(!first.includes('github-token'));
     assert.ok(!second.includes('github-token'));
+  });
+
+  await t.test('matches ticket keys only in canonical PR fields with exact boundaries', () => {
+    assert.strictEqual(hasCanonicalTicketReference({
+      title: 'QRD-1047 Component Template data model and API',
+      body: '',
+      head: { ref: 'feat/QRD-1047' },
+      comments: [{ body: 'folder support landing in QRD-1055' }],
+    }, 'QRD-1055'), false);
+    assert.strictEqual(hasCanonicalTicketReference({
+      title: 'Add folder support',
+      body: 'Implements QRD-1055.',
+      head: { ref: 'feature/component-template-folders' },
+    }, 'QRD-1055'), true);
+    assert.strictEqual(hasCanonicalTicketReference({
+      title: 'Add folder support',
+      body: '',
+      head: { ref: 'feature/QRD-1055-component-template-folders' },
+    }, 'QRD-1055'), true);
+    assert.strictEqual(hasCanonicalTicketReference({ title: 'Follow-up QRD-10550' }, 'QRD-1055'), false);
   });
 
   await t.test('builds a least-privilege offline Google Calendar OAuth URL', async () => {

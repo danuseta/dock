@@ -10,6 +10,7 @@ interface PullRequestSummary {
 
 export interface DiscordSummary {
   ticket: { key: string; title: string; url: string };
+  relatedTickets?: Array<{ key: string; title: string; url: string }>;
   prs: PullRequestSummary[];
   demoUrl?: string;
 }
@@ -18,10 +19,11 @@ export const DEFAULT_DISCORD_MESSAGE_TEMPLATE = `🚀 **Update: {{ticketKey}} - 
 
 **Jira Ticket:** [{{ticketKey}}]({{ticketUrl}})
 
+{{relatedTickets}}
 {{pullRequests}}
 {{demoUrl}}`;
 
-const ALLOWED_TEMPLATE_FIELDS = new Set(['ticketKey', 'ticketTitle', 'ticketUrl', 'pullRequests', 'demoUrl']);
+const ALLOWED_TEMPLATE_FIELDS = new Set(['ticketKey', 'ticketTitle', 'ticketUrl', 'relatedTickets', 'pullRequests', 'demoUrl']);
 const MAX_DISCORD_MESSAGE_LENGTH = 2_000;
 
 export function normalizeDiscordMessageTemplate(value?: string | null): string {
@@ -60,12 +62,18 @@ function formatPullRequests(prs: PullRequestSummary[]): string {
   return message.trim();
 }
 
+function formatRelatedTickets(tickets: DiscordSummary['relatedTickets']): string {
+  if (!tickets || tickets.length < 2) return '';
+  return `**Related Tickets:**\n${tickets.map((ticket) => `- [${ticket.key}](${ticket.url}) — ${ticket.title}`).join('\n')}`;
+}
+
 export function formatDiscordMessage(summary: DiscordSummary, messageTemplate?: string | null): string {
   const template = normalizeDiscordMessageTemplate(messageTemplate);
   const values: Record<string, string> = {
     ticketKey: summary.ticket.key,
     ticketTitle: summary.ticket.title,
     ticketUrl: summary.ticket.url,
+    relatedTickets: formatRelatedTickets(summary.relatedTickets),
     pullRequests: formatPullRequests(summary.prs),
     demoUrl: summary.demoUrl ? `🎬 **Demo Video:**\n${summary.demoUrl}` : '',
   };

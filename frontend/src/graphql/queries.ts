@@ -86,6 +86,28 @@ export const GET_TICKET_DETAIL = gql`
         updatedAt
       }
     }
+    ticketRelationGroup(ticketKey: $key) {
+      primaryKey
+      dependsOnKey
+      ticketKeys
+      tickets {
+        key
+        title
+        url
+        pullRequests {
+          id
+          title
+          url
+          status
+          repo
+          type
+        }
+        demoLink { url }
+      }
+    }
+    dashboard {
+      tickets { key title status }
+    }
     settings {
       discordMessageTemplate
     }
