@@ -176,6 +176,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
 
   const isOldSprint = ticket.sprintState === 'CLOSED';
   const approvalLabels = getApprovalLabels(ticket.labels);
+  const assignee = displayAssignee(ticket.assignee);
   const relation = data?.ticketRelationGroup;
   const relationTickets = relation?.tickets?.length ? relation.tickets : [ticket];
   const isCombinedAnnouncement = relationTickets.length > 1;
@@ -207,7 +208,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
             <div className="mb-3 flex flex-wrap items-center gap-3"><Badge variant="accent" className="px-3 py-1 font-bold text-base">{ticket.key}</Badge>{ticket.storyPoints != null && <Badge className="border-orange-300/35 bg-orange-300/10 text-orange-200">{ticket.storyPoints} SP</Badge>}<PRBadge status={ticket.status} />{approvalLabels.map((label) => <Badge key={label} variant="success" className="gap-1"><CheckCircle2 size={12} aria-hidden="true" />{label}</Badge>)}</div>
             <h1 className="text-balance font-display text-[1.65rem] leading-snug font-bold">{ticket.title}</h1>
             <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-border pt-3 font-mono text-sm text-muted-foreground">
-              <span className="flex items-center gap-1.5"><User size={15} className="text-secondary-foreground" aria-hidden="true" />Assignee: <strong className="text-foreground">{displayAssignee(ticket.assignee)}</strong></span>
+              {assignee && <span className="flex items-center gap-1.5"><User size={15} className="text-secondary-foreground" aria-hidden="true" />Assignee: <strong className="text-foreground">{assignee}</strong></span>}
               {ticket.sprintName && ticket.sprintName !== 'No Sprint' && <span className={cn('text-[0.78rem] font-semibold', isOldSprint ? 'text-muted-foreground' : 'text-status-merged')}>{ticket.sprintName}</span>}
               {ticket.url && <a href={ticket.url} target="_blank" rel="noreferrer" className="flex min-h-6 items-center gap-1.5 font-bold text-accent hover:underline"><ExternalLink size={15} aria-hidden="true" />Open in Jira</a>}
             </div>

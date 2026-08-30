@@ -15,6 +15,6 @@ export function mergeReliableAssignee(existing?: string | null, incoming?: strin
   return next;
 }
 
-export function displayAssignee(assignee?: string | null): string {
-  return mergeReliableAssignee(undefined, assignee) || 'Syncing assignee…';
+export function displayAssignee(assignee?: string | null): string | null {
+  return mergeReliableAssignee(undefined, assignee) || null;
 }

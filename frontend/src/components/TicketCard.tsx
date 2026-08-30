@@ -29,6 +29,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({ ticket, onClick }) => {
   const hasConflict = ticket.pullRequests?.some(pr => pr.status?.toUpperCase() === 'CONFLICT');
   const isOldSprint = ticket.sprintState === 'CLOSED';
   const approvalLabels = getApprovalLabels(ticket.labels);
+  const assignee = displayAssignee(ticket.assignee);
 
   return (
     <button
@@ -81,12 +82,14 @@ export const TicketCard: React.FC<TicketCardProps> = ({ ticket, onClick }) => {
         </div>
       )}
 
-      <div className="mt-auto flex items-center border-t border-border pt-2">
-        <div className="flex items-center gap-1.5 font-mono text-xs text-secondary-foreground">
-          <User size={12} className="text-muted-foreground" aria-hidden="true" />
-          <span className="font-semibold text-foreground">{displayAssignee(ticket.assignee)}</span>
+      {assignee && (
+        <div className="mt-auto flex items-center border-t border-border pt-2">
+          <div className="flex items-center gap-1.5 font-mono text-xs text-secondary-foreground">
+            <User size={12} className="text-muted-foreground" aria-hidden="true" />
+            <span className="font-semibold text-foreground">{assignee}</span>
+          </div>
         </div>
-      </div>
+      )}
     </button>
   );
 };

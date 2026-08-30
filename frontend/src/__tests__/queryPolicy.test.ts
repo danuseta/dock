@@ -14,5 +14,5 @@ test('cached page queries render stored data before background work', () => {
 test('keeps a reliable assignee while stale Jira cache is revalidated', () => {
   assert.strictEqual(mergeReliableAssignee('M Danu Seta W', 'Unassigned'), 'M Danu Seta W');
   assert.strictEqual(mergeReliableAssignee(undefined, 'M Danu Seta W'), 'M Danu Seta W');
-  assert.strictEqual(displayAssignee('Unassigned'), 'Syncing assignee…');
+  assert.strictEqual(displayAssignee('Unassigned'), null);
 });
