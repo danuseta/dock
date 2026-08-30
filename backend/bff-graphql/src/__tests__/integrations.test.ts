@@ -4,7 +4,10 @@ import axios from 'axios';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
+  buildDiscordForumTitle,
   DEFAULT_DISCORD_MESSAGE_TEMPLATE,
+  describeDiscordError,
+  DiscordService,
   formatDiscordMessage,
   normalizeDiscordMessageTemplate,
 } from '../integrations/discord';
@@ -73,6 +76,49 @@ test('internal integration behavior', async (t) => {
     assert.match(message, /Related Tickets/);
     assert.match(message, /QRD-475/);
     assert.match(message, /QRD-476/);
+  });
+
+  await t.test('retries a forum webhook once with an automatic post title', async (forumTest) => {
+    const bodies: any[] = [];
+    const server = createServer((request, response) => {
+      let body = '';
+      request.on('data', (chunk) => { body += chunk; });
+      request.on('end', () => {
+        bodies.push(JSON.parse(body));
+        if (bodies.length === 1) {
+          response.writeHead(400, { 'content-type': 'application/json' });
+          response.end(JSON.stringify({ code: 220001, message: 'A thread_name or thread_id is required' }));
+          return;
+        }
+        response.writeHead(204);
+        response.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    forumTest.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+    const port = (server.address() as AddressInfo).port;
+    const ticket = { key: 'QRD-1055', title: '[BE] Component Template: folder support', url: 'https://jira.example/QRD-1055' };
+
+    await new DiscordService().sendSummary({ ticket, prs: [] }, `http://127.0.0.1:${port}/webhook`);
+
+    assert.strictEqual(bodies.length, 2);
+    assert.strictEqual(bodies[0].thread_name, undefined);
+    assert.strictEqual(bodies[1].thread_name, buildDiscordForumTitle(ticket));
+  });
+
+  await t.test('sanitizes Discord transport errors before logging', () => {
+    const error = Object.assign(new Error('Request failed'), {
+      isAxiosError: true,
+      config: { url: 'https://discord.com/api/webhooks/id/secret-token' },
+      response: { status: 400, data: { code: 220001, message: 'A thread_name or thread_id is required' } },
+    });
+    const details = describeDiscordError(error);
+    assert.deepStrictEqual(details, {
+      status: 400,
+      code: 220001,
+      message: 'A thread_name or thread_id is required',
+    });
+    assert.doesNotMatch(JSON.stringify(details), /secret-token/);
   });
 
   await t.test('passes the selected Jira projects to assigned-ticket lookup and cache identity', async () => {

@@ -1,4 +1,4 @@
-import { DiscordService } from '../integrations/discord';
+import { describeDiscordError, DiscordService } from '../integrations/discord';
 
 export class DiscordAPI {
   constructor(private readonly discordService = new DiscordService()) {}
@@ -13,7 +13,7 @@ export class DiscordAPI {
       );
       return true;
     } catch (error) {
-      console.error('Discord API error:', error);
+      console.error('[Discord] Send failed:', describeDiscordError(error));
       return false;
     }
   }

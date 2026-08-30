@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { getDiscordTemplateError, renderDiscordMessageTemplate } from '../lib/discordTemplate';
+import { buildDiscordForumTitle, getDiscordTemplateError, renderDiscordMessageTemplate } from '../lib/discordTemplate';
 
 test('renders saved Discord template fields for the editable preview', () => {
   const message = renderDiscordMessageTemplate('{{ticketKey}} — {{ticketTitle}}\n{{pullRequests}}\n{{demoUrl}}', {
@@ -30,4 +30,11 @@ test('renders a related ticket group in one Discord preview', () => {
   assert.match(message, /Related Tickets/);
   assert.match(message, /QRD-476/);
   assert.strictEqual(getDiscordTemplateError('{{relatedTickets}}'), '');
+});
+
+test('builds a safe bounded default title for Discord forum posts', () => {
+  const title = buildDiscordForumTitle({ key: 'QRD-1055', title: '[BE]\nComponent Template: folder support '.repeat(8) });
+  assert.match(title, /^\[QRD-1055\] \[BE\] Component Template/);
+  assert.strictEqual(title.length, 100);
+  assert.doesNotMatch(title, /\n/);
 });

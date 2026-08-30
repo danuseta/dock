@@ -25,6 +25,29 @@ export const DEFAULT_DISCORD_MESSAGE_TEMPLATE = `🚀 **Update: {{ticketKey}} - 
 
 const ALLOWED_TEMPLATE_FIELDS = new Set(['ticketKey', 'ticketTitle', 'ticketUrl', 'relatedTickets', 'pullRequests', 'demoUrl']);
 const MAX_DISCORD_MESSAGE_LENGTH = 2_000;
+const MAX_DISCORD_THREAD_NAME_LENGTH = 100;
+const DISCORD_FORUM_THREAD_REQUIRED_CODE = 220001;
+
+export function buildDiscordForumTitle(ticket: DiscordSummary['ticket']): string {
+  const title = [...`[${ticket.key}] ${ticket.title}`]
+    .map((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127 ? ' ' : character;
+    })
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return title.slice(0, MAX_DISCORD_THREAD_NAME_LENGTH);
+}
+
+export function describeDiscordError(error: unknown): Record<string, string | number | undefined> {
+  if (!axios.isAxiosError(error)) return { message: error instanceof Error ? error.message : 'Unknown Discord error' };
+  return {
+    status: error.response?.status,
+    code: error.response?.data?.code,
+    message: error.response?.data?.message || error.message,
+  };
+}
 
 export function normalizeDiscordMessageTemplate(value?: string | null): string {
   const template = value?.trim() || DEFAULT_DISCORD_MESSAGE_TEMPLATE;
@@ -93,6 +116,7 @@ export class DiscordService {
     webhookUrl: string,
     options: { customMessage?: string; messageTemplate?: string; threadId?: string; threadName?: string } = {},
     retryCount = 0,
+    forumFallbackAttempted = false,
   ): Promise<void> {
     const message = options.customMessage?.trim() || formatDiscordMessage(payload, options.messageTemplate);
     if (message.length > MAX_DISCORD_MESSAGE_LENGTH) throw new Error('Discord message must not exceed 2000 characters');
@@ -112,7 +136,21 @@ export class DiscordService {
         const header = Number.parseFloat(String(error.response.headers['retry-after'] || ''));
         const retryAfter = Number.isFinite(header) ? header * 1000 : (2 ** retryCount) * 1000;
         await this.delay(retryAfter);
-        return this.sendSummary(payload, webhookUrl, options, retryCount + 1);
+        return this.sendSummary(payload, webhookUrl, options, retryCount + 1, forumFallbackAttempted);
+      }
+      if (axios.isAxiosError(error)
+        && error.response?.status === 400
+        && error.response?.data?.code === DISCORD_FORUM_THREAD_REQUIRED_CODE
+        && !options.threadId?.trim()
+        && !options.threadName?.trim()
+        && !forumFallbackAttempted) {
+        return this.sendSummary(
+          payload,
+          webhookUrl,
+          { ...options, threadName: buildDiscordForumTitle(payload.ticket) },
+          retryCount,
+          true,
+        );
       }
       throw error;
     }

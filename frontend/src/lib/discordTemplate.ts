@@ -7,6 +7,19 @@ export const DEFAULT_DISCORD_MESSAGE_TEMPLATE = `🚀 **Update: {{ticketKey}} - 
 {{demoUrl}}`;
 
 const ALLOWED_TEMPLATE_FIELDS = new Set(['ticketKey', 'ticketTitle', 'ticketUrl', 'relatedTickets', 'pullRequests', 'demoUrl']);
+const MAX_DISCORD_THREAD_NAME_LENGTH = 100;
+
+export const buildDiscordForumTitle = (ticket: { key: string; title: string }) => (
+  [...`[${ticket.key}] ${ticket.title}`]
+    .map((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127 ? ' ' : character;
+    })
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_DISCORD_THREAD_NAME_LENGTH)
+);
 
 export const getDiscordTemplateError = (template: string) => {
   if (!template.trim()) return 'Discord message template cannot be empty.';

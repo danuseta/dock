@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { MessageSquare, X, Send, Hash, PlusSquare, Info } from 'lucide-react';
 import { Button, Card, Dialog, IconButton, Input, Textarea } from './ui';
-import { renderDiscordMessageTemplate } from '../lib/discordTemplate';
+import { buildDiscordForumTitle, renderDiscordMessageTemplate } from '../lib/discordTemplate';
 
 interface PullRequestItem { id?: string; title?: string; url?: string; repo?: string; status?: string; type?: string; headBranch?: string; baseBranch?: string }
 interface DiscordPreviewModalProps {
@@ -25,6 +25,8 @@ export const DiscordPreviewModal: React.FC<DiscordPreviewModalProps> = ({ isOpen
   useEffect(() => {
     if (!isOpen) return;
     setMessage(renderDiscordMessageTemplate(messageTemplate, { ticket, relatedTickets, pullRequests, demoUrl }));
+    setThreadId('');
+    setThreadName('');
   }, [isOpen, ticket, relatedTickets, pullRequests, demoUrl, messageTemplate]);
 
   const handleSubmit = async () => onConfirm(message, threadId.trim() || undefined, threadName.trim() || undefined);
@@ -42,7 +44,7 @@ export const DiscordPreviewModal: React.FC<DiscordPreviewModalProps> = ({ isOpen
           <div id="discord-thread-guide" hidden={!showThreadInfo} className="mb-3 rounded-sm border-l-[3px] border-status-discord bg-surface-2 p-3 text-[0.8125rem] text-secondary-foreground"><p className="mb-1.5 font-bold">Discord thread delivery:</p><ul className="list-disc space-y-1 pl-5"><li><strong>Existing Thread ID:</strong> sends to an existing thread or forum post. In Discord Developer Mode, right-click the thread and choose Copy Channel ID.</li><li><strong>New Forum Thread Title:</strong> creates a new thread when the webhook targets a Forum Channel.</li></ul></div>
           <div className="grid grid-cols-2 gap-4 max-sm:grid-cols-1">
             <label><span className="mb-1 flex items-center gap-1 font-mono text-xs text-muted-foreground"><Hash size={12} aria-hidden="true" />Existing Thread ID (Optional)</span><Input className="font-mono text-xs" placeholder="e.g. 123456789012345678" value={threadId} onChange={(event) => setThreadId(event.target.value)} disabled={loading || threadName.length > 0} /></label>
-            <label><span className="mb-1 flex items-center gap-1 font-mono text-xs text-muted-foreground"><PlusSquare size={12} aria-hidden="true" />New Forum Thread Title (Optional)</span><Input className="font-mono text-xs" placeholder={`[${ticket.key}] Discussion`} value={threadName} onChange={(event) => setThreadName(event.target.value)} disabled={loading || threadId.length > 0} /></label>
+            <label><span className="mb-1 flex items-center gap-1 font-mono text-xs text-muted-foreground"><PlusSquare size={12} aria-hidden="true" />New Forum Post Title</span><Input className="font-mono text-xs" placeholder={buildDiscordForumTitle(ticket)} value={threadName} maxLength={100} onChange={(event) => setThreadName(event.target.value)} disabled={loading || threadId.length > 0} /><span className="mt-1 block text-pretty text-[0.7rem] text-muted-foreground">Leave blank to auto-create this title when the webhook points to a Forum channel.</span></label>
           </div>
         </section>
 
