@@ -15,6 +15,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
     assert.ok(schemaStr.includes('PullRequest'), 'Schema must define PullRequest GraphQL type');
     assert.ok(schemaStr.includes('hasConflict'), 'Schema must support conflict check booleans');
     assert.ok(schemaStr.includes('DockerRuntime'), 'Schema must define Docker runtime inventory');
+    assert.ok(schemaStr.includes('discordMessageTemplate'), 'Settings must expose the Discord message template');
   });
 
   await t.test('should provide complete resolver mapping for queries, mutations, and field resolvers', () => {

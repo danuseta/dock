@@ -9,7 +9,7 @@ export class DiscordAPI {
       await this.discordService.sendSummary(
         { ticket: payload.ticket, prs: payload.prs, demoUrl: payload.demoUrl },
         payload.webhookUrl,
-        { customMessage: payload.customMessage, threadId: payload.threadId, threadName: payload.threadName },
+        { customMessage: payload.customMessage, messageTemplate: payload.messageTemplate, threadId: payload.threadId, threadName: payload.threadName },
       );
       return true;
     } catch (error) {

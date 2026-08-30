@@ -161,6 +161,7 @@ export const resolvers = {
         prs,
         demoUrl: demoLink?.url,
         webhookUrl: settings.discordWebhookUrl,
+        messageTemplate: settings.discordMessageTemplate,
         customMessage,
         threadId,
         threadName

@@ -10,7 +10,7 @@ import { UPDATE_SETTINGS, VALIDATE_JIRA, VALIDATE_GITHUB, VALIDATE_DISCORD, SET_
 import { Toast } from '../components/Toast';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { NAVIGATION_PREFERENCES_EVENT, NavigationMode, NavigationPreferences, readNavigationPreferences, saveNavigationPreferences } from '../lib/navigationPreferences';
-import { Badge, Button, Card, Checkbox, IconButton, Input, Page, Select } from '../components/ui';
+import { Badge, Button, Card, Checkbox, IconButton, Input, Page, Select, Textarea } from '../components/ui';
 import { cn } from '../lib/cn';
 import {
   isValidServiceHealthRefreshSeconds,
@@ -19,6 +19,7 @@ import {
   normalizeServiceHealthRefreshSeconds,
 } from '../lib/serviceHealthRefresh';
 import { isInitialQueryLoading } from '../lib/queryPolicy';
+import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, getDiscordTemplateError } from '../lib/discordTemplate';
 
 type SettingsSection = 'general' | 'security' | 'jira' | 'github' | 'calendar' | 'discord';
 type RefreshUnit = 'seconds' | 'minutes';
@@ -86,6 +87,7 @@ const SettingsPage: React.FC = () => {
   const [githubToken, setGithubToken] = useState('');
   const [githubRepos, setGithubRepos] = useState('');
   const [discordWebhookUrl, setDiscordWebhookUrl] = useState('');
+  const [discordMessageTemplate, setDiscordMessageTemplate] = useState(DEFAULT_DISCORD_MESSAGE_TEMPLATE);
   const [googleClientId, setGoogleClientId] = useState('');
   const [googleClientSecret, setGoogleClientSecret] = useState('');
   const [googleCalendarId, setGoogleCalendarId] = useState('primary');
@@ -138,6 +140,7 @@ const SettingsPage: React.FC = () => {
       setJiraEmail(data.settings.jiraEmail || '');
       setJiraProjectKeys(data.settings.jiraProjectKeys || '');
       setGithubRepos(data.settings.githubRepos || '');
+      setDiscordMessageTemplate(data.settings.discordMessageTemplate || DEFAULT_DISCORD_MESSAGE_TEMPLATE);
       setGoogleClientId(data.settings.googleClientId || '');
       setGoogleCalendarId(data.settings.googleCalendarId || 'primary');
       const refreshSeconds = normalizeServiceHealthRefreshSeconds(data.settings.serviceHealthRefreshSeconds);
@@ -177,6 +180,7 @@ const SettingsPage: React.FC = () => {
   const serviceHealthRefreshSeconds = Number(serviceHealthRefreshValue)
     * (serviceHealthRefreshUnit === 'minutes' ? 60 : 1);
   const isRefreshIntervalValid = isValidServiceHealthRefreshSeconds(serviceHealthRefreshSeconds);
+  const discordTemplateError = getDiscordTemplateError(discordMessageTemplate);
   const refreshMinimum = serviceHealthRefreshUnit === 'minutes' ? 1 : MIN_SERVICE_HEALTH_REFRESH_SECONDS;
   const refreshMaximum = serviceHealthRefreshUnit === 'minutes'
     ? MAX_SERVICE_HEALTH_REFRESH_SECONDS / 60
@@ -190,6 +194,11 @@ const SettingsPage: React.FC = () => {
       setToast({ message: 'Service health refresh must be a whole number between 5 seconds and 24 hours.', type: 'error' });
       return false;
     }
+    if (discordTemplateError) {
+      setActiveSection('discord');
+      setToast({ message: discordTemplateError, type: 'error' });
+      return false;
+    }
     try {
       const result = await updateSettings({
         variables: {
@@ -201,6 +210,7 @@ const SettingsPage: React.FC = () => {
             githubToken,
             githubRepos,
             discordWebhookUrl,
+            discordMessageTemplate,
             googleClientId,
             googleClientSecret,
             googleCalendarId,
@@ -466,13 +476,33 @@ const SettingsPage: React.FC = () => {
             <div className="flex flex-wrap items-center gap-3"><Button variant="primary" onClick={handleConnectGoogle}><CalendarDays size={16} aria-hidden="true" />{data?.settings?.googleCalendarConnected ? 'Reconnect Google Calendar' : 'Connect Google Calendar'}</Button>{data?.settings?.googleCalendarConnected && <Button onClick={handleDisconnectGoogle} disabled={disconnectingGoogle}><Unplug size={16} aria-hidden="true" />{disconnectingGoogle ? 'Disconnecting...' : 'Disconnect'}</Button>}<Badge variant={data?.settings?.googleCalendarConnected ? 'success' : 'neutral'}>{data?.settings?.googleCalendarConnected ? 'Connected' : 'Not connected'}</Badge></div>
           </div></Card></section>}
 
-          {activeSection === 'discord' && <section><SettingsHeading title="Discord" description="Configure the webhook used for ticket notifications." /><Card><SectionTitle icon={<MessageSquare size={20} className="text-status-discord" aria-hidden="true" />}>Discord notifications</SectionTitle><div className="flex flex-col gap-3"><Field label="Discord Webhook URL" hint={data?.settings?.hasDiscordWebhookUrl ? 'A webhook is already configured. Leave this blank to keep it.' : undefined}><div className="relative"><Input type={showDiscordWebhook ? 'text' : 'password'} className="pr-12 font-mono" placeholder="https://discord.com/api/webhooks/..." value={discordWebhookUrl} onChange={(e) => { setDiscordWebhookUrl(e.target.value); markUnsaved(); }} /><IconButton className="absolute top-0 right-0" variant="ghost" aria-label={showDiscordWebhook ? 'Hide Discord webhook' : 'Show Discord webhook'} onClick={() => setShowDiscordWebhook(!showDiscordWebhook)}>{showDiscordWebhook ? <EyeOff size={16} /> : <Eye size={16} />}</IconButton></div></Field><div className="rounded-sm border-l-[3px] border-status-discord bg-surface-0 p-3 text-[0.8125rem] text-secondary-foreground"><strong>Discord thread and forum posting:</strong> The ticket detail preview lets you send to an existing thread ID or create a new thread in a forum channel.</div><div className="mt-2"><Button onClick={handleTestDiscord} disabled={testingDiscord}><Zap size={16} aria-hidden="true" />{testingDiscord ? 'Testing Webhook...' : 'Test Discord Webhook'}</Button></div></div></Card></section>}
+          {activeSection === 'discord' && <section>
+            <SettingsHeading title="Discord" description="Configure the webhook and default ticket-summary format." />
+            <Card>
+              <SectionTitle icon={<MessageSquare size={20} className="text-status-discord" aria-hidden="true" />}>Discord notifications</SectionTitle>
+              <div className="flex flex-col gap-4">
+                <Field label="Discord Webhook URL" hint={data?.settings?.hasDiscordWebhookUrl ? 'A webhook is already configured. Leave this blank to keep it.' : undefined}>
+                  <div className="relative"><Input type={showDiscordWebhook ? 'text' : 'password'} className="pr-12 font-mono" placeholder="https://discord.com/api/webhooks/..." value={discordWebhookUrl} onChange={(e) => { setDiscordWebhookUrl(e.target.value); markUnsaved(); }} /><IconButton className="absolute top-0 right-0" variant="ghost" aria-label={showDiscordWebhook ? 'Hide Discord webhook' : 'Show Discord webhook'} onClick={() => setShowDiscordWebhook(!showDiscordWebhook)}>{showDiscordWebhook ? <EyeOff size={16} /> : <Eye size={16} />}</IconButton></div>
+                </Field>
+                <Field label="Default message template" hint="Markdown is supported. The ticket preview remains editable before sending.">
+                  <Textarea className="min-h-[230px] bg-surface-0 font-mono text-xs leading-5" value={discordMessageTemplate} maxLength={2000} aria-invalid={Boolean(discordTemplateError)} aria-describedby={discordTemplateError ? 'discord-template-error' : undefined} onChange={(event) => { setDiscordMessageTemplate(event.target.value); markUnsaved(); }} />
+                </Field>
+                {discordTemplateError && <p id="discord-template-error" className="text-pretty text-xs text-status-conflict" role="alert">{discordTemplateError}</p>}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-pretty text-xs text-muted-foreground">Available fields: <span className="font-mono text-secondary-foreground">{'{{ticketKey}} {{ticketTitle}} {{ticketUrl}} {{pullRequests}} {{demoUrl}}'}</span></p>
+                  <span className="font-mono text-xs text-muted-foreground tabular-nums">{discordMessageTemplate.length}/2000</span>
+                </div>
+                <div className="flex flex-wrap gap-2"><Button onClick={() => { setDiscordMessageTemplate(DEFAULT_DISCORD_MESSAGE_TEMPLATE); markUnsaved(); }}>Restore default format</Button><Button onClick={handleTestDiscord} disabled={testingDiscord}><Zap size={16} aria-hidden="true" />{testingDiscord ? 'Testing Webhook...' : 'Test Discord Webhook'}</Button></div>
+                <div className="rounded-sm border-l-[3px] border-status-discord bg-surface-0 p-3 text-[0.8125rem] text-secondary-foreground"><strong>Discord thread and forum posting:</strong> The ticket detail preview lets you send to an existing thread ID or create a new thread in a forum channel.</div>
+              </div>
+            </Card>
+          </section>}
         </main>
       </div>
 
       <div className={cn('fixed right-6 z-20 flex items-center gap-4 rounded-md border border-border-glow bg-surface-2 p-2 pl-4 shadow-card max-[760px]:right-4 max-[760px]:bottom-[max(6rem,calc(env(safe-area-inset-bottom)+6rem))] max-[760px]:left-4 max-[760px]:justify-between', navigationPreferences.mode === 'bottom' ? 'bottom-[max(6rem,calc(env(safe-area-inset-bottom)+6rem))]' : 'bottom-[max(1.5rem,env(safe-area-inset-bottom))]')}>
         <span className="text-xs text-muted-foreground max-[420px]:hidden">{hasUnsavedChanges ? 'Unsaved changes' : 'No unsaved changes'}</span>
-        <Button variant="primary" className="h-11 px-5" onClick={() => handleSave()} disabled={!isRefreshIntervalValid}><Save size={17} aria-hidden="true" />Save &amp; Encrypt Settings</Button>
+        <Button variant="primary" className="h-11 px-5" onClick={() => handleSave()} disabled={!isRefreshIntervalValid || Boolean(discordTemplateError)}><Save size={17} aria-hidden="true" />Save &amp; Encrypt Settings</Button>
       </div>
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </Page>

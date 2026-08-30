@@ -1,4 +1,5 @@
 import { StorageService } from '../storage/service';
+import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, normalizeDiscordMessageTemplate } from '../integrations/discord';
 
 const MIN_SERVICE_HEALTH_REFRESH_SECONDS = 5;
 const MAX_SERVICE_HEALTH_REFRESH_SECONDS = 86_400;
@@ -50,6 +51,7 @@ export class StorageAPI {
       hasJiraApiToken: Boolean(settings.jiraApiToken),
       hasGithubToken: Boolean(settings.githubToken),
       hasDiscordWebhookUrl: Boolean(settings.discordWebhookUrl),
+      discordMessageTemplate: settings.discordMessageTemplate || DEFAULT_DISCORD_MESSAGE_TEMPLATE,
       hasGoogleClientSecret: Boolean(settings.googleClientSecret),
       googleCalendarConnected: Boolean(settings.googleRefreshToken),
       serviceHealthRefreshSeconds: isValidServiceHealthRefreshSeconds(settings.serviceHealthRefreshSeconds)
@@ -65,6 +67,7 @@ export class StorageAPI {
         && !isValidServiceHealthRefreshSeconds(input.serviceHealthRefreshSeconds)) {
         throw new Error('Invalid service health refresh interval');
       }
+      if (input.discordMessageTemplate != null) normalizeDiscordMessageTemplate(String(input.discordMessageTemplate));
       await Promise.all(Object.entries(input)
         .filter(([key, value]) => !(this.sensitiveKeys.has(key)
           && (value == null || String(value).trim() === '')))

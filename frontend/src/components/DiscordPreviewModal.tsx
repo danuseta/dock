@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { MessageSquare, X, Send, Hash, PlusSquare, Info } from 'lucide-react';
 import { Button, Card, Dialog, IconButton, Input, Textarea } from './ui';
+import { renderDiscordMessageTemplate } from '../lib/discordTemplate';
 
-interface PullRequestItem { id?: string; title?: string; url?: string; repo?: string; status?: string; headBranch?: string; baseBranch?: string }
+interface PullRequestItem { id?: string; title?: string; url?: string; repo?: string; status?: string; type?: string; headBranch?: string; baseBranch?: string }
 interface DiscordPreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -10,10 +11,11 @@ interface DiscordPreviewModalProps {
   ticket: { key: string; title: string; url?: string };
   pullRequests: PullRequestItem[];
   demoUrl?: string;
+  messageTemplate?: string;
   loading: boolean;
 }
 
-export const DiscordPreviewModal: React.FC<DiscordPreviewModalProps> = ({ isOpen, onClose, onConfirm, ticket, pullRequests, demoUrl, loading }) => {
+export const DiscordPreviewModal: React.FC<DiscordPreviewModalProps> = ({ isOpen, onClose, onConfirm, ticket, pullRequests, demoUrl, messageTemplate, loading }) => {
   const [message, setMessage] = useState('');
   const [threadId, setThreadId] = useState('');
   const [threadName, setThreadName] = useState('');
@@ -21,24 +23,8 @@ export const DiscordPreviewModal: React.FC<DiscordPreviewModalProps> = ({ isOpen
 
   useEffect(() => {
     if (!isOpen) return;
-    let content = `🚀 **Update: ${ticket.key} - ${ticket.title}**\n\n`;
-    content += `**Jira Ticket:** [${ticket.key}](${ticket.url || 'https://jira.example.com/browse/' + ticket.key})\n\n`;
-    if (pullRequests.length > 0) {
-      content += '**Linked Repositories & PRs:**\n';
-      pullRequests.forEach(pr => {
-        let badge = '⚪ `UNKNOWN`';
-        const status = (pr.status || '').toUpperCase();
-        if (status === 'OPEN') badge = '🟢 `OPEN`';
-        else if (status === 'MERGED') badge = '🟣 `MERGED`';
-        else if (status === 'CONFLICT') badge = '🔴 `CONFLICT`';
-        const branches = pr.headBranch && pr.baseBranch ? ` (*${pr.headBranch} → ${pr.baseBranch}*)` : '';
-        content += `- [**${pr.repo}**] ${badge} - [${pr.title}](${pr.url})${branches}\n`;
-      });
-      content += '\n';
-    }
-    if (demoUrl) content += `🎬 **Demo & Verification Video:**\n${demoUrl}\n`;
-    setMessage(content);
-  }, [isOpen, ticket, pullRequests, demoUrl]);
+    setMessage(renderDiscordMessageTemplate(messageTemplate, { ticket, pullRequests, demoUrl }));
+  }, [isOpen, ticket, pullRequests, demoUrl, messageTemplate]);
 
   const handleSubmit = async () => onConfirm(message, threadId.trim() || undefined, threadName.trim() || undefined);
 
@@ -48,7 +34,7 @@ export const DiscordPreviewModal: React.FC<DiscordPreviewModalProps> = ({ isOpen
         <div className="mb-4 flex items-center justify-between border-b border-border pb-3"><div className="flex items-center gap-2"><MessageSquare size={22} className="text-status-discord" aria-hidden="true" /><h2 id="discord-preview-title" className="font-mono text-xl font-bold text-status-discord">Discord Broadcast Preview</h2></div><IconButton variant="ghost" className="size-8 rounded-full" onClick={onClose} disabled={loading} aria-label="Close Discord preview"><X size={16} aria-hidden="true" /></IconButton></div>
         <p className="mb-4 text-pretty text-sm text-secondary-foreground">Review and customize the Markdown summary before sending it to your Discord server.</p>
 
-        <label className="mb-5 block"><span className="mb-2 block font-mono text-xs text-muted-foreground uppercase">Message Content (Markdown Supported)</span><Textarea className="min-h-[200px] bg-surface-0 font-mono leading-6" value={message} onChange={(event) => setMessage(event.target.value)} disabled={loading} /></label>
+        <label className="mb-5 block"><span className="mb-2 block font-mono text-xs text-muted-foreground uppercase">Message Content (Markdown Supported)</span><Textarea className="min-h-[200px] bg-surface-0 font-mono leading-6" value={message} onChange={(event) => setMessage(event.target.value)} maxLength={2000} disabled={loading} /><span className="mt-1 block text-right font-mono text-[0.68rem] text-muted-foreground tabular-nums">{message.length}/2000</span></label>
 
         <section className="mb-6 rounded-sm border border-border bg-surface-1 p-4" aria-labelledby="discord-destination-title">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-2"><Hash size={18} className="text-accent" aria-hidden="true" /><h3 id="discord-destination-title" className="font-mono text-sm font-bold">Post to a Specific Thread or Forum (Optional)</h3></div><Button size="sm" onClick={() => setShowThreadInfo(!showThreadInfo)} aria-expanded={showThreadInfo} aria-controls="discord-thread-guide"><Info size={13} aria-hidden="true" />{showThreadInfo ? 'Hide Guide' : 'How does this work?'}</Button></div>

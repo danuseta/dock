@@ -51,6 +51,7 @@ export const GET_TICKET_DETAIL = gql`
       sprintName
       sprintState
       storyPoints
+      labels
       pullRequests {
         id
         title
@@ -85,6 +86,9 @@ export const GET_TICKET_DETAIL = gql`
         updatedAt
       }
     }
+    settings {
+      discordMessageTemplate
+    }
   }
 `;
 
@@ -115,6 +119,7 @@ export const GET_SETTINGS = gql`
       hasJiraApiToken
       hasGithubToken
       hasDiscordWebhookUrl
+      discordMessageTemplate
       hasGoogleClientSecret
       googleCalendarConnected
       serviceHealthRefreshSeconds

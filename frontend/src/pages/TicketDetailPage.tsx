@@ -233,6 +233,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
         ticket={{ key: ticket.key, title: ticket.title, url: ticket.url }}
         pullRequests={ticket.pullRequests || []}
         demoUrl={ticket.demoLink?.url || demoUrl}
+        messageTemplate={data?.settings?.discordMessageTemplate}
         loading={sendingDiscord}
       />
 

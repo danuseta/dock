@@ -77,7 +77,13 @@ export class JiraService {
 
     if (!forceRefresh) {
       const cached = await this.storage.getCache('jira', cacheKey).catch(() => null);
-      if (Array.isArray(cached)) return cached;
+      const isCurrentCache = Array.isArray(cached) && cached.every((ticket: any) => (
+        Array.isArray(ticket?.labels)
+        && typeof ticket?.assignee === 'string'
+        && ticket.assignee.trim().length > 0
+        && ticket.assignee !== 'Unassigned'
+      ));
+      if (isCurrentCache) return cached;
     }
 
     const response = await this.client.fetchAssignedTickets(credentials, projects);
@@ -150,7 +156,7 @@ export class JiraService {
       title: fields.summary || 'Untitled Ticket',
       description,
       status: fields.status?.name || 'Unknown Status',
-      assignee: fields.assignee?.displayName || fields.assignee?.emailAddress || 'Unassigned',
+      assignee: fields.assignee?.displayName || fields.assignee?.emailAddress || 'Assignee unavailable',
       url: `https://${domain}/browse/${key}`,
       projectKey: fields.project?.key || key.split('-')[0] || null,
       projectName: fields.project?.name || null,

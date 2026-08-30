@@ -3,7 +3,11 @@ import test from 'node:test';
 import axios from 'axios';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { formatDiscordMessage } from '../integrations/discord';
+import {
+  DEFAULT_DISCORD_MESSAGE_TEMPLATE,
+  formatDiscordMessage,
+  normalizeDiscordMessageTemplate,
+} from '../integrations/discord';
 import { buildPullRequestCacheKey } from '../integrations/github';
 import { GoogleCalendarService, normalizeCalendarEvent } from '../integrations/google-calendar';
 import { isValidServiceHealthRefreshSeconds, StorageAPI } from '../datasources/StorageAPI';
@@ -47,6 +51,16 @@ test('internal integration behavior', async (t) => {
     assert.match(message, /demo\.example/);
   });
 
+  await t.test('renders and validates a configurable Discord message template', () => {
+    const message = formatDiscordMessage({
+      ticket: { key: 'QRD-1099', title: 'Agent workflow', url: 'https://jira.example/QRD-1099' },
+      prs: [],
+    }, '**{{ticketKey}}** {{ticketTitle}} — {{ticketUrl}}');
+    assert.strictEqual(message, '**QRD-1099** Agent workflow — https://jira.example/QRD-1099');
+    assert.throws(() => normalizeDiscordMessageTemplate('{{unknownField}}'), /Unsupported Discord template field/);
+    assert.throws(() => normalizeDiscordMessageTemplate('x'.repeat(2001)), /too long/);
+  });
+
   await t.test('passes the selected Jira projects to assigned-ticket lookup and cache identity', async () => {
     const cacheKeys: string[] = [];
     let receivedProjects: string[] = [];
@@ -68,6 +82,26 @@ test('internal integration behavior', async (t) => {
 
     assert.deepStrictEqual(receivedProjects, ['QRD', 'OPS']);
     assert.match(cacheKeys[0], /QRD-OPS/);
+  });
+
+  await t.test('refreshes legacy Jira cache entries missing labels or a reliable assignee', async () => {
+    let fetched = 0;
+    const storage = {
+      getCache: async () => [{ key: 'QRD-1099', assignee: 'Unassigned' }],
+      upsertCache: async () => undefined,
+    };
+    const client = {
+      fetchAssignedTickets: async () => {
+        fetched += 1;
+        return { issues: [{ key: 'QRD-1099', fields: { summary: 'Agent workflow', status: { name: 'IN PROGRESS' }, assignee: { displayName: 'M Danu Seta W' }, labels: ['alvinPass', 'kenPass'] } }] };
+      },
+    };
+    const tickets = await new JiraService(storage as any, client as any).getAssignedTickets(
+      { domain: 'company.atlassian.net', email: 'me@example.test', apiToken: 'secret' },
+    );
+    assert.strictEqual(fetched, 1);
+    assert.strictEqual(tickets[0].assignee, 'M Danu Seta W');
+    assert.deepStrictEqual(tickets[0].labels, ['alvinPass', 'kenPass']);
   });
 
   await t.test('scopes PR cache identity to the active GitHub credential', async () => {
@@ -234,6 +268,22 @@ test('internal integration behavior', async (t) => {
     assert.strictEqual(isValidServiceHealthRefreshSeconds(4), false);
     assert.strictEqual(isValidServiceHealthRefreshSeconds(5.5), false);
     assert.strictEqual(isValidServiceHealthRefreshSeconds(86_401), false);
+  });
+
+  await t.test('exposes a default Discord template and rejects invalid template settings', async () => {
+    const writes: Array<[string, string]> = [];
+    const storage = {
+      getSettings: async () => [],
+      hasMasterPin: async () => false,
+      upsertSetting: async (key: string, value: string) => { writes.push([key, value]); },
+    };
+    const api = new StorageAPI(storage as any);
+
+    assert.strictEqual((await api.getPublicSettings()).discordMessageTemplate, DEFAULT_DISCORD_MESSAGE_TEMPLATE);
+    assert.strictEqual(await api.updateSettings({ discordMessageTemplate: '{{unknownField}}' }), false);
+    assert.deepStrictEqual(writes, []);
+    assert.strictEqual(await api.updateSettings({ discordMessageTemplate: '**{{ticketKey}}**' }), true);
+    assert.deepStrictEqual(writes, [['discordMessageTemplate', '**{{ticketKey}}**']]);
   });
 
   await t.test('validates bounded credential-free upstream targets', () => {

@@ -139,6 +139,7 @@ export const typeDefs = gql`
     hasJiraApiToken: Boolean!
     hasGithubToken: Boolean!
     hasDiscordWebhookUrl: Boolean!
+    discordMessageTemplate: String!
     hasGoogleClientSecret: Boolean!
     googleCalendarConnected: Boolean!
     serviceHealthRefreshSeconds: Int!
@@ -189,6 +190,7 @@ export const typeDefs = gql`
     githubToken: String
     githubRepos: String
     discordWebhookUrl: String
+    discordMessageTemplate: String
     googleClientId: String
     googleClientSecret: String
     googleCalendarId: String
