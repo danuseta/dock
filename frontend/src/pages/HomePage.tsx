@@ -7,13 +7,14 @@ import { GoogleSearch } from '../components/GoogleSearch';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { WebsiteIcon } from '../components/WebsiteIcon';
 import { DockerRuntimeCard } from '../components/DockerRuntimeCard';
+import { MonthCalendar } from '../components/MonthCalendar';
 import { Button, Card, Dialog, IconButton, Input, Select } from '../components/ui';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { DEFAULT_SERVICE_HEALTH_REFRESH_SECONDS, normalizeServiceHealthRefreshSeconds } from '../lib/serviceHealthRefresh';
+import type { CalendarEvent } from '../lib/calendar';
 
 interface HomePageProps { onTicketClick: (key: string) => void; onNavigate: (path: string) => void; }
-interface CalendarEvent { id: string; title: string; start: string; end?: string | null; allDay: boolean; location?: string | null; url?: string | null; }
 
 const highlightColors = [
   { value: '#60a5fa', label: 'Blue' },
@@ -22,19 +23,10 @@ const highlightColors = [
   { value: '#f472b6', label: 'Pink' },
   { value: '#a78bfa', label: 'Violet' },
 ];
-const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const panelClass = 'min-w-0 rounded-md border border-border bg-surface-0';
 const panelHeaderClass = 'flex items-center justify-between gap-2.5 border-b border-border px-[17px] py-[15px]';
 const panelTitleClass = 'text-balance font-display text-[0.82rem] font-bold';
 const textActionClass = 'h-6 border-0 px-0 py-0 text-[0.68rem] text-muted-foreground hover:border-transparent hover:bg-transparent hover:text-foreground';
-const dateKey = (date: Date) => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
-
-const eventTime = (event: CalendarEvent) => {
-  if (event.allDay) return `All day${event.location ? ` · ${event.location}` : ''}`;
-  const start = new Date(event.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-  const end = event.end ? new Date(event.end).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : null;
-  return `${start}${end ? `–${end}` : ''} · ${event.location || 'Google Calendar'}`;
-};
 
 const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
   const [healthRefreshSeconds, setHealthRefreshSeconds] = useState(DEFAULT_SERVICE_HEALTH_REFRESH_SECONDS);
@@ -70,21 +62,6 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
   const monitors = data?.monitors || [];
   const healthyServices = monitors.filter((monitor: any) => monitor.lastStatus === 'UP').length;
   const calendarEvents: CalendarEvent[] = data?.calendarEvents || [];
-
-  const calendarDays = useMemo(() => {
-    const first = new Date(now.getFullYear(), now.getMonth(), 1);
-    const gridStart = new Date(now.getFullYear(), now.getMonth(), 1 - ((first.getDay() + 6) % 7));
-    const eventsByDate = calendarEvents.reduce<Record<string, CalendarEvent[]>>((result, event) => {
-      const key = dateKey(new Date(event.start));
-      (result[key] ||= []).push(event);
-      return result;
-    }, {});
-    return Array.from({ length: 42 }, (_, index) => {
-      const date = new Date(gridStart);
-      date.setDate(gridStart.getDate() + index);
-      return { date, key: dateKey(date), currentMonth: date.getMonth() === now.getMonth(), events: eventsByDate[dateKey(date)] || [] };
-    });
-  }, [calendarEvents, now]);
 
   const handleAdd = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -162,14 +139,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
         <div className="grid w-full max-w-[380px] justify-self-end gap-3.5 max-[900px]:justify-self-center max-[600px]:max-w-[360px]">
           <article className={cn(panelClass, 'relative z-10 overflow-visible')}>
             <header className={panelHeaderClass}><h2 className={panelTitleClass}>{monthLabel}</h2><Button variant="ghost" size="sm" className={textActionClass} onClick={() => onNavigate('/calendar')}>Google Calendar →</Button></header>
-            <div className="px-2.5 pt-2 pb-2.5"><div className="mb-[5px] grid grid-cols-7 gap-[3px]" aria-hidden="true">{weekdays.map((day) => <span className="text-center text-[0.56rem] font-bold text-muted-foreground" key={day}>{day}</span>)}</div><div className="grid grid-cols-7 gap-[3px]" aria-label={`${monthLabel} calendar`}>
-              {calendarDays.map((cell) => {
-                const isToday = cell.key === dateKey(now);
-                const popoverId = `home-events-${cell.key}`;
-                const label = `${cell.date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}${isToday ? ', today' : ''}${cell.events.length ? `, ${cell.events.length} ${cell.events.length === 1 ? 'event' : 'events'}` : ''}`;
-                return <button type="button" key={cell.key} className={cn('group relative grid aspect-square w-full min-w-0 place-items-center rounded-[5px] border border-border bg-surface-1 p-0 text-[0.56rem] text-secondary-foreground tabular-nums transition-colors duration-150 ease-out hover:z-20 hover:border-border-glow hover:bg-surface-hover hover:text-foreground focus-visible:z-20', !cell.currentMonth && 'text-muted-foreground opacity-55', isToday && 'border-accent bg-accent font-extrabold text-black hover:border-accent hover:bg-accent hover:text-black')} aria-label={label} aria-describedby={cell.events.length ? popoverId : undefined}>{cell.date.getDate()}{cell.events.length > 0 && <><span className={cn('absolute bottom-[3px] size-[3px] rounded-full bg-amber-500', isToday && 'bg-black')} aria-hidden="true" /><span id={popoverId} className="invisible pointer-events-none absolute bottom-[calc(100%+8px)] left-1/2 z-20 w-[218px] translate-x-[-50%] translate-y-1 rounded-[8px] border border-border-glow bg-surface-0 p-2.5 text-left text-foreground opacity-0 shadow-card transition-[opacity,transform] duration-150 ease-out group-hover:visible group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:visible group-focus-visible:translate-y-0 group-focus-visible:opacity-100 motion-reduce:transition-none" role="tooltip">{cell.events.map((event, index) => <span className={cn('block', index > 0 && 'mt-2 border-t border-border pt-2')} key={event.id}><strong className="mb-0.5 block text-[0.69rem] leading-[1.35]">{event.title}</strong><small className="block text-[0.58rem] leading-[1.45] text-muted-foreground">{eventTime(event)}</small></span>)}</span></>}</button>;
-              })}
-            </div></div>
+            <div className="px-2.5 pt-2 pb-2.5"><MonthCalendar month={now} events={calendarEvents} /></div>
           </article>
 
           <article className={panelClass}>

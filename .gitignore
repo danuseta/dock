@@ -5,6 +5,7 @@ node_modules/
 dist/
 build/
 *.log
+client_secret_*.json
 .dev/
 .serena/
 docs-ai/
