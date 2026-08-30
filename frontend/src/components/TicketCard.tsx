@@ -2,9 +2,11 @@ import React from 'react';
 import { 
   User, 
   AlertTriangle,
+  CheckCircle2,
 } from 'lucide-react';
 import { PRBadge } from './PRBadge';
 import { cn } from '../lib/cn';
+import { getApprovalLabels } from '../lib/ticketApprovals';
 
 interface TicketCardProps {
   ticket: {
@@ -15,6 +17,7 @@ interface TicketCardProps {
     sprintName?: string;
     sprintState?: string;
     storyPoints?: number | null;
+    labels?: string[];
     pullRequests?: any[];
     demoLink?: { url: string };
   };
@@ -24,6 +27,7 @@ interface TicketCardProps {
 export const TicketCard: React.FC<TicketCardProps> = ({ ticket, onClick }) => {
   const hasConflict = ticket.pullRequests?.some(pr => pr.status?.toUpperCase() === 'CONFLICT');
   const isOldSprint = ticket.sprintState === 'CLOSED';
+  const approvalLabels = getApprovalLabels(ticket.labels);
 
   return (
     <button
@@ -65,6 +69,16 @@ export const TicketCard: React.FC<TicketCardProps> = ({ ticket, onClick }) => {
       <h3 className="text-pretty text-[0.95rem] leading-[1.45] font-bold text-foreground">
         {ticket.title}
       </h3>
+
+      {approvalLabels.length > 0 && (
+        <div className="flex flex-wrap gap-1.5" aria-label="Approved checks">
+          {approvalLabels.map((label) => (
+            <span className="inline-flex items-center gap-1 rounded-xs border border-status-merged/40 bg-status-merged/10 px-2 py-1 font-mono text-[0.68rem] font-bold text-status-merged" key={label}>
+              <CheckCircle2 size={12} aria-hidden="true" /> {label}
+            </span>
+          ))}
+        </div>
+      )}
 
       <div className="mt-auto flex items-center border-t border-border pt-2">
         <div className="flex items-center gap-1.5 font-mono text-xs text-secondary-foreground">

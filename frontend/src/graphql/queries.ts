@@ -21,6 +21,7 @@ export const GET_DASHBOARD = gql`
         sprintName
         sprintState
         storyPoints
+        labels
         pullRequests {
           id
           title
@@ -168,6 +169,13 @@ export const GET_HOME = gql`
     settings {
       serviceHealthRefreshSeconds
     }
+    dockerRuntime {
+      available
+      total
+      running
+      stopped
+      containers { id name image state uptime }
+    }
   }
 `;
 
@@ -203,6 +211,51 @@ export const GET_MONITORS = gql`
     settings {
       serviceHealthRefreshSeconds
     }
+    dockerRuntime {
+      available
+      total
+      running
+      stopped
+      containers { id name image state uptime }
+    }
+  }
+`;
+
+export const GET_DOCKER_RUNTIME = gql`
+  query GetDockerRuntime($includeStats: Boolean = true) {
+    dockerRuntime(includeStats: $includeStats) {
+      available
+      engineVersion
+      serverName
+      total
+      running
+      stopped
+      images
+      refreshedAt
+      error
+      containers {
+        id
+        name
+        project
+        image
+        command
+        state
+        status
+        ports
+        createdAt
+        uptime
+        cpuPercent
+        memoryUsageBytes
+        memoryLimitBytes
+        memoryPercent
+      }
+    }
+  }
+`;
+
+export const GET_DOCKER_CONTAINER_LOGS = gql`
+  query GetDockerContainerLogs($id: ID!, $tail: Int = 100) {
+    dockerContainerLogs(id: $id, tail: $tail)
   }
 `;
 

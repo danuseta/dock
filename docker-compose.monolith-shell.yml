@@ -16,10 +16,26 @@ services:
       - CORS_ORIGIN=http://localhost:3000
       - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://localhost:3000}
       - DOCK_PIN_MODE=${DOCK_PIN_MODE:-auto}
+      - DOCKER_API_URL=http://docker-proxy:2375
     networks:
       - dock-network
+      - docker-inventory
     volumes:
       - dock_data:/app/data
+
+  docker-proxy:
+    image: ghcr.io/tecnativa/docker-socket-proxy:v0.5.0
+    environment:
+      - CONTAINERS=1
+      - INFO=1
+      - POST=0
+      - LOG_LEVEL=warning
+    networks:
+      - docker-inventory
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   dock_data:
@@ -27,3 +43,5 @@ volumes:
 networks:
   dock-network:
     driver: bridge
+  docker-inventory:
+    internal: true

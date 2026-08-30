@@ -83,8 +83,8 @@ jobs:
           ssh -i ~/.ssh/deploy "$DEPLOY_USER@$DEPLOY_HOST"
           'set -e;
           cd ~/dock;
-          docker compose pull dock-app;
-          docker compose up -d dock-app;
+          docker compose pull dock-app docker-proxy;
+          docker compose up -d docker-proxy dock-app;
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
             if curl -fsS http://127.0.0.1:3101/health >/dev/null; then exit 0; fi;
             sleep 3;

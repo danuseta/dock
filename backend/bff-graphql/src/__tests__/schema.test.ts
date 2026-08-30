@@ -11,8 +11,10 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
     assert.ok(schemaStr.includes('Ticket'), 'Schema must define Ticket GraphQL type');
     assert.ok(schemaStr.includes('description'), 'Ticket type must include Atlassian description field');
     assert.ok(schemaStr.includes('sprintName'), 'Ticket type must include sprintName field');
+    assert.ok(schemaStr.includes('labels: [String!]!'), 'Ticket type must expose Jira labels');
     assert.ok(schemaStr.includes('PullRequest'), 'Schema must define PullRequest GraphQL type');
     assert.ok(schemaStr.includes('hasConflict'), 'Schema must support conflict check booleans');
+    assert.ok(schemaStr.includes('DockerRuntime'), 'Schema must define Docker runtime inventory');
   });
 
   await t.test('should provide complete resolver mapping for queries, mutations, and field resolvers', () => {
@@ -20,6 +22,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
     assert.ok(typeof resolvers.Query.dashboard === 'function', 'dashboard query resolver must exist');
     assert.ok(resolvers.Ticket, 'Ticket field resolvers must be defined');
     assert.ok(typeof resolvers.Ticket.pullRequests === 'function', 'Ticket.pullRequests resolver must exist');
+    assert.deepStrictEqual(resolvers.Ticket.labels({}), []);
     assert.strictEqual(
       resolvers.MonitorTarget.lastCheckedAt({ lastCheckedAt: new Date('2026-08-27T00:00:00.000Z') }),
       '2026-08-27T00:00:00.000Z',
@@ -57,6 +60,8 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'authStatus',
       'calendarEvents',
       'dashboard',
+      'dockerContainerLogs',
+      'dockerRuntime',
       'githubRepos',
       'jiraProjects',
       'monitors',

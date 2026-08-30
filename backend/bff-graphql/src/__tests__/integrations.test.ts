@@ -9,6 +9,7 @@ import { GoogleCalendarService, normalizeCalendarEvent } from '../integrations/g
 import { isValidServiceHealthRefreshSeconds, StorageAPI } from '../datasources/StorageAPI';
 import { JiraService } from '../integrations/jira';
 import { UpstreamMonitorService, validateMonitorTarget } from '../integrations/upstream-monitor';
+import { DockerRuntimeService } from '../integrations/docker-runtime';
 
 test('internal integration behavior', async (t) => {
   await t.test('formats Jira ADF, project metadata, sprint, and story points', () => {
@@ -22,6 +23,7 @@ test('internal integration behavior', async (t) => {
         description: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Internal call only' }] }] },
         customfield_10020: [{ name: 'Sprint 21', state: 'active', startDate: '2026-08-01' }],
         customfield_10016: 5,
+        labels: ['fe-pass', 'needs-review', 'uat_pass'],
       },
     }, 'company.atlassian.net');
 
@@ -30,6 +32,7 @@ test('internal integration behavior', async (t) => {
     assert.strictEqual(ticket?.sprintName, 'Sprint 21');
     assert.strictEqual(ticket?.sprintState, 'ACTIVE');
     assert.strictEqual(ticket?.storyPoints, 5);
+    assert.deepStrictEqual(ticket?.labels, ['fe-pass', 'needs-review', 'uat_pass']);
     assert.match(ticket?.description || '', /Internal call only/);
   });
 
@@ -287,5 +290,39 @@ test('internal integration behavior', async (t) => {
     const result = await new UpstreamMonitorService(storage as any).check('monitor-http');
     assert.strictEqual(result.lastStatus, 'UP');
     assert.strictEqual(result.lastStatusCode, 204);
+  });
+
+  await t.test('maps Docker inventory without exposing a writable API', async () => {
+    const calls: string[] = [];
+    const fetcher = async (input: string | URL | Request) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith('/info')) return new Response(JSON.stringify({ Name: 'danuseta', ServerVersion: '28.0.1', Images: 7 }));
+      return new Response(JSON.stringify([{
+        Id: 'a'.repeat(64), Names: ['/dock-app-1'], Image: 'ghcr.io/danuseta/dock:latest', Command: 'node dist/index.js',
+        Created: Math.floor(Date.now() / 1000) - 3600, State: 'running', Status: 'Up 1 hour',
+        Ports: [{ PrivatePort: 4000, PublicPort: 3101, Type: 'tcp', IP: '127.0.0.1' }],
+        Labels: { 'com.docker.compose.project': 'dock' },
+      }]));
+    };
+    const runtime = await new DockerRuntimeService(fetcher as typeof fetch, 'http://docker.test').runtime();
+    assert.strictEqual(runtime.available, true);
+    assert.strictEqual(runtime.running, 1);
+    assert.strictEqual(runtime.containers[0].project, 'dock');
+    assert.deepStrictEqual(runtime.containers[0].ports, ['127.0.0.1:3101 → 4000/tcp']);
+    assert.ok(calls.every((url) => url.endsWith('/info') || url.includes('/containers/json?all=1')));
+  });
+
+  await t.test('rejects arbitrary Docker log paths and bounds the tail size', async () => {
+    let requestedUrl = '';
+    const fetcher = async (input: string | URL | Request) => {
+      requestedUrl = String(input);
+      return new Response('2026-08-30T00:00:00Z ready\n');
+    };
+    const service = new DockerRuntimeService(fetcher as typeof fetch, 'http://docker.test');
+    await assert.rejects(() => service.logs('../info', 5), /Invalid container ID/);
+    const logs = await service.logs('b'.repeat(64), 10_000);
+    assert.match(requestedUrl, /tail=200$/);
+    assert.match(logs, /ready/);
   });
 });

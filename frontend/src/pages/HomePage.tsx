@@ -6,6 +6,7 @@ import { ADD_QUICK_LINK, REMOVE_QUICK_LINK } from '../graphql/mutations';
 import { GoogleSearch } from '../components/GoogleSearch';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { WebsiteIcon } from '../components/WebsiteIcon';
+import { DockerRuntimeCard } from '../components/DockerRuntimeCard';
 import { Button, Card, Dialog, IconButton, Input, Select } from '../components/ui';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
@@ -135,7 +136,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
       </section>
 
       <div className="grid grid-cols-[minmax(0,1fr)_minmax(340px,380px)] items-stretch gap-3.5 max-[900px]:grid-cols-1">
-        <div className="grid grid-rows-[auto_minmax(0,1fr)] gap-3.5">
+        <div className="grid grid-rows-[auto_minmax(0,1fr)_auto] gap-3.5">
           <section className="min-w-0" aria-labelledby="quick-links-title">
             <div className="mb-2 flex items-center justify-between">
               <h2 id="quick-links-title" className={panelTitleClass}>Quick links</h2>
@@ -154,6 +155,8 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
             {activeTickets.slice(0, 4).map((ticket: any) => <button className="grid w-full grid-cols-[82px_minmax(0,1fr)_auto_auto] items-center gap-2.5 border-0 border-b border-border bg-transparent px-3.5 py-2.5 text-left text-foreground transition-colors duration-150 ease-out last:border-b-0 hover:bg-surface-1 max-[600px]:grid-cols-[72px_minmax(0,1fr)_auto]" key={ticket.key} onClick={() => onTicketClick(ticket.key)}><span className="font-mono text-[0.69rem] font-bold text-accent">{ticket.key}</span><span className="truncate text-[0.8rem]">{ticket.title}</span><span className="whitespace-nowrap font-mono text-[0.63rem] font-bold text-muted-foreground tabular-nums">{ticket.storyPoints || 0} SP</span><span className="whitespace-nowrap rounded-[5px] bg-surface-2 px-1.5 py-0.5 text-[0.63rem] text-secondary-foreground max-[600px]:hidden">{ticket.status}</span></button>)}
             {activeTickets.length === 0 && <div className="px-3.5 py-5 text-[0.78rem] text-muted-foreground">No active Jira tickets.</div>}
           </article>
+
+          <DockerRuntimeCard runtime={data?.dockerRuntime} onNavigate={onNavigate} compact />
         </div>
 
         <div className="grid w-full max-w-[380px] justify-self-end gap-3.5 max-[900px]:justify-self-center max-[600px]:max-w-[360px]">

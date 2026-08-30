@@ -11,6 +11,7 @@ import SettingsPage from './pages/SettingsPage';
 import HomePage from './pages/HomePage';
 import CalendarPage from './pages/CalendarPage';
 import MonitoringPage from './pages/MonitoringPage';
+import DockerServicesPage from './pages/DockerServicesPage';
 import { PinLockModal } from './components/PinLockModal';
 import { Button } from './components/ui';
 
@@ -24,7 +25,7 @@ function App() {
       const key = decodeURIComponent(path.split('/').pop() || '');
       return { path: '/ticket', key: key || null };
     }
-    if (path === '/dashboard' || path === '/calendar' || path === '/monitoring' || path === '/attention' || path === '/settings') {
+    if (path === '/dashboard' || path === '/calendar' || path === '/monitoring' || path === '/docker' || path === '/attention' || path === '/settings') {
       return { path, key: null };
     }
     return { path: '/', key: null };
@@ -76,7 +77,8 @@ function App() {
       case '/': return <HomePage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;
       case '/dashboard': return <DashboardPage onTicketClick={navigateToTicket} />;
       case '/calendar': return <CalendarPage onNavigate={handleNavigate} />;
-      case '/monitoring': return <MonitoringPage />;
+      case '/monitoring': return <MonitoringPage onNavigate={handleNavigate} />;
+      case '/docker': return <DockerServicesPage />;
       case '/attention': return <NeedsAttentionPage onTicketClick={navigateToTicket} />;
       case '/settings': return <SettingsPage />;
       case '/ticket': return selectedTicketKey ? <TicketDetailPage ticketKey={selectedTicketKey} onBack={() => handleNavigate('/dashboard')} /> : <DashboardPage onTicketClick={navigateToTicket} />;

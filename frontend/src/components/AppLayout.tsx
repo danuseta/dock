@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, Home as HomeIcon, LayoutDashboard, Settings as SettingsIcon } from 'lucide-react';
+import { Activity, AlertTriangle, Box, CalendarDays, ChevronLeft, ChevronRight, Home as HomeIcon, LayoutDashboard, Settings as SettingsIcon } from 'lucide-react';
 import { useQuery } from '@apollo/client';
 import { GET_NEEDS_ATTENTION } from '../graphql/queries';
 import { NAVIGATION_PREFERENCES_EVENT, NavigationPreferences, readNavigationPreferences, saveNavigationPreferences } from '../lib/navigationPreferences';
@@ -28,6 +28,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, c
     { path: '/dashboard', label: 'Board', icon: LayoutDashboard, badge: 0 },
     { path: '/calendar', label: 'Calendar', icon: CalendarDays, badge: 0 },
     { path: '/monitoring', label: 'Monitoring', icon: Activity, badge: 0 },
+    { path: '/docker', label: 'Docker Services', icon: Box, badge: 0 },
     { path: '/attention', label: 'Needs Attention', icon: AlertTriangle, badge: conflictCount },
     { path: '/settings', label: 'System Settings', icon: SettingsIcon, badge: 0 },
   ];

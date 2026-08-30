@@ -6,6 +6,7 @@ import { ADD_MONITOR, CHECK_MONITORS, REMOVE_MONITOR, UPDATE_MONITOR } from '../
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Button, Card, Dialog, IconButton, Input, Page, PageHeader } from '../components/ui';
 import { cn } from '../lib/cn';
+import { DockerRuntimeCard } from '../components/DockerRuntimeCard';
 import { DEFAULT_SERVICE_HEALTH_REFRESH_SECONDS, normalizeServiceHealthRefreshSeconds } from '../lib/serviceHealthRefresh';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 
@@ -40,7 +41,9 @@ const statusTone = (status?: string | null) => status === 'UP'
 
 const metricTones = ['text-accent', 'text-status-merged', 'text-status-conflict', 'text-muted-foreground'];
 
-const MonitoringPage: React.FC = () => {
+interface MonitoringPageProps { onNavigate: (path: string) => void; }
+
+const MonitoringPage: React.FC<MonitoringPageProps> = ({ onNavigate }) => {
   const [refreshSeconds, setRefreshSeconds] = useState(DEFAULT_SERVICE_HEALTH_REFRESH_SECONDS);
   const { data, loading, error, refetch } = useQuery(GET_MONITORS, {
     ...CACHED_QUERY_OPTIONS,
@@ -127,6 +130,7 @@ const MonitoringPage: React.FC = () => {
 
       {(error || actionError) && !editor && <Card className="mb-4 border-status-conflict text-status-conflict" role="alert">{actionError || error?.message}</Card>}
 
+      <div className="grid grid-cols-[minmax(0,1fr)_340px] items-start gap-4 max-[1120px]:grid-cols-1">
       {monitors.length === 0 ? <Card className="py-10 text-center"><Activity size={34} className="mx-auto mb-2.5 text-muted-foreground" aria-hidden="true" /><p className="text-pretty text-muted-foreground">No services yet.</p><Button variant="primary" className="mt-4" onClick={() => setEditor(createEmptyMonitor())}><Plus size={16} aria-hidden="true" />Add your first service</Button></Card> : (
         <Card className="overflow-hidden p-0">
           <div className="overflow-x-auto">
@@ -152,6 +156,8 @@ const MonitoringPage: React.FC = () => {
           </div>
         </Card>
       )}
+        <DockerRuntimeCard runtime={data?.dockerRuntime} onNavigate={onNavigate} />
+      </div>
 
       <Dialog open={Boolean(editor)} onClose={() => !isSaving && setEditor(null)} dismissible={!isSaving} labelledBy="service-editor-title" describedBy="service-editor-description">
         <Card className="w-[min(560px,calc(100vw-2rem))] p-0 shadow-card">

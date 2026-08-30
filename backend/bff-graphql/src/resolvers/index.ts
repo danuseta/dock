@@ -6,6 +6,7 @@ import { GraphQLError } from 'graphql';
 import { shouldRequirePin, type AuthContext } from '../auth/session';
 import { googleCalendarService } from '../integrations/google-calendar';
 import { upstreamMonitorService } from '../integrations/upstream-monitor';
+import { dockerRuntimeService } from '../integrations/docker-runtime';
 
 const jiraAPI = new JiraAPI();
 const githubAPI = new GitHubAPI();
@@ -103,9 +104,24 @@ export const resolvers = {
     monitors: async (_: unknown, { refresh }: { refresh?: boolean }) => {
       return upstreamMonitorService.list(Boolean(refresh));
     },
+    dockerRuntime: async (_: unknown, { includeStats }: { includeStats?: boolean }) => {
+      return dockerRuntimeService.runtime(Boolean(includeStats));
+    },
+    dockerContainerLogs: async (_: unknown, { id, tail }: { id: string; tail?: number }) => {
+      try {
+        return await dockerRuntimeService.logs(id, tail);
+      } catch (error) {
+        if (error instanceof Error && error.message === 'Invalid container ID') {
+          throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+        }
+        console.error('[BFF Docker] Failed to load logs:', error instanceof Error ? error.message : 'unknown error');
+        throw new GraphQLError('Container logs are unavailable', { extensions: { code: 'SERVICE_UNAVAILABLE' } });
+      }
+    },
   },
   
   Ticket: {
+    labels: (parent: any) => Array.isArray(parent.labels) ? parent.labels : [],
     pullRequests: async (parent: any) => {
       return await githubAPI.getPullRequestsForTicket(parent.key, {
         staleWhileRevalidate: parent.__dashboard === true,
@@ -231,6 +247,7 @@ export const resolvers = {
 
 const protectedQueries = [
   'dashboard', 'ticketDetail', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
+  'dockerRuntime', 'dockerContainerLogs',
 ] as const;
 const protectedMutations = [
   'saveDemoLink',

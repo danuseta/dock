@@ -13,6 +13,7 @@ export const typeDefs = gql`
     sprintName: String
     sprintState: String
     storyPoints: Float
+    labels: [String!]!
     pullRequests: [PullRequest!]
     demoLink: DemoLink
   }
@@ -96,6 +97,36 @@ export const typeDefs = gql`
     lastLatencyMs: Int
     lastCheckedAt: String
     lastError: String
+  }
+
+  type DockerContainer {
+    id: ID!
+    name: String!
+    project: String
+    image: String!
+    command: String
+    state: String!
+    status: String!
+    ports: [String!]!
+    createdAt: String!
+    uptime: String!
+    cpuPercent: Float
+    memoryUsageBytes: Float
+    memoryLimitBytes: Float
+    memoryPercent: Float
+  }
+
+  type DockerRuntime {
+    available: Boolean!
+    engineVersion: String
+    serverName: String
+    total: Int!
+    running: Int!
+    stopped: Int!
+    images: Int!
+    containers: [DockerContainer!]!
+    refreshedAt: String!
+    error: String
   }
 
   type Settings {
@@ -188,6 +219,8 @@ export const typeDefs = gql`
     quickLinks: [QuickLink!]!
     calendarEvents(timeMin: String, timeMax: String, maxResults: Int): [CalendarEvent!]!
     monitors(refresh: Boolean = false): [MonitorTarget!]!
+    dockerRuntime(includeStats: Boolean = false): DockerRuntime!
+    dockerContainerLogs(id: ID!, tail: Int = 100): String!
   }
 
   type Mutation {
