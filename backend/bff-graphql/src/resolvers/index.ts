@@ -167,13 +167,16 @@ export const resolvers = {
       const prs = [...new Map(pullRequestGroups.flat().map((pr: any) => [pr.url || pr.id, pr])).values()];
       const primaryTicket = tickets.find((ticket) => ticket.key === relation.primaryKey) || tickets[0];
       if (!primaryTicket) return false;
-      const isCombined = tickets.length > 1;
       const settings = await storageAPI.getSettings();
+      const demoEntries = demoLinks
+        .map((demoLink, index) => ({ key: tickets[index]?.key, url: demoLink?.url }))
+        .filter((entry): entry is { key: string; url: string } => Boolean(entry.key && entry.url));
+      const uniqueDemoUrls = [...new Set(demoEntries.map((entry) => entry.url))];
 
       const payload = {
         ticket: {
-          key: isCombined ? tickets.map((ticket) => ticket.key).join(' + ') : primaryTicket.key,
-          title: isCombined ? `${primaryTicket.title} (+${tickets.length - 1} related)` : primaryTicket.title,
+          key: primaryTicket.key,
+          title: primaryTicket.title,
           url: primaryTicket.url || `https://jira.example.com/browse/${primaryTicket.key}`
         },
         relatedTickets: tickets.map((ticket) => ({
@@ -182,12 +185,9 @@ export const resolvers = {
           url: ticket.url || `https://jira.example.com/browse/${ticket.key}`,
         })),
         prs,
-        demoUrl: demoLinks
-          .map((demoLink, index) => demoLink?.url && tickets[index]
-            ? `- **${tickets[index].key}:** ${demoLink.url}`
-            : null)
-          .filter(Boolean)
-          .join('\n') || undefined,
+        demoUrl: (uniqueDemoUrls.length === 1
+          ? `- **${tickets.map((ticket) => ticket.key).join(' + ')}:** ${uniqueDemoUrls[0]}`
+          : demoEntries.map((entry) => `- **${entry.key}:** ${entry.url}`).join('\n')) || undefined,
         webhookUrl: settings.discordWebhookUrl,
         messageTemplate: settings.discordMessageTemplate,
         customMessage,

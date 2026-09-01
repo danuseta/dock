@@ -66,18 +66,31 @@ test('internal integration behavior', async (t) => {
     assert.throws(() => normalizeDiscordMessageTemplate('x'.repeat(2001)), /too long/);
   });
 
-  await t.test('renders related Jira tickets in one Discord message', () => {
+  await t.test('repeats every ticket line once per ticket in a dependency group', () => {
     const message = formatDiscordMessage({
-      ticket: { key: 'QRD-475 + QRD-476', title: 'Combined delivery', url: 'https://jira.example/QRD-475' },
+      ticket: { key: 'QRD-476', title: 'Backend threads', url: 'https://jira.example/QRD-476' },
       relatedTickets: [
-        { key: 'QRD-475', title: 'Backend', url: 'https://jira.example/QRD-475' },
-        { key: 'QRD-476', title: 'Frontend', url: 'https://jira.example/QRD-476' },
+        { key: 'QRD-476', title: 'Backend threads', url: 'https://jira.example/QRD-476' },
+        { key: 'QRD-475', title: 'Frontend panel', url: 'https://jira.example/QRD-475' },
       ],
       prs: [],
-    });
+    }, '{{ticketKey}} - {{ticketTitle}}\n\nJira :\n[{{ticketKey}}]({{ticketUrl}})');
+    assert.match(message, /^QRD-476 - Backend threads\nQRD-475 - Frontend panel$/m);
+    assert.match(message, /^\[QRD-476\]\(https:\/\/jira\.example\/QRD-476\)\n\[QRD-475\]\(https:\/\/jira\.example\/QRD-475\)$/m);
+    assert.doesNotMatch(message, /\(\+1 related\)/);
+  });
+
+  await t.test('still renders the optional related ticket block', () => {
+    const message = formatDiscordMessage({
+      ticket: { key: 'QRD-476', title: 'Backend threads', url: 'https://jira.example/QRD-476' },
+      relatedTickets: [
+        { key: 'QRD-476', title: 'Backend threads', url: 'https://jira.example/QRD-476' },
+        { key: 'QRD-475', title: 'Frontend panel', url: 'https://jira.example/QRD-475' },
+      ],
+      prs: [],
+    }, '{{relatedTickets}}');
     assert.match(message, /Related Tickets/);
-    assert.match(message, /QRD-475/);
-    assert.match(message, /QRD-476/);
+    assert.match(message, /- \[QRD-475\]\(https:\/\/jira\.example\/QRD-475\) — Frontend panel/);
   });
 
   await t.test('retries a forum webhook once with an automatic post title', async (forumTest) => {

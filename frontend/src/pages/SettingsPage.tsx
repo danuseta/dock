@@ -502,7 +502,7 @@ const SettingsPage: React.FC = () => {
                 <Field label="Discord Webhook URL" hint={data?.settings?.hasDiscordWebhookUrl ? 'A webhook is already configured. Leave this blank to keep it.' : undefined}>
                   <div className="relative"><Input type={showDiscordWebhook ? 'text' : 'password'} className="pr-12 font-mono" placeholder="https://discord.com/api/webhooks/..." value={discordWebhookUrl} onChange={(e) => { setDiscordWebhookUrl(e.target.value); markUnsaved(); }} /><IconButton className="absolute top-0 right-0" variant="ghost" aria-label={showDiscordWebhook ? 'Hide Discord webhook' : 'Show Discord webhook'} onClick={() => setShowDiscordWebhook(!showDiscordWebhook)}>{showDiscordWebhook ? <EyeOff size={16} /> : <Eye size={16} />}</IconButton></div>
                 </Field>
-                <Field label="Default message template" hint="Markdown is supported. The ticket preview remains editable before sending.">
+                <Field label="Default message template" hint="Markdown is supported. The ticket preview remains editable before sending. Any line holding a ticket field repeats once per ticket when the announcement covers a dependency group.">
                   <Textarea className="min-h-[230px] bg-surface-0 font-mono text-xs leading-5" value={discordMessageTemplate} maxLength={2000} aria-invalid={Boolean(discordTemplateError)} aria-describedby={discordTemplateError ? 'discord-template-error' : undefined} onChange={(event) => { setDiscordMessageTemplate(event.target.value); markUnsaved(); }} />
                 </Field>
                 {discordTemplateError && <p id="discord-template-error" className="text-pretty text-xs text-status-conflict" role="alert">{discordTemplateError}</p>}

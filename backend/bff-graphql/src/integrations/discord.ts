@@ -19,11 +19,11 @@ export const DEFAULT_DISCORD_MESSAGE_TEMPLATE = `🚀 **Update: {{ticketKey}} - 
 
 **Jira Ticket:** [{{ticketKey}}]({{ticketUrl}})
 
-{{relatedTickets}}
 {{pullRequests}}
 {{demoUrl}}`;
 
 const ALLOWED_TEMPLATE_FIELDS = new Set(['ticketKey', 'ticketTitle', 'ticketUrl', 'relatedTickets', 'pullRequests', 'demoUrl']);
+const TICKET_FIELD_PATTERN = /\{\{\s*(ticketKey|ticketTitle|ticketUrl)\s*\}\}/;
 const MAX_DISCORD_MESSAGE_LENGTH = 2_000;
 const MAX_DISCORD_THREAD_NAME_LENGTH = 100;
 const DISCORD_FORUM_THREAD_REQUIRED_CODE = 220001;
@@ -82,18 +82,29 @@ function formatRelatedTickets(tickets: DiscordSummary['relatedTickets']): string
   return `**Related Tickets:**\n${tickets.map((ticket) => `- [${ticket.key}](${ticket.url}) — ${ticket.title}`).join('\n')}`;
 }
 
+function fillTemplateFields(line: string, values: Record<string, string>): string {
+  return line.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_match, field: string) => values[field] || '');
+}
+
 export function formatDiscordMessage(summary: DiscordSummary, messageTemplate?: string | null): string {
   const template = normalizeDiscordMessageTemplate(messageTemplate);
-  const values: Record<string, string> = {
-    ticketKey: summary.ticket.key,
-    ticketTitle: summary.ticket.title,
-    ticketUrl: summary.ticket.url,
+  const groupTickets = summary.relatedTickets?.length ? summary.relatedTickets : [summary.ticket];
+  const sharedValues: Record<string, string> = {
     relatedTickets: formatRelatedTickets(summary.relatedTickets),
     pullRequests: formatPullRequests(summary.prs),
     demoUrl: summary.demoUrl || '',
   };
   const message = template
-    .replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_match, field: string) => values[field] || '')
+    .split('\n')
+    .map((line) => (TICKET_FIELD_PATTERN.test(line)
+      ? groupTickets.map((ticket) => fillTemplateFields(line, {
+        ...sharedValues,
+        ticketKey: ticket.key,
+        ticketTitle: ticket.title,
+        ticketUrl: ticket.url,
+      })).join('\n')
+      : fillTemplateFields(line, sharedValues)))
+    .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
   if (!message || message.length > MAX_DISCORD_MESSAGE_LENGTH) throw new Error('Discord message must be between 1 and 2000 characters');

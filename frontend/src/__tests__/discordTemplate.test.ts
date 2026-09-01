@@ -20,17 +20,33 @@ test('rejects unknown Discord template fields before saving', () => {
   assert.strictEqual(getDiscordTemplateError('{{ticketKey}}'), '');
 });
 
-test('renders a related ticket group in one Discord preview', () => {
-  const message = renderDiscordMessageTemplate('{{ticketKey}}\n{{relatedTickets}}', {
-    ticket: { key: 'QRD-475 + QRD-476', title: 'Combined delivery', url: 'https://jira.example/QRD-475' },
+test('repeats every ticket line once per ticket in a dependency group', () => {
+  const message = renderDiscordMessageTemplate('{{ticketKey}} - {{ticketTitle}}\n\nJira :\n[{{ticketKey}}]({{ticketUrl}})\n\n{{demoUrl}}', {
+    ticket: { key: 'QRD-476', title: 'Backend threads', url: 'https://jira.example/QRD-476' },
     relatedTickets: [
-      { key: 'QRD-475', title: 'Backend', url: 'https://jira.example/QRD-475' },
-      { key: 'QRD-476', title: 'Frontend', url: 'https://jira.example/QRD-476' },
+      { key: 'QRD-476', title: 'Backend threads', url: 'https://jira.example/QRD-476' },
+      { key: 'QRD-475', title: 'Frontend panel', url: 'https://jira.example/QRD-475' },
+    ],
+    pullRequests: [],
+    demoUrl: '- **QRD-476 + QRD-475:** https://demo.example/475',
+  });
+  assert.match(message, /^QRD-476 - Backend threads\nQRD-475 - Frontend panel$/m);
+  assert.match(message, /^\[QRD-476\]\(https:\/\/jira\.example\/QRD-476\)\n\[QRD-475\]\(https:\/\/jira\.example\/QRD-475\)$/m);
+  assert.match(message, /- \*\*QRD-476 \+ QRD-475:\*\* https:\/\/demo\.example\/475/);
+  assert.doesNotMatch(message, /\(\+1 related\)/);
+});
+
+test('still renders the optional related ticket block', () => {
+  const message = renderDiscordMessageTemplate('{{relatedTickets}}', {
+    ticket: { key: 'QRD-476', title: 'Backend threads', url: 'https://jira.example/QRD-476' },
+    relatedTickets: [
+      { key: 'QRD-476', title: 'Backend threads', url: 'https://jira.example/QRD-476' },
+      { key: 'QRD-475', title: 'Frontend panel', url: 'https://jira.example/QRD-475' },
     ],
     pullRequests: [],
   });
   assert.match(message, /Related Tickets/);
-  assert.match(message, /QRD-476/);
+  assert.match(message, /- \[QRD-475\]\(https:\/\/jira\.example\/QRD-475\) — Frontend panel/);
   assert.strictEqual(getDiscordTemplateError('{{relatedTickets}}'), '');
 });
 

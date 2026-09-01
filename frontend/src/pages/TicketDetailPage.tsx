@@ -181,18 +181,17 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const relationTickets = relation?.tickets?.length ? relation.tickets : [ticket];
   const isCombinedAnnouncement = relationTickets.length > 1;
   const primaryTicket = relationTickets.find((item: any) => item.key === relation?.primaryKey) || relationTickets[0];
-  const announcementTicket = {
-    key: isCombinedAnnouncement ? relationTickets.map((item: any) => item.key).join(' + ') : primaryTicket.key,
-    title: isCombinedAnnouncement ? `${primaryTicket.title} (+${relationTickets.length - 1} related)` : primaryTicket.title,
-    url: primaryTicket.url,
-  };
+  const announcementTicket = { key: primaryTicket.key, title: primaryTicket.title, url: primaryTicket.url };
   const announcementPullRequests = [...new Map(relationTickets
     .flatMap((item: any) => item.pullRequests || [])
     .map((pullRequest: any) => [pullRequest.url || pullRequest.id, pullRequest])).values()];
-  const announcementDemoUrl = relationTickets
-    .filter((item: any) => item.demoLink?.url || (item.key === ticket.key && demoUrl))
-    .map((item: any) => `- **${item.key}:** ${item.demoLink?.url || demoUrl}`)
-    .join('\n');
+  const demoEntries = relationTickets
+    .map((item: any) => ({ key: item.key, url: item.demoLink?.url || (item.key === ticket.key ? demoUrl : '') }))
+    .filter((entry: any) => entry.url);
+  const uniqueDemoUrls = [...new Set(demoEntries.map((entry: any) => entry.url))];
+  const announcementDemoUrl = uniqueDemoUrls.length === 1
+    ? `- **${relationTickets.map((item: any) => item.key).join(' + ')}:** ${uniqueDemoUrls[0]}`
+    : demoEntries.map((entry: any) => `- **${entry.key}:** ${entry.url}`).join('\n');
   const ticketChoices = [...new Map((data?.dashboard || [])
     .flatMap((group: any) => group.tickets || [])
     .filter((item: any) => item.key !== ticket.key)

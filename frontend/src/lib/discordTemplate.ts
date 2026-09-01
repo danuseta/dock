@@ -2,11 +2,11 @@ export const DEFAULT_DISCORD_MESSAGE_TEMPLATE = `🚀 **Update: {{ticketKey}} - 
 
 **Jira Ticket:** [{{ticketKey}}]({{ticketUrl}})
 
-{{relatedTickets}}
 {{pullRequests}}
 {{demoUrl}}`;
 
 const ALLOWED_TEMPLATE_FIELDS = new Set(['ticketKey', 'ticketTitle', 'ticketUrl', 'relatedTickets', 'pullRequests', 'demoUrl']);
+const TICKET_FIELD_PATTERN = /\{\{\s*(ticketKey|ticketTitle|ticketUrl)\s*\}\}/;
 const MAX_DISCORD_THREAD_NAME_LENGTH = 100;
 
 export const buildDiscordForumTitle = (ticket: { key: string; title: string }) => (
@@ -30,16 +30,19 @@ export const getDiscordTemplateError = (template: string) => {
   return '';
 };
 
+interface DiscordTemplateTicket { key: string; title: string; url?: string }
 interface DiscordTemplateData {
-  ticket: { key: string; title: string; url?: string };
-  relatedTickets?: Array<{ key: string; title: string; url?: string }>;
+  ticket: DiscordTemplateTicket;
+  relatedTickets?: DiscordTemplateTicket[];
   pullRequests: Array<{ repo?: string; title?: string; url?: string; status?: string; type?: string }>;
   demoUrl?: string;
 }
 
+const ticketUrl = (ticket: DiscordTemplateTicket) => ticket.url || `https://jira.example.com/browse/${ticket.key}`;
+
 const formatRelatedTickets = (tickets?: DiscordTemplateData['relatedTickets']) => {
   if (!tickets || tickets.length < 2) return '';
-  return `**Related Tickets:**\n${tickets.map((ticket) => `- [${ticket.key}](${ticket.url || '#'}) — ${ticket.title}`).join('\n')}`;
+  return `**Related Tickets:**\n${tickets.map((ticket) => `- [${ticket.key}](${ticketUrl(ticket)}) — ${ticket.title}`).join('\n')}`;
 };
 
 const formatPullRequests = (pullRequests: DiscordTemplateData['pullRequests']) => {
@@ -53,17 +56,28 @@ const formatPullRequests = (pullRequests: DiscordTemplateData['pullRequests']) =
   )).join('\n\n');
 };
 
+const fillFields = (line: string, values: Record<string, string>) => (
+  line.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_match, field: string) => values[field] || '')
+);
+
 export const renderDiscordMessageTemplate = (template: string | null | undefined, data: DiscordTemplateData) => {
-  const values: Record<string, string> = {
-    ticketKey: data.ticket.key,
-    ticketTitle: data.ticket.title,
-    ticketUrl: data.ticket.url || `https://jira.example.com/browse/${data.ticket.key}`,
+  const groupTickets = data.relatedTickets?.length ? data.relatedTickets : [data.ticket];
+  const sharedValues: Record<string, string> = {
     relatedTickets: formatRelatedTickets(data.relatedTickets),
     pullRequests: formatPullRequests(data.pullRequests),
     demoUrl: data.demoUrl || '',
   };
   return (template?.trim() || DEFAULT_DISCORD_MESSAGE_TEMPLATE)
-    .replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_match, field: string) => values[field] || '')
+    .split('\n')
+    .map((line) => (TICKET_FIELD_PATTERN.test(line)
+      ? groupTickets.map((ticket) => fillFields(line, {
+        ...sharedValues,
+        ticketKey: ticket.key,
+        ticketTitle: ticket.title,
+        ticketUrl: ticketUrl(ticket),
+      })).join('\n')
+      : fillFields(line, sharedValues)))
+    .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 };
