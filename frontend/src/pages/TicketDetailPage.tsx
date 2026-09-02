@@ -19,7 +19,7 @@ import {
   Unlink,
   CheckCircle2,
 } from 'lucide-react';
-import { GET_TICKET_DETAIL } from '../graphql/queries';
+import { GET_DASHBOARD, GET_TICKET_DETAIL_CORE, GET_TICKET_DETAIL_ENRICHMENT } from '../graphql/queries';
 import { CLEAR_TICKET_DEPENDENCY, SAVE_DEMO_LINK, SEND_TO_DISCORD, SET_TICKET_DEPENDENCY, CHECK_CONFLICTS } from '../graphql/mutations';
 import { PRBadge } from '../components/PRBadge';
 import { ConflictModal } from '../components/ConflictModal';
@@ -38,9 +38,25 @@ interface TicketDetailPageProps {
 
 const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const { data, loading, error, refetch } = useQuery(GET_TICKET_DETAIL, { 
+  const { data: coreData, loading: coreLoading, error: coreError, refetch: refetchCore } = useQuery(GET_TICKET_DETAIL_CORE, { 
     ...DETAIL_QUERY_OPTIONS,
     variables: { key: ticketKey },
+  });
+  const { data: cachedDashboardData } = useQuery(GET_DASHBOARD, {
+    fetchPolicy: 'cache-only',
+    returnPartialData: true,
+  });
+  const cachedTicket = cachedDashboardData?.dashboard
+    ?.flatMap((group: any) => group.tickets || [])
+    .find((item: any) => item.key?.toUpperCase() === ticketKey.toUpperCase());
+  const coreTicketFromResponse = coreData?.ticketDetail?.key?.toUpperCase() === ticketKey.toUpperCase()
+    ? coreData.ticketDetail
+    : undefined;
+  const coreTicket = coreTicketFromResponse || (coreData?.ticketDetail === undefined ? cachedTicket : undefined);
+  const { data: enrichmentData, loading: enrichmentLoading, error: enrichmentError, refetch: refetchEnrichment } = useQuery(GET_TICKET_DETAIL_ENRICHMENT, {
+    ...DETAIL_QUERY_OPTIONS,
+    variables: { key: ticketKey },
+    skip: !coreTicket,
   });
   const [saveDemoLink] = useMutation(SAVE_DEMO_LINK);
   const [sendToDiscord, { loading: sendingDiscord }] = useMutation(SEND_TO_DISCORD);
@@ -57,8 +73,8 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const [activePRTab, setActivePRTab] = useState<Record<string, 'commits' | 'files' | 'none'>>({});
 
   useEffect(() => {
-    setDependsOnKey(data?.ticketRelationGroup?.dependsOnKey || '');
-  }, [data?.ticketRelationGroup?.dependsOnKey, ticketKey]);
+    setDependsOnKey(coreData?.ticketRelationGroup?.dependsOnKey || '');
+  }, [coreData?.ticketRelationGroup?.dependsOnKey, ticketKey]);
 
   const togglePRTab = (prId: string, tab: 'commits' | 'files') => {
     setActivePRTab(prev => ({
@@ -76,22 +92,25 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
     </button>
   ) : null;
 
-  const ticket = data?.ticketDetail?.key?.toUpperCase() === ticketKey.toUpperCase()
-    ? data.ticketDetail
+  const enrichedTicket = enrichmentData?.ticketDetail?.key?.toUpperCase() === ticketKey.toUpperCase()
+    ? enrichmentData.ticketDetail
+    : undefined;
+  const ticket = coreTicket
+    ? { ...coreTicket, ...(enrichedTicket || {}) }
     : undefined;
 
-  if (loading && !ticket) return (
+  if (coreLoading && !ticket) return (
     <Page width="full">
       {renderBackButton()}
       <LoadingSkeleton />
     </Page>
   );
-  if (error && !ticket) return (
+  if (coreError && !ticket) return (
     <Page width="full">
       {renderBackButton()}
       <Card className="border-status-conflict text-status-conflict" role="alert">
-        <p>Error loading ticket details: {error.message}</p>
-        <Button className="mt-3" variant="primary" onClick={() => void refetch()}>Retry</Button>
+        <p>Error loading ticket details: {coreError.message}</p>
+        <Button className="mt-3" variant="primary" onClick={() => void refetchCore()}>Retry</Button>
       </Card>
     </Page>
   );
@@ -102,6 +121,10 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
       <Card>Ticket "{ticketKey}" not found in current workspace.</Card>
     </Page>
   );
+
+  const refetchAll = async () => {
+    await Promise.all([refetchCore(), refetchEnrichment()]);
+  };
 
   const handleInspect = async (owner: string, repo: string, pullNumber: number) => {
     try {
@@ -136,7 +159,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
     if (!dependsOnKey) return;
     try {
       await setTicketDependency({ variables: { ticketKey, dependsOnKey } });
-      await refetch();
+      await refetchAll();
       setToast({ message: `${ticketKey} now depends on ${dependsOnKey}.`, type: 'success' });
     } catch (err: any) {
       setToast({ message: err.message || 'Failed to save ticket dependency', type: 'error' });
@@ -146,7 +169,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const handleClearDependency = async () => {
     try {
       await clearTicketDependency({ variables: { ticketKey } });
-      await refetch();
+      await refetchAll();
       setDependsOnKey('');
       setToast({ message: 'Ticket dependency removed.', type: 'success' });
     } catch (err: any) {
@@ -171,7 +194,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const handleManualRefetch = async () => {
     setIsRefreshing(true);
     try {
-      await refetch();
+      await refetchEnrichment();
       setToast({ message: 'Pull requests synchronized successfully!', type: 'success' });
     } catch (e) {
       setToast({ message: 'Failed to synchronize pull requests', type: 'error' });
@@ -183,8 +206,9 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const isOldSprint = ticket.sprintState === 'CLOSED';
   const approvalLabels = getApprovalLabels(ticket.labels);
   const assignee = displayAssignee(ticket.assignee);
-  const relation = data?.ticketRelationGroup;
-  const relationTickets = relation?.tickets?.length ? relation.tickets : [ticket];
+  const relation = coreData?.ticketRelationGroup;
+  const enrichedRelation = enrichmentData?.ticketRelationGroup;
+  const relationTickets = enrichedRelation?.tickets?.length ? enrichedRelation.tickets : [ticket];
   const isCombinedAnnouncement = relationTickets.length > 1;
   const primaryTicket = relationTickets.find((item: any) => item.key === relation?.primaryKey) || relationTickets[0];
   const announcementTicket = { key: primaryTicket.key, title: primaryTicket.title, url: primaryTicket.url };
@@ -198,7 +222,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const announcementDemoUrl = uniqueDemoUrls.length === 1
     ? `- **${relationTickets.map((item: any) => item.key).join(' + ')}:** ${uniqueDemoUrls[0]}`
     : demoEntries.map((entry: any) => `- **${entry.key}:** ${entry.url}`).join('\n');
-  const ticketChoices = [...new Map((data?.dashboard || [])
+  const ticketChoices = [...new Map((coreData?.dashboard || [])
     .flatMap((group: any) => group.tickets || [])
     .filter((item: any) => item.key !== ticket.key)
     .map((item: any) => [item.key, item])).values()]
@@ -246,6 +270,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
             </div>
 
             <div className="flex flex-col gap-4">
+              {enrichmentLoading && !enrichmentData && <div className="rounded-sm border border-dashed border-border bg-white/[0.01] px-4 py-6 text-center text-muted-foreground"><p className="font-mono text-xs">Loading GitHub pull request details...</p></div>}
               {ticket.pullRequests?.map((pr: any) => {
                 const isConflict = pr.status?.toUpperCase() === 'CONFLICT';
                 const currentTab = activePRTab[pr.id] || 'none';
@@ -279,7 +304,8 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
                 );
               })}
 
-              {(!ticket.pullRequests || ticket.pullRequests.length === 0) && <div className="rounded-sm border border-dashed border-border bg-white/[0.01] px-4 py-6 text-center text-muted-foreground"><p className="font-mono text-xs">No GitHub pull requests currently linked to ticket key "{ticket.key}".</p></div>}
+              {!enrichmentLoading && !enrichmentError && (!ticket.pullRequests || ticket.pullRequests.length === 0) && <div className="rounded-sm border border-dashed border-border bg-white/[0.01] px-4 py-6 text-center text-muted-foreground"><p className="font-mono text-xs">No GitHub pull requests currently linked to ticket key "{ticket.key}".</p></div>}
+              {enrichmentError && <div className="rounded-sm border border-status-conflict/40 bg-status-conflict-bg px-4 py-3 text-center text-status-conflict"><p className="font-mono text-xs">GitHub pull request details are temporarily unavailable.</p></div>}
             </div>
           </Card>
 
@@ -303,7 +329,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
         relatedTickets={relationTickets.map((item: any) => ({ key: item.key, title: item.title, url: item.url }))}
         pullRequests={announcementPullRequests as any[]}
         demoUrl={announcementDemoUrl || undefined}
-        messageTemplate={data?.settings?.discordMessageTemplate}
+        messageTemplate={coreData?.settings?.discordMessageTemplate}
         loading={sendingDiscord}
       />
 

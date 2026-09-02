@@ -180,6 +180,50 @@ test('internal integration behavior', async (t) => {
     assert.deepStrictEqual(tickets[0].labels, ['alvinPass', 'kenPass']);
   });
 
+  await t.test('serves cached Jira ticket details without calling Jira', async () => {
+    const cachedTicket = { key: 'QRD-1148', title: 'Cached detail', status: 'IN PROGRESS' };
+    let jiraCalls = 0;
+    const service = new JiraService({
+      getCache: async (namespace: string, key: string) => {
+        assert.strictEqual(namespace, 'jira');
+        assert.match(key, /ticket_detail_company\.atlassian\.net_me@example\.test_QRD-1148/);
+        return cachedTicket;
+      },
+    } as any, {
+      getTicketDetails: async () => { jiraCalls += 1; return null; },
+    } as any);
+
+    assert.deepStrictEqual(await service.getTicketDetails({
+      domain: 'https://company.atlassian.net/', email: 'me@example.test', apiToken: 'secret',
+    }, 'qrd-1148'), cachedTicket);
+    assert.strictEqual(jiraCalls, 0);
+  });
+
+  await t.test('deduplicates concurrent Jira ticket detail lookups', async () => {
+    let jiraCalls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const service = new JiraService({
+      getCache: async () => null,
+      upsertCache: async () => undefined,
+    } as any, {
+      getTicketDetails: async () => {
+        jiraCalls += 1;
+        await gate;
+        return { key: 'QRD-1148', fields: { summary: 'Deduplicated', status: { name: 'TODO' } } };
+      },
+    } as any);
+    const credentials = { domain: 'company.atlassian.net', email: 'me@example.test', apiToken: 'secret' };
+    const first = service.getTicketDetails(credentials, 'QRD-1148');
+    const second = service.getTicketDetails(credentials, 'qrd-1148');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.strictEqual(jiraCalls, 1);
+    release();
+    const [firstTicket, secondTicket] = await Promise.all([first, second]);
+    assert.strictEqual(firstTicket.title, 'Deduplicated');
+    assert.deepStrictEqual(secondTicket, firstTicket);
+  });
+
   await t.test('distinguishes a missing Jira ticket from an upstream lookup failure', async () => {
     const api = new JiraAPI();
     (api as any).storageAPI = { getSettings: async () => ({ jiraUrl: 'example.atlassian.net', jiraEmail: 'me@example.test', jiraApiToken: 'secret' }) };

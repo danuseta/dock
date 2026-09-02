@@ -114,6 +114,94 @@ export const GET_TICKET_DETAIL = gql`
   }
 `;
 
+export const GET_TICKET_DETAIL_CORE = gql`
+  query GetTicketDetailCore($key: String!) {
+    ticketDetail(key: $key) {
+      key
+      title
+      description
+      status
+      assignee
+      url
+      sprintName
+      sprintState
+      storyPoints
+      labels
+    }
+    ticketRelationGroup(ticketKey: $key) {
+      primaryKey
+      dependsOnKey
+      ticketKeys
+    }
+    dashboard {
+      tickets { key title status }
+    }
+    settings {
+      discordMessageTemplate
+    }
+  }
+`;
+
+export const GET_TICKET_DETAIL_ENRICHMENT = gql`
+  query GetTicketDetailEnrichment($key: String!) {
+    ticketDetail(key: $key) {
+      key
+      pullRequests {
+        id
+        title
+        url
+        status
+        repo
+        type
+        owner
+        pullNumber
+        baseBranch
+        headBranch
+        commitsCount
+        commits {
+          sha
+          author
+          message
+          date
+          url
+        }
+        changedFilesCount
+        files {
+          filename
+          status
+          additions
+          deletions
+          changes
+          blobUrl
+        }
+      }
+      demoLink {
+        url
+        updatedAt
+      }
+    }
+    ticketRelationGroup(ticketKey: $key) {
+      primaryKey
+      dependsOnKey
+      ticketKeys
+      tickets {
+        key
+        title
+        url
+        pullRequests {
+          id
+          title
+          url
+          status
+          repo
+          type
+        }
+        demoLink { url }
+      }
+    }
+  }
+`;
+
 export const GET_NEEDS_ATTENTION = gql`
   query GetNeedsAttention {
     needsAttention {

@@ -65,6 +65,8 @@ export class JiraClient {
 }
 
 export class JiraService {
+  private readonly ticketDetailInFlight = new Map<string, Promise<any>>();
+
   constructor(
     private readonly storage = new StorageService(),
     private readonly client = new JiraClient(),
@@ -95,8 +97,25 @@ export class JiraService {
   }
 
   async getTicketDetails(credentials: JiraCredentials, ticketKey: string) {
-    const issue = await this.client.getTicketDetails(credentials, ticketKey);
-    return this.formatTicket(issue, cleanDomain(credentials.domain));
+    const domain = cleanDomain(credentials.domain);
+    const normalizedKey = ticketKey.trim().toUpperCase();
+    const cacheKey = `ticket_detail_${domain}_${credentials.email.trim().toLowerCase()}_${normalizedKey}`;
+    const cached = await this.storage.getCache('jira', cacheKey).catch(() => null);
+    if (cached && typeof cached === 'object') return cached;
+
+    const pending = this.ticketDetailInFlight.get(cacheKey);
+    if (pending) return pending;
+
+    const request = (async () => {
+      const issue = await this.client.getTicketDetails(credentials, normalizedKey);
+      const ticket = this.formatTicket(issue, domain);
+      if (ticket) await this.storage.upsertCache('jira', cacheKey, ticket, 600).catch(() => undefined);
+      return ticket;
+    })().finally(() => {
+      if (this.ticketDetailInFlight.get(cacheKey) === request) this.ticketDetailInFlight.delete(cacheKey);
+    });
+    this.ticketDetailInFlight.set(cacheKey, request);
+    return request;
   }
 
   listProjects(credentials: JiraCredentials) { return this.client.listProjects(credentials); }
