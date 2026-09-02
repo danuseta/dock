@@ -1,4 +1,4 @@
-import { JiraAPI } from '../datasources/JiraAPI';
+import { JiraAPI, JiraTicketLookupError } from '../datasources/JiraAPI';
 import { GitHubAPI } from '../datasources/GitHubAPI';
 import { DiscordAPI } from '../datasources/DiscordAPI';
 import { StorageAPI } from '../datasources/StorageAPI';
@@ -15,8 +15,7 @@ const storageAPI = new StorageAPI();
 const isPresent = <T>(value: T | null | undefined): value is T => value != null;
 
 async function hasMasterPin(): Promise<boolean> {
-  const settings = await storageAPI.getPublicSettings();
-  return settings.hasMasterPin === true;
+  return storageAPI.hasMasterPin();
 }
 
 async function requireUnlocked(context: AuthContext): Promise<void> {
@@ -78,7 +77,20 @@ export const resolvers = {
         }));
     },
     ticketDetail: async (_: any, { key }: { key: string }) => {
-      return await jiraAPI.getTicket(key);
+      try {
+        return await jiraAPI.getTicket(key);
+      } catch (error) {
+        if (error instanceof JiraTicketLookupError) {
+          throw new GraphQLError(error.message, {
+            extensions: {
+              code: 'SERVICE_UNAVAILABLE',
+              retryable: true,
+              statusCode: error.statusCode,
+            },
+          });
+        }
+        throw error;
+      }
     },
     ticketRelationGroup: async (_: any, { ticketKey }: { ticketKey: string }) => {
       return storageAPI.getTicketRelationGroup(ticketKey);

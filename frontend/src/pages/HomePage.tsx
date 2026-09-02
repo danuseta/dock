@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { Plus, RefreshCw, Trash2, X } from 'lucide-react';
-import { GET_HOME } from '../graphql/queries';
+import { GET_HOME_CORE, GET_HOME_SECONDARY } from '../graphql/queries';
 import { ADD_QUICK_LINK, REMOVE_QUICK_LINK } from '../graphql/mutations';
 import { GoogleSearch } from '../components/GoogleSearch';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
@@ -30,9 +30,13 @@ const textActionClass = 'h-6 border-0 px-0 py-0 text-[0.68rem] text-muted-foregr
 
 const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
   const [healthRefreshSeconds, setHealthRefreshSeconds] = useState(DEFAULT_SERVICE_HEALTH_REFRESH_SECONDS);
-  const { data, loading, error, refetch } = useQuery(GET_HOME, { ...CACHED_QUERY_OPTIONS, pollInterval: healthRefreshSeconds * 1000 });
-  const [addQuickLink, { loading: adding }] = useMutation(ADD_QUICK_LINK, { refetchQueries: [{ query: GET_HOME }] });
-  const [removeQuickLink] = useMutation(REMOVE_QUICK_LINK, { refetchQueries: [{ query: GET_HOME }] });
+  const { data: coreData, loading: coreLoading, error: coreError } = useQuery(GET_HOME_CORE, CACHED_QUERY_OPTIONS);
+  const { data: secondaryData, loading: secondaryLoading, error: secondaryError, refetch: refetchSecondary } = useQuery(
+    GET_HOME_SECONDARY,
+    { ...CACHED_QUERY_OPTIONS, pollInterval: healthRefreshSeconds * 1000 },
+  );
+  const [addQuickLink, { loading: adding }] = useMutation(ADD_QUICK_LINK, { refetchQueries: [{ query: GET_HOME_CORE }] });
+  const [removeQuickLink] = useMutation(REMOVE_QUICK_LINK, { refetchQueries: [{ query: GET_HOME_CORE }] });
   const [now, setNow] = useState(new Date());
   const [healthCountdown, setHealthCountdown] = useState(DEFAULT_SERVICE_HEALTH_REFRESH_SECONDS);
   const [showForm, setShowForm] = useState(false);
@@ -53,15 +57,15 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
   }, [healthRefreshSeconds]);
 
   useEffect(() => {
-    setHealthRefreshSeconds(normalizeServiceHealthRefreshSeconds(data?.settings?.serviceHealthRefreshSeconds));
-  }, [data?.settings?.serviceHealthRefreshSeconds]);
+    setHealthRefreshSeconds(normalizeServiceHealthRefreshSeconds(secondaryData?.settings?.serviceHealthRefreshSeconds));
+  }, [secondaryData?.settings?.serviceHealthRefreshSeconds]);
 
-  const tickets = useMemo(() => (data?.dashboard || []).flatMap((group: any) => group.tickets || []), [data]);
+  const tickets = useMemo(() => (coreData?.dashboard || []).flatMap((group: any) => group.tickets || []), [coreData]);
   const activeTickets = tickets.filter((ticket: any) => !/done|merged|closed|resolved/i.test(ticket.status));
   const storyPoints = activeTickets.reduce((total: number, ticket: any) => total + (ticket.storyPoints || 0), 0);
-  const monitors = data?.monitors || [];
+  const monitors = secondaryData?.monitors || [];
   const healthyServices = monitors.filter((monitor: any) => monitor.lastStatus === 'UP').length;
-  const calendarEvents: CalendarEvent[] = data?.calendarEvents || [];
+  const calendarEvents: CalendarEvent[] = secondaryData?.calendarEvents || [];
 
   const handleAdd = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -74,17 +78,17 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
     }
   };
 
-  const refreshHealth = async () => { setHealthCountdown(healthRefreshSeconds); await refetch(); };
+  const refreshHealth = async () => { setHealthCountdown(healthRefreshSeconds); await refetchSecondary(); };
 
-  if (isInitialQueryLoading(loading, data)) return <div className="mx-auto w-full max-w-[1500px] p-6"><LoadingSkeleton /></div>;
-  if (error && !data) return <div className="mx-auto w-full max-w-[1500px] p-6"><div className="rounded-md border border-status-conflict bg-status-conflict-bg p-6 text-pretty text-sm text-status-conflict" role="alert">Home data failed to load: {error.message}</div></div>;
+  if (isInitialQueryLoading(coreLoading, coreData)) return <div className="mx-auto w-full max-w-[1500px] p-6"><LoadingSkeleton /></div>;
+  if (coreError && !coreData) return <div className="mx-auto w-full max-w-[1500px] p-6"><div className="rounded-md border border-status-conflict bg-status-conflict-bg p-6 text-pretty text-sm text-status-conflict" role="alert">Home data failed to load: {coreError.message}</div></div>;
 
   const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening';
   const monthLabel = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   const metrics = [
     { label: 'Active tickets', value: activeTickets.length },
     { label: 'Story points', value: storyPoints },
-    { label: 'Needs attention', value: data?.needsAttention?.length || 0, className: 'text-status-conflict' },
+    { label: 'Needs attention', value: secondaryData?.needsAttention?.length || 0, className: 'text-status-conflict' },
     { label: 'Services healthy', value: `${healthyServices}/${monitors.length}`, className: 'text-status-merged' },
   ];
 
@@ -120,10 +124,10 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
               <IconButton variant="ghost" className="size-6" onClick={() => { setLinkError(''); setShowForm(true); }} aria-label="Add quick link" title="Add quick link"><Plus size={14} aria-hidden="true" /></IconButton>
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {(data?.quickLinks || []).map((link: any) => {
+              {(coreData?.quickLinks || []).map((link: any) => {
                 return <span className="group relative" key={link.id}><a className="grid size-11 place-items-center rounded-[9px] border border-border bg-surface-0 transition-colors duration-150 ease-out hover:border-border-glow hover:bg-surface-1" href={link.url} target="_blank" rel="noreferrer" aria-label={`Open ${link.title}`} title={link.title}><WebsiteIcon title={link.title} url={link.url} /></a><button className="absolute -top-[5px] -right-[5px] grid size-[17px] place-items-center rounded-full border border-border bg-surface-2 p-0 text-status-conflict opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100" type="button" aria-label={`Remove ${link.title}`} onClick={() => removeQuickLink({ variables: { id: link.id } })}><Trash2 size={10} aria-hidden="true" /></button></span>;
               })}
-              {(data?.quickLinks || []).length === 0 && <button type="button" className="min-h-11 rounded-[9px] border border-dashed border-border bg-transparent px-3 text-muted-foreground" onClick={() => setShowForm(true)}>Add your first link</button>}
+              {(coreData?.quickLinks || []).length === 0 && <button type="button" className="min-h-11 rounded-[9px] border border-dashed border-border bg-transparent px-3 text-muted-foreground" onClick={() => setShowForm(true)}>Add your first link</button>}
             </div>
           </section>
 
@@ -133,7 +137,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
             {activeTickets.length === 0 && <div className="px-3.5 py-5 text-[0.78rem] text-muted-foreground">No active Jira tickets.</div>}
           </article>
 
-          <DockerRuntimeCard runtime={data?.dockerRuntime} onNavigate={onNavigate} compact />
+          <DockerRuntimeCard runtime={secondaryData?.dockerRuntime} onNavigate={onNavigate} compact loading={secondaryLoading && !secondaryData} />
         </div>
 
         <div className="grid w-full max-w-[380px] justify-self-end gap-3.5 max-[900px]:justify-self-center max-[600px]:max-w-[360px]">
@@ -144,8 +148,8 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
 
           <article className={panelClass}>
             <header className={panelHeaderClass}><h2 className={panelTitleClass}>Service health</h2><div className="flex items-center gap-[7px]"><span className="font-mono text-[0.63rem] text-muted-foreground tabular-nums">Refresh {healthCountdown}s</span><IconButton variant="ghost" className="size-[26px] rounded-sm border-border" onClick={refreshHealth} aria-label="Refresh service health now"><RefreshCw size={13} aria-hidden="true" /></IconButton></div></header>
-            {monitors.map((monitor: any) => <div className="flex items-center gap-[11px] border-b border-border px-[15px] py-3 last:border-b-0" key={monitor.id}><span className={cn('size-2 flex-none rounded-full bg-muted-foreground', monitor.lastStatus === 'UP' ? 'bg-status-merged' : 'bg-status-conflict')} /><span className="min-w-0 flex-1"><strong className="block truncate text-[0.75rem]">{monitor.name}</strong><small className="text-[0.68rem] text-muted-foreground">{monitor.lastStatusCode ? `HTTP ${monitor.lastStatusCode}` : monitor.lastStatus || 'Not checked'}</small></span><span className="font-mono text-[0.68rem] text-muted-foreground tabular-nums">{monitor.lastLatencyMs == null ? '—' : `${monitor.lastLatencyMs} ms`}</span></div>)}
-            {monitors.length === 0 && <button type="button" className="w-full border-0 bg-transparent p-4 text-accent" onClick={() => onNavigate('/monitoring')}>Add a service monitor</button>}
+            {secondaryError && !secondaryData ? <div className="p-4 text-sm text-status-conflict" role="alert">Service health unavailable. <button type="button" className="underline" onClick={() => void refetchSecondary()}>Retry</button></div> : secondaryLoading && !secondaryData ? <div className="p-4 text-sm text-muted-foreground" role="status">Checking services...</div> : monitors.map((monitor: any) => <div className="flex items-center gap-[11px] border-b border-border px-[15px] py-3 last:border-b-0" key={monitor.id}><span className={cn('size-2 flex-none rounded-full bg-muted-foreground', monitor.lastStatus === 'UP' ? 'bg-status-merged' : 'bg-status-conflict')} /><span className="min-w-0 flex-1"><strong className="block truncate text-[0.75rem]">{monitor.name}</strong><small className="text-[0.68rem] text-muted-foreground">{monitor.lastStatusCode ? `HTTP ${monitor.lastStatusCode}` : monitor.lastStatus || 'Not checked'}</small></span><span className="font-mono text-[0.68rem] text-muted-foreground tabular-nums">{monitor.lastLatencyMs == null ? '—' : `${monitor.lastLatencyMs} ms`}</span></div>)}
+            {!secondaryLoading && !secondaryError && monitors.length === 0 && <button type="button" className="w-full border-0 bg-transparent p-4 text-accent" onClick={() => onNavigate('/monitoring')}>Add a service monitor</button>}
           </article>
         </div>
       </div>

@@ -15,6 +15,7 @@ import { buildPullRequestCacheKey, hasCanonicalTicketReference } from '../integr
 import { GoogleCalendarService, normalizeCalendarEvent } from '../integrations/google-calendar';
 import { isValidServiceHealthRefreshSeconds, StorageAPI } from '../datasources/StorageAPI';
 import { JiraService } from '../integrations/jira';
+import { JiraAPI, JiraTicketLookupError } from '../datasources/JiraAPI';
 import { UpstreamMonitorService, validateMonitorTarget } from '../integrations/upstream-monitor';
 import { DockerRuntimeService } from '../integrations/docker-runtime';
 
@@ -177,6 +178,27 @@ test('internal integration behavior', async (t) => {
     assert.strictEqual(fetched, 1);
     assert.strictEqual(tickets[0].assignee, 'M Danu Seta W');
     assert.deepStrictEqual(tickets[0].labels, ['alvinPass', 'kenPass']);
+  });
+
+  await t.test('distinguishes a missing Jira ticket from an upstream lookup failure', async () => {
+    const api = new JiraAPI();
+    (api as any).storageAPI = { getSettings: async () => ({ jiraUrl: 'example.atlassian.net', jiraEmail: 'me@example.test', jiraApiToken: 'secret' }) };
+    (api as any).jiraService = {
+      getTicketDetails: async () => {
+        throw Object.assign(new Error('missing'), { response: { status: 404 } });
+      },
+    };
+    assert.strictEqual(await api.getTicket('QRD-404'), null);
+
+    (api as any).jiraService = {
+      getTicketDetails: async () => {
+        throw Object.assign(new Error('gateway timeout'), { response: { status: 504 } });
+      },
+    };
+    await assert.rejects(
+      () => api.getTicket('QRD-1148'),
+      (error: unknown) => error instanceof JiraTicketLookupError && error.statusCode === 504,
+    );
   });
 
   await t.test('groups ticket dependencies and rejects dependency cycles', async () => {

@@ -28,7 +28,7 @@ import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Toast } from '../components/Toast';
 import { Badge, Button, Card, Input, Page, Select } from '../components/ui';
 import { cn } from '../lib/cn';
-import { CACHED_QUERY_OPTIONS, displayAssignee, isInitialQueryLoading } from '../lib/queryPolicy';
+import { DETAIL_QUERY_OPTIONS, displayAssignee } from '../lib/queryPolicy';
 import { getApprovalLabels } from '../lib/ticketApprovals';
 
 interface TicketDetailPageProps {
@@ -39,7 +39,7 @@ interface TicketDetailPageProps {
 const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const { data, loading, error, refetch } = useQuery(GET_TICKET_DETAIL, { 
-    ...CACHED_QUERY_OPTIONS,
+    ...DETAIL_QUERY_OPTIONS,
     variables: { key: ticketKey },
   });
   const [saveDemoLink] = useMutation(SAVE_DEMO_LINK);
@@ -76,20 +76,26 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
     </button>
   ) : null;
 
-  if (isInitialQueryLoading(loading, data)) return (
+  const ticket = data?.ticketDetail?.key?.toUpperCase() === ticketKey.toUpperCase()
+    ? data.ticketDetail
+    : undefined;
+
+  if (loading && !ticket) return (
     <Page width="full">
       {renderBackButton()}
       <LoadingSkeleton />
     </Page>
   );
-  if (error && !data) return (
+  if (error && !ticket) return (
     <Page width="full">
       {renderBackButton()}
-      <Card className="border-status-conflict text-status-conflict" role="alert">Error loading ticket details: {error.message}</Card>
+      <Card className="border-status-conflict text-status-conflict" role="alert">
+        <p>Error loading ticket details: {error.message}</p>
+        <Button className="mt-3" variant="primary" onClick={() => void refetch()}>Retry</Button>
+      </Card>
     </Page>
   );
 
-  const ticket = data?.ticketDetail;
   if (!ticket) return (
     <Page width="full">
       {renderBackButton()}

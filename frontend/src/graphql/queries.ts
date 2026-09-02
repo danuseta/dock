@@ -206,6 +206,67 @@ export const GET_HOME = gql`
   }
 `;
 
+export const GET_HOME_CORE = gql`
+  query GetHomeCore {
+    quickLinks {
+      id
+      title
+      url
+      color
+      position
+    }
+    dashboard {
+      status
+      tickets {
+        key
+        title
+        status
+        sprintName
+        storyPoints
+      }
+    }
+  }
+`;
+
+export const GET_HOME_SECONDARY = gql`
+  query GetHomeSecondary {
+    needsAttention {
+      id
+      message
+      ticketKey
+    }
+    calendarEvents(maxResults: 50) {
+      id
+      title
+      start
+      end
+      allDay
+      location
+      url
+      calendarId
+    }
+    monitors(refresh: true) {
+      id
+      name
+      url
+      lastStatus
+      lastStatusCode
+      lastLatencyMs
+      lastCheckedAt
+    }
+    settings {
+      serviceHealthRefreshSeconds
+    }
+    dockerRuntime {
+      available
+      total
+      running
+      stopped
+      containers { id name image state uptime }
+    }
+  }
+`;
+
 export const GET_CALENDAR = gql`
   query GetCalendar($timeMin: String, $timeMax: String, $maxResults: Int) {
     calendarEvents(timeMin: $timeMin, timeMax: $timeMax, maxResults: $maxResults) {

@@ -1,6 +1,13 @@
 import { StorageAPI } from './StorageAPI';
 import { JiraCredentials, JiraService } from '../integrations/jira';
 
+export class JiraTicketLookupError extends Error {
+  constructor(public readonly statusCode?: number) {
+    super('Jira ticket lookup is temporarily unavailable');
+    this.name = 'JiraTicketLookupError';
+  }
+}
+
 export class JiraAPI {
   private storageAPI: StorageAPI;
   private jiraService: JiraService;
@@ -41,8 +48,10 @@ export class JiraAPI {
       const { credentials } = await this.getConfiguration();
       return await this.jiraService.getTicketDetails(credentials, key);
     } catch (error: any) {
-      console.error(`[BFF JiraAPI] Error getting ticket ${key}:`, error.response?.status, error.response?.data || error.message);
-      return null;
+      const statusCode = Number.isInteger(error?.response?.status) ? error.response.status : undefined;
+      if (statusCode === 404) return null;
+      console.error(`[BFF JiraAPI] Error getting ticket ${key}:`, statusCode || error?.code || error?.message || 'unknown error');
+      throw new JiraTicketLookupError(statusCode);
     }
   }
 

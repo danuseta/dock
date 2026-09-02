@@ -5,6 +5,12 @@ export const CACHED_QUERY_OPTIONS = {
   notifyOnNetworkStatusChange: false,
 } as const;
 
+export const DETAIL_QUERY_OPTIONS = {
+  ...CACHED_QUERY_OPTIONS,
+  returnPartialData: false,
+  notifyOnNetworkStatusChange: true,
+} as const;
+
 export function isInitialQueryLoading(loading: boolean, data: unknown): boolean {
   return loading && data === undefined;
 }

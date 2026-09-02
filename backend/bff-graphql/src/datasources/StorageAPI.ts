@@ -97,6 +97,10 @@ export class StorageAPI {
     return formatted;
   }
 
+  hasMasterPin() {
+    return this.storage.hasMasterPin();
+  }
+
   async getPublicSettings() {
     const settings: any = await this.getSettings();
     return {

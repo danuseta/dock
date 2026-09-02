@@ -8,15 +8,18 @@ interface DockerRuntimeCardProps {
   runtime?: DockerRuntime;
   onNavigate: (path: string) => void;
   compact?: boolean;
+  loading?: boolean;
 }
 
-export const DockerRuntimeCard = ({ runtime, onNavigate, compact = false }: DockerRuntimeCardProps) => (
+export const DockerRuntimeCard = ({ runtime, onNavigate, compact = false, loading = false }: DockerRuntimeCardProps) => (
   <Card className="overflow-hidden p-0">
     <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
       <div className="flex items-center gap-2.5"><Box className="size-4 text-accent" aria-hidden="true" /><h2 className="text-balance font-display text-sm font-bold">Docker services</h2></div>
       <Button variant="ghost" size="sm" className="h-7 px-1.5 text-xs" onClick={() => onNavigate('/docker')}>View all <ChevronRight size={14} aria-hidden="true" /></Button>
     </header>
-    {!runtime?.available ? (
+    {loading ? (
+      <div className="px-4 py-5 text-pretty text-sm text-muted-foreground" role="status">Loading Docker runtime...</div>
+    ) : !runtime?.available ? (
       <div className="px-4 py-5 text-pretty text-sm text-muted-foreground">Docker runtime is unavailable.</div>
     ) : (
       <>
