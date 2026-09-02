@@ -4,21 +4,32 @@ import { GitHubService, SearchPRsOptions } from '../integrations/github';
 export class GitHubAPI {
   private storageAPI: StorageAPI;
   private githubService: GitHubService;
+  private authInFlight: Promise<{
+    headers: { Authorization: string };
+    repos: string;
+    hasToken: boolean;
+  }> | null = null;
 
   constructor() {
     this.storageAPI = new StorageAPI();
     this.githubService = new GitHubService();
   }
 
-  private async getAuth() {
-    const settings = await this.storageAPI.getSettings();
-    return {
+  private getAuth() {
+    if (this.authInFlight) return this.authInFlight;
+
+    const pending = this.storageAPI.getSettings().then((settings) => ({
       headers: {
         Authorization: `Bearer ${settings.githubToken || ''}`,
       },
       repos: settings.githubRepos || '',
       hasToken: !!settings.githubToken,
-    };
+    })).finally(() => {
+      if (this.authInFlight === pending) this.authInFlight = null;
+    });
+
+    this.authInFlight = pending;
+    return pending;
   }
 
   async getPullRequestsForTicket(ticketKey: string, options: SearchPRsOptions = {}) {
@@ -55,11 +66,6 @@ export class GitHubAPI {
       console.error('[BFF GitHubAPI] Error fetching PRs:', error.response?.status, error.response?.data || error.message);
       return []; // Graceful degradation
     }
-  }
-
-  async hasCachedConflictForTicket(ticketKey: string) {
-    const items = await this.getPullRequestsForTicket(ticketKey, { cacheOnly: true });
-    return items.some((pr) => pr.status?.toUpperCase() === 'CONFLICT' || pr.type?.toUpperCase() === 'CONFLICT');
   }
 
   async checkConflicts(owner: string, repo: string, pullNumber: number) {

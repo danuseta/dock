@@ -22,7 +22,6 @@ export const GET_DASHBOARD = gql`
         sprintState
         storyPoints
         labels
-        hasConflict
       }
     }
   }

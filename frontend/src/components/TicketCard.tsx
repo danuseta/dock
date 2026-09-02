@@ -19,7 +19,6 @@ interface TicketCardProps {
     sprintState?: string;
     storyPoints?: number | null;
     labels?: string[];
-    hasConflict?: boolean | null;
     pullRequests?: any[];
     demoLink?: { url: string };
   };
@@ -27,7 +26,7 @@ interface TicketCardProps {
 }
 
 export const TicketCard: React.FC<TicketCardProps> = ({ ticket, onClick }) => {
-  const hasConflict = ticket.hasConflict ?? ticket.pullRequests?.some(pr => pr.status?.toUpperCase() === 'CONFLICT') ?? false;
+  const hasConflict = ticket.pullRequests?.some(pr => pr.status?.toUpperCase() === 'CONFLICT') ?? false;
   const isOldSprint = ticket.sprintState === 'CLOSED';
   const approvalLabels = getApprovalLabels(ticket.labels);
   const assignee = displayAssignee(ticket.assignee);

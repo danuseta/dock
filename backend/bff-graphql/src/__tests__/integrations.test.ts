@@ -11,7 +11,7 @@ import {
   formatDiscordMessage,
   normalizeDiscordMessageTemplate,
 } from '../integrations/discord';
-import { buildPullRequestCacheKey, GitHubService, hasCanonicalTicketReference } from '../integrations/github';
+import { buildPullRequestCacheKey, hasCanonicalTicketReference } from '../integrations/github';
 import { GoogleCalendarService, normalizeCalendarEvent } from '../integrations/google-calendar';
 import { isValidServiceHealthRefreshSeconds, StorageAPI } from '../datasources/StorageAPI';
 import { JiraService } from '../integrations/jira';
@@ -269,18 +269,6 @@ test('internal integration behavior', async (t) => {
     assert.notStrictEqual(first, second);
     assert.ok(!first.includes('github-token'));
     assert.ok(!second.includes('github-token'));
-  });
-
-  await t.test('cache-only PR lookup never starts a GitHub request on a cache miss', async () => {
-    let cacheReads = 0;
-    const service = new GitHubService({
-      getCache: async () => { cacheReads += 1; return null; },
-      upsertCache: async () => { throw new Error('cache-only lookup must not write'); },
-    } as any);
-
-    const result = await service.searchPRs('github-token', ['org/repo'], 'QRD-1', { cacheOnly: true });
-    assert.deepStrictEqual(result, []);
-    assert.strictEqual(cacheReads, 1);
   });
 
   await t.test('matches ticket keys only in canonical PR fields with exact boundaries', () => {
