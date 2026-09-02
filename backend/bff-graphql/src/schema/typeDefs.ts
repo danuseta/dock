@@ -14,6 +14,7 @@ export const typeDefs = gql`
     sprintState: String
     storyPoints: Float
     labels: [String!]!
+    hasConflict: Boolean
     pullRequests: [PullRequest!]
     demoLink: DemoLink
   }

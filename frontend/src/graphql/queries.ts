@@ -22,18 +22,7 @@ export const GET_DASHBOARD = gql`
         sprintState
         storyPoints
         labels
-        pullRequests {
-          id
-          title
-          url
-          status
-          repo
-          type
-          owner
-          pullNumber
-          baseBranch
-          headBranch
-        }
+        hasConflict
       }
     }
   }

@@ -57,6 +57,11 @@ export class GitHubAPI {
     }
   }
 
+  async hasCachedConflictForTicket(ticketKey: string) {
+    const items = await this.getPullRequestsForTicket(ticketKey, { cacheOnly: true });
+    return items.some((pr) => pr.status?.toUpperCase() === 'CONFLICT' || pr.type?.toUpperCase() === 'CONFLICT');
+  }
+
   async checkConflicts(owner: string, repo: string, pullNumber: number) {
     try {
       const auth = await this.getAuth();

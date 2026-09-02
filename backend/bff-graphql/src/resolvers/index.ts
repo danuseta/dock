@@ -138,6 +138,7 @@ export const resolvers = {
   
   Ticket: {
     labels: (parent: any) => Array.isArray(parent.labels) ? parent.labels : [],
+    hasConflict: async (parent: any) => githubAPI.hasCachedConflictForTicket(parent.key),
     pullRequests: async (parent: any) => {
       return await githubAPI.getPullRequestsForTicket(parent.key, {
         staleWhileRevalidate: parent.__dashboard === true,

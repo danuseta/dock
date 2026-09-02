@@ -24,6 +24,7 @@ export function hasCanonicalTicketReference(pr: any, ticketKey: string): boolean
 
 export interface SearchPRsOptions {
   staleWhileRevalidate?: boolean;
+  cacheOnly?: boolean;
 }
 
 export class GitHubClient {
@@ -186,6 +187,8 @@ export class GitHubService {
       }
       return cached;
     }
+
+    if (options.cacheOnly) return [];
 
     const pending = this.fetchAndCachePRsOnce(pat, repos, ticketKey, cacheKey);
     if (options.staleWhileRevalidate) {
