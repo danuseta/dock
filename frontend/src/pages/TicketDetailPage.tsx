@@ -144,7 +144,8 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const handleSaveDemo = async () => {
     if (!demoUrl) return;
     try {
-      await saveDemoLink({ variables: { ticketKey, url: demoUrl } });
+      const saved = await saveDemoLink({ variables: { ticketKey, url: demoUrl } });
+      if (saved.data?.saveDemoLink !== true) throw new Error('Demo recording link was not stored');
       await refetchEnrichment();
       setToast({ message: 'Demo recording link saved permanently!', type: 'success' });
       setDemoUrl('');

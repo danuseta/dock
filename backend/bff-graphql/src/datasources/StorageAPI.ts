@@ -33,7 +33,10 @@ export class StorageAPI {
     try {
       await this.storage.upsertDemoLink(ticketKey, url);
       return true;
-    } catch { return false; }
+    } catch (error) {
+      console.error(`[Storage] Failed to save demo link for ${ticketKey}:`, error instanceof Error ? error.message : error);
+      return false;
+    }
   }
 
   async getTicketRelationGroup(ticketKeyInput: string) {
