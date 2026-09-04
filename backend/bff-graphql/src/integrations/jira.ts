@@ -64,58 +64,93 @@ export class JiraClient {
   }
 }
 
+const ASSIGNED_TICKETS_TTL_SECONDS = 3600;
+const TICKET_DETAIL_TTL_SECONDS = 600;
+const REVALIDATE_AFTER_MS = 45000;
+
 export class JiraService {
-  private readonly ticketDetailInFlight = new Map<string, Promise<any>>();
+  private readonly inFlight = new Map<string, Promise<any>>();
+  private readonly lastRefresh = new Map<string, number>();
 
   constructor(
     private readonly storage = new StorageService(),
     private readonly client = new JiraClient(),
   ) {}
 
+  private fetchFresh<T>(cacheKey: string, fetcher: () => Promise<T>): Promise<T> {
+    return fetcher().finally(() => this.lastRefresh.set(cacheKey, Date.now()));
+  }
+
+  private fetchOnce<T>(cacheKey: string, fetcher: () => Promise<T>): Promise<T> {
+    const pending = this.inFlight.get(cacheKey);
+    if (pending) return pending;
+
+    const request = this.fetchFresh(cacheKey, fetcher).finally(() => {
+      if (this.inFlight.get(cacheKey) === request) this.inFlight.delete(cacheKey);
+    });
+    this.inFlight.set(cacheKey, request);
+    return request;
+  }
+
+  private revalidateIfStale(cacheKey: string, fetcher: () => Promise<unknown>): void {
+    if (Date.now() - (this.lastRefresh.get(cacheKey) || 0) <= REVALIDATE_AFTER_MS) return;
+    void this.fetchOnce(cacheKey, fetcher).catch(() => undefined);
+  }
+
   async getAssignedTickets(credentials: JiraCredentials, projectKeys: string[] = [], forceRefresh = false) {
     const domain = cleanDomain(credentials.domain);
     const projects = cleanProjectKeys(projectKeys);
     const cacheKey = `assigned_tickets_${domain}_${credentials.email.trim()}_${projects.join('-') || 'all'}`;
 
-    if (!forceRefresh) {
-      const cached = await this.storage.getCache('jira', cacheKey).catch(() => null);
-      const isCurrentCache = Array.isArray(cached) && cached.every((ticket: any) => (
-        Array.isArray(ticket?.labels)
-        && typeof ticket?.assignee === 'string'
-        && ticket.assignee.trim().length > 0
-        && ticket.assignee !== 'Unassigned'
-      ));
-      if (isCurrentCache) return cached;
+    const fetchTickets = async () => {
+      const response = await this.client.fetchAssignedTickets(credentials, projects);
+      const tickets = (response?.issues || [])
+        .map((issue: any) => this.formatTicket(issue, domain))
+        .filter(Boolean);
+      await this.storage.upsertCache('jira', cacheKey, tickets, ASSIGNED_TICKETS_TTL_SECONDS).catch(() => undefined);
+      return tickets;
+    };
+
+    if (forceRefresh) {
+      await this.inFlight.get(cacheKey)?.catch(() => undefined);
+      return this.fetchFresh(cacheKey, fetchTickets);
     }
 
-    const response = await this.client.fetchAssignedTickets(credentials, projects);
-    const tickets = (response?.issues || [])
-      .map((issue: any) => this.formatTicket(issue, domain))
-      .filter(Boolean);
-    await this.storage.upsertCache('jira', cacheKey, tickets, 3600).catch(() => undefined);
-    return tickets;
+    const cached = await this.storage.getCache('jira', cacheKey).catch(() => null);
+    const isCurrentCache = Array.isArray(cached) && cached.every((ticket: any) => (
+      Array.isArray(ticket?.labels)
+      && typeof ticket?.assignee === 'string'
+      && ticket.assignee.trim().length > 0
+      && ticket.assignee !== 'Unassigned'
+    ));
+    if (isCurrentCache) {
+      this.revalidateIfStale(cacheKey, fetchTickets);
+      return cached;
+    }
+    return this.fetchOnce(cacheKey, fetchTickets);
   }
 
   async getTicketDetails(credentials: JiraCredentials, ticketKey: string) {
     const domain = cleanDomain(credentials.domain);
     const normalizedKey = ticketKey.trim().toUpperCase();
     const cacheKey = `ticket_detail_${domain}_${credentials.email.trim().toLowerCase()}_${normalizedKey}`;
-    const cached = await this.storage.getCache('jira', cacheKey).catch(() => null);
-    if (cached && typeof cached === 'object') return cached;
 
-    const pending = this.ticketDetailInFlight.get(cacheKey);
-    if (pending) return pending;
-
-    const request = (async () => {
+    const fetchTicket = async () => {
       const issue = await this.client.getTicketDetails(credentials, normalizedKey);
       const ticket = this.formatTicket(issue, domain);
-      if (ticket) await this.storage.upsertCache('jira', cacheKey, ticket, 600).catch(() => undefined);
+      if (ticket) {
+        await this.storage.upsertCache('jira', cacheKey, ticket, TICKET_DETAIL_TTL_SECONDS).catch(() => undefined);
+      }
       return ticket;
-    })().finally(() => {
-      if (this.ticketDetailInFlight.get(cacheKey) === request) this.ticketDetailInFlight.delete(cacheKey);
-    });
-    this.ticketDetailInFlight.set(cacheKey, request);
-    return request;
+    };
+
+    const cached = await this.storage.getCache('jira', cacheKey).catch(() => null);
+    if (cached && typeof cached === 'object') {
+      this.revalidateIfStale(cacheKey, fetchTicket);
+      return cached;
+    }
+
+    return this.fetchOnce(cacheKey, fetchTicket);
   }
 
   listProjects(credentials: JiraCredentials) { return this.client.listProjects(credentials); }

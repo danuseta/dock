@@ -41,6 +41,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const { data: coreData, loading: coreLoading, error: coreError, refetch: refetchCore } = useQuery(GET_TICKET_DETAIL_CORE, { 
     ...DETAIL_QUERY_OPTIONS,
     variables: { key: ticketKey },
+    pollInterval: 30000,
   });
   const { data: cachedDashboardData } = useQuery(GET_DASHBOARD, {
     fetchPolicy: 'cache-only',

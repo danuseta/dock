@@ -180,23 +180,314 @@ test('internal integration behavior', async (t) => {
     assert.deepStrictEqual(tickets[0].labels, ['alvinPass', 'kenPass']);
   });
 
-  await t.test('serves cached Jira ticket details without calling Jira', async () => {
+  await t.test('revalidates cached assigned Jira tickets in the background and re-upserts', async () => {
+    const cachedTickets = [{ key: 'QRD-1', title: 'Cached', status: 'TODO', assignee: 'M Danu Seta W', labels: ['alvinPass'] }];
+    let fetchCalls = 0;
+    let upserted: any = null;
+    const storage = {
+      getCache: async () => cachedTickets,
+      upsertCache: async (_namespace: string, _key: string, value: unknown) => { upserted = value; },
+    };
+    const client = {
+      fetchAssignedTickets: async () => {
+        fetchCalls += 1;
+        return { issues: [{ key: 'QRD-1', fields: { summary: 'Fresh', status: { name: 'DONE' }, assignee: { displayName: 'M Danu Seta W' }, labels: ['alvinPass'] } }] };
+      },
+    };
+    const service = new JiraService(storage as any, client as any);
+    const credentials = { domain: 'company.atlassian.net', email: 'me@example.test', apiToken: 'secret' };
+
+    const tickets = await service.getAssignedTickets(credentials);
+    assert.strictEqual(tickets, cachedTickets);
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.strictEqual(fetchCalls, 1);
+    assert.strictEqual(upserted?.[0]?.status, 'DONE');
+  });
+
+  await t.test('does not revalidate cached assigned Jira tickets again inside the revalidation window', async () => {
+    let fetchCalls = 0;
+    const freshTicket = { key: 'QRD-2', title: 'Fresh', status: 'TODO', assignee: 'M Danu Seta W', labels: ['alvinPass'] };
+    const storage: { getCache: () => Promise<any>; upsertCache: () => Promise<void> } = {
+      getCache: async () => null,
+      upsertCache: async () => undefined,
+    };
+    const client = {
+      fetchAssignedTickets: async () => {
+        fetchCalls += 1;
+        return { issues: [{ key: 'QRD-2', fields: { summary: 'Fresh', status: { name: 'TODO' }, assignee: { displayName: 'M Danu Seta W' }, labels: ['alvinPass'] } }] };
+      },
+    };
+    const service = new JiraService(storage as any, client as any);
+    const credentials = { domain: 'company.atlassian.net', email: 'me@example.test', apiToken: 'secret' };
+
+    await service.getAssignedTickets(credentials);
+    assert.strictEqual(fetchCalls, 1);
+
+    storage.getCache = async () => [freshTicket];
+    await service.getAssignedTickets(credentials);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.strictEqual(fetchCalls, 1);
+  });
+
+  await t.test('serves cached Jira assigned tickets without waiting on a background Jira revalidation', async () => {
+    const cachedTickets = [{ key: 'QRD-5', title: 'Cached', status: 'TODO', assignee: 'M Danu Seta W', labels: ['alvinPass'] }];
+    let jiraCalls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const service = new JiraService({
+      getCache: async () => cachedTickets,
+      upsertCache: async () => undefined,
+    } as any, {
+      fetchAssignedTickets: async () => { jiraCalls += 1; await gate; return { issues: [] }; },
+    } as any);
+
+    assert.deepStrictEqual(await service.getAssignedTickets({
+      domain: 'company.atlassian.net', email: 'me@example.test', apiToken: 'secret',
+    }), cachedTickets);
+
+    release();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.strictEqual(jiraCalls, 1);
+  });
+
+  await t.test('revalidates once the cache entry crosses the 45s staleness boundary', async () => {
+    let fetchCalls = 0;
+    const freshTicket = { key: 'QRD-6', title: 'Fresh', status: 'TODO', assignee: 'M Danu Seta W', labels: ['alvinPass'] };
+    const storage: { getCache: () => Promise<any>; upsertCache: () => Promise<void> } = {
+      getCache: async () => null,
+      upsertCache: async () => undefined,
+    };
+    const client = {
+      fetchAssignedTickets: async () => {
+        fetchCalls += 1;
+        return { issues: [{ key: 'QRD-6', fields: { summary: 'Fresh', status: { name: 'TODO' }, assignee: { displayName: 'M Danu Seta W' }, labels: ['alvinPass'] } }] };
+      },
+    };
+    const service = new JiraService(storage as any, client as any);
+    const credentials = { domain: 'company.atlassian.net', email: 'me@example.test', apiToken: 'secret' };
+
+    await service.getAssignedTickets(credentials);
+    assert.strictEqual(fetchCalls, 1);
+
+    storage.getCache = async () => [freshTicket];
+    const originalDateNow = Date.now;
+    try {
+      const realNow = originalDateNow();
+      Date.now = () => realNow + 46_000;
+      await service.getAssignedTickets(credentials);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.strictEqual(fetchCalls, 2);
+    } finally {
+      Date.now = originalDateNow;
+    }
+  });
+
+  await t.test('forceRefresh does not join an in-flight background revalidation', async () => {
+    const cachedTickets = [{ key: 'QRD-7', title: 'Cached', status: 'TODO', assignee: 'M Danu Seta W', labels: ['alvinPass'] }];
+    let clientCalls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const storage = {
+      getCache: async () => cachedTickets,
+      upsertCache: async () => undefined,
+    };
+    const client = {
+      fetchAssignedTickets: async () => {
+        clientCalls += 1;
+        await gate;
+        return { issues: [] };
+      },
+    };
+    const service = new JiraService(storage as any, client as any);
+    const credentials = { domain: 'company.atlassian.net', email: 'me@example.test', apiToken: 'secret' };
+
+    const first = await service.getAssignedTickets(credentials);
+    assert.strictEqual(first, cachedTickets);
+    assert.strictEqual(clientCalls, 1);
+
+    const second = service.getAssignedTickets(credentials, [], true);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.strictEqual(clientCalls, 1);
+
+    release();
+    await second;
+    assert.strictEqual(clientCalls, 2);
+  });
+
+  await t.test('a forced refresh waits out an in-flight background revalidation and lands last', async () => {
+    const cachedTickets = [{ key: 'QRD-8', title: 'Cached', status: 'TODO', assignee: 'M Danu Seta W', labels: ['alvinPass'] }];
+    let clientCalls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const upserts: string[] = [];
+    const storage = {
+      getCache: async () => cachedTickets,
+      upsertCache: async (_namespace: string, _key: string, value: any) => { upserts.push(value[0].status); },
+    };
+    const client = {
+      fetchAssignedTickets: async () => {
+        clientCalls += 1;
+        if (clientCalls === 1) {
+          await gate;
+          return { issues: [{ key: 'QRD-8', fields: { summary: 'Old', status: { name: 'OLD' }, assignee: { displayName: 'M Danu Seta W' }, labels: ['alvinPass'] } }] };
+        }
+        return { issues: [{ key: 'QRD-8', fields: { summary: 'New', status: { name: 'NEW' }, assignee: { displayName: 'M Danu Seta W' }, labels: ['alvinPass'] } }] };
+      },
+    };
+    const service = new JiraService(storage as any, client as any);
+    const credentials = { domain: 'company.atlassian.net', email: 'me@example.test', apiToken: 'secret' };
+
+    const background = await service.getAssignedTickets(credentials);
+    assert.strictEqual(background, cachedTickets);
+    assert.strictEqual(clientCalls, 1);
+
+    const forced = service.getAssignedTickets(credentials, [], true);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.strictEqual(clientCalls, 1);
+
+    release();
+    const forcedResult = await forced;
+    assert.strictEqual(clientCalls, 2);
+    assert.deepStrictEqual(upserts, ['OLD', 'NEW']);
+    assert.strictEqual(forcedResult[0].status, 'NEW');
+  });
+
+  await t.test('serves cached Jira ticket details without waiting on a background Jira revalidation', async () => {
     const cachedTicket = { key: 'QRD-1148', title: 'Cached detail', status: 'IN PROGRESS' };
     let jiraCalls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
     const service = new JiraService({
       getCache: async (namespace: string, key: string) => {
         assert.strictEqual(namespace, 'jira');
         assert.match(key, /ticket_detail_company\.atlassian\.net_me@example\.test_QRD-1148/);
         return cachedTicket;
       },
+      upsertCache: async () => undefined,
     } as any, {
-      getTicketDetails: async () => { jiraCalls += 1; return null; },
+      getTicketDetails: async () => { jiraCalls += 1; await gate; return null; },
     } as any);
 
     assert.deepStrictEqual(await service.getTicketDetails({
       domain: 'https://company.atlassian.net/', email: 'me@example.test', apiToken: 'secret',
     }, 'qrd-1148'), cachedTicket);
-    assert.strictEqual(jiraCalls, 0);
+
+    release();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.strictEqual(jiraCalls, 1);
+  });
+
+  await t.test('revalidates cached Jira ticket details in the background and re-upserts', async () => {
+    const cachedTicket = { key: 'QRD-1148', title: 'Cached detail', status: 'IN PROGRESS' };
+    let fetchCalls = 0;
+    let upserted: any = null;
+    const storage = {
+      getCache: async () => cachedTicket,
+      upsertCache: async (_namespace: string, _key: string, value: unknown) => { upserted = value; },
+    };
+    const client = {
+      getTicketDetails: async () => {
+        fetchCalls += 1;
+        return { key: 'QRD-1148', fields: { summary: 'Fresh detail', status: { name: 'DONE' } } };
+      },
+    };
+    const service = new JiraService(storage as any, client as any);
+    const credentials = { domain: 'company.atlassian.net', email: 'me@example.test', apiToken: 'secret' };
+
+    const ticket = await service.getTicketDetails(credentials, 'QRD-1148');
+    assert.deepStrictEqual(ticket, cachedTicket);
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.strictEqual(fetchCalls, 1);
+    assert.strictEqual(upserted?.status, 'DONE');
+  });
+
+  await t.test('does not revalidate cached Jira ticket details again inside the revalidation window', async () => {
+    let fetchCalls = 0;
+    const storage: { getCache: () => Promise<any>; upsertCache: () => Promise<void> } = {
+      getCache: async () => null,
+      upsertCache: async () => undefined,
+    };
+    const client = {
+      getTicketDetails: async () => {
+        fetchCalls += 1;
+        return { key: 'QRD-1148', fields: { summary: 'Fresh detail', status: { name: 'TODO' } } };
+      },
+    };
+    const service = new JiraService(storage as any, client as any);
+    const credentials = { domain: 'company.atlassian.net', email: 'me@example.test', apiToken: 'secret' };
+
+    await service.getTicketDetails(credentials, 'QRD-1148');
+    assert.strictEqual(fetchCalls, 1);
+
+    storage.getCache = async () => ({ key: 'QRD-1148', title: 'Fresh detail', status: 'TODO' });
+    await service.getTicketDetails(credentials, 'QRD-1148');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.strictEqual(fetchCalls, 1);
+  });
+
+  await t.test('keeps serving cached Jira ticket details when a background revalidation rejects', async () => {
+    const cachedTicket = { key: 'QRD-1148', title: 'Cached detail', status: 'IN PROGRESS' };
+    let fetchCalls = 0;
+    const storage = {
+      getCache: async () => cachedTicket,
+      upsertCache: async () => undefined,
+    };
+    const client = {
+      getTicketDetails: async () => {
+        fetchCalls += 1;
+        throw new Error('Jira upstream unavailable');
+      },
+    };
+    const service = new JiraService(storage as any, client as any);
+    const credentials = { domain: 'company.atlassian.net', email: 'me@example.test', apiToken: 'secret' };
+
+    let unhandledRejections = 0;
+    const onUnhandledRejection = () => { unhandledRejections += 1; };
+    process.on('unhandledRejection', onUnhandledRejection);
+    try {
+      const ticket = await service.getTicketDetails(credentials, 'QRD-1148');
+      assert.deepStrictEqual(ticket, cachedTicket);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    } finally {
+      process.off('unhandledRejection', onUnhandledRejection);
+    }
+    assert.strictEqual(fetchCalls, 1);
+    assert.strictEqual(unhandledRejections, 0);
+  });
+
+  await t.test('throttles further upstream calls after a rejecting background revalidation', async () => {
+    const cachedTicket = { key: 'QRD-1200', title: 'Cached detail', status: 'IN PROGRESS' };
+    let fetchCalls = 0;
+    const storage = {
+      getCache: async () => cachedTicket,
+      upsertCache: async () => undefined,
+    };
+    const client = {
+      getTicketDetails: async () => {
+        fetchCalls += 1;
+        throw new Error('Jira upstream unavailable');
+      },
+    };
+    const service = new JiraService(storage as any, client as any);
+    const credentials = { domain: 'company.atlassian.net', email: 'me@example.test', apiToken: 'secret' };
+
+    let unhandledRejections = 0;
+    const onUnhandledRejection = () => { unhandledRejections += 1; };
+    process.on('unhandledRejection', onUnhandledRejection);
+    try {
+      await service.getTicketDetails(credentials, 'QRD-1200');
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.strictEqual(fetchCalls, 1);
+
+      await service.getTicketDetails(credentials, 'QRD-1200');
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.strictEqual(fetchCalls, 1);
+    } finally {
+      process.off('unhandledRejection', onUnhandledRejection);
+    }
+    assert.strictEqual(unhandledRejections, 0);
   });
 
   await t.test('deduplicates concurrent Jira ticket detail lookups', async () => {

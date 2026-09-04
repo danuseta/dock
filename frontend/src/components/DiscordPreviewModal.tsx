@@ -27,7 +27,7 @@ export const DiscordPreviewModal: React.FC<DiscordPreviewModalProps> = ({ isOpen
     setMessage(renderDiscordMessageTemplate(messageTemplate, { ticket, relatedTickets, pullRequests, demoUrl }));
     setThreadId('');
     setThreadName('');
-  }, [isOpen, ticket, relatedTickets, pullRequests, demoUrl, messageTemplate]);
+  }, [isOpen]);
 
   const handleSubmit = async () => onConfirm(message, threadId.trim() || undefined, threadName.trim() || undefined);
 
