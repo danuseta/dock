@@ -145,6 +145,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
     if (!demoUrl) return;
     try {
       await saveDemoLink({ variables: { ticketKey, url: demoUrl } });
+      await refetchEnrichment();
       setToast({ message: 'Demo recording link saved permanently!', type: 'success' });
       setDemoUrl('');
     } catch (err) {
