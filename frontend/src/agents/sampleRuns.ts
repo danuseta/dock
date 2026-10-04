@@ -62,7 +62,7 @@ export function sampleTimeline(elapsed: number): AgentTimeline {
   const waiting = step === 4;
   const tool = ['Edit', 'Read', 'Bash', 'Grep'][Math.floor(elapsedSeconds / 2) % 4];
   const member = (id: string, name: string, detail: string, doneAfter: number) => ({
-    id, parentId: 'main', name, detail,
+    id, parentId: 'coord', name, detail,
     state: sinceStep >= doneAfter ? 'done' : 'active',
     tool: sinceStep >= doneAfter ? null : tool,
     tools: Math.min(sinceStep, doneAfter) + 1,
@@ -91,7 +91,8 @@ export function sampleTimeline(elapsed: number): AgentTimeline {
       ...(waiting ? [{ id: 'g2', stageIndex: 4, text: run.waiting || '', state: 'waiting', at: new Date(now - sinceStep * 1000).toISOString() }] : []),
     ],
     agents: [
-      { id: 'main', parentId: null, name: 'lead', detail: 'sample team', state: waiting ? 'waiting' : 'active', tool: waiting ? null : team.length ? 'Agent' : tool, tools: 6 + elapsedSeconds % 35 },
+      { id: 'main', parentId: null, name: 'lead', detail: 'sample team', state: waiting ? 'waiting' : 'active', tool: null, tools: 2 },
+      { id: 'coord', parentId: 'main', name: 'coord-sample', detail: 'SAMPLE-2 coordinator', state: 'active', tool: waiting ? null : team.length ? 'Agent' : tool, tools: 6 + elapsedSeconds % 35 },
       ...team,
     ],
     buckets,

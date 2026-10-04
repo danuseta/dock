@@ -471,6 +471,7 @@ export const GET_GITHUB_REPOS = gql`
 
 const ORCHESTRATION_FIELDS = `
   key
+  kind
   title
   stage
   waiting

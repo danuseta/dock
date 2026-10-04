@@ -4,13 +4,20 @@ import {
   ACTIVE_GRACE_WINDOW, THINKING_WINDOW_SECS, applyHook, isStale, poseOf, slotFromServer, tickActivity,
   type ActivitySlot,
 } from '../agents/office/activity';
-import { FURNITURE, MEMBERS_PER_ROW, NAV_GRID, SPOTS, STAGE_ZONES, WAITING_ROW, ZONES, memberSpot, zoneForStage } from '../agents/office/layout';
-import { calculateWalkDuration, getZoneDoorPoint, interpolatePathPosition, pathLength, planWalkPath, routeThroughDoors } from '../agents/office/movement';
+import {
+  EXIT, FURNITURE, LEAD_SEAT, MAX_PODS, MEMBER_DESKS, NAV_GRID,
+  coordinatorSeat, doorOf, memberSeat, podId, podIndexOf, podZone, railIndex, waitingSpot,
+} from '../agents/office/layout';
+import { calculateWalkDuration, interpolatePathPosition, pathLength, planWalkPath, routeThroughDoors } from '../agents/office/movement';
 import { GRID_CELL, GRID_COLS, astar, buildNavGrid, toWorld } from '../agents/office/navigation';
-import { formatAge, runStatus, shirtColor } from '../agents/runs';
+import { formatAge, runStatus, shirtColor, splitTeam, stageName } from '../agents/runs';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 
 const blocked = (x: number, y: number) => NAV_GRID[Math.floor(y / GRID_CELL) * GRID_COLS + Math.floor(x / GRID_CELL)] === 1;
+const reaches = (from: { x: number; y: number }, to: { x: number; y: number }) => {
+  const path = astar(from.x, from.y, to.x, to.y, NAV_GRID);
+  return path.length > 0 && path[path.length - 1].x === to.x && path[path.length - 1].y === to.y;
+};
 
 test('status rules: grace window, thinking window and staleness', () => {
   const slot: ActivitySlot = { state: 'IDLE', detail: null, lastEventAt: 0, endedAt: null };
@@ -39,48 +46,70 @@ test('server ages become local timestamps without trusting either clock', () => 
   assert.strictEqual(slotFromServer({ activity: 'UNKNOWN', idleSeconds: 0 }, 5).state, 'IDLE');
 });
 
-test('ledger stages map onto the five rooms', () => {
-  assert.deepStrictEqual(['gate', 'plan', 'code', 'test', 'verify'].map(zoneForStage), STAGE_ZONES);
-  assert.deepStrictEqual(['evidence', 'commit', 'pr'].map(zoneForStage), ['verify', 'verify', 'verify']);
-  assert.strictEqual(zoneForStage('done'), 'corridor');
-  assert.strictEqual(zoneForStage('blocked'), 'gate');
+test('ledger stages map onto the six-stop rail, and a review names them its own way', () => {
+  assert.deepStrictEqual(['gate', 'plan', 'code', 'test', 'verify', 'evidence', 'commit', 'pr', 'done', 'blocked'].map(railIndex), [0, 1, 2, 3, 4, 4, 4, 5, 6, 0]);
+  assert.deepStrictEqual(['code', 'verify', 'pr'].map((stage) => stageName(stage, 'build')), ['Code', 'Verify', 'PR']);
+  assert.deepStrictEqual(['code', 'verify', 'pr'].map((stage) => stageName(stage, 'review')), ['Review', 'Evidence', 'Verdict']);
 });
 
-test('every door is on walkable floor and every seat can be reached from it', () => {
-  for (const zone of STAGE_ZONES) {
-    const door = getZoneDoorPoint(zone);
-    assert.strictEqual(blocked(door.x, door.y), false, `${zone} door`);
-    // Seats at a table sit inside its padding; A* steps to the nearest free cell and finishes on the seat.
-    for (const spot of SPOTS[zone]) {
-      const path = astar(door.x, door.y, spot.x, spot.y, NAV_GRID);
-      assert.deepStrictEqual(path[path.length - 1], spot, `${zone} seat ${spot.x},${spot.y}`);
+test('every pod has a reachable desk for its coordinator and each member', () => {
+  const seats = new Set<string>();
+  for (let pod = 0; pod < MAX_PODS; pod += 1) {
+    const zone = podZone(pod);
+    const door = doorOf(podId(pod));
+    assert.strictEqual(blocked(door.x, door.y), false, `pod ${pod} door is on free floor`);
+    const inside = (point: { x: number; y: number }) => point.x > zone.x && point.x < zone.x + zone.width && point.y > zone.y && point.y < zone.y + zone.height;
+
+    const front = coordinatorSeat(pod);
+    assert.ok(inside(front) && reaches(door, front), `pod ${pod} coordinator seat`);
+    seats.add(`${front.x},${front.y}`);
+    for (let desk = 0; desk < MEMBER_DESKS; desk += 1) {
+      const seat = memberSeat(pod, desk);
+      assert.ok(inside(seat), `pod ${pod} desk ${desk} is inside the pod`);
+      assert.strictEqual(blocked(seat.x, seat.y), false, `pod ${pod} desk ${desk} seat is free floor`);
+      assert.ok(reaches(front, seat), `pod ${pod} desk ${desk} can be walked to from the front desk`);
+      seats.add(`${seat.x},${seat.y}`);
     }
+    assert.strictEqual(podIndexOf(podId(pod)), pod);
   }
-  for (const offset of [-225, -135, -45, 45, 135, 225]) {
-    assert.strictEqual(blocked(WAITING_ROW.x + offset, WAITING_ROW.y), false, `waiting spot ${offset}`);
+  assert.strictEqual(seats.size, MAX_PODS * (MEMBER_DESKS + 1), 'no two people share a seat');
+  assert.strictEqual(podIndexOf('you'), -1);
+});
+
+test('the lead, the owner queue and the exit are all reachable from a pod', () => {
+  const from = coordinatorSeat(4);
+  for (let index = 0; index < 7; index += 1) {
+    const spot = waitingSpot(index, 7);
+    assert.strictEqual(blocked(spot.x, spot.y), false, `queue spot ${index}`);
+    assert.ok(reaches(from, spot), `queue spot ${index} from a back pod`);
   }
+  assert.strictEqual(new Set(Array.from({ length: 7 }, (_, index) => waitingSpot(index, 7).x)).size, 7);
+  assert.ok(reaches(from, EXIT));
+  assert.ok(reaches(doorOf('lead'), LEAD_SEAT));
 });
 
 test('A* walks around furniture and never cuts through a blocked cell', () => {
   const grid = buildNavGrid(FURNITURE);
-  const path = astar(820, 235, 970, 235, grid);
+  const start = coordinatorSeat(0);
+  const end = memberSeat(0, 5);
+  const path = astar(start.x, start.y, end.x, end.y, grid);
   assert.ok(path.length > 1);
-  assert.deepStrictEqual(path[path.length - 1], { x: 970, y: 235 });
-  for (const point of path) assert.strictEqual(blocked(point.x, point.y), false);
+  assert.deepStrictEqual(path[path.length - 1], end);
+  for (const point of path.slice(0, -1)) assert.strictEqual(blocked(point.x, point.y), false);
 
   const walled = new Uint8Array(grid.length).fill(1);
   assert.deepStrictEqual(astar(100, 100, 900, 900, walled), []);
 });
 
-test('walks between rooms leave by one door and enter by the other', () => {
-  const from = SPOTS.code[0];
-  const to = SPOTS.verify[0];
-  assert.deepStrictEqual(planWalkPath(from, to, 'code', 'verify'), [from, getZoneDoorPoint('code'), getZoneDoorPoint('verify'), to]);
-  assert.deepStrictEqual(planWalkPath(from, to, 'code', 'code'), [from, to]);
+test('walks between areas leave by one door and enter by the other', () => {
+  const from = coordinatorSeat(3);
+  const to = waitingSpot(0, 1);
+  assert.deepStrictEqual(planWalkPath(from, to, 'pod3', 'you'), [from, doorOf('pod3'), doorOf('you'), to]);
+  assert.deepStrictEqual(planWalkPath(from, to, 'pod3', 'pod3'), [from, to]);
 
-  const route = routeThroughDoors(from, { ...WAITING_ROW }, 'code', 'you');
+  const route = routeThroughDoors(from, to, 'pod3', 'you');
   assert.deepStrictEqual(route[0], from);
-  assert.deepStrictEqual(route[route.length - 1], WAITING_ROW);
+  assert.deepStrictEqual(route[route.length - 1], to);
   for (const point of route.slice(1, -1)) assert.strictEqual(blocked(point.x, point.y), false);
 
   const straight = [{ x: 0, y: 0 }, { x: 120, y: 0 }, { x: 120, y: 120 }];
@@ -109,6 +138,19 @@ test('a run is summarised by its worst news first', () => {
   assert.strictEqual(shirtColor('QRD-1387'), shirtColor('QRD-1387'));
 });
 
+test('a team splits into one sub-coordinator and its members', () => {
+  const agent = (id: string, parentId: string | null, name: string) => ({ id, parentId, name, state: 'active', tools: 0 });
+  const nested = splitTeam([agent('main', null, 'lead'), agent('c', 'main', 'executor'), agent('m1', 'c', 'executor'), agent('m2', 'c', 'test-runner')]);
+  assert.deepStrictEqual([nested.coordinator?.id, nested.members.map((member) => member.id)], ['c', ['m1', 'm2']]);
+
+  const named = splitTeam([agent('c', 'main', 'coord-1406')]);
+  assert.deepStrictEqual([named.coordinator?.id, named.members.length], ['c', 0], 'a coordinator that has not spawned anyone yet is known by its name');
+
+  const direct = splitTeam([agent('a', 'main', 'code-reviewer'), agent('b', 'main', 'test-runner')]);
+  assert.deepStrictEqual([direct.coordinator, direct.members.length], [null, 2], 'without one, the lead handles the ticket and everyone is a member');
+  assert.deepStrictEqual(splitTeam(undefined), { coordinator: null, members: [] });
+});
+
 test('the sample run cycles through the stages and ends at a gate', () => {
   const stages = [0, 7, 14, 21, 28].map((second) => sampleRuns(second).find((run) => run.key === 'SAMPLE-2'));
   assert.deepStrictEqual(stages.map((run) => run?.stage), ['code', 'test', 'verify', 'verify', 'verify']);
@@ -117,34 +159,17 @@ test('the sample run cycles through the stages and ends at a gate', () => {
   assert.deepStrictEqual(sampleRuns(-1).map((run) => run.stage), sampleRuns(0).map((run) => run.stage), 'a clock that lags the start does not break the script');
 });
 
-test('the sample flow fans a team out and then waits at a gate', () => {
+test('the sample flow puts a coordinator between the lead and its team', () => {
   const coding = sampleTimeline(1);
-  assert.deepStrictEqual([coding.stageIndex, coding.agents.length, coding.agents[0].tool], [2, 5, 'Agent']);
+  const team = splitTeam(coding.agents);
+  assert.deepStrictEqual([coding.stageIndex, team.coordinator?.name, team.members.length], [2, 'coord-sample', 4]);
+  assert.ok(team.members.every((member) => member.parentId === team.coordinator?.id));
   assert.strictEqual(coding.buckets.length, 48);
   assert.ok(sampleTimeline(6).agents.filter((agent) => agent.state === 'done').length >= 3, 'members finish before the stage ends');
 
   const gated = sampleTimeline(29);
-  assert.deepStrictEqual([gated.stageIndex, gated.agents.length, gated.agents[0].state], [4, 1, 'waiting']);
+  assert.deepStrictEqual([gated.stageIndex, gated.agents[0].state], [4, 'waiting']);
   assert.deepStrictEqual(gated.gates.map((gate) => gate.state), ['passed', 'waiting']);
   assert.ok(gated.buckets.some((bucket) => bucket.gate));
   assert.deepStrictEqual(sampleTimeline(-3).stageIndex, sampleTimeline(0).stageIndex);
-});
-
-
-test('team members get their own standing room inside the stage room', () => {
-  for (const zone of STAGE_ZONES) {
-    const area = ZONES[zone];
-    const seen = new Set<string>();
-    for (let row = 0; row < 3; row += 1) {
-      for (let index = 0; index < MEMBERS_PER_ROW; index += 1) {
-        const spot = memberSpot(zone, row, index);
-        assert.ok(spot.x > area.x && spot.x < area.x + area.width && spot.y > area.y && spot.y < area.y + area.height, `${zone} member spot inside the room`);
-        assert.strictEqual(blocked(spot.x, spot.y), false, `${zone} member spot ${spot.x},${spot.y} is free floor`);
-        seen.add(`${spot.x},${spot.y}`);
-      }
-    }
-    assert.strictEqual(seen.size, 3 * MEMBERS_PER_ROW, 'no two members of different tickets share a spot');
-    for (const seat of SPOTS[zone]) assert.ok(!seen.has(`${seat.x},${seat.y}`));
-  }
-  assert.deepStrictEqual(memberSpot('code', 0, MEMBERS_PER_ROW), memberSpot('code', 1, 0), 'a sixth member wraps to the next row');
 });

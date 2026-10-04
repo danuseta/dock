@@ -13,8 +13,11 @@ export interface TimelineAgent {
   tools: number;
 }
 
+export type RunKind = 'build' | 'review';
+
 export interface AgentRun {
   key: string;
+  kind?: RunKind | string;
   title: string;
   stage: string;
   waiting?: string | null;
@@ -75,6 +78,26 @@ export const STAGE_COLOR: Record<string, string> = {
 };
 
 export const stageLabel = (stage: string) => STAGE_LABEL[stage] ?? stage;
+
+/** A review walks the same rail as a build but its stops mean different things. */
+const REVIEW_LABEL: Record<string, string> = {
+  gate: 'Brief', plan: 'Plan', code: 'Review', test: 'Test', verify: 'Evidence', evidence: 'Evidence', commit: 'Verdict', pr: 'Verdict', done: 'Done', blocked: 'Blocked',
+};
+export const stageName = (stage: string, kind?: string) => (kind === 'review' ? REVIEW_LABEL[stage] : undefined) ?? stageLabel(stage);
+
+/**
+ * The lead hands each ticket to one sub-coordinator, which spawns the members.
+ * When a ticket has no such agent, the lead is handling it directly and every
+ * spawned agent counts as a member.
+ */
+export function splitTeam(agents?: TimelineAgent[] | null): { coordinator: TimelineAgent | null; members: TimelineAgent[] } {
+  const all = (agents || []).filter((agent) => agent.parentId);
+  const top = all.filter((agent) => agent.parentId === 'main');
+  const coordinator = top.find((agent) => all.some((other) => other.parentId === agent.id))
+    || top.find((agent) => /^coord/i.test(agent.name))
+    || null;
+  return { coordinator, members: all.filter((agent) => agent !== coordinator) };
+}
 export const stageColor = (stage: string) => STAGE_COLOR[stage] ?? '#9aa0aa';
 
 export function formatAge(seconds: number): string {
@@ -111,6 +134,9 @@ export function runStatus(run: Pick<AgentRun, 'stage' | 'waiting' | 'acFailed' |
 }
 
 const SHIRT_COLORS = ['#e8c56c', '#8c9bf0', '#62cf9f', '#e08a7a', '#5cc0e0', '#c79bf0', '#f0a35c', '#9ad06a'];
+
+/** Each pod has its own colour, so two tickets side by side never look alike. */
+export const podColor = (index: number): string => SHIRT_COLORS[((index % SHIRT_COLORS.length) + SHIRT_COLORS.length) % SHIRT_COLORS.length];
 
 /** A ticket keeps the same shirt across reloads. */
 export function shirtColor(key: string): string {

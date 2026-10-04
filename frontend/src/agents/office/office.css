@@ -67,9 +67,67 @@
   font: 700 0.6rem var(--font-mono);
 }
 
-.dock-agent-tag-member b {
-  color: oklch(0.75 0.11 220);
-  font-weight: 700;
+.dock-agent-tag-member i {
+  width: 5px;
+  height: 5px;
+  background: oklch(0.75 0.11 220);
+}
+
+.dock-agent-tag-member.is-done i {
+  background: var(--color-status-merged);
+}
+
+.dock-agent-tag-member span {
+  max-width: 74px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dock-agent-tag-member.is-done {
+  opacity: 0.6;
+}
+
+.dock-agent-tag-lead {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  cursor: default;
+}
+
+.dock-pod-label {
+  pointer-events: none;
+}
+
+.dock-pod-sign {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 9px;
+  border: 1px solid var(--pod);
+  border-radius: 6px;
+  background: rgb(12 12 12 / 0.9);
+  color: var(--color-secondary-foreground);
+  font: 700 0.62rem var(--font-mono);
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.dock-pod-sign b {
+  color: var(--pod);
+  font-weight: 800;
+}
+
+.dock-pod-sign span + span {
+  padding-left: 8px;
+  border-left: 1px solid var(--color-border-glow);
+}
+
+.dock-pod-free {
+  color: var(--color-muted-foreground);
+  font: 600 0.58rem var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.55;
 }
 
 .dock-agent-tag-done {

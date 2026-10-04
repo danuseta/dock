@@ -1,21 +1,15 @@
 // Ported from openclaw-office (MIT, (c) 2026 OpenClaw): src/lib/movement-animator.ts.
 // planWalkPath, pathLength, calculateWalkDuration and interpolatePathPosition are
-// the original functions; the door rule (centre of the zone's corridor edge) is
-// applied to DOCK's zones. See frontend/public/third-party-notices.txt.
+// the original functions; the door points are DOCK's (see layout.doorOf).
+// See frontend/public/third-party-notices.txt.
 
-import { CORRIDOR_W, EXIT, NAV_GRID, ZONES, type ZoneId } from './layout';
+import { NAV_GRID, doorOf, type ZoneId } from './layout';
 import { astar, type Point } from './navigation';
 
 export const WALK_SPEED = 120;
 export const MIN_WALK_DURATION = 1.5;
 
-export function getZoneDoorPoint(zone: ZoneId): Point {
-  if (zone === 'corridor') return { ...EXIT };
-  const area = ZONES[zone];
-  return zone === 'you'
-    ? { x: area.x + area.width / 2, y: area.y - CORRIDOR_W / 2 }
-    : { x: area.x + area.width / 2, y: area.y + area.height + CORRIDOR_W / 2 };
-}
+export const getZoneDoorPoint = (zone: ZoneId): Point => doorOf(zone);
 
 export function planWalkPath(from: Point, to: Point, fromZone: ZoneId, toZone: ZoneId): Point[] {
   if (fromZone === toZone) return [{ ...from }, { ...to }];
