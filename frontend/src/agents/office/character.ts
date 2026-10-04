@@ -2,7 +2,8 @@
 // src/features/retro-office/objects/agents.tsx. Part sizes, positions, the face
 // texture and the walk cycle (arm swing 0.4, leg swing 0.35, bounce 0.04, turn
 // smoothing 0.12) are the originals, rewritten from react-three-fiber JSX to
-// plain three.js. The typing, raised-hand and asleep poses are DOCK's own.
+// plain three.js. The typing, raised-hand, asleep and seated-lead poses and the
+// stool are DOCK's own.
 // See frontend/public/third-party-notices.txt.
 
 import * as THREE from 'three';
@@ -25,6 +26,7 @@ export interface Character {
   rightArm: THREE.Group;
   leftArm: THREE.Group;
   ring: THREE.Mesh;
+  stool: THREE.Mesh;
   tag: CSS2DObject;
   x: number;
   y: number;
@@ -77,9 +79,9 @@ function makeFaceTexture(): THREE.CanvasTexture {
   return texture;
 }
 
-export function createCharacter(key: string, topColor: string, at: Point, zone: ZoneId): Character {
+export function createCharacter(key: string, topColor: string, at: Point, zone: ZoneId, scale = 1): Character {
   const group = new THREE.Group();
-  group.scale.setScalar(AGENT_SCALE);
+  group.scale.setScalar(AGENT_SCALE * scale);
 
   const shadow = new THREE.Mesh(
     new THREE.CircleGeometry(0.12, 12),
@@ -132,6 +134,9 @@ export function createCharacter(key: string, topColor: string, at: Point, zone: 
   ring.visible = false;
   group.add(ring);
 
+  const stool = box(group, [0.16, 0.09, 0.16], '#3a3a44', [0, 0.085, 0]);
+  stool.visible = false;
+
   group.traverse((object) => { object.userData.key = key; });
 
   const element = document.createElement('div');
@@ -141,15 +146,16 @@ export function createCharacter(key: string, topColor: string, at: Point, zone: 
   group.add(tag);
 
   return {
-    group, rightLeg, leftLeg, rightArm, leftArm, ring, tag,
+    group, rightLeg, leftLeg, rightArm, leftArm, ring, stool, tag,
     x: at.x, y: at.y, zone, facing: Math.PI,
     frame: Math.random() * 40, phaseOffset: Math.random() * 6,
     walk: null, tagHtml: '', arrivedAt: null,
   };
 }
 
-export function animateCharacter(character: Character, pose: Pose, walking: boolean, deltaSeconds: number, still: boolean): void {
+export function animateCharacter(character: Character, pose: Pose, walking: boolean, deltaSeconds: number, still: boolean, seated = false): void {
   const { group, leftArm, rightArm, leftLeg, rightLeg } = character;
+  const sitting = seated && !walking;
   character.frame += deltaSeconds * 60;
 
   let rotationDelta = character.facing - group.rotation.y;
@@ -159,14 +165,15 @@ export function animateCharacter(character: Character, pose: Pose, walking: bool
 
   const frameValue = character.frame + character.phaseOffset / WALK_ANIM_SPEED;
   const walkPhase = Math.sin(frameValue * WALK_ANIM_SPEED);
-  const typing = !walking && pose === 'SeatedTyping';
+  const typing = !walking && !sitting && pose === 'SeatedTyping';
   const asleep = !walking && pose === 'Asleep';
   const raised = !walking && pose === 'SeatedWaiting';
 
   group.rotation.x = typing ? -0.15 : asleep ? 0.42 : 0;
   const bounce = walking ? walkPhase * 0.04 : 0;
   const breathe = !walking && !typing && !still ? Math.sin(frameValue * 0.03) * 0.01 : 0;
-  group.position.y = bounce + breathe;
+  group.position.y = bounce + breathe - (sitting ? 0.055 : 0);
+  character.stool.visible = sitting;
 
   leftArm.rotation.set(0, 0, 0);
   rightArm.rotation.set(0, 0, 0);
@@ -177,12 +184,16 @@ export function animateCharacter(character: Character, pose: Pose, walking: bool
     const tap = still ? 0 : 0.12;
     leftArm.rotation.x = -1.05 + Math.sin(character.frame * 0.5) * tap;
     rightArm.rotation.x = -1.05 + Math.cos(character.frame * 0.5) * tap;
+  } else if (sitting && !raised) {
+    // The lead sits back with folded arms while the team works.
+    leftArm.rotation.set(-0.75, 0, -0.55);
+    rightArm.rotation.set(-0.75, 0, 0.55);
   } else if (raised) {
     rightArm.rotation.x = -2.75 + (still ? 0 : Math.sin(character.frame * 0.08) * 0.08);
     rightArm.rotation.z = -0.12;
   }
-  rightLeg.rotation.x = walking ? -walkPhase * 0.35 : 0;
-  leftLeg.rotation.x = walking ? walkPhase * 0.35 : 0;
+  rightLeg.rotation.x = walking ? -walkPhase * 0.35 : sitting ? -Math.PI / 2 : 0;
+  leftLeg.rotation.x = walking ? walkPhase * 0.35 : sitting ? -Math.PI / 2 : 0;
 }
 
 export function disposeCharacter(character: Character): void {

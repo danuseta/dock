@@ -78,7 +78,9 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
   const sampling = sampleStartedAt !== null;
   const sampleTick = sampling ? Math.floor(now - sampleStartedAt) : 0;
   const runs = useMemo<AgentRun[]>(
-    () => (sampling ? sampleRuns(sampleTick) : serverRuns || []),
+    () => (sampling
+      ? sampleRuns(sampleTick).map((run) => (run.key === 'SAMPLE-2' ? { ...run, members: sampleTimeline(sampleTick).agents.filter((agent) => agent.parentId) } : run))
+      : serverRuns || []),
     [sampling, sampleTick, serverRuns],
   );
   const selected = runs.find((run) => run.key === selectedKey) || runs.find((run) => run.waiting) || runs[0] || null;

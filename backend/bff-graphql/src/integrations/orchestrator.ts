@@ -349,6 +349,12 @@ export class OrchestratorService {
     return buildTimeline(run, stageEvents, toolEvents, now);
   }
 
+  /** The agents the main session has spawned for the stage the ticket is in. */
+  async members(keyInput: string, now = new Date()) {
+    const timeline = await this.timeline(keyInput, now);
+    return timeline ? timeline.agents.filter((agent) => agent.parentId) : [];
+  }
+
   async needsAttention(now = new Date()) {
     return attentionItems(await this.list(now));
   }

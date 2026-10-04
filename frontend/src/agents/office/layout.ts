@@ -40,6 +40,20 @@ export const SPOTS: Record<StageZone, Point[]> = {
   verify: [{ x: 1505, y: 260 }, { x: 1600, y: 330 }, { x: 1500, y: 430 }],
 };
 
+/**
+ * Team members stand in rows along the front of the room, one row per ticket,
+ * so the lead keeps the desk and the people doing the work are in plain view.
+ */
+export const MEMBERS_PER_ROW = 3;
+export function memberSpot(zone: StageZone, ticketRow: number, index: number): Point {
+  const area = ZONES[zone];
+  const row = ticketRow + Math.floor(index / MEMBERS_PER_ROW);
+  return {
+    x: area.x + 62 + (index % MEMBERS_PER_ROW) * 88,
+    y: area.y + area.height - 38 - (row % 3) * 44,
+  };
+}
+
 export const WAITING_ROW: Point = { x: 900, y: 800 };
 export const WAITING_GAP = 90;
 

@@ -4,7 +4,7 @@ import {
   ACTIVE_GRACE_WINDOW, THINKING_WINDOW_SECS, applyHook, isStale, poseOf, slotFromServer, tickActivity,
   type ActivitySlot,
 } from '../agents/office/activity';
-import { FURNITURE, NAV_GRID, SPOTS, STAGE_ZONES, WAITING_ROW, zoneForStage } from '../agents/office/layout';
+import { FURNITURE, MEMBERS_PER_ROW, NAV_GRID, SPOTS, STAGE_ZONES, WAITING_ROW, ZONES, memberSpot, zoneForStage } from '../agents/office/layout';
 import { calculateWalkDuration, getZoneDoorPoint, interpolatePathPosition, pathLength, planWalkPath, routeThroughDoors } from '../agents/office/movement';
 import { GRID_CELL, GRID_COLS, astar, buildNavGrid, toWorld } from '../agents/office/navigation';
 import { formatAge, runStatus, shirtColor } from '../agents/runs';
@@ -128,4 +128,23 @@ test('the sample flow fans a team out and then waits at a gate', () => {
   assert.deepStrictEqual(gated.gates.map((gate) => gate.state), ['passed', 'waiting']);
   assert.ok(gated.buckets.some((bucket) => bucket.gate));
   assert.deepStrictEqual(sampleTimeline(-3).stageIndex, sampleTimeline(0).stageIndex);
+});
+
+
+test('team members get their own standing room inside the stage room', () => {
+  for (const zone of STAGE_ZONES) {
+    const area = ZONES[zone];
+    const seen = new Set<string>();
+    for (let row = 0; row < 3; row += 1) {
+      for (let index = 0; index < MEMBERS_PER_ROW; index += 1) {
+        const spot = memberSpot(zone, row, index);
+        assert.ok(spot.x > area.x && spot.x < area.x + area.width && spot.y > area.y && spot.y < area.y + area.height, `${zone} member spot inside the room`);
+        assert.strictEqual(blocked(spot.x, spot.y), false, `${zone} member spot ${spot.x},${spot.y} is free floor`);
+        seen.add(`${spot.x},${spot.y}`);
+      }
+    }
+    assert.strictEqual(seen.size, 3 * MEMBERS_PER_ROW, 'no two members of different tickets share a spot');
+    for (const seat of SPOTS[zone]) assert.ok(!seen.has(`${seat.x},${seat.y}`));
+  }
+  assert.deepStrictEqual(memberSpot('code', 0, MEMBERS_PER_ROW), memberSpot('code', 1, 0), 'a sixth member wraps to the next row');
 });

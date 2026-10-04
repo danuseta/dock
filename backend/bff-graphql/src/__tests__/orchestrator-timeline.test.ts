@@ -114,6 +114,9 @@ test('event batches update state once and keep every tool call', async () => {
     ['orchestrator', null, 'active', 1], ['Explore', 'Hook payload probe', 'done', 1],
   ]);
 
+  assert.deepStrictEqual((await service.members('QRD-1', at(6))).map((agent) => agent.name), ['Explore']);
+  assert.deepStrictEqual(await service.members('QRD-404', at(6)), []);
+
   await service.ingestEventBatch({ key: 'QRD-1', events: [{ event: 'Stop', at: at(7).toISOString() }] }, at(7));
   assert.strictEqual((await service.get('QRD-1', at(10)))?.activity, 'IDLE', 'the main session stopping does');
 
