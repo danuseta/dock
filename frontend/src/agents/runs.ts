@@ -3,6 +3,16 @@ import { poseOf, slotFromServer, type Pose } from './office/activity';
 export interface AgentAc { n: number; state: string; text: string; evidence?: string | null }
 export interface AgentEvent { id: string; kind: string; detail?: string | null; at: string }
 
+export interface TimelineAgent {
+  id: string;
+  parentId?: string | null;
+  name: string;
+  detail?: string | null;
+  state: string;
+  tool?: string | null;
+  tools: number;
+}
+
 export interface AgentRun {
   key: string;
   title: string;
@@ -26,17 +36,8 @@ export interface AgentRun {
   hasTranscript: boolean;
   updatedAt: string;
   events?: AgentEvent[];
+  members?: TimelineAgent[];
   sample?: boolean;
-}
-
-export interface TimelineAgent {
-  id: string;
-  parentId?: string | null;
-  name: string;
-  detail?: string | null;
-  state: string;
-  tool?: string | null;
-  tools: number;
 }
 
 export interface AgentTimeline {

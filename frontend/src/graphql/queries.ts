@@ -497,6 +497,7 @@ export const GET_ORCHESTRATIONS = gql`
   query GetOrchestrations {
     orchestrations {
       ${ORCHESTRATION_FIELDS}
+      members { id parentId name detail state tool tools }
     }
   }
 `;

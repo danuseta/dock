@@ -255,6 +255,7 @@ export const typeDefs = gql`
     updatedAt: String!
     events: [OrchestrationEvent!]!
     timeline: OrchestrationTimeline
+    members: [TimelineAgent!]!
   }
 
   type IngestToken {

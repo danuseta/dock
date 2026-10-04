@@ -172,6 +172,7 @@ export const resolvers = {
   Orchestration: {
     events: async (parent: { key: string }) => orchestratorService.events(parent.key),
     timeline: async (parent: { key: string }) => orchestratorService.timeline(parent.key),
+    members: async (parent: { key: string }) => orchestratorService.members(parent.key).catch(() => []),
   },
 
   TicketRelationGroup: {

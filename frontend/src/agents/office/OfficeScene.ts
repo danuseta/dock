@@ -2,13 +2,13 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
-import { shirtColor, stageColor, type AgentRun } from '../runs';
+import { shirtColor, stageColor, type AgentRun, type TimelineAgent } from '../runs';
 import { clock, poseOf, slotFromServer, tickActivity, type ActivitySlot, type Pose } from './activity';
 import { buildBoardCards, type BoardCards } from './board';
 import { animateCharacter, createCharacter, disposeCharacter, type Character } from './character';
 import { ASK_EMOTE, THINK_EMOTE, ZZZ_EMOTE } from './emotes';
 import {
-  EXIT, FURNITURE, SPOTS, STAGE_ZONES, WAITING_GAP, WAITING_ROW, ZONES, ZONE_META, zoneForStage,
+  EXIT, FURNITURE, SPOTS, STAGE_ZONES, WAITING_GAP, WAITING_ROW, ZONES, ZONE_META, memberSpot, zoneForStage,
   type StageZone, type ZoneId,
 } from './layout';
 import { calculateWalkDuration, interpolatePathPosition, routeThroughDoors } from './movement';
@@ -22,11 +22,16 @@ export interface OfficeSceneOptions {
   onSelect: (key: string) => void;
 }
 
+interface Member { info: TimelineAgent; character: Character }
+
 interface Occupant {
   run: AgentRun;
   slot: ActivitySlot;
   character: Character;
+  members: Map<string, Member>;
 }
+
+const MEMBER_SCALE = 0.82;
 
 const BACKGROUND = 0x0d0d0f;
 const OWNER_COLOR = '#e9e2d0';
@@ -119,6 +124,7 @@ export class OfficeScene {
     const keys = new Set(runs.map((run) => run.key));
     for (const [key, occupant] of this.occupants) {
       if (keys.has(key)) continue;
+      for (const member of occupant.members.values()) disposeCharacter(member.character);
       disposeCharacter(occupant.character);
       this.occupants.delete(key);
     }
@@ -134,7 +140,7 @@ export class OfficeScene {
       }
       const character = createCharacter(run.key, shirtColor(run.key), { x: 0, y: 0 }, 'corridor');
       this.scene.add(character.group);
-      const occupant = { run, slot, character };
+      const occupant: Occupant = { run, slot, character, members: new Map() };
       this.occupants.set(run.key, occupant);
       fresh.push(occupant);
     }
@@ -148,8 +154,9 @@ export class OfficeScene {
         if (occupant.run.stage === 'done') occupant.character.arrivedAt = now - DONE_LINGER_SECONDS;
         continue;
       }
-      this.retarget(occupant, target, zone, now);
+      this.walk(occupant.character, target, zone, now);
     }
+    for (const occupant of this.occupants.values()) this.syncMembers(occupant, now);
 
     this.boardCards.render([...this.occupants.values()]
       .filter((occupant) => occupant.run.stage !== 'done')
@@ -176,7 +183,10 @@ export class OfficeScene {
     this.renderer.domElement.removeEventListener('pointerdown', this.handlePointerDown);
     this.renderer.domElement.removeEventListener('pointerup', this.handlePointerUp);
     this.labelRenderer.domElement.removeEventListener('click', this.handleLabelClick);
-    for (const occupant of this.occupants.values()) disposeCharacter(occupant.character);
+    for (const occupant of this.occupants.values()) {
+      for (const member of occupant.members.values()) disposeCharacter(member.character);
+      disposeCharacter(occupant.character);
+    }
     this.occupants.clear();
     this.boardCards.dispose();
     for (const label of this.labels) label.element.remove();
@@ -216,8 +226,7 @@ export class OfficeScene {
     return spots[Math.max(0, same.indexOf(occupant)) % spots.length];
   }
 
-  private retarget(occupant: Occupant, target: Point, zone: ZoneId, now: number): void {
-    const { character } = occupant;
+  private walk(character: Character, target: Point, zone: ZoneId, now: number): void {
     const destination = character.walk ? character.walk.path[character.walk.path.length - 1] : character;
     if (Math.hypot(target.x - destination.x, target.y - destination.y) < 4) {
       if (!character.walk) character.zone = zone;
@@ -230,6 +239,54 @@ export class OfficeScene {
     const path = routeThroughDoors({ x: character.x, y: character.y }, target, character.zone, zone);
     character.walk = { path, duration: calculateWalkDuration(path), started: now, toZone: zone };
     character.arrivedAt = null;
+  }
+
+  /** Moves a character along its walk; true while it is still on the way. */
+  private advance(character: Character, now: number): boolean {
+    if (!character.walk) return false;
+    const progress = (now - character.walk.started) / character.walk.duration;
+    const position = interpolatePathPosition(character.walk.path, progress);
+    const dx = position.x - character.x;
+    const dy = position.y - character.y;
+    if (Math.abs(dx) + Math.abs(dy) > 0.01) character.facing = Math.atan2(dx, dy);
+    character.x = position.x;
+    character.y = position.y;
+    if (progress < 1) return true;
+    character.zone = character.walk.toZone;
+    character.walk = null;
+    character.arrivedAt = now;
+    return false;
+  }
+
+  /**
+   * The lead keeps the desk; whoever it has spawned for this stage stands in
+   * the same room and does the work. A member that finishes leaves the floor.
+   */
+  private syncMembers(occupant: Occupant, now: number): void {
+    const zone = zoneForStage(occupant.run.stage);
+    const active = zone === 'corridor' ? [] : (occupant.run.members || []).filter((member) => member.state === 'active');
+    const ids = new Set(active.map((member) => member.id));
+    for (const [id, member] of occupant.members) {
+      if (ids.has(id)) continue;
+      disposeCharacter(member.character);
+      occupant.members.delete(id);
+    }
+    if (zone === 'corridor') return;
+    const row = [...this.occupants.values()]
+      .filter((other) => other.run.stage !== 'done' && zoneForStage(other.run.stage) === zone)
+      .indexOf(occupant);
+    active.forEach((info, index) => {
+      let member = occupant.members.get(info.id);
+      if (!member) {
+        const lead = occupant.character;
+        const character = createCharacter(occupant.run.key, shirtColor(occupant.run.key), { x: lead.x, y: lead.y }, lead.zone, MEMBER_SCALE);
+        this.scene.add(character.group);
+        member = { info, character };
+        occupant.members.set(info.id, member);
+      }
+      member.info = info;
+      this.walk(member.character, memberSpot(zone, Math.max(0, row), index), zone, now);
+    });
   }
 
   private buildRoom(): void {
@@ -351,10 +408,14 @@ export class OfficeScene {
     }
   }
 
-  private tagHtml(run: AgentRun, pose: Pose | null): string {
+  private memberTagHtml(key: string, info: TimelineAgent): string {
+    return `<button type="button" class="dock-agent-tag dock-agent-tag-member" data-key="${escapeHtml(key)}">${escapeHtml(info.name)}${info.tool ? ` <b>${escapeHtml(info.tool)}</b>` : ''}</button>`;
+  }
+
+  private tagHtml(run: AgentRun, pose: Pose | null, team: number): string {
     if (run.stage === 'done') return '<span class="dock-agent-tag dock-agent-tag-done">Done ✓</span>';
     const emote = pose === 'SeatedWaiting' ? ASK_EMOTE : pose === 'Asleep' ? ZZZ_EMOTE : pose === 'SeatedThinking' ? THINK_EMOTE : '';
-    return `${emote}<button type="button" class="dock-agent-tag" data-key="${escapeHtml(run.key)}"><i style="background:${stageColor(run.stage)}"></i>${escapeHtml(run.key)}</button>`;
+    return `${emote}<button type="button" class="dock-agent-tag" data-key="${escapeHtml(run.key)}"><i style="background:${stageColor(run.stage)}"></i>${escapeHtml(run.key)}${team > 0 ? ` <small>lead · ${team}</small>` : ''}</button>`;
   }
 
   private readonly frame = (): void => {
@@ -368,33 +429,20 @@ export class OfficeScene {
       const { character, run, slot } = occupant;
       tickActivity(slot, now);
       const pose = poseOf(slot, now);
-      let walking = false;
-      if (character.walk) {
-        const progress = (now - character.walk.started) / character.walk.duration;
-        const position = interpolatePathPosition(character.walk.path, progress);
-        const dx = position.x - character.x;
-        const dy = position.y - character.y;
-        if (Math.abs(dx) + Math.abs(dy) > 0.01) character.facing = Math.atan2(dx, dy);
-        character.x = position.x;
-        character.y = position.y;
-        walking = progress < 1;
-        if (!walking) {
-          character.zone = character.walk.toZone;
-          character.walk = null;
-          character.arrivedAt = now;
-        }
-      }
+      const walking = this.advance(character, now);
       if (!walking) character.facing = run.stage === 'done' ? Math.PI / 2 : pose === 'SeatedWaiting' ? 0 : Math.PI;
 
       const [worldX, , worldZ] = toWorld(character.x, character.y);
       character.group.position.x = worldX;
       character.group.position.z = worldZ;
-      animateCharacter(character, pose, walking, delta, still);
+      const team = occupant.members.size;
+      const seated = team > 0 && pose !== 'SeatedWaiting' && run.stage !== 'done';
+      animateCharacter(character, pose, walking, delta, still, seated);
 
       const gone = run.stage === 'done' && !walking && now - (character.arrivedAt ?? now) >= DONE_LINGER_SECONDS;
       character.group.visible = !gone;
       character.tag.element.style.display = gone ? 'none' : '';
-      const html = this.tagHtml(run, walking ? null : pose);
+      const html = this.tagHtml(run, walking || seated ? null : pose, team);
       if (html !== character.tagHtml) {
         character.tagHtml = html;
         character.tag.element.innerHTML = html;
@@ -402,6 +450,21 @@ export class OfficeScene {
       const isSelected = run.key === this.selected;
       character.tag.element.classList.toggle('is-selected', isSelected);
       character.ring.visible = isSelected;
+
+      for (const member of occupant.members.values()) {
+        const body = member.character;
+        const moving = this.advance(body, now);
+        if (!moving) body.facing = Math.PI;
+        const [memberX, , memberZ] = toWorld(body.x, body.y);
+        body.group.position.x = memberX;
+        body.group.position.z = memberZ;
+        animateCharacter(body, 'SeatedTyping', moving, delta, still);
+        const memberHtml = this.memberTagHtml(run.key, member.info);
+        if (memberHtml !== body.tagHtml) {
+          body.tagHtml = memberHtml;
+          body.tag.element.innerHTML = memberHtml;
+        }
+      }
     }
 
     const [boardWidth, boardHeight] = this.boardPixelSize();
@@ -447,7 +510,8 @@ export class OfficeScene {
       ((event.clientX - rect.left) / rect.width) * 2 - 1,
       -((event.clientY - rect.top) / rect.height) * 2 + 1,
     ), this.camera);
-    const groups = [...this.occupants.values()].filter((occupant) => occupant.character.group.visible).map((occupant) => occupant.character.group);
+    const groups = [...this.occupants.values()].filter((occupant) => occupant.character.group.visible)
+      .flatMap((occupant) => [occupant.character.group, ...[...occupant.members.values()].map((member) => member.character.group)]);
     const key = raycaster.intersectObjects(groups, true)[0]?.object.userData.key;
     if (typeof key === 'string') this.options.onSelect(key);
   };
