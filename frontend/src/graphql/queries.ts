@@ -22,6 +22,16 @@ export const GET_DASHBOARD = gql`
         sprintState
         storyPoints
         labels
+        orchestration {
+          key
+          stage
+          waiting
+          acPassed
+          acFailed
+          acTotal
+          activity
+          stalled
+        }
       }
     }
   }
@@ -311,6 +321,19 @@ export const GET_HOME_SECONDARY = gql`
       message
       ticketKey
     }
+    orchestrations {
+      key
+      title
+      stage
+      waiting
+      acPassed
+      acFailed
+      acTotal
+      activity
+      idleSeconds
+      endedSeconds
+      stalled
+    }
     calendarEvents(maxResults: 50) {
       id
       title
@@ -442,6 +465,59 @@ export const GET_GITHUB_REPOS = gql`
       private
       url
       description
+    }
+  }
+`;
+
+const ORCHESTRATION_FIELDS = `
+  key
+  title
+  stage
+  waiting
+  gate
+  ac { n state text evidence }
+  acPassed
+  acFailed
+  acTotal
+  testsBe
+  testsFe
+  prBe
+  prFe
+  note
+  activity
+  activityDetail
+  idleSeconds
+  endedSeconds
+  stalled
+  hasTranscript
+  updatedAt
+`;
+
+export const GET_ORCHESTRATIONS = gql`
+  query GetOrchestrations {
+    orchestrations {
+      ${ORCHESTRATION_FIELDS}
+    }
+  }
+`;
+
+export const GET_ORCHESTRATION = gql`
+  query GetOrchestration($key: String!) {
+    orchestration(key: $key) {
+      ${ORCHESTRATION_FIELDS}
+      events { id kind detail at }
+    }
+  }
+`;
+
+export const GET_INGEST_TOKENS = gql`
+  query GetIngestTokens {
+    ingestTokens {
+      id
+      name
+      prefix
+      createdAt
+      lastUsedAt
     }
   }
 `;

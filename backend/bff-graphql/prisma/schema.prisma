@@ -111,3 +111,42 @@ model MonitoredRepository {
   updatedAt DateTime @updatedAt
   @@unique([owner, name])
 }
+
+model OrchestratorRun {
+  key              String    @id
+  title            String    @default("")
+  stage            String
+  waiting          String    @default("")
+  payload          String
+  activity         String    @default("IDLE")
+  activityDetail   String?
+  activityEndedAt  DateTime?
+  lastEventAt      DateTime?
+  ledgerUpdatedAt  DateTime  @default(now())
+  transcriptAt     DateTime?
+  dismissedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([stage])
+}
+
+model OrchestratorEvent {
+  id        String   @id @default(uuid())
+  ticketKey String
+  kind      String
+  detail    String?
+  createdAt DateTime @default(now())
+
+  @@index([ticketKey, createdAt])
+}
+
+model IngestToken {
+  id         String    @id @default(uuid())
+  name       String
+  prefix     String
+  tokenHash  String    @unique
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+}

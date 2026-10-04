@@ -170,3 +170,30 @@ export const DISCONNECT_GOOGLE_CALENDAR = gql`
     disconnectGoogleCalendar
   }
 `;
+
+export const CREATE_INGEST_TOKEN = gql`
+  mutation CreateIngestToken($name: String!) {
+    createIngestToken(name: $name) {
+      token
+      record {
+        id
+        name
+        prefix
+        createdAt
+        lastUsedAt
+      }
+    }
+  }
+`;
+
+export const REVOKE_INGEST_TOKEN = gql`
+  mutation RevokeIngestToken($id: ID!) {
+    revokeIngestToken(id: $id)
+  }
+`;
+
+export const DISMISS_ORCHESTRATION = gql`
+  mutation DismissOrchestration($key: String!) {
+    dismissOrchestration(key: $key)
+  }
+`;

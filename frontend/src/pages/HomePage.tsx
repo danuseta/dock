@@ -7,6 +7,8 @@ import { GoogleSearch } from '../components/GoogleSearch';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { WebsiteIcon } from '../components/WebsiteIcon';
 import { DockerRuntimeCard } from '../components/DockerRuntimeCard';
+import { AgentRunStrip } from '../components/AgentRunStrip';
+import type { AgentRunSummary } from '../agents/runs';
 import { MonthCalendar } from '../components/MonthCalendar';
 import { Button, Card, Dialog, IconButton, Input, Select } from '../components/ui';
 import { cn } from '../lib/cn';
@@ -66,6 +68,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
   const monitors = secondaryData?.monitors || [];
   const healthyServices = monitors.filter((monitor: any) => monitor.lastStatus === 'UP').length;
   const calendarEvents: CalendarEvent[] = secondaryData?.calendarEvents || [];
+  const agentRuns: Array<AgentRunSummary & { title: string }> = (secondaryData?.orchestrations || []).filter((run: AgentRunSummary) => run.stage !== 'done');
 
   const handleAdd = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -117,7 +120,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
       </section>
 
       <div className="grid grid-cols-[minmax(0,1fr)_minmax(340px,380px)] items-stretch gap-3.5 max-[900px]:grid-cols-1">
-        <div className="grid grid-rows-[auto_minmax(0,1fr)_auto] gap-3.5">
+        <div className={cn('grid gap-3.5', agentRuns.length > 0 ? 'grid-rows-[auto_minmax(0,1fr)_auto_auto]' : 'grid-rows-[auto_minmax(0,1fr)_auto]')}>
           <section className="min-w-0" aria-labelledby="quick-links-title">
             <div className="mb-2 flex items-center justify-between">
               <h2 id="quick-links-title" className={panelTitleClass}>Quick links</h2>
@@ -136,6 +139,13 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
             {activeTickets.slice(0, 4).map((ticket: any) => <button className="grid w-full grid-cols-[82px_minmax(0,1fr)_auto_auto] items-center gap-2.5 border-0 border-b border-border bg-transparent px-3.5 py-2.5 text-left text-foreground transition-colors duration-150 ease-out last:border-b-0 hover:bg-surface-1 max-[600px]:grid-cols-[72px_minmax(0,1fr)_auto]" key={ticket.key} onClick={() => onTicketClick(ticket.key)}><span className="font-mono text-[0.69rem] font-bold text-accent">{ticket.key}</span><span className="truncate text-[0.8rem]">{ticket.title}</span><span className="whitespace-nowrap font-mono text-[0.63rem] font-bold text-muted-foreground tabular-nums">{ticket.storyPoints || 0} SP</span><span className="whitespace-nowrap rounded-[5px] bg-surface-2 px-1.5 py-0.5 text-[0.63rem] text-secondary-foreground max-[600px]:hidden">{ticket.status}</span></button>)}
             {activeTickets.length === 0 && <div className="px-3.5 py-5 text-[0.78rem] text-muted-foreground">No active Jira tickets.</div>}
           </article>
+
+          {agentRuns.length > 0 && (
+            <article className={panelClass}>
+              <header className="flex items-center justify-between gap-2.5 border-b border-border px-3.5 py-[11px]"><h2 className={panelTitleClass}>Agents</h2><Button variant="ghost" size="sm" className={textActionClass} onClick={() => onNavigate('/agents')}>Open office →</Button></header>
+              {agentRuns.slice(0, 4).map((run) => <button className="grid w-full grid-cols-[82px_minmax(0,1fr)_minmax(0,auto)] items-center gap-2.5 border-0 border-b border-border bg-transparent px-3.5 py-2 text-left text-foreground transition-colors duration-150 ease-out last:border-b-0 hover:bg-surface-1 max-[600px]:grid-cols-[72px_minmax(0,1fr)]" key={run.key} onClick={() => onNavigate('/agents')}><span className="font-mono text-[0.69rem] font-bold text-accent">{run.key}</span><span className="truncate text-[0.8rem]">{run.title || 'Untitled'}</span><AgentRunStrip run={run} className="max-[600px]:col-span-2" /></button>)}
+            </article>
+          )}
 
           <DockerRuntimeCard runtime={secondaryData?.dockerRuntime} onNavigate={onNavigate} compact loading={secondaryLoading && !secondaryData} />
         </div>

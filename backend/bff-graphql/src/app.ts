@@ -13,6 +13,7 @@ import {
   sessionManager,
 } from './auth/session';
 import { createGoogleCalendarRouter } from './auth/google-calendar-router';
+import { createOrchestratorApiRouter, createOrchestratorIngestRouter } from './routes/orchestrator';
 
 export interface CreateAppOptions {
   corsOrigin?: string;
@@ -45,9 +46,12 @@ export async function createApp(options: CreateAppOptions = {}): Promise<JidisAp
     credentials: true,
     origin: options.corsOrigin || process.env.CORS_ORIGIN || 'http://localhost:3000',
   }));
+  // Mounted ahead of the global parser: ingest routes carry their own body limits.
+  app.use('/ingest/orchestrator', createOrchestratorIngestRouter());
   app.use(express.json());
 
   app.use('/auth/google', createGoogleCalendarRouter());
+  app.use('/api/orchestrator', createOrchestratorApiRouter());
 
   app.use('/graphql', expressMiddleware(apolloServer, {
     context: async ({ req, res }) => ({
@@ -74,6 +78,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<JidisAp
         || request.path === '/api'
         || request.path.startsWith('/api/')
         || request.path.startsWith('/internal/')
+        || request.path.startsWith('/ingest/')
         || path.extname(request.path) !== ''
       ) {
         next();

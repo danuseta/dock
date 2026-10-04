@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOCK · session flow</title>
+<!-- zoetrope (MIT, (c) 2026 Furkan Kalaycioglu), built from source with DOCK's palette.
+     See /third-party-notices.txt. -->
+<script type="importmap">{ "imports": { "env": "./wasm/env.js" } }</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap">
+<style>
+	html, body { margin: 0; height: 100%; background: #0b0b0c; color: #e9e2d0; font: 12px/1.4 "JetBrains Mono", ui-monospace, Consolas, monospace; }
+	body { display: flex; flex-direction: column; }
+	#bar { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; padding: 6px 12px; border-bottom: 1px solid #2a2a2e; color: #9aa0aa; }
+	#bar b, #bar .m { color: #e9e2d0; }
+	#terminal-container { flex: 1 1 auto; min-height: 0; width: 100%; position: relative; }
+	#terminal-container:focus, #terminal-container canvas:focus { outline: none; }
+</style>
+</head>
+<body>
+<div id="bar" role="status">Loading the session…</div>
+<div id="terminal-container"></div>
+<script type="module">
+	import init, { zoetrope_load } from "./wasm/web.js";
+
+	const bar = document.getElementById("bar");
+	const show = (parts) => {
+		bar.textContent = "";
+		for (const [text, cls] of parts) {
+			const span = document.createElement(cls === "b" ? "b" : "span");
+			if (cls && cls !== "b") span.className = cls;
+			span.textContent = text;
+			bar.appendChild(span);
+		}
+	};
+
+	try {
+		const params = new URLSearchParams(location.search);
+		const key = params.get("key") || "";
+		if (!/^[A-Za-z][A-Za-z0-9_]{0,31}-[1-9][0-9]{0,9}$/.test(key)) throw new Error("no ticket selected");
+		// Only DOCK's own origin, or the local dev server beside it, may be asked for a transcript.
+		const requested = new URL(params.get("api") || location.origin, location.origin);
+		const sameHost = requested.hostname === location.hostname;
+		const api = sameHost ? requested.origin : location.origin;
+
+		const response = await fetch(`${api}/api/orchestrator/transcript/${encodeURIComponent(key)}`, { credentials: "include", cache: "no-store" });
+		if (response.status === 401) throw new Error("unlock DOCK first");
+		if (response.status === 404) throw new Error(`no session uploaded for ${key}`);
+		if (!response.ok) throw new Error(`transcript request failed (${response.status})`);
+		const { files, stats } = await response.json();
+
+		// The terminal measures its cells once, so the font has to be ready before init.
+		await Promise.allSettled([document.fonts.load('400 16px "JetBrains Mono"'), document.fonts.load('700 16px "JetBrains Mono"')]);
+		await init();
+		const summary = JSON.parse(zoetrope_load(JSON.stringify(files), false));
+		if (summary.error) throw new Error(summary.error);
+
+		const megabytes = ((stats?.bytes ?? 0) / 1048576).toFixed(1);
+		show([
+			["zoetrope", "b"], [` · ${key}`],
+			[`${stats?.files ?? files.length} files · ${megabytes} MB`],
+			[`${stats?.masked ?? 0} secrets masked · ${stats?.blobs ?? 0} images dropped`, "m"],
+			[stats?.receivedAt ? `uploaded ${new Date(stats.receivedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })}` : ""],
+		]);
+	} catch (error) {
+		show([[`Session flow unavailable: ${error?.message ?? error}`]]);
+	}
+</script>
+</body>
+</html>
