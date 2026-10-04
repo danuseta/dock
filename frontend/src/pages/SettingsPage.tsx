@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useLazyQuery } from '@apollo/client';
 import {
-  Activity, CalendarDays, CheckCircle2, ChevronRight, Eye, EyeOff, GitBranch,
+  Activity, Bot, CalendarDays, CheckCircle2, ChevronRight, Eye, EyeOff, GitBranch,
   KeyRound, LayoutPanelLeft, Lock, MessageSquare, Save, ShieldCheck, Unplug, Zap,
   type LucideIcon,
 } from 'lucide-react';
-import { GET_SETTINGS, GET_GITHUB_REPOS, GET_JIRA_PROJECTS } from '../graphql/queries';
+import { GET_SETTINGS, GET_GITHUB_REPOS, GET_JIRA_PROJECTS, GET_INGEST_TOKENS } from '../graphql/queries';
 import { UPDATE_SETTINGS, VALIDATE_JIRA, VALIDATE_GITHUB, VALIDATE_DISCORD, SET_MASTER_PIN, CHANGE_MASTER_PIN, REMOVE_MASTER_PIN, DISCONNECT_GOOGLE_CALENDAR } from '../graphql/mutations';
 import { Toast } from '../components/Toast';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
+import { IngestTokensSection } from '../components/IngestTokensSection';
 import { NAVIGATION_PREFERENCES_EVENT, NavigationMode, NavigationPreferences, readNavigationPreferences, saveNavigationPreferences } from '../lib/navigationPreferences';
 import { Badge, Button, Card, Checkbox, IconButton, Input, Page, Select, Textarea } from '../components/ui';
 import { cn } from '../lib/cn';
@@ -21,7 +22,7 @@ import {
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, getDiscordTemplateError, renderDiscordMessageTemplate } from '../lib/discordTemplate';
 
-type SettingsSection = 'general' | 'security' | 'jira' | 'github' | 'calendar' | 'discord';
+type SettingsSection = 'general' | 'security' | 'jira' | 'github' | 'calendar' | 'discord' | 'agents';
 type RefreshUnit = 'seconds' | 'minutes';
 
 const settingsSections: Array<{
@@ -37,6 +38,7 @@ const settingsSections: Array<{
   { id: 'github', label: 'GitHub', description: 'Repositories', icon: GitBranch, group: 'Connections' },
   { id: 'calendar', label: 'Calendar', description: 'Google OAuth', icon: CalendarDays, group: 'Connections' },
   { id: 'discord', label: 'Discord', description: 'Notifications', icon: MessageSquare, group: 'Connections' },
+  { id: 'agents', label: 'Agents', description: 'Orchestrator ingest', icon: Bot, group: 'Connections' },
 ];
 
 const navigationPreview: Record<NavigationMode, string> = {
@@ -85,6 +87,7 @@ const SettingsPage: React.FC = () => {
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
   const [navigationPreferences, setNavigationPreferences] = useState(readNavigationPreferences);
   const { data, loading, error, refetch } = useQuery(GET_SETTINGS, CACHED_QUERY_OPTIONS);
+  const { data: ingestTokenData } = useQuery(GET_INGEST_TOKENS, CACHED_QUERY_OPTIONS);
   const [updateSettings] = useMutation(UPDATE_SETTINGS);
   const [validateJira, { loading: testingJira }] = useMutation(VALIDATE_JIRA);
   const [validateGitHub, { loading: testingGitHub }] = useMutation(VALIDATE_GITHUB);
@@ -396,6 +399,7 @@ const SettingsPage: React.FC = () => {
     github: Boolean(data?.settings?.hasGithubToken),
     calendar: Boolean(data?.settings?.googleCalendarConnected),
     discord: Boolean(data?.settings?.hasDiscordWebhookUrl),
+    agents: (ingestTokenData?.ingestTokens?.length || 0) > 0,
   };
 
   return (
@@ -524,6 +528,8 @@ const SettingsPage: React.FC = () => {
               </div>
             </Card>
           </section>}
+
+          {activeSection === 'agents' && <IngestTokensSection />}
         </main>
       </div>
 

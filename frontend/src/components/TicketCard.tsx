@@ -8,6 +8,8 @@ import { PRBadge } from './PRBadge';
 import { cn } from '../lib/cn';
 import { getApprovalLabels } from '../lib/ticketApprovals';
 import { displayAssignee } from '../lib/queryPolicy';
+import { AgentRunStrip } from './AgentRunStrip';
+import type { AgentRunSummary } from '../agents/runs';
 
 interface TicketCardProps {
   ticket: {
@@ -21,6 +23,7 @@ interface TicketCardProps {
     labels?: string[];
     pullRequests?: any[];
     demoLink?: { url: string };
+    orchestration?: AgentRunSummary | null;
   };
   onClick: () => void;
 }
@@ -81,6 +84,8 @@ export const TicketCard: React.FC<TicketCardProps> = ({ ticket, onClick }) => {
           ))}
         </div>
       )}
+
+      {ticket.orchestration && <AgentRunStrip run={ticket.orchestration} />}
 
       {assignee && (
         <div className="mt-auto flex items-center border-t border-border pt-2">

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@apollo/client';
 import { Loader2 } from 'lucide-react';
 import { GET_AUTH_STATUS } from './graphql/queries';
@@ -13,7 +13,10 @@ import CalendarPage from './pages/CalendarPage';
 import MonitoringPage from './pages/MonitoringPage';
 import DockerServicesPage from './pages/DockerServicesPage';
 import { PinLockModal } from './components/PinLockModal';
-import { Button } from './components/ui';
+import { LoadingSkeleton } from './components/LoadingSkeleton';
+import { Button, Page } from './components/ui';
+
+const AgentsPage = lazy(() => import('./pages/AgentsPage'));
 
 function App() {
   const { data, error, refetch } = useQuery(GET_AUTH_STATUS, { fetchPolicy: 'network-only' });
@@ -25,7 +28,7 @@ function App() {
       const key = decodeURIComponent(path.split('/').pop() || '');
       return { path: '/ticket', key: key || null };
     }
-    if (path === '/dashboard' || path === '/calendar' || path === '/monitoring' || path === '/docker' || path === '/attention' || path === '/settings') {
+    if (path === '/dashboard' || path === '/agents' || path === '/calendar' || path === '/monitoring' || path === '/docker' || path === '/attention' || path === '/settings') {
       return { path, key: null };
     }
     return { path: '/', key: null };
@@ -76,6 +79,7 @@ function App() {
     switch (currentPath) {
       case '/': return <HomePage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;
       case '/dashboard': return <DashboardPage onTicketClick={navigateToTicket} />;
+      case '/agents': return <Suspense fallback={<Page width="full"><LoadingSkeleton /></Page>}><AgentsPage onTicketClick={navigateToTicket} onNavigate={handleNavigate} /></Suspense>;
       case '/calendar': return <CalendarPage onNavigate={handleNavigate} />;
       case '/monitoring': return <MonitoringPage onNavigate={handleNavigate} />;
       case '/docker': return <DockerServicesPage />;

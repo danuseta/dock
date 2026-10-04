@@ -20,6 +20,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { GET_DASHBOARD, GET_TICKET_DETAIL_CORE, GET_TICKET_DETAIL_ENRICHMENT } from '../graphql/queries';
+import { TicketAgentPanel } from '../components/TicketAgentPanel';
 import { CLEAR_TICKET_DEPENDENCY, SAVE_DEMO_LINK, SEND_TO_DISCORD, SET_TICKET_DEPENDENCY, CHECK_CONFLICTS } from '../graphql/mutations';
 import { PRBadge } from '../components/PRBadge';
 import { ConflictModal } from '../components/ConflictModal';
@@ -257,6 +258,8 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
             <Button className="h-12 w-full border-status-discord bg-status-discord text-base text-white hover:bg-status-discord/80" onClick={handleDiscordBroadcast}><MessageSquare size={20} aria-hidden="true" />{isCombinedAnnouncement ? `Broadcast ${relationTickets.length} Tickets to Discord` : 'Broadcast Summary to Discord'}</Button>
             <p className="mt-2.5 text-center font-mono text-xs text-muted-foreground">{isCombinedAnnouncement ? `One combined announcement for ${relationTickets.map((item: any) => item.key).join(' + ')}.` : 'Sends status, PR merge checks, and demo recordings to team channels.'}</p>
           </Card>
+
+          <TicketAgentPanel ticketKey={ticket.key} />
 
           <Card>
             <div className="mb-3 flex items-center gap-2 border-b border-border pb-3"><Link2 size={19} className="text-accent" aria-hidden="true" /><h2 className="text-balance font-display text-lg font-bold">Ticket Dependency</h2></div>

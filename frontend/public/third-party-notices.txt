@@ -1,0 +1,83 @@
+DOCK - third-party notices for the Agents page
+==============================================
+
+The Agents page was written for DOCK. Parts of it are ported from, or built
+from, the open-source projects below. Each is under the MIT License; the
+licence text appears once at the end and applies to every project listed with
+the copyright line shown.
+
+1. Claw3D
+   https://github.com/iamlukethedev/Claw3D (revision 0565b78)
+   Copyright (c) 2026 Luke The Dev
+   Used in:
+     frontend/src/agents/office/navigation.ts  - constants, toWorld, furniture
+       maps, buildNavGrid, astar (src/features/retro-office/core)
+     frontend/src/agents/office/character.ts   - box-rig character and walk cycle
+       (src/features/retro-office/objects/agents.tsx), rewritten from
+       react-three-fiber JSX to plain three.js
+     frontend/public/office/furniture/*.glb    - ten furniture models copied
+       unchanged from public/office-assets/models/furniture
+   Note on the models: the Claw3D repository states no separate licence or
+   author for these files. Their file names match Kenney's "Furniture Kit"
+   (kenney.nl, CC0), but that origin is not confirmed. If it turns out they are
+   not redistributable, delete the folder: the office falls back to plain boxes.
+
+2. hermes-virtual-office
+   https://github.com/JuniorXcoder/hermes-virtual-office (revision cd47a19)
+   Copyright (c) 2026 Hermes Virtual Office Contributors
+   Used in:
+     frontend/src/agents/office/board.ts       - buildBoardCards, setBoardSize
+       (src/lib/office/board.ts)
+     frontend/src/agents/office/office.css     - wall-board card structure
+       (src/app/globals.css), recoloured
+
+3. openclaw-office
+   https://github.com/WW-AI-Lab/openclaw-office (revision def631a)
+   Copyright (c) 2026 OpenClaw
+   Used in:
+     frontend/src/agents/office/movement.ts    - planWalkPath, pathLength,
+       calculateWalkDuration, interpolatePathPosition (src/lib/movement-animator.ts)
+     frontend/src/agents/office/emotes.ts      - ZzzEmote; the "?" follows
+       ErrorEmote (src/components/office-2d/Emotes.tsx)
+     frontend/src/agents/office/office.css     - emote keyframes (src/styles/globals.css)
+
+4. pixtuoid
+   https://github.com/IvanWng97/pixtuoid (revision bc6af3a)
+   Copyright (c) 2026 Ivan Wang
+   Used in:
+     frontend/src/agents/office/activity.ts            - Idle / Active / Waiting
+     backend/bff-graphql/src/integrations/orchestrator.ts
+       rules, time windows and the hook-event mapping, rewritten from Rust
+       (state/mod.rs, state/reducer/mod.rs, pose/pure.rs, source/decoder.rs)
+
+5. zoetrope
+   https://github.com/furkankly/zoetrope (revision b1f31dd)
+   Copyright (c) 2026 Furkan Kalaycioglu
+   Used in:
+     frontend/public/zoetrope/wasm/*           - the web build, compiled from
+       source with two changes: the palette in src/state/graph.rs (eight
+       colours) and one colour in src/autopilot.rs, both set to DOCK's theme
+
+three.js (https://threejs.org, MIT, Copyright (c) 2010-2024 three.js authors)
+is an npm dependency and carries its own licence in node_modules.
+
+------------------------------------------------------------------------------
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
