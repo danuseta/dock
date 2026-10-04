@@ -8,7 +8,7 @@ import { FURNITURE, NAV_GRID, SPOTS, STAGE_ZONES, WAITING_ROW, zoneForStage } fr
 import { calculateWalkDuration, getZoneDoorPoint, interpolatePathPosition, pathLength, planWalkPath, routeThroughDoors } from '../agents/office/movement';
 import { GRID_CELL, GRID_COLS, astar, buildNavGrid, toWorld } from '../agents/office/navigation';
 import { formatAge, runStatus, shirtColor } from '../agents/runs';
-import { sampleRuns } from '../agents/sampleRuns';
+import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 
 const blocked = (x: number, y: number) => NAV_GRID[Math.floor(y / GRID_CELL) * GRID_COLS + Math.floor(x / GRID_CELL)] === 1;
 
@@ -115,4 +115,17 @@ test('the sample run cycles through the stages and ends at a gate', () => {
   assert.deepStrictEqual(stages.map((run) => run?.activity), ['ACTIVE', 'ACTIVE', 'ACTIVE', 'ACTIVE', 'WAITING']);
   assert.ok(sampleRuns(0).every((run) => run.sample));
   assert.deepStrictEqual(sampleRuns(-1).map((run) => run.stage), sampleRuns(0).map((run) => run.stage), 'a clock that lags the start does not break the script');
+});
+
+test('the sample flow fans a team out and then waits at a gate', () => {
+  const coding = sampleTimeline(1);
+  assert.deepStrictEqual([coding.stageIndex, coding.agents.length, coding.agents[0].tool], [2, 5, 'Agent']);
+  assert.strictEqual(coding.buckets.length, 48);
+  assert.ok(sampleTimeline(6).agents.filter((agent) => agent.state === 'done').length >= 3, 'members finish before the stage ends');
+
+  const gated = sampleTimeline(29);
+  assert.deepStrictEqual([gated.stageIndex, gated.agents.length, gated.agents[0].state], [4, 1, 'waiting']);
+  assert.deepStrictEqual(gated.gates.map((gate) => gate.state), ['passed', 'waiting']);
+  assert.ok(gated.buckets.some((bucket) => bucket.gate));
+  assert.deepStrictEqual(sampleTimeline(-3).stageIndex, sampleTimeline(0).stageIndex);
 });
