@@ -90,6 +90,9 @@ const ledger = {
 test('orchestrator ledger parsing keeps only what DOCK shows', () => {
   const parsed = parseLedger(ledger, new Date('2026-10-05T00:00:00.000Z'));
   assert.strictEqual(parsed.key, 'QRD-1387');
+  assert.strictEqual(parsed.kind, 'build');
+  assert.strictEqual(parseLedger({ ...ledger, kind: 'review' }).kind, 'review');
+  assert.strictEqual(parseLedger({ ...ledger, kind: 'anything' }).kind, 'build');
   assert.deepStrictEqual(parsed.ac.map((item) => item.state), ['PASS', 'FAIL', 'TODO']);
   assert.strictEqual(parsed.prBe, 'https://github.com/example/be/pull/1');
   assert.strictEqual(parsed.prFe, null, 'non-HTTP PR links are dropped');
