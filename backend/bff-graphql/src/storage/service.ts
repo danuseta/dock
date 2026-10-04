@@ -199,6 +199,25 @@ export class StorageService {
     return event;
   }
 
+  getOrchestratorToolEvents(ticketKey: string, take: number) {
+    return this.db.orchestratorToolEvent.findMany({ where: { ticketKey }, orderBy: { id: 'desc' }, take });
+  }
+
+  async addOrchestratorToolEvents(
+    ticketKey: string,
+    events: Array<{ kind: string; agentId: string; agentType: string | null; name: string; detail: string | null; at: Date }>,
+    keep: number,
+  ) {
+    if (events.length === 0) return;
+    await this.db.orchestratorToolEvent.createMany({ data: events.map((event) => ({ ticketKey, ...event })) });
+    const oldestKept = await this.db.orchestratorToolEvent.findFirst({
+      where: { ticketKey }, orderBy: { id: 'desc' }, skip: keep - 1, select: { id: true },
+    });
+    if (oldestKept) {
+      await this.db.orchestratorToolEvent.deleteMany({ where: { ticketKey, id: { lt: oldestKept.id } } });
+    }
+  }
+
   getIngestTokens() {
     return this.db.ingestToken.findMany({ where: { revokedAt: null }, orderBy: { createdAt: 'asc' } });
   }

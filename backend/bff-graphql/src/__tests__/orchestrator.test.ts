@@ -169,7 +169,7 @@ test('orchestrator service ingests ledgers, events and builds attention items', 
     const working = await service.ingestHookEvent({ key: 'QRD-1387', event: 'PreToolUse', detail: 'Bash' }, now);
     assert.strictEqual(working?.activity, 'ACTIVE');
     await service.ingestHookEvent({ key: 'QRD-1387', event: 'PreToolUse', detail: 'Read' }, now);
-    assert.strictEqual(events.filter((event) => event.kind === 'ACTIVE').length, 1, 'repeated tool calls do not grow the event log');
+    assert.strictEqual(events.filter((event) => event.kind === 'AGENT_ACTIVE').length, 1, 'repeated tool calls do not grow the event log');
 
     const later = new Date(now.getTime() + 45 * 60 * 1000);
     assert.deepStrictEqual(attentionItems(await service.list(later)).map((item) => item.type), ['AGENT_STALLED']);
