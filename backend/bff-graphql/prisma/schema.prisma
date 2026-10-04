@@ -150,3 +150,16 @@ model IngestToken {
   revokedAt  DateTime?
   createdAt  DateTime  @default(now())
 }
+
+model OrchestratorToolEvent {
+  id        Int      @id @default(autoincrement())
+  ticketKey String
+  kind      String
+  agentId   String   @default("main")
+  agentType String?
+  name      String
+  detail    String?
+  at        DateTime
+
+  @@index([ticketKey, id])
+}

@@ -8,14 +8,16 @@ import { Badge, Button, Card, Dialog, Page, PageHeader } from '../components/ui'
 import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
-import { STATUS_LABEL, formatAge, runStatus, stageColor, stageLabel, type AgentEvent, type AgentRun, type RunStatus } from '../agents/runs';
-import { sampleRuns } from '../agents/sampleRuns';
+import { STATUS_LABEL, formatAge, runStatus, stageColor, stageLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunStatus } from '../agents/runs';
+import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
+import { AgentFlowGraph } from '../components/AgentFlowGraph';
 
 const AgentsOffice = lazy(() => import('../components/AgentsOffice'));
 
 interface AgentsPageProps { onTicketClick: (key: string) => void; onNavigate: (path: string) => void; }
 
 type View = 'office' | 'table';
+type FlowView = 'live' | 'replay';
 
 const POLL_MS = 5000;
 const sectionLabel = 'font-mono text-[0.66rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
@@ -37,7 +39,9 @@ const acTone = (state: string) => state === 'PASS'
     : 'border-border-glow text-secondary-foreground';
 
 const eventLabel: Record<string, string> = {
-  STAGE: 'Moved to', WAITING: 'Waiting on you', RESUMED: 'Resumed', ACTIVE: 'Working', IDLE: 'Idle',
+  STAGE: 'Moved to', WAITING: 'Waiting on you', RESUMED: 'Resumed',
+  AGENT_ACTIVE: 'Working', AGENT_IDLE: 'Idle', AGENT_WAITING: 'Asking',
+  ACTIVE: 'Working', IDLE: 'Idle',
 };
 
 const StageChip: React.FC<{ stage: string }> = ({ stage }) => (
@@ -55,6 +59,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
   const { data, loading, error, refetch } = useQuery(GET_ORCHESTRATIONS, { ...CACHED_QUERY_OPTIONS, pollInterval: POLL_MS });
   const [dismissOrchestration, { loading: dismissing }] = useMutation(DISMISS_ORCHESTRATION);
   const [view, setView] = useState<View>('office');
+  const [flowView, setFlowView] = useState<FlowView>('live');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [sampleStartedAt, setSampleStartedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now() / 1000);
@@ -82,9 +87,15 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
     ...CACHED_QUERY_OPTIONS,
     variables: { key: selected?.key },
     skip: !selected || sampling,
-    pollInterval: POLL_MS * 2,
+    pollInterval: POLL_MS,
   });
   const events: AgentEvent[] = !sampling && detailData?.orchestration?.key === selected?.key ? detailData?.orchestration?.events || [] : [];
+
+  const timeline: AgentTimeline | null = sampling
+    ? (selected?.key === 'SAMPLE-2' ? sampleTimeline(sampleTick) : null)
+    : (detailData?.orchestration?.key === selected?.key ? detailData?.orchestration?.timeline || null : null);
+  const canReplay = Boolean(selected?.hasTranscript) && !sampling;
+  const showReplay = flowView === 'replay' && canReplay;
 
   // Ages keep counting between polls; the server only sends how old things were when it answered.
   const drift = sampling ? 0 : Math.max(0, now - receivedAt);
@@ -285,11 +296,20 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
         <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 border-b border-border bg-surface-0 px-5 py-2.5">
           <h2 className="font-display text-[0.95rem] font-bold">Session flow</h2>
           {selected && <span className="font-mono text-xs font-bold text-accent">{selected.key}</span>}
-          <span className="text-pretty text-[0.78rem] text-muted-foreground">The Claude Code session for this ticket, with secrets masked on the laptop before upload.</span>
+          <span className="text-pretty text-[0.78rem] text-muted-foreground">{showReplay ? 'The uploaded Claude Code session, with secrets masked on the laptop.' : 'Live from the stage, gate and tool-call events your laptop reports.'}</span>
+          {canReplay && (
+            <div className="ml-auto flex rounded-sm border border-border bg-surface-1 p-0.5 max-[700px]:ml-0" role="group" aria-label="Session flow view">
+              {([['live', 'Live graph'], ['replay', 'Replay detail']] as const).map(([id, label]) => (
+                <button key={id} type="button" className={cn('h-7 rounded-xs px-3 font-display text-xs font-semibold text-secondary-foreground transition-colors duration-150', flowView === id && 'bg-accent text-black')} aria-pressed={flowView === id} onClick={() => setFlowView(id)}>{label}</button>
+              ))}
+            </div>
+          )}
         </div>
-        {selected?.hasTranscript && !sampling
-          ? <iframe key={selected.key} className="block h-[420px] w-full border-0 bg-[#0b0b0c]" title={`Session flow for ${selected.key}`} src={`${import.meta.env.BASE_URL}zoetrope/index.html?key=${encodeURIComponent(selected.key)}&api=${encodeURIComponent(apiOrigin)}`} />
-          : <p className="px-5 py-8 text-center text-pretty text-sm text-muted-foreground">{sampling ? 'Sample tickets have no session to show.' : selected ? `No session has been uploaded for ${selected.key} yet.` : 'Select a ticket to see its session.'}</p>}
+        {showReplay && selected
+          ? <iframe key={selected.key} className="block h-[470px] w-full border-0 bg-[#0b0b0c]" title={`Session replay for ${selected.key}`} src={`${import.meta.env.BASE_URL}zoetrope/index.html?key=${encodeURIComponent(selected.key)}&api=${encodeURIComponent(apiOrigin)}`} />
+          : selected && timeline
+            ? <AgentFlowGraph run={selected} timeline={timeline} />
+            : <p className="px-5 py-8 text-center text-pretty text-sm text-muted-foreground">{!selected ? 'Select a ticket to see its flow.' : sampling ? 'Select SAMPLE-2 to see a sample flow.' : 'Loading the flow...'}</p>}
       </Card>
 
       <Dialog open={Boolean(dismissTarget)} onClose={() => !dismissing && setDismissTarget(null)} dismissible={!dismissing} labelledBy="hide-run-title" describedBy="hide-run-description">

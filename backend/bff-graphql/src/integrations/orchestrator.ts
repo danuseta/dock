@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { generateIngestToken, hashIngestToken } from '../auth/ingest-token';
 import { StorageService } from '../storage/service';
+import { buildTimeline } from './orchestrator-timeline';
 
 export const ORCHESTRATOR_STAGES = [
   'gate', 'plan', 'code', 'test', 'verify', 'evidence', 'commit', 'pr', 'done', 'blocked',
@@ -26,6 +27,11 @@ const TICKET_KEY = /^[A-Z][A-Z0-9_]{0,31}-[1-9]\d{0,9}$/;
 const MAX_AC = 50;
 const MAX_EVENTS_KEPT = 60;
 const EVENTS_RETURNED = 20;
+const MAX_TOOL_EVENTS_KEPT = 300;
+const MAX_BATCH_EVENTS = 100;
+// Tools that are plumbing between agents rather than work worth drawing.
+const HIDDEN_TOOLS = new Set(['SubagentHandback']);
+const SPAWN_TOOLS = new Set(['Agent', 'Task']);
 const MAX_TOKENS = 5;
 const MAX_TRANSCRIPT_FILES = 40;
 export const MAX_TRANSCRIPT_BYTES = 12 * 1024 * 1024;
@@ -129,6 +135,41 @@ export function parseHookEvent(input: unknown): { key: string; event: HookEvent;
   const event = text(input.event, 40) as HookEvent;
   if (!HOOK_EVENTS.includes(event)) throw new OrchestratorInputError(`Event must be one of ${HOOK_EVENTS.join(', ')}`);
   return { key: normalizeTicketKey(input.key), event, detail: optionalText(input.detail, 80) };
+}
+
+export interface BatchEvent {
+  event: HookEvent;
+  at: Date;
+  tool: string | null;
+  agentId: string | null;
+  agentType: string | null;
+  spawnType: string | null;
+  detail: string | null;
+}
+
+/** A queue of hook events flushed from the laptop every few seconds. */
+export function parseEventBatch(input: unknown, now = new Date()): { key: string; events: BatchEvent[] } {
+  if (!isRecord(input)) throw new OrchestratorInputError('An event batch object is required');
+  const raw = Array.isArray(input.events) ? input.events : [];
+  if (raw.length === 0 || raw.length > MAX_BATCH_EVENTS) {
+    throw new OrchestratorInputError(`Between 1 and ${MAX_BATCH_EVENTS} events are required`);
+  }
+  const events = raw.map((item): BatchEvent => {
+    if (!isRecord(item)) throw new OrchestratorInputError('Each event must be an object');
+    const event = text(item.event, 40) as HookEvent;
+    if (!HOOK_EVENTS.includes(event)) throw new OrchestratorInputError(`Event must be one of ${HOOK_EVENTS.join(', ')}`);
+    const at = new Date(text(item.at, 40));
+    return {
+      event,
+      at: Number.isNaN(at.getTime()) || at > now ? now : at,
+      tool: optionalText(item.tool, 60),
+      agentId: optionalText(item.agentId, 64),
+      agentType: optionalText(item.agentType, 80),
+      spawnType: optionalText(item.spawnType, 80),
+      detail: optionalText(item.detail, 80),
+    };
+  });
+  return { key: normalizeTicketKey(input.key), events };
 }
 
 export function parseTranscript(input: unknown): { key: string; files: TranscriptFile[]; stats: Record<string, number> } {
@@ -298,6 +339,16 @@ export class OrchestratorService {
     return events.map((event) => ({ id: event.id, kind: event.kind, detail: event.detail, at: event.createdAt.toISOString() }));
   }
 
+  async timeline(keyInput: string, now = new Date()) {
+    const run = await this.get(keyInput, now);
+    if (!run) return null;
+    const [stageEvents, toolEvents] = await Promise.all([
+      this.storage.getOrchestratorEvents(run.key, MAX_EVENTS_KEPT),
+      this.storage.getOrchestratorToolEvents(run.key, MAX_TOOL_EVENTS_KEPT),
+    ]);
+    return buildTimeline(run, stageEvents, toolEvents, now);
+  }
+
   async needsAttention(now = new Date()) {
     return attentionItems(await this.list(now));
   }
@@ -341,7 +392,52 @@ export class OrchestratorService {
     const next = reduceHookEvent(current, event, detail, now);
     const updated = await this.storage.updateOrchestratorRun(key, { ...next, lastEventAt: now });
     if (next.activity !== current.activity) {
-      await this.storage.addOrchestratorEvent(key, next.activity, next.activityDetail, MAX_EVENTS_KEPT);
+      await this.storage.addOrchestratorEvent(key, `AGENT_${next.activity}`, next.activityDetail, MAX_EVENTS_KEPT);
+    }
+    return toOrchestration(updated, now);
+  }
+
+  /**
+   * The batched path the hook uses: one read, one state write and one insert
+   * for up to a hundred events, however many tools ran in the window.
+   */
+  async ingestEventBatch(input: unknown, now = new Date()) {
+    const { key, events } = parseEventBatch(input, now);
+    const row = await this.storage.getOrchestratorRun(key);
+    if (!row) return null;
+
+    const initial: ActivityState = {
+      activity: row.activity === 'ACTIVE' || row.activity === 'WAITING' ? row.activity : 'IDLE',
+      activityDetail: row.activityDetail,
+      activityEndedAt: row.activityEndedAt,
+    };
+    let state = initial;
+    let lastEventAt = row.lastEventAt ?? new Date(0);
+    const rows: Array<{ kind: string; agentId: string; agentType: string | null; name: string; detail: string | null; at: Date }> = [];
+
+    for (const event of [...events].sort((a, b) => a.at.getTime() - b.at.getTime())) {
+      const fromSubagent = Boolean(event.agentId);
+      // A subagent finishing a turn is not the ticket going quiet; only the main session's own stop is.
+      if (event.event !== 'SubagentStop' && !(fromSubagent && event.event === 'Stop')) {
+        state = reduceHookEvent(state, event.event, event.tool || event.detail, event.at);
+      }
+      if (event.at > lastEventAt) lastEventAt = event.at;
+
+      if (event.event === 'PreToolUse' && event.tool && !HIDDEN_TOOLS.has(event.tool)) {
+        const agent = { agentId: event.agentId || 'main', agentType: event.agentType };
+        rows.push({ kind: 'tool', ...agent, name: event.tool, detail: null, at: event.at });
+        if (SPAWN_TOOLS.has(event.tool)) {
+          rows.push({ kind: 'spawn', ...agent, name: event.spawnType || 'agent', detail: event.detail, at: event.at });
+        }
+      } else if (event.event === 'SubagentStop' && event.agentId) {
+        rows.push({ kind: 'stop', agentId: event.agentId, agentType: event.agentType, name: event.agentType || 'agent', detail: null, at: event.at });
+      }
+    }
+
+    const updated = await this.storage.updateOrchestratorRun(key, { ...state, lastEventAt });
+    await this.storage.addOrchestratorToolEvents(key, rows, MAX_TOOL_EVENTS_KEPT);
+    if (state.activity !== initial.activity) {
+      await this.storage.addOrchestratorEvent(key, `AGENT_${state.activity}`, state.activityDetail, MAX_EVENTS_KEPT);
     }
     return toOrchestration(updated, now);
   }

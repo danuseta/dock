@@ -189,6 +189,48 @@ export const typeDefs = gql`
     at: String!
   }
 
+  type TimelineGate {
+    id: ID!
+    stageIndex: Int!
+    text: String!
+    state: String!
+    at: String!
+  }
+
+  type TimelineAgent {
+    id: ID!
+    parentId: ID
+    name: String!
+    detail: String
+    state: String!
+    tool: String
+    tools: Int!
+  }
+
+  type TimelineBucket {
+    n: Int!
+    gate: Boolean!
+  }
+
+  type TimelineLogEntry {
+    at: String!
+    kind: String!
+    head: String!
+    text: String!
+  }
+
+  type OrchestrationTimeline {
+    stageIndex: Int!
+    round: Int!
+    loopFrom: Int
+    loopTo: Int
+    gates: [TimelineGate!]!
+    agents: [TimelineAgent!]!
+    buckets: [TimelineBucket!]!
+    totalTools: Int!
+    log: [TimelineLogEntry!]!
+  }
+
   type Orchestration {
     key: ID!
     title: String!
@@ -212,6 +254,7 @@ export const typeDefs = gql`
     hasTranscript: Boolean!
     updatedAt: String!
     events: [OrchestrationEvent!]!
+    timeline: OrchestrationTimeline
   }
 
   type IngestToken {

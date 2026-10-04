@@ -29,6 +29,38 @@ export interface AgentRun {
   sample?: boolean;
 }
 
+export interface TimelineAgent {
+  id: string;
+  parentId?: string | null;
+  name: string;
+  detail?: string | null;
+  state: string;
+  tool?: string | null;
+  tools: number;
+}
+
+export interface AgentTimeline {
+  stageIndex: number;
+  round: number;
+  loopFrom?: number | null;
+  loopTo?: number | null;
+  gates: Array<{ id: string; stageIndex: number; text: string; state: string; at: string }>;
+  agents: TimelineAgent[];
+  buckets: Array<{ n: number; gate: boolean }>;
+  totalTools: number;
+  log: Array<{ at: string; kind: string; head: string; text: string }>;
+}
+
+/** The six stops of the flow graph's rail; evidence and commit share Verify. */
+export const FLOW_RAIL = [
+  { id: 'gate', name: 'Gate', color: '#9aa0aa' },
+  { id: 'plan', name: 'Plan', color: '#8c9bf0' },
+  { id: 'code', name: 'Code', color: '#e8c56c' },
+  { id: 'test', name: 'Test', color: '#62cf9f' },
+  { id: 'verify', name: 'Verify', color: '#5cc0e0' },
+  { id: 'pr', name: 'PR', color: '#62cf9f' },
+] as const;
+
 export type AgentRunSummary = Pick<AgentRun, 'key' | 'stage' | 'waiting' | 'acPassed' | 'acFailed' | 'acTotal' | 'activity' | 'stalled'>;
 
 export const STAGE_LABEL: Record<string, string> = {

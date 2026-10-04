@@ -64,6 +64,10 @@ export function createOrchestratorIngestRouter(
     const run = await service.ingestHookEvent(body);
     return run && { key: run.key, activity: run.activity };
   }));
+  router.post('/events', small, handle(async (body) => {
+    const run = await service.ingestEventBatch(body);
+    return run && { key: run.key, activity: run.activity };
+  }));
   router.post('/transcript', express.json({ limit: MAX_TRANSCRIPT_BYTES + 1024 * 1024 }), handle((body) => service.saveTranscript(body)));
 
   router.use((error: unknown, _request: Request, response: Response, _next: express.NextFunction) => {

@@ -506,6 +506,17 @@ export const GET_ORCHESTRATION = gql`
     orchestration(key: $key) {
       ${ORCHESTRATION_FIELDS}
       events { id kind detail at }
+      timeline {
+        stageIndex
+        round
+        loopFrom
+        loopTo
+        gates { id stageIndex text state at }
+        agents { id parentId name detail state tool tools }
+        buckets { n gate }
+        totalTools
+        log { at kind head text }
+      }
     }
   }
 `;

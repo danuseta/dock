@@ -1,4 +1,4 @@
-import type { AgentRun } from './runs';
+import type { AgentRun, AgentTimeline } from './runs';
 
 // A scripted run for the Agents page when no laptop has pushed anything yet.
 // It never touches the server: SAMPLE-2 walks code -> test -> verify and then
@@ -49,4 +49,57 @@ export function sampleRuns(elapsed: number): AgentRun[] {
     run({ key: 'SAMPLE-3', title: 'Sample: an agent that went quiet', stage: 'test', stalled: true, idleSeconds: 2520 + elapsedSeconds }, ['PASS', 'TODO']),
     run({ key: 'SAMPLE-4', title: 'Sample: a failed acceptance check', stage: 'verify', activity: 'IDLE', idleSeconds: 6 + (elapsedSeconds % 14) }, ['PASS', 'FAIL', 'TODO']),
   ];
+}
+
+const SAMPLE_RAIL: Record<string, number> = { code: 2, test: 3, verify: 4 };
+
+/** The flow graph for SAMPLE-2, in step with sampleRuns: a team fans out, then waits at a gate. */
+export function sampleTimeline(elapsed: number): AgentTimeline {
+  const elapsedSeconds = Math.max(0, Math.floor(elapsed));
+  const step = Math.floor(elapsedSeconds / STEP_SECONDS) % 5;
+  const sinceStep = elapsedSeconds % STEP_SECONDS;
+  const run = sampleRuns(elapsedSeconds)[1];
+  const waiting = step === 4;
+  const tool = ['Edit', 'Read', 'Bash', 'Grep'][Math.floor(elapsedSeconds / 2) % 4];
+  const member = (id: string, name: string, detail: string, doneAfter: number) => ({
+    id, parentId: 'main', name, detail,
+    state: sinceStep >= doneAfter ? 'done' : 'active',
+    tool: sinceStep >= doneAfter ? null : tool,
+    tools: Math.min(sinceStep, doneAfter) + 1,
+  });
+  const team = [
+    [member('a1', 'executor', 'BE: service', 5), member('a2', 'executor', 'BE: controller', 4), member('a3', 'executor', 'FE: panel', 6), member('a4', 'executor', 'FE: tests', 3)],
+    [member('a1', 'test-runner', 'BE tests', 6), member('a2', 'test-runner', 'FE tests', 4)],
+    [member('a1', 'browser-verifier', 'check AC in the browser', 6)],
+    [],
+    [],
+  ][step];
+  const buckets = Array.from({ length: 48 }, (_, index) => {
+    const age = 47 - index;
+    const second = elapsedSeconds - age * 5;
+    return { n: second < 0 || (waiting && age * 5 < sinceStep) ? 0 : 1 + ((second * 7) % 4), gate: false };
+  });
+  if (waiting) buckets[Math.max(0, 47 - Math.floor(sinceStep / 5))].gate = true;
+  const now = Date.now();
+  return {
+    stageIndex: SAMPLE_RAIL[run.stage] ?? 2,
+    round: 1,
+    loopFrom: null,
+    loopTo: null,
+    gates: [
+      { id: 'g1', stageIndex: 1, text: 'Gate 1: approve the plan', state: 'passed', at: new Date(now - 60000).toISOString() },
+      ...(waiting ? [{ id: 'g2', stageIndex: 4, text: run.waiting || '', state: 'waiting', at: new Date(now - sinceStep * 1000).toISOString() }] : []),
+    ],
+    agents: [
+      { id: 'main', parentId: null, name: 'lead', detail: 'sample team', state: waiting ? 'waiting' : 'active', tool: waiting ? null : team.length ? 'Agent' : tool, tools: 6 + elapsedSeconds % 35 },
+      ...team,
+    ],
+    buckets,
+    totalTools: 20 + elapsedSeconds,
+    log: [
+      ...(waiting ? [{ at: new Date(now - sinceStep * 1000).toISOString(), kind: 'gate', head: 'Gate', text: run.waiting || '' }] : []),
+      ...team.filter((agent) => agent.state === 'active').map((agent) => ({ at: new Date(now).toISOString(), kind: 'tool', head: agent.name, text: tool })),
+      { at: new Date(now - sinceStep * 1000).toISOString(), kind: 'stage', head: 'Stage', text: run.stage },
+    ],
+  };
 }
