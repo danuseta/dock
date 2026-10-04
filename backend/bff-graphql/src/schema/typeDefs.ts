@@ -16,6 +16,7 @@ export const typeDefs = gql`
     labels: [String!]!
     pullRequests: [PullRequest!]
     demoLink: DemoLink
+    orchestration: Orchestration
   }
 
   type TicketGroup {
@@ -174,6 +175,58 @@ export const typeDefs = gql`
     pullNumber: Int
   }
 
+  type OrchestrationAc {
+    n: Int!
+    state: String!
+    text: String!
+    evidence: String
+  }
+
+  type OrchestrationEvent {
+    id: ID!
+    kind: String!
+    detail: String
+    at: String!
+  }
+
+  type Orchestration {
+    key: ID!
+    title: String!
+    stage: String!
+    waiting: String
+    gate: String
+    ac: [OrchestrationAc!]!
+    acPassed: Int!
+    acFailed: Int!
+    acTotal: Int!
+    testsBe: String
+    testsFe: String
+    prBe: String
+    prFe: String
+    note: String
+    activity: String!
+    activityDetail: String
+    idleSeconds: Int!
+    endedSeconds: Float
+    stalled: Boolean!
+    hasTranscript: Boolean!
+    updatedAt: String!
+    events: [OrchestrationEvent!]!
+  }
+
+  type IngestToken {
+    id: ID!
+    name: String!
+    prefix: String!
+    createdAt: String!
+    lastUsedAt: String
+  }
+
+  type IngestTokenSecret {
+    token: String!
+    record: IngestToken!
+  }
+
   type GitHubRepo {
     id: ID!
     name: String!
@@ -231,6 +284,9 @@ export const typeDefs = gql`
     monitors(refresh: Boolean = false): [MonitorTarget!]!
     dockerRuntime(includeStats: Boolean = false): DockerRuntime!
     dockerContainerLogs(id: ID!, tail: Int = 100): String!
+    orchestrations: [Orchestration!]!
+    orchestration(key: String!): Orchestration
+    ingestTokens: [IngestToken!]!
   }
 
   type Mutation {
@@ -256,5 +312,8 @@ export const typeDefs = gql`
     updateMonitor(id: ID!, input: MonitorTargetInput!): MonitorTarget!
     removeMonitor(id: ID!): Boolean!
     checkMonitors: [MonitorTarget!]!
+    createIngestToken(name: String!): IngestTokenSecret!
+    revokeIngestToken(id: ID!): Boolean!
+    dismissOrchestration(key: String!): Boolean!
   }
 `;

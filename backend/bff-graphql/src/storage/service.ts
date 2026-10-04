@@ -157,6 +157,72 @@ export class StorageService {
     return true;
   }
 
+  getOrchestratorRuns() {
+    return this.db.orchestratorRun.findMany({ orderBy: [{ ledgerUpdatedAt: 'desc' }, { key: 'asc' }] });
+  }
+
+  getOrchestratorRun(key: string) {
+    return this.db.orchestratorRun.findUnique({ where: { key } });
+  }
+
+  upsertOrchestratorRun(key: string, data: { title: string; stage: string; waiting: string; payload: string; ledgerUpdatedAt: Date }) {
+    return this.db.orchestratorRun.upsert({
+      where: { key },
+      update: { ...data, dismissedAt: null },
+      create: { key, ...data },
+    });
+  }
+
+  updateOrchestratorRun(key: string, data: {
+    activity?: string;
+    activityDetail?: string | null;
+    activityEndedAt?: Date | null;
+    lastEventAt?: Date;
+    transcriptAt?: Date;
+    dismissedAt?: Date | null;
+  }) {
+    return this.db.orchestratorRun.update({ where: { key }, data });
+  }
+
+  getOrchestratorEvents(ticketKey: string, take: number) {
+    return this.db.orchestratorEvent.findMany({ where: { ticketKey }, orderBy: { createdAt: 'desc' }, take });
+  }
+
+  async addOrchestratorEvent(ticketKey: string, kind: string, detail: string | null, keep: number) {
+    const event = await this.db.orchestratorEvent.create({ data: { ticketKey, kind, detail } });
+    const stale = await this.db.orchestratorEvent.findMany({
+      where: { ticketKey }, orderBy: { createdAt: 'desc' }, skip: keep, select: { id: true },
+    });
+    if (stale.length > 0) {
+      await this.db.orchestratorEvent.deleteMany({ where: { id: { in: stale.map((item) => item.id) } } });
+    }
+    return event;
+  }
+
+  getIngestTokens() {
+    return this.db.ingestToken.findMany({ where: { revokedAt: null }, orderBy: { createdAt: 'asc' } });
+  }
+
+  countIngestTokens() {
+    return this.db.ingestToken.count({ where: { revokedAt: null } });
+  }
+
+  createIngestToken(data: { name: string; prefix: string; tokenHash: string }) {
+    return this.db.ingestToken.create({ data });
+  }
+
+  findIngestToken(tokenHash: string) {
+    return this.db.ingestToken.findFirst({ where: { tokenHash, revokedAt: null } });
+  }
+
+  touchIngestToken(id: string, lastUsedAt: Date) {
+    return this.db.ingestToken.update({ where: { id }, data: { lastUsedAt } });
+  }
+
+  revokeIngestToken(id: string) {
+    return this.db.ingestToken.updateMany({ where: { id, revokedAt: null }, data: { revokedAt: new Date() } });
+  }
+
   getRepositories() { return this.db.monitoredRepository.findMany(); }
   createRepository(data: { owner: string; name: string; webhookSecret?: string }) {
     return this.db.monitoredRepository.create({ data });

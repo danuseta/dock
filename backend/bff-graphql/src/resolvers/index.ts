@@ -7,12 +7,20 @@ import { shouldRequirePin, type AuthContext } from '../auth/session';
 import { googleCalendarService } from '../integrations/google-calendar';
 import { upstreamMonitorService } from '../integrations/upstream-monitor';
 import { dockerRuntimeService } from '../integrations/docker-runtime';
+import { OrchestratorInputError, orchestratorService } from '../integrations/orchestrator';
 
 const jiraAPI = new JiraAPI();
 const githubAPI = new GitHubAPI();
 const discordAPI = new DiscordAPI();
 const storageAPI = new StorageAPI();
 const isPresent = <T>(value: T | null | undefined): value is T => value != null;
+
+function orchestratorInputError(error: unknown): never {
+  if (error instanceof OrchestratorInputError) {
+    throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+  }
+  throw error;
+}
 
 async function hasMasterPin(): Promise<boolean> {
   return storageAPI.hasMasterPin();
@@ -96,7 +104,14 @@ export const resolvers = {
       return storageAPI.getTicketRelationGroup(ticketKey);
     },
     needsAttention: async () => {
-      return await githubAPI.getNeedsAttention();
+      const [agentItems, conflicts] = await Promise.all([
+        orchestratorService.needsAttention().catch((error) => {
+          console.error('[BFF Orchestrator] Failed to load attention items:', error instanceof Error ? error.message : 'unknown error');
+          return [];
+        }),
+        githubAPI.getNeedsAttention(),
+      ]);
+      return [...agentItems, ...conflicts];
     },
     settings: async () => {
       return await storageAPI.getPublicSettings();
@@ -123,6 +138,9 @@ export const resolvers = {
     dockerRuntime: async (_: unknown, { includeStats }: { includeStats?: boolean }) => {
       return dockerRuntimeService.runtime(Boolean(includeStats));
     },
+    orchestrations: async () => orchestratorService.list(),
+    orchestration: async (_: unknown, { key }: { key: string }) => orchestratorService.get(key),
+    ingestTokens: async () => orchestratorService.tokens(),
     dockerContainerLogs: async (_: unknown, { id, tail }: { id: string; tail?: number }) => {
       try {
         return await dockerRuntimeService.logs(id, tail);
@@ -145,7 +163,14 @@ export const resolvers = {
     },
     demoLink: async (parent: any) => {
       return await storageAPI.getDemoLink(parent.key);
-    }
+    },
+    orchestration: async (parent: any) => {
+      return orchestratorService.get(parent.key).catch(() => null);
+    },
+  },
+
+  Orchestration: {
+    events: async (parent: { key: string }) => orchestratorService.events(parent.key),
   },
 
   TicketRelationGroup: {
@@ -301,12 +326,19 @@ export const resolvers = {
     updateMonitor: async (_: unknown, { id, input }: { id: string, input: any }) => upstreamMonitorService.update(id, input),
     removeMonitor: async (_: unknown, { id }: { id: string }) => upstreamMonitorService.remove(id),
     checkMonitors: async () => upstreamMonitorService.checkAll(),
+    createIngestToken: async (_: unknown, { name }: { name: string }) => {
+      return orchestratorService.createToken(name).catch(orchestratorInputError);
+    },
+    revokeIngestToken: async (_: unknown, { id }: { id: string }) => orchestratorService.revokeToken(id),
+    dismissOrchestration: async (_: unknown, { key }: { key: string }) => {
+      return orchestratorService.dismiss(key).catch(orchestratorInputError);
+    },
   }
 };
 
 const protectedQueries = [
   'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
-  'dockerRuntime', 'dockerContainerLogs',
+  'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens',
 ] as const;
 const protectedMutations = [
   'saveDemoLink',
@@ -328,6 +360,9 @@ const protectedMutations = [
   'updateMonitor',
   'removeMonitor',
   'checkMonitors',
+  'createIngestToken',
+  'revokeIngestToken',
+  'dismissOrchestration',
 ] as const;
 
 for (const field of protectedQueries) {
