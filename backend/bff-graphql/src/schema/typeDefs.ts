@@ -233,6 +233,7 @@ export const typeDefs = gql`
 
   type Orchestration {
     key: ID!
+    kind: String!
     title: String!
     stage: String!
     waiting: String

@@ -8,7 +8,7 @@ import { Badge, Button, Card, Dialog, Page, PageHeader } from '../components/ui'
 import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
-import { STATUS_LABEL, formatAge, runStatus, stageColor, stageLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunStatus } from '../agents/runs';
+import { STATUS_LABEL, formatAge, runStatus, stageColor, stageLabel, stageName, type AgentEvent, type AgentRun, type AgentTimeline, type RunStatus } from '../agents/runs';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 import { AgentFlowGraph } from '../components/AgentFlowGraph';
 
@@ -44,10 +44,10 @@ const eventLabel: Record<string, string> = {
   ACTIVE: 'Working', IDLE: 'Idle',
 };
 
-const StageChip: React.FC<{ stage: string }> = ({ stage }) => (
+const StageChip: React.FC<{ stage: string; kind?: string }> = ({ stage, kind }) => (
   <span className="inline-flex items-center gap-1.5 rounded-xs border border-border-glow px-2 py-0.5 font-mono text-[0.66rem] font-bold text-secondary-foreground">
     <i className="size-1.5 rounded-full" style={{ background: stageColor(stage) }} aria-hidden="true" />
-    {stageLabel(stage).toUpperCase()}
+    {stageName(stage, kind).toUpperCase()}
   </span>
 );
 
@@ -176,8 +176,9 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
               <div className="pointer-events-none absolute bottom-3 left-3.5 flex flex-wrap gap-x-3.5 gap-y-1 rounded-[8px] border border-border bg-[rgb(12_12_12/0.78)] px-[11px] py-[7px] font-mono text-[0.7rem] font-semibold text-secondary-foreground">
                 <span className="flex items-center gap-1.5"><Hand size={12} className="text-amber-200" aria-hidden="true" />raised hand = waiting on you</span>
                 <span className="flex items-center gap-1.5"><Moon size={12} aria-hidden="true" />zzz = no activity</span>
+                <span>faded = finished</span>
+                <span className="max-[900px]:hidden">drag to orbit · scroll to zoom</span>
               </div>
-              <div className="pointer-events-none absolute top-3 right-3.5 rounded-[8px] border border-border bg-[rgb(12_12_12/0.7)] px-2.5 py-1.5 font-mono text-[0.7rem] text-muted-foreground max-[900px]:hidden">drag to orbit · scroll to zoom · click a character or card</div>
               {empty && (
                 <div className="absolute inset-x-0 top-1/2 mx-auto w-[min(440px,calc(100%-2rem))] -translate-y-1/2 rounded-md border border-border bg-[rgb(12_12_12/0.9)] p-5 text-center">
                   <Bot size={28} className="mx-auto mb-2 text-muted-foreground" aria-hidden="true" />
@@ -202,7 +203,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                   {runs.map((run) => (
                     <tr key={run.key} className={cn('cursor-pointer border-t border-border hover:bg-surface-1', selected?.key === run.key && 'bg-surface-1')} onClick={() => setSelectedKey(run.key)}>
                       <td className="px-4 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => setSelectedKey(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><span className="mt-0.5 block max-w-[320px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
-                      <td className="px-4 py-3"><StageChip stage={run.stage} /></td>
+                      <td className="px-4 py-3"><StageChip stage={run.stage} kind={run.kind} /></td>
                       <td className="px-4 py-3"><StatusChip status={statusOf(run)} /></td>
                       <td className="px-4 py-3 font-mono text-xs tabular-nums">{run.acPassed}/{run.acTotal}{run.acFailed > 0 && <span className="ml-1.5 text-status-conflict">{run.acFailed} failed</span>}</td>
                       <td className="max-w-[280px] px-4 py-3 text-xs text-secondary-foreground"><span className="line-clamp-2">{run.waiting || '—'}</span></td>
@@ -222,7 +223,8 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
             <>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-xs border border-accent/30 bg-accent-dim px-[9px] py-[3px] font-mono text-sm font-extrabold text-accent">{selected.key}</span>
-                <StageChip stage={selected.stage} />
+                {selected.kind === 'review' && <span className="rounded-xs border border-border-glow px-2 py-0.5 font-mono text-[0.66rem] font-bold text-secondary-foreground">REVIEW</span>}
+                <StageChip stage={selected.stage} kind={selected.kind} />
                 <StatusChip status={statusOf(selected)} />
               </div>
               <h2 className="text-pretty font-display text-base leading-snug font-bold">{selected.title || 'Untitled'}</h2>
@@ -308,7 +310,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
           )}
         </div>
         {showReplay && selected
-          ? <iframe key={selected.key} className="block h-[470px] w-full border-0 bg-[#0b0b0c]" title={`Session replay for ${selected.key}`} src={`${import.meta.env.BASE_URL}zoetrope/index.html?key=${encodeURIComponent(selected.key)}&api=${encodeURIComponent(apiOrigin)}`} />
+          ? <iframe key={selected.key} className="block h-[540px] w-full border-0 bg-[#0b0b0c]" title={`Session replay for ${selected.key}`} src={`${import.meta.env.BASE_URL}zoetrope/index.html?key=${encodeURIComponent(selected.key)}&api=${encodeURIComponent(apiOrigin)}`} />
           : selected && timeline
             ? <AgentFlowGraph run={selected} timeline={timeline} />
             : <p className="px-5 py-8 text-center text-pretty text-sm text-muted-foreground">{!selected ? 'Select a ticket to see its flow.' : sampling ? 'Select SAMPLE-2 to see a sample flow.' : 'Loading the flow...'}</p>}

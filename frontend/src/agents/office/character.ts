@@ -2,8 +2,9 @@
 // src/features/retro-office/objects/agents.tsx. Part sizes, positions, the face
 // texture and the walk cycle (arm swing 0.4, leg swing 0.35, bounce 0.04, turn
 // smoothing 0.12) are the originals, rewritten from react-three-fiber JSX to
-// plain three.js. The typing, raised-hand, asleep and seated-lead poses and the
-// stool are DOCK's own.
+// plain three.js. Claw3D's "sitting" only leans the standing figure; the real
+// seated pose (bent legs, lowered onto the chair), and the typing, folded-arms,
+// raised-hand and asleep poses are DOCK's own.
 // See frontend/public/third-party-notices.txt.
 
 import * as THREE from 'three';
@@ -26,8 +27,8 @@ export interface Character {
   rightArm: THREE.Group;
   leftArm: THREE.Group;
   ring: THREE.Mesh;
-  stool: THREE.Mesh;
   tag: CSS2DObject;
+  dimmed: boolean;
   x: number;
   y: number;
   zone: ZoneId;
@@ -134,9 +135,6 @@ export function createCharacter(key: string, topColor: string, at: Point, zone: 
   ring.visible = false;
   group.add(ring);
 
-  const stool = box(group, [0.16, 0.09, 0.16], '#3a3a44', [0, 0.085, 0]);
-  stool.visible = false;
-
   group.traverse((object) => { object.userData.key = key; });
 
   const element = document.createElement('div');
@@ -146,16 +144,22 @@ export function createCharacter(key: string, topColor: string, at: Point, zone: 
   group.add(tag);
 
   return {
-    group, rightLeg, leftLeg, rightArm, leftArm, ring, stool, tag,
+    group, rightLeg, leftLeg, rightArm, leftArm, ring, tag, dimmed: false,
     x: at.x, y: at.y, zone, facing: Math.PI,
     frame: Math.random() * 40, phaseOffset: Math.random() * 6,
     walk: null, tagHtml: '', arrivedAt: null,
   };
 }
 
-export function animateCharacter(character: Character, pose: Pose, walking: boolean, deltaSeconds: number, still: boolean, seated = false): void {
+export interface Posture { seated?: boolean; folded?: boolean }
+
+/** How far a seated figure drops so its hips rest on the chair. */
+const SEAT_DROP = 0.07;
+
+export function animateCharacter(character: Character, pose: Pose, walking: boolean, deltaSeconds: number, still: boolean, posture: Posture = {}): void {
   const { group, leftArm, rightArm, leftLeg, rightLeg } = character;
-  const sitting = seated && !walking;
+  const sitting = Boolean(posture.seated) && !walking;
+  const folded = sitting && Boolean(posture.folded);
   character.frame += deltaSeconds * 60;
 
   let rotationDelta = character.facing - group.rotation.y;
@@ -165,15 +169,14 @@ export function animateCharacter(character: Character, pose: Pose, walking: bool
 
   const frameValue = character.frame + character.phaseOffset / WALK_ANIM_SPEED;
   const walkPhase = Math.sin(frameValue * WALK_ANIM_SPEED);
-  const typing = !walking && !sitting && pose === 'SeatedTyping';
+  const typing = !walking && !folded && pose === 'SeatedTyping';
   const asleep = !walking && pose === 'Asleep';
   const raised = !walking && pose === 'SeatedWaiting';
 
   group.rotation.x = typing ? -0.15 : asleep ? 0.42 : 0;
   const bounce = walking ? walkPhase * 0.04 : 0;
   const breathe = !walking && !typing && !still ? Math.sin(frameValue * 0.03) * 0.01 : 0;
-  group.position.y = bounce + breathe - (sitting ? 0.055 : 0);
-  character.stool.visible = sitting;
+  group.position.y = bounce + breathe - (sitting ? SEAT_DROP : 0);
 
   leftArm.rotation.set(0, 0, 0);
   rightArm.rotation.set(0, 0, 0);
@@ -184,8 +187,8 @@ export function animateCharacter(character: Character, pose: Pose, walking: bool
     const tap = still ? 0 : 0.12;
     leftArm.rotation.x = -1.05 + Math.sin(character.frame * 0.5) * tap;
     rightArm.rotation.x = -1.05 + Math.cos(character.frame * 0.5) * tap;
-  } else if (sitting && !raised) {
-    // The lead sits back with folded arms while the team works.
+  } else if (folded && !raised) {
+    // Sitting back with folded arms while the team works.
     leftArm.rotation.set(-0.75, 0, -0.55);
     rightArm.rotation.set(-0.75, 0, 0.55);
   } else if (raised) {
@@ -194,6 +197,20 @@ export function animateCharacter(character: Character, pose: Pose, walking: bool
   }
   rightLeg.rotation.x = walking ? -walkPhase * 0.35 : sitting ? -Math.PI / 2 : 0;
   leftLeg.rotation.x = walking ? walkPhase * 0.35 : sitting ? -Math.PI / 2 : 0;
+}
+
+/** A member that has finished stays at its desk, faded, until the ticket moves on. */
+export function setDimmed(character: Character, dimmed: boolean): void {
+  if (character.dimmed === dimmed) return;
+  character.dimmed = dimmed;
+  character.group.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      material.transparent = true;
+      material.opacity = dimmed ? 0.38 : object === character.group.children[0] ? 0.2 : 1;
+    }
+  });
 }
 
 export function disposeCharacter(character: Character): void {

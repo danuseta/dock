@@ -39,10 +39,11 @@ test('timeline draws subagents, attributes their tools and closes them on stop',
 
   assert.strictEqual(timeline.stageIndex, 3);
   assert.deepStrictEqual(timeline.agents.map((agent) => [agent.name, agent.detail, agent.state, agent.tool, agent.tools]), [
-    ['orchestrator', null, 'active', 'Agent', 3],
+    ['lead', null, 'active', 'Agent', 3],
+    ['general-purpose', 'left over from the code stage', 'active', null, 0],
     ['test-runner', 'Test-runner BE', 'active', 'Read', 2],
     ['test-runner', 'Test-runner FE', 'done', null, 1],
-  ], 'agents from an earlier stage are gone, and each subagent keeps its own tools');
+  ], 'an agent that never stopped is still there, and each subagent keeps its own tools');
   assert.strictEqual(timeline.totalTools, 6);
   assert.strictEqual(timeline.buckets.length, BUCKET_COUNT);
   assert.strictEqual(timeline.buckets.reduce((sum, bucket) => sum + bucket.n, 0), 6);
@@ -69,7 +70,6 @@ test('a ticket sent back shows the round and the loop until it passes that stage
   );
   assert.deepStrictEqual([again.round, again.loopFrom, again.stageIndex], [2, null, 5]);
   assert.deepStrictEqual(again.gates.map((gate) => gate.state), ['passed', 'waiting']);
-  assert.strictEqual(again.agents[0].name, 'lead', 'an OMC team makes the main session the lead');
   assert.strictEqual(again.buckets[BUCKET_COUNT - 1].gate, true);
 });
 
@@ -111,7 +111,7 @@ test('event batches update state once and keep every tool call', async () => {
 
   const timeline = await service.timeline('QRD-1', at(6));
   assert.deepStrictEqual(timeline?.agents.map((agent) => [agent.name, agent.detail, agent.state, agent.tools]), [
-    ['orchestrator', null, 'active', 1], ['Explore', 'Hook payload probe', 'done', 1],
+    ['lead', null, 'active', 1], ['Explore', 'Hook payload probe', 'done', 1],
   ]);
 
   assert.deepStrictEqual((await service.members('QRD-1', at(6))).map((agent) => agent.name), ['Explore']);
@@ -124,4 +124,44 @@ test('event batches update state once and keep every tool call', async () => {
   assert.throws(() => parseEventBatch({ key: 'QRD-1', events: [] }), OrchestratorInputError);
   assert.throws(() => parseEventBatch({ key: 'QRD-1', events: Array.from({ length: 101 }, () => ({ event: 'Stop' })) }), OrchestratorInputError);
   assert.strictEqual(parseEventBatch({ key: 'QRD-1', events: [{ event: 'Stop', at: '2999-01-01T00:00:00Z' }] }, at(9)).events[0].at.getTime(), at(9).getTime());
+});
+
+test('a sub-coordinator and the members it spawns form a tree', () => {
+  const timeline = buildTimeline(
+    { stage: 'test', waiting: null, activity: 'ACTIVE' },
+    [stageEvent('STAGE', 'code', 0), stageEvent('STAGE', 'test', 100)],
+    [
+      toolEvent(5, 'spawn', 'oh-my-claudecode:executor', 'main', 'coord-1406', 'QRD-1406 coordinator'),
+      toolEvent(6, 'tool', 'Read', 'c1', 'oh-my-claudecode:executor'),
+      toolEvent(10, 'spawn', 'oh-my-claudecode:executor', 'c1', 'be-exec', 'BE service'),
+      toolEvent(11, 'tool', 'Edit', 'm1', 'oh-my-claudecode:executor'),
+      toolEvent(50, 'stop', 'oh-my-claudecode:executor', 'm1', 'oh-my-claudecode:executor'),
+      toolEvent(105, 'spawn', 'test-runner', 'c1', null, 'BE tests'),
+      toolEvent(106, 'tool', 'Bash', 'm2', 'test-runner'),
+      toolEvent(107, 'tool', 'Grep', 'ghost', 'oh-my-claudecode:verifier'),
+    ],
+    at(110),
+  );
+  const byName = new Map(timeline.agents.map((agent) => [agent.name, agent]));
+  const coordinator = byName.get('coord-1406');
+  assert.ok(coordinator, 'the name the lead gave its sub-coordinator is used');
+  assert.deepStrictEqual([coordinator.parentId, coordinator.state], ['main', 'active'], 'it outlives the stage it was spawned in');
+  assert.strictEqual(byName.has('be-exec'), false, 'a member that finished in an earlier stage is gone');
+  assert.deepStrictEqual([byName.get('test-runner')?.parentId, byName.get('test-runner')?.tool], [coordinator.id, 'Bash']);
+  assert.deepStrictEqual([byName.get('verifier')?.parentId, byName.get('verifier')?.tools], ['main', 1], 'an agent whose spawn was never seen still appears');
+});
+
+test('a member whose stop event never arrived is retired after ten silent minutes', () => {
+  const events = [
+    toolEvent(0, 'spawn', 'oh-my-claudecode:executor', 'main', 'old-exec', 'never stopped'),
+    toolEvent(5, 'tool', 'Edit', 'old', 'oh-my-claudecode:executor'),
+    toolEvent(1000, 'spawn', 'oh-my-claudecode:executor', 'main', 'new-exec', 'fresh'),
+    toolEvent(1001, 'tool', 'Edit', 'new', 'oh-my-claudecode:executor'),
+  ];
+  const stages = [stageEvent('STAGE', 'code', 900)];
+  const timeline = buildTimeline({ stage: 'code', waiting: null, activity: 'ACTIVE' }, stages, events, at(1005));
+  assert.deepStrictEqual(timeline.agents.map((agent) => [agent.name, agent.state, agent.tools]), [['lead', 'active', 0], ['new-exec', 'active', 1]],
+    'the silent one is gone, and the new member is not mistaken for it');
+  const early = buildTimeline({ stage: 'code', waiting: null, activity: 'ACTIVE' }, [stageEvent('STAGE', 'code', 0)], events.slice(0, 2), at(300));
+  assert.deepStrictEqual(early.agents.map((agent) => agent.name), ['lead', 'old-exec'], 'five quiet minutes is still a working member');
 });

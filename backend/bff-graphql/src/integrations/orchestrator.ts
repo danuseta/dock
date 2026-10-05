@@ -40,8 +40,12 @@ const TRANSCRIPT_PATH = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+){0,3}$/;
 export class OrchestratorInputError extends Error {}
 
 export interface LedgerAc { n: number; state: AcState; text: string; evidence: string | null }
+export const RUN_KINDS = ['build', 'review'] as const;
+export type RunKind = typeof RUN_KINDS[number];
+
 export interface Ledger {
   key: string;
+  kind: RunKind;
   title: string;
   stage: OrchestratorStage;
   waiting: string;
@@ -116,6 +120,7 @@ export function parseLedger(input: unknown, now = new Date()): Ledger {
 
   return {
     key,
+    kind: text(input.kind, 20) === 'review' ? 'review' : 'build',
     title: text(input.title, 300),
     stage,
     waiting: text(input.waiting, 500),
@@ -144,6 +149,7 @@ export interface BatchEvent {
   agentId: string | null;
   agentType: string | null;
   spawnType: string | null;
+  spawnName: string | null;
   detail: string | null;
 }
 
@@ -166,6 +172,7 @@ export function parseEventBatch(input: unknown, now = new Date()): { key: string
       agentId: optionalText(item.agentId, 64),
       agentType: optionalText(item.agentType, 80),
       spawnType: optionalText(item.spawnType, 80),
+      spawnName: optionalText(item.spawnName, 32),
       detail: optionalText(item.detail, 80),
     };
   });
@@ -265,6 +272,7 @@ export function toOrchestration(row: RunRow, now: Date) {
 
   return {
     key: row.key,
+    kind: ledger.kind === 'review' ? 'review' : 'build',
     title: row.title,
     stage: row.stage,
     waiting: row.waiting || null,
@@ -433,7 +441,8 @@ export class OrchestratorService {
         const agent = { agentId: event.agentId || 'main', agentType: event.agentType };
         rows.push({ kind: 'tool', ...agent, name: event.tool, detail: null, at: event.at });
         if (SPAWN_TOOLS.has(event.tool)) {
-          rows.push({ kind: 'spawn', ...agent, name: event.spawnType || 'agent', detail: event.detail, at: event.at });
+          // On a spawn row agentType carries the name the spawner gave its member, when it gave one.
+          rows.push({ kind: 'spawn', agentId: agent.agentId, agentType: event.spawnName, name: event.spawnType || 'agent', detail: event.detail, at: event.at });
         }
       } else if (event.event === 'SubagentStop' && event.agentId) {
         rows.push({ kind: 'stop', agentId: event.agentId, agentType: event.agentType, name: event.agentType || 'agent', detail: null, at: event.at });

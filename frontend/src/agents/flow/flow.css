@@ -2,7 +2,7 @@
    SVG that only draws the connecting lines. */
 
 .dock-flow-wrap { overflow-x: auto; background: #0d0d0f; }
-.dock-flow { position: relative; min-width: 860px; height: 470px; }
+.dock-flow { position: relative; min-width: 860px; height: 540px; }
 .dock-flow svg { position: absolute; inset: 0; width: 100%; height: 100%; }
 
 .dock-flow-head { position: absolute; top: 12px; left: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }

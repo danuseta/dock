@@ -2,14 +2,15 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
-import { shirtColor, stageColor, type AgentRun, type TimelineAgent } from '../runs';
+import { podColor, splitTeam, stageColor, stageName, type AgentRun, type TimelineAgent } from '../runs';
 import { clock, poseOf, slotFromServer, tickActivity, type ActivitySlot, type Pose } from './activity';
 import { buildBoardCards, type BoardCards } from './board';
-import { animateCharacter, createCharacter, disposeCharacter, type Character } from './character';
+import { animateCharacter, createCharacter, disposeCharacter, setDimmed, type Character } from './character';
 import { ASK_EMOTE, THINK_EMOTE, ZZZ_EMOTE } from './emotes';
 import {
-  EXIT, FURNITURE, SPOTS, STAGE_ZONES, WAITING_GAP, WAITING_ROW, ZONES, ZONE_META, memberSpot, zoneForStage,
-  type StageZone, type ZoneId,
+  EXIT, FURNITURE, LEAD_SEAT, LEAD_ZONE, MAX_PODS, MEMBER_DESKS, RAIL_STAGES, YOU_ZONE,
+  coordinatorSeat, memberSeat, podId, podZone, railIndex, waitingSpot,
+  type Zone, type ZoneId,
 } from './layout';
 import { calculateWalkDuration, interpolatePathPosition, routeThroughDoors } from './movement';
 import {
@@ -22,20 +23,25 @@ export interface OfficeSceneOptions {
   onSelect: (key: string) => void;
 }
 
-interface Member { info: TimelineAgent; character: Character }
+interface Member { info: TimelineAgent; character: Character; desk: number }
 
 interface Occupant {
   run: AgentRun;
   slot: ActivitySlot;
+  pod: number;
   character: Character;
   members: Map<string, Member>;
+  hidden: number;
 }
 
-const MEMBER_SCALE = 0.82;
+interface Pod { pad: THREE.Mesh; strip: THREE.Mesh; sign: CSS2DObject }
 
 const BACKGROUND = 0x0d0d0f;
 const OWNER_COLOR = '#e9e2d0';
+const LEAD_COLOR = '#d9d2bf';
+const FREE_POD = 0x26262c;
 const DONE_LINGER_SECONDS = 4;
+const MEMBER_SCALE = 0.86;
 const BOARD_SIZE: [number, number] = [22, 3.1];
 const FALLBACK_HEIGHT: Partial<Record<FurnitureItem['type'], number>> = {
   computer: 0.35, chair: 0.5, plant: 0.7, lamp: 1.4, bookshelf: 1.7, cabinet: 1,
@@ -46,7 +52,8 @@ const escapeHtml = (value: string) => value.replace(/[&<>"]/g, (char) => (
 ));
 
 /**
- * The 3D office. DOCK owns the floor plan and the frame loop; characters,
+ * The 3D office. DOCK owns the floor plan and the frame loop: one lead, a pod
+ * per ticket with its sub-coordinator and members at their desks. Characters,
  * pathfinding, the wall board, movement and the status rules come from the
  * projects credited in frontend/public/third-party-notices.txt.
  */
@@ -59,6 +66,8 @@ export class OfficeScene {
   private readonly board: THREE.Mesh;
   private readonly boardCards: BoardCards;
   private readonly occupants = new Map<string, Occupant>();
+  private readonly pods: Pod[] = [];
+  private readonly lead: Character;
   private readonly labels: CSS2DObject[] = [];
   private readonly resizeObserver: ResizeObserver;
   private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -84,12 +93,12 @@ export class OfficeScene {
 
     this.scene.background = new THREE.Color(BACKGROUND);
     this.scene.fog = new THREE.Fog(BACKGROUND, 40, 80);
-    this.camera.position.set(-1.2, 16, 20.5);
+    this.camera.position.set(-1, 26, 22.5);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.target.set(0, 0.9, -0.6);
+    this.controls.target.set(0, 0, 1.4);
     this.controls.enableDamping = true;
     this.controls.maxPolarAngle = 1.42;
-    this.controls.minDistance = 10;
+    this.controls.minDistance = 8;
     this.controls.maxDistance = 46;
     this.controls.update();
 
@@ -103,9 +112,12 @@ export class OfficeScene {
     this.scene.add(frame);
     this.boardCards = buildBoardCards(
       this.board,
-      STAGE_ZONES.map((zone) => ZONE_META[zone].name.toUpperCase()),
+      RAIL_STAGES.map((stage) => stageName(stage, 'build').toUpperCase()),
       (key) => this.options.onSelect(key),
     );
+
+    this.lead = createCharacter('', LEAD_COLOR, LEAD_SEAT, 'lead');
+    this.scene.add(this.lead.group);
 
     this.renderer.domElement.addEventListener('pointerdown', this.handlePointerDown);
     this.renderer.domElement.addEventListener('pointerup', this.handlePointerUp);
@@ -124,12 +136,11 @@ export class OfficeScene {
     const keys = new Set(runs.map((run) => run.key));
     for (const [key, occupant] of this.occupants) {
       if (keys.has(key)) continue;
-      for (const member of occupant.members.values()) disposeCharacter(member.character);
-      disposeCharacter(occupant.character);
+      this.removeOccupant(occupant);
       this.occupants.delete(key);
     }
 
-    const fresh: Occupant[] = [];
+    const fresh = new Set<Occupant>();
     for (const run of runs) {
       const slot = slotFromServer(run, now);
       const existing = this.occupants.get(run.key);
@@ -138,37 +149,36 @@ export class OfficeScene {
         existing.slot = slot;
         continue;
       }
-      const character = createCharacter(run.key, shirtColor(run.key), { x: 0, y: 0 }, 'corridor');
+      if (run.stage === 'done') continue;
+      const pod = this.freePod();
+      if (pod === -1) continue;
+      const character = createCharacter(run.key, podColor(pod), coordinatorSeat(pod), podId(pod));
       this.scene.add(character.group);
-      const occupant: Occupant = { run, slot, character, members: new Map() };
+      const occupant: Occupant = { run, slot, pod, character, members: new Map(), hidden: 0 };
       this.occupants.set(run.key, occupant);
-      fresh.push(occupant);
+      fresh.add(occupant);
     }
 
-    // New arrivals start in place; everyone else walks to wherever their ticket now belongs.
+    const waiting = [...this.occupants.values()].filter((occupant) => occupant.run.stage !== 'done' && occupant.slot.state === 'WAITING');
     for (const occupant of this.occupants.values()) {
-      const target = this.spotFor(occupant);
-      const zone = this.zoneOf(occupant);
-      if (fresh.includes(occupant)) {
-        Object.assign(occupant.character, { x: target.x, y: target.y, zone });
-        if (occupant.run.stage === 'done') occupant.character.arrivedAt = now - DONE_LINGER_SECONDS;
-        continue;
-      }
-      this.walk(occupant.character, target, zone, now);
+      const done = occupant.run.stage === 'done';
+      const queued = waiting.indexOf(occupant);
+      const zone: ZoneId = done ? 'corridor' : queued >= 0 ? 'you' : podId(occupant.pod);
+      const target = done ? { ...EXIT } : queued >= 0 ? waitingSpot(queued, waiting.length) : coordinatorSeat(occupant.pod);
+      if (fresh.has(occupant)) Object.assign(occupant.character, { x: target.x, y: target.y, zone });
+      else this.walk(occupant.character, target, zone, now);
+      this.syncMembers(occupant, now, fresh.has(occupant));
     }
-    for (const occupant of this.occupants.values()) this.syncMembers(occupant, now);
+    this.paintPods();
 
     this.boardCards.render([...this.occupants.values()]
       .filter((occupant) => occupant.run.stage !== 'done')
-      .map((occupant) => {
-        const zone = zoneForStage(occupant.run.stage);
-        return {
-          id: occupant.run.key,
-          column: zone === 'corridor' ? 0 : STAGE_ZONES.indexOf(zone),
-          title: `${occupant.run.key} · ${occupant.run.acPassed}/${occupant.run.acTotal}`,
-          status: occupant.run.waiting ? 'review' as const : occupant.run.stalled || occupant.run.acFailed > 0 ? 'blocked' as const : 'running' as const,
-        };
-      }));
+      .map((occupant) => ({
+        id: occupant.run.key,
+        column: Math.min(RAIL_STAGES.length - 1, railIndex(occupant.run.stage)),
+        title: `${occupant.run.key} · ${occupant.run.acPassed}/${occupant.run.acTotal}`,
+        status: occupant.run.waiting ? 'review' as const : occupant.run.stalled || occupant.run.acFailed > 0 ? 'blocked' as const : 'running' as const,
+      })));
   }
 
   setSelected(key: string | null): void {
@@ -183,11 +193,9 @@ export class OfficeScene {
     this.renderer.domElement.removeEventListener('pointerdown', this.handlePointerDown);
     this.renderer.domElement.removeEventListener('pointerup', this.handlePointerUp);
     this.labelRenderer.domElement.removeEventListener('click', this.handleLabelClick);
-    for (const occupant of this.occupants.values()) {
-      for (const member of occupant.members.values()) disposeCharacter(member.character);
-      disposeCharacter(occupant.character);
-    }
+    for (const occupant of this.occupants.values()) this.removeOccupant(occupant);
     this.occupants.clear();
+    disposeCharacter(this.lead);
     this.boardCards.dispose();
     for (const label of this.labels) label.element.remove();
     this.controls.dispose();
@@ -202,28 +210,16 @@ export class OfficeScene {
     this.labelRenderer.domElement.remove();
   }
 
-  private zoneOf(occupant: Occupant): ZoneId {
-    if (occupant.run.stage === 'done') return 'corridor';
-    return occupant.slot.state === 'WAITING' ? 'you' : zoneForStage(occupant.run.stage);
+  private removeOccupant(occupant: Occupant): void {
+    for (const member of occupant.members.values()) disposeCharacter(member.character);
+    occupant.members.clear();
+    disposeCharacter(occupant.character);
   }
 
-  private spotFor(occupant: Occupant): Point {
-    if (occupant.run.stage === 'done') return { ...EXIT };
-    const all = [...this.occupants.values()].filter((other) => other.run.stage !== 'done');
-    if (occupant.slot.state === 'WAITING') {
-      const queue = all.filter((other) => other.slot.state === 'WAITING');
-      const index = Math.max(0, queue.indexOf(occupant));
-      const perRow = 6;
-      const rowSize = Math.min(perRow, queue.length - Math.floor(index / perRow) * perRow);
-      return {
-        x: WAITING_ROW.x + ((index % perRow) - (rowSize - 1) / 2) * WAITING_GAP,
-        y: WAITING_ROW.y - Math.floor(index / perRow) * 70,
-      };
-    }
-    const zone = zoneForStage(occupant.run.stage) as StageZone;
-    const same = all.filter((other) => other.slot.state !== 'WAITING' && zoneForStage(other.run.stage) === zone);
-    const spots = SPOTS[zone];
-    return spots[Math.max(0, same.indexOf(occupant)) % spots.length];
+  private freePod(): number {
+    const taken = new Set([...this.occupants.values()].map((occupant) => occupant.pod));
+    for (let index = 0; index < MAX_PODS; index += 1) if (!taken.has(index)) return index;
+    return -1;
   }
 
   private walk(character: Character, target: Point, zone: ZoneId, now: number): void {
@@ -259,34 +255,68 @@ export class OfficeScene {
   }
 
   /**
-   * The lead keeps the desk; whoever it has spawned for this stage stands in
-   * the same room and does the work. A member that finishes leaves the floor.
+   * The ticket's character is its sub-coordinator. Everyone it (or the lead)
+   * spawned for this ticket takes a desk in the pod and keeps it until the
+   * server stops reporting them; a finished member stays, faded.
    */
-  private syncMembers(occupant: Occupant, now: number): void {
-    const zone = zoneForStage(occupant.run.stage);
-    const active = zone === 'corridor' ? [] : (occupant.run.members || []).filter((member) => member.state === 'active');
-    const ids = new Set(active.map((member) => member.id));
+  private syncMembers(occupant: Occupant, now: number, atOnce: boolean): void {
+    const team = occupant.run.stage === 'done' ? [] : splitTeam(occupant.run.members).members;
+    const ids = new Set(team.map((member) => member.id));
     for (const [id, member] of occupant.members) {
       if (ids.has(id)) continue;
       disposeCharacter(member.character);
       occupant.members.delete(id);
     }
-    if (zone === 'corridor') return;
-    const row = [...this.occupants.values()]
-      .filter((other) => other.run.stage !== 'done' && zoneForStage(other.run.stage) === zone)
-      .indexOf(occupant);
-    active.forEach((info, index) => {
+    occupant.hidden = 0;
+    const zone = podId(occupant.pod);
+    for (const info of team) {
       let member = occupant.members.get(info.id);
       if (!member) {
-        const lead = occupant.character;
-        const character = createCharacter(occupant.run.key, shirtColor(occupant.run.key), { x: lead.x, y: lead.y }, lead.zone, MEMBER_SCALE);
+        const taken = new Set([...occupant.members.values()].map((item) => item.desk));
+        let desk = 0;
+        while (desk < MEMBER_DESKS && taken.has(desk)) desk += 1;
+        if (desk >= MEMBER_DESKS) {
+          occupant.hidden += 1;
+          continue;
+        }
+        const seat = memberSeat(occupant.pod, desk);
+        const start = atOnce ? seat : coordinatorSeat(occupant.pod);
+        const character = createCharacter(occupant.run.key, podColor(occupant.pod), start, zone, MEMBER_SCALE);
         this.scene.add(character.group);
-        member = { info, character };
+        member = { info, character, desk };
         occupant.members.set(info.id, member);
       }
       member.info = info;
-      this.walk(member.character, memberSpot(zone, Math.max(0, row), index), zone, now);
+      this.walk(member.character, memberSeat(occupant.pod, member.desk), zone, now);
+      setDimmed(member.character, info.state !== 'active');
+    }
+  }
+
+  private paintPods(): void {
+    const byPod = new Map([...this.occupants.values()].map((occupant) => [occupant.pod, occupant]));
+    this.pods.forEach((pod, index) => {
+      const occupant = byPod.get(index);
+      const active = occupant && occupant.run.stage !== 'done' ? occupant : undefined;
+      const tint = active ? new THREE.Color(podColor(index)) : null;
+      (pod.pad.material as THREE.MeshStandardMaterial).color.copy(tint ? new THREE.Color(0x2a2a31).lerp(tint, 0.16) : new THREE.Color(FREE_POD));
+      const strip = pod.strip.material as THREE.MeshStandardMaterial;
+      strip.color.copy(tint ?? new THREE.Color(0x34343b));
+      strip.emissive.copy(tint ?? new THREE.Color(0x000000));
+      const html = active ? this.signHtml(active) : '<span class="dock-pod-free">free pod</span>';
+      if (pod.sign.element.innerHTML !== html) pod.sign.element.innerHTML = html;
     });
+  }
+
+  private signHtml(occupant: Occupant): string {
+    const { run } = occupant;
+    const team = splitTeam(run.members);
+    const working = team.members.filter((member) => member.state === 'active').length;
+    const extra = occupant.hidden > 0 ? ` +${occupant.hidden}` : '';
+    return `<button type="button" class="dock-pod-sign" data-key="${escapeHtml(run.key)}" style="--pod:${podColor(occupant.pod)}">`
+      + `<b>${escapeHtml(run.key)}</b>`
+      + `<span>${run.kind === 'review' ? 'review · ' : ''}${escapeHtml(stageName(run.stage, run.kind))}</span>`
+      + `<span>${team.members.length ? `${working}/${team.members.length} working${extra}` : 'no team yet'}</span>`
+      + '</button>';
   }
 
   private buildRoom(): void {
@@ -309,50 +339,55 @@ export class OfficeScene {
     wall.receiveShadow = true;
     this.scene.add(wall);
 
-    for (const id of [...STAGE_ZONES, 'you'] as const) {
-      const zone = ZONES[id];
-      const colorValue = id === 'you' ? OWNER_COLOR : ZONE_META[id].color;
-      const color = new THREE.Color(colorValue);
+    const area = (zone: Zone, color: THREE.ColorRepresentation, tint: number) => {
       const [centerX, , centerZ] = toWorld(zone.x + zone.width / 2, zone.y + zone.height / 2);
       const pad = new THREE.Mesh(
         new THREE.BoxGeometry(zone.width * SCALE, 0.06, zone.height * SCALE),
-        new THREE.MeshStandardMaterial({ color: new THREE.Color(0x2a2a31).lerp(color, 0.13), roughness: 0.9 }),
+        new THREE.MeshStandardMaterial({ color: new THREE.Color(0x2a2a31).lerp(new THREE.Color(color), tint), roughness: 0.9 }),
       );
       pad.position.set(centerX, 0.03, centerZ);
       pad.receiveShadow = true;
       this.scene.add(pad);
-
-      const edgeZ = id === 'you' ? centerZ - (zone.height * SCALE) / 2 : centerZ + (zone.height * SCALE) / 2;
       const strip = new THREE.Mesh(
         new THREE.BoxGeometry(zone.width * SCALE, 0.08, 0.12),
-        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.6 }),
+        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.55 }),
       );
-      strip.position.set(centerX, 0.05, edgeZ);
+      strip.position.set(centerX, 0.05, centerZ - (zone.height * SCALE) / 2);
       this.scene.add(strip);
-      // The owner's label sits off-centre so the queue of raised hands does not cover it.
-      const labelX = id === 'you' ? centerX - zone.width * SCALE * 0.34 : centerX;
-      this.addLabel(id === 'you' ? 'Your desk · decision gates' : ZONE_META[id].name, colorValue, [labelX, 0.1, edgeZ + (id === 'you' ? -0.45 : 0.45)]);
+      return { pad, strip, centerX, frontZ: centerZ - (zone.height * SCALE) / 2, backZ: centerZ + (zone.height * SCALE) / 2 };
+    };
+
+    area(LEAD_ZONE, LEAD_COLOR, 0.13);
+    const youArea = area(YOU_ZONE, OWNER_COLOR, 0.13);
+    this.addLabel('dock-zone-label', 'Your desk · decision gates', OWNER_COLOR, [youArea.centerX - YOU_ZONE.width * SCALE * 0.3, 0.1, youArea.frontZ + 0.35]);
+
+    for (let index = 0; index < MAX_PODS; index += 1) {
+      const zone = podZone(index);
+      const pod = area(zone, FREE_POD, 0);
+      const sign = this.addLabel('dock-pod-label', '', '', [pod.centerX - zone.width * SCALE * 0.3, 0.12, pod.frontZ + 0.42]);
+      this.pods.push({ pad: pod.pad, strip: pod.strip, sign });
     }
 
-    const [exitX, , exitZ] = toWorld(EXIT.x + 30, EXIT.y);
+    const [exitX, , exitZ] = toWorld(EXIT.x + 22, EXIT.y);
     const door = new THREE.Mesh(
-      new THREE.BoxGeometry(0.25, 2.6, 1.7),
+      new THREE.BoxGeometry(0.25, 2.6, 1.5),
       new THREE.MeshStandardMaterial({ color: 0x2a2a2e, emissive: 0x62cf9f, emissiveIntensity: 0.15 }),
     );
     door.position.set(exitX, 1.3, exitZ);
     this.scene.add(door);
-    this.addLabel('Done →', '#62cf9f', [exitX, 3, exitZ]);
+    this.addLabel('dock-zone-label', 'Done →', '#62cf9f', [exitX, 3, exitZ]);
   }
 
-  private addLabel(text: string, color: string, position: [number, number, number]): void {
+  private addLabel(className: string, text: string, color: string, position: [number, number, number]): CSS2DObject {
     const element = document.createElement('div');
-    element.className = 'dock-zone-label';
+    element.className = className;
     element.textContent = text;
-    element.style.color = color;
+    if (color) element.style.color = color;
     const label = new CSS2DObject(element);
     label.position.set(...position);
     this.scene.add(label);
     this.labels.push(label);
+    return label;
   }
 
   private placeFallback(item: FurnitureItem): void {
@@ -395,9 +430,11 @@ export class OfficeScene {
         holder.add(model);
         holder.position.set(x, FURNITURE_Y_OFFSET[item.type] ?? 0, z);
         holder.rotation.y = ((item.r ?? 0) * Math.PI) / 2;
+        // A hundred-odd small desks each casting a shadow is the costly part; only the large pieces do.
+        const casts = item.type !== 'computer' && item.type !== 'chair';
         model.traverse((object) => {
           if ((object as THREE.Mesh).isMesh) {
-            object.castShadow = true;
+            object.castShadow = casts;
             object.receiveShadow = true;
           }
         });
@@ -408,14 +445,32 @@ export class OfficeScene {
     }
   }
 
-  private memberTagHtml(key: string, info: TimelineAgent): string {
-    return `<button type="button" class="dock-agent-tag dock-agent-tag-member" data-key="${escapeHtml(key)}">${escapeHtml(info.name)}${info.tool ? ` <b>${escapeHtml(info.tool)}</b>` : ''}</button>`;
-  }
-
-  private tagHtml(run: AgentRun, pose: Pose | null, team: number): string {
+  private coordinatorTag(occupant: Occupant, pose: Pose | null): string {
+    const { run } = occupant;
     if (run.stage === 'done') return '<span class="dock-agent-tag dock-agent-tag-done">Done ✓</span>';
     const emote = pose === 'SeatedWaiting' ? ASK_EMOTE : pose === 'Asleep' ? ZZZ_EMOTE : pose === 'SeatedThinking' ? THINK_EMOTE : '';
-    return `${emote}<button type="button" class="dock-agent-tag" data-key="${escapeHtml(run.key)}"><i style="background:${stageColor(run.stage)}"></i>${escapeHtml(run.key)}${team > 0 ? ` <small>lead · ${team}</small>` : ''}</button>`;
+    const role = splitTeam(run.members).coordinator ? 'coordinator' : 'lead direct';
+    // At its desk the pod's sign already names the ticket; away from it (the owner's queue, the door) the tag has to.
+    const label = pose === 'SeatedWaiting' || occupant.character.walk ? `${escapeHtml(run.key)} <small>${role}</small>` : role;
+    return `${emote}<button type="button" class="dock-agent-tag" data-key="${escapeHtml(run.key)}"><i style="background:${stageColor(run.stage)}"></i>${label}</button>`;
+  }
+
+  private memberTag(key: string, info: TimelineAgent): string {
+    const active = info.state === 'active';
+    const title = `${info.name}${info.detail ? ` — ${info.detail}` : ''}${active ? (info.tool ? ` · ${info.tool}` : '') : ' · done'}`;
+    return `<button type="button" class="dock-agent-tag dock-agent-tag-member${active ? '' : ' is-done'}" data-key="${escapeHtml(key)}" title="${escapeHtml(title)}"><i></i><span>${escapeHtml(info.name)}</span></button>`;
+  }
+
+  private place(character: Character): void {
+    const [worldX, , worldZ] = toWorld(character.x, character.y);
+    character.group.position.x = worldX;
+    character.group.position.z = worldZ;
+  }
+
+  private setTag(character: Character, html: string): void {
+    if (html === character.tagHtml) return;
+    character.tagHtml = html;
+    character.tag.element.innerHTML = html;
   }
 
   private readonly frame = (): void => {
@@ -424,29 +479,32 @@ export class OfficeScene {
     const delta = Math.min(Math.max(now - this.lastFrame, 0), 0.05);
     this.lastFrame = now;
     const still = this.reducedMotion.matches;
+    let tickets = 0;
+    let busy = 0;
+    let delegated = 0;
 
     for (const occupant of this.occupants.values()) {
       const { character, run, slot } = occupant;
       tickActivity(slot, now);
       const pose = poseOf(slot, now);
       const walking = this.advance(character, now);
-      if (!walking) character.facing = run.stage === 'done' ? Math.PI / 2 : pose === 'SeatedWaiting' ? 0 : Math.PI;
+      const done = run.stage === 'done';
+      const queued = !done && slot.state === 'WAITING';
+      const working = [...occupant.members.values()].filter((member) => member.info.state === 'active').length;
+      if (!done) {
+        tickets += 1;
+        if (slot.state === 'ACTIVE') busy += 1;
+        if (occupant.members.size > 0) delegated += 1;
+      }
+      if (!walking) character.facing = done ? Math.PI / 2 : queued ? 0 : Math.PI;
+      this.place(character);
+      const seated = !done && !queued;
+      animateCharacter(character, pose, walking, delta, still, { seated, folded: working > 0 });
 
-      const [worldX, , worldZ] = toWorld(character.x, character.y);
-      character.group.position.x = worldX;
-      character.group.position.z = worldZ;
-      const team = occupant.members.size;
-      const seated = team > 0 && pose !== 'SeatedWaiting' && run.stage !== 'done';
-      animateCharacter(character, pose, walking, delta, still, seated);
-
-      const gone = run.stage === 'done' && !walking && now - (character.arrivedAt ?? now) >= DONE_LINGER_SECONDS;
+      const gone = done && !walking && now - (character.arrivedAt ?? now) >= DONE_LINGER_SECONDS;
       character.group.visible = !gone;
       character.tag.element.style.display = gone ? 'none' : '';
-      const html = this.tagHtml(run, walking || seated ? null : pose, team);
-      if (html !== character.tagHtml) {
-        character.tagHtml = html;
-        character.tag.element.innerHTML = html;
-      }
+      this.setTag(character, this.coordinatorTag(occupant, walking || (seated && working > 0) ? null : pose));
       const isSelected = run.key === this.selected;
       character.tag.element.classList.toggle('is-selected', isSelected);
       character.ring.visible = isSelected;
@@ -455,17 +513,18 @@ export class OfficeScene {
         const body = member.character;
         const moving = this.advance(body, now);
         if (!moving) body.facing = Math.PI;
-        const [memberX, , memberZ] = toWorld(body.x, body.y);
-        body.group.position.x = memberX;
-        body.group.position.z = memberZ;
-        animateCharacter(body, 'SeatedTyping', moving, delta, still);
-        const memberHtml = this.memberTagHtml(run.key, member.info);
-        if (memberHtml !== body.tagHtml) {
-          body.tagHtml = memberHtml;
-          body.tag.element.innerHTML = memberHtml;
-        }
+        this.place(body);
+        animateCharacter(body, member.info.state === 'active' ? 'SeatedTyping' : 'SeatedThinking', moving, delta, still, { seated: true });
+        this.setTag(body, this.memberTag(run.key, member.info));
       }
     }
+
+    // The lead never leaves its desk: it types while it handles a ticket itself and sits back once the work is delegated.
+    this.lead.facing = Math.PI;
+    this.place(this.lead);
+    const leadPose: Pose = busy > 0 ? 'SeatedTyping' : tickets > 0 ? 'SeatedThinking' : 'Asleep';
+    animateCharacter(this.lead, leadPose, false, delta, still, { seated: true, folded: tickets > 0 && delegated === tickets });
+    this.setTag(this.lead, `${tickets === 0 ? ZZZ_EMOTE : ''}<span class="dock-agent-tag dock-agent-tag-lead">LEAD <small>${tickets} ${tickets === 1 ? 'ticket' : 'tickets'}</small></span>`);
 
     const [boardWidth, boardHeight] = this.boardPixelSize();
     this.boardCards.setBoardSize(boardWidth, boardHeight);
@@ -513,7 +572,7 @@ export class OfficeScene {
     const groups = [...this.occupants.values()].filter((occupant) => occupant.character.group.visible)
       .flatMap((occupant) => [occupant.character.group, ...[...occupant.members.values()].map((member) => member.character.group)]);
     const key = raycaster.intersectObjects(groups, true)[0]?.object.userData.key;
-    if (typeof key === 'string') this.options.onSelect(key);
+    if (typeof key === 'string' && key) this.options.onSelect(key);
   };
 
   private readonly handleLabelClick = (event: MouseEvent): void => {

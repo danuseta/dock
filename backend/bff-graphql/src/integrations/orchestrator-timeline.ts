@@ -5,9 +5,11 @@ export const RAIL = ['gate', 'plan', 'code', 'test', 'verify', 'pr'] as const;
 export const BUCKET_SECONDS = 5;
 export const BUCKET_COUNT = 48;
 
-const MAX_CHILDREN = 8;
+const MAX_CHILDREN = 14;
 const MAX_GATES = 6;
 const LOG_SIZE = 14;
+// A member that has been silent this long is treated as finished: its stop event was missed.
+const AGENT_SILENCE_MS = 10 * 60 * 1000;
 
 export interface StageEvent { id: string; kind: string; detail: string | null; createdAt: Date }
 export interface ToolEvent {
@@ -66,53 +68,72 @@ export function buildTimeline(run: TimelineRun, stageEventsDesc: StageEvent[], t
   if (loop && current > loop.from) loop = null;
   if (run.waiting && gates.length > 0) gates[gates.length - 1].state = 'waiting';
 
-  // Agents: the main session plus whatever it spawned during this visit to the stage.
+  // Agents: the main session, the sub-coordinators it spawned, and whoever they spawned.
+  // An agent stays for as long as it works; a finished one stays until the ticket changes stage.
   const main: TimelineAgent = {
     id: 'main',
     parentId: null,
-    name: tools.some((event) => event.kind === 'spawn' && event.name.startsWith('oh-my-claudecode:')) ? 'lead' : 'orchestrator',
+    name: 'lead',
     detail: null,
     state: run.stage === 'done' ? 'done' : run.activity === 'ACTIVE' ? 'active' : run.activity === 'WAITING' ? 'waiting' : 'idle',
     tool: null,
     tools: 0,
   };
-  interface Child extends TimelineAgent { type: string; linkedId: string | null }
+  interface Child extends TimelineAgent { type: string; linkedId: string | null; endedAt: Date | null; lastAt: Date }
   const children: Child[] = [];
+  const addChild = (parentId: string, type: string, name: string, detail: string | null, linkedId: string | null, at: Date): Child => {
+    const child: Child = { id: `agent-${children.length + 1}`, parentId, name, detail, state: 'active', tool: null, tools: 0, type, linkedId, endedAt: null, lastAt: at };
+    children.push(child);
+    return child;
+  };
   const findChild = (event: ToolEvent) => (
     children.find((child) => child.linkedId === event.agentId)
-    || children.find((child) => !child.linkedId && child.state === 'active' && event.agentType != null && shortType(event.agentType) === shortType(child.type))
+    // First event from a new member: it is the oldest recent spawn of its type that nobody has claimed yet.
+    || children.find((child) => !child.linkedId && child.state === 'active' && event.agentType != null
+      && shortType(event.agentType) === shortType(child.type) && event.at.getTime() - child.lastAt.getTime() < AGENT_SILENCE_MS)
   );
 
   for (const event of tools) {
-    const inVisit = event.at >= stageSince;
     if (event.kind === 'spawn') {
-      if (inVisit) {
-        children.push({
-          id: `agent-${children.length + 1}`, parentId: 'main', name: shortType(event.name), detail: event.detail,
-          state: 'active', tool: null, tools: 0, type: event.name, linkedId: null,
-        });
-      }
+      // The row's agentId is whoever made the call, so a member spawned by a sub-coordinator hangs under it.
+      const parent = event.agentId === 'main' ? undefined : children.find((child) => child.linkedId === event.agentId);
+      addChild(parent ? parent.id : 'main', event.name, event.agentType || shortType(event.name), event.detail, null, event.at);
     } else if (event.kind === 'tool') {
-      const child = event.agentId !== 'main' && inVisit ? findChild(event) : undefined;
-      if (child) {
-        child.linkedId = event.agentId;
-        child.tool = event.name;
-        child.tools += 1;
-      } else {
+      if (event.agentId === 'main') {
         main.tool = event.name;
         main.tools += 1;
+        continue;
       }
-    } else if (event.kind === 'stop' && inVisit) {
-      const child = findChild(event) || children.find((item) => item.state === 'active');
+      // Its spawn may have scrolled out of the buffer: an agent that is still calling tools still exists.
+      const child = findChild(event) || addChild('main', event.agentType || 'agent', shortType(event.agentType), null, event.agentId, event.at);
+      child.linkedId = event.agentId;
+      child.lastAt = event.at;
+      child.tool = event.name;
+      child.tools += 1;
+    } else if (event.kind === 'stop') {
+      const child = findChild(event);
       if (child) {
         child.state = 'done';
         child.tool = null;
+        child.endedAt = event.at;
       }
     }
   }
   if (main.state !== 'active') main.tool = null;
-  const agents: TimelineAgent[] = [main, ...children.slice(-MAX_CHILDREN).map((child) => ({
-    id: child.id, parentId: child.parentId, name: child.name, detail: child.detail, state: child.state, tool: child.tool, tools: child.tools,
+  for (const child of children) {
+    if (child.state === 'active' && now.getTime() - child.lastAt.getTime() > AGENT_SILENCE_MS) {
+      child.state = 'done';
+      child.tool = null;
+      child.endedAt = child.lastAt;
+    }
+  }
+  const shown = children.filter((child) => child.state === 'active' || (child.endedAt != null && child.endedAt >= stageSince));
+  const shownIds = new Set(shown.map((child) => child.id));
+  const agents: TimelineAgent[] = [main, ...shown.slice(-MAX_CHILDREN).map((child) => ({
+    id: child.id,
+    // A finished parent that is no longer shown hands its members up to the lead.
+    parentId: child.parentId && child.parentId !== 'main' && !shownIds.has(child.parentId) ? 'main' : child.parentId,
+    name: child.name, detail: child.detail, state: child.state, tool: child.tool, tools: child.tools,
   }))];
 
   // Activity strip: tool calls per five seconds, newest on the right.
