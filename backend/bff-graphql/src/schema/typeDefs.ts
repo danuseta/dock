@@ -231,6 +231,13 @@ export const typeDefs = gql`
     log: [TimelineLogEntry!]!
   }
 
+  type OrchestrationPullRequest {
+    url: String!
+    number: Int!
+    repo: String!
+    status: String!
+  }
+
   type Orchestration {
     key: ID!
     kind: String!
@@ -246,6 +253,8 @@ export const typeDefs = gql`
     testsFe: String
     prBe: String
     prFe: String
+    pullRequests: [OrchestrationPullRequest!]!
+    review: String
     note: String
     activity: String!
     activityDetail: String

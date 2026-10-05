@@ -484,6 +484,13 @@ const ORCHESTRATION_FIELDS = `
   testsFe
   prBe
   prFe
+  pullRequests {
+    url
+    number
+    repo
+    status
+  }
+  review
   note
   activity
   activityDetail

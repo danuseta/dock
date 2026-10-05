@@ -14,6 +14,7 @@ import {
   parseLedger,
   parseTranscript,
   reduceHookEvent,
+  throttledPullRequestLookup,
   toOrchestration,
 } from '../integrations/orchestrator';
 import { createOrchestratorIngestRouter } from '../routes/orchestrator';
@@ -166,7 +167,7 @@ test('orchestrator service ingests ledgers, events and builds attention items', 
 
     assert.deepStrictEqual((await service.needsAttention(now)).map((item) => item.type), ['AGENT_WAITING', 'AGENT_AC_FAILED']);
 
-    await service.ingestLedger({ ...ledger, waiting: '', stage: 'pr', ac: [] }, now);
+    await service.ingestLedger({ ...ledger, waiting: '', stage: 'pr', ac: [], pr: {} }, now);
     assert.deepStrictEqual(events.map((event) => event.kind), ['STAGE', 'WAITING', 'STAGE', 'RESUMED']);
 
     const working = await service.ingestHookEvent({ key: 'QRD-1387', event: 'PreToolUse', detail: 'Bash' }, now);
@@ -252,4 +253,78 @@ test('ingest routes require a token and throttle only failures', async (t) => {
   assert.strictEqual((await post('', ledger, 'dock_ing_wrong')).status, 401);
   assert.strictEqual((await post('', ledger, 'dock_ing_wrong')).status, 429, 'failures are throttled');
   assert.strictEqual((await post('', ledger, token)).status, 200, 'a valid token is not locked out by failed attempts');
+});
+
+test('a run with a pull request is waiting for review, not stalled', async () => {
+  const lastEventAt = new Date('2026-10-05T00:00:00.000Z');
+  const row = (stage: string, ledger: object = {}) => ({
+    key: 'QRD-1387', title: 'Ticket', stage, waiting: '', payload: JSON.stringify({ ac: [], ...ledger }),
+    activity: 'IDLE', activityDetail: null, activityEndedAt: null as Date | null,
+    lastEventAt, ledgerUpdatedAt: lastEventAt, transcriptAt: null, dismissedAt: null,
+  });
+  const later = new Date(lastEventAt.getTime() + 45 * 60 * 1000);
+  const pr = (status: 'open' | 'draft' | 'merged' | 'closed', number = 7) => ({ url: `https://github.com/example/be/pull/${number}`, number, repo: 'example/be', status });
+
+  const none = toOrchestration(row('pr'), later);
+  assert.deepStrictEqual([none.stalled, none.review, none.pullRequests], [true, null, []], 'no pull request: unchanged');
+  assert.deepStrictEqual(toOrchestration(row('pr'), later, [pr('closed')]).review, null);
+
+  const open = toOrchestration(row('pr'), later, [pr('merged', 6), pr('open')]);
+  assert.deepStrictEqual([open.stalled, open.review], [false, 'open']);
+  assert.strictEqual(toOrchestration(row('pr'), later, [pr('draft')]).review, 'open');
+  assert.deepStrictEqual(attentionItems([open]), [], 'no AGENT_STALLED item for a run in review');
+
+  const merged = toOrchestration(row('pr'), later, [pr('merged', 6), pr('merged')]);
+  assert.deepStrictEqual([merged.stalled, merged.review], [false, 'merged']);
+
+  const fromLedger = toOrchestration(row('pr', { prBe: 'https://github.com/example/be/pull/9' }), later);
+  assert.deepStrictEqual([fromLedger.stalled, fromLedger.review], [false, 'open']);
+  assert.deepStrictEqual(fromLedger.pullRequests, [{ url: 'https://github.com/example/be/pull/9', number: 9, repo: 'example/be', status: 'open' }]);
+
+  const done = toOrchestration(row('done'), later, [pr('open')]);
+  assert.deepStrictEqual([done.stalled, done.review], [false, null]);
+});
+
+test('the service looks up GitHub only for runs that can be in review', async () => {
+  const { storage } = memoryStorage();
+  const service = new OrchestratorService(storage, os.tmpdir(), async (key) => {
+    calls.push(key);
+    if (key === 'QRD-3') throw new Error('GitHub down');
+    return [{ url: 'https://github.com/example/be/pull/1', number: 1, repo: 'example/be', status: 'open' }];
+  });
+  const calls: string[] = [];
+  const now = new Date('2026-10-05T00:00:00.000Z');
+  const ledger = (key: string, stage: string) => ({ key, title: key, stage, ac: [] });
+  for (const [key, stage] of [['QRD-1', 'code'], ['QRD-2', 'pr'], ['QRD-3', 'commit'], ['QRD-4', 'done']]) {
+    await service.ingestLedger(ledger(key, stage), now);
+  }
+
+  const runs = await service.list(now);
+  assert.deepStrictEqual(calls.sort(), ['QRD-2', 'QRD-3'], 'only pr/commit/evidence runs, never code or done');
+  assert.deepStrictEqual(runs.map((run) => run.review), [null, 'open', null, null], 'a failing lookup does not fail the list');
+
+  calls.length = 0;
+  const stale = new Date(now.getTime() + 45 * 60 * 1000);
+  await service.list(stale);
+  assert.deepStrictEqual(calls.sort(), ['QRD-1', 'QRD-2', 'QRD-3'], 'a run that would be stalled is looked up too');
+});
+
+test('the pull request lookup asks GitHub at most once per ticket per window', async () => {
+  let clock = 1_000;
+  let searches = 0;
+  const lookup = throttledPullRequestLookup(async () => {
+    searches += 1;
+    return [{ url: 'https://github.com/example/be/pull/1', number: 1, repo: 'example/be', status: 'open' as const }];
+  }, 5 * 60 * 1000, () => clock);
+
+  await Promise.all([lookup('QRD-1'), lookup('QRD-1')]);
+  assert.strictEqual(searches, 1);
+  clock += 4 * 60 * 1000;
+  assert.strictEqual((await lookup('QRD-1')).length, 1);
+  assert.strictEqual(searches, 1, 'still inside the window');
+  await lookup('QRD-2');
+  assert.strictEqual(searches, 2, 'the window is per ticket');
+  clock += 2 * 60 * 1000;
+  await lookup('QRD-1');
+  assert.strictEqual(searches, 3);
 });
