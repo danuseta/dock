@@ -15,7 +15,7 @@ const ac = (states: string[]) => states.map((state, index) => ({
 
 function run(partial: Partial<AgentRun> & Pick<AgentRun, 'key' | 'title' | 'stage'>, states: string[]): AgentRun {
   return {
-    waiting: null, gate: 'GO', testsBe: null, testsFe: null, prBe: null, prFe: null, note: null,
+    waiting: null, gate: 'GO', testsBe: null, testsFe: null, prBe: null, prFe: null, pullRequests: [], review: null, note: null,
     activity: 'IDLE', activityDetail: null, idleSeconds: 0, endedSeconds: null, stalled: false,
     hasTranscript: false, updatedAt: new Date().toISOString(), events: [], sample: true,
     ac: ac(states),

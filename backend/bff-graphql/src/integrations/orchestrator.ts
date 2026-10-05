@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { generateIngestToken, hashIngestToken } from '../auth/ingest-token';
+import { GitHubAPI } from '../datasources/GitHubAPI';
 import { StorageService } from '../storage/service';
 import { buildTimeline } from './orchestrator-timeline';
 
@@ -248,7 +249,43 @@ interface RunRow {
 
 const FINISHED_STAGES = new Set<string>(['done', 'blocked']);
 
-export function toOrchestration(row: RunRow, now: Date) {
+export type PullRequestStatus = 'open' | 'draft' | 'merged' | 'closed';
+export interface RunPullRequest { url: string; number: number; repo: string; status: PullRequestStatus }
+export type PullRequestLookup = (key: string) => Promise<RunPullRequest[]>;
+
+const PR_LOOKUP_INTERVAL_MS = 5 * 60 * 1000;
+const PR_LOOKUP_STAGES = new Set<string>(['pr', 'commit', 'evidence']);
+
+function ledgerPullRequest(url: string): RunPullRequest {
+  const match = /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/.exec(url);
+  return { url, number: match ? Number(match[2]) : 0, repo: match ? match[1] : url, status: 'open' };
+}
+
+function reviewState(pullRequests: RunPullRequest[]): 'open' | 'merged' | null {
+  if (pullRequests.some((pr) => pr.status === 'open' || pr.status === 'draft')) return 'open';
+  if (pullRequests.length > 0 && pullRequests.every((pr) => pr.status === 'merged')) return 'merged';
+  return null;
+}
+
+// Cache-only GitHub lookup for the 5 s polled list: asks at most once per ticket
+// per window and serves the last answer in between.
+export function throttledPullRequestLookup(
+  search: PullRequestLookup,
+  intervalMs = PR_LOOKUP_INTERVAL_MS,
+  clock: () => number = Date.now,
+): PullRequestLookup {
+  const last = new Map<string, { at: number; pullRequests: RunPullRequest[] }>();
+  return async (key) => {
+    const seen = last.get(key);
+    if (seen && clock() - seen.at < intervalMs) return seen.pullRequests;
+    const entry = { at: clock(), pullRequests: seen?.pullRequests ?? [] };
+    last.set(key, entry);
+    try { entry.pullRequests = await search(key); } catch { /* a failing GitHub lookup keeps the previous answer */ }
+    return entry.pullRequests;
+  };
+}
+
+export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunPullRequest[] = []) {
   let ledger: Partial<Ledger> = {};
   try { ledger = JSON.parse(row.payload); } catch { /* an unreadable payload still shows the row's own columns */ }
   const ac = Array.isArray(ledger.ac) ? ledger.ac : [];
@@ -266,8 +303,14 @@ export function toOrchestration(row: RunRow, now: Date) {
   if (row.waiting) { activity = 'WAITING'; activityDetail = 'gate'; endedMs = null; }
   if (FINISHED_STAGES.has(row.stage) && !row.waiting) { activity = 'IDLE'; activityDetail = null; endedMs = null; }
 
+  const pullRequests = githubPullRequests.length > 0
+    ? githubPullRequests
+    : [ledger.prBe, ledger.prFe].filter((url): url is string => typeof url === 'string' && url.length > 0).map(ledgerPullRequest);
+  const review = FINISHED_STAGES.has(row.stage) ? null : reviewState(pullRequests);
+
   const stalled = !FINISHED_STAGES.has(row.stage)
     && activity !== 'WAITING'
+    && review === null
     && idleMs > (activity === 'ACTIVE' ? STALE_ACTIVE_MS : STALE_IDLE_MS);
 
   return {
@@ -285,6 +328,8 @@ export function toOrchestration(row: RunRow, now: Date) {
     testsFe: ledger.testsFe ?? null,
     prBe: ledger.prBe ?? null,
     prFe: ledger.prFe ?? null,
+    pullRequests,
+    review,
     note: ledger.note ?? null,
     activity,
     activityDetail,
@@ -328,18 +373,27 @@ export class OrchestratorService {
   constructor(
     private readonly storage = new StorageService(),
     private readonly transcriptDirectory = defaultTranscriptDirectory(),
+    private readonly lookupPullRequests: PullRequestLookup | null = null,
   ) {}
+
+  private async present(row: RunRow, now: Date) {
+    const run = toOrchestration(row, now);
+    if (!this.lookupPullRequests || row.stage === 'done') return run;
+    if (!PR_LOOKUP_STAGES.has(row.stage) && !run.stalled) return run;
+    const pullRequests = await this.lookupPullRequests(row.key).catch(() => []);
+    return pullRequests.length > 0 ? toOrchestration(row, now, pullRequests) : run;
+  }
 
   async list(now = new Date()) {
     const rows = await this.storage.getOrchestratorRuns();
-    return rows.filter((row) => !row.dismissedAt).map((row) => toOrchestration(row, now));
+    return Promise.all(rows.filter((row) => !row.dismissedAt).map((row) => this.present(row, now)));
   }
 
   async get(keyInput: string, now = new Date()) {
     let key: string;
     try { key = normalizeTicketKey(keyInput); } catch { return null; }
     const row = await this.storage.getOrchestratorRun(key);
-    return row && !row.dismissedAt ? toOrchestration(row, now) : null;
+    return row && !row.dismissedAt ? this.present(row, now) : null;
   }
 
   async events(key: string) {
@@ -533,4 +587,13 @@ export class OrchestratorService {
   }
 }
 
-export const orchestratorService = new OrchestratorService();
+const githubAPI = new GitHubAPI();
+export const orchestratorService = new OrchestratorService(undefined, undefined, throttledPullRequestLookup(async (key) => {
+  const found = await githubAPI.getPullRequestsForTicket(key, { staleWhileRevalidate: true });
+  return found.map((pr) => ({
+    url: pr.url,
+    number: pr.number,
+    repo: `${pr.owner}/${pr.repo}`,
+    status: (['open', 'draft', 'merged', 'closed'].includes(pr.status) ? pr.status : 'open') as PullRequestStatus,
+  }));
+}));

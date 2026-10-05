@@ -8,7 +8,7 @@ import { Badge, Button, Card, Dialog, Page, PageHeader } from '../components/ui'
 import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
-import { STATUS_LABEL, formatAge, isArchived, pageOf, runStatus, sortRuns, stageColor, stageLabel, stageName, type AgentEvent, type AgentRun, type AgentTimeline, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
+import { formatAge, isArchived, pageOf, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
 import { RAIL_STAGES, railIndex } from '../agents/office/layout';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 import { AgentFlowGraph } from '../components/AgentFlowGraph';
@@ -43,6 +43,7 @@ const statusTone: Record<RunStatus, string> = {
   failed: 'border-status-conflict/50 bg-status-conflict-bg text-status-conflict',
   stalled: 'border-status-conflict/50 bg-status-conflict-bg text-status-conflict',
   working: 'border-status-merged/40 bg-status-merged-bg text-status-merged',
+  review: 'border-sky-300/50 bg-sky-300/10 text-sky-200',
   thinking: 'border-border-glow bg-surface-2 text-secondary-foreground',
   asleep: 'border-border bg-surface-2 text-muted-foreground',
   done: 'border-status-merged/40 bg-status-merged-bg text-status-merged',
@@ -67,8 +68,8 @@ const StageChip: React.FC<{ stage: string; kind?: string }> = ({ stage, kind }) 
   </span>
 );
 
-const StatusChip: React.FC<{ status: RunStatus }> = ({ status }) => (
-  <span className={cn('inline-flex items-center rounded-xs border px-2 py-0.5 font-mono text-[0.66rem] font-bold', statusTone[status])}>{STATUS_LABEL[status]}</span>
+const StatusChip: React.FC<{ status: RunStatus; review?: AgentRun['review'] }> = ({ status, review }) => (
+  <span className={cn('inline-flex items-center rounded-xs border px-2 py-0.5 font-mono text-[0.66rem] font-bold', statusTone[status])}>{statusLabel(status, review)}</span>
 );
 
 const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) => {
@@ -148,7 +149,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
     { label: 'Tickets with an agent', value: active.length, className: 'text-accent' },
     { label: 'Waiting on you', value: active.filter((run) => run.waiting).length, className: 'text-amber-200' },
     { label: 'Working now', value: active.filter((run) => statusOf(run) === 'working').length, className: 'text-status-merged' },
-    { label: 'Stalled or failed', value: active.filter((run) => run.stalled || run.acFailed > 0).length, className: 'text-status-conflict' },
+    { label: 'Stalled or failed', value: active.filter((run) => (run.stalled && !run.review) || run.acFailed > 0).length, className: 'text-status-conflict' },
   ];
 
   const handleDismiss = async () => {
@@ -315,7 +316,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                       <tr key={run.key} className={cn('cursor-pointer border-t border-border hover:bg-surface-1', selected?.key === run.key && 'bg-surface-1')} onClick={() => setSelectedKey(run.key)}>
                         <td className="px-4 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => setSelectedKey(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><span className="mt-0.5 block max-w-[320px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
                         <td className="px-4 py-3"><StageChip stage={run.stage} kind={run.kind} /></td>
-                        <td className="px-4 py-3"><StatusChip status={statusOf(run)} /></td>
+                        <td className="px-4 py-3"><StatusChip status={statusOf(run)} review={run.review} /></td>
                         <td className="px-4 py-3 font-mono text-xs tabular-nums">{run.acPassed}/{run.acTotal}{run.acFailed > 0 && <span className="ml-1.5 text-status-conflict">{run.acFailed} failed</span>}</td>
                         <td className="max-w-[280px] px-4 py-3 text-xs text-secondary-foreground"><span className="line-clamp-2">{run.waiting || '—'}</span></td>
                         <td className="px-4 py-3 text-xs text-muted-foreground tabular-nums">{formatAge(run.idleSeconds + drift)} ago</td>
@@ -345,7 +346,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                 <span className="rounded-xs border border-accent/30 bg-accent-dim px-[9px] py-[3px] font-mono text-sm font-extrabold text-accent">{selected.key}</span>
                 {selected.kind === 'review' && <span className="rounded-xs border border-border-glow px-2 py-0.5 font-mono text-[0.66rem] font-bold text-secondary-foreground">REVIEW</span>}
                 <StageChip stage={selected.stage} kind={selected.kind} />
-                <StatusChip status={statusOf(selected)} />
+                <StatusChip status={statusOf(selected)} review={selected.review} />
               </div>
               <h2 className="text-pretty font-display text-base leading-snug font-bold">{selected.title || 'Untitled'}</h2>
 
@@ -384,7 +385,10 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                 <dl className="grid grid-cols-[92px_1fr] gap-x-2.5 gap-y-1 text-[0.82rem]">
                   {selected.testsBe && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Tests BE</dt><dd className="break-words">{selected.testsBe}</dd></>}
                   {selected.testsFe && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Tests FE</dt><dd className="break-words">{selected.testsFe}</dd></>}
-                  {[['PR BE', selected.prBe], ['PR FE', selected.prFe]].map(([label, url]) => url && (
+                  {selected.pullRequests?.map((pr) => (
+                    <React.Fragment key={pr.url}><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">{pr.status}</dt><dd className="min-w-0"><a className="flex items-center gap-1 font-mono text-xs text-accent hover:underline" href={pr.url} target="_blank" rel="noreferrer"><span className="truncate">{pr.repo}#{pr.number}</span><ExternalLink className="size-3.5 shrink-0" aria-hidden="true" /></a></dd></React.Fragment>
+                  ))}
+                  {!selected.pullRequests?.length && [['PR BE', selected.prBe], ['PR FE', selected.prFe]].map(([label, url]) => url && (
                     <React.Fragment key={label}><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">{label}</dt><dd className="min-w-0"><a className="flex items-center gap-1 font-mono text-xs text-accent hover:underline" href={url} target="_blank" rel="noreferrer"><span className="truncate">{url}</span><ExternalLink className="size-3.5 shrink-0" aria-hidden="true" /></a></dd></React.Fragment>
                   ))}
                   {selected.note && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Note</dt><dd className="break-words">{selected.note}</dd></>}

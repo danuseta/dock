@@ -10,7 +10,7 @@ import {
 } from '../agents/office/layout';
 import { calculateWalkDuration, interpolatePathPosition, pathLength, planWalkPath, routeThroughDoors } from '../agents/office/movement';
 import { GRID_CELL, GRID_COLS, astar, buildNavGrid, toWorld } from '../agents/office/navigation';
-import { formatAge, isArchived, pageOf, runStatus, shirtColor, sortRuns, splitTeam, stageName, type AgentRun, type RunSortColumn } from '../agents/runs';
+import { formatAge, isArchived, pageOf, runStatus, shirtColor, sortRuns, splitTeam, stageName, statusLabel, type AgentRun, type RunSortColumn } from '../agents/runs';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 
 const blocked = (x: number, y: number) => NAV_GRID[Math.floor(y / GRID_CELL) * GRID_COLS + Math.floor(x / GRID_CELL)] === 1;
@@ -223,4 +223,21 @@ test('the table sorts by any column, archives finished tickets and pages the res
   assert.deepStrictEqual(pageOf(many, 3, 10), { items: [20, 21, 22], page: 3, pages: 3, from: 21, to: 23 });
   assert.strictEqual(pageOf(many, 9, 10).page, 3, 'a page past the end falls back to the last one');
   assert.deepStrictEqual(pageOf([], 1, 10), { items: [], page: 1, pages: 1, from: 0, to: 0 });
+});
+
+test('a run with an open pull request is in review, not idle, and sorts after working', () => {
+  const run = { stage: 'pr', waiting: null, acFailed: 0, stalled: false, activity: 'IDLE', idleSeconds: 60, endedSeconds: null, review: 'open' as const };
+  assert.strictEqual(runStatus(run, 1000), 'review');
+  assert.strictEqual(runStatus({ ...run, review: 'merged' }, 1000), 'review');
+  assert.strictEqual(statusLabel('review', 'open'), 'In review');
+  assert.strictEqual(statusLabel('review', 'merged'), 'Merged');
+  assert.strictEqual(runStatus({ ...run, review: null }, 1000), 'asleep');
+  assert.strictEqual(runStatus({ ...run, activity: 'ACTIVE', idleSeconds: 1 }, 1000), 'working', 'an agent that is typing is still working');
+  assert.strictEqual(runStatus({ ...run, acFailed: 1 }, 1000), 'failed');
+  assert.strictEqual(runStatus({ ...run, stage: 'done' }, 1000), 'done');
+
+  const runs = ['QRD-1', 'QRD-2', 'QRD-3', 'QRD-4'].map((key) => ({ ...sampleRuns(0)[0], key }));
+  const statuses = { 'QRD-1': 'asleep', 'QRD-2': 'review', 'QRD-3': 'working', 'QRD-4': 'thinking' } as const;
+  const order = sortRuns(runs, { column: 'status', descending: false }, (item) => statuses[item.key as keyof typeof statuses]).map((item) => item.key);
+  assert.deepStrictEqual(order, ['QRD-3', 'QRD-2', 'QRD-4', 'QRD-1']);
 });

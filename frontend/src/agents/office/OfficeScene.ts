@@ -212,7 +212,7 @@ export class OfficeScene {
         id: occupant.run.key,
         column: Math.min(RAIL_STAGES.length - 1, railIndex(occupant.run.stage)),
         title: `${occupant.run.key} · ${occupant.run.acPassed}/${occupant.run.acTotal}`,
-        status: occupant.run.waiting ? 'review' as const : occupant.run.stalled || occupant.run.acFailed > 0 ? 'blocked' as const : 'running' as const,
+        status: occupant.run.waiting ? 'review' as const : (occupant.run.stalled && !occupant.run.review) || occupant.run.acFailed > 0 ? 'blocked' as const : 'running' as const,
       })));
   }
 

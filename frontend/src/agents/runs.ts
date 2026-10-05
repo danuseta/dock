@@ -15,6 +15,8 @@ export interface TimelineAgent {
 
 export type RunKind = 'build' | 'review';
 
+export interface AgentPullRequest { url: string; number: number; repo: string; status: string }
+
 export interface AgentRun {
   key: string;
   kind?: RunKind | string;
@@ -30,6 +32,8 @@ export interface AgentRun {
   testsFe?: string | null;
   prBe?: string | null;
   prFe?: string | null;
+  pullRequests?: AgentPullRequest[];
+  review?: 'open' | 'merged' | null;
   note?: string | null;
   activity: string;
   activityDetail?: string | null;
@@ -108,13 +112,14 @@ export function formatAge(seconds: number): string {
   return hours < 48 ? `${hours} h` : `${Math.round(hours / 24)} d`;
 }
 
-export type RunStatus = 'waiting' | 'failed' | 'stalled' | 'working' | 'thinking' | 'asleep' | 'done';
+export type RunStatus = 'waiting' | 'failed' | 'stalled' | 'working' | 'review' | 'thinking' | 'asleep' | 'done';
 
 export const STATUS_LABEL: Record<RunStatus, string> = {
   waiting: 'Waiting on you',
   failed: 'AC failed',
   stalled: 'Stalled',
   working: 'Working',
+  review: 'In review',
   thinking: 'Thinking',
   asleep: 'Idle',
   done: 'Done',
@@ -124,13 +129,18 @@ const POSE_STATUS: Record<Pose, RunStatus> = {
   SeatedTyping: 'working', SeatedWaiting: 'waiting', SeatedThinking: 'thinking', Asleep: 'asleep',
 };
 
+export const statusLabel = (status: RunStatus, review?: AgentRun['review']): string => (
+  status === 'review' && review === 'merged' ? 'Merged' : STATUS_LABEL[status]
+);
+
 /** One word for a run, worst news first. */
-export function runStatus(run: Pick<AgentRun, 'stage' | 'waiting' | 'acFailed' | 'stalled' | 'activity' | 'idleSeconds' | 'endedSeconds'>, now: number): RunStatus {
+export function runStatus(run: Pick<AgentRun, 'stage' | 'waiting' | 'acFailed' | 'stalled' | 'activity' | 'idleSeconds' | 'endedSeconds' | 'review'>, now: number): RunStatus {
   if (run.stage === 'done') return 'done';
   if (run.waiting) return 'waiting';
   if (run.acFailed > 0) return 'failed';
   if (run.stalled) return 'stalled';
-  return POSE_STATUS[poseOf(slotFromServer(run, now), now)];
+  const status = POSE_STATUS[poseOf(slotFromServer(run, now), now)];
+  return run.review && status !== 'working' ? 'review' : status;
 }
 
 const SHIRT_COLORS = ['#e8c56c', '#8c9bf0', '#62cf9f', '#e08a7a', '#5cc0e0', '#c79bf0', '#f0a35c', '#9ad06a'];
@@ -149,7 +159,7 @@ export type RunSortColumn = 'ticket' | 'stage' | 'status' | 'ac' | 'waiting' | '
 export interface RunSort { column: RunSortColumn; descending: boolean }
 
 const STAGE_ORDER = ['gate', 'plan', 'code', 'test', 'verify', 'evidence', 'commit', 'pr', 'done'];
-const STATUS_ORDER: RunStatus[] = ['waiting', 'failed', 'stalled', 'working', 'thinking', 'asleep', 'done'];
+const STATUS_ORDER: RunStatus[] = ['waiting', 'failed', 'stalled', 'working', 'review', 'thinking', 'asleep', 'done'];
 const byKey = new Intl.Collator('en', { numeric: true });
 
 /** A finished ticket leaves the working list and is kept in the archive. */
