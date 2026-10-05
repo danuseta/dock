@@ -10,7 +10,7 @@ import {
 } from '../agents/office/layout';
 import { calculateWalkDuration, interpolatePathPosition, pathLength, planWalkPath, routeThroughDoors } from '../agents/office/movement';
 import { GRID_CELL, GRID_COLS, astar, buildNavGrid, toWorld } from '../agents/office/navigation';
-import { formatAge, isArchived, pageOf, runStatus, shirtColor, sortRuns, splitTeam, stageName, statusLabel, type AgentRun, type RunSortColumn } from '../agents/runs';
+import { formatAge, hasTrouble, isArchived, pageOf, runStatus, shirtColor, sortRuns, splitTeam, stageName, statusLabel, type AgentRun, type RunSortColumn } from '../agents/runs';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 
 const blocked = (x: number, y: number) => NAV_GRID[Math.floor(y / GRID_CELL) * GRID_COLS + Math.floor(x / GRID_CELL)] === 1;
@@ -264,4 +264,27 @@ test('a merged run is archived, an open or closed pull request is not', () => {
   assert.strictEqual(statusLabel(runStatus({ ...run, review: 'open' as const }, 1000), 'open'), 'In review');
   assert.strictEqual(statusLabel(runStatus({ ...run, stage: 'done', review: null }, 1000), null), 'Done');
   assert.strictEqual(runStatus({ ...run, review: null }, 1000), 'asleep', 'no pull request: still asleep');
+});
+
+test('requested changes and a red CI read as trouble, ahead of Stalled, and count in the metric', () => {
+  const run = { stage: 'pr', waiting: null, acFailed: 0, stalled: false, activity: 'IDLE', idleSeconds: 60, endedSeconds: null, review: 'open' as const };
+  assert.strictEqual(runStatus({ ...run, reviewSignal: 'changes_requested' }, 1000), 'changes_requested');
+  assert.strictEqual(runStatus({ ...run, reviewSignal: 'checks_failing' }, 1000), 'checks_failing');
+  for (const reviewSignal of ['checks_pending', 'approved', null] as const) assert.strictEqual(runStatus({ ...run, reviewSignal }, 1000), 'review', String(reviewSignal));
+  assert.strictEqual(runStatus({ ...run, reviewSignal: 'changes_requested', activity: 'ACTIVE', idleSeconds: 1 }, 1000), 'working', 'an agent fixing it is still working');
+  assert.strictEqual(runStatus({ ...run, reviewSignal: 'changes_requested', acFailed: 1 }, 1000), 'failed');
+  assert.strictEqual(runStatus({ ...run, reviewSignal: 'changes_requested', review: 'merged' }, 1000), 'review', 'a merged run is finished');
+  assert.strictEqual(statusLabel('changes_requested'), 'Changes requested');
+  assert.strictEqual(statusLabel('checks_failing'), 'CI failing');
+
+  const trouble = (extra: object) => hasTrouble({ acFailed: 0, stalled: false, review: 'open', reviewSignal: null, ...extra });
+  assert.deepStrictEqual(
+    [trouble({ reviewSignal: 'changes_requested' }), trouble({ reviewSignal: 'checks_failing' }), trouble({ reviewSignal: 'checks_pending' }), trouble({ reviewSignal: 'approved' }), trouble({}), trouble({ acFailed: 1 }), trouble({ stalled: true }), trouble({ stalled: true, review: null })],
+    [true, true, false, false, false, true, false, true],
+  );
+
+  const runs = ['QRD-1', 'QRD-2', 'QRD-3', 'QRD-4', 'QRD-5'].map((key) => ({ ...sampleRuns(0)[0], key }));
+  const statuses = { 'QRD-1': 'stalled', 'QRD-2': 'checks_failing', 'QRD-3': 'failed', 'QRD-4': 'changes_requested', 'QRD-5': 'working' } as const;
+  const order = sortRuns(runs, { column: 'status', descending: false }, (item) => statuses[item.key as keyof typeof statuses]).map((item) => item.key);
+  assert.deepStrictEqual(order, ['QRD-3', 'QRD-4', 'QRD-2', 'QRD-1', 'QRD-5'], 'right after failed, before stalled');
 });

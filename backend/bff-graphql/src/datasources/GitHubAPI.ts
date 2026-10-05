@@ -54,6 +54,7 @@ export class GitHubAPI {
         type: pr.type || (pr.mergeable === false ? 'CONFLICT' : 'PR'),
         owner: pr.owner || 'unknown',
         pullNumber: pr.pullNumber || pr.number || 0,
+        headSha: pr.headSha || '',
         number: pr.number || pr.pullNumber || 0,
         baseBranch: pr.baseBranch || 'main',
         headBranch: pr.headBranch || '',
@@ -65,6 +66,17 @@ export class GitHubAPI {
     } catch (error: any) {
       console.error('[BFF GitHubAPI] Error fetching PRs:', error.response?.status, error.response?.data || error.message);
       return []; // Graceful degradation
+    }
+  }
+
+  /** Cache read only: the first call for a ticket starts a background refresh and returns nothing. */
+  async getPullRequestSignals(ticketKey: string, pullRequests: Array<{ url: string; status: string; owner: string; repo: string; number: number; headSha?: string }>) {
+    try {
+      const auth = await this.getAuth();
+      if (!auth.hasToken) return {};
+      return await this.githubService.getPRSignals(auth.headers.Authorization.replace('Bearer ', ''), ticketKey, pullRequests);
+    } catch {
+      return {};
     }
   }
 

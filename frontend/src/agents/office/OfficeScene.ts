@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
-import { isArchived, podColor, shirtColor, splitTeam, stageColor, stageName, type AgentRun, type TimelineAgent } from '../runs';
+import { hasTrouble, isArchived, podColor, shirtColor, splitTeam, stageColor, stageName, type AgentRun, type TimelineAgent } from '../runs';
 import { clock, poseOf, slotFromServer, tickActivity, type ActivitySlot, type Pose } from './activity';
 import { buildBoardCards, type BoardCards } from './board';
 import { animateCharacter, createCharacter, disposeCharacter, setDimmed, type Character } from './character';
@@ -214,7 +214,7 @@ export class OfficeScene {
         id: occupant.run.key,
         column: Math.min(RAIL_STAGES.length - 1, railIndex(occupant.run.stage)),
         title: `${occupant.run.key} · ${occupant.run.acPassed}/${occupant.run.acTotal}`,
-        status: occupant.run.waiting ? 'review' as const : (occupant.run.stalled && !occupant.run.review) || occupant.run.acFailed > 0 ? 'blocked' as const : 'running' as const,
+        status: occupant.run.waiting ? 'review' as const : hasTrouble(occupant.run) ? 'blocked' as const : 'running' as const,
       })));
   }
 

@@ -236,6 +236,8 @@ export const typeDefs = gql`
     number: Int!
     repo: String!
     status: String!
+    reviewDecision: String
+    checks: String
   }
 
   type Orchestration {
@@ -255,6 +257,7 @@ export const typeDefs = gql`
     prFe: String
     pullRequests: [OrchestrationPullRequest!]!
     review: String
+    reviewSignal: String
     finished: Boolean!
     note: String
     activity: String!

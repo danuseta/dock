@@ -8,7 +8,7 @@ import { Badge, Button, Card, Dialog, Page, PageHeader } from '../components/ui'
 import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
-import { formatAge, isArchived, pageOf, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
+import { formatAge, hasTrouble, isArchived, pageOf, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
 import { RAIL_STAGES, railIndex } from '../agents/office/layout';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 import { AgentFlowGraph } from '../components/AgentFlowGraph';
@@ -42,6 +42,8 @@ const statusTone: Record<RunStatus, string> = {
   waiting: 'border-amber-300/50 bg-amber-300/10 text-amber-200',
   failed: 'border-status-conflict/50 bg-status-conflict-bg text-status-conflict',
   stalled: 'border-status-conflict/50 bg-status-conflict-bg text-status-conflict',
+  changes_requested: 'border-status-conflict/50 bg-status-conflict-bg text-status-conflict',
+  checks_failing: 'border-status-conflict/50 bg-status-conflict-bg text-status-conflict',
   working: 'border-status-merged/40 bg-status-merged-bg text-status-merged',
   review: 'border-sky-300/50 bg-sky-300/10 text-sky-200',
   thinking: 'border-border-glow bg-surface-2 text-secondary-foreground',
@@ -149,7 +151,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
     { label: 'Tickets with an agent', value: active.length, className: 'text-accent' },
     { label: 'Waiting on you', value: active.filter((run) => run.waiting).length, className: 'text-amber-200' },
     { label: 'Working now', value: active.filter((run) => statusOf(run) === 'working').length, className: 'text-status-merged' },
-    { label: 'Stalled or failed', value: active.filter((run) => (run.stalled && !run.review) || run.acFailed > 0).length, className: 'text-status-conflict' },
+    { label: 'Stalled or failed', value: active.filter(hasTrouble).length, className: 'text-status-conflict' },
   ];
 
   const handleDismiss = async () => {
@@ -249,7 +251,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                           <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto p-2">
                             {cards.length === 0 && <span className="py-2 text-center text-xs text-muted-foreground">—</span>}
                             {cards.map((run) => (
-                              <button key={run.key} type="button" className={cn('rounded-xs border border-border-glow border-l-[3px] bg-surface-0 px-2 py-1.5 text-left hover:border-accent', run.waiting ? 'border-l-amber-300' : run.stalled || run.acFailed > 0 ? 'border-l-status-conflict' : 'border-l-status-merged', selected?.key === run.key && 'border-accent')} onClick={() => { setSelectedKey(run.key); setBoardOpen(false); }}>
+                              <button key={run.key} type="button" className={cn('rounded-xs border border-border-glow border-l-[3px] bg-surface-0 px-2 py-1.5 text-left hover:border-accent', run.waiting ? 'border-l-amber-300' : hasTrouble(run) ? 'border-l-status-conflict' : 'border-l-status-merged', selected?.key === run.key && 'border-accent')} onClick={() => { setSelectedKey(run.key); setBoardOpen(false); }}>
                                 <span className="flex items-center justify-between gap-2 font-mono text-xs font-extrabold text-accent"><span>{run.key}</span><span className="font-semibold text-muted-foreground tabular-nums">{run.acPassed}/{run.acTotal}</span></span>
                                 <span className="mt-0.5 line-clamp-2 text-[0.74rem] text-secondary-foreground">{run.waiting || run.title || 'Untitled'}</span>
                               </button>
@@ -366,6 +368,8 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                   <dd>{selected.activity === 'ACTIVE' ? `Active${selected.activityDetail ? ` · ${selected.activityDetail}` : ''}` : selected.activity === 'WAITING' ? 'Waiting' : 'Idle'}</dd>
                   <dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Last event</dt>
                   <dd className="tabular-nums">{formatAge(selected.idleSeconds + drift)} ago</dd>
+                  {selected.reviewSignal === 'approved' && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Review</dt><dd>Approved</dd></>}
+                  {selected.reviewSignal === 'checks_pending' && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Review</dt><dd>Checks running</dd></>}
                   {selected.gate && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Gate</dt><dd>{selected.gate}</dd></>}
                   {selected.stalled && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Stalled</dt><dd className="text-status-conflict">No activity past the stale limit</dd></>}
                 </dl>
@@ -387,7 +391,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                   {selected.testsBe && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Tests BE</dt><dd className="break-words">{selected.testsBe}</dd></>}
                   {selected.testsFe && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Tests FE</dt><dd className="break-words">{selected.testsFe}</dd></>}
                   {selected.pullRequests?.map((pr) => (
-                    <React.Fragment key={pr.url}><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">{pr.status}</dt><dd className="min-w-0"><a className="flex items-center gap-1 font-mono text-xs text-accent hover:underline" href={pr.url} target="_blank" rel="noreferrer"><span className="truncate">{pr.repo}#{pr.number}</span><ExternalLink className="size-3.5 shrink-0" aria-hidden="true" /></a></dd></React.Fragment>
+                    <React.Fragment key={pr.url}><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">{pr.status}</dt><dd className="min-w-0"><a className="flex items-center gap-1 font-mono text-xs text-accent hover:underline" href={pr.url} target="_blank" rel="noreferrer"><span className="truncate">{pr.repo}#{pr.number}</span><ExternalLink className="size-3.5 shrink-0" aria-hidden="true" /></a>{(pr.reviewDecision === 'changes_requested' || pr.reviewDecision === 'approved' || (pr.checks && pr.checks !== 'none')) && <span className="font-mono text-[0.68rem] text-muted-foreground">{[pr.reviewDecision === 'changes_requested' && 'changes requested', pr.reviewDecision === 'approved' && 'approved', pr.checks === 'failing' && 'CI failing', pr.checks === 'pending' && 'checks running', pr.checks === 'passing' && 'CI passing'].filter(Boolean).join(' · ')}</span>}</dd></React.Fragment>
                   ))}
                   {!selected.pullRequests?.length && [['PR BE', selected.prBe], ['PR FE', selected.prFe]].map(([label, url]) => url && (
                     <React.Fragment key={label}><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">{label}</dt><dd className="min-w-0"><a className="flex items-center gap-1 font-mono text-xs text-accent hover:underline" href={url} target="_blank" rel="noreferrer"><span className="truncate">{url}</span><ExternalLink className="size-3.5 shrink-0" aria-hidden="true" /></a></dd></React.Fragment>
