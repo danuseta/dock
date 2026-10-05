@@ -15,11 +15,11 @@ const MAX_AC_CHIPS = 8;
 const stateLabel: Record<string, string> = { active: 'working', waiting: 'waiting on you', idle: 'idle', done: 'done' };
 const logTone: Record<string, string> = { stage: 'text-accent', gate: 'text-amber-200', ok: 'text-status-merged', tool: 'text-[oklch(0.75_0.11_220)]' };
 
-const AgentBox: React.FC<{ agent: TimelineAgent; x: number; y: number; small: boolean }> = ({ agent, x, y, small }) => (
+const AgentBox: React.FC<{ agent: TimelineAgent; x: number; y: number; small: boolean; supervising?: boolean }> = ({ agent, x, y, small, supervising }) => (
   <div className={cn('dock-flow-node dock-flow-agent', `is-${agent.state}`, small && 'is-small')} style={{ left: `${x / 10}%`, top: y }}>
     <header><i aria-hidden="true" /><span>{agent.name}</span></header>
     <p>{agent.detail || (agent.parentId ? 'team member' : 'main session')}</p>
-    <footer><span>{agent.tool || stateLabel[agent.state] || agent.state}</span><span>{agent.tools} {agent.tools === 1 ? 'tool' : 'tools'}</span></footer>
+    <footer><span>{agent.tool || (supervising && agent.state === 'active' ? 'supervising' : stateLabel[agent.state] || agent.state)}</span><span>{agent.tools} {agent.tools === 1 ? 'tool' : 'tools'}</span></footer>
   </div>
 );
 
@@ -127,7 +127,7 @@ export const AgentFlowGraph: React.FC<AgentFlowGraphProps> = ({ run, timeline })
           )}
 
           {root && <AgentBox agent={root} x={rootX} y={ROOT_Y} small={false} />}
-          {children.map((child, index) => <AgentBox key={child.id} agent={child} x={childX(index)} y={CHILD_Y} small={small} />)}
+          {children.map((child, index) => <AgentBox key={child.id} agent={child} x={childX(index)} y={CHILD_Y} small={small} supervising={leaves.some((leaf) => leaf.parentId === child.id && leaf.state === 'active')} />)}
           {leaves.map((leaf, index) => <AgentBox key={leaf.id} agent={leaf} x={leafX(index)} y={leafY(index)} small={small} />)}
 
           <div className="dock-flow-strip">

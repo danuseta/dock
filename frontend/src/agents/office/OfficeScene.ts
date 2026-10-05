@@ -2,14 +2,14 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
-import { podColor, splitTeam, stageColor, stageName, type AgentRun, type TimelineAgent } from '../runs';
+import { podColor, shirtColor, splitTeam, stageColor, stageName, type AgentRun, type TimelineAgent } from '../runs';
 import { clock, poseOf, slotFromServer, tickActivity, type ActivitySlot, type Pose } from './activity';
 import { buildBoardCards, type BoardCards } from './board';
 import { animateCharacter, createCharacter, disposeCharacter, setDimmed, type Character } from './character';
 import { ASK_EMOTE, THINK_EMOTE, ZZZ_EMOTE } from './emotes';
 import {
-  EXIT, FURNITURE, LEAD_SEAT, LEAD_ZONE, MAX_PODS, MEMBER_DESKS, RAIL_STAGES, YOU_ZONE,
-  coordinatorSeat, memberSeat, podId, podZone, railIndex, waitingSpot,
+  EXIT, FURNITURE, LEAD_SEAT, LEAD_ZONE, LOUNGE_ZONE, MAX_PODS, MEMBER_DESKS, RAIL_STAGES, YOU_ZONE,
+  coordinatorSeat, loungeSpot, memberSeat, podId, podZone, railIndex, waitingSpot,
   type Zone, type ZoneId,
 } from './layout';
 import { calculateWalkDuration, interpolatePathPosition, routeThroughDoors } from './movement';
@@ -41,6 +41,8 @@ const OWNER_COLOR = '#e9e2d0';
 const LEAD_COLOR = '#d9d2bf';
 const FREE_POD = 0x26262c;
 const DONE_LINGER_SECONDS = 4;
+// A ticket keeps its pod this long after its last activity, so a pause between two tools does not empty the room.
+const POD_GRACE_SECONDS = 45;
 const MEMBER_SCALE = 0.86;
 const BOARD_SIZE: [number, number] = [22, 3.1];
 const FALLBACK_HEIGHT: Partial<Record<FurnitureItem['type'], number>> = {
@@ -150,21 +152,41 @@ export class OfficeScene {
         continue;
       }
       if (run.stage === 'done') continue;
-      const pod = this.freePod();
-      if (pod === -1) continue;
-      const character = createCharacter(run.key, podColor(pod), coordinatorSeat(pod), podId(pod));
+      const character = createCharacter(run.key, shirtColor(run.key), { ...LEAD_SEAT }, 'lounge');
       this.scene.add(character.group);
-      const occupant: Occupant = { run, slot, pod, character, members: new Map(), hidden: 0 };
+      const occupant: Occupant = { run, slot, pod: -1, character, members: new Map(), hidden: 0 };
       this.occupants.set(run.key, occupant);
       fresh.add(occupant);
     }
 
-    const waiting = [...this.occupants.values()].filter((occupant) => occupant.run.stage !== 'done' && occupant.slot.state === 'WAITING');
+    // A pod is for work in progress. A ticket that is waiting on the owner queues at the owner's
+    // desk, and one that nobody is working on stands in the lounge, so neither uses up a pod.
+    const live = [...this.occupants.values()].filter((occupant) => occupant.run.stage !== 'done');
+    const waiting = live.filter((occupant) => occupant.slot.state === 'WAITING');
+    const working = (occupant: Occupant) => occupant.slot.state === 'ACTIVE'
+      || splitTeam(occupant.run.members).members.some((member) => member.state === 'active')
+      || Boolean(splitTeam(occupant.run.members).coordinator && splitTeam(occupant.run.members).coordinator?.state === 'active')
+      || (occupant.pod >= 0 && occupant.run.idleSeconds < POD_GRACE_SECONDS);
+    for (const occupant of this.occupants.values()) {
+      const keeps = occupant.run.stage !== 'done' && occupant.slot.state !== 'WAITING' && working(occupant);
+      if (!keeps && occupant.pod >= 0) {
+        for (const member of occupant.members.values()) disposeCharacter(member.character);
+        occupant.members.clear();
+        occupant.pod = -1;
+      }
+    }
+    for (const occupant of live) {
+      if (occupant.pod === -1 && occupant.slot.state !== 'WAITING' && working(occupant)) occupant.pod = this.freePod();
+    }
+    const parked = live.filter((occupant) => occupant.pod === -1 && occupant.slot.state !== 'WAITING');
+
     for (const occupant of this.occupants.values()) {
       const done = occupant.run.stage === 'done';
       const queued = waiting.indexOf(occupant);
-      const zone: ZoneId = done ? 'corridor' : queued >= 0 ? 'you' : podId(occupant.pod);
-      const target = done ? { ...EXIT } : queued >= 0 ? waitingSpot(queued, waiting.length) : coordinatorSeat(occupant.pod);
+      const zone: ZoneId = done ? 'corridor' : queued >= 0 ? 'you' : occupant.pod >= 0 ? podId(occupant.pod) : 'lounge';
+      const target = done ? { ...EXIT }
+        : queued >= 0 ? waitingSpot(queued, waiting.length)
+          : occupant.pod >= 0 ? coordinatorSeat(occupant.pod) : loungeSpot(parked.indexOf(occupant));
       if (fresh.has(occupant)) Object.assign(occupant.character, { x: target.x, y: target.y, zone });
       else this.walk(occupant.character, target, zone, now);
       this.syncMembers(occupant, now, fresh.has(occupant));
@@ -217,7 +239,7 @@ export class OfficeScene {
   }
 
   private freePod(): number {
-    const taken = new Set([...this.occupants.values()].map((occupant) => occupant.pod));
+    const taken = new Set([...this.occupants.values()].map((occupant) => occupant.pod).filter((pod) => pod >= 0));
     for (let index = 0; index < MAX_PODS; index += 1) if (!taken.has(index)) return index;
     return -1;
   }
@@ -260,7 +282,7 @@ export class OfficeScene {
    * server stops reporting them; a finished member stays, faded.
    */
   private syncMembers(occupant: Occupant, now: number, atOnce: boolean): void {
-    const team = occupant.run.stage === 'done' ? [] : splitTeam(occupant.run.members).members;
+    const team = occupant.run.stage === 'done' || occupant.pod < 0 ? [] : splitTeam(occupant.run.members).members;
     const ids = new Set(team.map((member) => member.id));
     for (const [id, member] of occupant.members) {
       if (ids.has(id)) continue;
@@ -268,6 +290,7 @@ export class OfficeScene {
       occupant.members.delete(id);
     }
     occupant.hidden = 0;
+    if (occupant.pod < 0) return;
     const zone = podId(occupant.pod);
     for (const info of team) {
       let member = occupant.members.get(info.id);
@@ -281,7 +304,7 @@ export class OfficeScene {
         }
         const seat = memberSeat(occupant.pod, desk);
         const start = atOnce ? seat : coordinatorSeat(occupant.pod);
-        const character = createCharacter(occupant.run.key, podColor(occupant.pod), start, zone, MEMBER_SCALE);
+        const character = createCharacter(occupant.run.key, shirtColor(occupant.run.key), start, zone, MEMBER_SCALE);
         this.scene.add(character.group);
         member = { info, character, desk };
         occupant.members.set(info.id, member);
@@ -293,7 +316,7 @@ export class OfficeScene {
   }
 
   private paintPods(): void {
-    const byPod = new Map([...this.occupants.values()].map((occupant) => [occupant.pod, occupant]));
+    const byPod = new Map([...this.occupants.values()].filter((occupant) => occupant.pod >= 0).map((occupant) => [occupant.pod, occupant]));
     this.pods.forEach((pod, index) => {
       const occupant = byPod.get(index);
       const active = occupant && occupant.run.stage !== 'done' ? occupant : undefined;
@@ -358,6 +381,8 @@ export class OfficeScene {
     };
 
     area(LEAD_ZONE, LEAD_COLOR, 0.13);
+    const lounge = area(LOUNGE_ZONE, '#7c8190', 0.1);
+    this.addLabel('dock-zone-label', 'Not being worked on', '#9aa0aa', [lounge.centerX, 0.1, lounge.frontZ + 0.35]);
     const youArea = area(YOU_ZONE, OWNER_COLOR, 0.13);
     this.addLabel('dock-zone-label', 'Your desk · decision gates', OWNER_COLOR, [youArea.centerX - YOU_ZONE.width * SCALE * 0.3, 0.1, youArea.frontZ + 0.35]);
 
@@ -451,7 +476,7 @@ export class OfficeScene {
     const emote = pose === 'SeatedWaiting' ? ASK_EMOTE : pose === 'Asleep' ? ZZZ_EMOTE : pose === 'SeatedThinking' ? THINK_EMOTE : '';
     const role = splitTeam(run.members).coordinator ? 'coordinator' : 'lead direct';
     // At its desk the pod's sign already names the ticket; away from it (the owner's queue, the door) the tag has to.
-    const label = pose === 'SeatedWaiting' || occupant.character.walk ? `${escapeHtml(run.key)} <small>${role}</small>` : role;
+    const label = pose === 'SeatedWaiting' || occupant.character.walk || occupant.pod < 0 ? `${escapeHtml(run.key)} <small>${occupant.pod < 0 && pose !== 'SeatedWaiting' ? escapeHtml(stageName(run.stage, run.kind)) : role}</small>` : role;
     return `${emote}<button type="button" class="dock-agent-tag" data-key="${escapeHtml(run.key)}"><i style="background:${stageColor(run.stage)}"></i>${label}</button>`;
   }
 
@@ -496,9 +521,9 @@ export class OfficeScene {
         if (slot.state === 'ACTIVE') busy += 1;
         if (occupant.members.size > 0) delegated += 1;
       }
-      if (!walking) character.facing = done ? Math.PI / 2 : queued ? 0 : Math.PI;
+      if (!walking) character.facing = done ? Math.PI / 2 : queued ? Math.PI : occupant.pod >= 0 ? Math.PI : 0;
       this.place(character);
-      const seated = !done && !queued;
+      const seated = !done && !queued && occupant.pod >= 0;
       animateCharacter(character, pose, walking, delta, still, { seated, folded: working > 0 });
 
       const gone = done && !walking && now - (character.arrivedAt ?? now) >= DONE_LINGER_SECONDS;

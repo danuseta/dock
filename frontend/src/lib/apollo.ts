@@ -22,6 +22,8 @@ export const apolloClient = new ApolloClient({
         },
       },
       Orchestration: { keyFields: ['key'] },
+      // Agent ids are only unique inside one ticket's run, so they must not be merged across tickets.
+      TimelineAgent: { keyFields: false },
     },
   }),
 });

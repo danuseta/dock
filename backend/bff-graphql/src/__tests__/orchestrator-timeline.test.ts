@@ -165,3 +165,23 @@ test('a member whose stop event never arrived is retired after ten silent minute
   const early = buildTimeline({ stage: 'code', waiting: null, activity: 'ACTIVE' }, [stageEvent('STAGE', 'code', 0)], events.slice(0, 2), at(300));
   assert.deepStrictEqual(early.agents.map((agent) => agent.name), ['lead', 'old-exec'], 'five quiet minutes is still a working member');
 });
+
+test('a sub-coordinator whose turn stopped while its members work is still working', () => {
+  const events = [
+    toolEvent(1, 'spawn', 'oh-my-claudecode:executor', 'main', 'coord-1260', 'QRD-1260 coordinator'),
+    toolEvent(2, 'tool', 'Read', 'c1', 'oh-my-claudecode:executor'),
+    toolEvent(3, 'spawn', 'test-runner', 'c1', 'be-tests', 'BE tests'),
+    toolEvent(4, 'tool', 'Bash', 'm1', 'test-runner'),
+    toolEvent(5, 'stop', 'oh-my-claudecode:executor', 'c1', 'oh-my-claudecode:executor'),
+  ];
+  const stages = [stageEvent('STAGE', 'code', 0)];
+  const waiting = buildTimeline({ stage: 'code', waiting: null, activity: 'ACTIVE' }, stages, events, at(10));
+  assert.deepStrictEqual(waiting.agents.map((agent) => [agent.name, agent.state]), [['lead', 'active'], ['coord-1260', 'active'], ['be-tests', 'active']]);
+
+  const teamDone = [...events, toolEvent(20, 'stop', 'test-runner', 'm1', 'test-runner')];
+  assert.strictEqual(buildTimeline({ stage: 'code', waiting: null, activity: 'ACTIVE' }, stages, teamDone, at(21)).agents[1].state, 'done');
+
+  const resumed = [...teamDone, toolEvent(22, 'tool', 'Bash', 'c1', 'oh-my-claudecode:executor')];
+  const after = buildTimeline({ stage: 'code', waiting: null, activity: 'ACTIVE' }, stages, resumed, at(23));
+  assert.deepStrictEqual([after.agents[1].state, after.agents[1].tool], ['active', 'Bash'], 'it picks up again when the reports come in');
+});
