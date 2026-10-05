@@ -283,6 +283,15 @@ test('a run with a pull request is waiting for review, not stalled', async () =>
 
   const done = toOrchestration(row('done'), later, [pr('open')]);
   assert.deepStrictEqual([done.stalled, done.review], [false, null]);
+
+  const active = { ...row('pr'), activity: 'ACTIVE', activityDetail: 'Bash' };
+  const at = (minutes: number) => new Date(lastEventAt.getTime() + minutes * 60 * 1000);
+  const silent = toOrchestration(active, at(11), [pr('open')]);
+  assert.deepStrictEqual([silent.activity, silent.activityDetail, silent.endedSeconds, silent.stalled, silent.review], ['IDLE', null, null, false, 'open']);
+  assert.strictEqual(toOrchestration(active, at(2), [pr('open')]).activity, 'ACTIVE', 'a recent event still reads Working');
+  const noPr = toOrchestration(active, at(11));
+  assert.deepStrictEqual([noPr.activity, noPr.stalled], ['ACTIVE', true], 'without a pull request a stale ACTIVE run is stalled');
+  assert.strictEqual(toOrchestration({ ...active, waiting: 'Approve' }, at(11), [pr('open')]).activity, 'WAITING');
 });
 
 test('the service looks up GitHub only for runs that can be in review', async () => {
