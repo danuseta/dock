@@ -8,10 +8,12 @@ interface AgentsOfficeProps {
   runs: AgentRun[];
   selectedKey: string | null;
   onSelect: (key: string) => void;
+  view?: string;
+  viewTick?: number;
   className?: string;
 }
 
-const AgentsOffice: React.FC<AgentsOfficeProps> = ({ runs, selectedKey, onSelect, className }) => {
+const AgentsOffice: React.FC<AgentsOfficeProps> = ({ runs, selectedKey, onSelect, view = 'overview', viewTick = 0, className }) => {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<OfficeScene | null>(null);
   const onSelectRef = useRef(onSelect);
@@ -38,6 +40,7 @@ const AgentsOffice: React.FC<AgentsOfficeProps> = ({ runs, selectedKey, onSelect
 
   useEffect(() => { sceneRef.current?.setRuns(runs); }, [runs]);
   useEffect(() => { sceneRef.current?.setSelected(selectedKey); }, [selectedKey]);
+  useEffect(() => { sceneRef.current?.setView(view); }, [view, viewTick]);
 
   return (
     <div ref={hostRef} className={cn('dock-office', className)} role="img" aria-label="3D office showing where each ticket's agent is working">

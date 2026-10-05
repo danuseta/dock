@@ -5,12 +5,12 @@ import {
   type ActivitySlot,
 } from '../agents/office/activity';
 import {
-  EXIT, FURNITURE, LEAD_SEAT, LOUNGE_SPOTS, MAX_PODS, MEMBER_DESKS, NAV_GRID,
+  EXIT, FURNITURE, LEAD_SEAT, LOUNGE_SPOTS, MAX_PODS, MEMBER_DESKS, NAV_GRID, QUEUE_PER_ROW, YOU_ZONE,
   coordinatorSeat, doorOf, loungeSpot, memberSeat, podId, podIndexOf, podZone, railIndex, waitingSpot,
 } from '../agents/office/layout';
 import { calculateWalkDuration, interpolatePathPosition, pathLength, planWalkPath, routeThroughDoors } from '../agents/office/movement';
 import { GRID_CELL, GRID_COLS, astar, buildNavGrid, toWorld } from '../agents/office/navigation';
-import { formatAge, runStatus, shirtColor, splitTeam, stageName } from '../agents/runs';
+import { formatAge, isArchived, pageOf, runStatus, shirtColor, sortRuns, splitTeam, stageName, type AgentRun, type RunSortColumn } from '../agents/runs';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 
 const blocked = (x: number, y: number) => NAV_GRID[Math.floor(y / GRID_CELL) * GRID_COLS + Math.floor(x / GRID_CELL)] === 1;
@@ -77,12 +77,16 @@ test('every pod has a reachable desk for its coordinator and each member', () =>
 
 test('the lead, the owner queue and the exit are all reachable from a pod', () => {
   const from = coordinatorSeat(4);
-  for (let index = 0; index < 7; index += 1) {
-    const spot = waitingSpot(index, 7);
+  const queue = Array.from({ length: 10 }, (_, index) => waitingSpot(index, 10));
+  queue.forEach((spot, index) => {
     assert.strictEqual(blocked(spot.x, spot.y), false, `queue spot ${index}`);
     assert.ok(reaches(from, spot), `queue spot ${index} from a back pod`);
+    assert.ok(spot.x > YOU_ZONE.x && spot.x < YOU_ZONE.x + YOU_ZONE.width, `queue spot ${index} stays at the owner's desk`);
+  });
+  for (let index = 1; index < QUEUE_PER_ROW; index += 1) {
+    assert.ok(queue[index].x - queue[index - 1].x >= 120, 'neighbours in the queue leave room for a ticket tag each');
   }
-  assert.strictEqual(new Set(Array.from({ length: 7 }, (_, index) => waitingSpot(index, 7).x)).size, 7);
+  assert.ok(queue[QUEUE_PER_ROW].y - queue[0].y >= 40, 'the second row stands clear of the first row\'s tags');
   assert.ok(reaches(from, EXIT));
   const parked = new Set<string>();
   for (let index = 0; index < LOUNGE_SPOTS; index += 1) {
@@ -196,4 +200,27 @@ test('every chair is tucked at its desk and turned to face it', () => {
     // The chair model's backrest is on its north side at r = 0, so a chair south of its desk is turned round.
     assert.strictEqual(chair.r ?? 0, centre.y > deskCentreY ? 2 : 0, `chair at ${chair.x},${chair.y} has its back to the room, not to the desk`);
   }
+});
+
+test('the table sorts by any column, archives finished tickets and pages the rest', () => {
+  const run = (key: string, stage: string, idleSeconds: number, waiting = '', acPassed = 0): AgentRun => ({
+    ...sampleRuns(0)[0], key, stage, idleSeconds, waiting, acPassed, acTotal: 4, acFailed: 0,
+  });
+  const runs = [run('QRD-1376', 'code', 30), run('QRD-99', 'pr', 5, 'Approve?', 4), run('QRD-1260', 'done', 900, '', 4), run('QRD-1381', 'gate', 60, '', 2)];
+  const status = () => 'working' as const;
+  const keys = (column: RunSortColumn, descending = false) => sortRuns(runs, { column, descending }, status).map((item) => item.key);
+  assert.deepStrictEqual(keys('ticket'), ['QRD-99', 'QRD-1260', 'QRD-1376', 'QRD-1381'], 'ticket numbers sort as numbers');
+  assert.deepStrictEqual(keys('activity'), ['QRD-99', 'QRD-1376', 'QRD-1381', 'QRD-1260'], 'most recent first');
+  assert.deepStrictEqual(keys('activity', true)[0], 'QRD-1260');
+  assert.deepStrictEqual(keys('stage'), ['QRD-1381', 'QRD-1376', 'QRD-99', 'QRD-1260']);
+  assert.strictEqual(keys('waiting')[0], 'QRD-99', 'tickets waiting on the owner come first');
+  assert.strictEqual(keys('ac', true)[0], 'QRD-99');
+  assert.strictEqual(runs.length, 4, 'sorting does not reorder the list it was given');
+  assert.deepStrictEqual(runs.filter(isArchived).map((item) => item.key), ['QRD-1260']);
+
+  const many = Array.from({ length: 23 }, (_, index) => index);
+  assert.deepStrictEqual(pageOf(many, 1, 10), { items: many.slice(0, 10), page: 1, pages: 3, from: 1, to: 10 });
+  assert.deepStrictEqual(pageOf(many, 3, 10), { items: [20, 21, 22], page: 3, pages: 3, from: 21, to: 23 });
+  assert.strictEqual(pageOf(many, 9, 10).page, 3, 'a page past the end falls back to the last one');
+  assert.deepStrictEqual(pageOf([], 1, 10), { items: [], page: 1, pages: 1, from: 0, to: 0 });
 });

@@ -14,12 +14,17 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+const OTHER_TICKET_KEY = /(^|[^A-Za-z0-9_])[A-Z][A-Z0-9]+-\d+(?![A-Za-z0-9_])/;
+
 export function hasCanonicalTicketReference(pr: any, ticketKey: string): boolean {
   const normalizedKey = ticketKey.trim().toUpperCase();
   if (!normalizedKey) return false;
   const exactKey = new RegExp(`(^|[^A-Z0-9_])${escapeRegExp(normalizedKey)}(?![A-Z0-9_])`, 'i');
-  return [pr?.title, pr?.head?.ref, pr?.body]
-    .some((value) => typeof value === 'string' && exactKey.test(value));
+  const names = [pr?.title, pr?.head?.ref].filter((value): value is string => typeof value === 'string');
+  if (names.some((value) => exactKey.test(value))) return true;
+  // A pull request that names another ticket in its title or branch only mentions this one in passing.
+  if (names.some((value) => OTHER_TICKET_KEY.test(value))) return false;
+  return typeof pr?.body === 'string' && exactKey.test(pr.body);
 }
 
 export interface SearchPRsOptions {
