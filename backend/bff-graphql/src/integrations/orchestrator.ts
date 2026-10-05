@@ -224,6 +224,8 @@ export function reduceHookEvent(current: ActivityState, event: HookEvent, detail
     case 'PostToolUse':
     case 'Stop':
     case 'SubagentStop':
+      // A notification or permission prompt is answered once the agent acts or stops again.
+      if (current.activity === 'WAITING') return { activity: 'IDLE', activityDetail: null, activityEndedAt: null };
       return current.activity === 'ACTIVE' ? { ...current, activityEndedAt: now } : current;
     case 'Notification':
       return { activity: 'WAITING', activityDetail: detail || 'waiting', activityEndedAt: null };
@@ -300,6 +302,9 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
   if (activity === 'ACTIVE' && endedMs !== null && endedMs >= ACTIVE_GRACE_MS) {
     activity = 'IDLE'; activityDetail = null; endedMs = null;
   }
+  // A hook-level WAITING (notification, permission prompt) is not a gate: with no event for as long as an idle
+  // run may stay quiet, nobody is still blocked on it. The ledger's own gate below always wins.
+  if (activity === 'WAITING' && idleMs > STALE_IDLE_MS) { activity = 'IDLE'; activityDetail = null; endedMs = null; }
   if (row.waiting) { activity = 'WAITING'; activityDetail = 'gate'; endedMs = null; }
   if (FINISHED_STAGES.has(row.stage) && !row.waiting) { activity = 'IDLE'; activityDetail = null; endedMs = null; }
 
@@ -487,7 +492,7 @@ export class OrchestratorService {
     for (const event of [...events].sort((a, b) => a.at.getTime() - b.at.getTime())) {
       const fromSubagent = Boolean(event.agentId);
       // A subagent finishing a turn is not the ticket going quiet; only the main session's own stop is.
-      if (event.event !== 'SubagentStop' && !(fromSubagent && event.event === 'Stop')) {
+      if ((event.event !== 'SubagentStop' && !(fromSubagent && event.event === 'Stop')) || state.activity === 'WAITING') {
         state = reduceHookEvent(state, event.event, event.tool || event.detail, event.at);
       }
       if (event.at > lastEventAt) lastEventAt = event.at;

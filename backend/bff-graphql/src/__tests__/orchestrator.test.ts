@@ -337,3 +337,35 @@ test('the pull request lookup asks GitHub at most once per ticket per window', a
   await lookup('QRD-1');
   assert.strictEqual(searches, 3);
 });
+
+test('a hook-level waiting ends when an agent acts or stops, and does not outlive a quiet spell', async () => {
+  const { storage } = memoryStorage();
+  Object.assign(storage, { addOrchestratorToolEvents: async () => undefined });
+  const service = new OrchestratorService(storage, os.tmpdir());
+  const start = new Date('2026-10-05T00:00:00.000Z');
+  const after = (seconds: number) => new Date(start.getTime() + seconds * 1000);
+  await service.ingestLedger({ key: 'QRD-5', title: 'Ticket', stage: 'pr', ac: [] }, start);
+  const batch = async (events: object[], now: Date) => service.ingestEventBatch({ key: 'QRD-5', events: events.map((event) => ({ at: now.toISOString(), ...event })) }, now);
+  const notification = { event: 'Notification', detail: 'Claude needs your permission', agentId: 'sub-1', agentType: 'test-runner' };
+
+  assert.strictEqual((await batch([notification], after(10)))?.activity, 'WAITING', 'a pending prompt still shows');
+  assert.strictEqual((await batch([{ event: 'SubagentStop', agentId: 'sub-1', agentType: 'test-runner' }], after(20)))?.activity, 'IDLE', 'the agent stopping ends it');
+
+  await batch([notification], after(30));
+  assert.strictEqual((await batch([{ event: 'Stop', agentId: 'sub-1', agentType: 'test-runner' }], after(40)))?.activity, 'IDLE', 'a subagent turn ending ends it');
+
+  await batch([notification], after(50));
+  assert.strictEqual((await batch([{ event: 'Stop' }], after(60)))?.activity, 'IDLE', 'the main session stopping ends it');
+
+  await batch([notification], after(70));
+  assert.strictEqual((await batch([{ event: 'PreToolUse', tool: 'Read' }], after(80)))?.activity, 'ACTIVE', 'acting again ends it');
+
+  await batch([notification], after(90));
+  const quietSpell = 31 * 60;
+  assert.strictEqual((await service.get('QRD-5', after(90 + 29 * 60)))?.activity, 'WAITING', 'still inside the quiet window');
+  const quiet = await service.get('QRD-5', after(90 + quietSpell));
+  assert.deepStrictEqual([quiet?.activity, quiet?.activityDetail], ['IDLE', null], 'no event for 30 minutes: nobody is blocked on it');
+
+  await service.ingestLedger({ key: 'QRD-5', title: 'Ticket', stage: 'pr', ac: [], waiting: 'Approve the merge?' }, after(90));
+  assert.deepStrictEqual([(await service.get('QRD-5', after(90 + 3 * 3600)))?.activity, (await service.get('QRD-5', after(90 + 3 * 3600)))?.activityDetail], ['WAITING', 'gate'], 'the ledger gate never expires');
+});
