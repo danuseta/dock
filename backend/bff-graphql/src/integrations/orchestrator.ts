@@ -4,6 +4,7 @@ import { generateIngestToken, hashIngestToken } from '../auth/ingest-token';
 import { GitHubAPI } from '../datasources/GitHubAPI';
 import { StorageService } from '../storage/service';
 import { buildTimeline } from './orchestrator-timeline';
+import { reviewSignalOf, type ChecksState, type ReviewDecision } from './pr-signals';
 
 export const ORCHESTRATOR_STAGES = [
   'gate', 'plan', 'code', 'test', 'verify', 'evidence', 'commit', 'pr', 'done', 'blocked',
@@ -252,7 +253,7 @@ interface RunRow {
 const FINISHED_STAGES = new Set<string>(['done', 'blocked']);
 
 export type PullRequestStatus = 'open' | 'draft' | 'merged' | 'closed';
-export interface RunPullRequest { url: string; number: number; repo: string; status: PullRequestStatus }
+export interface RunPullRequest { url: string; number: number; repo: string; status: PullRequestStatus; reviewDecision?: ReviewDecision | null; checks?: ChecksState | null }
 export type PullRequestLookup = (key: string) => Promise<RunPullRequest[]>;
 
 const PR_LOOKUP_INTERVAL_MS = 5 * 60 * 1000;
@@ -336,6 +337,7 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     prFe: ledger.prFe ?? null,
     pullRequests,
     review,
+    reviewSignal: review === 'open' ? reviewSignalOf(pullRequests) : null,
     finished: row.stage === 'done' || review === 'merged',
     note: ledger.note ?? null,
     activity,
@@ -365,6 +367,13 @@ export function attentionItems(runs: Orchestration[]) {
     if (run.acFailed > 0) {
       const failed = run.ac.filter((item) => item.state === 'FAIL').map((item) => `AC${item.n}`).join(', ');
       items.push({ id: `agent-ac-failed-${run.key}`, type: 'AGENT_AC_FAILED', message: `Acceptance check failed: ${failed}`, ticketKey: run.key });
+    }
+    if (run.review === 'open') {
+      const named = (pick: (pr: Orchestration['pullRequests'][number]) => boolean) => run.pullRequests.filter((pr) => (pr.status === 'open' || pr.status === 'draft') && pick(pr)).map((pr) => `${pr.repo}#${pr.number}`).join(', ');
+      const changes = named((pr) => pr.reviewDecision === 'changes_requested');
+      if (changes) items.push({ id: `agent-changes-requested-${run.key}`, type: 'AGENT_CHANGES_REQUESTED', message: `Changes requested on ${changes}`, ticketKey: run.key });
+      const failing = named((pr) => pr.checks === 'failing');
+      if (failing) items.push({ id: `agent-checks-failing-${run.key}`, type: 'AGENT_CHECKS_FAILING', message: `Checks failing on ${failing}`, ticketKey: run.key });
     }
     if (run.stalled) {
       items.push({ id: `agent-stalled-${run.key}`, type: 'AGENT_STALLED', message: `No agent activity for ${minutes(run.idleSeconds)} in ${run.stage}`, ticketKey: run.key });
@@ -598,10 +607,13 @@ export class OrchestratorService {
 const githubAPI = new GitHubAPI();
 export const orchestratorService = new OrchestratorService(undefined, undefined, throttledPullRequestLookup(async (key) => {
   const found = await githubAPI.getPullRequestsForTicket(key, { staleWhileRevalidate: true });
+  const signals = await githubAPI.getPullRequestSignals(key, found);
   return found.map((pr) => ({
     url: pr.url,
     number: pr.number,
     repo: `${pr.owner}/${pr.repo}`,
     status: (['open', 'draft', 'merged', 'closed'].includes(pr.status) ? pr.status : 'open') as PullRequestStatus,
+    reviewDecision: (signals as Record<string, { reviewDecision?: ReviewDecision }>)[pr.url]?.reviewDecision ?? null,
+    checks: (signals as Record<string, { checks?: ChecksState }>)[pr.url]?.checks ?? null,
   }));
 }));

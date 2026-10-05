@@ -490,8 +490,11 @@ const ORCHESTRATION_FIELDS = `
     number
     repo
     status
+    reviewDecision
+    checks
   }
   review
+  reviewSignal
   finished
   note
   activity

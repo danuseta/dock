@@ -12,7 +12,7 @@ import { cn } from '../lib/cn';
 
 interface NeedsAttentionPageProps { onTicketClick: (key: string) => void }
 
-const agentLabel: Record<string, string> = { AGENT_WAITING: 'WAITING', AGENT_AC_FAILED: 'AC FAILED', AGENT_STALLED: 'STALLED' };
+const agentLabel: Record<string, string> = { AGENT_WAITING: 'WAITING', AGENT_AC_FAILED: 'AC FAILED', AGENT_STALLED: 'STALLED', AGENT_CHANGES_REQUESTED: 'CHANGES REQUESTED', AGENT_CHECKS_FAILING: 'CI FAILING' };
 
 const NeedsAttentionPage: React.FC<NeedsAttentionPageProps> = ({ onTicketClick }) => {
   const { data, loading, error } = useQuery(GET_NEEDS_ATTENTION, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });

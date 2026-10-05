@@ -378,3 +378,35 @@ test('a hook-level waiting ends when an agent acts or stops, and does not outliv
   await service.ingestLedger({ key: 'QRD-5', title: 'Ticket', stage: 'pr', ac: [], waiting: 'Approve the merge?' }, after(90));
   assert.deepStrictEqual([(await service.get('QRD-5', after(90 + 3 * 3600)))?.activity, (await service.get('QRD-5', after(90 + 3 * 3600)))?.activityDetail], ['WAITING', 'gate'], 'the ledger gate never expires');
 });
+
+test('review signals reach the run and Needs Attention, and only for open pull requests', () => {
+  const lastEventAt = new Date('2026-10-05T00:00:00.000Z');
+  const row = {
+    key: 'QRD-1387', title: 'Ticket', stage: 'pr', waiting: '', payload: JSON.stringify({ ac: [] }),
+    activity: 'IDLE', activityDetail: null, activityEndedAt: null as Date | null,
+    lastEventAt, ledgerUpdatedAt: lastEventAt, transcriptAt: null, dismissedAt: null,
+  };
+  const now = new Date(lastEventAt.getTime() + 60 * 1000);
+  const pr = (number: number, status: 'open' | 'merged' | 'closed', reviewDecision: 'changes_requested' | 'approved' | 'none', checks: 'failing' | 'pending' | 'passing' | 'none') => (
+    { url: `https://github.com/example/be/pull/${number}`, number, repo: 'example/be', status, reviewDecision, checks }
+  );
+  const types = (prs: ReturnType<typeof pr>[]) => attentionItems([toOrchestration(row, now, prs)]).map((item) => item.type);
+
+  const both = toOrchestration(row, now, [pr(7, 'open', 'changes_requested', 'failing'), pr(8, 'open', 'approved', 'failing')]);
+  assert.deepStrictEqual([both.review, both.reviewSignal], ['open', 'changes_requested']);
+  assert.deepStrictEqual(attentionItems([both]).map((item) => [item.type, item.message]), [
+    ['AGENT_CHANGES_REQUESTED', 'Changes requested on example/be#7'],
+    ['AGENT_CHECKS_FAILING', 'Checks failing on example/be#7, example/be#8'],
+  ]);
+  assert.deepStrictEqual(types([pr(7, 'open', 'none', 'failing')]), ['AGENT_CHECKS_FAILING']);
+  assert.deepStrictEqual(types([pr(7, 'open', 'approved', 'pending')]), [], 'running checks and approvals need no attention');
+  assert.strictEqual(toOrchestration(row, now, [pr(7, 'open', 'approved', 'pending')]).reviewSignal, 'checks_pending');
+  assert.strictEqual(toOrchestration(row, now, [pr(7, 'open', 'approved', 'passing')]).reviewSignal, 'approved');
+  assert.deepStrictEqual(types([pr(7, 'merged', 'changes_requested', 'failing')]), [], 'a merged run produces none');
+  assert.deepStrictEqual(types([pr(7, 'merged', 'changes_requested', 'failing'), pr(8, 'open', 'none', 'none')]), [], 'a merged pull request is not blamed while another is open');
+  assert.deepStrictEqual(types([pr(7, 'closed', 'changes_requested', 'failing')]), [], 'a closed one does not count');
+  assert.deepStrictEqual(attentionItems([toOrchestration({ ...row, stage: 'done' }, now, [pr(7, 'open', 'changes_requested', 'failing')])]), [], 'a finished run produces none');
+
+  const unknown = toOrchestration(row, now, [{ url: 'https://github.com/example/be/pull/9', number: 9, repo: 'example/be', status: 'open' }]);
+  assert.deepStrictEqual([unknown.review, unknown.reviewSignal, attentionItems([unknown])], ['open', null, []], 'without facts from GitHub the run reads as before');
+});

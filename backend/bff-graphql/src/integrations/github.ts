@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import { createHash } from 'node:crypto';
 import { StorageService } from '../storage/service';
+import { checkRunsState, combineChecks, commitStatusState, reviewDecisionOf, type PullRequestSignal } from './pr-signals';
 
 function credentialCacheId(token: string): string {
   return createHash('sha256').update(token).digest('hex').slice(0, 16);
@@ -26,6 +27,9 @@ export function hasCanonicalTicketReference(pr: any, ticketKey: string): boolean
   if (names.some((value) => OTHER_TICKET_KEY.test(value))) return false;
   return typeof pr?.body === 'string' && exactKey.test(pr.body);
 }
+
+const SIGNAL_PULL_REQUESTS = 5;
+const SIGNAL_REFRESH_MS = 5 * 60 * 1000;
 
 export interface SearchPRsOptions {
   staleWhileRevalidate?: boolean;
@@ -96,6 +100,19 @@ export class GitHubClient {
   async getPRStatus(owner: string, repo: string, pullNumber: number) {
     const response = await this.client.get(`/repos/${owner}/${repo}/pulls/${pullNumber}`);
     return response.data;
+  }
+
+  async getPRSignal(owner: string, repo: string, pullNumber: number, headSha?: string): Promise<PullRequestSignal> {
+    const sha = headSha || (await this.getPRStatus(owner, repo, pullNumber)).head?.sha;
+    const [reviews, checkRuns, status] = await Promise.all([
+      this.client.get(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, { params: { per_page: 100 } }),
+      this.client.get(`/repos/${owner}/${repo}/commits/${sha}/check-runs`, { params: { per_page: 100 } }),
+      this.client.get(`/repos/${owner}/${repo}/commits/${sha}/status`),
+    ]);
+    return {
+      reviewDecision: reviewDecisionOf(reviews.data || []),
+      checks: combineChecks(checkRunsState(checkRuns.data?.check_runs || []), commitStatusState(status.data)),
+    };
   }
 
   async getPRActivity(owner: string, repo: string, pullNumber: number) {
@@ -173,6 +190,7 @@ export class GitHubClient {
 export class GitHubService {
   private readonly lastRefresh = new Map<string, number>();
   private readonly inFlight = new Map<string, Promise<any[]>>();
+  private readonly signalsInFlight = new Map<string, Promise<void>>();
 
   constructor(private readonly storage = new StorageService()) {}
 
@@ -197,6 +215,50 @@ export class GitHubService {
       return [];
     }
     return pending;
+  }
+
+  /**
+   * Review decision and check state of a ticket's newest open pull requests, for the Agents page only. Reads the cache
+   * and returns at once; a missing or five-minute-old entry is refreshed in the background (at most 5 pull requests, 3
+   * requests each, one refresh at a time per ticket). A failing call leaves the previous answer in place.
+   */
+  async getPRSignals(
+    pat: string,
+    ticketKey: string,
+    pullRequests: Array<{ url: string; status: string; owner: string; repo: string; number: number; headSha?: string }>,
+  ): Promise<Record<string, PullRequestSignal>> {
+    const cacheKey = `signals_v1_${credentialCacheId(pat)}_${ticketKey}`;
+    const cached = await this.storage.getCache('github', cacheKey).catch(() => null);
+    const entry = cached && typeof cached === 'object' && !Array.isArray(cached) ? cached as { at?: number; signals?: Record<string, PullRequestSignal> } : null;
+    const open = pullRequests
+      .filter((pr) => (pr.status === 'open' || pr.status === 'draft') && pr.owner && pr.repo && pr.number)
+      .sort((a, b) => b.number - a.number)
+      .slice(0, SIGNAL_PULL_REQUESTS);
+    if (open.length > 0 && (!entry || Date.now() - (entry.at || 0) > SIGNAL_REFRESH_MS) && !this.signalsInFlight.has(cacheKey)) {
+      const refresh = this.refreshSignals(pat, open, cacheKey, entry?.signals || {})
+        .finally(() => { this.signalsInFlight.delete(cacheKey); });
+      this.signalsInFlight.set(cacheKey, refresh);
+    }
+    return entry?.signals || {};
+  }
+
+  private async refreshSignals(
+    pat: string,
+    open: Array<{ url: string; owner: string; repo: string; number: number; headSha?: string }>,
+    cacheKey: string,
+    previous: Record<string, PullRequestSignal>,
+  ) {
+    try {
+      const client = new GitHubClient(pat);
+      const signals: Record<string, PullRequestSignal> = {};
+      await Promise.all(open.map(async (pr) => {
+        try { signals[pr.url] = await client.getPRSignal(pr.owner, pr.repo, pr.number, pr.headSha); }
+        catch (error: any) { if (previous[pr.url]) signals[pr.url] = previous[pr.url]; console.error(`[GitHub] Failed to read review signals of ${pr.owner}/${pr.repo}#${pr.number}:`, error.message); }
+      }));
+      await this.storage.upsertCache('github', cacheKey, { at: Date.now(), signals }, 3600);
+    } catch (error: any) {
+      console.error('[GitHub] Failed to refresh review signals:', error.message);
+    }
   }
 
   private fetchAndCachePRsOnce(pat: string, repos: string[], ticketKey: string, cacheKey: string) {
@@ -231,7 +293,7 @@ export class GitHubService {
             mergeable_state: status.mergeable_state,
             type: status.mergeable === false ? 'CONFLICT' : 'PR',
             created_at: pr.created_at, updated_at: pr.updated_at,
-            owner, repo, pullNumber: pr.number, number: pr.number,
+            owner, repo, pullNumber: pr.number, number: pr.number, headSha: status.head?.sha || '',
             baseBranch: status.base?.ref || pr.base?.ref || 'main',
             headBranch: status.head?.ref || pr.head?.ref || '',
             commitsCount: activity.commits.length, commits: activity.commits,
