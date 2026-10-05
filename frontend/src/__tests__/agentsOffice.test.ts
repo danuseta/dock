@@ -5,8 +5,8 @@ import {
   type ActivitySlot,
 } from '../agents/office/activity';
 import {
-  EXIT, FURNITURE, LEAD_SEAT, MAX_PODS, MEMBER_DESKS, NAV_GRID,
-  coordinatorSeat, doorOf, memberSeat, podId, podIndexOf, podZone, railIndex, waitingSpot,
+  EXIT, FURNITURE, LEAD_SEAT, LOUNGE_SPOTS, MAX_PODS, MEMBER_DESKS, NAV_GRID,
+  coordinatorSeat, doorOf, loungeSpot, memberSeat, podId, podIndexOf, podZone, railIndex, waitingSpot,
 } from '../agents/office/layout';
 import { calculateWalkDuration, interpolatePathPosition, pathLength, planWalkPath, routeThroughDoors } from '../agents/office/movement';
 import { GRID_CELL, GRID_COLS, astar, buildNavGrid, toWorld } from '../agents/office/navigation';
@@ -66,7 +66,6 @@ test('every pod has a reachable desk for its coordinator and each member', () =>
     for (let desk = 0; desk < MEMBER_DESKS; desk += 1) {
       const seat = memberSeat(pod, desk);
       assert.ok(inside(seat), `pod ${pod} desk ${desk} is inside the pod`);
-      assert.strictEqual(blocked(seat.x, seat.y), false, `pod ${pod} desk ${desk} seat is free floor`);
       assert.ok(reaches(front, seat), `pod ${pod} desk ${desk} can be walked to from the front desk`);
       seats.add(`${seat.x},${seat.y}`);
     }
@@ -85,6 +84,14 @@ test('the lead, the owner queue and the exit are all reachable from a pod', () =
   }
   assert.strictEqual(new Set(Array.from({ length: 7 }, (_, index) => waitingSpot(index, 7).x)).size, 7);
   assert.ok(reaches(from, EXIT));
+  const parked = new Set<string>();
+  for (let index = 0; index < LOUNGE_SPOTS; index += 1) {
+    const spot = loungeSpot(index);
+    assert.strictEqual(blocked(spot.x, spot.y), false, `lounge spot ${index}`);
+    assert.ok(reaches(from, spot), `lounge spot ${index} from a back pod`);
+    parked.add(`${spot.x},${spot.y}`);
+  }
+  assert.strictEqual(parked.size, LOUNGE_SPOTS, 'tickets that are not being worked on do not stand on each other');
   assert.ok(reaches(doorOf('lead'), LEAD_SEAT));
 });
 
@@ -172,4 +179,21 @@ test('the sample flow puts a coordinator between the lead and its team', () => {
   assert.deepStrictEqual(gated.gates.map((gate) => gate.state), ['passed', 'waiting']);
   assert.ok(gated.buckets.some((bucket) => bucket.gate));
   assert.deepStrictEqual(sampleTimeline(-3).stageIndex, sampleTimeline(0).stageIndex);
+});
+
+test('every chair is tucked at its desk and turned to face it', () => {
+  const chairs = FURNITURE.filter((item) => item.type === 'chair');
+  const desks = FURNITURE.filter((item) => item.type === 'desk_cubicle' || item.type === 'executive_desk');
+  assert.strictEqual(chairs.length, 2 + MAX_PODS * (MEMBER_DESKS + 1));
+  for (const chair of chairs) {
+    const centre = { x: chair.x + 12, y: chair.y + 12 };
+    const desk = desks.find((item) => {
+      const [width, depth] = item.type === 'desk_cubicle' ? [100, 55] : [130, 65];
+      return centre.x > item.x - 10 && centre.x < item.x + width + 10 && centre.y > item.y - 10 && centre.y < item.y + depth + 10;
+    });
+    assert.ok(desk, `chair at ${chair.x},${chair.y} sits at a desk, not out on the floor`);
+    const deskCentreY = desk.y + (desk.type === 'desk_cubicle' ? 27.5 : 32.5);
+    // The chair model's backrest is on its north side at r = 0, so a chair south of its desk is turned round.
+    assert.strictEqual(chair.r ?? 0, centre.y > deskCentreY ? 2 : 0, `chair at ${chair.x},${chair.y} has its back to the room, not to the desk`);
+  }
 });

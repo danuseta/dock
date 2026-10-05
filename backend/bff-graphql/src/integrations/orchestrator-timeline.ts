@@ -108,6 +108,9 @@ export function buildTimeline(run: TimelineRun, stageEventsDesc: StageEvent[], t
       const child = findChild(event) || addChild('main', event.agentType || 'agent', shortType(event.agentType), null, event.agentId, event.at);
       child.linkedId = event.agentId;
       child.lastAt = event.at;
+      // An agent's turn can stop while its own members work and pick up again when they report.
+      child.state = 'active';
+      child.endedAt = null;
       child.tool = event.name;
       child.tools += 1;
     } else if (event.kind === 'stop') {
@@ -125,6 +128,16 @@ export function buildTimeline(run: TimelineRun, stageEventsDesc: StageEvent[], t
       child.state = 'done';
       child.tool = null;
       child.endedAt = child.lastAt;
+    }
+  }
+  // Whoever still has a member at work is supervising, whatever its own last event was.
+  for (let pass = 0; pass < 3; pass += 1) {
+    for (const child of children) {
+      if (child.state !== 'active' && children.some((other) => other.parentId === child.id && other.state === 'active')) {
+        child.state = 'active';
+        child.tool = null;
+        child.endedAt = null;
+      }
     }
   }
   const shown = children.filter((child) => child.state === 'active' || (child.endedAt != null && child.endedAt >= stageSince));
