@@ -60,12 +60,20 @@ export function memberSeat(index: number, desk: number): Point {
   return { x: origin.x + STRAIGHT_SEAT.x, y: origin.y + STRAIGHT_SEAT.y };
 }
 
-/** Tickets nobody is working on right now stand here instead of holding a pod. */
-export const LOUNGE_SPOTS = 12;
-export function loungeSpot(index: number): Point {
-  const slot = index % LOUNGE_SPOTS;
-  return { x: LOUNGE_ZONE.x + 55 + (slot % 6) * 70, y: LOUNGE_ZONE.y + 105 + Math.floor(slot / 6) * 62 };
+/**
+ * Tickets nobody is working on right now stand here instead of holding a pod. The lounge is split in two halves:
+ * tickets with an open pull request on the left, tickets with nothing going on on the right.
+ */
+export type LoungeGroup = 'review' | 'idle';
+export const LOUNGE_GROUP_SPOTS = 6;
+export const LOUNGE_SPOTS = LOUNGE_GROUP_SPOTS * 2;
+const LOUNGE_GROUP_X: Record<LoungeGroup, number> = { review: LOUNGE_ZONE.x + 40, idle: LOUNGE_ZONE.x + 270 };
+export function loungeSpot(index: number, group: LoungeGroup = 'idle'): Point {
+  const slot = index % LOUNGE_GROUP_SPOTS;
+  return { x: LOUNGE_GROUP_X[group] + (slot % 3) * 70, y: LOUNGE_ZONE.y + 105 + Math.floor(slot / 3) * 62 };
 }
+/** The floor label of a group sits under its second column, along the back edge of the lounge. */
+export const loungeLabelSpot = (group: LoungeGroup): Point => ({ x: LOUNGE_GROUP_X[group] + 70, y: LOUNGE_ZONE.y + LOUNGE_ZONE.height - 10 });
 
 /** Tickets waiting on the owner queue up in front of the owner's desk, far enough apart that their name tags do not cover each other. */
 export const QUEUE_PER_ROW = 5;

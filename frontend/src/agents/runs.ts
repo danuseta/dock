@@ -34,6 +34,7 @@ export interface AgentRun {
   prFe?: string | null;
   pullRequests?: AgentPullRequest[];
   review?: 'open' | 'merged' | null;
+  finished?: boolean;
   note?: string | null;
   activity: string;
   activityDetail?: string | null;
@@ -69,7 +70,7 @@ export const FLOW_RAIL = [
   { id: 'pr', name: 'PR', color: '#62cf9f' },
 ] as const;
 
-export type AgentRunSummary = Pick<AgentRun, 'key' | 'stage' | 'waiting' | 'acPassed' | 'acFailed' | 'acTotal' | 'activity' | 'stalled'>;
+export type AgentRunSummary = Pick<AgentRun, 'key' | 'stage' | 'waiting' | 'acPassed' | 'acFailed' | 'acTotal' | 'activity' | 'stalled' | 'finished'>;
 
 export const STAGE_LABEL: Record<string, string> = {
   gate: 'Gate', plan: 'Plan', code: 'Code', test: 'Test', verify: 'Verify',
@@ -136,6 +137,7 @@ export const statusLabel = (status: RunStatus, review?: AgentRun['review']): str
 /** One word for a run, worst news first. */
 export function runStatus(run: Pick<AgentRun, 'stage' | 'waiting' | 'acFailed' | 'stalled' | 'activity' | 'idleSeconds' | 'endedSeconds' | 'review'>, now: number): RunStatus {
   if (run.stage === 'done') return 'done';
+  if (run.review === 'merged') return 'review';
   if (run.waiting) return 'waiting';
   if (run.acFailed > 0) return 'failed';
   if (run.stalled) return 'stalled';
@@ -163,7 +165,7 @@ const STATUS_ORDER: RunStatus[] = ['waiting', 'failed', 'stalled', 'working', 'r
 const byKey = new Intl.Collator('en', { numeric: true });
 
 /** A finished ticket leaves the working list and is kept in the archive. */
-export const isArchived = (run: Pick<AgentRun, 'stage'>): boolean => run.stage === 'done';
+export const isArchived = (run: Pick<AgentRun, 'stage' | 'finished'>): boolean => run.stage === 'done' || run.finished === true;
 
 export function sortRuns<T extends AgentRun>(runs: T[], sort: RunSort, statusOf: (run: T) => RunStatus): T[] {
   const rank = (run: T): number => {

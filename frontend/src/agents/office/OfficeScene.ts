@@ -2,14 +2,14 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
-import { podColor, shirtColor, splitTeam, stageColor, stageName, type AgentRun, type TimelineAgent } from '../runs';
+import { isArchived, podColor, shirtColor, splitTeam, stageColor, stageName, type AgentRun, type TimelineAgent } from '../runs';
 import { clock, poseOf, slotFromServer, tickActivity, type ActivitySlot, type Pose } from './activity';
 import { buildBoardCards, type BoardCards } from './board';
 import { animateCharacter, createCharacter, disposeCharacter, setDimmed, type Character } from './character';
-import { ASK_EMOTE, THINK_EMOTE, ZZZ_EMOTE } from './emotes';
+import { ASK_EMOTE, REVIEW_EMOTE, THINK_EMOTE, ZZZ_EMOTE } from './emotes';
 import {
   EXIT, FURNITURE, LEAD_SEAT, LEAD_ZONE, LOUNGE_ZONE, MAX_PODS, MEMBER_DESKS, RAIL_STAGES, YOU_ZONE,
-  coordinatorSeat, loungeSpot, memberSeat, podId, podZone, railIndex, waitingSpot,
+  coordinatorSeat, loungeLabelSpot, loungeSpot, memberSeat, podId, podZone, railIndex, waitingSpot,
   type Zone, type ZoneId,
 } from './layout';
 import { calculateWalkDuration, interpolatePathPosition, routeThroughDoors } from './movement';
@@ -162,7 +162,7 @@ export class OfficeScene {
         existing.slot = slot;
         continue;
       }
-      if (run.stage === 'done') continue;
+      if (isArchived(run)) continue;
       const character = createCharacter(run.key, shirtColor(run.key), { ...LEAD_SEAT }, 'lounge');
       this.scene.add(character.group);
       const occupant: Occupant = { run, slot, pod: -1, standing: -1, character, members: new Map(), hidden: 0 };
@@ -172,14 +172,14 @@ export class OfficeScene {
 
     // A pod is for work in progress. A ticket that is waiting on the owner queues at the owner's
     // desk, and one that nobody is working on stands in the lounge, so neither uses up a pod.
-    const live = [...this.occupants.values()].filter((occupant) => occupant.run.stage !== 'done');
+    const live = [...this.occupants.values()].filter((occupant) => !isArchived(occupant.run));
     const waiting = live.filter((occupant) => occupant.slot.state === 'WAITING');
     const working = (occupant: Occupant) => occupant.slot.state === 'ACTIVE'
       || splitTeam(occupant.run.members).members.some((member) => member.state === 'active')
       || Boolean(splitTeam(occupant.run.members).coordinator && splitTeam(occupant.run.members).coordinator?.state === 'active')
       || (occupant.pod >= 0 && occupant.run.idleSeconds < POD_GRACE_SECONDS);
     for (const occupant of this.occupants.values()) {
-      const keeps = occupant.run.stage !== 'done' && occupant.slot.state !== 'WAITING' && working(occupant);
+      const keeps = !isArchived(occupant.run) && occupant.slot.state !== 'WAITING' && working(occupant);
       if (!keeps && occupant.pod >= 0) {
         for (const member of occupant.members.values()) disposeCharacter(member.character);
         occupant.members.clear();
@@ -190,15 +190,17 @@ export class OfficeScene {
       if (occupant.pod === -1 && occupant.slot.state !== 'WAITING' && working(occupant)) occupant.pod = this.freePod();
     }
     const parked = live.filter((occupant) => occupant.pod === -1 && occupant.slot.state !== 'WAITING');
+    const parkedGroup = (group: 'review' | 'idle') => parked.filter((occupant) => (occupant.run.review === 'open') === (group === 'review'));
+    const groupOf = (occupant: Occupant) => (occupant.run.review === 'open' ? 'review' as const : 'idle' as const);
 
     for (const occupant of this.occupants.values()) {
-      const done = occupant.run.stage === 'done';
+      const done = isArchived(occupant.run);
       const queued = waiting.indexOf(occupant);
-      occupant.standing = done || occupant.pod >= 0 ? -1 : queued >= 0 ? queued : parked.indexOf(occupant);
+      occupant.standing = done || occupant.pod >= 0 ? -1 : queued >= 0 ? queued : parkedGroup(groupOf(occupant)).indexOf(occupant);
       const zone: ZoneId = done ? 'corridor' : queued >= 0 ? 'you' : occupant.pod >= 0 ? podId(occupant.pod) : 'lounge';
       const target = done ? { ...EXIT }
         : queued >= 0 ? waitingSpot(queued, waiting.length)
-          : occupant.pod >= 0 ? coordinatorSeat(occupant.pod) : loungeSpot(parked.indexOf(occupant));
+          : occupant.pod >= 0 ? coordinatorSeat(occupant.pod) : loungeSpot(parkedGroup(groupOf(occupant)).indexOf(occupant), groupOf(occupant));
       if (fresh.has(occupant)) Object.assign(occupant.character, { x: target.x, y: target.y, zone });
       else this.walk(occupant.character, target, zone, now);
       this.syncMembers(occupant, now, fresh.has(occupant));
@@ -207,7 +209,7 @@ export class OfficeScene {
     if (this.viewPending) this.setView(this.view);
 
     this.boardCards.render([...this.occupants.values()]
-      .filter((occupant) => occupant.run.stage !== 'done')
+      .filter((occupant) => !isArchived(occupant.run))
       .map((occupant) => ({
         id: occupant.run.key,
         column: Math.min(RAIL_STAGES.length - 1, railIndex(occupant.run.stage)),
@@ -237,7 +239,7 @@ export class OfficeScene {
       this.flight = { position: at({ x: 1330, y: 0 }, 10.5), target: at({ x: 1325, y: 262 }, 0.4) };
     } else if (view.startsWith('ticket:')) {
       const occupant = this.occupants.get(view.slice(7));
-      if (!occupant || occupant.run.stage === 'done') {
+      if (!occupant || isArchived(occupant.run)) {
         // The ticket has not reported in yet (or has just left): show everything and try again when it arrives.
         this.viewPending = !occupant;
         this.flight = { position: new THREE.Vector3(...OVERVIEW.position), target: new THREE.Vector3(...OVERVIEW.target) };
@@ -350,7 +352,7 @@ export class OfficeScene {
    * server stops reporting them; a finished member stays, faded.
    */
   private syncMembers(occupant: Occupant, now: number, atOnce: boolean): void {
-    const team = occupant.run.stage === 'done' || occupant.pod < 0 ? [] : splitTeam(occupant.run.members).members;
+    const team = isArchived(occupant.run) || occupant.pod < 0 ? [] : splitTeam(occupant.run.members).members;
     const ids = new Set(team.map((member) => member.id));
     for (const [id, member] of occupant.members) {
       if (ids.has(id)) continue;
@@ -387,7 +389,7 @@ export class OfficeScene {
     const byPod = new Map([...this.occupants.values()].filter((occupant) => occupant.pod >= 0).map((occupant) => [occupant.pod, occupant]));
     this.pods.forEach((pod, index) => {
       const occupant = byPod.get(index);
-      const active = occupant && occupant.run.stage !== 'done' ? occupant : undefined;
+      const active = occupant && !isArchived(occupant.run) ? occupant : undefined;
       const tint = active ? new THREE.Color(podColor(index)) : null;
       (pod.pad.material as THREE.MeshStandardMaterial).color.copy(tint ? new THREE.Color(0x2a2a31).lerp(tint, 0.16) : new THREE.Color(FREE_POD));
       const strip = pod.strip.material as THREE.MeshStandardMaterial;
@@ -449,8 +451,12 @@ export class OfficeScene {
     };
 
     area(LEAD_ZONE, LEAD_COLOR, 0.13);
-    const lounge = area(LOUNGE_ZONE, '#7c8190', 0.1);
-    this.addLabel('dock-zone-label', 'Not being worked on', '#9aa0aa', [lounge.centerX, 0.1, lounge.frontZ + 0.35]);
+    area(LOUNGE_ZONE, '#7c8190', 0.1);
+    for (const [group, text] of [['review', 'In review'], ['idle', 'Not being worked on']] as const) {
+      const spot = loungeLabelSpot(group);
+      const [labelX, , labelZ] = toWorld(spot.x, spot.y);
+      this.addLabel('dock-zone-label', text, group === 'review' ? '#7dd3fc' : '#9aa0aa', [labelX, 0.1, labelZ]);
+    }
     const youArea = area(YOU_ZONE, OWNER_COLOR, 0.13);
     this.addLabel('dock-zone-label', 'Your desk · decision gates', OWNER_COLOR, [youArea.centerX - YOU_ZONE.width * SCALE * 0.3, 0.1, youArea.frontZ + 0.35]);
 
@@ -540,8 +546,10 @@ export class OfficeScene {
 
   private coordinatorTag(occupant: Occupant, pose: Pose | null): string {
     const { run } = occupant;
-    if (run.stage === 'done') return '<span class="dock-agent-tag dock-agent-tag-done">Done ✓</span>';
-    const emote = pose === 'SeatedWaiting' ? ASK_EMOTE : pose === 'Asleep' ? ZZZ_EMOTE : pose === 'SeatedThinking' ? THINK_EMOTE : '';
+    if (isArchived(run)) return `<span class="dock-agent-tag dock-agent-tag-done">${run.stage !== 'done' && run.review === 'merged' ? 'Merged' : 'Done'} ✓</span>`;
+    // A ticket with an open pull request that nobody is working on is waiting for review, not asleep.
+    const inReview = run.review === 'open' && occupant.pod < 0 && (pose === 'Asleep' || pose === 'SeatedThinking');
+    const emote = pose === 'SeatedWaiting' ? ASK_EMOTE : inReview ? REVIEW_EMOTE : pose === 'Asleep' ? ZZZ_EMOTE : pose === 'SeatedThinking' ? THINK_EMOTE : '';
     const role = splitTeam(run.members).coordinator ? 'coordinator' : 'lead direct';
     // At its desk the pod's sign already names the ticket; away from it (the owner's queue, the door) the tag has to.
     // Standing in the owner's queue or the lounge the tag is the ticket key alone, so several fit side by side;
@@ -584,7 +592,7 @@ export class OfficeScene {
       tickActivity(slot, now);
       const pose = poseOf(slot, now);
       const walking = this.advance(character, now);
-      const done = run.stage === 'done';
+      const done = isArchived(run);
       const queued = !done && slot.state === 'WAITING';
       const working = [...occupant.members.values()].filter((member) => member.info.state === 'active').length;
       if (!done) {

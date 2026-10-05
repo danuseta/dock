@@ -333,6 +333,7 @@ export const GET_HOME_SECONDARY = gql`
       idleSeconds
       endedSeconds
       stalled
+      finished
     }
     calendarEvents(maxResults: 50) {
       id
@@ -491,6 +492,7 @@ const ORCHESTRATION_FIELDS = `
     status
   }
   review
+  finished
   note
   activity
   activityDetail

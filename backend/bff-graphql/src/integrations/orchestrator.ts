@@ -336,6 +336,7 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     prFe: ledger.prFe ?? null,
     pullRequests,
     review,
+    finished: row.stage === 'done' || review === 'merged',
     note: ledger.note ?? null,
     activity,
     activityDetail,
@@ -357,6 +358,7 @@ function minutes(seconds: number): string {
 export function attentionItems(runs: Orchestration[]) {
   return runs.flatMap((run) => {
     const items: Array<{ id: string; type: string; message: string; ticketKey: string }> = [];
+    if (run.review === 'merged') return items;
     if (run.waiting) {
       items.push({ id: `agent-waiting-${run.key}`, type: 'AGENT_WAITING', message: `Waiting on you: ${run.waiting}`, ticketKey: run.key });
     }

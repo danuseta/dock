@@ -5,8 +5,8 @@ import {
   type ActivitySlot,
 } from '../agents/office/activity';
 import {
-  EXIT, FURNITURE, LEAD_SEAT, LOUNGE_SPOTS, MAX_PODS, MEMBER_DESKS, NAV_GRID, QUEUE_PER_ROW, YOU_ZONE,
-  coordinatorSeat, doorOf, loungeSpot, memberSeat, podId, podIndexOf, podZone, railIndex, waitingSpot,
+  EXIT, FURNITURE, LEAD_SEAT, LOUNGE_GROUP_SPOTS, LOUNGE_SPOTS, LOUNGE_ZONE, MAX_PODS, MEMBER_DESKS, NAV_GRID, QUEUE_PER_ROW, YOU_ZONE,
+  coordinatorSeat, doorOf, loungeLabelSpot, loungeSpot, memberSeat, podId, podIndexOf, podZone, railIndex, waitingSpot,
 } from '../agents/office/layout';
 import { calculateWalkDuration, interpolatePathPosition, pathLength, planWalkPath, routeThroughDoors } from '../agents/office/movement';
 import { GRID_CELL, GRID_COLS, astar, buildNavGrid, toWorld } from '../agents/office/navigation';
@@ -89,13 +89,23 @@ test('the lead, the owner queue and the exit are all reachable from a pod', () =
   assert.ok(queue[QUEUE_PER_ROW].y - queue[0].y >= 40, 'the second row stands clear of the first row\'s tags');
   assert.ok(reaches(from, EXIT));
   const parked = new Set<string>();
-  for (let index = 0; index < LOUNGE_SPOTS; index += 1) {
-    const spot = loungeSpot(index);
-    assert.strictEqual(blocked(spot.x, spot.y), false, `lounge spot ${index}`);
-    assert.ok(reaches(from, spot), `lounge spot ${index} from a back pod`);
-    parked.add(`${spot.x},${spot.y}`);
+  for (const group of ['review', 'idle'] as const) {
+    for (let index = 0; index < LOUNGE_GROUP_SPOTS; index += 1) {
+      const spot = loungeSpot(index, group);
+      assert.strictEqual(blocked(spot.x, spot.y), false, `${group} lounge spot ${index}`);
+      assert.ok(reaches(from, spot), `${group} lounge spot ${index} from a back pod`);
+      assert.ok(spot.x > LOUNGE_ZONE.x && spot.x < LOUNGE_ZONE.x + LOUNGE_ZONE.width && spot.y > LOUNGE_ZONE.y && spot.y < LOUNGE_ZONE.y + LOUNGE_ZONE.height, `${group} lounge spot ${index} stays in the lounge`);
+      parked.add(`${spot.x},${spot.y}`);
+    }
   }
-  assert.strictEqual(parked.size, LOUNGE_SPOTS, 'tickets that are not being worked on do not stand on each other');
+  assert.strictEqual(parked.size, LOUNGE_SPOTS, 'tickets that are not being worked on do not stand on each other, in either group');
+  const middle = LOUNGE_ZONE.x + LOUNGE_ZONE.width / 2;
+  for (let index = 0; index < LOUNGE_GROUP_SPOTS; index += 1) {
+    assert.ok(loungeSpot(index, 'review').x < middle && loungeSpot(index, 'idle').x > middle, 'each group keeps to its own half of the lounge');
+  }
+  const [reviewLabel, idleLabel] = [loungeLabelSpot('review'), loungeLabelSpot('idle')];
+  assert.ok(idleLabel.x - reviewLabel.x >= 200, 'the two floor labels are far enough apart not to overlap');
+  assert.ok(reviewLabel.y > loungeSpot(LOUNGE_GROUP_SPOTS - 1, 'review').y, 'labels sit below the last row of tickets');
   assert.ok(reaches(doorOf('lead'), LEAD_SEAT));
 });
 
@@ -240,4 +250,18 @@ test('a run with an open pull request is in review, not idle, and sorts after wo
   const statuses = { 'QRD-1': 'asleep', 'QRD-2': 'review', 'QRD-3': 'working', 'QRD-4': 'thinking' } as const;
   const order = sortRuns(runs, { column: 'status', descending: false }, (item) => statuses[item.key as keyof typeof statuses]).map((item) => item.key);
   assert.deepStrictEqual(order, ['QRD-3', 'QRD-2', 'QRD-4', 'QRD-1']);
+});
+
+test('a merged run is archived, an open or closed pull request is not', () => {
+  const run = { stage: 'pr', waiting: null, acFailed: 0, stalled: false, activity: 'IDLE', idleSeconds: 60, endedSeconds: null };
+  assert.strictEqual(isArchived({ stage: 'pr', finished: true }), true, 'every pull request merged');
+  assert.strictEqual(isArchived({ stage: 'done' }), true);
+  assert.strictEqual(isArchived({ stage: 'pr', finished: false }), false, 'in review stays on the working list');
+  assert.strictEqual(isArchived({ stage: 'pr' }), false);
+
+  assert.strictEqual(runStatus({ ...run, review: 'merged' as const, activity: 'ACTIVE', waiting: 'Approve?' }, 1000), 'review', 'a merged run reads Merged whatever its last event was');
+  assert.strictEqual(statusLabel(runStatus({ ...run, review: 'merged' as const }, 1000), 'merged'), 'Merged');
+  assert.strictEqual(statusLabel(runStatus({ ...run, review: 'open' as const }, 1000), 'open'), 'In review');
+  assert.strictEqual(statusLabel(runStatus({ ...run, stage: 'done', review: null }, 1000), null), 'Done');
+  assert.strictEqual(runStatus({ ...run, review: null }, 1000), 'asleep', 'no pull request: still asleep');
 });

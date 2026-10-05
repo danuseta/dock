@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowDown, ArrowUp, Bot, Building2, ChevronLeft, ChevronRight, ExternalLink, EyeOff, Hand, Moon, Play, Square, Table2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Bot, Building2, ChevronLeft, ChevronRight, ExternalLink, EyeOff, GitPullRequest, Hand, Moon, Play, Square, Table2, X } from 'lucide-react';
 import { GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
 import { DISMISS_ORCHESTRATION } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
@@ -263,6 +263,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
               )}
               <div className="pointer-events-none absolute bottom-3 left-3.5 flex flex-wrap gap-x-3.5 gap-y-1 rounded-[8px] border border-border bg-[rgb(12_12_12/0.78)] px-[11px] py-[7px] font-mono text-[0.7rem] font-semibold text-secondary-foreground">
                 <span className="flex items-center gap-1.5"><Hand size={12} className="text-amber-200" aria-hidden="true" />raised hand = waiting on you</span>
+                <span className="flex items-center gap-1.5"><GitPullRequest size={12} className="text-sky-300" aria-hidden="true" />pull request = in review</span>
                 <span className="flex items-center gap-1.5"><Moon size={12} aria-hidden="true" />zzz = no activity</span>
                 <span>faded = finished</span>
                 <span className="max-[900px]:hidden">drag to orbit · scroll to zoom</span>
