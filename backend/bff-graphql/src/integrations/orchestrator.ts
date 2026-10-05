@@ -307,6 +307,7 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     ? githubPullRequests
     : [ledger.prBe, ledger.prFe].filter((url): url is string => typeof url === 'string' && url.length > 0).map(ledgerPullRequest);
   const review = FINISHED_STAGES.has(row.stage) ? null : reviewState(pullRequests);
+  if (review && activity === 'ACTIVE' && idleMs > STALE_ACTIVE_MS) { activity = 'IDLE'; activityDetail = null; endedMs = null; }
 
   const stalled = !FINISHED_STAGES.has(row.stage)
     && activity !== 'WAITING'
