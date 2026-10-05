@@ -89,7 +89,7 @@ export function buildBoardCards(boardMesh: Mesh, columnNames: string[], onClick:
 
   const setBoardSize = (widthPx: number, heightPx: number) => {
     const width = Math.max(180, Math.min(900, widthPx * 0.9));
-    const height = Math.max(40, Math.min(420, heightPx * 0.66));
+    const height = Math.max(60, Math.min(560, heightPx * 0.8));
     grid.style.width = `${width}px`;
     for (const column of columns) column.style.maxHeight = `${height}px`;
   };

@@ -67,12 +67,13 @@ export function loungeSpot(index: number): Point {
   return { x: LOUNGE_ZONE.x + 55 + (slot % 6) * 70, y: LOUNGE_ZONE.y + 105 + Math.floor(slot / 6) * 62 };
 }
 
-/** Tickets waiting on the owner queue up in front of the owner's desk. */
+/** Tickets waiting on the owner queue up in front of the owner's desk, far enough apart that their name tags do not cover each other. */
+export const QUEUE_PER_ROW = 5;
 export function waitingSpot(index: number, count: number): Point {
-  const perRow = 7;
+  const perRow = QUEUE_PER_ROW;
   const row = Math.floor(index / perRow);
   const inRow = Math.min(perRow, count - row * perRow);
-  return { x: 1325 + ((index % perRow) - (inRow - 1) / 2) * 78, y: 226 - row * 30 };
+  return { x: 1325 + ((index % perRow) - (inRow - 1) / 2) * 122, y: 212 + row * 44 };
 }
 
 /** A waypoint on the corridor side of each area; walks between areas pass through two of them. */
@@ -111,7 +112,7 @@ export const FURNITURE: FurnitureItem[] = [
   { type: 'plant', x: 85, y: 80 }, { type: 'lamp', x: 420, y: 80 },
   { type: 'couch', x: 540, y: 78 }, { type: 'couch', x: 700, y: 78 }, { type: 'plant', x: 900, y: 80 },
   // The owner sits on the far side of the desk, facing the queue.
-  { type: 'executive_desk', x: 1260, y: 95, r: 2 }, chairAt({ x: 1350, y: 104 }), { type: 'plant', x: 1030, y: 80 }, { type: 'bookshelf', x: 1540, y: 66 },
+  { type: 'executive_desk', x: 1260, y: 95, r: 2 }, chairAt({ x: 1350, y: 104 }), { type: 'plant', x: 1030, y: 80 }, { type: 'bookshelf', x: 1600, y: 66 },
   ...Array.from({ length: MAX_PODS }, (_, index) => podFurniture(index)).flat(),
 ];
 

@@ -29,6 +29,8 @@ interface Occupant {
   run: AgentRun;
   slot: ActivitySlot;
   pod: number;
+  /** Place in the owner's queue or the lounge, where people stand side by side; -1 at a desk. */
+  standing: number;
   character: Character;
   members: Map<string, Member>;
   hidden: number;
@@ -45,6 +47,10 @@ const DONE_LINGER_SECONDS = 4;
 const POD_GRACE_SECONDS = 45;
 const MEMBER_SCALE = 0.86;
 const BOARD_SIZE: [number, number] = [22, 3.1];
+const BOARD_Y = 2.5;
+const OVERVIEW = { position: [-1, 26, 22.5], target: [0, 0, 1.4] } as const;
+const TAG_HEIGHT = 0.9;
+const TAG_STEP = 0.78;
 const FALLBACK_HEIGHT: Partial<Record<FurnitureItem['type'], number>> = {
   computer: 0.35, chair: 0.5, plant: 0.7, lamp: 1.4, bookshelf: 1.7, cabinet: 1,
 };
@@ -75,6 +81,9 @@ export class OfficeScene {
   private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   private readonly corner = new THREE.Vector3();
   private selected: string | null = null;
+  private view = 'overview';
+  private viewPending = false;
+  private flight: { position: THREE.Vector3; target: THREE.Vector3 } | null = null;
   private pointerDown: [number, number] | null = null;
   private animationFrame = 0;
   private lastFrame = clock();
@@ -95,22 +104,24 @@ export class OfficeScene {
 
     this.scene.background = new THREE.Color(BACKGROUND);
     this.scene.fog = new THREE.Fog(BACKGROUND, 40, 80);
-    this.camera.position.set(-1, 26, 22.5);
+    this.camera.position.set(...OVERVIEW.position);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.target.set(0, 0, 1.4);
+    this.controls.target.set(...OVERVIEW.target);
     this.controls.enableDamping = true;
     this.controls.maxPolarAngle = 1.42;
-    this.controls.minDistance = 8;
+    this.controls.minDistance = 3;
+    // Dragging or zooming by hand ends a camera move that is still under way.
+    this.controls.addEventListener('start', this.cancelFlight);
     this.controls.maxDistance = 46;
     this.controls.update();
 
     this.buildRoom();
     const depth = CANVAS_H * SCALE;
     this.board = new THREE.Mesh(new THREE.BoxGeometry(BOARD_SIZE[0], BOARD_SIZE[1], 0.14), new THREE.MeshLambertMaterial({ color: 0x15161a }));
-    this.board.position.set(0, 2.5, -depth / 2 - 0.68);
+    this.board.position.set(0, BOARD_Y, -depth / 2 - 0.68);
     this.scene.add(this.board);
     const frame = new THREE.Mesh(new THREE.BoxGeometry(BOARD_SIZE[0] + 0.4, BOARD_SIZE[1] + 0.4, 0.1), new THREE.MeshLambertMaterial({ color: 0x33343b }));
-    frame.position.set(0, 2.5, -depth / 2 - 0.74);
+    frame.position.set(0, BOARD_Y, -depth / 2 - 0.74);
     this.scene.add(frame);
     this.boardCards = buildBoardCards(
       this.board,
@@ -154,7 +165,7 @@ export class OfficeScene {
       if (run.stage === 'done') continue;
       const character = createCharacter(run.key, shirtColor(run.key), { ...LEAD_SEAT }, 'lounge');
       this.scene.add(character.group);
-      const occupant: Occupant = { run, slot, pod: -1, character, members: new Map(), hidden: 0 };
+      const occupant: Occupant = { run, slot, pod: -1, standing: -1, character, members: new Map(), hidden: 0 };
       this.occupants.set(run.key, occupant);
       fresh.add(occupant);
     }
@@ -183,6 +194,7 @@ export class OfficeScene {
     for (const occupant of this.occupants.values()) {
       const done = occupant.run.stage === 'done';
       const queued = waiting.indexOf(occupant);
+      occupant.standing = done || occupant.pod >= 0 ? -1 : queued >= 0 ? queued : parked.indexOf(occupant);
       const zone: ZoneId = done ? 'corridor' : queued >= 0 ? 'you' : occupant.pod >= 0 ? podId(occupant.pod) : 'lounge';
       const target = done ? { ...EXIT }
         : queued >= 0 ? waitingSpot(queued, waiting.length)
@@ -192,6 +204,7 @@ export class OfficeScene {
       this.syncMembers(occupant, now, fresh.has(occupant));
     }
     this.paintPods();
+    if (this.viewPending) this.setView(this.view);
 
     this.boardCards.render([...this.occupants.values()]
       .filter((occupant) => occupant.run.stage !== 'done')
@@ -207,6 +220,60 @@ export class OfficeScene {
     this.selected = key;
   }
 
+  /** Moves the camera to a named point of view: `overview`, `lead`, `owner`, or `ticket:<key>` for that ticket's team. */
+  setView(view: string): void {
+    if (this.disposed) return;
+    this.view = view;
+    const at = (point: Point, lift: number): THREE.Vector3 => {
+      const [x, , z] = toWorld(point.x, point.y);
+      return new THREE.Vector3(x, lift, z);
+    };
+    const above = (target: THREE.Vector3, height: number, back: number) => ({ position: target.clone().add(new THREE.Vector3(0, height, back)), target });
+    this.viewPending = false;
+    if (view === 'lead') {
+      this.flight = above(at({ x: LEAD_ZONE.x + LEAD_ZONE.width * 0.7, y: LEAD_ZONE.y + LEAD_ZONE.height * 0.6 }, 0.6), 7.5, 8.5);
+    } else if (view === 'owner') {
+      // From behind the owner's chair, looking over the desk at the queue.
+      this.flight = { position: at({ x: 1330, y: 0 }, 10.5), target: at({ x: 1325, y: 262 }, 0.4) };
+    } else if (view.startsWith('ticket:')) {
+      const occupant = this.occupants.get(view.slice(7));
+      if (!occupant || occupant.run.stage === 'done') {
+        // The ticket has not reported in yet (or has just left): show everything and try again when it arrives.
+        this.viewPending = !occupant;
+        this.flight = { position: new THREE.Vector3(...OVERVIEW.position), target: new THREE.Vector3(...OVERVIEW.target) };
+      } else if (occupant.pod >= 0) {
+        const zone = podZone(occupant.pod);
+        this.flight = above(at({ x: zone.x + zone.width / 2, y: zone.y + zone.height * 0.55 }, 0.5), 8.5, 9);
+      } else {
+        const path = occupant.character.walk?.path;
+        const destination = path?.[path.length - 1] ?? occupant.character;
+        this.flight = above(at({ x: destination.x, y: destination.y }, 0.8), 6, 7);
+      }
+    } else {
+      this.flight = { position: new THREE.Vector3(...OVERVIEW.position), target: new THREE.Vector3(...OVERVIEW.target) };
+    }
+    if (this.reducedMotion.matches) this.landFlight();
+  }
+
+  private readonly cancelFlight = (): void => {
+    this.flight = null;
+  };
+
+  private landFlight(): void {
+    if (!this.flight) return;
+    this.camera.position.copy(this.flight.position);
+    this.controls.target.copy(this.flight.target);
+    this.flight = null;
+  }
+
+  private advanceFlight(delta: number): void {
+    if (!this.flight) return;
+    const ease = 1 - Math.exp(-delta * 4.5);
+    this.camera.position.lerp(this.flight.position, ease);
+    this.controls.target.lerp(this.flight.target, ease);
+    if (this.camera.position.distanceTo(this.flight.position) < 0.03) this.landFlight();
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -220,6 +287,7 @@ export class OfficeScene {
     disposeCharacter(this.lead);
     this.boardCards.dispose();
     for (const label of this.labels) label.element.remove();
+    this.controls.removeEventListener('start', this.cancelFlight);
     this.controls.dispose();
     this.scene.traverse((object) => {
       const mesh = object as THREE.Mesh;
@@ -476,7 +544,10 @@ export class OfficeScene {
     const emote = pose === 'SeatedWaiting' ? ASK_EMOTE : pose === 'Asleep' ? ZZZ_EMOTE : pose === 'SeatedThinking' ? THINK_EMOTE : '';
     const role = splitTeam(run.members).coordinator ? 'coordinator' : 'lead direct';
     // At its desk the pod's sign already names the ticket; away from it (the owner's queue, the door) the tag has to.
-    const label = pose === 'SeatedWaiting' || occupant.character.walk || occupant.pod < 0 ? `${escapeHtml(run.key)} <small>${occupant.pod < 0 && pose !== 'SeatedWaiting' ? escapeHtml(stageName(run.stage, run.kind)) : role}</small>` : role;
+    // Standing in the owner's queue or the lounge the tag is the ticket key alone, so several fit side by side;
+    // on the way somewhere it also says what the ticket is, and at its desk the pod's sign already names it.
+    const label = pose === 'SeatedWaiting' || (occupant.pod < 0 && !occupant.character.walk) ? escapeHtml(run.key)
+      : occupant.character.walk || occupant.pod < 0 ? `${escapeHtml(run.key)} <small>${occupant.pod < 0 ? escapeHtml(stageName(run.stage, run.kind)) : role}</small>` : role;
     return `${emote}<button type="button" class="dock-agent-tag" data-key="${escapeHtml(run.key)}"><i style="background:${stageColor(run.stage)}"></i>${label}</button>`;
   }
 
@@ -523,6 +594,8 @@ export class OfficeScene {
       }
       if (!walking) character.facing = done ? Math.PI / 2 : queued ? Math.PI : occupant.pod >= 0 ? Math.PI : 0;
       this.place(character);
+      // People standing in a row hold their tags at alternating heights, so neighbouring tags do not cover each other.
+      character.tag.position.y = TAG_HEIGHT + (occupant.standing >= 0 && !walking ? (occupant.standing % (queued ? 2 : 3)) * TAG_STEP : 0);
       const seated = !done && !queued && occupant.pod >= 0;
       animateCharacter(character, pose, walking, delta, still, { seated, folded: working > 0 });
 
@@ -553,6 +626,7 @@ export class OfficeScene {
 
     const [boardWidth, boardHeight] = this.boardPixelSize();
     this.boardCards.setBoardSize(boardWidth, boardHeight);
+    this.advanceFlight(delta);
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
     this.labelRenderer.render(this.scene, this.camera);

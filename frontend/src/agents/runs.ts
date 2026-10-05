@@ -144,3 +144,36 @@ export function shirtColor(key: string): string {
   for (let index = 0; index < key.length; index += 1) hash = (hash * 31 + key.charCodeAt(index)) >>> 0;
   return SHIRT_COLORS[hash % SHIRT_COLORS.length];
 }
+
+export type RunSortColumn = 'ticket' | 'stage' | 'status' | 'ac' | 'waiting' | 'activity';
+export interface RunSort { column: RunSortColumn; descending: boolean }
+
+const STAGE_ORDER = ['gate', 'plan', 'code', 'test', 'verify', 'evidence', 'commit', 'pr', 'done'];
+const STATUS_ORDER: RunStatus[] = ['waiting', 'failed', 'stalled', 'working', 'thinking', 'asleep', 'done'];
+const byKey = new Intl.Collator('en', { numeric: true });
+
+/** A finished ticket leaves the working list and is kept in the archive. */
+export const isArchived = (run: Pick<AgentRun, 'stage'>): boolean => run.stage === 'done';
+
+export function sortRuns<T extends AgentRun>(runs: T[], sort: RunSort, statusOf: (run: T) => RunStatus): T[] {
+  const rank = (run: T): number => {
+    if (sort.column === 'stage') return STAGE_ORDER.indexOf(run.stage);
+    if (sort.column === 'status') return STATUS_ORDER.indexOf(statusOf(run));
+    if (sort.column === 'ac') return run.acTotal ? run.acPassed / run.acTotal : -1;
+    if (sort.column === 'waiting') return run.waiting ? 0 : 1;
+    if (sort.column === 'activity') return run.idleSeconds;
+    return 0;
+  };
+  const direction = sort.descending ? -1 : 1;
+  return [...runs].sort((a, b) => (
+    (sort.column === 'ticket' ? byKey.compare(a.key, b.key) : rank(a) - rank(b)) * direction || byKey.compare(a.key, b.key)
+  ));
+}
+
+export function pageOf<T>(items: T[], page: number, size: number): { items: T[]; page: number; pages: number; from: number; to: number } {
+  const pages = Math.max(1, Math.ceil(items.length / size));
+  const current = Math.min(pages, Math.max(1, Math.floor(page) || 1));
+  const start = (current - 1) * size;
+  const slice = items.slice(start, start + size);
+  return { items: slice, page: current, pages, from: slice.length ? start + 1 : 0, to: start + slice.length };
+}

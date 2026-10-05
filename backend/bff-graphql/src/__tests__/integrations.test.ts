@@ -580,6 +580,12 @@ test('internal integration behavior', async (t) => {
       head: { ref: 'feature/QRD-1055-component-template-folders' },
     }, 'QRD-1055'), true);
     assert.strictEqual(hasCanonicalTicketReference({ title: 'Follow-up QRD-10550' }, 'QRD-1055'), false);
+    const mention = { title: 'QRD-1241 feat: guardrail rules on the skill draft', body: 'v1 only checks the first condition until QRD-1251', head: { ref: 'feature/QRD-1241-guardrails-tab' } };
+    assert.strictEqual(hasCanonicalTicketReference(mention, 'QRD-1251'), false, 'a mention inside another ticket\'s pull request is not a link');
+    assert.strictEqual(hasCanonicalTicketReference(mention, 'QRD-1241'), true);
+    assert.strictEqual(hasCanonicalTicketReference({ title: 'QRD-1241 feat: guardrail rules', body: 'until QRD-1251' }, 'QRD-1251'), false, 'search results carry no branch');
+    assert.strictEqual(hasCanonicalTicketReference({ title: 'QRD-1241 and QRD-1251: guardrails', body: '' }, 'QRD-1251'), true);
+    assert.strictEqual(hasCanonicalTicketReference({ title: 'Fix utf-8 handling', body: 'Closes QRD-1251', head: { ref: 'fix/utf-8' } }, 'QRD-1251'), true);
   });
 
   await t.test('builds a least-privilege offline Google Calendar OAuth URL', async () => {

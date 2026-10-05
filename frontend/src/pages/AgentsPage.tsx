@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { Bot, Building2, ExternalLink, EyeOff, Hand, Moon, Play, Square, Table2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Bot, Building2, ChevronLeft, ChevronRight, ExternalLink, EyeOff, Hand, Moon, Play, Square, Table2, X } from 'lucide-react';
 import { GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
 import { DISMISS_ORCHESTRATION } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
@@ -8,7 +8,8 @@ import { Badge, Button, Card, Dialog, Page, PageHeader } from '../components/ui'
 import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
-import { STATUS_LABEL, formatAge, runStatus, stageColor, stageLabel, stageName, type AgentEvent, type AgentRun, type AgentTimeline, type RunStatus } from '../agents/runs';
+import { STATUS_LABEL, formatAge, isArchived, pageOf, runStatus, sortRuns, stageColor, stageLabel, stageName, type AgentEvent, type AgentRun, type AgentTimeline, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
+import { RAIL_STAGES, railIndex } from '../agents/office/layout';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 import { AgentFlowGraph } from '../components/AgentFlowGraph';
 
@@ -18,8 +19,23 @@ interface AgentsPageProps { onTicketClick: (key: string) => void; onNavigate: (p
 
 type View = 'office' | 'table';
 type FlowView = 'live' | 'replay';
+type TableTab = 'active' | 'archive';
 
 const POLL_MS = 5000;
+const PAGE_SIZE = 10;
+const OFFICE_VIEW_KEY = 'dock-agents-office-view';
+const OFFICE_VIEWS = [['overview', 'Overview'], ['lead', 'Lead'], ['owner', 'Me']] as const;
+const TABLE_COLUMNS: Array<[RunSortColumn, string]> = [
+  ['ticket', 'Ticket'], ['stage', 'Stage'], ['status', 'Status'], ['ac', 'AC'], ['waiting', 'Waiting on you'], ['activity', 'Last activity'],
+];
+
+const savedOfficeView = (): string => {
+  try {
+    return window.localStorage.getItem(OFFICE_VIEW_KEY) || 'overview';
+  } catch {
+    return 'overview';
+  }
+};
 const sectionLabel = 'font-mono text-[0.66rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
 
 const statusTone: Record<RunStatus, string> = {
@@ -66,6 +82,12 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
   const [dismissTarget, setDismissTarget] = useState<AgentRun | null>(null);
   const [actionError, setActionError] = useState('');
   const [receivedAt, setReceivedAt] = useState(() => Date.now() / 1000);
+  const [officeView, setOfficeView] = useState(savedOfficeView);
+  const [viewTick, setViewTick] = useState(0);
+  const [boardOpen, setBoardOpen] = useState(false);
+  const [tableTab, setTableTab] = useState<TableTab>('active');
+  const [sort, setSort] = useState<RunSort>({ column: 'activity', descending: false });
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now() / 1000), 1000);
@@ -102,7 +124,26 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
   // Ages keep counting between polls; the server only sends how old things were when it answered.
   const drift = sampling ? 0 : Math.max(0, now - receivedAt);
   const statusOf = (run: AgentRun) => runStatus({ ...run, idleSeconds: run.idleSeconds + drift }, now);
-  const active = runs.filter((run) => run.stage !== 'done');
+  const active = runs.filter((run) => !isArchived(run));
+  const archived = runs.filter(isArchived);
+  const listed = pageOf(sortRuns(tableTab === 'archive' ? archived : active, sort, statusOf), page, PAGE_SIZE);
+  const teamView = officeView.startsWith('ticket:') ? officeView.slice(7) : '';
+
+  const chooseView = (next: string) => {
+    setOfficeView(next);
+    // Picking the view you are already on flies the camera back to it.
+    setViewTick((tick) => tick + 1);
+    if (next.startsWith('ticket:')) setSelectedKey(next.slice(7));
+    try {
+      window.localStorage.setItem(OFFICE_VIEW_KEY, next);
+    } catch {
+      // The view is a convenience; without storage it simply resets on reload.
+    }
+  };
+  const sortBy = (column: RunSortColumn) => {
+    setSort((current) => ({ column, descending: current.column === column ? !current.descending : false }));
+    setPage(1);
+  };
   const metrics = [
     { label: 'Tickets with an agent', value: active.length, className: 'text-accent' },
     { label: 'Waiting on you', value: active.filter((run) => run.waiting).length, className: 'text-amber-200' },
@@ -169,10 +210,56 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
       <div className="grid grid-cols-[minmax(0,1fr)_360px] items-start gap-4 max-[1120px]:grid-cols-1">
         <Card className="p-0">
           {view === 'office' ? (
+            <>
+            {!empty && (
+              <div className="flex flex-wrap items-center gap-1.5 border-b border-border bg-surface-0 px-3 py-2" role="group" aria-label="Point of view">
+                <span className={cn(sectionLabel, 'mr-1')}>View</span>
+                {OFFICE_VIEWS.map(([id, label]) => (
+                  <button key={id} type="button" className={cn('h-7 rounded-xs px-2.5 font-display text-xs font-semibold text-secondary-foreground transition-colors duration-150 hover:text-foreground', officeView === id && 'bg-accent text-black hover:text-black')} aria-pressed={officeView === id} onClick={() => chooseView(id)}>{label}</button>
+                ))}
+                <select
+                  className={cn('h-7 max-w-[190px] rounded-xs border-0 bg-surface-2 px-2 font-display text-xs font-semibold text-secondary-foreground', teamView && 'bg-accent text-black')}
+                  aria-label="Team view for a ticket"
+                  value={teamView}
+                  onChange={(event) => chooseView(event.target.value ? `ticket:${event.target.value}` : 'overview')}
+                >
+                  <option value="">Team…</option>
+                  {active.map((run) => <option key={run.key} value={run.key}>{run.key} · {stageName(run.stage, run.kind)}</option>)}
+                </select>
+                <button type="button" className={cn('h-7 rounded-xs px-2.5 font-display text-xs font-semibold text-secondary-foreground transition-colors duration-150 hover:text-foreground', boardOpen && 'bg-accent text-black hover:text-black')} aria-pressed={boardOpen} onClick={() => setBoardOpen((open) => !open)}>Board</button>
+              </div>
+            )}
             <div className="relative">
               <Suspense fallback={<div className="grid h-[600px] place-items-center text-sm text-muted-foreground max-[900px]:h-[420px]" role="status">Opening the office...</div>}>
-                <AgentsOffice className="h-[600px] max-[900px]:h-[420px]" runs={runs} selectedKey={selected?.key || null} onSelect={setSelectedKey} />
+                <AgentsOffice className="h-[600px] max-[900px]:h-[420px]" runs={runs} selectedKey={selected?.key || null} onSelect={setSelectedKey} view={officeView} viewTick={viewTick} />
               </Suspense>
+              {boardOpen && !empty && (
+                <div className="absolute inset-0 z-10 flex flex-col bg-[rgb(12_12_12/0.96)] p-4" role="dialog" aria-label="Status board">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <h2 className="font-display text-[0.95rem] font-bold">Status board <span className="ml-1.5 font-mono text-xs font-semibold text-muted-foreground tabular-nums">{active.length} {active.length === 1 ? 'ticket' : 'tickets'}</span></h2>
+                    <Button size="sm" variant="ghost" onClick={() => setBoardOpen(false)}><X size={14} aria-hidden="true" />Close</Button>
+                  </div>
+                  <div className="grid min-h-0 flex-1 grid-cols-6 gap-2 overflow-x-auto max-[900px]:grid-cols-[repeat(6,150px)]">
+                    {RAIL_STAGES.map((stage, column) => {
+                      const cards = active.filter((run) => Math.min(RAIL_STAGES.length - 1, railIndex(run.stage)) === column);
+                      return (
+                        <div className="flex min-h-0 flex-col rounded-[8px] border border-border bg-surface-1" key={stage}>
+                          <p className={cn(sectionLabel, 'flex items-center justify-between border-b border-border px-2.5 py-2')}><span>{stageName(stage, 'build')}</span><span className="tabular-nums">{cards.length}</span></p>
+                          <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto p-2">
+                            {cards.length === 0 && <span className="py-2 text-center text-xs text-muted-foreground">—</span>}
+                            {cards.map((run) => (
+                              <button key={run.key} type="button" className={cn('rounded-xs border border-border-glow border-l-[3px] bg-surface-0 px-2 py-1.5 text-left hover:border-accent', run.waiting ? 'border-l-amber-300' : run.stalled || run.acFailed > 0 ? 'border-l-status-conflict' : 'border-l-status-merged', selected?.key === run.key && 'border-accent')} onClick={() => { setSelectedKey(run.key); setBoardOpen(false); }}>
+                                <span className="flex items-center justify-between gap-2 font-mono text-xs font-extrabold text-accent"><span>{run.key}</span><span className="font-semibold text-muted-foreground tabular-nums">{run.acPassed}/{run.acTotal}</span></span>
+                                <span className="mt-0.5 line-clamp-2 text-[0.74rem] text-secondary-foreground">{run.waiting || run.title || 'Untitled'}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               <div className="pointer-events-none absolute bottom-3 left-3.5 flex flex-wrap gap-x-3.5 gap-y-1 rounded-[8px] border border-border bg-[rgb(12_12_12/0.78)] px-[11px] py-[7px] font-mono text-[0.7rem] font-semibold text-secondary-foreground">
                 <span className="flex items-center gap-1.5"><Hand size={12} className="text-amber-200" aria-hidden="true" />raised hand = waiting on you</span>
                 <span className="flex items-center gap-1.5"><Moon size={12} aria-hidden="true" />zzz = no activity</span>
@@ -191,27 +278,60 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                 </div>
               )}
             </div>
+            </>
           ) : empty ? (
             <div className="py-12 text-center"><Bot size={34} className="mx-auto mb-2.5 text-muted-foreground" aria-hidden="true" /><p className="text-pretty text-muted-foreground">No ticket has reported in yet.</p></div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[860px] border-collapse text-left text-sm">
-                <thead className="bg-surface-1 text-xs text-muted-foreground">
-                  <tr><th className="px-4 py-3 font-medium">Ticket</th><th className="px-4 py-3 font-medium">Stage</th><th className="px-4 py-3 font-medium">Status</th><th className="px-4 py-3 font-medium">AC</th><th className="px-4 py-3 font-medium">Waiting on you</th><th className="px-4 py-3 font-medium">Last activity</th></tr>
-                </thead>
-                <tbody>
-                  {runs.map((run) => (
-                    <tr key={run.key} className={cn('cursor-pointer border-t border-border hover:bg-surface-1', selected?.key === run.key && 'bg-surface-1')} onClick={() => setSelectedKey(run.key)}>
-                      <td className="px-4 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => setSelectedKey(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><span className="mt-0.5 block max-w-[320px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
-                      <td className="px-4 py-3"><StageChip stage={run.stage} kind={run.kind} /></td>
-                      <td className="px-4 py-3"><StatusChip status={statusOf(run)} /></td>
-                      <td className="px-4 py-3 font-mono text-xs tabular-nums">{run.acPassed}/{run.acTotal}{run.acFailed > 0 && <span className="ml-1.5 text-status-conflict">{run.acFailed} failed</span>}</td>
-                      <td className="max-w-[280px] px-4 py-3 text-xs text-secondary-foreground"><span className="line-clamp-2">{run.waiting || '—'}</span></td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground tabular-nums">{formatAge(run.idleSeconds + drift)} ago</td>
-                    </tr>
+            <div>
+              <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+                <div className="flex rounded-sm border border-border bg-surface-1 p-0.5" role="group" aria-label="Tickets shown">
+                  {([['active', 'Active', active.length], ['archive', 'Archive', archived.length]] as const).map(([id, label, count]) => (
+                    <button key={id} type="button" className={cn('flex h-7 items-center gap-1.5 rounded-xs px-3 font-display text-xs font-semibold text-secondary-foreground transition-colors duration-150', tableTab === id && 'bg-accent text-black')} aria-pressed={tableTab === id} onClick={() => { setTableTab(id); setPage(1); }}>
+                      {label}<span className="font-mono tabular-nums opacity-70">{count}</span>
+                    </button>
                   ))}
-                </tbody>
-              </table>
+                </div>
+                <span className="text-pretty text-xs text-muted-foreground">{tableTab === 'archive' ? 'Finished tickets. They no longer count in the totals above.' : 'Tickets an agent is still on.'}</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[860px] border-collapse text-left text-sm">
+                  <thead className="bg-surface-1 text-xs text-muted-foreground">
+                    <tr>
+                      {TABLE_COLUMNS.map(([column, label]) => (
+                        <th key={column} className="px-4 py-2 font-medium" aria-sort={sort.column === column ? (sort.descending ? 'descending' : 'ascending') : 'none'}>
+                          <button type="button" className={cn('flex items-center gap-1 border-0 bg-transparent p-0 py-1 font-medium hover:text-foreground', sort.column === column && 'text-foreground')} onClick={() => sortBy(column)}>
+                            {label}
+                            {sort.column === column && (sort.descending ? <ArrowDown size={12} aria-hidden="true" /> : <ArrowUp size={12} aria-hidden="true" />)}
+                          </button>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {listed.items.length === 0 && (
+                      <tr><td colSpan={TABLE_COLUMNS.length} className="px-4 py-10 text-center text-sm text-muted-foreground">{tableTab === 'archive' ? 'Nothing archived yet. A ticket moves here when it is done.' : 'No ticket is being worked on right now.'}</td></tr>
+                    )}
+                    {listed.items.map((run) => (
+                      <tr key={run.key} className={cn('cursor-pointer border-t border-border hover:bg-surface-1', selected?.key === run.key && 'bg-surface-1')} onClick={() => setSelectedKey(run.key)}>
+                        <td className="px-4 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => setSelectedKey(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><span className="mt-0.5 block max-w-[320px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
+                        <td className="px-4 py-3"><StageChip stage={run.stage} kind={run.kind} /></td>
+                        <td className="px-4 py-3"><StatusChip status={statusOf(run)} /></td>
+                        <td className="px-4 py-3 font-mono text-xs tabular-nums">{run.acPassed}/{run.acTotal}{run.acFailed > 0 && <span className="ml-1.5 text-status-conflict">{run.acFailed} failed</span>}</td>
+                        <td className="max-w-[280px] px-4 py-3 text-xs text-secondary-foreground"><span className="line-clamp-2">{run.waiting || '—'}</span></td>
+                        <td className="px-4 py-3 text-xs text-muted-foreground tabular-nums">{formatAge(run.idleSeconds + drift)} ago</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
+                <span className="tabular-nums">{listed.from === 0 ? '0 tickets' : `${listed.from}–${listed.to} of ${tableTab === 'archive' ? archived.length : active.length}`}</span>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="ghost" disabled={listed.page <= 1} onClick={() => setPage(listed.page - 1)} aria-label="Previous page"><ChevronLeft size={14} aria-hidden="true" />Prev</Button>
+                  <span className="font-mono tabular-nums">Page {listed.page} / {listed.pages}</span>
+                  <Button size="sm" variant="ghost" disabled={listed.page >= listed.pages} onClick={() => setPage(listed.page + 1)} aria-label="Next page">Next<ChevronRight size={14} aria-hidden="true" /></Button>
+                </div>
+              </div>
             </div>
           )}
         </Card>
