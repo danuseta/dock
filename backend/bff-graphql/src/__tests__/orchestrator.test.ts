@@ -284,6 +284,15 @@ test('a run with a pull request is waiting for review, not stalled', async () =>
   const done = toOrchestration(row('done'), later, [pr('open')]);
   assert.deepStrictEqual([done.stalled, done.review], [false, null]);
 
+  const finished = (stage: string, prs: Array<ReturnType<typeof pr>>) => toOrchestration(row(stage), later, prs).finished;
+  assert.deepStrictEqual(
+    [finished('done', []), finished('pr', [pr('merged', 1), pr('merged', 2)]), finished('pr', [pr('merged', 1), pr('open', 2)]), finished('pr', [pr('closed')]), finished('pr', [pr('merged', 1), pr('closed', 2)]), finished('pr', [])],
+    [true, true, false, false, false, false],
+    'done stage or every pull request merged; closed-only, mixed and no PR are not finished',
+  );
+  const mergedRun = toOrchestration({ ...row('pr'), waiting: 'Approve?', payload: JSON.stringify({ ac: [{ n: 1, state: 'FAIL', text: 'x' }] }) }, later, [pr('merged')]);
+  assert.deepStrictEqual(attentionItems([mergedRun]), [], 'a merged run produces no attention item');
+
   const active = { ...row('pr'), activity: 'ACTIVE', activityDetail: 'Bash' };
   const at = (minutes: number) => new Date(lastEventAt.getTime() + minutes * 60 * 1000);
   const silent = toOrchestration(active, at(11), [pr('open')]);

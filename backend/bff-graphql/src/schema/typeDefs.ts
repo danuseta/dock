@@ -255,6 +255,7 @@ export const typeDefs = gql`
     prFe: String
     pullRequests: [OrchestrationPullRequest!]!
     review: String
+    finished: Boolean!
     note: String
     activity: String!
     activityDetail: String
