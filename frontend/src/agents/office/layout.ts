@@ -66,15 +66,21 @@ export function memberSeat(index: number, desk: number): Point {
  */
 export type LoungeGroup = 'review' | 'idle';
 export const LOUNGE_GROUP_SPOTS = 6;
+/** Each group has two sofas with two seats each; anyone beyond that stands in front of them. */
+export const LOUNGE_SOFA_SEATS = 4;
+export const isSofaSeat = (index: number): boolean => index >= 0 && index % LOUNGE_GROUP_SPOTS < LOUNGE_SOFA_SEATS;
+const LOUNGE_SOFA_Y = LOUNGE_ZONE.y + 18;
 export const LOUNGE_SPOTS = LOUNGE_GROUP_SPOTS * 2;
-const LOUNGE_GROUP_X: Record<LoungeGroup, number> = { review: LOUNGE_ZONE.x + 45, idle: LOUNGE_ZONE.x + 275 };
-export const LOUNGE_COLUMN_GAP = 100;
+const LOUNGE_GROUP_X: Record<LoungeGroup, number> = { review: LOUNGE_ZONE.x + 15, idle: LOUNGE_ZONE.x + 245 };
+export const LOUNGE_COLUMN_GAP = 110;
+const loungeSofas = (group: LoungeGroup): FurnitureItem[] => [0, 1].map((sofa) => ({ type: 'couch', x: LOUNGE_GROUP_X[group] + sofa * LOUNGE_COLUMN_GAP, y: LOUNGE_SOFA_Y }));
 export function loungeSpot(index: number, group: LoungeGroup = 'idle'): Point {
   const slot = index % LOUNGE_GROUP_SPOTS;
-  return { x: LOUNGE_GROUP_X[group] + (slot % 2) * LOUNGE_COLUMN_GAP, y: LOUNGE_ZONE.y + 90 + Math.floor(slot / 2) * 46 };
+  if (slot < LOUNGE_SOFA_SEATS) return { x: LOUNGE_GROUP_X[group] + Math.floor(slot / 2) * LOUNGE_COLUMN_GAP + 26 + (slot % 2) * 48, y: LOUNGE_SOFA_Y + 24 };
+  return { x: LOUNGE_GROUP_X[group] + 50 + (slot - LOUNGE_SOFA_SEATS) * LOUNGE_COLUMN_GAP, y: LOUNGE_ZONE.y + 125 };
 }
 /** The floor label of a group sits centred under it, just in front of the lounge. */
-export const loungeLabelSpot = (group: LoungeGroup): Point => ({ x: LOUNGE_GROUP_X[group] + LOUNGE_COLUMN_GAP / 2, y: LOUNGE_ZONE.y + LOUNGE_ZONE.height + 14 });
+export const loungeLabelSpot = (group: LoungeGroup): Point => ({ x: LOUNGE_GROUP_X[group] + (LOUNGE_COLUMN_GAP + 100) / 2, y: LOUNGE_ZONE.y + LOUNGE_ZONE.height + 14 });
 
 /** Tickets waiting on the owner queue up in front of the owner's desk, far enough apart that their name tags do not cover each other. */
 export const QUEUE_PER_ROW = 5;
@@ -119,7 +125,7 @@ function podFurniture(index: number): FurnitureItem[] {
 export const FURNITURE: FurnitureItem[] = [
   { type: 'executive_desk', x: 200, y: 95 }, { type: 'computer', x: 225, y: 110 }, { type: 'computer', x: 280, y: 110 }, chairAt(LEAD_SEAT, FACING_DESK),
   { type: 'plant', x: 85, y: 80 }, { type: 'lamp', x: 420, y: 80 },
-  { type: 'couch', x: 540, y: 78 }, { type: 'couch', x: 700, y: 78 }, { type: 'plant', x: 900, y: 80 },
+  ...loungeSofas('review'), ...loungeSofas('idle'), { type: 'plant', x: 472, y: 80 },
   // The owner sits on the far side of the desk, facing the queue.
   { type: 'executive_desk', x: 1260, y: 95, r: 2 }, chairAt({ x: 1350, y: 104 }), { type: 'plant', x: 1030, y: 80 }, { type: 'bookshelf', x: 1600, y: 66 },
   ...Array.from({ length: MAX_PODS }, (_, index) => podFurniture(index)).flat(),

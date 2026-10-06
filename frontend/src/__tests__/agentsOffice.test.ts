@@ -6,7 +6,7 @@ import {
 } from '../agents/office/activity';
 import {
   EXIT, FURNITURE, LEAD_SEAT, LOUNGE_GROUP_SPOTS, LOUNGE_SPOTS, LOUNGE_ZONE, MAX_PODS, MEMBER_DESKS, NAV_GRID, QUEUE_PER_ROW, YOU_ZONE,
-  coordinatorSeat, doorOf, loungeLabelSpot, loungeSpot, memberSeat, podId, podIndexOf, podZone, railIndex, waitingSpot,
+  coordinatorSeat, doorOf, isSofaSeat, loungeLabelSpot, loungeSpot, memberSeat, podId, podIndexOf, podZone, railIndex, waitingSpot,
 } from '../agents/office/layout';
 import { calculateWalkDuration, interpolatePathPosition, pathLength, planWalkPath, routeThroughDoors } from '../agents/office/movement';
 import { GRID_CELL, GRID_COLS, astar, buildNavGrid, toWorld } from '../agents/office/navigation';
@@ -92,8 +92,11 @@ test('the lead, the owner queue and the exit are all reachable from a pod', () =
   for (const group of ['review', 'idle'] as const) {
     for (let index = 0; index < LOUNGE_GROUP_SPOTS; index += 1) {
       const spot = loungeSpot(index, group);
-      assert.strictEqual(blocked(spot.x, spot.y), false, `${group} lounge spot ${index}`);
-      assert.ok(reaches(from, spot), `${group} lounge spot ${index} from a back pod`);
+      // A sofa seat is on the sofa itself, so it is reached from the floor just in front of it.
+      const approach = isSofaSeat(index) ? { x: spot.x, y: spot.y + 50 } : spot;
+      assert.strictEqual(blocked(spot.x, spot.y), isSofaSeat(index), `${group} lounge spot ${index} is ${isSofaSeat(index) ? 'on a sofa' : 'free floor'}`);
+      assert.strictEqual(blocked(approach.x, approach.y), false, `${group} lounge spot ${index} can be walked up to`);
+      assert.ok(reaches(from, approach), `${group} lounge spot ${index} from a back pod`);
       assert.ok(spot.x > LOUNGE_ZONE.x && spot.x < LOUNGE_ZONE.x + LOUNGE_ZONE.width && spot.y > LOUNGE_ZONE.y && spot.y < LOUNGE_ZONE.y + LOUNGE_ZONE.height, `${group} lounge spot ${index} stays in the lounge`);
       parked.add(`${spot.x},${spot.y}`);
     }
@@ -106,7 +109,7 @@ test('the lead, the owner queue and the exit are all reachable from a pod', () =
   for (const group of ['review', 'idle'] as const) {
     const spots = Array.from({ length: LOUNGE_GROUP_SPOTS }, (_, index) => loungeSpot(index, group));
     spots.forEach((a, i) => spots.slice(i + 1).forEach((b) => {
-      assert.ok(Math.abs(a.x - b.x) >= 70 || Math.abs(a.y - b.y) >= 40, `${group} lounge spots leave room for a compact tag each`);
+      assert.ok(Math.abs(a.x - b.x) >= 45 || Math.abs(a.y - b.y) >= 40, `${group} lounge spots leave room for a compact tag each`);
     }));
   }
   assert.ok(loungeSpot(0, 'idle').x - loungeSpot(2, 'review').x >= 75, 'the two groups do not crowd each other');

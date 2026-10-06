@@ -151,10 +151,13 @@ export function createCharacter(key: string, topColor: string, at: Point, zone: 
   };
 }
 
-export interface Posture { seated?: boolean; folded?: boolean }
+export interface Posture { seated?: boolean; folded?: boolean; seatHeight?: number }
 
-/** How far a seated figure drops so its hips rest on the chair. */
-const SEAT_DROP = 0.07;
+/** Top of the desk chair's seat and of the lounge sofa's cushion above the floor, measured from the models at their scale. */
+export const CHAIR_SEAT_HEIGHT = 0.228;
+export const SOFA_SEAT_HEIGHT = 0.414;
+/** Underside of a figure's thigh when its legs are bent forward, in the figure's own units. */
+const THIGH_UNDERSIDE = 0.06;
 
 export function animateCharacter(character: Character, pose: Pose, walking: boolean, deltaSeconds: number, still: boolean, posture: Posture = {}): void {
   const { group, leftArm, rightArm, leftLeg, rightLeg } = character;
@@ -176,7 +179,9 @@ export function animateCharacter(character: Character, pose: Pose, walking: bool
   group.rotation.x = typing ? -0.15 : asleep ? 0.42 : 0;
   const bounce = walking ? walkPhase * 0.04 : 0;
   const breathe = !walking && !typing && !still ? Math.sin(frameValue * 0.03) * 0.01 : 0;
-  group.position.y = bounce + breathe - (sitting ? SEAT_DROP : 0);
+  // A seated figure is raised until its thighs rest on the seat; without this it sinks through the chair.
+  const lift = sitting ? Math.max(0, (posture.seatHeight ?? CHAIR_SEAT_HEIGHT) - THIGH_UNDERSIDE * group.scale.y) : 0;
+  group.position.y = bounce + breathe + lift;
 
   leftArm.rotation.set(0, 0, 0);
   rightArm.rotation.set(0, 0, 0);

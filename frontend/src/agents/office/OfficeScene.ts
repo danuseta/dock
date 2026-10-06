@@ -5,11 +5,11 @@ import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer
 import { hasTrouble, isArchived, podColor, shirtColor, splitTeam, stageColor, stageName, type AgentRun, type TimelineAgent } from '../runs';
 import { clock, poseOf, slotFromServer, tickActivity, type ActivitySlot, type Pose } from './activity';
 import { buildBoardCards, type BoardCards } from './board';
-import { animateCharacter, createCharacter, disposeCharacter, setDimmed, type Character } from './character';
+import { SOFA_SEAT_HEIGHT, animateCharacter, createCharacter, disposeCharacter, setDimmed, type Character } from './character';
 import { ASK_EMOTE, REVIEW_EMOTE, THINK_EMOTE, ZZZ_EMOTE } from './emotes';
 import {
   EXIT, FURNITURE, LEAD_SEAT, LEAD_ZONE, LOUNGE_ZONE, MAX_PODS, MEMBER_DESKS, RAIL_STAGES, YOU_ZONE,
-  coordinatorSeat, loungeLabelSpot, loungeSpot, memberSeat, podId, podZone, railIndex, waitingSpot,
+  coordinatorSeat, isSofaSeat, loungeLabelSpot, loungeSpot, memberSeat, podId, podZone, railIndex, waitingSpot,
   type Zone, type ZoneId,
 } from './layout';
 import { calculateWalkDuration, interpolatePathPosition, routeThroughDoors } from './movement';
@@ -607,7 +607,8 @@ export class OfficeScene {
       // Whoever waits in the lounge settles the same way, however recently the ticket was active: the sleeping slump and the upright
       // thinking stance would otherwise make a ticket in review stand differently from one that is idle.
       const lounging = !done && !queued && occupant.pod < 0 && !walking;
-      animateCharacter(character, lounging ? 'SeatedThinking' : pose, walking, delta, still, { seated: seated || lounging, folded: working > 0 });
+      const onSofa = lounging && isSofaSeat(occupant.standing);
+      animateCharacter(character, lounging ? 'SeatedThinking' : pose, walking, delta, still, { seated: seated || onSofa, folded: working > 0, seatHeight: onSofa ? SOFA_SEAT_HEIGHT : undefined });
 
       const gone = done && !walking && now - (character.arrivedAt ?? now) >= DONE_LINGER_SECONDS;
       character.group.visible = !gone;
