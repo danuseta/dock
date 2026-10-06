@@ -103,6 +103,13 @@ test('the lead, the owner queue and the exit are all reachable from a pod', () =
   for (let index = 0; index < LOUNGE_GROUP_SPOTS; index += 1) {
     assert.ok(loungeSpot(index, 'review').x < middle && loungeSpot(index, 'idle').x > middle, 'each group keeps to its own half of the lounge');
   }
+  for (const group of ['review', 'idle'] as const) {
+    const spots = Array.from({ length: LOUNGE_GROUP_SPOTS }, (_, index) => loungeSpot(index, group));
+    spots.forEach((a, i) => spots.slice(i + 1).forEach((b) => {
+      assert.ok(Math.abs(a.x - b.x) >= 70 || Math.abs(a.y - b.y) >= 40, `${group} lounge spots leave room for a compact tag each`);
+    }));
+  }
+  assert.ok(loungeSpot(0, 'idle').x - loungeSpot(2, 'review').x >= 75, 'the two groups do not crowd each other');
   const [reviewLabel, idleLabel] = [loungeLabelSpot('review'), loungeLabelSpot('idle')];
   assert.ok(idleLabel.x - reviewLabel.x >= 200, 'the two floor labels are far enough apart not to overlap');
   assert.ok(reviewLabel.y > loungeSpot(LOUNGE_GROUP_SPOTS - 1, 'review').y, 'labels sit below the last row of tickets');

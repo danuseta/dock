@@ -49,8 +49,6 @@ const MEMBER_SCALE = 0.86;
 const BOARD_SIZE: [number, number] = [22, 3.1];
 const BOARD_Y = 2.5;
 const OVERVIEW = { position: [-1, 26, 22.5], target: [0, 0, 1.4] } as const;
-const TAG_HEIGHT = 0.9;
-const TAG_STEP = 0.78;
 const FALLBACK_HEIGHT: Partial<Record<FurnitureItem['type'], number>> = {
   computer: 0.35, chair: 0.5, plant: 0.7, lamp: 1.4, bookshelf: 1.7, cabinet: 1,
 };
@@ -222,7 +220,7 @@ export class OfficeScene {
     this.selected = key;
   }
 
-  /** Moves the camera to a named point of view: `overview`, `lead`, `owner`, or `ticket:<key>` for that ticket's team. */
+  /** Moves the camera to a named point of view: `overview`, `lead`, `owner`, `lounge`, or `ticket:<key>` for that ticket's team. */
   setView(view: string): void {
     if (this.disposed) return;
     this.view = view;
@@ -234,6 +232,8 @@ export class OfficeScene {
     this.viewPending = false;
     if (view === 'lead') {
       this.flight = above(at({ x: LEAD_ZONE.x + LEAD_ZONE.width * 0.7, y: LEAD_ZONE.y + LEAD_ZONE.height * 0.6 }, 0.6), 7.5, 8.5);
+    } else if (view === 'lounge') {
+      this.flight = { position: at({ x: LOUNGE_ZONE.x + LOUNGE_ZONE.width / 2, y: LOUNGE_ZONE.y + LOUNGE_ZONE.height + 250 }, 8.5), target: at({ x: LOUNGE_ZONE.x + LOUNGE_ZONE.width / 2, y: LOUNGE_ZONE.y + 150 }, 0.4) };
     } else if (view === 'owner') {
       // From behind the owner's chair, looking over the desk at the queue.
       this.flight = { position: at({ x: 1330, y: 0 }, 10.5), target: at({ x: 1325, y: 262 }, 0.4) };
@@ -554,9 +554,10 @@ export class OfficeScene {
     // At its desk the pod's sign already names the ticket; away from it (the owner's queue, the door) the tag has to.
     // Standing in the owner's queue or the lounge the tag is the ticket key alone, so several fit side by side;
     // on the way somewhere it also says what the ticket is, and at its desk the pod's sign already names it.
-    const label = pose === 'SeatedWaiting' || (occupant.pod < 0 && !occupant.character.walk) ? escapeHtml(run.key)
+    const standing = pose === 'SeatedWaiting' || (occupant.pod < 0 && !occupant.character.walk);
+    const label = standing ? escapeHtml(run.key.replace(/^.*-/, ''))
       : occupant.character.walk || occupant.pod < 0 ? `${escapeHtml(run.key)} <small>${occupant.pod < 0 ? escapeHtml(stageName(run.stage, run.kind)) : role}</small>` : role;
-    return `${emote}<button type="button" class="dock-agent-tag" data-key="${escapeHtml(run.key)}"><i style="background:${stageColor(run.stage)}"></i>${label}</button>`;
+    return `${emote}<button type="button" class="dock-agent-tag${standing ? ' dock-agent-tag-compact' : ''}" data-key="${escapeHtml(run.key)}" title="${escapeHtml(run.key)}"><i style="background:${stageColor(run.stage)}"></i>${label}</button>`;
   }
 
   private memberTag(key: string, info: TimelineAgent): string {
@@ -602,10 +603,11 @@ export class OfficeScene {
       }
       if (!walking) character.facing = done ? Math.PI / 2 : queued ? Math.PI : occupant.pod >= 0 ? Math.PI : 0;
       this.place(character);
-      // People standing in a row hold their tags at alternating heights, so neighbouring tags do not cover each other.
-      character.tag.position.y = TAG_HEIGHT + (occupant.standing >= 0 && !walking ? (occupant.standing % (queued ? 2 : 3)) * TAG_STEP : 0);
       const seated = !done && !queued && occupant.pod >= 0;
-      animateCharacter(character, pose, walking, delta, still, { seated, folded: working > 0 });
+      // Whoever waits in the lounge settles the same way, however recently the ticket was active: the sleeping slump and the upright
+      // thinking stance would otherwise make a ticket in review stand differently from one that is idle.
+      const lounging = !done && !queued && occupant.pod < 0 && !walking;
+      animateCharacter(character, lounging ? 'SeatedThinking' : pose, walking, delta, still, { seated: seated || lounging, folded: working > 0 });
 
       const gone = done && !walking && now - (character.arrivedAt ?? now) >= DONE_LINGER_SECONDS;
       character.group.visible = !gone;
