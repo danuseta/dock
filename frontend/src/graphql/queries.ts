@@ -497,6 +497,8 @@ const ORCHESTRATION_FIELDS = `
   reviewSignal
   finished
   note
+  brief
+  decisions { at text }
   activity
   activityDetail
   idleSeconds

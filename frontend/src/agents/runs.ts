@@ -37,6 +37,8 @@ export interface AgentRun {
   reviewSignal?: 'changes_requested' | 'checks_failing' | 'checks_pending' | 'approved' | null;
   finished?: boolean;
   note?: string | null;
+  brief?: string | null;
+  decisions?: { at: string; text: string }[];
   activity: string;
   activityDetail?: string | null;
   idleSeconds: number;

@@ -98,6 +98,11 @@ test('orchestrator ledger parsing keeps only what DOCK shows', () => {
   assert.strictEqual(parsed.prBe, 'https://github.com/example/be/pull/1');
   assert.strictEqual(parsed.prFe, null, 'non-HTTP PR links are dropped');
   assert.strictEqual(parsed.updatedAt, '2026-10-04T08:15:33.256Z');
+  assert.strictEqual(parsed.brief, null);
+  assert.deepStrictEqual(parsed.decisions, []);
+  const withBrief = parseLedger({ ...ledger, brief: 'line 1\nline 2', decisions: [{ at: '2026-10-04T08:00:00.000Z', text: 'use X' }, 'bad', { at: 'x' }, null] });
+  assert.strictEqual(withBrief.brief, 'line 1\nline 2');
+  assert.deepStrictEqual(withBrief.decisions, [{ at: '2026-10-04T08:00:00.000Z', text: 'use X' }]);
   assert.ok(!('dirs' in parsed) && !('ports' in parsed), 'local paths and ports stay on the laptop');
 
   assert.throws(() => parseLedger({ ...ledger, key: '../etc' }), OrchestratorInputError);
