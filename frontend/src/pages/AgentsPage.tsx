@@ -24,7 +24,7 @@ type TableTab = 'active' | 'archive';
 const POLL_MS = 5000;
 const PAGE_SIZE = 10;
 const OFFICE_VIEW_KEY = 'dock-agents-office-view';
-const OFFICE_VIEWS = [['overview', 'Overview'], ['lead', 'Lead'], ['owner', 'Me']] as const;
+const OFFICE_VIEWS = [['overview', 'Overview'], ['lead', 'Lead'], ['owner', 'Me'], ['lounge', 'Lounge']] as const;
 const TABLE_COLUMNS: Array<[RunSortColumn, string]> = [
   ['ticket', 'Ticket'], ['stage', 'Stage'], ['status', 'Status'], ['ac', 'AC'], ['waiting', 'Waiting on you'], ['activity', 'Last activity'],
 ];
