@@ -400,6 +400,27 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                 </dl>
               )}
 
+              {selected.brief && (
+                <div>
+                  <p className={cn(sectionLabel, 'mb-1')}>Brief</p>
+                  <p className="whitespace-pre-wrap break-words text-[0.82rem]">{selected.brief}</p>
+                </div>
+              )}
+
+              {!!selected.decisions?.length && (
+                <div>
+                  <p className={cn(sectionLabel, 'mb-1')}>Decisions</p>
+                  <ol className="flex flex-col">
+                    {[...selected.decisions].reverse().map((decision, index) => (
+                      <li className="grid grid-cols-[1fr_auto] gap-2 border-b border-border py-1.5 text-[0.78rem] last:border-b-0" key={`${decision.at}-${index}`}>
+                        <span className="min-w-0 break-words">{decision.text}</span>
+                        <time className="font-mono text-[0.68rem] text-muted-foreground tabular-nums" dateTime={decision.at}>{new Date(decision.at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</time>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+
               {events.length > 0 && (
                 <div>
                   <p className={cn(sectionLabel, 'mb-1')}>Recent events</p>

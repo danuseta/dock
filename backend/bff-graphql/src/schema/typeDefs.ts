@@ -240,6 +240,11 @@ export const typeDefs = gql`
     checks: String
   }
 
+  type OrchestrationDecision {
+    at: String!
+    text: String!
+  }
+
   type Orchestration {
     key: ID!
     kind: String!
@@ -260,6 +265,8 @@ export const typeDefs = gql`
     reviewSignal: String
     finished: Boolean!
     note: String
+    brief: String
+    decisions: [OrchestrationDecision!]!
     activity: String!
     activityDetail: String
     idleSeconds: Int!

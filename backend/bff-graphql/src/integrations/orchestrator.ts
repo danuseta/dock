@@ -27,6 +27,7 @@ export const STALE_IDLE_MS = 30 * 60 * 1000;
 
 const TICKET_KEY = /^[A-Z][A-Z0-9_]{0,31}-[1-9]\d{0,9}$/;
 const MAX_AC = 50;
+const MAX_DECISIONS = 100;
 const MAX_EVENTS_KEPT = 60;
 const EVENTS_RETURNED = 20;
 const MAX_TOOL_EVENTS_KEPT = 300;
@@ -42,6 +43,7 @@ const TRANSCRIPT_PATH = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+){0,3}$/;
 export class OrchestratorInputError extends Error {}
 
 export interface LedgerAc { n: number; state: AcState; text: string; evidence: string | null }
+export interface LedgerDecision { at: string; text: string }
 export const RUN_KINDS = ['build', 'review'] as const;
 export type RunKind = typeof RUN_KINDS[number];
 
@@ -58,6 +60,8 @@ export interface Ledger {
   prBe: string | null;
   prFe: string | null;
   note: string | null;
+  brief: string | null;
+  decisions: LedgerDecision[];
   updatedAt: string;
 }
 
@@ -116,6 +120,12 @@ export function parseLedger(input: unknown, now = new Date()): Ledger {
     };
   });
 
+  const decisions = (Array.isArray(input.decisions) ? input.decisions : [])
+    .filter(isRecord)
+    .map((item): LedgerDecision => ({ at: text(item.at, 40), text: text(item.text, 1000) }))
+    .filter((item) => item.text)
+    .slice(-MAX_DECISIONS);
+
   const tests = isRecord(input.tests) ? input.tests : {};
   const pr = isRecord(input.pr) ? input.pr : {};
   const updatedAt = new Date(text(input.updatedAt, 40));
@@ -133,6 +143,8 @@ export function parseLedger(input: unknown, now = new Date()): Ledger {
     prBe: httpUrl(pr.be),
     prFe: httpUrl(pr.fe),
     note: optionalText(input.note, 500),
+    brief: optionalText(input.brief, 20000),
+    decisions,
     updatedAt: (Number.isNaN(updatedAt.getTime()) || updatedAt > now ? now : updatedAt).toISOString(),
   };
 }
@@ -340,6 +352,8 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     reviewSignal: review === 'open' ? reviewSignalOf(pullRequests) : null,
     finished: row.stage === 'done' || review === 'merged',
     note: ledger.note ?? null,
+    brief: ledger.brief ?? null,
+    decisions: Array.isArray(ledger.decisions) ? ledger.decisions : [],
     activity,
     activityDetail,
     idleSeconds: Math.floor(idleMs / 1000),
