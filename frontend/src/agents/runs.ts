@@ -39,6 +39,9 @@ export interface AgentRun {
   note?: string | null;
   brief?: string | null;
   decisions?: { at: string; text: string }[];
+  assumptions?: { n: number; text: string; falsifier: string; state: string; evidence?: string | null }[];
+  failures?: { at: string; type: string; what?: string | null; evidence: string; attempt: number }[];
+  closing?: { hours?: number | null; fixRounds: number; replans: number } | null;
   activity: string;
   activityDetail?: string | null;
   idleSeconds: number;

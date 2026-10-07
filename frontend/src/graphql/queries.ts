@@ -499,6 +499,9 @@ const ORCHESTRATION_FIELDS = `
   note
   brief
   decisions { at text }
+  assumptions { n text falsifier state evidence }
+  failures { at type what evidence attempt }
+  closing { hours fixRounds replans }
   activity
   activityDetail
   idleSeconds

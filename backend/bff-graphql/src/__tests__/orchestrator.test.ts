@@ -103,6 +103,21 @@ test('orchestrator ledger parsing keeps only what DOCK shows', () => {
   const withBrief = parseLedger({ ...ledger, brief: 'line 1\nline 2', decisions: [{ at: '2026-10-04T08:00:00.000Z', text: 'use X' }, 'bad', { at: 'x' }, null] });
   assert.strictEqual(withBrief.brief, 'line 1\nline 2');
   assert.deepStrictEqual(withBrief.decisions, [{ at: '2026-10-04T08:00:00.000Z', text: 'use X' }]);
+  assert.deepStrictEqual(parsed.assumptions, []);
+  assert.deepStrictEqual(parsed.failures, []);
+  assert.strictEqual(parsed.closing, null);
+  const withRisk = parseLedger({
+    ...ledger,
+    assumptions: [{ n: 1, text: 'BE returns hold', falsifier: 'the room has no such field', state: 'refuted', evidence: 'curl output' }, { text: 'no state' }, { falsifier: 'no text' }, 'bad'],
+    failures: [{ at: '2026-10-04T08:00:00.000Z', type: 'transient', what: 'be tests', evidence: 'ETIMEDOUT', attempt: 2 }, { type: 'unknown', evidence: 'x' }, null],
+    closing: { hours: 6.5, fixRounds: 2, replans: 1, failures: { transient: 2 } },
+  });
+  assert.deepStrictEqual(withRisk.assumptions, [
+    { n: 1, text: 'BE returns hold', falsifier: 'the room has no such field', state: 'refuted', evidence: 'curl output' },
+    { n: 2, text: 'no state', falsifier: '', state: 'open', evidence: null },
+  ]);
+  assert.deepStrictEqual(withRisk.failures, [{ at: '2026-10-04T08:00:00.000Z', type: 'transient', what: 'be tests', evidence: 'ETIMEDOUT', attempt: 2 }]);
+  assert.deepStrictEqual(withRisk.closing, { hours: 6.5, fixRounds: 2, replans: 1 });
   assert.ok(!('dirs' in parsed) && !('ports' in parsed), 'local paths and ports stay on the laptop');
 
   assert.throws(() => parseLedger({ ...ledger, key: '../etc' }), OrchestratorInputError);
