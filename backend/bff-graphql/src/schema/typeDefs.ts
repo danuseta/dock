@@ -245,6 +245,28 @@ export const typeDefs = gql`
     text: String!
   }
 
+  type OrchestrationAssumption {
+    n: Int!
+    text: String!
+    falsifier: String!
+    state: String!
+    evidence: String
+  }
+
+  type OrchestrationFailure {
+    at: String!
+    type: String!
+    what: String
+    evidence: String!
+    attempt: Int!
+  }
+
+  type OrchestrationClosing {
+    hours: Float
+    fixRounds: Int!
+    replans: Int!
+  }
+
   type Orchestration {
     key: ID!
     kind: String!
@@ -267,6 +289,9 @@ export const typeDefs = gql`
     note: String
     brief: String
     decisions: [OrchestrationDecision!]!
+    assumptions: [OrchestrationAssumption!]!
+    failures: [OrchestrationFailure!]!
+    closing: OrchestrationClosing
     activity: String!
     activityDetail: String
     idleSeconds: Int!

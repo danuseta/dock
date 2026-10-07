@@ -28,6 +28,8 @@ export const STALE_IDLE_MS = 30 * 60 * 1000;
 const TICKET_KEY = /^[A-Z][A-Z0-9_]{0,31}-[1-9]\d{0,9}$/;
 const MAX_AC = 50;
 const MAX_DECISIONS = 100;
+const MAX_ASSUMPTIONS = 50;
+const MAX_FAILURES = 100;
 const MAX_EVENTS_KEPT = 60;
 const EVENTS_RETURNED = 20;
 const MAX_TOOL_EVENTS_KEPT = 300;
@@ -44,6 +46,13 @@ export class OrchestratorInputError extends Error {}
 
 export interface LedgerAc { n: number; state: AcState; text: string; evidence: string | null }
 export interface LedgerDecision { at: string; text: string }
+export const ASSUMPTION_STATES = ['open', 'confirmed', 'refuted'] as const;
+export type AssumptionState = typeof ASSUMPTION_STATES[number];
+export interface LedgerAssumption { n: number; text: string; falsifier: string; state: AssumptionState; evidence: string | null }
+export const FAILURE_TYPES = ['transient', 'defect', 'spec', 'env', 'permission'] as const;
+export type FailureType = typeof FAILURE_TYPES[number];
+export interface LedgerFailure { at: string; type: FailureType; what: string | null; evidence: string; attempt: number }
+export interface LedgerClosing { hours: number | null; fixRounds: number; replans: number }
 export const RUN_KINDS = ['build', 'review'] as const;
 export type RunKind = typeof RUN_KINDS[number];
 
@@ -62,6 +71,9 @@ export interface Ledger {
   note: string | null;
   brief: string | null;
   decisions: LedgerDecision[];
+  assumptions: LedgerAssumption[];
+  failures: LedgerFailure[];
+  closing: LedgerClosing | null;
   updatedAt: string;
 }
 
@@ -126,6 +138,42 @@ export function parseLedger(input: unknown, now = new Date()): Ledger {
     .filter((item) => item.text)
     .slice(-MAX_DECISIONS);
 
+  const assumptions = (Array.isArray(input.assumptions) ? input.assumptions : [])
+    .filter(isRecord)
+    .map((item, index): LedgerAssumption => {
+      const state = text(item.state, 12) as AssumptionState;
+      return {
+        n: Number.isInteger(item.n) && Number(item.n) > 0 ? Number(item.n) : index + 1,
+        text: text(item.text, 500),
+        falsifier: text(item.falsifier, 500),
+        state: ASSUMPTION_STATES.includes(state) ? state : 'open',
+        evidence: optionalText(item.evidence, 500),
+      };
+    })
+    .filter((item) => item.text)
+    .slice(-MAX_ASSUMPTIONS);
+
+  const failures = (Array.isArray(input.failures) ? input.failures : [])
+    .filter(isRecord)
+    .map((item): LedgerFailure => ({
+      at: text(item.at, 40),
+      type: text(item.type, 12) as FailureType,
+      what: optionalText(item.what, 200),
+      evidence: text(item.evidence, 500),
+      attempt: Number.isInteger(item.attempt) && Number(item.attempt) > 0 ? Number(item.attempt) : 1,
+    }))
+    .filter((item) => FAILURE_TYPES.includes(item.type))
+    .slice(-MAX_FAILURES);
+
+  const count = (value: unknown): number => (Number.isInteger(value) && Number(value) > 0 ? Number(value) : 0);
+  const closing: LedgerClosing | null = isRecord(input.closing)
+    ? {
+      hours: typeof input.closing.hours === 'number' && Number.isFinite(input.closing.hours) && input.closing.hours >= 0 ? input.closing.hours : null,
+      fixRounds: count(input.closing.fixRounds),
+      replans: count(input.closing.replans),
+    }
+    : null;
+
   const tests = isRecord(input.tests) ? input.tests : {};
   const pr = isRecord(input.pr) ? input.pr : {};
   const updatedAt = new Date(text(input.updatedAt, 40));
@@ -145,6 +193,9 @@ export function parseLedger(input: unknown, now = new Date()): Ledger {
     note: optionalText(input.note, 500),
     brief: optionalText(input.brief, 20000),
     decisions,
+    assumptions,
+    failures,
+    closing,
     updatedAt: (Number.isNaN(updatedAt.getTime()) || updatedAt > now ? now : updatedAt).toISOString(),
   };
 }
@@ -354,6 +405,9 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     note: ledger.note ?? null,
     brief: ledger.brief ?? null,
     decisions: Array.isArray(ledger.decisions) ? ledger.decisions : [],
+    assumptions: Array.isArray(ledger.assumptions) ? ledger.assumptions : [],
+    failures: Array.isArray(ledger.failures) ? ledger.failures : [],
+    closing: ledger.closing ?? null,
     activity,
     activityDetail,
     idleSeconds: Math.floor(idleMs / 1000),

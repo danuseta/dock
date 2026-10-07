@@ -421,6 +421,45 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                 </div>
               )}
 
+              {!!selected.assumptions?.length && (
+                <div>
+                  <p className={cn(sectionLabel, 'mb-1')}>Assumptions</p>
+                  <ol className="flex flex-col">
+                    {selected.assumptions.map((assumption) => (
+                      <li className="grid grid-cols-[1fr_auto] gap-2 border-b border-border py-1.5 text-[0.78rem] last:border-b-0" key={assumption.n}>
+                        <span className="min-w-0 break-words">{assumption.text}<span className="mt-0.5 block text-[0.72rem] text-muted-foreground">Wrong if: {assumption.falsifier}</span>{assumption.evidence && <span className="mt-0.5 block break-all font-mono text-[0.68rem] text-muted-foreground">{assumption.evidence}</span>}</span>
+                        <span className="font-mono text-[0.68rem] text-muted-foreground">{assumption.state}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+
+              {!!selected.failures?.length && (
+                <div>
+                  <p className={cn(sectionLabel, 'mb-1')}>Failures</p>
+                  <ol className="flex flex-col">
+                    {[...selected.failures].reverse().map((failure, index) => (
+                      <li className="grid grid-cols-[1fr_auto] gap-2 border-b border-border py-1.5 text-[0.78rem] last:border-b-0" key={`${failure.at}-${index}`}>
+                        <span className="min-w-0 break-words">{failure.what || failure.type}<span className="mt-0.5 block break-all font-mono text-[0.68rem] text-muted-foreground">{failure.evidence}</span></span>
+                        <span className="font-mono text-[0.68rem] text-muted-foreground tabular-nums">{failure.type} #{failure.attempt}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+
+              {selected.closing && (
+                <div>
+                  <p className={cn(sectionLabel, 'mb-1')}>Closing</p>
+                  <dl className="grid grid-cols-[92px_1fr] gap-x-2.5 gap-y-1 text-[0.82rem]">
+                    <dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Fix rounds</dt><dd className="tabular-nums">{selected.closing.fixRounds}</dd>
+                    <dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Replans</dt><dd className="tabular-nums">{selected.closing.replans}</dd>
+                    {selected.closing.hours != null && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Hours</dt><dd className="tabular-nums">{selected.closing.hours}</dd></>}
+                  </dl>
+                </div>
+              )}
+
               {events.length > 0 && (
                 <div>
                   <p className={cn(sectionLabel, 'mb-1')}>Recent events</p>
