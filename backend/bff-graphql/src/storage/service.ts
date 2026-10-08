@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { prisma } from './client';
 import { decrypt, encrypt, hashPin, verifyPin } from './crypto';
 
@@ -240,6 +240,146 @@ export class StorageService {
 
   revokeIngestToken(id: string) {
     return this.db.ingestToken.updateMany({ where: { id, revokedAt: null }, data: { revokedAt: new Date() } });
+  }
+
+  getChatSessions(source: string | null, take: number) {
+    return this.db.chatSession.findMany({
+      where: source ? { source } : {}, orderBy: [{ lastMessageAt: 'desc' }, { id: 'asc' }], take,
+    });
+  }
+
+  getChatSession(id: string) {
+    return this.db.chatSession.findUnique({ where: { id } });
+  }
+
+  getChatSessionsByIds(ids: string[]) {
+    return this.db.chatSession.findMany({ where: { id: { in: ids } } });
+  }
+
+  getChatSessionsWithTicket(source: string, since: Date) {
+    return this.db.chatSession.findMany({ where: { source, ticketKey: { not: null }, lastMessageAt: { gte: since } } });
+  }
+
+  getStaleChatSessions(before: Date) {
+    return this.db.chatSession.findMany({ where: { status: 'running', lastDeltaAt: { lt: before } }, select: { id: true } });
+  }
+
+  createChatSession(data: {
+    id: string; source: string; title: string; ticketKey: string | null; forkFrom?: string | null;
+    messageCount?: number; startedAt: Date; lastMessageAt: Date;
+  }) {
+    return this.db.chatSession.create({ data });
+  }
+
+  updateChatSession(id: string, data: {
+    title?: string;
+    ticketKey?: string | null;
+    claudeSessionId?: string;
+    status?: string;
+    statusDetail?: string | null;
+    messageCount?: number;
+    startedAt?: Date;
+    lastMessageAt?: Date;
+    lastDeltaAt?: Date;
+  }) {
+    return this.db.chatSession.update({ where: { id }, data });
+  }
+
+  async deleteChatSession(id: string) {
+    const [, sessions] = await this.db.$transaction([
+      this.db.chatMessage.deleteMany({ where: { sessionId: id } }),
+      this.db.chatSession.deleteMany({ where: { id } }),
+    ]);
+    return sessions.count > 0;
+  }
+
+  deleteChatMessages(sessionId: string) {
+    return this.db.chatMessage.deleteMany({ where: { sessionId } });
+  }
+
+  createChatMessage(data: { sessionId: string; role: string; text: string; state: string; at: Date }) {
+    return this.db.chatMessage.create({ data });
+  }
+
+  /** Appends messages, drops the oldest beyond `keep` and returns how many the session has now. */
+  async addChatMessages(sessionId: string, messages: Array<{ role: string; text: string; at: Date }>, keep: number) {
+    if (messages.length > 0) {
+      await this.db.chatMessage.createMany({ data: messages.map((message) => ({ sessionId, ...message })) });
+    }
+    return this.trimChatMessages(sessionId, keep);
+  }
+
+  async trimChatMessages(sessionId: string, keep: number) {
+    const oldestKept = await this.db.chatMessage.findFirst({
+      where: { sessionId }, orderBy: { id: 'desc' }, skip: keep - 1, select: { id: true },
+    });
+    if (oldestKept) {
+      await this.db.chatMessage.deleteMany({ where: { sessionId, id: { lt: oldestKept.id } } });
+    }
+    return this.db.chatMessage.count({ where: { sessionId } });
+  }
+
+  getChatMessage(id: number) {
+    return this.db.chatMessage.findUnique({ where: { id } });
+  }
+
+  /** Ascending id. Without `afterId` the newest `take` (older than `beforeId` when given) are returned. */
+  async getChatMessages(sessionId: string, cursor: { afterId?: number | null; beforeId?: number | null }, take: number) {
+    const id = {
+      ...(cursor.afterId != null ? { gt: cursor.afterId } : {}),
+      ...(cursor.beforeId != null ? { lt: cursor.beforeId } : {}),
+    };
+    if (cursor.afterId != null) {
+      return this.db.chatMessage.findMany({ where: { sessionId, id }, orderBy: { id: 'asc' }, take });
+    }
+    const newest = await this.db.chatMessage.findMany({ where: { sessionId, id }, orderBy: { id: 'desc' }, take });
+    return newest.reverse();
+  }
+
+  countChatMessagesInState(sessionId: string, states: string[]) {
+    return this.db.chatMessage.count({ where: { sessionId, state: { in: states } } });
+  }
+
+  getQueuedChatMessages(take: number) {
+    return this.db.chatMessage.findMany({ where: { state: 'queued', role: 'user' }, orderBy: { id: 'asc' }, take });
+  }
+
+  /** The state check is part of the write, so two bridges cannot take the same message. */
+  async moveChatMessage(id: number, sessionId: string, from: string, to: string) {
+    const moved = await this.db.chatMessage.updateMany({ where: { id, sessionId, state: from }, data: { state: to } });
+    return moved.count === 1;
+  }
+
+  moveChatMessages(sessionId: string, from: string, to: string) {
+    return this.db.chatMessage.updateMany({ where: { sessionId, state: from }, data: { state: to } });
+  }
+
+  getNewestChatMessage(sessionId: string, role: string) {
+    return this.db.chatMessage.findFirst({ where: { sessionId, role }, orderBy: { id: 'desc' } });
+  }
+
+  /** Case-insensitive for ASCII. Prisma's `contains` leaves % and _ as wildcards on sqlite, so the pattern is escaped here. */
+  async searchChatMessages(query: string, take: number) {
+    const pattern = `%${query.replace(/[!%_]/g, '!$&')}%`;
+    const found = await this.db.$queryRaw<Array<{ id: number | bigint }>>(Prisma.sql`
+      SELECT "id" FROM "ChatMessage" WHERE "text" LIKE ${pattern} ESCAPE '!'
+      ORDER BY "at" DESC, "id" DESC LIMIT ${take}`);
+    const ids = found.map((row) => Number(row.id));
+    const rows = await this.db.chatMessage.findMany({ where: { id: { in: ids } } });
+    return rows.sort((first, second) => ids.indexOf(first.id) - ids.indexOf(second.id));
+  }
+
+  /** One query for the whole list: the start of each session's newest user or assistant message. */
+  async getChatLastTexts(sessionIds: string[], length: number) {
+    if (sessionIds.length === 0) return new Map<string, string>();
+    const rows = await this.db.$queryRaw<Array<{ sessionId: string; text: string }>>(Prisma.sql`
+      SELECT "sessionId", substr("text", 1, ${length}) AS "text" FROM "ChatMessage"
+      WHERE "id" IN (
+        SELECT MAX("id") FROM "ChatMessage"
+        WHERE "sessionId" IN (${Prisma.join(sessionIds)}) AND "role" IN ('user', 'assistant')
+        GROUP BY "sessionId"
+      )`);
+    return new Map(rows.map((row) => [row.sessionId, row.text]));
   }
 
   getRepositories() { return this.db.monitoredRepository.findMany(); }

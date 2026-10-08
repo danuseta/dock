@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { OfficeScene } from '../agents/office/OfficeScene';
 import type { AgentRun } from '../agents/runs';
+import type { TicketBalloon } from '../chat/messages';
 import { cn } from '../lib/cn';
 import '../agents/office/office.css';
 
@@ -8,18 +9,23 @@ interface AgentsOfficeProps {
   runs: AgentRun[];
   selectedKey: string | null;
   onSelect: (key: string) => void;
+  balloons?: TicketBalloon[];
+  onBalloon?: (sessionId: string) => void;
   view?: string;
   viewTick?: number;
   className?: string;
 }
 
-const AgentsOffice: React.FC<AgentsOfficeProps> = ({ runs, selectedKey, onSelect, view = 'overview', viewTick = 0, className }) => {
+const AgentsOffice: React.FC<AgentsOfficeProps> = ({ runs, selectedKey, onSelect, balloons, onBalloon, view = 'overview', viewTick = 0, className }) => {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<OfficeScene | null>(null);
   const onSelectRef = useRef(onSelect);
   const [failure, setFailure] = useState('');
 
+  const onBalloonRef = useRef(onBalloon);
+
   useEffect(() => { onSelectRef.current = onSelect; }, [onSelect]);
+  useEffect(() => { onBalloonRef.current = onBalloon; }, [onBalloon]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -28,6 +34,7 @@ const AgentsOffice: React.FC<AgentsOfficeProps> = ({ runs, selectedKey, onSelect
       sceneRef.current = new OfficeScene(host, {
         assetBase: `${import.meta.env.BASE_URL}office`,
         onSelect: (key) => onSelectRef.current(key),
+        onBalloon: (sessionId) => onBalloonRef.current?.(sessionId),
       });
     } catch (error) {
       setFailure(error instanceof Error ? error.message : 'WebGL is unavailable');
@@ -39,6 +46,7 @@ const AgentsOffice: React.FC<AgentsOfficeProps> = ({ runs, selectedKey, onSelect
   }, []);
 
   useEffect(() => { sceneRef.current?.setRuns(runs); }, [runs]);
+  useEffect(() => { sceneRef.current?.setBalloons(balloons || []); }, [balloons]);
   useEffect(() => { sceneRef.current?.setSelected(selectedKey); }, [selectedKey]);
   useEffect(() => { sceneRef.current?.setView(view); }, [view, viewTick]);
 

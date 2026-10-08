@@ -1,0 +1,222 @@
+import React, { useEffect, useState } from 'react';
+import { useMutation, useQuery } from '@apollo/client';
+import { ArrowLeft, MessagesSquare, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { CREATE_CHAT_SESSION, DELETE_CHAT_SESSION, RENAME_CHAT_SESSION } from '../graphql/mutations';
+import { GET_CHAT_SESSIONS, SEARCH_CHAT } from '../graphql/queries';
+import { LoadingSkeleton } from '../components/LoadingSkeleton';
+import { Button, Card, Dialog, Input, Page, PageHeader } from '../components/ui';
+import { cn } from '../lib/cn';
+import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
+import { ChatThread } from '../chat/ChatThread';
+import { SLOW_POLL_MS, relativeTime, type ChatSession } from '../chat/messages';
+import { chatStore } from '../chat/store';
+
+interface SearchHit { session: ChatSession; messageId: number; snippet: string; at: string }
+
+const sectionLabel = 'font-mono text-[0.66rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
+const chip = 'inline-flex flex-none items-center rounded-xs border px-1.5 py-px font-mono text-[0.62rem] font-bold';
+const SEARCH_MIN = 2;
+const TITLE_MAX = 120;
+
+const titleOf = (session: ChatSession) => session.title || session.ticketKey || 'Untitled session';
+const errorText = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
+
+const SourceChip: React.FC<{ source: string }> = ({ source }) => (
+  <span className={cn(chip, source === 'dock' ? 'border-accent/30 bg-accent-dim text-accent' : 'border-border-glow text-secondary-foreground')}>{source === 'dock' ? 'DOCK' : 'CLI'}</span>
+);
+
+const SessionsPage: React.FC = () => {
+  const { data, loading, error, refetch } = useQuery<{ chatSessions: ChatSession[] }>(GET_CHAT_SESSIONS, { ...CACHED_QUERY_OPTIONS, variables: { limit: 300 }, pollInterval: SLOW_POLL_MS });
+  const [createSession, { loading: creating }] = useMutation<{ createChatSession: ChatSession }>(CREATE_CHAT_SESSION);
+  const [renameSession, { loading: renaming }] = useMutation(RENAME_CHAT_SESSION);
+  const [deleteSession, { loading: deleting }] = useMutation(DELETE_CHAT_SESSION);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [searchText, setSearchText] = useState('');
+  const [query, setQuery] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [titleDraft, setTitleDraft] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ChatSession | null>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setQuery(searchText.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [searchText]);
+
+  const searching = query.length >= SEARCH_MIN;
+  const { data: searchData, loading: searchLoading, error: searchError } = useQuery<{ chatSearch: SearchHit[] }>(SEARCH_CHAT, {
+    variables: { query, limit: 30 },
+    skip: !searching,
+    fetchPolicy: 'network-only',
+  });
+
+  const sessions = data?.chatSessions || [];
+  const hits = searchData?.chatSearch || [];
+  const selected = sessions.find((session) => session.id === selectedId) || hits.find((hit) => hit.session.id === selectedId)?.session || null;
+  const now = Date.now();
+
+  const select = (id: string | null) => {
+    setSelectedId(id);
+    setTitleDraft(null);
+    setActionError('');
+  };
+
+  const create = async (variables: { title?: string; ticketKey?: string | null; forkFrom?: string }) => {
+    setActionError('');
+    try {
+      const result = await createSession({ variables });
+      const created = result.data?.createChatSession;
+      if (!created) throw new Error('DOCK did not return a session');
+      await refetch();
+      select(created.id);
+    } catch (createError) {
+      setActionError(errorText(createError, 'The session could not be created'));
+    }
+  };
+
+  const saveTitle = async () => {
+    const title = (titleDraft || '').trim();
+    if (!selected || !title) return;
+    setActionError('');
+    try {
+      await renameSession({ variables: { id: selected.id, title } });
+      setTitleDraft(null);
+    } catch (renameError) {
+      setActionError(errorText(renameError, 'The session could not be renamed'));
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setActionError('');
+    try {
+      await deleteSession({ variables: { id: deleteTarget.id } });
+      chatStore.closeTab(deleteTarget.id);
+      setDeleteTarget(null);
+      select(null);
+      await refetch();
+    } catch (deleteError) {
+      setActionError(errorText(deleteError, 'The session could not be deleted'));
+    }
+  };
+
+  if (isInitialQueryLoading(loading, data)) return <Page width="full"><LoadingSkeleton /></Page>;
+
+  return (
+    <Page width="full">
+      <PageHeader>
+        <div>
+          <h1 className="text-balance font-display text-3xl font-black">Sessions</h1>
+          <p className="mt-1 text-pretty text-secondary-foreground">Claude Code history from your PC, and the sessions you run from DOCK.</p>
+        </div>
+        <Button size="sm" variant="primary" disabled={creating} onClick={() => void create({})}><Plus size={14} aria-hidden="true" />New session</Button>
+      </PageHeader>
+
+      {error && !data && <Card className="mb-4 border-status-conflict text-status-conflict" role="alert">Sessions failed to load: {error.message}</Card>}
+
+      <div className="grid grid-cols-[360px_minmax(0,1fr)] items-start gap-4 max-[900px]:grid-cols-1">
+        <Card className={cn('flex h-[calc(100dvh-196px)] min-h-[420px] max-[900px]:h-[calc(100dvh-320px)] flex-col bg-surface-0 p-0', selected && 'max-[900px]:hidden')}>
+          <div className="relative flex-none border-b border-border p-3">
+            <Search size={14} className="pointer-events-none absolute top-1/2 left-6 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <Input className="h-9 pl-9 text-[0.82rem]" type="search" value={searchText} placeholder="Search every message..." aria-label="Search messages" onChange={(event) => setSearchText(event.target.value)} />
+          </div>
+          <p className={cn(sectionLabel, 'flex flex-none items-center justify-between px-3.5 pt-3 pb-1.5')}>
+            <span>{searching ? `Results for "${query}"` : 'Sessions'}</span>
+            <span className="tabular-nums">{searching ? hits.length : sessions.length}</span>
+          </p>
+          <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+            {searching ? (
+              <>
+                {searchError && <p className="px-1.5 py-2 text-pretty text-xs text-status-conflict" role="alert">The search failed: {searchError.message}</p>}
+                {!searchError && searchLoading && hits.length === 0 && <p className="px-1.5 py-6 text-center text-sm text-muted-foreground" role="status">Searching...</p>}
+                {!searchError && !searchLoading && hits.length === 0 && <p className="px-1.5 py-6 text-center text-pretty text-sm text-muted-foreground">No message contains "{query}".</p>}
+                {hits.map((hit) => (
+                  <button key={`${hit.session.id}-${hit.messageId}`} type="button" className={cn('mb-1 block w-full rounded-xs border border-transparent px-2.5 py-2 text-left hover:bg-surface-1', hit.session.id === selectedId && 'border-border-glow bg-surface-1')} onClick={() => select(hit.session.id)}>
+                    <span className="flex items-center gap-1.5"><SourceChip source={hit.session.source} /><span className="min-w-0 truncate font-display text-[0.8rem] font-semibold">{titleOf(hit.session)}</span></span>
+                    <span className="mt-1 line-clamp-2 text-[0.76rem] break-words text-secondary-foreground">{hit.snippet}</span>
+                    <span className="mt-1 block font-mono text-[0.64rem] text-muted-foreground">{relativeTime(hit.at, now)}</span>
+                  </button>
+                ))}
+              </>
+            ) : (
+              <>
+                {searchText.trim().length === 1 && <p className="px-1.5 pb-2 text-xs text-muted-foreground">Type at least {SEARCH_MIN} characters to search.</p>}
+                {sessions.length === 0 && <p className="px-1.5 py-6 text-center text-pretty text-sm text-muted-foreground">No session yet. Start one here, or run <span className="font-mono text-xs">node dock-push.cjs sessions</span> on your PC to bring in the history.</p>}
+                {sessions.map((session) => (
+                  <button key={session.id} type="button" className={cn('mb-1 block w-full rounded-xs border border-transparent px-2.5 py-2 text-left hover:bg-surface-1', session.id === selectedId && 'border-border-glow bg-surface-1')} aria-current={session.id === selectedId ? 'true' : undefined} onClick={() => select(session.id)}>
+                    <span className="flex items-center gap-1.5">
+                      <SourceChip source={session.source} />
+                      <span className="min-w-0 flex-1 truncate font-display text-[0.8rem] font-semibold">{titleOf(session)}</span>
+                      {(session.status === 'queued' || session.status === 'running') && <i className="size-1.5 flex-none animate-pulse rounded-full bg-status-merged" title="Working" aria-hidden="true" />}
+                      {session.status === 'error' && <i className="size-1.5 flex-none rounded-full bg-status-conflict" title="The last turn failed" aria-hidden="true" />}
+                    </span>
+                    {session.lastText && <span className="mt-1 block truncate text-[0.76rem] text-secondary-foreground">{session.lastText}</span>}
+                    <span className="mt-1 flex items-center gap-2 font-mono text-[0.64rem] text-muted-foreground tabular-nums">
+                      {session.ticketKey && <span className="font-bold text-accent">{session.ticketKey}</span>}
+                      <span>{relativeTime(session.lastMessageAt, now)}</span>
+                      <span className="ml-auto">{session.messageCount} {session.messageCount === 1 ? 'message' : 'messages'}</span>
+                    </span>
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
+        </Card>
+
+        <Card className={cn('flex h-[calc(100dvh-196px)] min-h-[420px] max-[900px]:h-[calc(100dvh-320px)] flex-col bg-surface-0 p-0', !selected && 'max-[900px]:hidden')}>
+          {!selected ? (
+            <div className="grid flex-1 place-items-center p-6 text-center">
+              <div>
+                <MessagesSquare size={28} className="mx-auto mb-2 text-muted-foreground" aria-hidden="true" />
+                <p className="text-pretty text-sm text-muted-foreground">Select a session to read it.</p>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-none flex-wrap items-center gap-2 border-b border-border px-3.5 py-2.5">
+                <Button size="sm" variant="ghost" className="hidden h-7 px-2 max-[900px]:inline-flex" aria-label="Back to the session list" onClick={() => select(null)}><ArrowLeft size={14} aria-hidden="true" /></Button>
+                <SourceChip source={selected.source} />
+                {selected.source === 'cli' && <span className={cn(chip, 'border-border text-muted-foreground')}>READ-ONLY</span>}
+                {selected.ticketKey && <span className={cn(chip, 'border-accent/30 bg-accent-dim text-accent')}>{selected.ticketKey}</span>}
+                {titleDraft === null ? (
+                  <h2 className="min-w-0 flex-1 truncate font-display text-[0.95rem] font-bold" title={titleOf(selected)}>{titleOf(selected)}</h2>
+                ) : (
+                  <form className="flex min-w-0 flex-1 items-center gap-1.5" onSubmit={(event) => { event.preventDefault(); void saveTitle(); }}>
+                    <Input className="h-8 min-w-0 flex-1 px-2.5 text-[0.82rem]" value={titleDraft} maxLength={TITLE_MAX} aria-label="Session title" autoFocus onChange={(event) => setTitleDraft(event.target.value)} />
+                    <Button size="sm" type="submit" variant="primary" disabled={renaming || !titleDraft.trim()}>Save</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setTitleDraft(null)}>Cancel</Button>
+                  </form>
+                )}
+                {titleDraft === null && (
+                  <div className="flex flex-none items-center gap-1">
+                    {selected.source === 'dock' && <Button size="sm" className="h-7" onClick={() => chatStore.openSession(selected.id)}>Open in chat</Button>}
+                    <Button size="sm" variant="ghost" className="h-7 px-2" aria-label="Rename session" title="Rename" onClick={() => setTitleDraft(selected.title)}><Pencil size={13} aria-hidden="true" /></Button>
+                    <Button size="sm" variant="ghost" className="h-7 px-2" aria-label="Delete session" title="Delete" onClick={() => { setActionError(''); setDeleteTarget(selected); }}><Trash2 size={13} aria-hidden="true" /></Button>
+                  </div>
+                )}
+              </div>
+              {actionError && !deleteTarget && <p className="flex-none border-b border-border px-3.5 py-1.5 text-pretty text-xs break-words text-status-conflict" role="alert">{actionError}</p>}
+              <ChatThread
+                key={selected.id}
+                sessionId={selected.id}
+                className="min-h-0 flex-1"
+                readOnlyAction={<Button size="sm" variant="primary" disabled={creating} onClick={() => void create({ forkFrom: selected.id, title: selected.title || undefined, ticketKey: selected.ticketKey })}>Continue as a DOCK session</Button>}
+              />
+            </>
+          )}
+        </Card>
+      </div>
+      {actionError && !selected && <p className="mt-3 text-pretty text-sm text-status-conflict" role="alert">{actionError}</p>}
+
+      <Dialog open={Boolean(deleteTarget)} onClose={() => !deleting && setDeleteTarget(null)} dismissible={!deleting} labelledBy="delete-session-title" describedBy="delete-session-description">
+        <Card className="w-[min(440px,calc(100vw-2rem))] shadow-card">
+          <h2 id="delete-session-title" className="text-balance font-display text-xl font-bold">Delete this session?</h2>
+          <p id="delete-session-description" className="mt-2 text-pretty text-sm text-muted-foreground">{deleteTarget ? titleOf(deleteTarget) : ''} and its messages are removed from DOCK. {deleteTarget?.source === 'cli' ? 'The session on your PC is not touched.' : 'This cannot be undone.'}</p>
+          {actionError && <p className="mt-3 text-pretty text-sm text-status-conflict" role="alert">{actionError}</p>}
+          <div className="mt-6 flex justify-end gap-2"><Button onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button><Button variant="danger" onClick={handleDelete} disabled={deleting}>{deleting ? 'Deleting...' : 'Delete session'}</Button></div>
+        </Card>
+      </Dialog>
+    </Page>
+  );
+};
+
+export default SessionsPage;

@@ -1,4 +1,5 @@
 import { gql } from '@apollo/client';
+import { CHAT_MESSAGE_FIELDS, CHAT_SESSION_FIELDS } from './queries';
 
 export const SAVE_DEMO_LINK = gql`
   mutation SaveDemoLink($ticketKey: String!, $url: String!) {
@@ -195,5 +196,35 @@ export const REVOKE_INGEST_TOKEN = gql`
 export const DISMISS_ORCHESTRATION = gql`
   mutation DismissOrchestration($key: String!) {
     dismissOrchestration(key: $key)
+  }
+`;
+
+export const CREATE_CHAT_SESSION = gql`
+  mutation CreateChatSession($title: String, $ticketKey: String, $forkFrom: ID) {
+    createChatSession(title: $title, ticketKey: $ticketKey, forkFrom: $forkFrom) {
+      ${CHAT_SESSION_FIELDS}
+    }
+  }
+`;
+
+export const SEND_CHAT_MESSAGE = gql`
+  mutation SendChatMessage($sessionId: ID!, $text: String!) {
+    sendChatMessage(sessionId: $sessionId, text: $text) {
+      ${CHAT_MESSAGE_FIELDS}
+    }
+  }
+`;
+
+export const RENAME_CHAT_SESSION = gql`
+  mutation RenameChatSession($id: ID!, $title: String!) {
+    renameChatSession(id: $id, title: $title) {
+      ${CHAT_SESSION_FIELDS}
+    }
+  }
+`;
+
+export const DELETE_CHAT_SESSION = gql`
+  mutation DeleteChatSession($id: ID!) {
+    deleteChatSession(id: $id)
   }
 `;
