@@ -317,6 +317,41 @@ export const typeDefs = gql`
     record: IngestToken!
   }
 
+  type ChatSession {
+    id: ID!
+    source: String!
+    title: String!
+    ticketKey: String
+    forkFrom: String
+    status: String!
+    statusDetail: String
+    messageCount: Int!
+    startedAt: String!
+    lastMessageAt: String!
+    lastText: String
+  }
+
+  type ChatMessage {
+    id: Int!
+    sessionId: ID!
+    role: String!
+    text: String!
+    state: String!
+    at: String!
+  }
+
+  type ChatBridge {
+    online: Boolean!
+    lastSeenAt: String
+  }
+
+  type ChatSearchHit {
+    session: ChatSession!
+    messageId: Int!
+    snippet: String!
+    at: String!
+  }
+
   type GitHubRepo {
     id: ID!
     name: String!
@@ -377,6 +412,12 @@ export const typeDefs = gql`
     orchestrations: [Orchestration!]!
     orchestration(key: String!): Orchestration
     ingestTokens: [IngestToken!]!
+    chatSessions(source: String, limit: Int): [ChatSession!]!
+    chatSession(id: ID!): ChatSession
+    chatMessages(sessionId: ID!, afterId: Int, beforeId: Int, limit: Int): [ChatMessage!]!
+    chatSearch(query: String!, limit: Int): [ChatSearchHit!]!
+    chatBridge: ChatBridge!
+    chatBalloons: [ChatMessage!]!
   }
 
   type Mutation {
@@ -405,5 +446,9 @@ export const typeDefs = gql`
     createIngestToken(name: String!): IngestTokenSecret!
     revokeIngestToken(id: ID!): Boolean!
     dismissOrchestration(key: String!): Boolean!
+    createChatSession(title: String, ticketKey: String, forkFrom: ID): ChatSession!
+    sendChatMessage(sessionId: ID!, text: String!): ChatMessage!
+    renameChatSession(id: ID!, title: String!): ChatSession!
+    deleteChatSession(id: ID!): Boolean!
   }
 `;

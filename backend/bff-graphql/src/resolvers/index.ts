@@ -8,6 +8,7 @@ import { googleCalendarService } from '../integrations/google-calendar';
 import { upstreamMonitorService } from '../integrations/upstream-monitor';
 import { dockerRuntimeService } from '../integrations/docker-runtime';
 import { OrchestratorInputError, orchestratorService } from '../integrations/orchestrator';
+import { chatService } from '../integrations/chat';
 
 const jiraAPI = new JiraAPI();
 const githubAPI = new GitHubAPI();
@@ -141,6 +142,16 @@ export const resolvers = {
     orchestrations: async () => orchestratorService.list(),
     orchestration: async (_: unknown, { key }: { key: string }) => orchestratorService.get(key),
     ingestTokens: async () => orchestratorService.tokens(),
+    chatSessions: async (_: unknown, { source, limit }: { source?: string; limit?: number }) => {
+      return chatService.sessions(source, limit).catch(orchestratorInputError);
+    },
+    chatSession: async (_: unknown, { id }: { id: string }) => chatService.session(id),
+    chatMessages: async (_: unknown, args: { sessionId: string; afterId?: number; beforeId?: number; limit?: number }) => {
+      return chatService.messages(args.sessionId, args.afterId, args.beforeId, args.limit).catch(orchestratorInputError);
+    },
+    chatSearch: async (_: unknown, { query, limit }: { query: string; limit?: number }) => chatService.search(query, limit),
+    chatBridge: async () => chatService.bridge(),
+    chatBalloons: async () => chatService.balloons(),
     dockerContainerLogs: async (_: unknown, { id, tail }: { id: string; tail?: number }) => {
       try {
         return await dockerRuntimeService.logs(id, tail);
@@ -335,12 +346,23 @@ export const resolvers = {
     dismissOrchestration: async (_: unknown, { key }: { key: string }) => {
       return orchestratorService.dismiss(key).catch(orchestratorInputError);
     },
+    createChatSession: async (_: unknown, args: { title?: string; ticketKey?: string; forkFrom?: string }) => {
+      return chatService.createSession(args).catch(orchestratorInputError);
+    },
+    sendChatMessage: async (_: unknown, { sessionId, text }: { sessionId: string; text: string }) => {
+      return chatService.sendMessage(sessionId, text).catch(orchestratorInputError);
+    },
+    renameChatSession: async (_: unknown, { id, title }: { id: string; title: string }) => {
+      return chatService.renameSession(id, title).catch(orchestratorInputError);
+    },
+    deleteChatSession: async (_: unknown, { id }: { id: string }) => chatService.deleteSession(id),
   }
 };
 
 const protectedQueries = [
   'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens',
+  'chatSessions', 'chatSession', 'chatMessages', 'chatSearch', 'chatBridge', 'chatBalloons',
 ] as const;
 const protectedMutations = [
   'saveDemoLink',
@@ -365,6 +387,10 @@ const protectedMutations = [
   'createIngestToken',
   'revokeIngestToken',
   'dismissOrchestration',
+  'createChatSession',
+  'sendChatMessage',
+  'renameChatSession',
+  'deleteChatSession',
 ] as const;
 
 for (const field of protectedQueries) {

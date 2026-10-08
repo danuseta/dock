@@ -21,7 +21,11 @@ import {
 export interface OfficeSceneOptions {
   assetBase: string;
   onSelect: (key: string) => void;
+  onBalloon?: (sessionId: string) => void;
 }
+
+/** The newest short chat line of a ticket, shown above its character. */
+export interface OfficeBalloon { key: string; sessionId: string; text: string }
 
 interface Member { info: TimelineAgent; character: Character; desk: number }
 
@@ -78,6 +82,7 @@ export class OfficeScene {
   private readonly resizeObserver: ResizeObserver;
   private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   private readonly corner = new THREE.Vector3();
+  private balloons = new Map<string, OfficeBalloon>();
   private selected: string | null = null;
   private view = 'overview';
   private viewPending = false;
@@ -214,6 +219,10 @@ export class OfficeScene {
         title: `${occupant.run.key} · ${occupant.run.acPassed}/${occupant.run.acTotal}`,
         status: occupant.run.waiting ? 'review' as const : hasTrouble(occupant.run) ? 'blocked' as const : 'running' as const,
       })));
+  }
+
+  setBalloons(balloons: OfficeBalloon[]): void {
+    this.balloons = new Map(balloons.map((balloon) => [balloon.key, balloon]));
   }
 
   setSelected(key: string | null): void {
@@ -560,6 +569,13 @@ export class OfficeScene {
     return `${emote}<button type="button" class="dock-agent-tag${standing ? ' dock-agent-tag-compact' : ''}" data-key="${escapeHtml(run.key)}" title="${escapeHtml(run.key)}"><i style="background:${stageColor(run.stage)}"></i>${label}</button>`;
   }
 
+  // The balloon lives inside the character's own label, so it follows the same projection and hides with it.
+  private balloonTag(key: string): string {
+    const balloon = this.balloons.get(key);
+    if (!balloon || !balloon.text) return '';
+    return `<button type="button" class="dock-agent-balloon" data-session="${escapeHtml(balloon.sessionId)}" title="Open this chat">${escapeHtml(balloon.text)}</button>`;
+  }
+
   private memberTag(key: string, info: TimelineAgent): string {
     const active = info.state === 'active';
     const title = `${info.name}${info.detail ? ` — ${info.detail}` : ''}${active ? (info.tool ? ` · ${info.tool}` : '') : ' · done'}`;
@@ -613,7 +629,7 @@ export class OfficeScene {
       const gone = done && !walking && now - (character.arrivedAt ?? now) >= DONE_LINGER_SECONDS;
       character.group.visible = !gone;
       character.tag.element.style.display = gone ? 'none' : '';
-      this.setTag(character, this.coordinatorTag(occupant, walking || (seated && working > 0) ? null : pose));
+      this.setTag(character, (done ? '' : this.balloonTag(run.key)) + this.coordinatorTag(occupant, walking || (seated && working > 0) ? null : pose));
       const isSelected = run.key === this.selected;
       character.tag.element.classList.toggle('is-selected', isSelected);
       character.ring.visible = isSelected;
@@ -686,7 +702,13 @@ export class OfficeScene {
   };
 
   private readonly handleLabelClick = (event: MouseEvent): void => {
-    const key = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-key]')?.dataset.key;
+    const target = event.target as HTMLElement | null;
+    const sessionId = target?.closest<HTMLElement>('[data-session]')?.dataset.session;
+    if (sessionId) {
+      this.options.onBalloon?.(sessionId);
+      return;
+    }
+    const key = target?.closest<HTMLElement>('[data-key]')?.dataset.key;
     if (key) this.options.onSelect(key);
   };
 }

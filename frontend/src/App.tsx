@@ -12,6 +12,7 @@ import HomePage from './pages/HomePage';
 import CalendarPage from './pages/CalendarPage';
 import MonitoringPage from './pages/MonitoringPage';
 import DockerServicesPage from './pages/DockerServicesPage';
+import SessionsPage from './pages/SessionsPage';
 import { PinLockModal } from './components/PinLockModal';
 import { LoadingSkeleton } from './components/LoadingSkeleton';
 import { Button, Page } from './components/ui';
@@ -28,7 +29,7 @@ function App() {
       const key = decodeURIComponent(path.split('/').pop() || '');
       return { path: '/ticket', key: key || null };
     }
-    if (path === '/dashboard' || path === '/agents' || path === '/calendar' || path === '/monitoring' || path === '/docker' || path === '/attention' || path === '/settings') {
+    if (path === '/dashboard' || path === '/agents' || path === '/sessions' || path === '/calendar' || path === '/monitoring' || path === '/docker' || path === '/attention' || path === '/settings') {
       return { path, key: null };
     }
     return { path: '/', key: null };
@@ -80,6 +81,7 @@ function App() {
       case '/': return <HomePage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;
       case '/dashboard': return <DashboardPage onTicketClick={navigateToTicket} />;
       case '/agents': return <Suspense fallback={<Page width="full"><LoadingSkeleton /></Page>}><AgentsPage onTicketClick={navigateToTicket} onNavigate={handleNavigate} /></Suspense>;
+      case '/sessions': return <SessionsPage />;
       case '/calendar': return <CalendarPage onNavigate={handleNavigate} />;
       case '/monitoring': return <MonitoringPage onNavigate={handleNavigate} />;
       case '/docker': return <DockerServicesPage />;

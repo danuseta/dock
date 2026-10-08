@@ -1,7 +1,7 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowDown, ArrowUp, Bot, Building2, ChevronLeft, ChevronRight, ExternalLink, EyeOff, GitPullRequest, Hand, Moon, Play, Square, Table2, X } from 'lucide-react';
-import { GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
+import { ArrowDown, ArrowUp, Bot, Building2, ChevronLeft, ChevronRight, ExternalLink, EyeOff, GitPullRequest, Hand, MessagesSquare, Moon, Play, Square, Table2, X } from 'lucide-react';
+import { GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
 import { DISMISS_ORCHESTRATION } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Badge, Button, Card, Dialog, Page, PageHeader } from '../components/ui';
@@ -12,6 +12,9 @@ import { formatAge, hasTrouble, isArchived, pageOf, runStatus, sortRuns, stageCo
 import { RAIL_STAGES, railIndex } from '../agents/office/layout';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 import { AgentFlowGraph } from '../components/AgentFlowGraph';
+import { ticketBalloons, type ChatMessage } from '../chat/messages';
+import { chatStore } from '../chat/store';
+import { useOpenForTicket } from '../chat/useOpenForTicket';
 
 const AgentsOffice = lazy(() => import('../components/AgentsOffice'));
 
@@ -77,6 +80,9 @@ const StatusChip: React.FC<{ status: RunStatus; review?: AgentRun['review'] }> =
 const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) => {
   const { data, loading, error, refetch } = useQuery(GET_ORCHESTRATIONS, { ...CACHED_QUERY_OPTIONS, pollInterval: POLL_MS });
   const [dismissOrchestration, { loading: dismissing }] = useMutation(DISMISS_ORCHESTRATION);
+  const { data: balloonData } = useQuery<{ chatBalloons: ChatMessage[]; chatSessions: Array<{ id: string; ticketKey?: string | null }> }>(GET_CHAT_BALLOONS, { fetchPolicy: 'network-only', pollInterval: POLL_MS });
+  const balloons = useMemo(() => ticketBalloons(balloonData?.chatBalloons || [], balloonData?.chatSessions || []), [balloonData]);
+  const { openForTicket, opening: openingChat, error: chatError } = useOpenForTicket();
   const [view, setView] = useState<View>('office');
   const [flowView, setFlowView] = useState<FlowView>('live');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -234,7 +240,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
             )}
             <div className="relative">
               <Suspense fallback={<div className="grid h-[600px] place-items-center text-sm text-muted-foreground max-[900px]:h-[420px]" role="status">Opening the office...</div>}>
-                <AgentsOffice className="h-[600px] max-[900px]:h-[420px]" runs={runs} selectedKey={selected?.key || null} onSelect={setSelectedKey} view={officeView} viewTick={viewTick} />
+                <AgentsOffice className="h-[600px] max-[900px]:h-[420px]" runs={runs} selectedKey={selected?.key || null} onSelect={setSelectedKey} balloons={sampling ? undefined : balloons} onBalloon={chatStore.openSession} view={officeView} viewTick={viewTick} />
               </Suspense>
               {boardOpen && !empty && (
                 <div className="absolute inset-0 z-10 flex flex-col bg-[rgb(12_12_12/0.96)] p-4" role="dialog" aria-label="Status board">
@@ -350,14 +356,17 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                 {selected.kind === 'review' && <span className="rounded-xs border border-border-glow px-2 py-0.5 font-mono text-[0.66rem] font-bold text-secondary-foreground">REVIEW</span>}
                 <StageChip stage={selected.stage} kind={selected.kind} />
                 <StatusChip status={statusOf(selected)} review={selected.review} />
+                {!selected.sample && <Button size="sm" className="ml-auto h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key)}><MessagesSquare size={13} aria-hidden="true" />Chat</Button>}
               </div>
+              {chatError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The chat could not be opened: {chatError}</p>}
               <h2 className="text-pretty font-display text-base leading-snug font-bold">{selected.title || 'Untitled'}</h2>
 
               {selected.waiting && (
                 <div className="rounded-[8px] border border-amber-300/50 bg-amber-300/10 px-3 py-2.5 text-sm">
                   <b className="mb-0.5 block font-mono text-[0.66rem] font-bold uppercase tracking-[0.08em] text-amber-200">Waiting on you</b>
                   <span className="text-pretty">{selected.waiting}</span>
-                  <p className="mt-1.5 text-pretty text-xs text-muted-foreground">Answer in the Claude Code session on your laptop. DOCK only shows the gate.</p>
+                  <p className="mt-1.5 text-pretty text-xs text-muted-foreground">Answer here, or in the Claude Code session on your laptop.</p>
+                  {!selected.sample && <Button size="sm" className="mt-2 h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key)}>Reply here</Button>}
                 </div>
               )}
 

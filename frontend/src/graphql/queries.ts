@@ -551,3 +551,88 @@ export const GET_INGEST_TOKENS = gql`
     }
   }
 `;
+
+export const CHAT_SESSION_FIELDS = `
+  id
+  source
+  title
+  ticketKey
+  forkFrom
+  status
+  statusDetail
+  messageCount
+  startedAt
+  lastMessageAt
+  lastText
+`;
+
+export const CHAT_MESSAGE_FIELDS = `
+  id
+  sessionId
+  role
+  text
+  state
+  at
+`;
+
+export const GET_CHAT_SESSIONS = gql`
+  query GetChatSessions($source: String, $limit: Int) {
+    chatSessions(source: $source, limit: $limit) {
+      ${CHAT_SESSION_FIELDS}
+    }
+  }
+`;
+
+export const GET_CHAT_SESSION = gql`
+  query GetChatSession($id: ID!) {
+    chatSession(id: $id) {
+      ${CHAT_SESSION_FIELDS}
+    }
+    chatBridge {
+      online
+      lastSeenAt
+    }
+  }
+`;
+
+export const GET_CHAT_MESSAGES = gql`
+  query GetChatMessages($sessionId: ID!, $afterId: Int, $beforeId: Int, $limit: Int) {
+    chatMessages(sessionId: $sessionId, afterId: $afterId, beforeId: $beforeId, limit: $limit) {
+      ${CHAT_MESSAGE_FIELDS}
+    }
+  }
+`;
+
+export const SEARCH_CHAT = gql`
+  query SearchChat($query: String!, $limit: Int) {
+    chatSearch(query: $query, limit: $limit) {
+      session {
+        ${CHAT_SESSION_FIELDS}
+      }
+      messageId
+      snippet
+      at
+    }
+  }
+`;
+
+export const GET_CHAT_BRIDGE = gql`
+  query GetChatBridge {
+    chatBridge {
+      online
+      lastSeenAt
+    }
+  }
+`;
+
+export const GET_CHAT_BALLOONS = gql`
+  query GetChatBalloons {
+    chatBalloons {
+      ${CHAT_MESSAGE_FIELDS}
+    }
+    chatSessions(source: "dock", limit: 300) {
+      id
+      ticketKey
+    }
+  }
+`;

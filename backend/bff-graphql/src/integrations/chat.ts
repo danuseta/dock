@@ -1,0 +1,410 @@
+import { randomUUID } from 'node:crypto';
+import { StorageService } from '../storage/service';
+import { OrchestratorInputError, normalizeTicketKey } from './orchestrator';
+
+export const CHAT_SOURCES = ['cli', 'dock'] as const;
+export type ChatSource = typeof CHAT_SOURCES[number];
+export const CHAT_ROLES = ['user', 'assistant', 'tool'] as const;
+export type ChatRole = typeof CHAT_ROLES[number];
+
+export const MAX_MESSAGE_CHARS = 16000;
+export const CUT_SUFFIX = ' …[cut]';
+export const MAX_MESSAGES_KEPT = 5000;
+export const MAX_TITLE_CHARS = 120;
+export const MAX_SYNC_MESSAGES = 500;
+export const MAX_SEND_CHARS = 8000;
+export const MAX_CLAIM_WAIT_SECONDS = 25;
+export const CLAIM_POLL_MS = 500;
+export const STALE_TAKEN_MS = 15 * 60 * 1000;
+export const STALE_TEXT = 'The laptop bridge stopped answering';
+export const BRIDGE_ONLINE_MS = 60 * 1000;
+export const BALLOON_MAX_AGE_MS = 30 * 60 * 1000;
+const MAX_DELTA_ITEMS = 200;
+const MAX_DETAIL_CHARS = 200;
+const MAX_ERROR_CHARS = 500;
+const MAX_QUERY_CHARS = 200;
+const MIN_QUERY_CHARS = 2;
+const LAST_TEXT_CHARS = 160;
+const SNIPPET_SIDE_CHARS = 60;
+const CLAIM_CANDIDATES = 20;
+const SESSIONS_LIMIT = { fallback: 100, max: 300 };
+const MESSAGES_LIMIT = { fallback: 200, max: 500 };
+const SEARCH_LIMIT = { fallback: 30, max: 100 };
+
+const CHAT_ID = /^[A-Za-z0-9-]{1,64}$/;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+);
+
+function text(value: unknown, max: number): string {
+  return typeof value === 'string' ? value.trim().slice(0, max) : '';
+}
+
+function chatId(value: unknown, name: string): string {
+  if (typeof value !== 'string' || !CHAT_ID.test(value)) throw new OrchestratorInputError(`${name} must be an id of letters, digits and dashes`);
+  return value;
+}
+
+function optionalChatId(value: unknown, name: string): string | null {
+  return value === undefined || value === null ? null : chatId(value, name);
+}
+
+function optionalTicketKey(value: unknown): string | null {
+  return value === undefined || value === null || value === '' ? null : normalizeTicketKey(value);
+}
+
+function isoDate(value: unknown, name: string, now: Date): Date {
+  const date = typeof value === 'string' && ISO_DATE.test(value) ? new Date(value) : new Date(NaN);
+  if (Number.isNaN(date.getTime())) throw new OrchestratorInputError(`${name} must be an ISO date`);
+  return date > now ? now : date;
+}
+
+function flag(value: unknown, name: string): boolean {
+  if (value === undefined || value === null) return false;
+  if (typeof value !== 'boolean') throw new OrchestratorInputError(`${name} must be true or false`);
+  return value;
+}
+
+function limit(value: unknown, { fallback, max }: { fallback: number; max: number }): number {
+  return Number.isInteger(value) && Number(value) > 0 ? Math.min(Number(value), max) : fallback;
+}
+
+function cursor(value: unknown, name: string): number | null {
+  if (value === undefined || value === null) return null;
+  if (!Number.isInteger(value) || Number(value) < 0) throw new OrchestratorInputError(`${name} must be a message id`);
+  return Number(value);
+}
+
+export function cutMessageText(value: string): string {
+  return value.length > MAX_MESSAGE_CHARS ? `${value.slice(0, MAX_MESSAGE_CHARS - CUT_SUFFIX.length)}${CUT_SUFFIX}` : value;
+}
+
+export interface ChatItem { role: ChatRole; text: string; at: Date }
+
+function parseItems(input: unknown, roles: readonly ChatRole[], max: number, now: Date): ChatItem[] {
+  if (input === undefined || input === null) return [];
+  if (!Array.isArray(input)) throw new OrchestratorInputError('Messages must be a list');
+  if (input.length > max) throw new OrchestratorInputError(`A maximum of ${max} messages per request is supported`);
+  return input.map((item): ChatItem => {
+    if (!isRecord(item) || typeof item.text !== 'string') throw new OrchestratorInputError('Each message needs a role, text and time');
+    const role = item.role as ChatRole;
+    if (typeof role !== 'string' || !roles.includes(role)) throw new OrchestratorInputError(`Message role must be one of ${roles.join(', ')}`);
+    return { role, text: cutMessageText(item.text), at: isoDate(item.at, 'Message time', now) };
+  });
+}
+
+export function parseSessionSync(input: unknown, now = new Date()) {
+  if (!isRecord(input) || !isRecord(input.session)) throw new OrchestratorInputError('A session object is required');
+  const { session } = input;
+  return {
+    id: chatId(session.id, 'Session id'),
+    title: text(session.title, MAX_TITLE_CHARS),
+    ticketKey: optionalTicketKey(session.ticketKey),
+    startedAt: isoDate(session.startedAt, 'startedAt', now),
+    lastMessageAt: isoDate(session.lastMessageAt, 'lastMessageAt', now),
+    replace: flag(input.replace, 'replace'),
+    messages: parseItems(input.messages, CHAT_ROLES, MAX_SYNC_MESSAGES, now),
+  };
+}
+
+export function parseClaim(input: unknown): { wait: number } {
+  if (!isRecord(input)) throw new OrchestratorInputError('A claim object is required');
+  const wait = input.wait === undefined || input.wait === null ? 0 : input.wait;
+  if (typeof wait !== 'number' || !Number.isFinite(wait) || wait < 0 || wait > MAX_CLAIM_WAIT_SECONDS) {
+    throw new OrchestratorInputError(`wait must be between 0 and ${MAX_CLAIM_WAIT_SECONDS} seconds`);
+  }
+  return { wait };
+}
+
+export function parseDelta(input: unknown, now = new Date()) {
+  if (!isRecord(input)) throw new OrchestratorInputError('A delta object is required');
+  if (!Number.isInteger(input.replyTo) || Number(input.replyTo) < 1) throw new OrchestratorInputError('replyTo must be a message id');
+  if (input.error !== undefined && input.error !== null && typeof input.error !== 'string') {
+    throw new OrchestratorInputError('error must be text');
+  }
+  if (input.detail !== undefined && input.detail !== null && typeof input.detail !== 'string') {
+    throw new OrchestratorInputError('detail must be text');
+  }
+  return {
+    sessionId: chatId(input.sessionId, 'sessionId'),
+    replyTo: Number(input.replyTo),
+    claudeSessionId: optionalChatId(input.claudeSessionId, 'claudeSessionId'),
+    items: parseItems(input.items, ['assistant', 'tool'], MAX_DELTA_ITEMS, now),
+    detail: text(input.detail, MAX_DETAIL_CHARS) || null,
+    done: flag(input.done, 'done'),
+    error: text(input.error, MAX_ERROR_CHARS) || null,
+  };
+}
+
+/** About 60 characters either side of the first match, on one line. */
+export function searchSnippet(value: string, query: string): string {
+  const found = value.toLowerCase().indexOf(query.toLowerCase());
+  const index = found < 0 ? 0 : found;
+  const start = Math.max(0, index - SNIPPET_SIDE_CHARS);
+  const end = Math.min(value.length, index + query.length + SNIPPET_SIDE_CHARS);
+  return `${start > 0 ? '…' : ''}${value.slice(start, end).replace(/\s+/g, ' ')}${end < value.length ? '…' : ''}`;
+}
+
+interface SessionRow {
+  id: string;
+  source: string;
+  title: string;
+  ticketKey: string | null;
+  forkFrom: string | null;
+  claudeSessionId: string | null;
+  status: string;
+  statusDetail: string | null;
+  messageCount: number;
+  startedAt: Date;
+  lastMessageAt: Date;
+}
+
+interface MessageRow { id: number; sessionId: string; role: string; text: string; state: string; at: Date }
+
+function toSession(row: SessionRow, lastText: string | null) {
+  return {
+    id: row.id,
+    source: row.source,
+    title: row.title,
+    ticketKey: row.ticketKey,
+    forkFrom: row.forkFrom,
+    status: row.status,
+    statusDetail: row.statusDetail,
+    messageCount: row.messageCount,
+    startedAt: row.startedAt.toISOString(),
+    lastMessageAt: row.lastMessageAt.toISOString(),
+    lastText,
+  };
+}
+
+function toMessage(row: MessageRow) {
+  return { id: row.id, sessionId: row.sessionId, role: row.role, text: row.text, state: row.state, at: row.at.toISOString() };
+}
+
+function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    signal?.addEventListener('abort', finish, { once: true });
+  });
+}
+
+export class ChatService {
+  private bridgeSeenAt: Date | null = null;
+
+  constructor(
+    private readonly storage = new StorageService(),
+    private readonly now: () => Date = () => new Date(),
+    private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void> = defaultSleep,
+  ) {}
+
+  private async present(rows: SessionRow[]) {
+    const lastTexts = await this.storage.getChatLastTexts(rows.map((row) => row.id), LAST_TEXT_CHARS);
+    return rows.map((row) => toSession(row, lastTexts.get(row.id) ?? null));
+  }
+
+  /** A turn the bridge took and then went silent on is given up, so the session can be used again. */
+  private async failStale() {
+    const stale = await this.storage.getStaleChatSessions(new Date(this.now().getTime() - STALE_TAKEN_MS));
+    for (const session of stale) {
+      await this.storage.moveChatMessages(session.id, 'taken', 'failed');
+      await this.storage.updateChatSession(session.id, { status: 'error', statusDetail: STALE_TEXT });
+    }
+  }
+
+  async sessions(sourceInput?: string | null, limitInput?: number | null) {
+    const source = sourceInput === undefined || sourceInput === null ? null : sourceInput;
+    if (source !== null && !CHAT_SOURCES.includes(source as ChatSource)) {
+      throw new OrchestratorInputError(`Source must be one of ${CHAT_SOURCES.join(', ')}`);
+    }
+    await this.failStale();
+    return this.present(await this.storage.getChatSessions(source, limit(limitInput, SESSIONS_LIMIT)));
+  }
+
+  async session(id: string) {
+    if (!CHAT_ID.test(String(id))) return null;
+    await this.failStale();
+    const row = await this.storage.getChatSession(id);
+    return row ? (await this.present([row]))[0] : null;
+  }
+
+  async messages(sessionId: string, afterId?: number | null, beforeId?: number | null, limitInput?: number | null) {
+    if (!CHAT_ID.test(String(sessionId))) return [];
+    const rows = await this.storage.getChatMessages(
+      sessionId,
+      { afterId: cursor(afterId, 'afterId'), beforeId: cursor(beforeId, 'beforeId') },
+      limit(limitInput, MESSAGES_LIMIT),
+    );
+    return rows.map(toMessage);
+  }
+
+  async search(queryInput: string, limitInput?: number | null) {
+    const query = text(queryInput, MAX_QUERY_CHARS);
+    if (query.length < MIN_QUERY_CHARS) return [];
+    const rows = await this.storage.searchChatMessages(query, limit(limitInput, SEARCH_LIMIT));
+    const sessions = await this.present(await this.storage.getChatSessionsByIds([...new Set(rows.map((row) => row.sessionId))]));
+    const byId = new Map(sessions.map((session) => [session.id, session]));
+    return rows.flatMap((row) => {
+      const session = byId.get(row.sessionId);
+      return session ? [{ session, messageId: row.id, snippet: searchSnippet(row.text, query), at: row.at.toISOString() }] : [];
+    });
+  }
+
+  bridge() {
+    const seen = this.bridgeSeenAt;
+    return {
+      online: Boolean(seen) && this.now().getTime() - seen!.getTime() <= BRIDGE_ONLINE_MS,
+      lastSeenAt: seen?.toISOString() ?? null,
+    };
+  }
+
+  async balloons() {
+    const since = new Date(this.now().getTime() - BALLOON_MAX_AGE_MS);
+    const sessions = await this.storage.getChatSessionsWithTicket('dock', since);
+    const newest = await Promise.all(sessions.map((session) => this.storage.getNewestChatMessage(session.id, 'assistant')));
+    return newest.flatMap((message) => (message && message.at >= since ? [toMessage(message)] : []));
+  }
+
+  async createSession(input: { title?: string | null; ticketKey?: string | null; forkFrom?: string | null }) {
+    const forkFrom = optionalChatId(input.forkFrom, 'forkFrom');
+    if (forkFrom && (await this.storage.getChatSession(forkFrom))?.source !== 'cli') {
+      throw new OrchestratorInputError('forkFrom must be an existing cli session');
+    }
+    const now = this.now();
+    const row = await this.storage.createChatSession({
+      id: randomUUID(),
+      source: 'dock',
+      title: text(input.title, MAX_TITLE_CHARS),
+      ticketKey: optionalTicketKey(input.ticketKey),
+      forkFrom,
+      startedAt: now,
+      lastMessageAt: now,
+    });
+    return toSession(row, null);
+  }
+
+  async sendMessage(sessionIdInput: string, textInput: string) {
+    const sessionId = chatId(sessionIdInput, 'sessionId');
+    const body = typeof textInput === 'string' ? textInput.trim() : '';
+    if (body.length < 1 || body.length > MAX_SEND_CHARS) {
+      throw new OrchestratorInputError(`A message needs between 1 and ${MAX_SEND_CHARS} characters`);
+    }
+    await this.failStale();
+    const session = await this.storage.getChatSession(sessionId);
+    if (!session) throw new OrchestratorInputError('Unknown chat session');
+    if (session.source !== 'dock') throw new OrchestratorInputError('Only a DOCK session can be written to');
+    if (await this.storage.countChatMessagesInState(sessionId, ['queued', 'taken']) > 0) {
+      throw new OrchestratorInputError('This session is still working on the previous message');
+    }
+    const now = this.now();
+    const message = await this.storage.createChatMessage({ sessionId, role: 'user', text: body, state: 'queued', at: now });
+    const messageCount = await this.storage.trimChatMessages(sessionId, MAX_MESSAGES_KEPT);
+    await this.storage.updateChatSession(sessionId, { status: 'queued', statusDetail: null, messageCount, lastMessageAt: now });
+    return toMessage(message);
+  }
+
+  async renameSession(idInput: string, titleInput: string) {
+    const id = chatId(idInput, 'id');
+    if (typeof titleInput !== 'string') throw new OrchestratorInputError('A title is required');
+    if (!await this.storage.getChatSession(id)) throw new OrchestratorInputError('Unknown chat session');
+    const row = await this.storage.updateChatSession(id, { title: text(titleInput, MAX_TITLE_CHARS) });
+    return (await this.present([row]))[0];
+  }
+
+  async deleteSession(id: string) {
+    if (!CHAT_ID.test(String(id))) return false;
+    return this.storage.deleteChatSession(id);
+  }
+
+  /** History of a terminal session, pushed from the laptop in batches. */
+  async syncSession(input: unknown) {
+    const sync = parseSessionSync(input, this.now());
+    const existing = await this.storage.getChatSession(sync.id);
+    if (existing && existing.source !== 'cli') {
+      throw new OrchestratorInputError('This id belongs to a DOCK session and cannot be overwritten');
+    }
+    const fields = { title: sync.title, ticketKey: sync.ticketKey, startedAt: sync.startedAt, lastMessageAt: sync.lastMessageAt };
+    if (!existing) await this.storage.createChatSession({ id: sync.id, source: 'cli', ...fields });
+    if (existing && sync.replace) await this.storage.deleteChatMessages(sync.id);
+    const messageCount = await this.storage.addChatMessages(sync.id, sync.messages, MAX_MESSAGES_KEPT);
+    await this.storage.updateChatSession(sync.id, { ...fields, messageCount });
+    return { id: sync.id, messageCount };
+  }
+
+  private async takeNext() {
+    for (const message of await this.storage.getQueuedChatMessages(CLAIM_CANDIDATES)) {
+      if (await this.storage.countChatMessagesInState(message.sessionId, ['taken']) > 0) continue;
+      const session = await this.storage.getChatSession(message.sessionId);
+      if (!session) continue;
+      if (!await this.storage.moveChatMessage(message.id, message.sessionId, 'queued', 'taken')) continue;
+      await this.storage.updateChatSession(session.id, { status: 'running', statusDetail: null, lastDeltaAt: this.now() });
+      return {
+        id: message.id,
+        sessionId: message.sessionId,
+        text: message.text,
+        claudeSessionId: session.claudeSessionId,
+        forkFrom: session.forkFrom,
+      };
+    }
+    return null;
+  }
+
+  /** Long poll: the oldest queued message, or `null` once `wait` seconds pass or the bridge hangs up. */
+  async claim(input: unknown, signal?: AbortSignal) {
+    const { wait } = parseClaim(input);
+    const deadline = this.now().getTime() + wait * 1000;
+    await this.failStale();
+    for (;;) {
+      if (signal?.aborted) return { message: null };
+      this.bridgeSeenAt = this.now();
+      const message = await this.takeNext();
+      if (message) return { message };
+      const left = deadline - this.now().getTime();
+      if (left <= 0) return { message: null };
+      await this.sleep(Math.min(CLAIM_POLL_MS, left), signal);
+    }
+  }
+
+  async delta(input: unknown) {
+    const now = this.now();
+    const delta = parseDelta(input, now);
+    this.bridgeSeenAt = now;
+    const session = await this.storage.getChatSession(delta.sessionId);
+    if (!session) return null;
+    if (session.source !== 'dock') throw new OrchestratorInputError('Only a DOCK session takes deltas');
+    const replyTo = await this.storage.getChatMessage(delta.replyTo);
+    if (!replyTo || replyTo.sessionId !== session.id || replyTo.role !== 'user') {
+      throw new OrchestratorInputError('replyTo is not a message of this session');
+    }
+
+    const messageCount = await this.storage.addChatMessages(session.id, delta.items, MAX_MESSAGES_KEPT);
+    const update: Parameters<StorageService['updateChatSession']>[1] = { messageCount };
+    if (delta.items.length > 0) update.lastMessageAt = now;
+    if (delta.claudeSessionId) update.claudeSessionId = delta.claudeSessionId;
+    // A turn that was already given up as stale keeps its error; late output is still shown.
+    if (replyTo.state === 'taken') {
+      update.lastDeltaAt = now;
+      if (delta.error) {
+        await this.storage.moveChatMessage(replyTo.id, session.id, 'taken', 'failed');
+        update.status = 'error';
+        update.statusDetail = delta.error;
+      } else if (delta.done) {
+        await this.storage.moveChatMessage(replyTo.id, session.id, 'taken', 'done');
+        update.status = 'idle';
+        update.statusDetail = null;
+      } else if (delta.detail) {
+        update.statusDetail = delta.detail;
+      }
+    }
+    const updated = await this.storage.updateChatSession(session.id, update);
+    return { id: updated.id, status: updated.status, messageCount };
+  }
+}
+
+export const chatService = new ChatService();

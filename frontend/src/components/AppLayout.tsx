@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, AlertTriangle, Bot, Box, CalendarDays, ChevronLeft, ChevronRight, Home as HomeIcon, LayoutDashboard, Settings as SettingsIcon } from 'lucide-react';
+import { Activity, AlertTriangle, Bot, Box, CalendarDays, ChevronLeft, ChevronRight, History, Home as HomeIcon, LayoutDashboard, Settings as SettingsIcon } from 'lucide-react';
 import { useQuery } from '@apollo/client';
 import { GET_NEEDS_ATTENTION } from '../graphql/queries';
 import { NAVIGATION_PREFERENCES_EVENT, NavigationPreferences, readNavigationPreferences, saveNavigationPreferences } from '../lib/navigationPreferences';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
+import { ChatDock } from '../chat/ChatDock';
 
 interface AppLayoutProps { currentPath: string; onNavigate: (path: string) => void; children: React.ReactNode; }
 
@@ -28,6 +29,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, c
     { path: '/', label: 'Home', icon: HomeIcon, badge: 0 },
     { path: '/dashboard', label: 'Board', icon: LayoutDashboard, badge: 0 },
     { path: '/agents', label: 'Agents', icon: Bot, badge: 0 },
+    { path: '/sessions', label: 'Sessions', icon: History, badge: 0 },
     { path: '/calendar', label: 'Calendar', icon: CalendarDays, badge: 0 },
     { path: '/monitoring', label: 'Monitoring', icon: Activity, badge: 0 },
     { path: '/docker', label: 'Docker Services', icon: Box, badge: 0 },
@@ -41,6 +43,12 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, c
     ? (preferences.collapsed ? ChevronLeft : ChevronRight)
     : (preferences.collapsed ? ChevronRight : ChevronLeft);
 
+  const sidebarPixels = preferences.collapsed ? 72 : 248;
+  const chatInset = {
+    left: preferences.mode === 'left' ? sidebarPixels : 0,
+    right: preferences.mode === 'right' ? sidebarPixels : 0,
+    bottom: preferences.mode === 'bottom' ? 82 : 0,
+  };
   const sidebarWidth = preferences.collapsed ? 'min-[761px]:w-[72px]' : 'min-[761px]:w-[248px]';
   const mainOffset = isSidebar
     ? preferences.mode === 'left'
@@ -139,6 +147,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, c
         )}
       </aside>
       <main className={cn('min-h-dvh min-w-0 pb-[82px] min-[761px]:pb-0', mainOffset)}>{children}</main>
+      <ChatDock inset={chatInset} />
     </div>
   );
 };

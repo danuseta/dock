@@ -1,6 +1,7 @@
 import express, { type Request, type Response, Router } from 'express';
 import { bearerToken } from '../auth/ingest-token';
 import { PinRateLimiter, sessionManager, shouldRequirePin } from '../auth/session';
+import { ChatService, chatService } from '../integrations/chat';
 import { MAX_TRANSCRIPT_BYTES, OrchestratorInputError, OrchestratorService, orchestratorService } from '../integrations/orchestrator';
 import { StorageService } from '../storage/service';
 
@@ -13,6 +14,7 @@ const clientKey = (request: Request) => request.ip || request.socket.remoteAddre
 export function createOrchestratorIngestRouter(
   service: OrchestratorService = orchestratorService,
   limiter = new PinRateLimiter(10, 15 * 60 * 1000),
+  chat: ChatService = chatService,
 ): Router {
   const router = Router();
 
@@ -37,9 +39,13 @@ export function createOrchestratorIngestRouter(
     }
   });
 
-  const handle = (work: (body: unknown) => Promise<unknown>) => async (request: Request, response: Response) => {
+  const handle = (work: (body: unknown, signal: AbortSignal) => Promise<unknown>) => async (request: Request, response: Response) => {
+    // A long poll stops when the laptop hangs up, so it cannot take a message nobody is waiting for.
+    const hangup = new AbortController();
+    response.on('close', () => hangup.abort());
     try {
-      const result = await work(request.body);
+      const result = await work(request.body, hangup.signal);
+      if (hangup.signal.aborted) return;
       if (result === null) {
         response.status(404).json({ error: 'Unknown ticket. Send its status first.' });
         return;
@@ -69,6 +75,9 @@ export function createOrchestratorIngestRouter(
     return run && { key: run.key, activity: run.activity };
   }));
   router.post('/transcript', express.json({ limit: MAX_TRANSCRIPT_BYTES + 1024 * 1024 }), handle((body) => service.saveTranscript(body)));
+  router.post('/sessions', express.json({ limit: '2mb' }), handle((body) => chat.syncSession(body)));
+  router.post('/chat/claim', small, handle((body, signal) => chat.claim(body, signal)));
+  router.post('/chat/delta', small, handle((body) => chat.delta(body)));
 
   router.use((error: unknown, _request: Request, response: Response, _next: express.NextFunction) => {
     const { status, type } = (error ?? {}) as { status?: number; type?: string };
