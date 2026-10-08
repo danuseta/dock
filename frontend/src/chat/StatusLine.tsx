@@ -1,19 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { useQuery } from '@apollo/client';
-import { GET_CHAT_STATUS } from '../graphql/queries';
+import React from 'react';
 import { cn } from '../lib/cn';
-import { SLOW_POLL_MS, relativeTime } from './messages';
-import { limitTone, resetsIn, sessionStatusParts, toneClass, type ChatLimit, type ChatSessionStatus, type ChatStatus } from './status';
-
-export function useChatStatus(): { status: ChatStatus | undefined; now: number } {
-  const { data } = useQuery<{ chatStatus: ChatStatus }>(GET_CHAT_STATUS, { fetchPolicy: 'cache-and-network', pollInterval: SLOW_POLL_MS });
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(timer);
-  }, []);
-  return { status: data?.chatStatus, now };
-}
+import { relativeTime } from './messages';
+import { limitTone, resetsIn, sessionStatusParts, toneClass, type ChatLimit, type ChatSessionStatus } from './status';
+import { useChatStatus } from './useChatStatus';
 
 const StaleMark: React.FC<{ receivedAt: string; now: number }> = ({ receivedAt, now }) => (
   <span className="rounded-xs border border-border px-1 text-[0.6rem] font-bold uppercase text-muted-foreground">stale · {relativeTime(receivedAt, now)}</span>

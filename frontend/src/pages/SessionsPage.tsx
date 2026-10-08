@@ -8,7 +8,8 @@ import { Button, Card, Dialog, Input, Page, PageHeader } from '../components/ui'
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { ChatThread } from '../chat/ChatThread';
-import { LimitsLine, SessionStatusView, useChatStatus } from '../chat/StatusLine';
+import { LimitsLine, SessionStatusView } from '../chat/StatusLine';
+import { useChatStatus } from '../chat/useChatStatus';
 import { SLOW_POLL_MS, relativeTime, type ChatSession } from '../chat/messages';
 import { chatStore } from '../chat/store';
 
