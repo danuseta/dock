@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { MessagesSquare, Minus, PanelBottom, PictureInPicture2, Plus, X } from 'lucide-react';
 import { CREATE_CHAT_SESSION } from '../graphql/mutations';
@@ -68,9 +68,9 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
   const drawer = state.mode === 'drawer';
   const anyUnread = state.tabs.some((id) => unread[id]);
 
-  const reportUnread = useRef((sessionId: string, value: boolean) => {
+  const reportUnread = useCallback((sessionId: string, value: boolean) => {
     setUnread((current) => (Boolean(current[sessionId]) === value ? current : { ...current, [sessionId]: value }));
-  }).current;
+  }, []);
 
   useEffect(() => {
     if (open || !refocusLauncher.current) return;
