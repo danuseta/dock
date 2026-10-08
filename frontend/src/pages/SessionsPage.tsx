@@ -52,7 +52,11 @@ const SessionsPage: React.FC = () => {
   const sessions = data?.chatSessions || [];
   const hits = searchData?.chatSearch || [];
   const selected = sessions.find((session) => session.id === selectedId) || hits.find((hit) => hit.session.id === selectedId)?.session || null;
-  const now = Date.now();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const select = (id: string | null) => {
     setSelectedId(id);

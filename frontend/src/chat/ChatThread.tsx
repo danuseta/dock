@@ -39,7 +39,9 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const heightBeforeOlder = useRef<number | null>(null);
-  messagesRef.current = messages;
+  useLayoutEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const { data, error: sessionError, refetch, startPolling, stopPolling } = useQuery<{ chatSession: ChatSession | null; chatBridge: { online: boolean; lastSeenAt?: string | null } }>(
     GET_CHAT_SESSION,
