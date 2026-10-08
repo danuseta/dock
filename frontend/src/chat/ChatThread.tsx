@@ -9,6 +9,7 @@ import {
   isOptimistic, isTurnInProgress, mergeMessages, newestAssistantId, oldestId, pollCursor, pollInterval, sendBlocker,
   type ChatMessage, type ChatSession,
 } from './messages';
+import { SessionStatusLine } from './StatusLine';
 import { chatStore } from './store';
 
 interface ChatThreadProps {
@@ -166,6 +167,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
 
   return (
     <div className={cn('flex min-h-0 flex-col', className)}>
+      <SessionStatusLine sessionId={sessionId} className="flex-none bg-surface-0" />
       <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto px-3.5 py-3" role="log" aria-label="Conversation">
         {loadingOlder && <p className="pb-2 text-center font-mono text-[0.66rem] text-muted-foreground" role="status">Loading older messages...</p>}
         {!loaded && !loadError && !missing && <p className="py-6 text-center text-sm text-muted-foreground" role="status">Loading the conversation...</p>}

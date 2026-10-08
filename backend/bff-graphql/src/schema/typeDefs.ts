@@ -345,6 +345,38 @@ export const typeDefs = gql`
     lastSeenAt: String
   }
 
+  type ChatLimit {
+    usedPercentage: Float!
+    resetsAt: String
+  }
+
+  type ChatLimits {
+    fiveHour: ChatLimit
+    sevenDay: ChatLimit
+    receivedAt: String!
+    stale: Boolean!
+  }
+
+  type ChatSessionStatus {
+    sessionId: ID!
+    model: String
+    effort: String
+    fastMode: Boolean
+    contextPercentage: Float
+    contextTokens: Float
+    contextSize: Float
+    costUsd: Float
+    cacheWarm: Boolean
+    cacheHitRatio: Float
+    receivedAt: String!
+    stale: Boolean!
+  }
+
+  type ChatStatus {
+    limits: ChatLimits
+    sessions: [ChatSessionStatus!]!
+  }
+
   type ChatSearchHit {
     session: ChatSession!
     messageId: Int!
@@ -417,6 +449,7 @@ export const typeDefs = gql`
     chatMessages(sessionId: ID!, afterId: Int, beforeId: Int, limit: Int): [ChatMessage!]!
     chatSearch(query: String!, limit: Int): [ChatSearchHit!]!
     chatBridge: ChatBridge!
+    chatStatus: ChatStatus!
     chatBalloons: [ChatMessage!]!
   }
 

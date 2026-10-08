@@ -8,6 +8,8 @@ import { Button, Card, Dialog, Input, Page, PageHeader } from '../components/ui'
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { ChatThread } from '../chat/ChatThread';
+import { LimitsLine, SessionStatusView } from '../chat/StatusLine';
+import { useChatStatus } from '../chat/useChatStatus';
 import { SLOW_POLL_MS, relativeTime, type ChatSession } from '../chat/messages';
 import { chatStore } from '../chat/store';
 
@@ -36,6 +38,7 @@ const SessionsPage: React.FC = () => {
   const [actionError, setActionError] = useState('');
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ChatSession | null>(null);
+  const { status: liveStatus, now: statusNow } = useChatStatus();
 
   useEffect(() => {
     const timer = window.setTimeout(() => setQuery(searchText.trim()), 300);
@@ -111,6 +114,7 @@ const SessionsPage: React.FC = () => {
         <div>
           <h1 className="text-balance font-display text-3xl font-black">Sessions</h1>
           <p className="mt-1 text-pretty text-secondary-foreground">Claude Code history from your PC, and the sessions you run from DOCK.</p>
+          <LimitsLine className="mt-2" />
         </div>
         <Button size="sm" variant="primary" disabled={creating} onClick={() => void create({})}><Plus size={14} aria-hidden="true" />New session</Button>
       </PageHeader>
@@ -154,6 +158,7 @@ const SessionsPage: React.FC = () => {
                       {session.status === 'error' && <i className="size-1.5 flex-none rounded-full bg-status-conflict" title="The last turn failed" aria-hidden="true" />}
                     </span>
                     {session.lastText && <span className="mt-1 block truncate text-[0.76rem] text-secondary-foreground">{session.lastText}</span>}
+                    {liveStatus?.sessions.filter((item) => item.sessionId === session.id).map((item) => <SessionStatusView key={item.sessionId} status={item} now={statusNow} className="mt-1" />)}
                     <span className="mt-1 flex items-center gap-2 font-mono text-[0.64rem] text-muted-foreground tabular-nums">
                       {session.ticketKey && <span className="font-bold text-accent">{session.ticketKey}</span>}
                       <span>{relativeTime(session.lastMessageAt, now)}</span>

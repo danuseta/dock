@@ -625,6 +625,33 @@ export const GET_CHAT_BRIDGE = gql`
   }
 `;
 
+export const GET_CHAT_STATUS = gql`
+  query GetChatStatus {
+    chatStatus {
+      limits {
+        fiveHour { usedPercentage resetsAt }
+        sevenDay { usedPercentage resetsAt }
+        receivedAt
+        stale
+      }
+      sessions {
+        sessionId
+        model
+        effort
+        fastMode
+        contextPercentage
+        contextTokens
+        contextSize
+        costUsd
+        cacheWarm
+        cacheHitRatio
+        receivedAt
+        stale
+      }
+    }
+  }
+`;
+
 export const GET_CHAT_BALLOONS = gql`
   query GetChatBalloons {
     chatBalloons {

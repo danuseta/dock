@@ -19,9 +19,12 @@ export const STALE_TAKEN_MS = 15 * 60 * 1000;
 export const STALE_TEXT = 'The laptop bridge stopped answering';
 export const BRIDGE_ONLINE_MS = 60 * 1000;
 export const BALLOON_MAX_AGE_MS = 30 * 60 * 1000;
+export const STATUS_STALE_MS = 5 * 60 * 1000;
+export const MAX_STATUS_SESSIONS = 200;
 const MAX_DELTA_ITEMS = 200;
 const MAX_DETAIL_CHARS = 200;
 const MAX_ERROR_CHARS = 500;
+const MAX_STATUS_TEXT_CHARS = 60;
 const MAX_QUERY_CHARS = 200;
 const MIN_QUERY_CHARS = 2;
 const LAST_TEXT_CHARS = 160;
@@ -138,6 +141,51 @@ export function parseDelta(input: unknown, now = new Date()) {
   };
 }
 
+function optionalNumber(value: unknown, name: string): number | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new OrchestratorInputError(`${name} must be a number of 0 or more`);
+  return value;
+}
+
+function optionalFlag(value: unknown, name: string): boolean | null {
+  return value === undefined || value === null ? null : flag(value, name);
+}
+
+function limitWindow(value: unknown, name: string) {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) throw new OrchestratorInputError(`${name} must be an object`);
+  const usedPercentage = optionalNumber(value.usedPercentage, `${name}.usedPercentage`);
+  if (usedPercentage === null) return null;
+  const resetsAt = optionalNumber(value.resetsAt, `${name}.resetsAt`);
+  return { usedPercentage, resetsAt: resetsAt === null ? null : new Date(resetsAt * 1000) };
+}
+
+export function parseStatus(input: unknown) {
+  if (!isRecord(input)) throw new OrchestratorInputError('A status object is required');
+  return {
+    sessionId: chatId(input.sessionId, 'sessionId'),
+    model: text(input.model, MAX_STATUS_TEXT_CHARS) || null,
+    effort: text(input.effort, MAX_STATUS_TEXT_CHARS) || null,
+    fastMode: optionalFlag(input.fastMode, 'fastMode'),
+    contextPercentage: optionalNumber(input.contextPercentage, 'contextPercentage'),
+    contextTokens: optionalNumber(input.contextTokens, 'contextTokens'),
+    contextSize: optionalNumber(input.contextSize, 'contextSize'),
+    costUsd: optionalNumber(input.costUsd, 'costUsd'),
+    cacheWarm: optionalFlag(input.cacheWarm, 'cacheWarm'),
+    cacheHitRatio: optionalNumber(input.cacheHitRatio, 'cacheHitRatio'),
+    fiveHour: limitWindow(input.fiveHour, 'fiveHour'),
+    sevenDay: limitWindow(input.sevenDay, 'sevenDay'),
+  };
+}
+
+type ParsedStatus = ReturnType<typeof parseStatus>;
+type LimitWindow = NonNullable<ReturnType<typeof limitWindow>>;
+
+const presentWindow = (window: LimitWindow | null) => window && {
+  usedPercentage: window.usedPercentage,
+  resetsAt: window.resetsAt?.toISOString() ?? null,
+};
+
 /** About 60 characters either side of the first match, on one line. */
 export function searchSnippet(value: string, query: string): string {
   const found = value.toLowerCase().indexOf(query.toLowerCase());
@@ -197,6 +245,8 @@ function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 export class ChatService {
   private bridgeSeenAt: Date | null = null;
+  private readonly sessionStatus = new Map<string, ParsedStatus & { receivedAt: Date }>();
+  private limitsSeen: { fiveHour: LimitWindow | null; sevenDay: LimitWindow | null; receivedAt: Date } | null = null;
 
   constructor(
     private readonly storage = new StorageService(),
@@ -262,6 +312,36 @@ export class ChatService {
       online: Boolean(seen) && this.now().getTime() - seen!.getTime() <= BRIDGE_ONLINE_MS,
       lastSeenAt: seen?.toISOString() ?? null,
     };
+  }
+
+  /** The latest status line of each laptop session and the account limits; memory only, so a restart empties it until the next push. */
+  statusSnapshot() {
+    const now = this.now().getTime();
+    const stale = (at: Date) => now - at.getTime() > STATUS_STALE_MS;
+    const limits = this.limitsSeen;
+    return {
+      limits: limits && {
+        fiveHour: presentWindow(limits.fiveHour),
+        sevenDay: presentWindow(limits.sevenDay),
+        receivedAt: limits.receivedAt.toISOString(),
+        stale: stale(limits.receivedAt),
+      },
+      sessions: [...this.sessionStatus.values()].map(({ fiveHour, sevenDay, receivedAt, ...status }) => ({
+        ...status,
+        receivedAt: receivedAt.toISOString(),
+        stale: stale(receivedAt),
+      })),
+    };
+  }
+
+  ingestStatus(input: unknown) {
+    const status = parseStatus(input);
+    const receivedAt = this.now();
+    this.sessionStatus.delete(status.sessionId);
+    this.sessionStatus.set(status.sessionId, { ...status, receivedAt });
+    if (this.sessionStatus.size > MAX_STATUS_SESSIONS) this.sessionStatus.delete(this.sessionStatus.keys().next().value!);
+    if (status.fiveHour || status.sevenDay) this.limitsSeen = { fiveHour: status.fiveHour, sevenDay: status.sevenDay, receivedAt };
+    return { sessionId: status.sessionId };
   }
 
   async balloons() {
