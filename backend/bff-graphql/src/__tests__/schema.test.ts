@@ -67,6 +67,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'chatSearch',
       'chatSession',
       'chatSessions',
+      'chatStatus',
       'dashboard',
       'dockerContainerLogs',
       'dockerRuntime',

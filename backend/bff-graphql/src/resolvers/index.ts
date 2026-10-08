@@ -151,6 +151,7 @@ export const resolvers = {
     },
     chatSearch: async (_: unknown, { query, limit }: { query: string; limit?: number }) => chatService.search(query, limit),
     chatBridge: async () => chatService.bridge(),
+    chatStatus: async () => chatService.statusSnapshot(),
     chatBalloons: async () => chatService.balloons(),
     dockerContainerLogs: async (_: unknown, { id, tail }: { id: string; tail?: number }) => {
       try {
@@ -362,7 +363,7 @@ export const resolvers = {
 const protectedQueries = [
   'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens',
-  'chatSessions', 'chatSession', 'chatMessages', 'chatSearch', 'chatBridge', 'chatBalloons',
+  'chatSessions', 'chatSession', 'chatMessages', 'chatSearch', 'chatBridge', 'chatStatus', 'chatBalloons',
 ] as const;
 const protectedMutations = [
   'saveDemoLink',

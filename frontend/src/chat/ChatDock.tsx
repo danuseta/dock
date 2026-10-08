@@ -6,6 +6,7 @@ import { GET_CHAT_MESSAGES, GET_CHAT_SESSION } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import { ChatThread } from './ChatThread';
 import { SLOW_POLL_MS, newestAssistantId, type ChatMessage, type ChatSession } from './messages';
+import { LimitsLine } from './StatusLine';
 import { chatStore, useChatState } from './store';
 
 interface ChatDockProps {
@@ -173,6 +174,7 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
             </button>
             <button type="button" className={control} aria-label="Minimise chat" title="Minimise" onClick={minimise}><Minus size={14} aria-hidden="true" /></button>
           </header>
+          <LimitsLine className="flex-none border-b border-border bg-surface-0 px-3.5 py-1.5" />
           {error && <p className="flex-none border-b border-border px-3.5 py-1.5 text-pretty text-xs break-words text-status-conflict" role="alert">A new session could not be started: {error}</p>}
           {state.active
             ? <ChatThread key={state.active} sessionId={state.active} className="min-h-0 flex-1" />

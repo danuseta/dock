@@ -14,6 +14,7 @@ import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 import { AgentFlowGraph } from '../components/AgentFlowGraph';
 import { ticketBalloons, type ChatMessage } from '../chat/messages';
 import { chatStore } from '../chat/store';
+import { LimitsLine } from '../chat/StatusLine';
 import { useOpenForTicket } from '../chat/useOpenForTicket';
 
 const AgentsOffice = lazy(() => import('../components/AgentsOffice'));
@@ -183,6 +184,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
         <div>
           <h1 className="text-balance font-display text-3xl font-black">Agents</h1>
           <p className="mt-1 text-pretty text-secondary-foreground">Where each ticket's agent is working, and which ones are waiting on you.</p>
+          <LimitsLine className="mt-2" />
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {sampling && <Badge variant="draft" className="border-dashed">SAMPLE DATA</Badge>}

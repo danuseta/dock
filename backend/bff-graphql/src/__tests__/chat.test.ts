@@ -477,4 +477,71 @@ test('chat ingest routes share the ingest token and the 404 / 400 conventions', 
   const done = await post('/chat/delta', { sessionId: dock.id, replyTo: sent.id, done: true, items: [{ role: 'assistant', text: 'hi', at: '2026-10-08T00:00:00.000Z' }] });
   assert.deepStrictEqual([done.status, await done.json()], [200, { ok: true, result: { id: dock.id, status: 'idle', messageCount: 2 } }]);
   assert.strictEqual(chat.bridge().online, true);
+
+  assert.strictEqual((await post('/chat/status', statusBody(), null)).status, 401);
+  assert.strictEqual((await post('/chat/status', statusBody(), 'dock_ing_wrong')).status, 401);
+  assert.strictEqual((await post('/chat/status', '{not json')).status, 400);
+  assert.strictEqual((await post('/chat/status', statusBody({ sessionId: 'bad id' }))).status, 400);
+  assert.strictEqual((await post('/chat/status', statusBody({ costUsd: 'free' }))).status, 400);
+  assert.deepStrictEqual(chat.statusSnapshot(), { limits: null, sessions: [] });
+  const stored = await post('/chat/status', statusBody());
+  assert.deepStrictEqual([stored.status, await stored.json()], [200, { ok: true, result: { sessionId: CLI_ID } }]);
+  assert.strictEqual(chat.statusSnapshot().sessions[0].sessionId, CLI_ID);
+});
+
+const statusBody = (overrides: object = {}) => ({
+  sessionId: CLI_ID,
+  model: 'Opus 4.7 (1M context)',
+  effort: 'high',
+  fastMode: false,
+  contextPercentage: 40,
+  contextTokens: 395000,
+  contextSize: 1000000,
+  costUsd: 12.5,
+  cacheWarm: true,
+  cacheHitRatio: 0.93,
+  fiveHour: { usedPercentage: 55, resetsAt: 1791417600 },
+  sevenDay: { usedPercentage: 20, resetsAt: 1791936000 },
+  ...overrides,
+});
+
+test('status keeps the latest line per session and the latest account limits, and marks old ones stale', () => {
+  const { service, advance } = clockedService();
+  assert.deepStrictEqual(service.statusSnapshot(), { limits: null, sessions: [] });
+
+  service.ingestStatus(statusBody());
+  service.ingestStatus(statusBody({ sessionId: 'other-session', costUsd: 1, fiveHour: undefined, sevenDay: undefined }));
+  const fresh = service.statusSnapshot();
+  assert.deepStrictEqual(fresh.limits, {
+    fiveHour: { usedPercentage: 55, resetsAt: '2026-10-08T00:00:00.000Z' },
+    sevenDay: { usedPercentage: 20, resetsAt: '2026-10-14T00:00:00.000Z' },
+    receivedAt: '2026-10-08T00:00:00.000Z',
+    stale: false,
+  });
+  assert.deepStrictEqual(fresh.sessions.map((status) => [status.sessionId, status.stale]), [[CLI_ID, false], ['other-session', false]]);
+  assert.deepStrictEqual(
+    { ...fresh.sessions[0], receivedAt: undefined },
+    { sessionId: CLI_ID, model: 'Opus 4.7 (1M context)', effort: 'high', fastMode: false, contextPercentage: 40, contextTokens: 395000, contextSize: 1000000, costUsd: 12.5, cacheWarm: true, cacheHitRatio: 0.93, receivedAt: undefined, stale: false },
+  );
+
+  advance(5 * 60 * 1000);
+  assert.strictEqual(service.statusSnapshot().sessions[0].stale, false);
+  advance(1);
+  service.ingestStatus(statusBody({ sessionId: 'other-session', fiveHour: undefined, sevenDay: undefined }));
+  const later = service.statusSnapshot();
+  assert.deepStrictEqual(later.sessions.map((status) => [status.sessionId, status.stale]), [[CLI_ID, true], ['other-session', false]]);
+  assert.strictEqual(later.limits?.stale, true, 'a push without limits does not refresh them');
+
+  service.ingestStatus({ sessionId: 'bare' });
+  assert.deepStrictEqual(service.statusSnapshot().sessions.at(-1), {
+    sessionId: 'bare', model: null, effort: null, fastMode: null, contextPercentage: null, contextTokens: null, contextSize: null,
+    costUsd: null, cacheWarm: null, cacheHitRatio: null, receivedAt: '2026-10-08T00:05:00.001Z', stale: false,
+  });
+});
+
+test('status rejects what is not a status', () => {
+  const { service } = clockedService();
+  for (const body of [null, [], 'x', {}, { sessionId: 7 }, statusBody({ costUsd: -1 }), statusBody({ contextPercentage: Number.NaN }), statusBody({ fastMode: 'yes' }), statusBody({ fiveHour: 'x' })]) {
+    assert.throws(() => service.ingestStatus(body), OrchestratorInputError);
+  }
 });
