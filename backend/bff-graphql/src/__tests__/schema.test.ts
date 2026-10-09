@@ -82,6 +82,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'settings',
       'sprintDashboard',
       'sprintDashboardSettings',
+      'sprintIssueEvents',
       'sprintList',
       'sprintTrend',
       'ticketDetail',

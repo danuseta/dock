@@ -321,6 +321,15 @@ test('saving settings validates input and recomputes stored sprints with the new
   assert.strictEqual(JSON.parse(store.snapshots.get(5)!.result!).overview.developers, 1);
 });
 
+test('issueEvents returns the stored changelog of a sprint, or an empty list', async () => {
+  const { service, store } = setup();
+  assert.strictEqual(await service.issueEvents(5), '[]');
+  service.startRefresh(5);
+  await service.idle();
+  assert.strictEqual(JSON.parse(await service.issueEvents(5)).length, issues.length);
+  assert.ok(store.events.has(5));
+});
+
 test('parseSprintConfig fills defaults and rejects bad numbers', () => {
   assert.strictEqual(parseSprintConfig(null).loadTarget, 16);
   assert.strictEqual(parseSprintConfig('{"slaDays":3}').slaDays, 3);

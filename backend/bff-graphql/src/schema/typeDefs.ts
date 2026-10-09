@@ -483,6 +483,7 @@ export const typeDefs = gql`
     sprintList: [SprintSummary!]!
     sprintDashboard(sprintId: Int): SprintDashboard!
     sprintTrend: String!
+    sprintIssueEvents(sprintId: Int!): String!
     sprintDashboardSettings: SprintDashboardSettings!
   }
 
