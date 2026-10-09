@@ -164,6 +164,7 @@ export const resolvers = {
     sprintList: async () => sprintDashboardService.listSprints(),
     sprintDashboard: async (_: unknown, { sprintId }: { sprintId?: number | null }) => sprintDashboardService.getDashboard(sprintId),
     sprintTrend: async () => sprintDashboardService.trend(),
+    sprintIssueEvents: async (_: unknown, { sprintId }: { sprintId: number }) => sprintDashboardService.issueEvents(sprintId),
     sprintDashboardSettings: async () => sprintDashboardService.getSettings(),
     dockerContainerLogs: async (_: unknown, { id, tail }: { id: string; tail?: number }) => {
       try {
@@ -386,7 +387,7 @@ const protectedQueries = [
   'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens',
   'chatSessions', 'chatSession', 'chatMessages', 'chatSearch', 'chatBridge', 'chatStatus', 'chatBalloons',
-  'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings',
+  'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents',
 ] as const;
 const protectedMutations = [
   'saveDemoLink',

@@ -274,6 +274,10 @@ export class SprintDashboardService {
     return { summary: row ? this.summarize(row) : null, result: row?.result ?? null, refreshState: this.refreshState() };
   }
 
+  async issueEvents(sprintId: number): Promise<string> {
+    return (await this.store.getSprintIssueEvents(sprintId))?.issues ?? '[]';
+  }
+
   async trend(): Promise<string> {
     const results = (await this.store.getSprintSnapshots())
       .filter((r) => r.result)
