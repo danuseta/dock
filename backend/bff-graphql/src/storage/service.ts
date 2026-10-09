@@ -81,6 +81,32 @@ export class StorageService {
     return this.db.appSettings.delete({ where: { key } }).catch(() => undefined);
   }
 
+  getSprintSnapshots() {
+    return this.db.sprintSnapshot.findMany({ orderBy: { startDate: 'desc' } });
+  }
+
+  getSprintSnapshot(sprintId: number) {
+    return this.db.sprintSnapshot.findUnique({ where: { sprintId } });
+  }
+
+  upsertSprintSnapshot(data: {
+    sprintId: number; name: string; state: string; startDate: Date; endDate: Date;
+    result?: string | null; computedAt?: Date | null; lastError?: string | null;
+  }) {
+    const { sprintId, ...fields } = data;
+    return this.db.sprintSnapshot.upsert({ where: { sprintId }, update: fields, create: { sprintId, ...fields } });
+  }
+
+  getSprintIssueEvents(sprintId: number) {
+    return this.db.sprintIssueEvents.findUnique({ where: { sprintId } });
+  }
+
+  upsertSprintIssueEvents(sprintId: number, issues: string, fetchedAt: Date) {
+    return this.db.sprintIssueEvents.upsert({
+      where: { sprintId }, update: { issues, fetchedAt }, create: { sprintId, issues, fetchedAt },
+    });
+  }
+
   getQuickLinks() {
     return this.db.quickLink.findMany({ orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] });
   }

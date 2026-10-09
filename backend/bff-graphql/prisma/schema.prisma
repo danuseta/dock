@@ -195,3 +195,21 @@ model ChatMessage {
   @@index([sessionId, id])
   @@index([state])
 }
+
+model SprintSnapshot {
+  sprintId   Int       @id
+  name       String
+  state      String
+  startDate  DateTime
+  endDate    DateTime
+  result     String?
+  computedAt DateTime?
+  lastError  String?
+  updatedAt  DateTime  @updatedAt
+}
+
+model SprintIssueEvents {
+  sprintId  Int      @id
+  issues    String
+  fetchedAt DateTime
+}

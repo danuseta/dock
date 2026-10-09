@@ -123,6 +123,36 @@ export const REMOVE_QUICK_LINK = gql`
   }
 `;
 
+export const REFRESH_SPRINT_DASHBOARD = gql`
+  mutation RefreshSprintDashboard($sprintId: Int!) {
+    refreshSprintDashboard(sprintId: $sprintId) {
+      status
+      label
+      done
+      total
+      error
+    }
+  }
+`;
+
+export const BACKFILL_SPRINT_DASHBOARDS = gql`
+  mutation BackfillSprintDashboards($count: Int!) {
+    backfillSprintDashboards(count: $count) {
+      status
+      label
+      done
+      total
+      error
+    }
+  }
+`;
+
+export const UPDATE_SPRINT_DASHBOARD_SETTINGS = gql`
+  mutation UpdateSprintDashboardSettings($boardId: String!, $config: String!) {
+    updateSprintDashboardSettings(boardId: $boardId, config: $config)
+  }
+`;
+
 export const ADD_MONITOR = gql`
   mutation AddMonitor($input: MonitorTargetInput!) {
     addMonitor(input: $input) {
