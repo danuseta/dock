@@ -427,6 +427,35 @@ export const typeDefs = gql`
     timeoutMs: Int
   }
 
+  type SprintSummary {
+    id: Int!
+    name: String!
+    state: String!
+    startDate: String!
+    endDate: String!
+    computedAt: String
+    lastError: String
+  }
+
+  type SprintRefreshState {
+    status: String!
+    label: String!
+    done: Int!
+    total: Int!
+    error: String
+  }
+
+  type SprintDashboard {
+    summary: SprintSummary
+    result: String
+    refreshState: SprintRefreshState!
+  }
+
+  type SprintDashboardSettings {
+    boardId: String!
+    config: String!
+  }
+
   type Query {
     authStatus: AuthStatus!
     dashboard: [TicketGroup!]!
@@ -451,6 +480,10 @@ export const typeDefs = gql`
     chatBridge: ChatBridge!
     chatStatus: ChatStatus!
     chatBalloons: [ChatMessage!]!
+    sprintList: [SprintSummary!]!
+    sprintDashboard(sprintId: Int): SprintDashboard!
+    sprintTrend: String!
+    sprintDashboardSettings: SprintDashboardSettings!
   }
 
   type Mutation {
@@ -483,5 +516,8 @@ export const typeDefs = gql`
     sendChatMessage(sessionId: ID!, text: String!): ChatMessage!
     renameChatSession(id: ID!, title: String!): ChatSession!
     deleteChatSession(id: ID!): Boolean!
+    refreshSprintDashboard(sprintId: Int!): SprintRefreshState!
+    backfillSprintDashboards(count: Int!): SprintRefreshState!
+    updateSprintDashboardSettings(boardId: String!, config: String!): Boolean!
   }
 `;

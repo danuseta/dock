@@ -1,12 +1,13 @@
 import { type HTMLAttributes } from 'react';
 import { cn } from '../../lib/cn';
 
-export type BadgeVariant = 'neutral' | 'accent' | 'success' | 'danger' | 'draft';
+export type BadgeVariant = 'neutral' | 'accent' | 'success' | 'warn' | 'danger' | 'draft';
 
 const variants: Record<BadgeVariant, string> = {
   neutral: 'border-border bg-surface-2 text-secondary-foreground',
   accent: 'border-accent/30 bg-accent-dim text-accent',
   success: 'border-status-merged/30 bg-status-merged-bg text-status-merged',
+  warn: 'border-status-warn/30 bg-status-warn-bg text-status-warn',
   danger: 'border-status-conflict/30 bg-status-conflict-bg text-status-conflict',
   draft: 'border-status-draft/30 bg-status-draft-bg text-status-draft',
 };

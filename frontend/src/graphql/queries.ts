@@ -382,6 +382,59 @@ export const GET_CALENDAR = gql`
   }
 `;
 
+export const GET_SPRINT_LIST = gql`
+  query GetSprintList {
+    sprintList {
+      id
+      name
+      state
+      startDate
+      endDate
+      computedAt
+      lastError
+    }
+  }
+`;
+
+export const GET_SPRINT_DASHBOARD = gql`
+  query GetSprintDashboard($sprintId: Int) {
+    sprintDashboard(sprintId: $sprintId) {
+      summary {
+        id
+        name
+        state
+        startDate
+        endDate
+        computedAt
+        lastError
+      }
+      result
+      refreshState {
+        status
+        label
+        done
+        total
+        error
+      }
+    }
+  }
+`;
+
+export const GET_SPRINT_TREND = gql`
+  query GetSprintTrend {
+    sprintTrend
+  }
+`;
+
+export const GET_SPRINT_SETTINGS = gql`
+  query GetSprintSettings {
+    sprintDashboardSettings {
+      boardId
+      config
+    }
+  }
+`;
+
 export const GET_MONITORS = gql`
   query GetMonitors($refresh: Boolean = false) {
     monitors(refresh: $refresh) {

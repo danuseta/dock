@@ -9,6 +9,7 @@ import { upstreamMonitorService } from '../integrations/upstream-monitor';
 import { dockerRuntimeService } from '../integrations/docker-runtime';
 import { OrchestratorInputError, orchestratorService } from '../integrations/orchestrator';
 import { chatService } from '../integrations/chat';
+import { SprintBusyError, SprintInputError, sprintDashboardService } from '../integrations/sprint-dashboard';
 
 const jiraAPI = new JiraAPI();
 const githubAPI = new GitHubAPI();
@@ -19,6 +20,13 @@ const isPresent = <T>(value: T | null | undefined): value is T => value != null;
 function orchestratorInputError(error: unknown): never {
   if (error instanceof OrchestratorInputError) {
     throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+  }
+  throw error;
+}
+
+function sprintError(error: unknown): never {
+  if (error instanceof SprintInputError || error instanceof SprintBusyError) {
+    throw new GraphQLError(error.message, { extensions: { code: error instanceof SprintBusyError ? 'CONFLICT' : 'BAD_USER_INPUT' } });
   }
   throw error;
 }
@@ -153,6 +161,10 @@ export const resolvers = {
     chatBridge: async () => chatService.bridge(),
     chatStatus: async () => chatService.statusSnapshot(),
     chatBalloons: async () => chatService.balloons(),
+    sprintList: async () => sprintDashboardService.listSprints(),
+    sprintDashboard: async (_: unknown, { sprintId }: { sprintId?: number | null }) => sprintDashboardService.getDashboard(sprintId),
+    sprintTrend: async () => sprintDashboardService.trend(),
+    sprintDashboardSettings: async () => sprintDashboardService.getSettings(),
     dockerContainerLogs: async (_: unknown, { id, tail }: { id: string; tail?: number }) => {
       try {
         return await dockerRuntimeService.logs(id, tail);
@@ -357,6 +369,16 @@ export const resolvers = {
       return chatService.renameSession(id, title).catch(orchestratorInputError);
     },
     deleteChatSession: async (_: unknown, { id }: { id: string }) => chatService.deleteSession(id),
+    refreshSprintDashboard: async (_: unknown, { sprintId }: { sprintId: number }) => {
+      try { return sprintDashboardService.startRefresh(sprintId); } catch (error) { return sprintError(error); }
+    },
+    backfillSprintDashboards: async (_: unknown, { count }: { count: number }) => {
+      try { return sprintDashboardService.startBackfill(count); } catch (error) { return sprintError(error); }
+    },
+    updateSprintDashboardSettings: async (_: unknown, { boardId, config }: { boardId: string; config: string }) => {
+      await sprintDashboardService.updateSettings(boardId, config).catch(sprintError);
+      return true;
+    },
   }
 };
 
@@ -364,6 +386,7 @@ const protectedQueries = [
   'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens',
   'chatSessions', 'chatSession', 'chatMessages', 'chatSearch', 'chatBridge', 'chatStatus', 'chatBalloons',
+  'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings',
 ] as const;
 const protectedMutations = [
   'saveDemoLink',
@@ -392,6 +415,9 @@ const protectedMutations = [
   'sendChatMessage',
   'renameChatSession',
   'deleteChatSession',
+  'refreshSprintDashboard',
+  'backfillSprintDashboards',
+  'updateSprintDashboardSettings',
 ] as const;
 
 for (const field of protectedQueries) {

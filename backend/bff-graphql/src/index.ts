@@ -1,5 +1,7 @@
 import 'dotenv/config';
 import { createApp } from './app';
+import { sprintDashboardService } from './integrations/sprint-dashboard';
+import { startSprintScheduler } from './integrations/sprint-scheduler';
 
 const port = Number(process.env.PORT || 4000);
 
@@ -9,6 +11,7 @@ export async function startServer(): Promise<void> {
   app.listen(port, () => {
     const shellStatus = frontendEnabled ? 'with React SPA' : 'API only';
     console.log(`DOCK GraphQL server running on port ${port} at /graphql (${shellStatus})`);
+    startSprintScheduler(sprintDashboardService);
   });
 }
 
