@@ -48,11 +48,9 @@ export function trendY(value: number, g: TrendGeometry): number {
 
 export function trendPath(data: Array<number | null>, g: TrendGeometry): string {
   let path = '';
-  let penDown = false;
   data.forEach((value, index) => {
-    if (value === null) { penDown = false; return; }
-    path += `${penDown ? 'L' : 'M'}${trendX(index, data.length, g).toFixed(1)},${trendY(value, g).toFixed(1)} `;
-    penDown = true;
+    if (value === null) return;
+    path += `${path ? 'L' : 'M'}${trendX(index, data.length, g).toFixed(1)},${trendY(value, g).toFixed(1)} `;
   });
   return path.trim();
 }

@@ -40,8 +40,8 @@ test('trend geometry puts 0 at the bottom, 100 at the top, and centres a single 
   assert.strictEqual(trendX(2, 3, geometry), 380);
 });
 
-test('trendPath lifts the pen over missing sprints', () => {
-  assert.strictEqual(trendPath([100, null, 0], geometry), 'M40.0,10.0 M380.0,170.0');
+test('trendPath joins the points across sprints without load, like the reference chart', () => {
+  assert.strictEqual(trendPath([100, null, 0], geometry), 'M40.0,10.0 L380.0,170.0');
   assert.strictEqual(trendPath([100, 0], geometry), 'M40.0,10.0 L380.0,170.0');
   assert.strictEqual(trendPath([null, null], geometry), '');
 });
