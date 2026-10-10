@@ -42,7 +42,7 @@ export const SprintSettingsPanel = () => {
           <label htmlFor="sprint-config" className="mb-1 block text-sm font-medium">Config (JSON)</label>
           <Textarea id="sprint-config" value={config} onChange={(event) => setConfig(event.target.value)} rows={14} spellCheck={false} disabled={loading} className="font-mono text-xs" />
           <p className="mt-1 text-xs text-muted-foreground">
-            roster: [{'{'} full (Jira display name), short, token (pass label), color {'}'}]. Also loadTarget, targetPerDev, bugMarginPerDev, slaDays, tzOffsetHours, dailyHour (WIB), statusAliases.
+            roster: [{'{'} full (Jira display name), short, token (pass label), color {'}'}]. Also loadTarget, targetPerDev, bugMarginPerDev, slaDays, tzOffsetHours, weekendWeight, dailyHour (WIB), statusAliases.
           </p>
         </div>
         <div className="flex items-center gap-3">

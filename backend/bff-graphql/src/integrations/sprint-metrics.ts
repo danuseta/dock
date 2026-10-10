@@ -32,6 +32,7 @@ export interface SprintConfig {
   bugMarginPerDev: number;
   slaDays: number;
   tzOffsetHours: number;
+  weekendWeight: number;
   dailyHour: number;
   statusAliases: Record<string, string>;
 }
@@ -51,11 +52,12 @@ export const DEFAULT_SPRINT_CONFIG: SprintConfig = {
   bugMarginPerDev: 5,
   slaDays: 2,
   tzOffsetHours: 8,
+  weekendWeight: 0.12,
   dailyHour: 6,
   statusAliases: { 'Blocked': 'To Do', 'In Review': 'To Do', 'Move to IT': 'To Do', 'Revision': 'To Do' },
 };
 
-export const RULES_VERSION = 2;
+export const RULES_VERSION = 3;
 
 export type Tone = 'g' | 'a' | 'r';
 export type Bucket = 'Todo' | 'InP' | 'PR' | 'UATM' | 'UATC' | 'UATB' | 'RFP' | 'Done';
@@ -204,10 +206,10 @@ export function computeSprintMetrics(window: SprintWindow, rawIssues: SprintIssu
     const dEnd = Math.floor((t2 + tzMs) / 86400000);
     for (; d <= dEnd; d++) {
       const dow = new Date(d * 86400000).getUTCDay();
-      if (dow === 0 || dow === 6) continue;
+      const weight = dow === 0 || dow === 6 ? config.weekendWeight : 1;
       const a = Math.max(t1, d * 86400000 - tzMs);
       const b = Math.min(t2, (d + 1) * 86400000 - tzMs);
-      if (b > a) total += (b - a) / 86400000;
+      if (b > a) total += weight * (b - a) / 86400000;
     }
     return total;
   }
@@ -351,8 +353,7 @@ export function computeSprintMetrics(window: SprintWindow, rawIssues: SprintIssu
         else {
           pending += m.sp;
           m.gate[entryStatus] = 'pending';
-          const wait = wdays(entries[entries.length - 1].t, CUTOFF);
-          if (m.endStatus === entryStatus && wait > slaDays) challenging.push({ m, sp: m.sp });
+          challenging.push({ m, sp: m.sp });
         }
       }
       challenging.sort((a, b) => b.sp - a.sp || a.m.issue.key.localeCompare(b.m.issue.key));
@@ -395,12 +396,9 @@ export function computeSprintMetrics(window: SprintWindow, rawIssues: SprintIssu
     if (r.issues.has(p.key)) continue;
     r.issues.add(p.key);
     r.sp += m.sp;
-    const status = norm(valAt(m.issue, 'status', p.t, m.issue.status));
-    if (status === 'PR Review') {
-      const entry = m.tr.filter((x) => x.to === 'PR Review' && x.t <= p.t).pop();
-      if (entry) r.durs.push(wdays(entry.t, p.t));
-      else r.noDur++;
-    } else r.noDur++;
+    const entry = m.tr.filter((x) => x.to === 'PR Review' && x.t <= p.t).pop();
+    if (entry) r.durs.push(wdays(entry.t, p.t));
+    else r.noDur++;
   }
   let unattributedSP = 0;
   const unattributed = new Set<string>();
@@ -431,16 +429,21 @@ export function computeSprintMetrics(window: SprintWindow, rawIssues: SprintIssu
   const teamAvgSP = mean(reviewers.map((r) => r.sp));
 
   const stageDur = new Map(devKeys.map((d) => [d, Object.fromEntries(STAGES.map(([k]) => [k, [] as number[]])) as Record<StageName, number[]>]));
+  const winEnd = window.state === 'closed' ? CUTOFF : dayStart(CUTOFF) + 86400000 - 1000;
   for (const m of model) {
-    const es = m.tr;
-    let cur = es.length ? es[0].from : m.endStatus;
+    const perStage = new Map<StageName, number>();
+    const add = (stage: StageName, from: number, to: number) => perStage.set(stage, (perStage.get(stage) || 0) + wdays(from, to));
+    let cur = m.tr.length ? m.tr[0].from : m.endStatus;
     let enter = m.issue.createdT;
-    for (const x of es) {
+    for (const x of m.tr.filter((t) => t.t <= winEnd)) {
       const stage = STAGES.find((s) => s[1] === cur);
-      if (stage && inWin(x.t)) stageDur.get(m.dev.short)![stage[0]].push(wdays(enter, x.t));
+      if (stage && x.t >= T0) add(stage[0], Math.max(enter, T0), x.t);
       cur = x.to;
       enter = x.t;
     }
+    const open = STAGES.find((s) => s[1] === cur);
+    if (open && enter <= winEnd) add(open[0], enter, winEnd);
+    for (const [stage, days] of perStage) stageDur.get(m.dev.short)![stage].push(days);
   }
   const stageRows: StageRow[] = devKeys.map((d) => ({
     dev: d,

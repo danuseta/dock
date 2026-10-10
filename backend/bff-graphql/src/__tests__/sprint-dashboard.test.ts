@@ -131,6 +131,25 @@ test('the start snapshot is taken at the start of the sprint day, not when the s
   assert.strictEqual(result.start.find((r) => r.dev === 'Bob')!.buckets.Todo, 6, 'K-3 moved at 09:00 on the start day, after the snapshot');
 });
 
+test('review duration counts weekend days at the configured weight, also for a pass given after PR Review', () => {
+  const late = issues.map((i) => i.key !== 'K-3' ? i : {
+    ...i,
+    events: i.events.map((e) => e.field === 'labels' ? { ...e, at: at(12, 10) } : e),
+  });
+  const reviewer = computeSprintMetrics(window, late, config).reviewers.find((r) => r.dev === 'Ann')!;
+  assert.strictEqual(reviewer.avg!.toFixed(2), '3.24', 'Wed 10:00 to Mon 10:00 is 3 working days plus 2 weekend days at 0.12');
+  assert.strictEqual(reviewer.breaches, 1);
+});
+
+test('stage duration includes the stage a ticket is still in, and every pending ticket is challenging', () => {
+  const stuck = issues.map((i) => i.key !== 'K-3' ? i : { ...i, status: 'PR Review', events: i.events.slice(0, 2) });
+  const result = computeSprintMetrics(window, stuck, config);
+  const bob = result.pr.find((r) => r.dev === 'Bob')!;
+  assert.deepStrictEqual([bob.pending, bob.challenging.map((c) => c.key)], [5, ['K-3']]);
+  assert.ok(result.stages.find((r) => r.dev === 'Bob')!.stages['PR Review'], 'K-3 is still in PR Review at the cutoff');
+  assert.ok(result.stages.find((r) => r.dev === 'Ann')!.stages['UAT Merged'], 'K-1 is still in UAT Merged at the cutoff');
+});
+
 test('percentages round half to even, like the reference dashboard', () => {
   assert.deepStrictEqual([62.5, 63.5, 212.5, 62.4, 62.6].map(roundHalfEven), [62, 64, 212, 62, 63]);
 });
@@ -385,6 +404,7 @@ test('issueEvents returns the stored changelog of a sprint, or an empty list', a
 
 test('parseSprintConfig fills defaults and rejects bad numbers', () => {
   assert.strictEqual(parseSprintConfig(null).loadTarget, 16);
+  assert.strictEqual(parseSprintConfig('{}').weekendWeight, 0.12);
   assert.strictEqual(parseSprintConfig('{"slaDays":3}').slaDays, 3);
   assert.throws(() => parseSprintConfig('{"dailyHour":30}'), SprintInputError);
   assert.throws(() => parseSprintConfig('{"loadTarget":"x"}'), SprintInputError);

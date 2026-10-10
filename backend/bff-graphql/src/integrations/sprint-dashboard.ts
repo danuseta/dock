@@ -84,7 +84,7 @@ export function parseSprintConfig(json: string | null | undefined): SprintConfig
     throw new SprintInputError('Each roster entry needs full, short, and token');
   }
   const config: SprintConfig = { ...DEFAULT_SPRINT_CONFIG, ...parsed, roster };
-  for (const key of ['loadTarget', 'targetPerDev', 'bugMarginPerDev', 'slaDays', 'tzOffsetHours', 'dailyHour'] as const) {
+  for (const key of ['loadTarget', 'targetPerDev', 'bugMarginPerDev', 'slaDays', 'tzOffsetHours', 'weekendWeight', 'dailyHour'] as const) {
     if (typeof config[key] !== 'number' || !Number.isFinite(config[key])) throw new SprintInputError(`Sprint config ${key} must be a number`);
   }
   if (config.loadTarget <= 0) throw new SprintInputError('Sprint config loadTarget must be above zero');
