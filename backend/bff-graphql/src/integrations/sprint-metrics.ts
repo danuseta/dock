@@ -186,8 +186,43 @@ export function sprintLabel(name: string): { label: string; num: number } {
   return { label: `${name.split(/\s+/)[0]}${number}`, num: number };
 }
 
+const PASS_LABEL = /^[A-Za-z][A-Za-z0-9]*Pass$/;
+
+function shortName(full: string, token: string): string {
+  const stem = token.slice(0, -'Pass'.length).toLowerCase();
+  const words = full.split(/\s+/).filter(Boolean);
+  const byStem = words.find((word) => word.length > 1 && word.toLowerCase().includes(stem));
+  return byStem || words.find((word) => word.length > 1) || full;
+}
+
+export function detectRoster(issues: SprintIssue[], overrides: RosterMember[] = []): RosterMember[] {
+  const added = new Map<string, Map<string, number>>();
+  for (const issue of issues) {
+    for (const event of issue.events) {
+      if (event.field !== 'labels' || !event.by) continue;
+      const before = new Set((event.from || '').split(/\s+/));
+      for (const label of (event.to || '').split(/\s+/)) {
+        if (!PASS_LABEL.test(label) || before.has(label)) continue;
+        const authors = added.get(label) || new Map<string, number>();
+        authors.set(event.by, (authors.get(event.by) || 0) + 1);
+        added.set(label, authors);
+      }
+    }
+  }
+  const owned = new Map<string, { token: string; count: number }>();
+  for (const [token, authors] of added) {
+    const [owner, count] = [...authors].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+    if (count > (owned.get(owner)?.count || 0)) owned.set(owner, { token, count });
+  }
+  const roster = new Map<string, RosterMember>();
+  for (const [full, { token }] of owned) roster.set(full, { full, short: shortName(full, token), token });
+  for (const member of overrides) roster.set(member.full, { ...roster.get(member.full), ...member });
+  return [...roster.values()];
+}
+
 export function computeSprintMetrics(window: SprintWindow, rawIssues: SprintIssue[], config: SprintConfig): SprintResult {
-  const { roster, loadTarget, targetPerDev, bugMarginPerDev, slaDays } = config;
+  const { loadTarget, targetPerDev, bugMarginPerDev, slaDays } = config;
+  const roster = detectRoster(rawIssues, config.roster);
   const tzMs = config.tzOffsetHours * 3600 * 1000;
   const { label, num: sprintNum } = sprintLabel(window.name);
   const dayStart = (t: number) => Math.floor((t + tzMs) / 86400000) * 86400000 - tzMs;
@@ -197,7 +232,7 @@ export function computeSprintMetrics(window: SprintWindow, rawIssues: SprintIssu
   const norm = (status: string | null): string => (status === null ? '' : config.statusAliases[status] || status);
   const devByFull = new Map(roster.map((d) => [d.full, d]));
   const devByToken = new Map(roster.map((d) => [d.token, d]));
-  const devKeys = [...roster].sort((a, b) => a.full.localeCompare(b.full)).map((d) => d.short);
+  const rosterKeys = [...roster].sort((a, b) => a.full.localeCompare(b.full)).map((d) => d.short);
 
   function wdays(t1: number, t2: number): number {
     if (t2 <= t1) return 0;
@@ -298,6 +333,7 @@ export function computeSprintMetrics(window: SprintWindow, rawIssues: SprintIssu
       sp: sp ?? 0, cls: carried ? 'carry' : i.type === 'Bug' ? 'bug' : 'alloc', dev, tr: transitions(i), gate: {},
     });
   }
+  const devKeys = rosterKeys.filter((d) => model.some((m) => m.dev.short === d));
   const byKey = new Map(model.map((m) => [m.issue.key, m]));
   const inWin = (t: number) => t >= T0 && t <= CUTOFF;
   const ref = (m: Entry): IssueRef => ({ key: m.issue.key, summary: m.summary });
@@ -383,7 +419,7 @@ export function computeSprintMetrics(window: SprintWindow, rawIssues: SprintIssu
   }
   passEvents.sort((a, b) => a.t - b.t);
 
-  const rev = new Map(devKeys.map((d) => [d, {
+  const rev = new Map(rosterKeys.map((d) => [d, {
     issues: new Set<string>(), sp: 0, durs: [] as number[], failed: new Set<string>(), failedSP: 0, noDur: 0,
   }]));
   let prePassIgnored = 0;
@@ -413,7 +449,7 @@ export function computeSprintMetrics(window: SprintWindow, rawIssues: SprintIssu
       }
     }
   }
-  const reviewers: ReviewerRow[] = devKeys.map((d) => {
+  const reviewers: ReviewerRow[] = rosterKeys.map((d) => {
     const r = rev.get(d)!;
     const failRate = r.sp ? r.failedSP / r.sp : null;
     const avg = mean(r.durs);

@@ -27,8 +27,8 @@ export function startSprintScheduler(service: SprintDashboardService): () => voi
     timer.unref();
   };
 
-  void service.boardId().then(async (boardId) => {
-    if (boardId && await service.isStale()) await service.runDaily();
+  void service.isStale().then(async (stale) => {
+    if (stale) await service.runDaily();
   }).catch((error) => console.error('[Sprint] Startup catch-up failed:', error instanceof Error ? error.message : error))
     .finally(() => { void schedule(); });
 

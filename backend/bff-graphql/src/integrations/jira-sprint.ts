@@ -127,6 +127,19 @@ export class JiraSprintClient {
     }
   }
 
+  async findBoardId(projectKeys: string[]): Promise<string | null> {
+    const boards: Array<{ id: number }> = [];
+    for (const key of projectKeys.length ? projectKeys : [undefined]) {
+      const page = await this.http.get('/rest/agile/1.0/board', { type: 'scrum', maxResults: 50, ...(key ? { projectKeyOrId: key } : {}) });
+      boards.push(...(page.values || []));
+    }
+    for (const board of boards) {
+      const active = await this.http.get(`/rest/agile/1.0/board/${board.id}/sprint`, { state: 'active', maxResults: 1 });
+      if ((active.values || []).length) return String(board.id);
+    }
+    return boards.length ? String(boards[0].id) : null;
+  }
+
   private async fullChangelog(key: string): Promise<any[]> {
     const histories: any[] = [];
     for (let startAt = 0; ; ) {
