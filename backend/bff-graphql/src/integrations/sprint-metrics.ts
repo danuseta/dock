@@ -83,7 +83,7 @@ export interface StageRow { dev: string; stages: Record<StageName, Toned<number>
 export interface Flag { sev: 'R' | 'A' | 'B'; dev: string; metric: string; desc: string }
 export interface ExcludedIssue {
   key: string; summary: string; assignee: string | null; status: string; sp: number | null;
-  reason: 'not-in-roster' | 'documentation' | 'unknown-status';
+  reason: 'removed-from-sprint' | 'not-in-roster' | 'unknown-status';
 }
 
 export interface SprintResult {
@@ -284,8 +284,8 @@ export function computeSprintMetrics(window: SprintWindow, rawIssues: SprintIssu
     }
     const spValue = sp ?? 0;
     const dev = assignee ? devByFull.get(assignee) : undefined;
+    if (!sprintsAt(i, CUTOFF).includes(window.name)) { exclude(i, assignee, sp, 'removed-from-sprint'); continue; }
     if (!dev) { exclude(i, assignee, sp, 'not-in-roster'); continue; }
-    if (/^\s*(documentation|dokumentasi)\b/i.test(i.summary)) { exclude(i, assignee, sp, 'documentation'); continue; }
     const endStatus = norm(valAt(i, 'status', CUTOFF, i.status));
     const startBucket = BUCKET[statusJ];
     const endBucket = BUCKET[endStatus];

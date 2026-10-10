@@ -61,7 +61,14 @@ const issues: SprintIssue[] = [
     ],
   },
   { key: 'K-4', summary: 'Someone else', created: at(6), type: 'Task', status: 'To Do', assignee: 'Out Sider', sp: 8, labels: [], events: [] },
-  { key: 'K-5', summary: 'Documentation: handbook', created: at(6), type: 'Task', status: 'To Do', assignee: ANN, sp: 1, labels: [], events: [] },
+  {
+    key: 'K-5', summary: 'Pulled out mid-sprint', created: '2026-01-01T10:00:00.000+0800', type: 'Task', status: 'To Do', assignee: ANN, sp: 4, labels: [],
+    events: [
+      ev('2026-01-03T10:00:00.000+0800', ANN, 'Sprint', '', 'QRD Sprint 5'),
+      ev(at(8), ANN, 'Sprint', 'QRD Sprint 5', ''),
+    ],
+  },
+  { key: 'K-6', summary: 'Documentation: handbook', created: '2026-01-01T10:00:00.000+0800', type: 'Task', status: 'To Do', assignee: BOB, sp: 1, labels: [], events: [] },
 ];
 
 test('computeSprintMetrics applies the sprint rules to a small synthetic sprint', () => {
@@ -69,11 +76,11 @@ test('computeSprintMetrics applies the sprint rules to a small synthetic sprint'
 
   assert.deepStrictEqual(
     { total: result.overview.totalSP, alloc: result.overview.allocated, carry: result.overview.carryover, bug: result.overview.bugSP, devs: result.overview.developers },
-    { total: 10, alloc: 5, carry: 3, bug: 2, devs: 2 },
+    { total: 11, alloc: 6, carry: 3, bug: 2, devs: 2 },
   );
   assert.deepStrictEqual(
     result.notes.excluded.map((e) => [e.key, e.reason]),
-    [['K-4', 'not-in-roster'], ['K-5', 'documentation']],
+    [['K-4', 'not-in-roster'], ['K-5', 'removed-from-sprint']],
   );
 
   const ann = result.pr.find((r) => r.dev === 'Ann')!;
@@ -240,7 +247,7 @@ test('refresh stores a snapshot and the dashboard reads it back', async () => {
   assert.strictEqual(service.refreshState().status, 'idle');
   const dashboard = await service.getDashboard(5);
   assert.strictEqual(dashboard.summary?.computedAt, '2026-01-12T00:00:00.000Z');
-  assert.strictEqual(JSON.parse(dashboard.result!).overview.totalSP, 10);
+  assert.strictEqual(JSON.parse(dashboard.result!).overview.totalSP, 11);
   assert.ok(store.events.has(5));
   assert.strictEqual((await service.getDashboard(null)).summary?.id, 5, 'no id picks the active sprint');
 });
