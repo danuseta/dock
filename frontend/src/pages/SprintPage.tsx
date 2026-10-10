@@ -69,7 +69,7 @@ const SprintPage: React.FC = () => {
         <Card className="py-10 text-center">
           <BarChart3 size={34} className="mx-auto mb-2.5 text-muted-foreground" aria-hidden="true" />
           <p className="text-pretty text-muted-foreground">
-            No sprint data yet. Set the Jira board id and the team roster in Settings, then load the last {board.backfillCount} sprints.
+            No sprint data yet. The board and the team are read from Jira, so just load the last {board.backfillCount} sprints.
           </p>
           <Button variant="primary" className="mt-4" onClick={() => void board.backfill()} disabled={board.busy}>
             <DatabaseZap size={16} aria-hidden="true" />Load last {board.backfillCount} sprints

@@ -23,7 +23,7 @@ export interface StageRow { dev: string; stages: Record<StageName, { value: numb
 export interface Flag { sev: 'R' | 'A' | 'B'; dev: string; metric: string; desc: string }
 export interface ExcludedIssue {
   key: string; summary: string; assignee: string | null; status: string; sp: number | null;
-  reason: 'not-in-roster' | 'documentation' | 'unknown-status';
+  reason: 'removed-from-sprint' | 'not-in-roster' | 'unknown-status';
 }
 
 export interface SprintResult {
@@ -46,8 +46,7 @@ export interface SprintResult {
   notes: {
     addedAfterStart: number;
     noSprintEvents: number;
-    spChanges: Array<{ key: string; from: number; to: number | null }>;
-    assigneeChanges: Array<{ key: string; now: string | null }>;
+    noSprintLabel: number;
     nonSelfPass: Array<{ key: string; token: string; by: string | null }>;
     prePassIgnored: number;
     passWithoutDuration: number;

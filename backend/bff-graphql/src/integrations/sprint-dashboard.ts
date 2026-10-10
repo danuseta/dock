@@ -1,7 +1,7 @@
 import { StorageService } from '../storage/service';
 import { JiraSprintClient, createJiraHttp, type BoardSprint } from './jira-sprint';
 import {
-  DEFAULT_SPRINT_CONFIG, buildTrend, computeSprintMetrics,
+  DEFAULT_SPRINT_CONFIG, RULES_VERSION, buildTrend, computeSprintMetrics, detectRoster,
   type SprintConfig, type SprintIssue, type SprintResult,
 } from './sprint-metrics';
 
@@ -81,10 +81,10 @@ export function parseSprintConfig(json: string | null | undefined): SprintConfig
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new SprintInputError('Sprint config must be a JSON object');
   const roster = parsed.roster ?? [];
   if (!Array.isArray(roster) || roster.some((m: any) => !m || [m.full, m.short, m.token].some((v) => typeof v !== 'string' || !v.trim()))) {
-    throw new SprintInputError('Each roster entry needs full, short, and token');
+    throw new SprintInputError('Each roster override needs full, short, and token');
   }
   const config: SprintConfig = { ...DEFAULT_SPRINT_CONFIG, ...parsed, roster };
-  for (const key of ['loadTarget', 'targetPerDev', 'bugMarginPerDev', 'slaDays', 'tzOffsetHours', 'dailyHour'] as const) {
+  for (const key of ['loadTarget', 'targetPerDev', 'bugMarginPerDev', 'slaDays', 'tzOffsetHours', 'weekendWeight', 'dailyHour'] as const) {
     if (typeof config[key] !== 'number' || !Number.isFinite(config[key])) throw new SprintInputError(`Sprint config ${key} must be a number`);
   }
   if (config.loadTarget <= 0) throw new SprintInputError('Sprint config loadTarget must be above zero');
@@ -92,7 +92,10 @@ export function parseSprintConfig(json: string | null | undefined): SprintConfig
   return config;
 }
 
-const endOf = (sprint: BoardSprint) => (sprint.state === 'closed' && sprint.completeDate) ? sprint.completeDate : sprint.endDate;
+function isCurrent(result: string | null): boolean {
+  if (!result) return false;
+  try { return JSON.parse(result).rulesVersion === RULES_VERSION; } catch { return false; }
+}
 
 export class SprintDashboardService {
   private running: Promise<void> | null = null;
@@ -145,13 +148,19 @@ export class SprintDashboardService {
     return { sprintId: row.sprintId, name: row.name, state: row.state, startDate: row.startDate, endDate: row.endDate };
   }
 
-  private async recomputeAll(config: SprintConfig): Promise<void> {
-    if (!config.roster.length) return;
-    for (const row of await this.store.getSprintSnapshots()) {
+  private async recomputeAll(base: SprintConfig): Promise<void> {
+    const rows = await this.store.getSprintSnapshots();
+    const stored = new Map<number, SprintIssue[]>();
+    for (const row of rows) {
       const events = await this.store.getSprintIssueEvents(row.sprintId);
-      if (!events) continue;
+      if (events) stored.set(row.sprintId, JSON.parse(events.issues) as SprintIssue[]);
+    }
+    const config = { ...base, roster: detectRoster([...stored.values()].flat(), base.roster) };
+    for (const row of rows) {
+      const issues = stored.get(row.sprintId);
+      if (!issues) continue;
       try {
-        const result = computeSprintMetrics(this.windowOf(row), JSON.parse(events.issues) as SprintIssue[], config);
+        const result = computeSprintMetrics(this.windowOf(row), issues, config);
         await this.store.upsertSprintSnapshot({ ...this.identityOf(row), result: JSON.stringify(result), lastError: null });
       } catch (error) {
         await this.store.upsertSprintSnapshot({ ...this.identityOf(row), lastError: describeError(error) });
@@ -162,7 +171,7 @@ export class SprintDashboardService {
   private async computeAndStore(sprint: BoardSprint, client: JiraSprintClient, config: SprintConfig): Promise<void> {
     const base = {
       sprintId: sprint.id, name: sprint.name, state: sprint.state,
-      startDate: new Date(sprint.startDate), endDate: new Date(endOf(sprint)),
+      startDate: new Date(sprint.startDate), endDate: new Date(sprint.endDate),
     };
     try {
       const issues = await client.fetchSprintIssues(sprint.id);
@@ -180,11 +189,15 @@ export class SprintDashboardService {
   }
 
   private async prepare(): Promise<{ client: JiraSprintClient; config: SprintConfig; sprints: BoardSprint[] }> {
-    const boardId = await this.boardId();
-    if (!boardId) throw new SprintInputError('Jira board id is not set for the sprint dashboard');
     const config = await this.getConfig();
-    if (!config.roster.length) throw new SprintInputError('Sprint roster is not configured');
     const client = await this.clientFactory();
+    let boardId = await this.boardId();
+    if (!boardId) {
+      const projectKeys = ((await this.setting('jiraProjectKeys')) || '').split(',').map((key) => key.trim()).filter(Boolean);
+      boardId = (await client.findBoardId(projectKeys)) || '';
+      if (!boardId) throw new SprintInputError('No Scrum board found in Jira for the configured projects');
+      await this.store.upsertSetting(BOARD_KEY, boardId, 'Jira board id for the sprint dashboard');
+    }
     return { client, config, sprints: await client.listSprints(boardId) };
   }
 
@@ -205,6 +218,7 @@ export class SprintDashboardService {
       const sprint = sprints.find((s) => s.id === sprintId);
       if (!sprint) throw new SprintInputError(`Sprint ${sprintId} is not on the board`);
       await this.computeAndStore(sprint, client, config);
+      await this.recomputeAll(config);
       this.state.done = 1;
     });
   }
@@ -217,7 +231,7 @@ export class SprintDashboardService {
       const existing = new Map((await this.store.getSprintSnapshots()).map((r) => [r.sprintId, r]));
       const todo = wanted.filter((s) => {
         const row = existing.get(s.id);
-        return !(row && row.state === 'closed' && row.result && s.state === 'closed');
+        return !(row && row.state === 'closed' && s.state === 'closed' && isCurrent(row.result));
       });
       this.state.total = todo.length;
       let failed = 0;
@@ -225,12 +239,12 @@ export class SprintDashboardService {
         try { await this.computeAndStore(sprint, client, config); } catch { failed++; }
         this.state.done++;
       }
+      await this.recomputeAll(config);
       if (failed) this.state.error = `${failed} sprint(s) failed; run the backfill again to retry them`;
     });
   }
 
   async runDaily(): Promise<void> {
-    if (!(await this.boardId())) return;
     try {
       this.start('Daily sprint update', 0, async () => {
         const { client, config, sprints } = await this.prepare();
@@ -242,6 +256,7 @@ export class SprintDashboardService {
           try { await this.computeAndStore(sprint, client, config); } catch { failed++; }
           this.state.done++;
         }
+        await this.recomputeAll(config);
         if (failed) this.state.error = `${failed} sprint(s) failed to update`;
       });
     } catch (error) {

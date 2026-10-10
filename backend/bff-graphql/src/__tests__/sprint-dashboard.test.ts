@@ -7,7 +7,7 @@ import {
 } from '../integrations/sprint-dashboard';
 import { nextRunAt } from '../integrations/sprint-scheduler';
 import {
-  DEFAULT_SPRINT_CONFIG, buildTrend, computeSprintMetrics,
+  DEFAULT_SPRINT_CONFIG, RULES_VERSION, buildTrend, computeSprintMetrics, detectRoster, roundHalfEven,
   type SprintConfig, type SprintEvent, type SprintIssue, type SprintResult,
 } from '../integrations/sprint-metrics';
 
@@ -28,7 +28,7 @@ const status = (when: string, by: string, from: string, to: string) => ev(when, 
 
 const issues: SprintIssue[] = [
   {
-    key: 'K-1', summary: 'Carried task', created: '2025-12-15T10:00:00.000+0800', type: 'Task', status: 'UAT MERGED', assignee: ANN, sp: 3, labels: [],
+    key: 'K-1', summary: 'Carried task', created: '2025-12-15T10:00:00.000+0800', type: 'Task', status: 'UAT MERGED', assignee: ANN, sp: 3, labels: ['QRD4', 'QRD5'],
     events: [
       ev('2025-12-20T10:00:00.000+0800', ANN, 'Sprint', '', 'QRD Sprint 4'),
       ev('2026-01-03T10:00:00.000+0800', ANN, 'Sprint', 'QRD Sprint 4', 'QRD Sprint 4, QRD Sprint 5'),
@@ -40,7 +40,7 @@ const issues: SprintIssue[] = [
     ],
   },
   {
-    key: 'K-2', summary: 'Mid-sprint bug', created: at(6, 9), type: 'Bug', status: 'UAT BUG / Improvement', assignee: ANN, sp: 2, labels: ['bobPass'],
+    key: 'K-2', summary: 'Mid-sprint bug', created: at(6, 9), type: 'Bug', status: 'UAT BUG / Improvement', assignee: ANN, sp: 2, labels: ['QRD5', 'bobPass'],
     events: [
       ev(at(6, 9), ANN, 'Story point estimate', null, '2'),
       status(at(7), ANN, 'To Do', 'In Progress'),
@@ -50,7 +50,7 @@ const issues: SprintIssue[] = [
     ],
   },
   {
-    key: 'K-3', summary: 'Clean task', created: '2026-01-01T10:00:00.000+0800', type: 'Task', status: 'ReadyForProduction', assignee: BOB, sp: 5, labels: ['annPass'],
+    key: 'K-3', summary: 'Clean task', created: '2026-01-01T10:00:00.000+0800', type: 'Task', status: 'ReadyForProduction', assignee: BOB, sp: 5, labels: ['QRD5', 'annPass'],
     events: [
       status(at(6), BOB, 'To Do', 'In Progress'),
       status(at(7), BOB, 'In Progress', 'PR Review'),
@@ -60,8 +60,16 @@ const issues: SprintIssue[] = [
       status(at(12), ANN, 'UAT CHECK', 'ReadyForProduction'),
     ],
   },
-  { key: 'K-4', summary: 'Someone else', created: at(6), type: 'Task', status: 'To Do', assignee: 'Out Sider', sp: 8, labels: [], events: [] },
-  { key: 'K-5', summary: 'Documentation: handbook', created: at(6), type: 'Task', status: 'To Do', assignee: ANN, sp: 1, labels: [], events: [] },
+  { key: 'K-4', summary: 'Someone else', created: at(6), type: 'Task', status: 'To Do', assignee: 'Out Sider', sp: 8, labels: ['QRD5'], events: [] },
+  {
+    key: 'K-5', summary: 'Pulled out mid-sprint', created: '2026-01-01T10:00:00.000+0800', type: 'Task', status: 'To Do', assignee: ANN, sp: 4, labels: ['QRD5'],
+    events: [
+      ev('2026-01-03T10:00:00.000+0800', ANN, 'Sprint', '', 'QRD Sprint 5'),
+      ev(at(8), ANN, 'Sprint', 'QRD Sprint 5', ''),
+    ],
+  },
+  { key: 'K-6', summary: 'Documentation: handbook', created: '2026-01-01T10:00:00.000+0800', type: 'Task', status: 'To Do', assignee: BOB, sp: 1, labels: ['QRD5'], events: [] },
+  { key: 'K-7', summary: 'In the sprint but never labelled', created: '2026-01-01T10:00:00.000+0800', type: 'Task', status: 'To Do', assignee: ANN, sp: 9, labels: [], events: [] },
 ];
 
 test('computeSprintMetrics applies the sprint rules to a small synthetic sprint', () => {
@@ -69,12 +77,13 @@ test('computeSprintMetrics applies the sprint rules to a small synthetic sprint'
 
   assert.deepStrictEqual(
     { total: result.overview.totalSP, alloc: result.overview.allocated, carry: result.overview.carryover, bug: result.overview.bugSP, devs: result.overview.developers },
-    { total: 10, alloc: 5, carry: 3, bug: 2, devs: 2 },
+    { total: 11, alloc: 6, carry: 3, bug: 2, devs: 2 },
   );
   assert.deepStrictEqual(
     result.notes.excluded.map((e) => [e.key, e.reason]),
-    [['K-4', 'not-in-roster'], ['K-5', 'documentation']],
+    [['K-4', 'not-in-roster'], ['K-5', 'removed-from-sprint']],
   );
+  assert.strictEqual(result.notes.noSprintLabel, 1, 'K-7 has no QRD5 label, so it is not part of the sprint');
 
   const ann = result.pr.find((r) => r.dev === 'Ann')!;
   const bob = result.pr.find((r) => r.dev === 'Bob')!;
@@ -90,6 +99,92 @@ test('computeSprintMetrics applies the sprint rules to a small synthetic sprint'
   assert.strictEqual(result.reviewers.find((r) => r.dev === 'Ann')!.sp, 5);
 
   assert.ok(result.flags.some((f) => f.sev === 'R' && f.dev === 'Ann' && f.metric === 'pr'));
+});
+
+test('computeSprintMetrics uses the current assignee and SP, and a carried-over bug is carryover', () => {
+  const changed = issues.map((i) => i.key !== 'K-2' ? i : {
+    ...i,
+    assignee: BOB,
+    sp: 4,
+    labels: [...i.labels, 'QRD4'],
+    events: [
+      ev('2025-12-20T10:00:00.000+0800', ANN, 'Sprint', '', 'QRD Sprint 4'),
+      ev('2026-01-03T10:00:00.000+0800', ANN, 'Sprint', 'QRD Sprint 4', 'QRD Sprint 4, QRD Sprint 5'),
+      ev('2025-12-21T10:00:00.000+0800', ANN, 'assignee', null, ANN),
+      ...i.events,
+    ],
+  });
+  const result = computeSprintMetrics(window, changed, config);
+  assert.deepStrictEqual(
+    { carry: result.overview.carryover, bug: result.overview.bugSP },
+    { carry: 7, bug: 0 },
+  );
+  assert.strictEqual(result.start.find((r) => r.dev === 'Bob')!.total, 10, 'K-2 now belongs to Bob at its current 4 SP');
+});
+
+test('the start snapshot is taken at the start of the sprint day, not when the sprint was started', () => {
+  const early = issues.map((i) => i.key !== 'K-3' ? i : {
+    ...i,
+    events: [status('2026-01-05T09:00:00.000+0800', BOB, 'To Do', 'In Progress'), ...i.events.slice(1)],
+  });
+  const result = computeSprintMetrics(window, early, config);
+  assert.strictEqual(result.start.find((r) => r.dev === 'Bob')!.buckets.Todo, 6, 'K-3 moved at 09:00 on the start day, after the snapshot');
+});
+
+test('review duration counts weekend days at the configured weight, also for a pass given after PR Review', () => {
+  const late = issues.map((i) => i.key !== 'K-3' ? i : {
+    ...i,
+    events: i.events.map((e) => e.field === 'labels' ? { ...e, at: at(12, 10) } : e),
+  });
+  const reviewer = computeSprintMetrics(window, late, config).reviewers.find((r) => r.dev === 'Ann')!;
+  assert.strictEqual(reviewer.avg!.toFixed(2), '3.24', 'Wed 10:00 to Mon 10:00 is 3 working days plus 2 weekend days at 0.12');
+  assert.strictEqual(reviewer.breaches, 1);
+});
+
+test('stage duration includes the stage a ticket is still in, and every pending ticket is challenging', () => {
+  const stuck = issues.map((i) => i.key !== 'K-3' ? i : { ...i, status: 'PR Review', events: i.events.slice(0, 2) });
+  const result = computeSprintMetrics(window, stuck, config);
+  const bob = result.pr.find((r) => r.dev === 'Bob')!;
+  assert.deepStrictEqual([bob.pending, bob.challenging.map((c) => c.key)], [5, ['K-3']]);
+  assert.ok(result.stages.find((r) => r.dev === 'Bob')!.stages['PR Review'], 'K-3 is still in PR Review at the cutoff');
+  assert.ok(result.stages.find((r) => r.dev === 'Ann')!.stages['UAT Merged'], 'K-1 is still in UAT Merged at the cutoff');
+});
+
+test('detectRoster gives each pass label to the person who added it most, and names them from it', () => {
+  const label = (by: string, token: string): SprintEvent => ev(at(6), by, 'labels', '', token);
+  const issue = (key: string, events: SprintEvent[]): SprintIssue => ({ key, summary: key, created: at(5), type: 'Task', status: 'To Do', assignee: null, sp: 1, labels: [], events });
+  const roster = detectRoster([
+    issue('A-1', [label('Aken Setiawan', 'kenPass'), label('M Danu Seta W', 'danuPass')]),
+    issue('A-2', [label('Aken Setiawan', 'kenPass'), label('Dwi Indra', 'kenPass')]),
+    issue('A-3', [label('Muhammad Shovian Hadi Al-Baihaqy', 'shovianPass'), label('Michael Jeffry Setiawan', 'mikePass')]),
+    issue('A-4', [label('Some Admin', 'QRD23'), label('Some Admin', 'TBM')]),
+  ]);
+  assert.deepStrictEqual(
+    roster.map((m) => [m.full, m.short, m.token]).sort(),
+    [
+      ['Aken Setiawan', 'Aken', 'kenPass'],
+      ['M Danu Seta W', 'Danu', 'danuPass'],
+      ['Michael Jeffry Setiawan', 'Michael', 'mikePass'],
+      ['Muhammad Shovian Hadi Al-Baihaqy', 'Shovian', 'shovianPass'],
+    ],
+    'Dwi Indra added kenPass once but does not own it; the admin owns no pass label',
+  );
+  assert.strictEqual(detectRoster([], [{ full: 'Michael Jeffry Setiawan', short: 'Mike', token: 'mikePass' }])[0].short, 'Mike');
+});
+
+test('findBoardId prefers the board of the configured project that has an active sprint', async () => {
+  const http = fakeHttp((_, url, params) => {
+    if (url === '/rest/agile/1.0/board') return { values: params.projectKeyOrId === 'QRD' ? [{ id: 7 }, { id: 40 }] : [] };
+    return { values: url.includes('/40/') ? [{ id: 632 }] : [] };
+  });
+  assert.strictEqual(await new JiraSprintClient(http).findBoardId(['QRD']), '40');
+  assert.strictEqual(http.calls[0][2].projectKeyOrId, 'QRD');
+  const empty = fakeHttp(() => ({ values: [] }));
+  assert.strictEqual(await new JiraSprintClient(empty).findBoardId([]), null);
+});
+
+test('percentages round half to even, like the reference dashboard', () => {
+  assert.deepStrictEqual([62.5, 63.5, 212.5, 62.4, 62.6].map(roundHalfEven), [62, 64, 212, 62, 63]);
 });
 
 test('computeSprintMetrics counts a pass label added by someone else separately', () => {
@@ -214,13 +309,14 @@ const boardSprints = [
   { id: 5, name: 'QRD Sprint 5', state: 'active' as const, startDate: window.start, endDate: window.end, completeDate: null },
 ];
 
-function setup(options: { failFor?: number; delayMs?: number } = {}) {
+function setup(options: { failFor?: number; delayMs?: number; board?: string | null } = {}) {
   const store = new MemoryStore();
   store.settings.set('sprintBoardId', '40');
   store.settings.set('sprintDashboardConfig', JSON.stringify(config));
   const fetched: number[] = [];
   const client = {
     listSprints: async () => boardSprints,
+    findBoardId: async () => (options.board === undefined ? '40' : options.board),
     fetchSprintIssues: async (id: number) => {
       fetched.push(id);
       if (options.delayMs) await new Promise((resolve) => setTimeout(resolve, options.delayMs));
@@ -240,7 +336,7 @@ test('refresh stores a snapshot and the dashboard reads it back', async () => {
   assert.strictEqual(service.refreshState().status, 'idle');
   const dashboard = await service.getDashboard(5);
   assert.strictEqual(dashboard.summary?.computedAt, '2026-01-12T00:00:00.000Z');
-  assert.strictEqual(JSON.parse(dashboard.result!).overview.totalSP, 10);
+  assert.strictEqual(JSON.parse(dashboard.result!).overview.totalSP, 11);
   assert.ok(store.events.has(5));
   assert.strictEqual((await service.getDashboard(null)).summary?.id, 5, 'no id picks the active sprint');
 });
@@ -269,23 +365,55 @@ test('a failed refresh records lastError and keeps the previous result', async (
   assert.match(row.lastError!, /Jira exploded/);
 });
 
-test('refresh without a roster or board id reports why', async () => {
+test('the roster is detected from pass labels when none is configured', async () => {
   const { service, store } = setup();
   store.settings.set('sprintDashboardConfig', JSON.stringify({ ...config, roster: [] }));
   service.startRefresh(5);
   await service.idle();
-  assert.match(service.refreshState().error!, /roster/);
+  assert.strictEqual(service.refreshState().error, null);
+  const result = JSON.parse(store.snapshots.get(5)!.result!);
+  assert.deepStrictEqual(result.roster.map((m: { short: string; token: string }) => [m.short, m.token]).sort(), [['Ann', 'annPass'], ['Bob', 'bobPass']]);
+  assert.strictEqual(result.overview.developers, 2);
+});
 
-  store.settings.delete('sprintBoardId');
+test('a member who shows a pass label only in another sprint is still detected, and members without load are not listed', async () => {
+  const cara = 'Cara Gamma';
+  const { service, store } = setup();
+  store.settings.set('sprintDashboardConfig', JSON.stringify({ ...config, roster: [] }));
+  await store.upsertSprintSnapshot({ sprintId: 4, name: 'QRD Sprint 4', state: 'closed', startDate: new Date(boardSprints[1].startDate), endDate: new Date(boardSprints[1].endDate) });
+  await store.upsertSprintIssueEvents(4, JSON.stringify([{
+    key: 'P-1', summary: 'Older work', created: '2025-12-16T10:00:00.000+0800', type: 'Task', status: 'To Do', assignee: cara, sp: 2, labels: ['QRD4'],
+    events: [ev('2025-12-17T10:00:00.000+0800', cara, 'labels', '', 'caraPass')],
+  }]));
   service.startRefresh(5);
   await service.idle();
-  assert.match(service.refreshState().error!, /board id/);
+
+  const five = JSON.parse(store.snapshots.get(5)!.result!);
+  assert.ok(five.roster.some((m: { short: string }) => m.short === 'Cara'), 'Cara is known from Sprint 4');
+  assert.deepStrictEqual(five.start.map((r: { dev: string }) => r.dev), ['Ann', 'Bob'], 'Cara has no load in Sprint 5, so no empty row');
+  assert.deepStrictEqual(JSON.parse(store.snapshots.get(4)!.result!).start.map((r: { dev: string }) => r.dev), ['Cara']);
+});
+
+test('the board is found from the Jira projects when no board id is saved', async () => {
+  const { service, store } = setup();
+  store.settings.delete('sprintBoardId');
+  store.settings.set('jiraProjectKeys', 'QRD, OPS');
+  service.startRefresh(5);
+  await service.idle();
+  assert.strictEqual(service.refreshState().error, null);
+  assert.strictEqual(store.settings.get('sprintBoardId'), '40');
+
+  const none = setup({ board: null });
+  none.store.settings.delete('sprintBoardId');
+  none.service.startRefresh(5);
+  await none.service.idle();
+  assert.match(none.service.refreshState().error!, /No Scrum board/);
 });
 
 test('backfill skips closed sprints that already have a result and keeps going after a failure', async () => {
   const { service, store, fetched } = setup({ failFor: 3 });
   await store.upsertSprintSnapshot({
-    sprintId: 4, name: 'QRD Sprint 4', state: 'closed', startDate: new Date(boardSprints[1].startDate), endDate: new Date(boardSprints[1].endDate), result: '{}',
+    sprintId: 4, name: 'QRD Sprint 4', state: 'closed', startDate: new Date(boardSprints[1].startDate), endDate: new Date(boardSprints[1].endDate), result: JSON.stringify({ rulesVersion: RULES_VERSION }),
   });
   service.startBackfill(3);
   await service.idle();
@@ -294,6 +422,16 @@ test('backfill skips closed sprints that already have a result and keeps going a
   assert.strictEqual(service.refreshState().total, 2);
   assert.match(service.refreshState().error!, /1 sprint\(s\) failed/);
   assert.ok(store.snapshots.get(5)!.result);
+});
+
+test('backfill recomputes closed sprints that were calculated with older rules', async () => {
+  const { service, store, fetched } = setup();
+  await store.upsertSprintSnapshot({
+    sprintId: 4, name: 'QRD Sprint 4', state: 'closed', startDate: new Date(boardSprints[1].startDate), endDate: new Date(boardSprints[1].endDate), result: JSON.stringify({ rulesVersion: RULES_VERSION - 1 }),
+  });
+  service.startBackfill(3);
+  await service.idle();
+  assert.deepStrictEqual(fetched.sort(), [3, 4, 5]);
 });
 
 test('the daily run refreshes the active sprint and finalizes sprints that closed since', async () => {
@@ -306,19 +444,21 @@ test('the daily run refreshes the active sprint and finalizes sprints that close
   assert.strictEqual(store.snapshots.get(4)!.state, 'closed');
 });
 
-test('saving settings validates input and recomputes stored sprints with the new roster', async () => {
+test('saving settings validates input and recomputes stored sprints with the new config', async () => {
   const { service, store } = setup();
   service.startRefresh(5);
   await service.idle();
-  assert.strictEqual(JSON.parse(store.snapshots.get(5)!.result!).overview.developers, 2);
+  assert.strictEqual(JSON.parse(store.snapshots.get(5)!.result!).overview.loadTarget, 16);
 
   await assert.rejects(service.updateSettings('abc', JSON.stringify(config)), SprintInputError);
   await assert.rejects(service.updateSettings('40', 'not json'), SprintInputError);
   await assert.rejects(service.updateSettings('40', JSON.stringify({ roster: [{ full: 'x' }] })), SprintInputError);
 
-  await service.updateSettings('41', JSON.stringify({ ...config, roster: [config.roster[0]] }));
+  await service.updateSettings('41', JSON.stringify({ loadTarget: 20, roster: [{ full: ANN, short: 'Annie', token: 'annPass' }] }));
   assert.strictEqual(await service.boardId(), '41');
-  assert.strictEqual(JSON.parse(store.snapshots.get(5)!.result!).overview.developers, 1);
+  const result = JSON.parse(store.snapshots.get(5)!.result!);
+  assert.strictEqual(result.overview.loadTarget, 20);
+  assert.deepStrictEqual(result.start.map((r: { dev: string }) => r.dev), ['Annie', 'Bob'], 'a roster entry overrides the detected name');
 });
 
 test('issueEvents returns the stored changelog of a sprint, or an empty list', async () => {
@@ -332,6 +472,7 @@ test('issueEvents returns the stored changelog of a sprint, or an empty list', a
 
 test('parseSprintConfig fills defaults and rejects bad numbers', () => {
   assert.strictEqual(parseSprintConfig(null).loadTarget, 16);
+  assert.strictEqual(parseSprintConfig('{}').weekendWeight, 0.12);
   assert.strictEqual(parseSprintConfig('{"slaDays":3}').slaDays, 3);
   assert.throws(() => parseSprintConfig('{"dailyHour":30}'), SprintInputError);
   assert.throws(() => parseSprintConfig('{"loadTarget":"x"}'), SprintInputError);
