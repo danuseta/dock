@@ -6,7 +6,7 @@ export const MethodNotes = ({ result }: { result: SprintResult }) => {
   const { notes } = result;
   const lines: string[] = [
     `A ticket is in the sprint when it carries the sprint's label (${result.sprint.label}) and is still in the sprint at the cutoff. ${notes.noSprintLabel} ticket(s) in the Jira sprint have no such label and are left out.`,
-    `Cutoff = ${result.cutoff}: the latest event for an active sprint, the end of the planned end date for a closed one. The start snapshot is taken at the start of the sprint's first day (+08:00), or at creation for tickets created later. ${notes.addedAfterStart} ticket(s) joined after the start.`,
+    `Cutoff = ${result.cutoff}: the latest event for an active sprint, the moment the sprint was completed for a closed one (or the time set for it under cutoffs in the config). The start snapshot is taken at the start of the sprint's first day (+08:00), or at creation for tickets created later. ${notes.addedAfterStart} ticket(s) joined after the start.`,
     'Each ticket uses its current assignee and current SP. Carryover = a ticket that was also in an earlier labelled sprint, bugs included. Bug = any other ticket of type Bug. Allocated = the rest.',
     'Durations are in working days on +08:00 calendar days, with no public holidays. A weekend day counts as 0.12 of a day; that weight is fitted to the reference dashboard, not derived, so sections 08 and 09 are approximate. Stage duration sums the time each ticket spent in a stage inside the sprint, including the stage it is still in.',
   ];

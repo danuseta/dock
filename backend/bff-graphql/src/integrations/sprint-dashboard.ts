@@ -87,6 +87,10 @@ export function parseSprintConfig(json: string | null | undefined): SprintConfig
   for (const key of ['loadTarget', 'targetPerDev', 'bugMarginPerDev', 'slaDays', 'tzOffsetHours', 'weekendWeight', 'dailyHour'] as const) {
     if (typeof config[key] !== 'number' || !Number.isFinite(config[key])) throw new SprintInputError(`Sprint config ${key} must be a number`);
   }
+  const cutoffs = config.cutoffs;
+  if (!cutoffs || typeof cutoffs !== 'object' || Array.isArray(cutoffs) || Object.values(cutoffs).some((v) => typeof v !== 'string' || Number.isNaN(Date.parse(v)))) {
+    throw new SprintInputError('Sprint config cutoffs must map a sprint label to a date-time');
+  }
   if (config.loadTarget <= 0) throw new SprintInputError('Sprint config loadTarget must be above zero');
   if (!Number.isInteger(config.dailyHour) || config.dailyHour < 0 || config.dailyHour > 23) throw new SprintInputError('Sprint config dailyHour must be 0 to 23');
   return config;
@@ -171,7 +175,7 @@ export class SprintDashboardService {
   private async computeAndStore(sprint: BoardSprint, client: JiraSprintClient, config: SprintConfig): Promise<void> {
     const base = {
       sprintId: sprint.id, name: sprint.name, state: sprint.state,
-      startDate: new Date(sprint.startDate), endDate: new Date(sprint.endDate),
+      startDate: new Date(sprint.startDate), endDate: new Date((sprint.state === 'closed' && sprint.completeDate) || sprint.endDate),
     };
     try {
       const issues = await client.fetchSprintIssues(sprint.id);

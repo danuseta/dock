@@ -33,6 +33,7 @@ export interface SprintConfig {
   slaDays: number;
   tzOffsetHours: number;
   weekendWeight: number;
+  cutoffs: Record<string, string>;
   dailyHour: number;
   statusAliases: Record<string, string>;
 }
@@ -53,11 +54,12 @@ export const DEFAULT_SPRINT_CONFIG: SprintConfig = {
   slaDays: 2,
   tzOffsetHours: 8,
   weekendWeight: 0.12,
+  cutoffs: {},
   dailyHour: 6,
   statusAliases: { 'Blocked': 'To Do', 'In Review': 'To Do', 'Move to IT': 'To Do', 'Revision': 'To Do' },
 };
 
-export const RULES_VERSION = 3;
+export const RULES_VERSION = 4;
 
 export type Tone = 'g' | 'a' | 'r';
 export type Bucket = 'Todo' | 'InP' | 'PR' | 'UATM' | 'UATC' | 'UATB' | 'RFP' | 'Done';
@@ -227,7 +229,7 @@ export function computeSprintMetrics(window: SprintWindow, rawIssues: SprintIssu
   const { label, num: sprintNum } = sprintLabel(window.name);
   const dayStart = (t: number) => Math.floor((t + tzMs) / 86400000) * 86400000 - tzMs;
   const T0 = dayStart(parseTime(window.start));
-  const endT = dayStart(parseTime(window.end)) + 86400000 - 1000;
+  const endT = parseTime(config.cutoffs[label] || window.end);
 
   const norm = (status: string | null): string => (status === null ? '' : config.statusAliases[status] || status);
   const devByFull = new Map(roster.map((d) => [d.full, d]));

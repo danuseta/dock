@@ -183,6 +183,17 @@ test('findBoardId prefers the board of the configured project that has an active
   assert.strictEqual(await new JiraSprintClient(empty).findBoardId([]), null);
 });
 
+test('a closed sprint is cut at the moment it was completed, or at the cutoff set for it', () => {
+  const closed = { ...window, state: 'closed' as const, end: '2026-01-09T04:00:00Z' };
+  const atClose = computeSprintMetrics(closed, issues, config);
+  assert.strictEqual(atClose.cutoff, '2026-01-09T04:00:00.000Z');
+  assert.strictEqual(atClose.end.find((r) => r.dev === 'Bob')!.buckets.UATC, 5, 'K-3 reached RFP on 12 Jan, after the sprint closed');
+
+  const frozen = computeSprintMetrics(closed, issues, { ...config, cutoffs: { QRD5: '2026-01-08T10:30:00+0800' } });
+  assert.strictEqual(frozen.cutoff, '2026-01-08T02:30:00.000Z');
+  assert.strictEqual(frozen.end.find((r) => r.dev === 'Bob')!.buckets.PR, 5, 'at 10:30 on 8 Jan K-3 was still in PR Review');
+});
+
 test('percentages round half to even, like the reference dashboard', () => {
   assert.deepStrictEqual([62.5, 63.5, 212.5, 62.4, 62.6].map(roundHalfEven), [62, 64, 212, 62, 63]);
 });
@@ -475,5 +486,7 @@ test('parseSprintConfig fills defaults and rejects bad numbers', () => {
   assert.strictEqual(parseSprintConfig('{}').weekendWeight, 0.12);
   assert.strictEqual(parseSprintConfig('{"slaDays":3}').slaDays, 3);
   assert.throws(() => parseSprintConfig('{"dailyHour":30}'), SprintInputError);
+  assert.throws(() => parseSprintConfig('{"cutoffs":{"QRD5":"soon"}}'), SprintInputError);
+  assert.strictEqual(parseSprintConfig('{"cutoffs":{"QRD5":"2026-01-08T10:30:00+08:00"}}').cutoffs.QRD5, '2026-01-08T10:30:00+08:00');
   assert.throws(() => parseSprintConfig('{"loadTarget":"x"}'), SprintInputError);
 });
