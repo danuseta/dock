@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { fmt, fmt0, formatUpdated, parseResult, pct, sprintOptionLabel, toneVariant, trendPath, trendX, trendY, type TrendGeometry } from '../sprint/format';
+import { fmt, fmt0, formatUpdated, nearestIndex, parseResult, pct, sprintOptionLabel, toneVariant, trendPath, trendX, trendY, type TrendGeometry } from '../sprint/format';
 
 const geometry: TrendGeometry = { width: 400, height: 200, left: 40, right: 20, top: 10, bottom: 30 };
 
@@ -42,8 +42,18 @@ test('trend geometry puts 0 at the bottom, 100 at the top, and centres a single 
   assert.strictEqual(trendX(2, 3, geometry), 380);
 });
 
-test('trendPath joins the points across sprints without load, like the reference chart', () => {
-  assert.strictEqual(trendPath([100, null, 0], geometry), 'M40.0,10.0 L380.0,170.0');
-  assert.strictEqual(trendPath([100, 0], geometry), 'M40.0,10.0 L380.0,170.0');
+test('trendPath draws one smooth line through the sprints that have a value', () => {
+  assert.strictEqual(trendPath([100, null, 0], geometry), 'M40.0,10.0 C176.0,10.0 244.0,170.0 380.0,170.0');
+  assert.strictEqual(trendPath([100, 0], geometry), 'M40.0,10.0 C176.0,10.0 244.0,170.0 380.0,170.0');
+  assert.strictEqual(trendPath([null, 50], geometry), 'M380.0,90.0');
   assert.strictEqual(trendPath([null, null], geometry), '');
+});
+
+test('nearestIndex maps a pointer position to the closest sprint', () => {
+  assert.strictEqual(nearestIndex(40, 3, geometry), 0);
+  assert.strictEqual(nearestIndex(120, 3, geometry), 0);
+  assert.strictEqual(nearestIndex(130, 3, geometry), 1);
+  assert.strictEqual(nearestIndex(999, 3, geometry), 2);
+  assert.strictEqual(nearestIndex(-5, 3, geometry), 0);
+  assert.strictEqual(nearestIndex(200, 1, geometry), 0);
 });

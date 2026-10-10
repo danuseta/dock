@@ -52,10 +52,18 @@ export function trendY(value: number, g: TrendGeometry): number {
 }
 
 export function trendPath(data: Array<number | null>, g: TrendGeometry): string {
-  let path = '';
-  data.forEach((value, index) => {
-    if (value === null) return;
-    path += `${path ? 'L' : 'M'}${trendX(index, data.length, g).toFixed(1)},${trendY(value, g).toFixed(1)} `;
-  });
-  return path.trim();
+  const points: Array<[number, number]> = [];
+  data.forEach((value, index) => { if (value !== null) points.push([trendX(index, data.length, g), trendY(value, g)]); });
+  return points.map(([x, y], k) => {
+    if (k === 0) return `M${x.toFixed(1)},${y.toFixed(1)}`;
+    const [px, py] = points[k - 1];
+    const bend = (x - px) * 0.4;
+    return `C${(px + bend).toFixed(1)},${py.toFixed(1)} ${(x - bend).toFixed(1)},${y.toFixed(1)} ${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+}
+
+export function nearestIndex(x: number, count: number, g: TrendGeometry): number {
+  if (count <= 1) return 0;
+  const step = (g.width - g.left - g.right) / (count - 1);
+  return Math.min(count - 1, Math.max(0, Math.round((x - g.left) / step)));
 }
