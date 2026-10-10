@@ -5,12 +5,11 @@ import type { SprintResult } from './types';
 export const MethodNotes = ({ result }: { result: SprintResult }) => {
   const { notes } = result;
   const lines: string[] = [
-    `Cutoff = ${result.cutoff} (latest event in the data for an active sprint, the sprint end for a closed one). Working days are Monday to Friday on +08:00 calendar days, fractional, with no public holidays.`,
-    `Sprint-start state is replayed from the events. ${notes.addedAfterStart} issue(s) joined after the start and are snapshotted when they joined; ${notes.noSprintEvents} issue(s) have no Sprint events and count as members from creation.`,
-    'Bug = issue type Bug, at its first estimate. Carryover = a non-bug issue that already belonged to an earlier sprint when it joined. Allocated = every other non-bug issue.',
+    `A ticket is in the sprint when it carries the sprint's label (${result.sprint.label}) and is still in the sprint at the cutoff. ${notes.noSprintLabel} ticket(s) in the Jira sprint have no such label and are left out.`,
+    `Cutoff = ${result.cutoff}: the latest event for an active sprint, the end of the planned end date for a closed one. The start snapshot is taken at the start of the sprint's first day (+08:00), or at creation for tickets created later. ${notes.addedAfterStart} ticket(s) joined after the start.`,
+    'Each ticket uses its current assignee and current SP. Carryover = a ticket that was also in an earlier labelled sprint, bugs included. Bug = any other ticket of type Bug. Allocated = the rest.',
+    'Working days are Monday to Friday on +08:00 calendar days, fractional, with no public holidays. Review and stage durations do not match the reference dashboard yet.',
   ];
-  if (notes.spChanges.length) lines.push(`One SP value per issue (the snapshot) is used everywhere. Current SP differs on: ${notes.spChanges.map((c) => `${c.key} ${fmt(c.from)}→${c.to === null ? 'none' : fmt(c.to)}`).join(', ')}.`);
-  if (notes.assigneeChanges.length) lines.push(`Tickets belong to the developer assigned at the snapshot. Reassigned since: ${notes.assigneeChanges.map((c) => `${c.key} now ${c.now || 'unassigned'}`).join(', ')}.`);
   lines.push(`A pass is a roster pass label added by its own owner. ${notes.nonSelfPass.length} label(s) added by someone else are ignored${notes.nonSelfPass.length ? `: ${notes.nonSelfPass.map((p) => `${p.key} ${p.token} by ${p.by || 'unknown'}`).join('; ')}` : ''}; ${notes.prePassIgnored} pass(es) from before the sprint start are ignored; ${notes.passWithoutDuration} pass(es) given outside PR Review have no duration.`);
   lines.push(`${notes.revertedToUatMerged} issue(s) were sent from UAT Check back to UAT Merged without a UAT Bug and count as pending.${notes.earlyPushBacks.length ? ` Push-backs within an hour of the start: ${notes.earlyPushBacks.join(', ')}.` : ''}`);
   if (notes.aliasHits.length) lines.push(`Non-engineering statuses mapped to To Do: ${notes.aliasHits.map((a) => `${a.status} (${a.count}×, ${a.keys.join(', ')})`).join('; ')}.`);

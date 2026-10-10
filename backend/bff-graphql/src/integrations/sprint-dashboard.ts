@@ -1,7 +1,7 @@
 import { StorageService } from '../storage/service';
 import { JiraSprintClient, createJiraHttp, type BoardSprint } from './jira-sprint';
 import {
-  DEFAULT_SPRINT_CONFIG, buildTrend, computeSprintMetrics,
+  DEFAULT_SPRINT_CONFIG, RULES_VERSION, buildTrend, computeSprintMetrics,
   type SprintConfig, type SprintIssue, type SprintResult,
 } from './sprint-metrics';
 
@@ -92,7 +92,10 @@ export function parseSprintConfig(json: string | null | undefined): SprintConfig
   return config;
 }
 
-const endOf = (sprint: BoardSprint) => (sprint.state === 'closed' && sprint.completeDate) ? sprint.completeDate : sprint.endDate;
+function isCurrent(result: string | null): boolean {
+  if (!result) return false;
+  try { return JSON.parse(result).rulesVersion === RULES_VERSION; } catch { return false; }
+}
 
 export class SprintDashboardService {
   private running: Promise<void> | null = null;
@@ -162,7 +165,7 @@ export class SprintDashboardService {
   private async computeAndStore(sprint: BoardSprint, client: JiraSprintClient, config: SprintConfig): Promise<void> {
     const base = {
       sprintId: sprint.id, name: sprint.name, state: sprint.state,
-      startDate: new Date(sprint.startDate), endDate: new Date(endOf(sprint)),
+      startDate: new Date(sprint.startDate), endDate: new Date(sprint.endDate),
     };
     try {
       const issues = await client.fetchSprintIssues(sprint.id);
@@ -217,7 +220,7 @@ export class SprintDashboardService {
       const existing = new Map((await this.store.getSprintSnapshots()).map((r) => [r.sprintId, r]));
       const todo = wanted.filter((s) => {
         const row = existing.get(s.id);
-        return !(row && row.state === 'closed' && row.result && s.state === 'closed');
+        return !(row && row.state === 'closed' && s.state === 'closed' && isCurrent(row.result));
       });
       this.state.total = todo.length;
       let failed = 0;

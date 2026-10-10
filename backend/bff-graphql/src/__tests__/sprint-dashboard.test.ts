@@ -7,7 +7,7 @@ import {
 } from '../integrations/sprint-dashboard';
 import { nextRunAt } from '../integrations/sprint-scheduler';
 import {
-  DEFAULT_SPRINT_CONFIG, buildTrend, computeSprintMetrics,
+  DEFAULT_SPRINT_CONFIG, RULES_VERSION, buildTrend, computeSprintMetrics, roundHalfEven,
   type SprintConfig, type SprintEvent, type SprintIssue, type SprintResult,
 } from '../integrations/sprint-metrics';
 
@@ -28,7 +28,7 @@ const status = (when: string, by: string, from: string, to: string) => ev(when, 
 
 const issues: SprintIssue[] = [
   {
-    key: 'K-1', summary: 'Carried task', created: '2025-12-15T10:00:00.000+0800', type: 'Task', status: 'UAT MERGED', assignee: ANN, sp: 3, labels: [],
+    key: 'K-1', summary: 'Carried task', created: '2025-12-15T10:00:00.000+0800', type: 'Task', status: 'UAT MERGED', assignee: ANN, sp: 3, labels: ['QRD4', 'QRD5'],
     events: [
       ev('2025-12-20T10:00:00.000+0800', ANN, 'Sprint', '', 'QRD Sprint 4'),
       ev('2026-01-03T10:00:00.000+0800', ANN, 'Sprint', 'QRD Sprint 4', 'QRD Sprint 4, QRD Sprint 5'),
@@ -40,7 +40,7 @@ const issues: SprintIssue[] = [
     ],
   },
   {
-    key: 'K-2', summary: 'Mid-sprint bug', created: at(6, 9), type: 'Bug', status: 'UAT BUG / Improvement', assignee: ANN, sp: 2, labels: ['bobPass'],
+    key: 'K-2', summary: 'Mid-sprint bug', created: at(6, 9), type: 'Bug', status: 'UAT BUG / Improvement', assignee: ANN, sp: 2, labels: ['QRD5', 'bobPass'],
     events: [
       ev(at(6, 9), ANN, 'Story point estimate', null, '2'),
       status(at(7), ANN, 'To Do', 'In Progress'),
@@ -50,7 +50,7 @@ const issues: SprintIssue[] = [
     ],
   },
   {
-    key: 'K-3', summary: 'Clean task', created: '2026-01-01T10:00:00.000+0800', type: 'Task', status: 'ReadyForProduction', assignee: BOB, sp: 5, labels: ['annPass'],
+    key: 'K-3', summary: 'Clean task', created: '2026-01-01T10:00:00.000+0800', type: 'Task', status: 'ReadyForProduction', assignee: BOB, sp: 5, labels: ['QRD5', 'annPass'],
     events: [
       status(at(6), BOB, 'To Do', 'In Progress'),
       status(at(7), BOB, 'In Progress', 'PR Review'),
@@ -60,15 +60,16 @@ const issues: SprintIssue[] = [
       status(at(12), ANN, 'UAT CHECK', 'ReadyForProduction'),
     ],
   },
-  { key: 'K-4', summary: 'Someone else', created: at(6), type: 'Task', status: 'To Do', assignee: 'Out Sider', sp: 8, labels: [], events: [] },
+  { key: 'K-4', summary: 'Someone else', created: at(6), type: 'Task', status: 'To Do', assignee: 'Out Sider', sp: 8, labels: ['QRD5'], events: [] },
   {
-    key: 'K-5', summary: 'Pulled out mid-sprint', created: '2026-01-01T10:00:00.000+0800', type: 'Task', status: 'To Do', assignee: ANN, sp: 4, labels: [],
+    key: 'K-5', summary: 'Pulled out mid-sprint', created: '2026-01-01T10:00:00.000+0800', type: 'Task', status: 'To Do', assignee: ANN, sp: 4, labels: ['QRD5'],
     events: [
       ev('2026-01-03T10:00:00.000+0800', ANN, 'Sprint', '', 'QRD Sprint 5'),
       ev(at(8), ANN, 'Sprint', 'QRD Sprint 5', ''),
     ],
   },
-  { key: 'K-6', summary: 'Documentation: handbook', created: '2026-01-01T10:00:00.000+0800', type: 'Task', status: 'To Do', assignee: BOB, sp: 1, labels: [], events: [] },
+  { key: 'K-6', summary: 'Documentation: handbook', created: '2026-01-01T10:00:00.000+0800', type: 'Task', status: 'To Do', assignee: BOB, sp: 1, labels: ['QRD5'], events: [] },
+  { key: 'K-7', summary: 'In the sprint but never labelled', created: '2026-01-01T10:00:00.000+0800', type: 'Task', status: 'To Do', assignee: ANN, sp: 9, labels: [], events: [] },
 ];
 
 test('computeSprintMetrics applies the sprint rules to a small synthetic sprint', () => {
@@ -82,6 +83,7 @@ test('computeSprintMetrics applies the sprint rules to a small synthetic sprint'
     result.notes.excluded.map((e) => [e.key, e.reason]),
     [['K-4', 'not-in-roster'], ['K-5', 'removed-from-sprint']],
   );
+  assert.strictEqual(result.notes.noSprintLabel, 1, 'K-7 has no QRD5 label, so it is not part of the sprint');
 
   const ann = result.pr.find((r) => r.dev === 'Ann')!;
   const bob = result.pr.find((r) => r.dev === 'Bob')!;
@@ -97,6 +99,40 @@ test('computeSprintMetrics applies the sprint rules to a small synthetic sprint'
   assert.strictEqual(result.reviewers.find((r) => r.dev === 'Ann')!.sp, 5);
 
   assert.ok(result.flags.some((f) => f.sev === 'R' && f.dev === 'Ann' && f.metric === 'pr'));
+});
+
+test('computeSprintMetrics uses the current assignee and SP, and a carried-over bug is carryover', () => {
+  const changed = issues.map((i) => i.key !== 'K-2' ? i : {
+    ...i,
+    assignee: BOB,
+    sp: 4,
+    labels: [...i.labels, 'QRD4'],
+    events: [
+      ev('2025-12-20T10:00:00.000+0800', ANN, 'Sprint', '', 'QRD Sprint 4'),
+      ev('2026-01-03T10:00:00.000+0800', ANN, 'Sprint', 'QRD Sprint 4', 'QRD Sprint 4, QRD Sprint 5'),
+      ev('2025-12-21T10:00:00.000+0800', ANN, 'assignee', null, ANN),
+      ...i.events,
+    ],
+  });
+  const result = computeSprintMetrics(window, changed, config);
+  assert.deepStrictEqual(
+    { carry: result.overview.carryover, bug: result.overview.bugSP },
+    { carry: 7, bug: 0 },
+  );
+  assert.strictEqual(result.start.find((r) => r.dev === 'Bob')!.total, 10, 'K-2 now belongs to Bob at its current 4 SP');
+});
+
+test('the start snapshot is taken at the start of the sprint day, not when the sprint was started', () => {
+  const early = issues.map((i) => i.key !== 'K-3' ? i : {
+    ...i,
+    events: [status('2026-01-05T09:00:00.000+0800', BOB, 'To Do', 'In Progress'), ...i.events.slice(1)],
+  });
+  const result = computeSprintMetrics(window, early, config);
+  assert.strictEqual(result.start.find((r) => r.dev === 'Bob')!.buckets.Todo, 6, 'K-3 moved at 09:00 on the start day, after the snapshot');
+});
+
+test('percentages round half to even, like the reference dashboard', () => {
+  assert.deepStrictEqual([62.5, 63.5, 212.5, 62.4, 62.6].map(roundHalfEven), [62, 64, 212, 62, 63]);
 });
 
 test('computeSprintMetrics counts a pass label added by someone else separately', () => {
@@ -292,7 +328,7 @@ test('refresh without a roster or board id reports why', async () => {
 test('backfill skips closed sprints that already have a result and keeps going after a failure', async () => {
   const { service, store, fetched } = setup({ failFor: 3 });
   await store.upsertSprintSnapshot({
-    sprintId: 4, name: 'QRD Sprint 4', state: 'closed', startDate: new Date(boardSprints[1].startDate), endDate: new Date(boardSprints[1].endDate), result: '{}',
+    sprintId: 4, name: 'QRD Sprint 4', state: 'closed', startDate: new Date(boardSprints[1].startDate), endDate: new Date(boardSprints[1].endDate), result: JSON.stringify({ rulesVersion: RULES_VERSION }),
   });
   service.startBackfill(3);
   await service.idle();
@@ -301,6 +337,16 @@ test('backfill skips closed sprints that already have a result and keeps going a
   assert.strictEqual(service.refreshState().total, 2);
   assert.match(service.refreshState().error!, /1 sprint\(s\) failed/);
   assert.ok(store.snapshots.get(5)!.result);
+});
+
+test('backfill recomputes closed sprints that were calculated with older rules', async () => {
+  const { service, store, fetched } = setup();
+  await store.upsertSprintSnapshot({
+    sprintId: 4, name: 'QRD Sprint 4', state: 'closed', startDate: new Date(boardSprints[1].startDate), endDate: new Date(boardSprints[1].endDate), result: JSON.stringify({ rulesVersion: RULES_VERSION - 1 }),
+  });
+  service.startBackfill(3);
+  await service.idle();
+  assert.deepStrictEqual(fetched.sort(), [3, 4, 5]);
 });
 
 test('the daily run refreshes the active sprint and finalizes sprints that closed since', async () => {

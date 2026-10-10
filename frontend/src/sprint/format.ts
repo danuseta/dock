@@ -3,7 +3,12 @@ import type { SprintResult, SprintSummary, SprintTrend, Tone } from './types';
 
 export const fmt = (n: number): string => String(Math.round(n * 100) / 100);
 export const fmt0 = (n: number): string => (n ? fmt(n) : '');
-export const pct = (x: number): string => `${Math.round(x * 100)}%`;
+export const roundHalfEven = (value: number): number => {
+  const floor = Math.floor(value);
+  if (Math.abs(value - floor - 0.5) < 1e-9) return floor % 2 === 0 ? floor : floor + 1;
+  return Math.round(value);
+};
+export const pct = (x: number): string => `${roundHalfEven(x * 100)}%`;
 
 const TONE_VARIANT: Record<Tone, BadgeVariant> = { g: 'success', a: 'warn', r: 'danger' };
 export const toneVariant = (tone: Tone): BadgeVariant => TONE_VARIANT[tone];

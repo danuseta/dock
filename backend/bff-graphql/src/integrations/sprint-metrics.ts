@@ -55,6 +55,8 @@ export const DEFAULT_SPRINT_CONFIG: SprintConfig = {
   statusAliases: { 'Blocked': 'To Do', 'In Review': 'To Do', 'Move to IT': 'To Do', 'Revision': 'To Do' },
 };
 
+export const RULES_VERSION = 2;
+
 export type Tone = 'g' | 'a' | 'r';
 export type Bucket = 'Todo' | 'InP' | 'PR' | 'UATM' | 'UATC' | 'UATB' | 'RFP' | 'Done';
 export type Buckets = Record<Bucket, number>;
@@ -87,6 +89,7 @@ export interface ExcludedIssue {
 }
 
 export interface SprintResult {
+  rulesVersion: number;
   sprint: { id: number; name: string; label: string; num: number; state: string; start: string; end: string };
   cutoff: string;
   roster: RosterMember[];
@@ -107,8 +110,7 @@ export interface SprintResult {
   notes: {
     addedAfterStart: number;
     noSprintEvents: number;
-    spChanges: Array<{ key: string; from: number; to: number | null }>;
-    assigneeChanges: Array<{ key: string; now: string | null }>;
+    noSprintLabel: number;
     nonSelfPass: Array<{ key: string; token: string; by: string | null }>;
     prePassIgnored: number;
     passWithoutDuration: number;
@@ -140,6 +142,11 @@ const STAGES: Array<[StageName, string]> = [
 
 const parseTime = (value: string) => Date.parse(value.replace(/([+-]\d\d)(\d\d)$/, '$1:$2'));
 const round2 = (n: number) => Math.round(n * 100) / 100;
+export const roundHalfEven = (value: number): number => {
+  const floor = Math.floor(value);
+  if (Math.abs(value - floor - 0.5) < 1e-9) return floor % 2 === 0 ? floor : floor + 1;
+  return Math.round(value);
+};
 const num = (value: unknown): number | null => (value === null || value === undefined || value === '') ? null : Number(value);
 const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
 const mean = (values: number[]) => values.length ? sum(values) / values.length : null;
@@ -159,17 +166,13 @@ const toneStage = (v: number, rfp: boolean): Tone => rfp
 interface Entry {
   issue: SprintIssue & { ev: Array<SprintEvent & { t: number }>; createdT: number };
   summary: string;
-  J: number;
   joinedAfterStart: boolean;
   startStatus: string;
   startBucket: Bucket;
   endStatus: string;
   endBucket: Bucket;
   sp: number;
-  curSp: number | null;
   cls: 'alloc' | 'carry' | 'bug';
-  snapAssignee: string | null;
-  curAssignee: string | null;
   dev: RosterMember;
   tr: Array<{ t: number; from: string; to: string }>;
   gate: Record<string, 'passed' | 'reworked' | 'pending'>;
@@ -185,8 +188,9 @@ export function computeSprintMetrics(window: SprintWindow, rawIssues: SprintIssu
   const { roster, loadTarget, targetPerDev, bugMarginPerDev, slaDays } = config;
   const tzMs = config.tzOffsetHours * 3600 * 1000;
   const { label, num: sprintNum } = sprintLabel(window.name);
-  const T0 = parseTime(window.start);
-  const endT = parseTime(window.end);
+  const dayStart = (t: number) => Math.floor((t + tzMs) / 86400000) * 86400000 - tzMs;
+  const T0 = dayStart(parseTime(window.start));
+  const endT = dayStart(parseTime(window.end)) + 86400000 - 1000;
 
   const norm = (status: string | null): string => (status === null ? '' : config.statusAliases[status] || status);
   const devByFull = new Map(roster.map((d) => [d.full, d]));
@@ -267,34 +271,29 @@ export function computeSprintMetrics(window: SprintWindow, rawIssues: SprintIssu
   const exclude = (i: Issue, assignee: string | null, sp: number | null, reason: ExcludedIssue['reason']) => {
     excluded.push({ key: i.key, summary: i.summary, assignee, status: i.status, sp, reason });
   };
+  const prefix = label.replace(/\d+$/, '');
+  let noSprintLabel = 0;
   for (const i of issues) {
+    if (!i.labels.includes(label)) { noSprintLabel++; continue; }
     const J = Math.max(T0, i.createdT, joinTime(i));
-    const statusJ = norm(valAt(i, 'status', J, i.status));
-    let assignee = valAt(i, 'assignee', J, i.assignee);
-    if (!assignee) {
-      const later = evs(i, 'assignee').find((e) => e.t > J && e.to);
-      assignee = later ? later.to : i.assignee;
-    }
-    const isBug = i.type === 'Bug';
-    let sp: number | null;
-    if (isBug) sp = firstSP(i);
-    else {
-      sp = num(valAt(i, 'Story point estimate', J, i.sp === null ? null : String(i.sp)));
-      if (sp === null) sp = firstSP(i);
-    }
-    const spValue = sp ?? 0;
+    const statusStart = norm(valAt(i, 'status', Math.max(T0, i.createdT), i.status));
+    const assignee = i.assignee;
+    const sp = num(i.sp) ?? firstSP(i);
     const dev = assignee ? devByFull.get(assignee) : undefined;
     if (!sprintsAt(i, CUTOFF).includes(window.name)) { exclude(i, assignee, sp, 'removed-from-sprint'); continue; }
     if (!dev) { exclude(i, assignee, sp, 'not-in-roster'); continue; }
     const endStatus = norm(valAt(i, 'status', CUTOFF, i.status));
-    const startBucket = BUCKET[statusJ];
+    const startBucket = BUCKET[statusStart];
     const endBucket = BUCKET[endStatus];
     if (!startBucket || !endBucket) { exclude(i, assignee, sp, 'unknown-status'); continue; }
-    const before = sprintsAt(i, J).filter((s) => s !== window.name && Number((s.match(/(\d+)\s*$/) || [0, 99])[1]) < sprintNum);
+    const labelled = new Set(i.labels.filter((l) => l.startsWith(prefix)).map((l) => Number(l.slice(prefix.length))));
+    const carried = sprintsAt(i, J).some((name) => {
+      const earlier = Number((name.match(/(\d+)\s*$/) || [0, NaN])[1]);
+      return name !== window.name && earlier < sprintNum && labelled.has(earlier);
+    });
     model.push({
-      issue: i, summary: i.summary, J, joinedAfterStart: J > T0, startStatus: statusJ, startBucket, endStatus, endBucket,
-      sp: spValue, curSp: num(i.sp), cls: isBug ? 'bug' : (before.length ? 'carry' : 'alloc'),
-      snapAssignee: assignee, curAssignee: i.assignee, dev, tr: transitions(i), gate: {},
+      issue: i, summary: i.summary, joinedAfterStart: J > T0, startStatus: statusStart, startBucket, endStatus, endBucket,
+      sp: sp ?? 0, cls: carried ? 'carry' : i.type === 'Bug' ? 'bug' : 'alloc', dev, tr: transitions(i), gate: {},
     });
   }
   const byKey = new Map(model.map((m) => [m.issue.key, m]));
@@ -454,7 +453,7 @@ export function computeSprintMetrics(window: SprintWindow, rawIssues: SprintIssu
   const flags: Flag[] = [];
   const metricIdx = ['load', 'completion', 'vel', 'pr', 'qa', 'fail', 'revdur', 'spreviewed', 'carry', 'bug', 'In Progress', 'PR Review', 'UAT MERGED', 'UAT CHECK', 'blue'];
   const addFlag = (sev: Flag['sev'], dev: string, metric: string, desc: string) => flags.push({ sev, dev, metric, desc });
-  const pct = (x: number) => Math.round(x * 100);
+  const pct = (x: number) => roundHalfEven(x * 100);
   const fmt = (n: number) => String(round2(n));
   for (const d of devKeys) {
     const s = startRows.find((r) => r.dev === d)!;
@@ -510,6 +509,7 @@ export function computeSprintMetrics(window: SprintWindow, rawIssues: SprintIssu
   const cutoffIso = new Date(CUTOFF).toISOString();
 
   return {
+    rulesVersion: RULES_VERSION,
     sprint: { id: window.id, name: window.name, label, num: sprintNum, state: window.state, start: window.start, end: window.end },
     cutoff: cutoffIso,
     roster,
@@ -533,8 +533,7 @@ export function computeSprintMetrics(window: SprintWindow, rawIssues: SprintIssu
     notes: {
       addedAfterStart: model.filter((m) => m.joinedAfterStart).length,
       noSprintEvents: issues.filter((i) => !evs(i, 'Sprint').length).length,
-      spChanges: model.filter((m) => m.curSp !== m.sp).map((m) => ({ key: m.issue.key, from: m.sp, to: m.curSp })),
-      assigneeChanges: model.filter((m) => m.curAssignee !== m.snapAssignee).map((m) => ({ key: m.issue.key, now: m.curAssignee })),
+      noSprintLabel,
       nonSelfPass,
       prePassIgnored,
       passWithoutDuration: reviewers.reduce((a, r) => a + r.noDuration, 0),

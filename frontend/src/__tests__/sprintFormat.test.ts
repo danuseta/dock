@@ -10,6 +10,8 @@ test('number helpers match the reference dashboard formatting', () => {
   assert.strictEqual(fmt0(0), '');
   assert.strictEqual(fmt0(2.5), '2.5');
   assert.strictEqual(pct(0.5849), '58%');
+  assert.strictEqual(pct(0.625), '62%', 'half rounds to even, like the reference');
+  assert.strictEqual(pct(2.125), '212%');
 });
 
 test('tones map to badge variants', () => {

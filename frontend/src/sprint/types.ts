@@ -46,8 +46,7 @@ export interface SprintResult {
   notes: {
     addedAfterStart: number;
     noSprintEvents: number;
-    spChanges: Array<{ key: string; from: number; to: number | null }>;
-    assigneeChanges: Array<{ key: string; now: string | null }>;
+    noSprintLabel: number;
     nonSelfPass: Array<{ key: string; token: string; by: string | null }>;
     prePassIgnored: number;
     passWithoutDuration: number;
