@@ -212,4 +212,5 @@ model SprintIssueEvents {
   sprintId  Int      @id
   issues    String
   fetchedAt DateTime
+  labelPool String?
 }

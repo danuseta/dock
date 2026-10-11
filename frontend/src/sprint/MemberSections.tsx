@@ -39,7 +39,7 @@ export const EndSection = ({ rows }: { rows: EndRow[] }) => (
               </span>
             )}
           </Num>
-          <Num>{fmt(row.carryover)}</Num>
+          <Num>{fmt0(row.carryover)}</Num>
         </Tr>
       ))}
     </Table>
