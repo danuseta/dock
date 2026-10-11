@@ -1,8 +1,8 @@
 import assert from 'node:assert';
 import test from 'node:test';
 import {
-  BRIDGE_OFFLINE, balloonText, isTurnInProgress, mergeMessages, newestAssistantId, oldestId, pollCursor, pollInterval, relativeTime, sendBlocker, ticketBalloons,
-  type ChatMessage,
+  BRIDGE_OFFLINE, balloonText, initialMachine, isTurnInProgress, machineNames, machineOf, machineOnline, mergeMessages, newestAssistantId, oldestId, pollCursor, pollInterval, relativeTime, sendBlocker, severalMachines, tabLabel, ticketBalloons,
+  type ChatMachine, type ChatMessage,
 } from '../chat/messages';
 import {
   clampDrawerHeight, closeTab, initialChatState, markSeen, openSession, parseChatState, setActive, setDrawerHeight, setMode,
@@ -50,6 +50,49 @@ test('chat turn state: progress, polling speed and why sending is off', () => {
   assert.strictEqual(BRIDGE_OFFLINE, 'The laptop bridge is offline. Start it with: node dock-chat.cjs run');
   assert.match(sendBlocker({ source: 'dock', busy: true, bridgeOnline: true }) || '', /still working/);
   assert.strictEqual(sendBlocker({ source: 'dock', busy: false }), null, 'an unknown bridge state does not block');
+});
+
+test('machines: the first session machine, per-machine online state and the offline reason', () => {
+  const both: ChatMachine[] = [{ name: 'laptop', online: false, lastSeenAt: '2026-10-08T09:00:00.000Z' }, { name: 'workspace', online: true, lastSeenAt: '2026-10-08T09:59:50.000Z' }];
+  const now = Date.parse('2026-10-08T10:00:00.000Z');
+
+  assert.deepStrictEqual(machineNames(both), ['laptop', 'workspace']);
+  assert.deepStrictEqual([machineNames(undefined), machineNames(null), machineNames([])], [['laptop'], ['laptop'], ['laptop']], 'no machine list means only the laptop');
+  assert.strictEqual(initialMachine(both), 'workspace', 'the first online machine');
+  assert.strictEqual(initialMachine(both, 'laptop'), 'laptop', 'the last one used wins while it still exists');
+  assert.strictEqual(initialMachine(both, 'gone'), 'workspace', 'a stored machine that no longer exists is ignored');
+  assert.strictEqual(initialMachine([{ name: 'workspace', online: false }]), 'laptop', 'nothing online falls back to the laptop');
+  assert.strictEqual(initialMachine(undefined, 'workspace'), 'laptop');
+
+  assert.deepStrictEqual([machineOnline(both, 'laptop'), machineOnline(both, 'workspace'), machineOnline(both, 'other')], [false, true, false]);
+  assert.strictEqual(machineOnline(undefined, 'laptop', true), true, 'without a machine list the aggregate answers');
+  assert.strictEqual(machineOnline([], 'laptop'), undefined);
+  assert.deepStrictEqual([machineOf({ machine: 'workspace' }), machineOf({ machine: null }), machineOf({}), machineOf(undefined)], ['workspace', 'laptop', 'laptop', 'laptop']);
+
+  assert.strictEqual(sendBlocker({ source: 'dock', busy: false, bridgeOnline: false, machine: 'laptop', lastSeenAt: both[0].lastSeenAt, now }), 'laptop is offline. Last seen 1 h ago. Start it with: node dock-chat.cjs run');
+  assert.strictEqual(sendBlocker({ source: 'dock', busy: false, bridgeOnline: false, machine: 'workspace', now }), 'workspace is offline. Start it, then send.');
+  assert.strictEqual(sendBlocker({ source: 'dock', busy: false, bridgeOnline: machineOnline(both, 'workspace'), machine: 'workspace', now }), null, 'workspace is up while the laptop is down');
+  assert.match(sendBlocker({ source: 'cli', busy: false, bridgeOnline: false, machine: 'laptop', now }) || '', /read-only/);
+  assert.strictEqual(sendBlocker({ source: 'dock', busy: false, bridgeOnline: false, machine: 'workspace', machineHasToken: false, lastSeenAt: both[0].lastSeenAt, now }), 'workspace has no ingest token. Create one in Settings before anything can answer.', 'a machine without a token cannot be told to start');
+  assert.strictEqual(sendBlocker({ source: 'dock', busy: false, bridgeOnline: false, machine: 'workspace', machineHasToken: true, now }), 'workspace is offline. Start it, then send.', 'a listed machine that is offline keeps the old text');
+});
+
+test('chat tabs: the machine joins the label only when more than one machine exists', () => {
+  const untitled = { title: '', ticketKey: null, machine: 'workspace' };
+  assert.strictEqual(tabLabel(untitled, false), 'New session');
+  assert.strictEqual(tabLabel(untitled, true), 'New session · workspace');
+  assert.strictEqual(tabLabel({ title: '', machine: null }, true), 'New session · laptop');
+  assert.strictEqual(tabLabel({ title: 'Fix login', ticketKey: 'QRD-1', machine: 'laptop' }, true), 'Fix login · laptop');
+  assert.strictEqual(tabLabel({ title: '', ticketKey: 'QRD-1' }, false), 'QRD-1');
+  assert.strictEqual(tabLabel(undefined, true), 'New session', 'a tab whose session is not loaded yet has no machine to show');
+});
+
+test('chat tabs: sessions on different machines are told apart even when the token list names one machine', () => {
+  assert.strictEqual(severalMachines(undefined, []), false);
+  assert.strictEqual(severalMachines([{ name: 'laptop', online: true }], ['laptop']), false);
+  assert.strictEqual(severalMachines([{ name: 'laptop', online: true }], ['laptop', 'workspace']), true, 'a session on a machine without a token still counts');
+  assert.strictEqual(severalMachines([], ['workspace']), true, 'no token list means the laptop plus the open sessions');
+  assert.strictEqual(severalMachines([{ name: 'laptop', online: true }, { name: 'workspace', online: false }], []), true);
 });
 
 test('chat balloons: one short line per ticket from its newest assistant message', () => {

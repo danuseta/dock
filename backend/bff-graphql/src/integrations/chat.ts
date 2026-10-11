@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { StorageService } from '../storage/service';
-import { OrchestratorInputError, normalizeTicketKey } from './orchestrator';
+import { DEFAULT_MACHINE, OrchestratorInputError, normalizeMachine, normalizeTicketKey } from './orchestrator';
 
 export const CHAT_SOURCES = ['cli', 'dock'] as const;
 export type ChatSource = typeof CHAT_SOURCES[number];
@@ -16,7 +16,7 @@ export const MAX_SEND_CHARS = 8000;
 export const MAX_CLAIM_WAIT_SECONDS = 25;
 export const CLAIM_POLL_MS = 500;
 export const STALE_TAKEN_MS = 15 * 60 * 1000;
-export const STALE_TEXT = 'The laptop bridge stopped answering';
+export const STALE_TEXT = 'The bridge stopped answering';
 export const BRIDGE_ONLINE_MS = 60 * 1000;
 export const BALLOON_MAX_AGE_MS = 30 * 60 * 1000;
 export const STATUS_STALE_MS = 5 * 60 * 1000;
@@ -180,6 +180,7 @@ export function parseStatus(input: unknown) {
 
 type ParsedStatus = ReturnType<typeof parseStatus>;
 type LimitWindow = NonNullable<ReturnType<typeof limitWindow>>;
+type LimitsSeen = { fiveHour: LimitWindow | null; sevenDay: LimitWindow | null; receivedAt: Date };
 
 const presentWindow = (window: LimitWindow | null) => window && {
   usedPercentage: window.usedPercentage,
@@ -198,6 +199,7 @@ export function searchSnippet(value: string, query: string): string {
 interface SessionRow {
   id: string;
   source: string;
+  machine: string;
   title: string;
   ticketKey: string | null;
   forkFrom: string | null;
@@ -215,6 +217,7 @@ function toSession(row: SessionRow, lastText: string | null) {
   return {
     id: row.id,
     source: row.source,
+    machine: row.machine,
     title: row.title,
     ticketKey: row.ticketKey,
     forkFrom: row.forkFrom,
@@ -244,9 +247,9 @@ function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 export class ChatService {
-  private bridgeSeenAt: Date | null = null;
-  private readonly sessionStatus = new Map<string, ParsedStatus & { receivedAt: Date }>();
-  private limitsSeen: { fiveHour: LimitWindow | null; sevenDay: LimitWindow | null; receivedAt: Date } | null = null;
+  private readonly bridgeSeenAt = new Map<string, Date>();
+  private readonly sessionStatus = new Map<string, Map<string, ParsedStatus & { receivedAt: Date }>>();
+  private readonly limitsSeen = new Map<string, LimitsSeen>();
 
   constructor(
     private readonly storage = new StorageService(),
@@ -306,19 +309,26 @@ export class ChatService {
     });
   }
 
-  bridge() {
-    const seen = this.bridgeSeenAt;
+  bridge(machine?: string) {
+    const seen = machine === undefined
+      ? [...this.bridgeSeenAt.values()].reduce<Date | null>((newest, at) => (!newest || at > newest ? at : newest), null)
+      : this.bridgeSeenAt.get(machine) ?? null;
     return {
       online: Boolean(seen) && this.now().getTime() - seen!.getTime() <= BRIDGE_ONLINE_MS,
       lastSeenAt: seen?.toISOString() ?? null,
     };
   }
 
-  /** The latest status line of each laptop session and the account limits; memory only, so a restart empties it until the next push. */
-  statusSnapshot() {
+  machines(names: string[]) {
+    return names.map((name) => ({ name, ...this.bridge(name) }));
+  }
+
+  statusSnapshot(machine?: string) {
     const now = this.now().getTime();
     const stale = (at: Date) => now - at.getTime() > STATUS_STALE_MS;
-    const limits = this.limitsSeen;
+    const limits = machine === undefined
+      ? [...this.limitsSeen.values()].reduce<LimitsSeen | null>((newest, seen) => (!newest || seen.receivedAt > newest.receivedAt ? seen : newest), null)
+      : this.limitsSeen.get(machine) ?? null;
     return {
       limits: limits && {
         fiveHour: presentWindow(limits.fiveHour),
@@ -326,21 +336,28 @@ export class ChatService {
         receivedAt: limits.receivedAt.toISOString(),
         stale: stale(limits.receivedAt),
       },
-      sessions: [...this.sessionStatus.values()].map(({ fiveHour, sevenDay, receivedAt, ...status }) => ({
-        ...status,
-        receivedAt: receivedAt.toISOString(),
-        stale: stale(receivedAt),
-      })),
+      sessions: [...this.sessionStatus]
+        .filter(([name]) => machine === undefined || name === machine)
+        .flatMap(([name, byId]) => [...byId.values()].map(({ fiveHour, sevenDay, receivedAt, ...status }) => ({
+          ...status,
+          machine: name,
+          receivedAt: receivedAt.toISOString(),
+          stale: stale(receivedAt),
+        }))),
     };
   }
 
-  ingestStatus(input: unknown) {
+  async ingestStatus(input: unknown, machine: string) {
     const status = parseStatus(input);
+    const known = await this.storage.getChatSession(status.sessionId);
+    if (known && known.machine !== machine) return { sessionId: status.sessionId, ignored: true, owner: known.machine };
     const receivedAt = this.now();
-    this.sessionStatus.delete(status.sessionId);
-    this.sessionStatus.set(status.sessionId, { ...status, receivedAt });
-    if (this.sessionStatus.size > MAX_STATUS_SESSIONS) this.sessionStatus.delete(this.sessionStatus.keys().next().value!);
-    if (status.fiveHour || status.sevenDay) this.limitsSeen = { fiveHour: status.fiveHour, sevenDay: status.sevenDay, receivedAt };
+    const mine = this.sessionStatus.get(machine) ?? new Map<string, ParsedStatus & { receivedAt: Date }>();
+    this.sessionStatus.set(machine, mine);
+    mine.delete(status.sessionId);
+    mine.set(status.sessionId, { ...status, receivedAt });
+    if (mine.size > MAX_STATUS_SESSIONS) mine.delete(mine.keys().next().value!);
+    if (status.fiveHour || status.sevenDay) this.limitsSeen.set(machine, { fiveHour: status.fiveHour, sevenDay: status.sevenDay, receivedAt });
     return { sessionId: status.sessionId };
   }
 
@@ -351,15 +368,22 @@ export class ChatService {
     return newest.flatMap((message) => (message && message.at >= since ? [toMessage(message)] : []));
   }
 
-  async createSession(input: { title?: string | null; ticketKey?: string | null; forkFrom?: string | null }) {
+  async createSession(input: { title?: string | null; ticketKey?: string | null; forkFrom?: string | null; machine?: string | null }) {
     const forkFrom = optionalChatId(input.forkFrom, 'forkFrom');
-    if (forkFrom && (await this.storage.getChatSession(forkFrom))?.source !== 'cli') {
+    const source = forkFrom ? await this.storage.getChatSession(forkFrom) : null;
+    if (forkFrom && source?.source !== 'cli') {
       throw new OrchestratorInputError('forkFrom must be an existing cli session');
+    }
+    const requested = input.machine === undefined || input.machine === null || input.machine === '' ? null : normalizeMachine(input.machine);
+    const machine = requested ?? source?.machine ?? DEFAULT_MACHINE;
+    if (source && machine !== source.machine) {
+      throw new OrchestratorInputError('A fork stays on the machine that holds the transcript');
     }
     const now = this.now();
     const row = await this.storage.createChatSession({
       id: randomUUID(),
       source: 'dock',
+      machine,
       title: text(input.title, MAX_TITLE_CHARS),
       ticketKey: optionalTicketKey(input.ticketKey),
       forkFrom,
@@ -369,7 +393,7 @@ export class ChatService {
     return toSession(row, null);
   }
 
-  async sendMessage(sessionIdInput: string, textInput: string) {
+  async sendMessage(sessionIdInput: string, textInput: string, machines: string[]) {
     const sessionId = chatId(sessionIdInput, 'sessionId');
     const body = typeof textInput === 'string' ? textInput.trim() : '';
     if (body.length < 1 || body.length > MAX_SEND_CHARS) {
@@ -379,6 +403,9 @@ export class ChatService {
     const session = await this.storage.getChatSession(sessionId);
     if (!session) throw new OrchestratorInputError('Unknown chat session');
     if (session.source !== 'dock') throw new OrchestratorInputError('Only a DOCK session can be written to');
+    if (!machines.includes(session.machine)) {
+      throw new OrchestratorInputError(`No ingest token exists for the machine ${session.machine}, so nothing would answer this message`);
+    }
     if (await this.storage.countChatMessagesInState(sessionId, ['queued', 'taken']) > 0) {
       throw new OrchestratorInputError('This session is still working on the previous message');
     }
@@ -403,22 +430,25 @@ export class ChatService {
   }
 
   /** History of a terminal session, pushed from the laptop in batches. */
-  async syncSession(input: unknown) {
+  async syncSession(input: unknown, machine: string) {
     const sync = parseSessionSync(input, this.now());
     const existing = await this.storage.getChatSession(sync.id);
     if (existing && existing.source !== 'cli') {
       throw new OrchestratorInputError('This id belongs to a DOCK session and cannot be overwritten');
     }
+    if (existing && existing.machine !== machine) {
+      throw new OrchestratorInputError('This session belongs to another machine');
+    }
     const fields = { title: sync.title, ticketKey: sync.ticketKey, startedAt: sync.startedAt, lastMessageAt: sync.lastMessageAt };
-    if (!existing) await this.storage.createChatSession({ id: sync.id, source: 'cli', ...fields });
+    if (!existing) await this.storage.createChatSession({ id: sync.id, source: 'cli', machine, ...fields });
     if (existing && sync.replace) await this.storage.deleteChatMessages(sync.id);
     const messageCount = await this.storage.addChatMessages(sync.id, sync.messages, MAX_MESSAGES_KEPT);
     await this.storage.updateChatSession(sync.id, { ...fields, messageCount });
     return { id: sync.id, messageCount };
   }
 
-  private async takeNext() {
-    for (const message of await this.storage.getQueuedChatMessages(CLAIM_CANDIDATES)) {
+  private async takeNext(machine: string) {
+    for (const message of await this.storage.getQueuedChatMessages(machine, CLAIM_CANDIDATES)) {
       if (await this.storage.countChatMessagesInState(message.sessionId, ['taken']) > 0) continue;
       const session = await this.storage.getChatSession(message.sessionId);
       if (!session) continue;
@@ -436,14 +466,14 @@ export class ChatService {
   }
 
   /** Long poll: the oldest queued message, or `null` once `wait` seconds pass or the bridge hangs up. */
-  async claim(input: unknown, signal?: AbortSignal) {
+  async claim(input: unknown, signal: AbortSignal | undefined, machine: string) {
     const { wait } = parseClaim(input);
     const deadline = this.now().getTime() + wait * 1000;
     await this.failStale();
     for (;;) {
       if (signal?.aborted) return { message: null };
-      this.bridgeSeenAt = this.now();
-      const message = await this.takeNext();
+      this.bridgeSeenAt.set(machine, this.now());
+      const message = await this.takeNext(machine);
       if (message) return { message };
       const left = deadline - this.now().getTime();
       if (left <= 0) return { message: null };
@@ -451,13 +481,14 @@ export class ChatService {
     }
   }
 
-  async delta(input: unknown) {
+  async delta(input: unknown, machine: string) {
     const now = this.now();
     const delta = parseDelta(input, now);
-    this.bridgeSeenAt = now;
+    this.bridgeSeenAt.set(machine, now);
     const session = await this.storage.getChatSession(delta.sessionId);
     if (!session) return null;
     if (session.source !== 'dock') throw new OrchestratorInputError('Only a DOCK session takes deltas');
+    if (session.machine !== machine) throw new OrchestratorInputError('This session belongs to another machine');
     const replyTo = await this.storage.getChatMessage(delta.replyTo);
     if (!replyTo || replyTo.sessionId !== session.id || replyTo.role !== 'user') {
       throw new OrchestratorInputError('replyTo is not a message of this session');

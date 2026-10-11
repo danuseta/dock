@@ -1,7 +1,20 @@
 import assert from 'node:assert';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
 import http from 'node:http';
-import test from 'node:test';
+import os from 'node:os';
+import path from 'node:path';
+import test, { after } from 'node:test';
 import type { Express } from 'express';
+
+if (process.env.JIDIS_SQLITE_INTEGRATION === '1') {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'dock-sqlite-'));
+  const url = `file:${path.join(directory, 'integration.db').replaceAll('\\', '/')}`;
+  process.env.DATABASE_URL = url;
+  process.env.ENCRYPTION_KEY ||= 'integration-test-key';
+  execFileSync(process.execPath, [require.resolve('prisma/build/index.js'), 'db', 'push', '--skip-generate', '--schema', path.resolve(__dirname, '../../prisma/schema.prisma')], { env: process.env, stdio: 'pipe' });
+  after(() => rmSync(directory, { recursive: true, force: true }));
+}
 
 async function listen(app: Express) {
   const server = http.createServer(app);
@@ -85,4 +98,124 @@ test('SQLite storage preserves settings, PIN, demo-link, and cache behavior', {
   assert.deepStrictEqual(await status.json(), {
     data: { authStatus: { authenticated: true, hasMasterPin: true } },
   });
+});
+
+test('SQLite storage defaults machine to laptop and queues chat per machine', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }] = await Promise.all([
+    import('../storage/service'),
+    import('../storage/client'),
+  ]);
+  const storage = new StorageService(prisma);
+  t.after(() => prisma.$disconnect());
+
+  const at = new Date('2026-10-05T00:00:00.000Z');
+  const [laptopSession, workspaceSession, idleSession] = ['aaaaaaaa-0000-4000-8000-000000000001', 'aaaaaaaa-0000-4000-8000-000000000002', 'aaaaaaaa-0000-4000-8000-000000000003'];
+  await storage.createChatSession({ id: laptopSession, source: 'dock', title: 'ZED-101', ticketKey: 'ZED-101', startedAt: at, lastMessageAt: at });
+  await storage.createChatSession({ id: workspaceSession, source: 'dock', machine: 'workspace', title: 'ZED-102', ticketKey: 'ZED-102', startedAt: at, lastMessageAt: at });
+  await storage.createChatSession({ id: idleSession, source: 'dock', title: 'idle', ticketKey: null, startedAt: at, lastMessageAt: at });
+  assert.strictEqual((await storage.getChatSession(laptopSession))?.machine, 'laptop');
+  assert.strictEqual((await storage.getChatSession(workspaceSession))?.machine, 'workspace');
+
+  for (const sessionId of [laptopSession, workspaceSession, idleSession]) {
+    await storage.createChatMessage({ sessionId, role: 'user', text: sessionId, state: 'queued', at });
+  }
+  await storage.updateChatSession(laptopSession, { status: 'queued' });
+  await storage.updateChatSession(workspaceSession, { status: 'queued' });
+  const cliSession = 'aaaaaaaa-0000-4000-8000-000000000004';
+  await storage.createChatSession({ id: cliSession, source: 'cli', title: 'cli', ticketKey: null, startedAt: at, lastMessageAt: at });
+  await storage.createChatMessage({ sessionId: cliSession, role: 'user', text: cliSession, state: 'queued', at });
+
+  const queuedIds = async (machine: string, take = 10) => (await storage.getQueuedChatMessages(machine, take)).map((message) => message.sessionId);
+  assert.deepStrictEqual(await queuedIds('laptop'), [laptopSession, idleSession], 'a queued message is found by its own state, whatever the status of its session');
+  assert.deepStrictEqual(await queuedIds('workspace'), [workspaceSession]);
+  assert.deepStrictEqual(await queuedIds('laptop', 1), [laptopSession]);
+  assert.deepStrictEqual(await queuedIds('phone'), []);
+  const [queued] = await storage.getQueuedChatMessages('workspace', 1);
+  assert.deepStrictEqual([typeof queued.id, queued.text], ['number', workspaceSession]);
+
+  const token = await storage.createIngestToken({ name: 'zed', prefix: 'dock_ing_zed', tokenHash: 'zed-hash', machine: 'workspace' });
+  assert.strictEqual(token.machine, 'workspace');
+  const fields = { title: 'Zed', stage: 'code', waiting: '', payload: '{}', ledgerUpdatedAt: at, machine: 'workspace', ledgerRaw: '{"history":[]}' };
+  const run = await storage.upsertOrchestratorRun('ZED-101', fields);
+  assert.strictEqual(run.machine, 'workspace');
+  assert.deepStrictEqual([run.ledgerRaw, run.handover], ['{"history":[]}', null]);
+  const offered = await storage.updateOrchestratorRun('ZED-101', { handover: '{"to":"laptop"}' });
+  assert.strictEqual(offered.handover, '{"to":"laptop"}');
+  assert.strictEqual('ledgerRaw' in offered, false, 'the update answers without the ledger');
+
+  const lists = [...await storage.getOrchestratorRuns(), await storage.getOrchestratorRun('ZED-101')];
+  assert.ok(lists.every((row) => row && !('ledgerRaw' in row)), 'a list or a plain read never loads the ledger');
+  assert.strictEqual((await storage.getOrchestratorRunWithLedger('ZED-101'))?.ledgerRaw, '{"history":[]}');
+  assert.strictEqual(await storage.countLiveOrchestratorRuns('workspace'), 1);
+
+  assert.strictEqual(await storage.changeOrchestratorRunOwner('ZED-101', { machine: 'workspace', handover: '{"to":"other"}' }, 'laptop'), false, 'an offer that changed blocks the accept');
+  assert.strictEqual(await storage.changeOrchestratorRunOwner('ZED-101', { machine: 'workspace', handover: '{"to":"laptop"}' }, 'laptop'), true);
+  assert.strictEqual(await storage.changeOrchestratorRunOwner('ZED-101', { machine: 'workspace', handover: '{"to":"laptop"}' }, 'laptop'), false, 'the second of two racing accepts loses');
+  const moved = await storage.getOrchestratorRunWithLedger('ZED-101');
+  assert.deepStrictEqual([moved?.machine, moved?.handover, moved?.ledgerRaw], ['laptop', null, '{"history":[]}']);
+
+  const late = await storage.upsertOrchestratorRun('ZED-101', { ...fields, title: 'Late push' });
+  assert.deepStrictEqual([late.machine, late.title], ['laptop', 'Zed'], 'a push that read the old owner changes nothing and cannot take the ticket back');
+  assert.strictEqual((await storage.upsertOrchestratorRun('ZED-101', { ...fields, machine: 'laptop', title: 'Owner push' })).title, 'Owner push');
+  assert.strictEqual((await storage.upsertOrchestratorRun('ZED-102', fields)).machine, 'workspace', 'the owner is written when the ticket is created');
+  const raced = await storage.upsertOrchestratorRun('ZED-102', { ...fields, machine: 'laptop' });
+  assert.strictEqual(raced.machine, 'workspace', 'a second creator gets the row of the first');
+
+  await storage.updateOrchestratorRun('ZED-101', { dismissedAt: at, handover: '{"to":"workspace"}' });
+  assert.strictEqual(await storage.countLiveOrchestratorRuns('laptop'), 0);
+  const taken = await storage.takeDismissedOrchestratorRun('ZED-101', { ...fields, title: 'Taken' });
+  assert.deepStrictEqual([taken.machine, taken.title, taken.dismissedAt, taken.handover], ['workspace', 'Taken', null, null]);
+  const notDismissed = await storage.takeDismissedOrchestratorRun('ZED-101', { ...fields, machine: 'laptop', title: 'Not allowed' });
+  assert.deepStrictEqual([notDismissed.machine, notDismissed.title], ['workspace', 'Taken'], 'only a dismissed ticket can be taken');
+
+  await storage.deleteChatSession(laptopSession);
+  await storage.deleteChatSession(workspaceSession);
+  await storage.deleteChatSession(idleSession);
+  await storage.deleteChatSession(cliSession);
+  await storage.revokeIngestToken(token.id);
+});
+
+test('SQLite storage takes a dismissed ticket only for its own machine or a machine without a token', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }, { OrchestratorService }] = await Promise.all([
+    import('../storage/service'),
+    import('../storage/client'),
+    import('../integrations/orchestrator'),
+  ]);
+  const storage = new StorageService(prisma);
+  const service = new OrchestratorService(storage, os.tmpdir());
+  t.after(() => prisma.$disconnect());
+
+  await service.createToken('laptop');
+  const workspace = await service.createToken('workspace', 'workspace');
+  const now = new Date('2026-10-05T00:00:00.000Z');
+  const push = (machine: string, title: string) => service.ingestLedger({ key: 'ZED-103', title, stage: 'code', waiting: '', updatedAt: now.toISOString() }, now, machine);
+
+  await push('laptop', 'Laptop title');
+  await service.ingestHookEvent({ key: 'ZED-103', event: 'PreToolUse', detail: 'Bash' }, now, 'laptop');
+  await service.dismiss('ZED-103');
+  assert.strictEqual((await push('laptop', 'Revived')).ignored, false, 'the owner revives its own dismissed ticket');
+  const revived = await storage.getOrchestratorRun('ZED-103');
+  assert.deepStrictEqual([revived?.title, revived?.dismissedAt, revived?.activity], ['Revived', null, 'ACTIVE']);
+
+  await service.dismiss('ZED-103');
+  const refused = await push('workspace', 'Pusher title');
+  assert.deepStrictEqual([refused.ignored, refused.machine], [true, 'laptop']);
+  const kept = await storage.getOrchestratorRun('ZED-103');
+  assert.deepStrictEqual([kept?.machine, kept?.title, kept?.dismissedAt === null], ['laptop', 'Revived', false], 'the row stays dismissed under its owner');
+
+  await service.revokeToken((await service.tokens()).find((token) => token.machine === 'laptop')!.id);
+  const taken = await push('workspace', 'Pusher title');
+  assert.deepStrictEqual([taken.ignored, taken.machine], [false, 'workspace']);
+  const row = await storage.getOrchestratorRun('ZED-103');
+  assert.deepStrictEqual(
+    [row?.title, row?.dismissedAt, row?.activity, row?.activityDetail, row?.activityEndedAt, row?.lastEventAt, row?.transcriptAt],
+    ['Pusher title', null, 'IDLE', null, null, null, null],
+    'the old machine history is reset',
+  );
+
+  await service.revokeToken(workspace.record.id);
 });

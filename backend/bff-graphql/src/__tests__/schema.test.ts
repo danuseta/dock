@@ -1,8 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { buildASTSchema, graphql } from 'graphql';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { buildASTSchema, graphql, parse, validate, type GraphQLSchema } from 'graphql';
 import { typeDefs } from '../schema/typeDefs';
-import { resolvers } from '../resolvers';
+import { protectedMutations, protectedQueries, resolvers } from '../resolvers';
+import { StorageAPI } from '../datasources/StorageAPI';
+import { orchestratorService } from '../integrations/orchestrator';
+
+function frontendOperations(files: string[]): Array<{ name: string; document: string }> {
+  const templates = new Map<string, string>();
+  const pattern = /export const (\w+) = (?:gql)?`([\s\S]*?)`;/g;
+  for (const file of files) {
+    const source = readFileSync(resolve(__dirname, '../../../../frontend/src/graphql', file), 'utf8');
+    for (const match of source.matchAll(pattern)) templates.set(match[1], match[2]);
+  }
+  const expand = (body: string): string => body.replace(/\$\{(\w+)\}/g, (_, name: string) => expand(templates.get(name) ?? ''));
+  return [...templates.entries()]
+    .map(([name, body]) => ({ name, document: expand(body) }))
+    .filter(({ document }) => /^\s*(query|mutation|subscription)\b/.test(document));
+}
+
+function operationErrors(schema: GraphQLSchema, document: string): string[] {
+  return validate(schema, parse(document)).map((error) => error.message);
+}
 
 test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t) => {
   await t.test('should define valid GraphQL type definitions containing essential DOCK domain types', () => {
@@ -63,6 +84,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'calendarEvents',
       'chatBalloons',
       'chatBridge',
+      'chatMachines',
       'chatMessages',
       'chatSearch',
       'chatSession',
@@ -102,6 +124,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'disconnectGoogleCalendar',
       'dismissOrchestration',
       'lockSession',
+      'moveOrchestration',
       'refreshData',
       'refreshSprintDashboard',
       'removeMasterPin',
@@ -122,5 +145,89 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'validateJira',
       'verifyMasterPin',
     ]);
+  });
+
+  await t.test('should put every root field behind the PIN or on the named public list', () => {
+    const publicQueries = ['authStatus', 'settings'];
+    const publicMutations = ['lockSession', 'verifyMasterPin', 'setMasterPin'];
+    const schema = buildASTSchema(typeDefs);
+    for (const [fields, guarded, open] of [
+      [Object.keys(schema.getQueryType()!.getFields()), protectedQueries, publicQueries],
+      [Object.keys(schema.getMutationType()!.getFields()), protectedMutations, publicMutations],
+    ] as Array<[string[], readonly string[], string[]]>) {
+      assert.deepStrictEqual(fields.filter((field) => !guarded.includes(field) && !open.includes(field)), [], 'a root field is neither guarded nor on the public list');
+      assert.deepStrictEqual(guarded.filter((field) => open.includes(field)), [], 'a field is not both guarded and public');
+      assert.deepStrictEqual(guarded.filter((field) => !fields.includes(field)), [], 'a guarded name is not in the schema');
+      assert.deepStrictEqual(open.filter((field) => !fields.includes(field)), [], 'a public name is not in the schema');
+    }
+  });
+
+  await t.test('should validate every frontend operation against the schema', () => {
+    const schema = buildASTSchema(typeDefs);
+    const operations = frontendOperations(['queries.ts', 'mutations.ts']);
+    assert.ok(operations.length > 20, 'frontend operations must be extracted');
+    for (const { name, document } of operations) {
+      assert.deepStrictEqual(operationErrors(schema, document), [], `${name} must validate`);
+    }
+  });
+
+  await t.test('should expose machine identity and hand-over fields additively', () => {
+    const schema = buildASTSchema(typeDefs);
+    const field = (type: string, name: string) => (schema.getType(type) as any).getFields()[name];
+    for (const [type, name, shape] of [
+      ['IngestToken', 'machine', 'String!'],
+      ['ChatSession', 'machine', 'String!'],
+      ['Orchestration', 'machine', 'String!'],
+      ['Orchestration', 'handoverTo', 'String'],
+      ['Orchestration', 'handoverAt', 'String'],
+      ['ChatSessionStatus', 'machine', 'String'],
+      ['ChatMachine', 'name', 'String!'],
+      ['ChatMachine', 'online', 'Boolean!'],
+      ['ChatMachine', 'lastSeenAt', 'String'],
+    ]) {
+      assert.strictEqual(String(field(type, name).type), shape, `${type}.${name}`);
+    }
+    const query = schema.getQueryType()!.getFields();
+    const mutation = schema.getMutationType()!.getFields();
+    assert.strictEqual(String(query.chatMachines.type), '[ChatMachine!]!');
+    assert.deepStrictEqual(query.chatStatus.args.map((arg) => [arg.name, String(arg.type)]), [['machine', 'String']]);
+    assert.deepStrictEqual(mutation.createIngestToken.args.map((arg) => [arg.name, String(arg.type)]), [['name', 'String!'], ['machine', 'String']]);
+    assert.deepStrictEqual(
+      mutation.createChatSession.args.map((arg) => [arg.name, String(arg.type)]),
+      [['title', 'String'], ['ticketKey', 'String'], ['forkFrom', 'ID'], ['machine', 'String']],
+    );
+    assert.deepStrictEqual(mutation.moveOrchestration.args.map((arg) => [arg.name, String(arg.type)]), [['key', 'String!'], ['machine', 'String!']]);
+    assert.strictEqual(String(mutation.moveOrchestration.type), 'Orchestration!');
+  });
+
+  await t.test('should reject a chat session on a machine without a token and guard privileged mutations', async () => {
+    const previousMode = process.env.DOCK_PIN_MODE;
+    const originalPin = StorageAPI.prototype.hasMasterPin;
+    const originalMachines = orchestratorService.machines;
+    process.env.DOCK_PIN_MODE = 'always';
+    StorageAPI.prototype.hasMasterPin = async () => true;
+    orchestratorService.machines = async () => ['laptop'];
+    try {
+      const mutations = resolvers.Mutation as Record<string, (...args: unknown[]) => Promise<unknown>>;
+      const locked = { request: { headers: {}, socket: {} }, authenticated: false } as any;
+      const unlocked = { ...locked, authenticated: true };
+      await assert.rejects(
+        mutations.moveOrchestration({}, { key: 'ZED-101', machine: 'workspace' }, locked),
+        /Unlock DOCK to continue/,
+      );
+      await assert.rejects(
+        mutations.createIngestToken({}, { name: 'workspace', machine: 'workspace' }, locked),
+        /Unlock DOCK to continue/,
+      );
+      await assert.rejects(
+        mutations.createChatSession({}, { title: 'Probe', machine: 'workspace' }, unlocked),
+        /Unknown machine/,
+      );
+    } finally {
+      StorageAPI.prototype.hasMasterPin = originalPin;
+      orchestratorService.machines = originalMachines;
+      if (previousMode === undefined) delete process.env.DOCK_PIN_MODE;
+      else process.env.DOCK_PIN_MODE = previousMode;
+    }
   });
 });

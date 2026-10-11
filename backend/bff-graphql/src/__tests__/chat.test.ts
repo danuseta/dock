@@ -9,6 +9,7 @@ import {
   CUT_SUFFIX,
   MAX_MESSAGE_CHARS,
   MAX_MESSAGES_KEPT,
+  MAX_STATUS_SESSIONS,
   STALE_TEXT,
   cutMessageText,
   parseClaim,
@@ -19,6 +20,8 @@ import {
 import { OrchestratorInputError, OrchestratorService } from '../integrations/orchestrator';
 import { createOrchestratorIngestRouter } from '../routes/orchestrator';
 import type { StorageService } from '../storage/service';
+
+const MACHINES = ['laptop', 'workspace'];
 
 function memoryStorage() {
   const sessions = new Map<string, any>();
@@ -38,7 +41,7 @@ function memoryStorage() {
     getStaleChatSessions: async (before: Date) => [...sessions.values()]
       .filter((session) => session.status === 'running' && session.lastDeltaAt && session.lastDeltaAt < before),
     createChatSession: async (data: any) => {
-      const row = { forkFrom: null, claudeSessionId: null, status: 'idle', statusDetail: null, messageCount: 0, lastDeltaAt: null, ...data };
+      const row = { machine: 'laptop', forkFrom: null, claudeSessionId: null, status: 'idle', statusDetail: null, messageCount: 0, lastDeltaAt: null, ...data };
       sessions.set(row.id, row);
       return row;
     },
@@ -77,8 +80,12 @@ function memoryStorage() {
     },
     countChatMessagesInState: async (sessionId: string, states: string[]) => ofSession(sessionId)
       .filter((message) => states.includes(message.state)).length,
-    getQueuedChatMessages: async (take: number) => messages
-      .filter((message) => message.state === 'queued' && message.role === 'user').slice(0, take).map((message) => ({ ...message })),
+    getQueuedChatMessages: async (machine: string, take: number) => messages
+      .filter((message) => {
+        const session = sessions.get(message.sessionId);
+        return message.state === 'queued' && message.role === 'user' && session?.source === 'dock' && session.machine === machine;
+      })
+      .slice(0, take).map((message) => ({ id: message.id, sessionId: message.sessionId, text: message.text })),
     moveChatMessage: async (id: number, sessionId: string, from: string, to: string) => {
       const row = messages.find((message) => message.id === id && message.sessionId === sessionId && message.state === from);
       if (row) row.state = to;
@@ -194,9 +201,9 @@ test('chat input is validated before anything is stored', () => {
 test('history sync upserts a cli session, replaces or appends, and keeps the newest 5 000 messages', async () => {
   const { service, messages } = clockedService();
 
-  assert.deepStrictEqual(await service.syncSession(syncBody()), { id: CLI_ID, messageCount: 3 });
-  assert.deepStrictEqual(await service.syncSession(syncBody({ replace: false, messages: [syncBody().messages[0]] })), { id: CLI_ID, messageCount: 4 });
-  assert.deepStrictEqual(await service.syncSession(syncBody()), { id: CLI_ID, messageCount: 3 }, 'replace drops what was there');
+  assert.deepStrictEqual(await service.syncSession(syncBody(), 'laptop'), { id: CLI_ID, messageCount: 3 });
+  assert.deepStrictEqual(await service.syncSession(syncBody({ replace: false, messages: [syncBody().messages[0]] }), 'laptop'), { id: CLI_ID, messageCount: 4 });
+  assert.deepStrictEqual(await service.syncSession(syncBody(), 'laptop'), { id: CLI_ID, messageCount: 3 }, 'replace drops what was there');
 
   const [listed] = await service.sessions('cli');
   assert.deepStrictEqual(
@@ -207,14 +214,14 @@ test('history sync upserts a cli session, replaces or appends, and keeps the new
   assert.deepStrictEqual(await service.sessions('dock'), []);
   await assert.rejects(service.sessions('other'), OrchestratorInputError);
 
-  await service.syncSession(syncBody({ messages: [{ role: 'assistant', text: 'y'.repeat(MAX_MESSAGE_CHARS + 500), at: '2026-10-07T08:00:00.000Z' }] }));
+  await service.syncSession(syncBody({ messages: [{ role: 'assistant', text: 'y'.repeat(MAX_MESSAGE_CHARS + 500), at: '2026-10-07T08:00:00.000Z' }] }), 'laptop');
   assert.strictEqual(messages()[0].text.length, MAX_MESSAGE_CHARS);
   assert.ok(messages()[0].text.endsWith(CUT_SUFFIX));
 
   const batch = (from: number) => Array.from({ length: 500 }, (_, index) => ({ role: 'assistant', text: `m${from + index}`, at: '2026-10-07T08:00:00.000Z' }));
-  await service.syncSession(syncBody({ messages: batch(0) }));
+  await service.syncSession(syncBody({ messages: batch(0) }), 'laptop');
   let last = { id: CLI_ID, messageCount: 0 };
-  for (let from = 500; from < 5500; from += 500) last = await service.syncSession(syncBody({ replace: false, messages: batch(from) }));
+  for (let from = 500; from < 5500; from += 500) last = await service.syncSession(syncBody({ replace: false, messages: batch(from) }), 'laptop');
   assert.strictEqual(last.messageCount, MAX_MESSAGES_KEPT);
   assert.strictEqual(messages().length, MAX_MESSAGES_KEPT);
   assert.strictEqual(messages()[0].text, 'm500', 'the oldest are dropped');
@@ -223,7 +230,7 @@ test('history sync upserts a cli session, replaces or appends, and keeps the new
 
 test('a DOCK session takes one turn at a time and the bridge moves it through its states', async () => {
   const { service, sessions, advance } = clockedService();
-  await service.syncSession(syncBody());
+  await service.syncSession(syncBody(), 'laptop');
 
   await assert.rejects(service.createSession({ forkFrom: 'does-not-exist' }), OrchestratorInputError);
   await assert.rejects(service.createSession({ ticketKey: 'nope' }), OrchestratorInputError);
@@ -233,24 +240,24 @@ test('a DOCK session takes one turn at a time and the bridge moves it through it
     ['dock', 120, 'QRD-1258', CLI_ID, 'idle', 0, null],
   );
   await assert.rejects(service.createSession({ forkFrom: dock.id }), OrchestratorInputError, 'only a cli session can be continued');
-  await assert.rejects(service.syncSession(syncBody({ session: { ...syncBody().session, id: dock.id } })), OrchestratorInputError, 'history sync never overwrites a DOCK session');
+  await assert.rejects(service.syncSession(syncBody({ session: { ...syncBody().session, id: dock.id } }), 'laptop'), OrchestratorInputError, 'history sync never overwrites a DOCK session');
 
-  await assert.rejects(service.sendMessage(CLI_ID, 'hello'), OrchestratorInputError, 'cli sessions are read-only');
-  await assert.rejects(service.sendMessage('unknown-session', 'hello'), OrchestratorInputError);
-  await assert.rejects(service.sendMessage(dock.id, '   '), OrchestratorInputError);
-  await assert.rejects(service.sendMessage(dock.id, 'x'.repeat(8001)), OrchestratorInputError);
+  await assert.rejects(service.sendMessage(CLI_ID, 'hello', MACHINES), OrchestratorInputError, 'cli sessions are read-only');
+  await assert.rejects(service.sendMessage('unknown-session', 'hello', MACHINES), OrchestratorInputError);
+  await assert.rejects(service.sendMessage(dock.id, '   ', MACHINES), OrchestratorInputError);
+  await assert.rejects(service.sendMessage(dock.id, 'x'.repeat(8001), MACHINES), OrchestratorInputError);
 
-  assert.deepStrictEqual(await service.claim({ wait: 0 }), { message: null });
+  assert.deepStrictEqual(await service.claim({ wait: 0 }, undefined, 'laptop'), { message: null });
 
-  const sent = await service.sendMessage(dock.id, '  What changed in the guard?  ');
+  const sent = await service.sendMessage(dock.id, '  What changed in the guard?  ', MACHINES);
   assert.deepStrictEqual([sent.role, sent.text, sent.state, sent.sessionId], ['user', 'What changed in the guard?', 'queued', dock.id]);
   assert.strictEqual((await service.session(dock.id))?.status, 'queued');
-  await assert.rejects(service.sendMessage(dock.id, 'second'), OrchestratorInputError, 'refused while a message is queued');
+  await assert.rejects(service.sendMessage(dock.id, 'second', MACHINES), OrchestratorInputError, 'refused while a message is queued');
 
   const other = await service.createSession({ title: 'Other' });
-  const otherSent = await service.sendMessage(other.id, 'Second session');
+  const otherSent = await service.sendMessage(other.id, 'Second session', MACHINES);
 
-  const [first, second, third] = await Promise.all([service.claim({ wait: 0 }), service.claim({ wait: 0 }), service.claim({ wait: 0 })]);
+  const [first, second, third] = await Promise.all([service.claim({ wait: 0 }, undefined, 'laptop'), service.claim({ wait: 0 }, undefined, 'laptop'), service.claim({ wait: 0 }, undefined, 'laptop')]);
   assert.deepStrictEqual(
     [first.message?.id, second.message?.id, third.message].sort(),
     [sent.id, otherSent.id, null].sort(),
@@ -259,14 +266,14 @@ test('a DOCK session takes one turn at a time and the bridge moves it through it
   const claimed = [first, second].map((claim) => claim.message).find((message) => message?.id === sent.id);
   assert.deepStrictEqual(claimed, { id: sent.id, sessionId: dock.id, text: 'What changed in the guard?', claudeSessionId: null, forkFrom: CLI_ID });
   assert.strictEqual((await service.session(dock.id))?.status, 'running');
-  await assert.rejects(service.sendMessage(dock.id, 'second'), OrchestratorInputError, 'refused while a message is taken');
+  await assert.rejects(service.sendMessage(dock.id, 'second', MACHINES), OrchestratorInputError, 'refused while a message is taken');
 
   const claude = 'c1a0de00-aaaa-4bbb-8ccc-ddddeeeeffff';
   advance(2000);
   const progress = await service.delta({
     sessionId: dock.id, replyTo: sent.id, claudeSessionId: claude, detail: 'Bash',
     items: [{ role: 'tool', text: 'Bash · git log', at: '2026-10-08T00:00:01.000Z' }, { role: 'assistant', text: 'Looking at the history.', at: '2026-10-08T00:00:02.000Z' }],
-  });
+  }, 'laptop');
   assert.deepStrictEqual(progress, { id: dock.id, status: 'running', messageCount: 3 });
   assert.deepStrictEqual(
     [sessions.get(dock.id).claudeSessionId, sessions.get(dock.id).statusDetail],
@@ -274,24 +281,24 @@ test('a DOCK session takes one turn at a time and the bridge moves it through it
   );
   assert.strictEqual((await service.session(dock.id))?.lastText, 'Looking at the history.');
 
-  assert.strictEqual(await service.delta({ sessionId: 'unknown-session', replyTo: sent.id }), null, 'unknown session is a 404');
-  await assert.rejects(service.delta({ sessionId: dock.id, replyTo: otherSent.id }), OrchestratorInputError, 'replyTo must belong to the session');
-  await assert.rejects(service.delta({ sessionId: CLI_ID, replyTo: 1 }), OrchestratorInputError);
+  assert.strictEqual(await service.delta({ sessionId: 'unknown-session', replyTo: sent.id }, 'laptop'), null, 'unknown session is a 404');
+  await assert.rejects(service.delta({ sessionId: dock.id, replyTo: otherSent.id }, 'laptop'), OrchestratorInputError, 'replyTo must belong to the session');
+  await assert.rejects(service.delta({ sessionId: CLI_ID, replyTo: 1 }, 'laptop'), OrchestratorInputError);
 
-  const finished = await service.delta({ sessionId: dock.id, replyTo: sent.id, done: true, items: [{ role: 'assistant', text: 'Done.', at: '2026-10-08T00:00:03.000Z' }] });
+  const finished = await service.delta({ sessionId: dock.id, replyTo: sent.id, done: true, items: [{ role: 'assistant', text: 'Done.', at: '2026-10-08T00:00:03.000Z' }] }, 'laptop');
   assert.deepStrictEqual(finished, { id: dock.id, status: 'idle', messageCount: 4 });
   const thread = await service.messages(dock.id);
   assert.deepStrictEqual(thread.map((message) => [message.role, message.state]), [['user', 'done'], ['tool', 'done'], ['assistant', 'done'], ['assistant', 'done']]);
   assert.strictEqual(sessions.get(dock.id).statusDetail, null);
 
-  const next = await service.sendMessage(dock.id, 'And the tests?');
-  const resumed = await service.claim({ wait: 0 });
+  const next = await service.sendMessage(dock.id, 'And the tests?', MACHINES);
+  const resumed = await service.claim({ wait: 0 }, undefined, 'laptop');
   assert.deepStrictEqual([resumed.message?.id, resumed.message?.claudeSessionId], [next.id, claude], 'the next turn resumes the Claude session');
-  const failed = await service.delta({ sessionId: dock.id, replyTo: next.id, done: true, error: 'claude exited with code 1' });
+  const failed = await service.delta({ sessionId: dock.id, replyTo: next.id, done: true, error: 'claude exited with code 1' }, 'laptop');
   assert.strictEqual(failed?.status, 'error');
   assert.strictEqual(sessions.get(dock.id).statusDetail, 'claude exited with code 1');
   assert.strictEqual((await service.messages(dock.id)).find((message) => message.id === next.id)?.state, 'failed');
-  await service.sendMessage(dock.id, 'Try again');
+  await service.sendMessage(dock.id, 'Try again', MACHINES);
   assert.strictEqual((await service.session(dock.id))?.status, 'queued', 'a failed turn does not lock the session');
 
   const renamed = await service.renameSession(dock.id, `${'r'.repeat(125)}`);
@@ -302,7 +309,7 @@ test('a DOCK session takes one turn at a time and the bridge moves it through it
   assert.strictEqual(await service.deleteSession(dock.id), false);
   assert.strictEqual(await service.session(dock.id), null);
   assert.deepStrictEqual(await service.messages(dock.id), []);
-  assert.deepStrictEqual((await service.claim({ wait: 0 })).message, null, 'a deleted session leaves nothing queued');
+  assert.deepStrictEqual((await service.claim({ wait: 0 }, undefined, 'laptop')).message, null, 'a deleted session leaves nothing queued');
 });
 
 test('claim skips a session that already has a taken message', async () => {
@@ -311,10 +318,10 @@ test('claim skips a session that already has a taken message', async () => {
   const free = await service.createSession({ title: 'Free' });
   await storage.createChatMessage({ sessionId: busy.id, role: 'user', text: 'in flight', state: 'taken', at: new Date() });
   await storage.createChatMessage({ sessionId: busy.id, role: 'user', text: 'raced in', state: 'queued', at: new Date() });
-  const waiting = await service.sendMessage(free.id, 'pick me');
+  const waiting = await service.sendMessage(free.id, 'pick me', MACHINES);
 
-  assert.strictEqual((await service.claim({ wait: 0 })).message?.id, waiting.id);
-  assert.strictEqual((await service.claim({ wait: 0 })).message, null);
+  assert.strictEqual((await service.claim({ wait: 0 }, undefined, 'laptop')).message?.id, waiting.id);
+  assert.strictEqual((await service.claim({ wait: 0 }, undefined, 'laptop')).message, null);
 });
 
 test('claim waits in 500 ms steps, marks the bridge seen and stops when the bridge hangs up', async () => {
@@ -329,7 +336,7 @@ test('claim waits in 500 ms steps, marks the bridge seen and stops when the brid
   });
 
   assert.deepStrictEqual(service.bridge(), { online: false, lastSeenAt: null });
-  assert.deepStrictEqual(await service.claim({ wait: 2 }), { message: null });
+  assert.deepStrictEqual(await service.claim({ wait: 2 }, undefined, 'laptop'), { message: null });
   assert.deepStrictEqual(sleeps, [500, 500, 500, 500]);
   assert.deepStrictEqual(service.bridge(), { online: true, lastSeenAt: '2026-10-08T00:00:02.000Z' });
   clock.at += 60_000;
@@ -340,9 +347,9 @@ test('claim waits in 500 ms steps, marks the bridge seen and stops when the brid
   const dock = await service.createSession({});
   sleeps.length = 0;
   onSleep = async () => {
-    if (sleeps.length === 3) await service.sendMessage(dock.id, 'arrives while waiting');
+    if (sleeps.length === 3) await service.sendMessage(dock.id, 'arrives while waiting', MACHINES);
   };
-  const claimed = await service.claim({ wait: 25 });
+  const claimed = await service.claim({ wait: 25 }, undefined, 'laptop');
   assert.strictEqual(claimed.message?.text, 'arrives while waiting');
   assert.strictEqual(sleeps.length, 3, 'returns as soon as a message is queued');
 
@@ -351,9 +358,9 @@ test('claim waits in 500 ms steps, marks the bridge seen and stops when the brid
   sleeps.length = 0;
   onSleep = async () => {
     hangup.abort();
-    await service.sendMessage(second.id, 'nobody is listening');
+    await service.sendMessage(second.id, 'nobody is listening', MACHINES);
   };
-  assert.deepStrictEqual(await service.claim({ wait: 25 }, hangup.signal), { message: null });
+  assert.deepStrictEqual(await service.claim({ wait: 25 }, hangup.signal, 'laptop'), { message: null });
   assert.strictEqual(sleeps.length, 1);
   assert.strictEqual((await service.messages(second.id))[0].state, 'queued', 'a message is not taken for a bridge that left');
 });
@@ -361,11 +368,11 @@ test('claim waits in 500 ms steps, marks the bridge seen and stops when the brid
 test('a taken message with no delta for 15 minutes is failed on the next list or claim', async () => {
   const { service, advance, sessions } = clockedService();
   const dock = await service.createSession({ title: 'Stale' });
-  const sent = await service.sendMessage(dock.id, 'long task');
-  await service.claim({ wait: 0 });
+  const sent = await service.sendMessage(dock.id, 'long task', MACHINES);
+  await service.claim({ wait: 0 }, undefined, 'laptop');
 
   advance(14 * 60 * 1000);
-  await service.delta({ sessionId: dock.id, replyTo: sent.id, detail: 'Bash' });
+  await service.delta({ sessionId: dock.id, replyTo: sent.id, detail: 'Bash' }, 'laptop');
   advance(14 * 60 * 1000);
   assert.strictEqual((await service.sessions())[0].status, 'running', 'a delta restarts the clock');
 
@@ -374,20 +381,20 @@ test('a taken message with no delta for 15 minutes is failed on the next list or
   assert.deepStrictEqual([listed.status, listed.statusDetail], ['error', STALE_TEXT]);
   assert.strictEqual((await service.messages(dock.id))[0].state, 'failed');
 
-  const late = await service.delta({ sessionId: dock.id, replyTo: sent.id, done: true, items: [{ role: 'assistant', text: 'late answer', at: '2026-10-08T00:00:00.000Z' }] });
+  const late = await service.delta({ sessionId: dock.id, replyTo: sent.id, done: true, items: [{ role: 'assistant', text: 'late answer', at: '2026-10-08T00:00:00.000Z' }] }, 'laptop');
   assert.deepStrictEqual([late?.status, late?.messageCount], ['error', 2], 'late output is kept but the turn stays failed');
   assert.strictEqual(sessions.get(dock.id).statusDetail, STALE_TEXT);
 
-  const again = await service.sendMessage(dock.id, 'retry');
-  await service.claim({ wait: 0 });
+  const again = await service.sendMessage(dock.id, 'retry', MACHINES);
+  await service.claim({ wait: 0 }, undefined, 'laptop');
   advance(16 * 60 * 1000);
-  assert.deepStrictEqual(await service.claim({ wait: 0 }), { message: null });
+  assert.deepStrictEqual(await service.claim({ wait: 0 }, undefined, 'laptop'), { message: null });
   assert.strictEqual((await service.messages(dock.id)).find((message) => message.id === again.id)?.state, 'failed', 'claim sweeps too');
 });
 
 test('messages page by id, search returns snippets and balloons show fresh answers on ticket sessions', async () => {
   const { service, advance } = clockedService();
-  await service.syncSession(syncBody({ messages: Array.from({ length: 10 }, (_, index) => ({ role: 'assistant', text: `line ${index + 1}`, at: `2026-10-07T08:00:${String(index).padStart(2, '0')}.000Z` })) }));
+  await service.syncSession(syncBody({ messages: Array.from({ length: 10 }, (_, index) => ({ role: 'assistant', text: `line ${index + 1}`, at: `2026-10-07T08:00:${String(index).padStart(2, '0')}.000Z` })) }), 'laptop');
 
   const ids = (rows: Array<{ id: number }>) => rows.map((row) => row.id);
   const all = ids(await service.messages(CLI_ID));
@@ -410,9 +417,9 @@ test('messages page by id, search returns snippets and balloons show fresh answe
   const ticket = await service.createSession({ ticketKey: 'QRD-1258' });
   const plain = await service.createSession({});
   for (const session of [ticket, plain]) {
-    const sent = await service.sendMessage(session.id, 'status?');
-    await service.claim({ wait: 0 });
-    await service.delta({ sessionId: session.id, replyTo: sent.id, done: true, items: [{ role: 'assistant', text: `answer for ${session.id}`, at: '2026-10-08T00:00:00.000Z' }] });
+    const sent = await service.sendMessage(session.id, 'status?', MACHINES);
+    await service.claim({ wait: 0 }, undefined, 'laptop');
+    await service.delta({ sessionId: session.id, replyTo: sent.id, done: true, items: [{ role: 'assistant', text: `answer for ${session.id}`, at: '2026-10-08T00:00:00.000Z' }] }, 'laptop');
   }
   const balloons = await service.balloons();
   assert.deepStrictEqual(balloons.map((message) => [message.sessionId, message.role]), [[ticket.id, 'assistant']]);
@@ -465,7 +472,7 @@ test('chat ingest routes share the ingest token and the 404 / 400 conventions', 
   const started = Date.now();
   const pending = post('/chat/claim', { wait: 5 });
   await new Promise((resolve) => setTimeout(resolve, 700));
-  const sent = await chat.sendMessage(dock.id, 'over http');
+  const sent = await chat.sendMessage(dock.id, 'over http', MACHINES);
   const claimed = await pending;
   assert.ok(Date.now() - started < 4000, 'the long poll answers as soon as a message is queued');
   assert.deepStrictEqual(await claimed.json(), {
@@ -505,12 +512,12 @@ const statusBody = (overrides: object = {}) => ({
   ...overrides,
 });
 
-test('status keeps the latest line per session and the latest account limits, and marks old ones stale', () => {
+test('status keeps the latest line per session and the latest account limits, and marks old ones stale', async () => {
   const { service, advance } = clockedService();
   assert.deepStrictEqual(service.statusSnapshot(), { limits: null, sessions: [] });
 
-  service.ingestStatus(statusBody());
-  service.ingestStatus(statusBody({ sessionId: 'other-session', costUsd: 1, fiveHour: undefined, sevenDay: undefined }));
+  await service.ingestStatus(statusBody(), 'laptop');
+  await service.ingestStatus(statusBody({ sessionId: 'other-session', costUsd: 1, fiveHour: undefined, sevenDay: undefined }), 'laptop');
   const fresh = service.statusSnapshot();
   assert.deepStrictEqual(fresh.limits, {
     fiveHour: { usedPercentage: 55, resetsAt: '2026-10-08T00:00:00.000Z' },
@@ -521,27 +528,217 @@ test('status keeps the latest line per session and the latest account limits, an
   assert.deepStrictEqual(fresh.sessions.map((status) => [status.sessionId, status.stale]), [[CLI_ID, false], ['other-session', false]]);
   assert.deepStrictEqual(
     { ...fresh.sessions[0], receivedAt: undefined },
-    { sessionId: CLI_ID, model: 'Opus 4.7 (1M context)', effort: 'high', fastMode: false, contextPercentage: 40, contextTokens: 395000, contextSize: 1000000, costUsd: 12.5, cacheWarm: true, cacheHitRatio: 0.93, receivedAt: undefined, stale: false },
+    { sessionId: CLI_ID, machine: 'laptop', model: 'Opus 4.7 (1M context)', effort: 'high', fastMode: false, contextPercentage: 40, contextTokens: 395000, contextSize: 1000000, costUsd: 12.5, cacheWarm: true, cacheHitRatio: 0.93, receivedAt: undefined, stale: false },
   );
 
   advance(5 * 60 * 1000);
   assert.strictEqual(service.statusSnapshot().sessions[0].stale, false);
   advance(1);
-  service.ingestStatus(statusBody({ sessionId: 'other-session', fiveHour: undefined, sevenDay: undefined }));
+  await service.ingestStatus(statusBody({ sessionId: 'other-session', fiveHour: undefined, sevenDay: undefined }), 'laptop');
   const later = service.statusSnapshot();
   assert.deepStrictEqual(later.sessions.map((status) => [status.sessionId, status.stale]), [[CLI_ID, true], ['other-session', false]]);
   assert.strictEqual(later.limits?.stale, true, 'a push without limits does not refresh them');
 
-  service.ingestStatus({ sessionId: 'bare' });
+  await service.ingestStatus({ sessionId: 'bare' }, 'laptop');
   assert.deepStrictEqual(service.statusSnapshot().sessions.at(-1), {
-    sessionId: 'bare', model: null, effort: null, fastMode: null, contextPercentage: null, contextTokens: null, contextSize: null,
+    sessionId: 'bare', machine: 'laptop', model: null, effort: null, fastMode: null, contextPercentage: null, contextTokens: null, contextSize: null,
     costUsd: null, cacheWarm: null, cacheHitRatio: null, receivedAt: '2026-10-08T00:05:00.001Z', stale: false,
   });
 });
 
-test('status rejects what is not a status', () => {
+test('status rejects what is not a status', async () => {
   const { service } = clockedService();
   for (const body of [null, [], 'x', {}, { sessionId: 7 }, statusBody({ costUsd: -1 }), statusBody({ contextPercentage: Number.NaN }), statusBody({ fastMode: 'yes' }), statusBody({ fiveHour: 'x' })]) {
-    assert.throws(() => service.ingestStatus(body), OrchestratorInputError);
+    await assert.rejects(service.ingestStatus(body, 'laptop'), OrchestratorInputError);
   }
+});
+
+const queuedFor = async (service: ChatService, machine: string, title: string) => {
+  const session = await service.createSession({ title, machine });
+  const message = await service.sendMessage(session.id, `for ${machine}`, MACHINES);
+  return { session, message };
+};
+
+test('a claim only returns the messages of sessions that belong to the calling machine', async () => {
+  const { service } = clockedService();
+  const remote = await queuedFor(service, 'workspace', 'Remote');
+  assert.strictEqual(remote.session.machine, 'workspace');
+
+  assert.deepStrictEqual(await service.claim({ wait: 0 }, undefined, 'laptop'), { message: null }, 'the workspace message is not the laptop one');
+  assert.deepStrictEqual(await service.claim({ wait: 0 }, undefined, 'laptop'), { message: null });
+  assert.strictEqual((await service.claim({ wait: 0 }, undefined, 'workspace')).message?.id, remote.message.id);
+
+  const local = await queuedFor(service, 'laptop', 'Local');
+  const other = await queuedFor(service, 'workspace', 'Other remote');
+  const [laptopClaim, workspaceClaim] = await Promise.all([
+    service.claim({ wait: 0 }, undefined, 'laptop'),
+    service.claim({ wait: 0 }, undefined, 'workspace'),
+  ]);
+  assert.strictEqual(laptopClaim.message?.id, local.message.id);
+  assert.strictEqual(workspaceClaim.message?.id, other.message.id);
+  assert.deepStrictEqual(await service.claim({ wait: 0 }, undefined, 'laptop'), { message: null });
+  assert.deepStrictEqual(await service.claim({ wait: 0 }, undefined, 'workspace'), { message: null });
+});
+
+test('bridge online and status limits are tracked per machine', async () => {
+  const { service, advance } = clockedService();
+  assert.deepStrictEqual(service.machines(['laptop', 'workspace']).map((machine) => machine.online), [false, false]);
+
+  await service.claim({ wait: 0 }, undefined, 'workspace');
+  assert.deepStrictEqual(service.machines(['laptop', 'workspace']), [
+    { name: 'laptop', online: false, lastSeenAt: null },
+    { name: 'workspace', online: true, lastSeenAt: '2026-10-08T00:00:00.000Z' },
+  ]);
+  assert.strictEqual(service.bridge('laptop').online, false);
+  assert.strictEqual(service.bridge().online, true, 'without a machine it is online when any machine is');
+
+  advance(61_000);
+  await service.claim({ wait: 0 }, undefined, 'laptop');
+  assert.deepStrictEqual(service.machines(['laptop', 'workspace']).map((machine) => machine.online), [true, false]);
+  assert.deepStrictEqual(service.bridge(), { online: true, lastSeenAt: '2026-10-08T00:01:01.000Z' });
+
+  await service.ingestStatus(statusBody({ fiveHour: { usedPercentage: 10, resetsAt: 1791417600 }, sevenDay: undefined }), 'workspace');
+  advance(1000);
+  await service.ingestStatus(statusBody({ sessionId: 'laptop-line', fiveHour: { usedPercentage: 90, resetsAt: 1791417600 }, sevenDay: undefined }), 'laptop');
+  assert.strictEqual(service.statusSnapshot('workspace').limits?.fiveHour?.usedPercentage, 10);
+  assert.strictEqual(service.statusSnapshot('laptop').limits?.fiveHour?.usedPercentage, 90);
+  assert.strictEqual(service.statusSnapshot().limits?.fiveHour?.usedPercentage, 90, 'without a machine the newest limits win');
+  assert.deepStrictEqual(service.statusSnapshot('workspace').sessions.map((status) => status.machine), ['workspace']);
+  assert.deepStrictEqual(service.statusSnapshot('laptop').sessions.map((status) => status.sessionId), ['laptop-line']);
+  assert.deepStrictEqual(service.statusSnapshot('nothing'), { limits: null, sessions: [] });
+});
+
+test('a session is created for a machine, keeps it, and is refused to any other machine', async () => {
+  const { service, sessions } = clockedService();
+  assert.strictEqual((await service.createSession({ title: 'No machine' })).machine, 'laptop');
+  assert.strictEqual((await service.createSession({ machine: null })).machine, 'laptop');
+  await assert.rejects(service.createSession({ machine: 'Not Valid' }), OrchestratorInputError);
+
+  await service.syncSession(syncBody(), 'workspace');
+  assert.strictEqual(sessions.get(CLI_ID).machine, 'workspace', 'a synced session takes the machine of the caller');
+  await assert.rejects(service.syncSession(syncBody(), 'laptop'), OrchestratorInputError, 'history from another machine is refused');
+  await assert.rejects(service.syncSession(syncBody(), 'laptop'), OrchestratorInputError);
+  assert.deepStrictEqual(await service.syncSession(syncBody(), 'workspace'), { id: CLI_ID, messageCount: 3 });
+
+  const fork = await service.createSession({ forkFrom: CLI_ID });
+  assert.strictEqual(fork.machine, 'workspace', 'a fork inherits the machine that holds the transcript');
+  assert.strictEqual((await service.createSession({ forkFrom: CLI_ID, machine: 'workspace' })).machine, 'workspace');
+  await assert.rejects(service.createSession({ forkFrom: CLI_ID, machine: 'laptop' }), OrchestratorInputError);
+
+  const sent = await service.sendMessage(fork.id, 'hello', MACHINES);
+  await service.claim({ wait: 0 }, undefined, 'workspace');
+  await assert.rejects(service.delta({ sessionId: fork.id, replyTo: sent.id, done: true }, 'laptop'), OrchestratorInputError, 'a delta from the wrong machine is refused');
+  await assert.rejects(service.delta({ sessionId: fork.id, replyTo: sent.id, done: true }, 'laptop'), OrchestratorInputError);
+  assert.strictEqual(sessions.get(fork.id).status, 'running');
+  assert.strictEqual((await service.delta({ sessionId: fork.id, replyTo: sent.id, done: true }, 'workspace'))?.status, 'idle');
+
+  await service.renameSession(fork.id, 'renamed');
+  assert.strictEqual(sessions.get(fork.id).machine, 'workspace', 'no call moves a session to another machine');
+});
+
+test('the ingest token decides the machine of a claim', async (t) => {
+  const { storage } = memoryStorage();
+  const orchestrator = new OrchestratorService(storage, os.tmpdir());
+  const chat = new ChatService(storage);
+  const laptop = await orchestrator.createToken('laptop');
+  const workspace = await orchestrator.createToken('workspace', 'workspace');
+  const app = express();
+  app.use('/ingest/orchestrator', createOrchestratorIngestRouter(orchestrator, new PinRateLimiter(5, 60_000), chat));
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const post = (route: string, body: unknown, bearer: string) => fetch(`http://127.0.0.1:${address.port}/ingest/orchestrator${route}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` },
+    body: JSON.stringify(body),
+  });
+
+  const remote = await queuedFor(chat, 'workspace', 'Remote');
+  const asLaptop = await post('/chat/claim', { wait: 0 }, laptop.token);
+  assert.deepStrictEqual(await asLaptop.json(), { ok: true, result: { message: null } });
+  const asWorkspace = await post('/chat/claim', { wait: 0 }, workspace.token);
+  assert.strictEqual((await asWorkspace.json()).result.message.id, remote.message.id);
+
+  const wrong = await post('/chat/delta', { sessionId: remote.session.id, replyTo: remote.message.id, done: true }, laptop.token);
+  assert.strictEqual(wrong.status, 400);
+  const right = await post('/chat/delta', { sessionId: remote.session.id, replyTo: remote.message.id, done: true }, workspace.token);
+  assert.strictEqual(right.status, 200);
+  assert.deepStrictEqual(chat.machines(['laptop', 'workspace']).map((machine) => machine.online), [true, true]);
+});
+
+test('a queued message is claimed whatever the status of its session says', async () => {
+  const { service, sessions, messages } = clockedService();
+  const { session, message } = await queuedFor(service, 'laptop', 'Late status');
+  for (const status of ['idle', 'error', 'running']) {
+    sessions.set(session.id, { ...sessions.get(session.id), status });
+    assert.deepStrictEqual(messages().filter((item) => item.id === message.id).map((item) => item.state), ['queued']);
+    await assert.rejects(service.sendMessage(session.id, 'again', MACHINES), /still working on the previous message/, 'the resend is refused by the message, not the status');
+  }
+  sessions.set(session.id, { ...sessions.get(session.id), status: 'idle' });
+  assert.strictEqual((await service.claim({ wait: 0 }, undefined, 'workspace')).message, null, 'the machine still decides');
+  assert.strictEqual((await service.claim({ wait: 0 }, undefined, 'laptop')).message?.id, message.id);
+  assert.strictEqual(sessions.get(session.id).status, 'running');
+});
+
+test('a message for a machine without a token is refused by name', async () => {
+  const { service } = clockedService();
+  const session = await service.createSession({ title: 'Orphan', machine: 'workspace' });
+  await assert.rejects(service.sendMessage(session.id, 'hello', ['laptop']), (error: unknown) => (
+    error instanceof OrchestratorInputError && error.message.includes('workspace')
+  ));
+  assert.strictEqual((await service.sendMessage(session.id, 'hello', MACHINES)).state, 'queued');
+});
+
+test('status lines are kept per machine, capped per machine and refused for a session of another machine', async () => {
+  const { service } = clockedService();
+  await service.ingestStatus(statusBody({ sessionId: 'shared-id', costUsd: 1 }), 'laptop');
+  await service.ingestStatus(statusBody({ sessionId: 'shared-id', costUsd: 2 }), 'workspace');
+  assert.deepStrictEqual(service.statusSnapshot().sessions.map((status) => [status.machine, status.costUsd]), [['laptop', 1], ['workspace', 2]], 'the same id on two machines is two lines');
+
+  for (let n = 0; n < MAX_STATUS_SESSIONS + 5; n += 1) await service.ingestStatus(statusBody({ sessionId: `flood-${n}` }), 'workspace');
+  assert.strictEqual(service.statusSnapshot('workspace').sessions.length, MAX_STATUS_SESSIONS, 'the cap is per machine');
+  assert.deepStrictEqual(service.statusSnapshot('laptop').sessions.map((status) => status.sessionId), ['shared-id'], 'a flood cannot evict another machine');
+
+  await service.syncSession(syncBody(), 'workspace');
+  const refused = await service.ingestStatus(statusBody({ costUsd: 99 }), 'laptop');
+  assert.deepStrictEqual(refused, { sessionId: CLI_ID, ignored: true, owner: 'workspace' });
+  assert.deepStrictEqual(service.statusSnapshot('laptop').sessions.map((status) => status.sessionId), ['shared-id']);
+  assert.deepStrictEqual(await service.ingestStatus(statusBody({ costUsd: 5 }), 'workspace'), { sessionId: CLI_ID });
+});
+
+test('every chat route acts as the machine of the token', async (t) => {
+  const { storage, sessions } = memoryStorage();
+  const orchestrator = new OrchestratorService(storage, os.tmpdir());
+  const chat = new ChatService(storage);
+  await orchestrator.createToken('laptop');
+  const workspace = await orchestrator.createToken('workspace', 'workspace');
+  const app = express();
+  app.use('/ingest/orchestrator', createOrchestratorIngestRouter(orchestrator, new PinRateLimiter(5, 60_000), chat));
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const post = async (route: string, body: unknown) => {
+    const response = await fetch(`http://127.0.0.1:${address.port}/ingest/orchestrator${route}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${workspace.token}` },
+      body: JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.json() as any };
+  };
+
+  assert.strictEqual((await post('/sessions', syncBody())).status, 200);
+  assert.strictEqual(sessions.get(CLI_ID).machine, 'workspace', '/sessions stores the session for the token machine');
+  assert.strictEqual((await post('/chat/status', statusBody())).status, 200);
+  assert.deepStrictEqual(chat.statusSnapshot('workspace').sessions.map((status) => status.sessionId), [CLI_ID], '/chat/status files the line under the token machine');
+  assert.deepStrictEqual(chat.statusSnapshot('laptop').sessions, []);
+
+  const remote = await queuedFor(chat, 'workspace', 'Remote');
+  const claimed = await post('/chat/claim', { wait: 0 });
+  assert.strictEqual(claimed.body.result.message.id, remote.message.id, '/chat/claim takes the message of the token machine');
+  const delta = await post('/chat/delta', { sessionId: remote.session.id, replyTo: remote.message.id, done: true });
+  assert.strictEqual(delta.status, 200, '/chat/delta is accepted for a session of the token machine');
 });

@@ -17,7 +17,7 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL must be set}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
       TRUST_PROXY: "true"
-      DOCK_PIN_MODE: ${DOCK_PIN_MODE:-auto}
+      DOCK_PIN_MODE: ${DOCK_PIN_MODE:-always}
       DOCKER_API_URL: http://docker-proxy:2375
     extra_hosts:
       - "host.docker.internal:host-gateway"

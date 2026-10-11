@@ -48,6 +48,9 @@ export interface AgentRun {
   endedSeconds?: number | null;
   stalled: boolean;
   hasTranscript: boolean;
+  machine?: string | null;
+  handoverTo?: string | null;
+  handoverAt?: string | null;
   updatedAt: string;
   events?: AgentEvent[];
   members?: TimelineAgent[];
@@ -194,6 +197,35 @@ export function sortRuns<T extends AgentRun>(runs: T[], sort: RunSort, statusOf:
   return [...runs].sort((a, b) => (
     (sort.column === 'ticket' ? byKey.compare(a.key, b.key) : rank(a) - rank(b)) * direction || byKey.compare(a.key, b.key)
   ));
+}
+
+/** A run as the Agents page uses it: a list the server did not send reads as empty, so a run cached by another query cannot break the page. */
+export const completeRun = (run: Omit<AgentRun, 'ac'> & { ac?: AgentAc[] | null }): AgentRun => ({
+  ...run,
+  ac: run.ac ?? [],
+  pullRequests: run.pullRequests ?? [],
+  decisions: run.decisions ?? [],
+  assumptions: run.assumptions ?? [],
+  failures: run.failures ?? [],
+  members: run.members ?? [],
+});
+
+/** The machine a ticket is offered to, with the time of the offer. */
+export function offerOf(run: Pick<AgentRun, 'handoverTo' | 'handoverAt'>): { to: string; at: string | null; label: string } | null {
+  if (!run.handoverTo) return null;
+  const at = run.handoverAt ? new Date(run.handoverAt) : null;
+  const time = at && !Number.isNaN(at.getTime()) ? at.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : null;
+  return { to: run.handoverTo, at: run.handoverAt || null, label: time ? `Offered to ${run.handoverTo} · ${time}` : `Offered to ${run.handoverTo}` };
+}
+
+/** The machines a ticket can be moved to: every machine but the one that owns it. */
+export const moveTargets = (machines: Array<{ name: string; online: boolean }> | null | undefined, current: string): Array<{ name: string; online: boolean }> => (
+  (machines || []).filter((machine) => machine.name !== current)
+);
+
+export function moveConfirmation(key: string, from: string, to: string, targetOnline: boolean): string {
+  const base = `Move ${key} from ${from} to ${to}? The work continues on ${to}, from the commits already pushed. The chat sessions of ${from} do not move with it. Work still running on ${from} is not stopped, and its updates will be ignored.`;
+  return targetOnline ? base : `${base} ${to} is offline, so nothing will pick ${key} up until it starts.`;
 }
 
 export function pageOf<T>(items: T[], page: number, size: number): { items: T[]; page: number; pages: number; from: number; to: number } {

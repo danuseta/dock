@@ -21,7 +21,9 @@ export function createOrchestratorIngestRouter(
   router.use(async (request, response, next) => {
     try {
       const token = bearerToken(request);
-      if (token && await service.authenticate(token)) {
+      const machine = token ? await service.authenticateMachine(token) : null;
+      if (machine) {
+        response.locals.machine = machine;
         next();
         return;
       }
@@ -39,12 +41,12 @@ export function createOrchestratorIngestRouter(
     }
   });
 
-  const handle = (work: (body: unknown, signal: AbortSignal) => Promise<unknown>) => async (request: Request, response: Response) => {
+  const handle = (work: (body: unknown, signal: AbortSignal, machine: string) => Promise<unknown>) => async (request: Request, response: Response) => {
     // A long poll stops when the laptop hangs up, so it cannot take a message nobody is waiting for.
     const hangup = new AbortController();
     response.on('close', () => hangup.abort());
     try {
-      const result = await work(request.body, hangup.signal);
+      const result = await work(request.body, hangup.signal, response.locals.machine);
       if (hangup.signal.aborted) return;
       if (result === null) {
         response.status(404).json({ error: 'Unknown ticket. Send its status first.' });
@@ -62,23 +64,27 @@ export function createOrchestratorIngestRouter(
   };
 
   const small = express.json({ limit: '256kb' });
-  router.post('/', small, handle(async (body) => {
-    const run = await service.ingestLedger(body);
-    return { key: run.key, stage: run.stage };
+  router.post('/', small, handle(async (body, _signal, machine) => {
+    const run = await service.ingestLedger(body, new Date(), machine);
+    return run.ignored ? { key: run.key, ignored: true, owner: run.machine } : { key: run.key, stage: run.stage };
   }));
-  router.post('/event', small, handle(async (body) => {
-    const run = await service.ingestHookEvent(body);
-    return run && { key: run.key, activity: run.activity };
+  router.post('/ledger/list', small, handle((_body, _signal, machine) => service.ledgerList(machine)));
+  router.post('/ledger/get', small, handle((body, _signal, machine) => service.ledgerGet(body, machine)));
+  router.post('/ledger/handover', small, handle((body, _signal, machine) => service.ledgerHandover(body, machine)));
+  router.post('/ledger/accept', small, handle((body, _signal, machine) => service.ledgerAccept(body, machine)));
+  router.post('/event', small, handle(async (body, _signal, machine) => {
+    const run = await service.ingestHookEvent(body, new Date(), machine);
+    return run && { key: run.key, activity: run.activity, ...(run.ignored ? { ignored: true, owner: run.machine } : {}) };
   }));
-  router.post('/events', small, handle(async (body) => {
-    const run = await service.ingestEventBatch(body);
-    return run && { key: run.key, activity: run.activity };
+  router.post('/events', small, handle(async (body, _signal, machine) => {
+    const run = await service.ingestEventBatch(body, new Date(), machine);
+    return run && { key: run.key, activity: run.activity, ...(run.ignored ? { ignored: true, owner: run.machine } : {}) };
   }));
-  router.post('/transcript', express.json({ limit: MAX_TRANSCRIPT_BYTES + 1024 * 1024 }), handle((body) => service.saveTranscript(body)));
-  router.post('/sessions', express.json({ limit: '2mb' }), handle((body) => chat.syncSession(body)));
-  router.post('/chat/claim', small, handle((body, signal) => chat.claim(body, signal)));
-  router.post('/chat/delta', small, handle((body) => chat.delta(body)));
-  router.post('/chat/status', small, handle(async (body) => chat.ingestStatus(body)));
+  router.post('/transcript', express.json({ limit: MAX_TRANSCRIPT_BYTES + 1024 * 1024 }), handle((body, _signal, machine) => service.saveTranscript(body, new Date(), machine)));
+  router.post('/sessions', express.json({ limit: '2mb' }), handle((body, _signal, machine) => chat.syncSession(body, machine)));
+  router.post('/chat/claim', small, handle((body, signal, machine) => chat.claim(body, signal, machine)));
+  router.post('/chat/delta', small, handle((body, _signal, machine) => chat.delta(body, machine)));
+  router.post('/chat/status', small, handle(async (body, _signal, machine) => chat.ingestStatus(body, machine)));
 
   router.use((error: unknown, _request: Request, response: Response, _next: express.NextFunction) => {
     const { status, type } = (error ?? {}) as { status?: number; type?: string };

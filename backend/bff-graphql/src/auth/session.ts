@@ -74,6 +74,12 @@ export function shouldRequirePin(request: Request, pinConfigured: boolean): bool
   return mode === 'always' || !isTailscaleRequest(request);
 }
 
+export function missingPinWarning(pinConfigured: boolean): string | null {
+  return pinMode() === 'always' && !pinConfigured
+    ? '[Auth] DOCK_PIN_MODE is always but no master PIN is stored, so every protected field is open until one is set'
+    : null;
+}
+
 function defaultSecureCookie(): boolean {
   const configured = process.env.SESSION_COOKIE_SECURE?.trim().toLowerCase();
   if (!configured) return process.env.NODE_ENV === 'production';

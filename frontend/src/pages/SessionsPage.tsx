@@ -10,7 +10,8 @@ import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy'
 import { ChatThread } from '../chat/ChatThread';
 import { LimitsLine, SessionStatusView } from '../chat/StatusLine';
 import { useChatStatus } from '../chat/useChatStatus';
-import { SLOW_POLL_MS, relativeTime, type ChatSession } from '../chat/messages';
+import { MachineChip, MachinePicker, useMachineChoice } from '../chat/MachineControls';
+import { SLOW_POLL_MS, machineOf, machineOnline, relativeTime, type ChatSession } from '../chat/messages';
 import { chatStore } from '../chat/store';
 
 interface SearchHit { session: ChatSession; messageId: number; snippet: string; at: string }
@@ -39,6 +40,7 @@ const SessionsPage: React.FC = () => {
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ChatSession | null>(null);
   const { status: liveStatus, now: statusNow } = useChatStatus();
+  const { machines, machine, choose } = useMachineChoice();
 
   useEffect(() => {
     const timer = window.setTimeout(() => setQuery(searchText.trim()), 300);
@@ -67,7 +69,7 @@ const SessionsPage: React.FC = () => {
     setActionError('');
   };
 
-  const create = async (variables: { title?: string; ticketKey?: string | null; forkFrom?: string }) => {
+  const create = async (variables: { title?: string; ticketKey?: string | null; forkFrom?: string; machine?: string }) => {
     setActionError('');
     try {
       const result = await createSession({ variables });
@@ -114,9 +116,12 @@ const SessionsPage: React.FC = () => {
         <div>
           <h1 className="text-balance font-display text-3xl font-black">Sessions</h1>
           <p className="mt-1 text-pretty text-secondary-foreground">Claude Code history from your PC, and the sessions you run from DOCK.</p>
-          <LimitsLine className="mt-2" />
+          <LimitsLine machine={selected ? machineOf(selected) : undefined} className="mt-2" />
         </div>
-        <Button size="sm" variant="primary" disabled={creating} onClick={() => void create({})}><Plus size={14} aria-hidden="true" />New session</Button>
+        <div className="flex items-center gap-2">
+          <MachinePicker machines={machines} value={machine} onChange={choose} disabled={creating} />
+          <Button size="sm" variant="primary" disabled={creating} onClick={() => void create({ machine })}><Plus size={14} aria-hidden="true" />New session</Button>
+        </div>
       </PageHeader>
 
       {error && !data && <Card className="mb-4 border-status-conflict text-status-conflict" role="alert">Sessions failed to load: {error.message}</Card>}
@@ -139,7 +144,7 @@ const SessionsPage: React.FC = () => {
                 {!searchError && !searchLoading && hits.length === 0 && <p className="px-1.5 py-6 text-center text-pretty text-sm text-muted-foreground">No message contains "{query}".</p>}
                 {hits.map((hit) => (
                   <button key={`${hit.session.id}-${hit.messageId}`} type="button" className={cn('mb-1 block w-full rounded-xs border border-transparent px-2.5 py-2 text-left hover:bg-surface-1', hit.session.id === selectedId && 'border-border-glow bg-surface-1')} onClick={() => select(hit.session.id)}>
-                    <span className="flex items-center gap-1.5"><SourceChip source={hit.session.source} /><span className="min-w-0 truncate font-display text-[0.8rem] font-semibold">{titleOf(hit.session)}</span></span>
+                    <span className="flex items-center gap-1.5"><SourceChip source={hit.session.source} /><MachineChip name={machineOf(hit.session)} /><span className="min-w-0 truncate font-display text-[0.8rem] font-semibold">{titleOf(hit.session)}</span></span>
                     <span className="mt-1 line-clamp-2 text-[0.76rem] break-words text-secondary-foreground">{hit.snippet}</span>
                     <span className="mt-1 block font-mono text-[0.64rem] text-muted-foreground">{relativeTime(hit.at, now)}</span>
                   </button>
@@ -153,6 +158,7 @@ const SessionsPage: React.FC = () => {
                   <button key={session.id} type="button" className={cn('mb-1 block w-full rounded-xs border border-transparent px-2.5 py-2 text-left hover:bg-surface-1', session.id === selectedId && 'border-border-glow bg-surface-1')} aria-current={session.id === selectedId ? 'true' : undefined} onClick={() => select(session.id)}>
                     <span className="flex items-center gap-1.5">
                       <SourceChip source={session.source} />
+                      <MachineChip name={machineOf(session)} online={machineOnline(machines, machineOf(session))} />
                       <span className="min-w-0 flex-1 truncate font-display text-[0.8rem] font-semibold">{titleOf(session)}</span>
                       {(session.status === 'queued' || session.status === 'running') && <i className="size-1.5 flex-none animate-pulse rounded-full bg-status-merged" title="Working" aria-hidden="true" />}
                       {session.status === 'error' && <i className="size-1.5 flex-none rounded-full bg-status-conflict" title="The last turn failed" aria-hidden="true" />}
