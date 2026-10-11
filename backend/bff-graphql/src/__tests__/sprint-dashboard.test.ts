@@ -513,6 +513,18 @@ test('a second refresh while one is running is rejected', async () => {
   await service.idle();
 });
 
+test('a rejected refresh names the running job and its progress', async () => {
+  const { service } = setup({ delayMs: 20 });
+  service.startBackfill(2);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.throws(
+    () => service.startRefresh(4),
+    (error: Error) => error instanceof SprintBusyError
+      && /already running: Backfilling sprints \(\d+ of 2\)\. Wait for it to finish\./.test(error.message),
+  );
+  await service.idle();
+});
+
 test('a failed refresh records lastError and keeps the previous result', async () => {
   const { service, store } = setup({ failFor: 5 });
   await store.upsertSprintSnapshot({

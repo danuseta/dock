@@ -13,8 +13,9 @@ const LABEL_SEARCH_FAILED = 'Label search failed: ';
 const LABEL_POOL_MISSING = 'Label pool has not been fetched; run the backfill';
 
 export class SprintBusyError extends Error {
-  constructor() {
-    super('A sprint dashboard refresh is already running');
+  constructor(state: { label: string; done: number; total: number }) {
+    const progress = state.total > 0 ? ` (${state.done} of ${state.total})` : '';
+    super(`A sprint dashboard refresh is already running: ${state.label}${progress}. Wait for it to finish.`);
     this.name = 'SprintBusyError';
   }
 }
@@ -247,7 +248,7 @@ export class SprintDashboardService {
   }
 
   private start(label: string, total: number, work: () => Promise<void>): RefreshState {
-    if (this.running) throw new SprintBusyError();
+    if (this.running) throw new SprintBusyError(this.state);
     this.state = { status: 'running', label, done: 0, total, error: null };
     const run = work()
       .then(() => { this.state = { ...this.state, status: this.state.error ? 'error' : 'idle' }; })
