@@ -6,9 +6,10 @@ import { GET_CHAT_MESSAGES, GET_CHAT_SESSION } from '../graphql/queries';
 import { Button } from '../components/ui';
 import { cn } from '../lib/cn';
 import {
-  isOptimistic, isTurnInProgress, mergeMessages, newestAssistantId, oldestId, pollCursor, pollInterval, sendBlocker,
-  type ChatMessage, type ChatSession,
+  isOptimistic, isTurnInProgress, machineOf, machineOnline, machinePlace, mergeMessages, newestAssistantId, oldestId, pollCursor, pollInterval, sendBlocker,
+  type ChatMachine, type ChatMessage, type ChatSession,
 } from './messages';
+import { MachineChip } from './MachineControls';
 import { SessionStatusLine } from './StatusLine';
 import { chatStore } from './store';
 
@@ -44,7 +45,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     messagesRef.current = messages;
   }, [messages]);
 
-  const { data, error: sessionError, refetch, startPolling, stopPolling } = useQuery<{ chatSession: ChatSession | null; chatBridge: { online: boolean; lastSeenAt?: string | null } }>(
+  const { data, error: sessionError, refetch, startPolling, stopPolling } = useQuery<{ chatSession: ChatSession | null; chatBridge: { online: boolean; lastSeenAt?: string | null }; chatMachines?: ChatMachine[] | null }>(
     GET_CHAT_SESSION,
     { variables: { id: sessionId }, fetchPolicy: 'cache-and-network' },
   );
@@ -52,7 +53,12 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
   const status = session?.status;
   const busy = isTurnInProgress(status, messages);
   const pollMs = pollInterval(busy);
-  const blocker = sendBlocker({ source: session?.source, busy, bridgeOnline: data?.chatBridge?.online });
+  const machine = machineOf(session);
+  const machineUp = machineOnline(data?.chatMachines, machine, data?.chatBridge?.online);
+  const machineSeenAt = data?.chatMachines?.find((item) => item.name === machine)?.lastSeenAt ?? data?.chatBridge?.lastSeenAt;
+  const machineHasToken = data?.chatMachines && data.chatMachines.length > 0 ? data.chatMachines.some((item) => item.name === machine) : undefined;
+  const blocker = sendBlocker({ source: session?.source, busy, bridgeOnline: machineUp, machine, machineHasToken, lastSeenAt: machineSeenAt });
+  const place = machinePlace(machine);
   const readOnly = session?.source === 'cli';
 
   useEffect(() => {
@@ -167,13 +173,14 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
 
   return (
     <div className={cn('flex min-h-0 flex-col', className)}>
+      {session && <div className="flex flex-none items-center gap-2 border-b border-border bg-surface-0 px-3.5 py-1.5 font-mono text-[0.66rem] text-muted-foreground"><span>Runs on</span><MachineChip name={machine} online={machineUp} /></div>}
       <SessionStatusLine sessionId={sessionId} className="flex-none bg-surface-0" />
       <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto px-3.5 py-3" role="log" aria-label="Conversation">
         {loadingOlder && <p className="pb-2 text-center font-mono text-[0.66rem] text-muted-foreground" role="status">Loading older messages...</p>}
         {!loaded && !loadError && !missing && <p className="py-6 text-center text-sm text-muted-foreground" role="status">Loading the conversation...</p>}
         {missing && <p className="py-6 text-center text-pretty text-sm text-muted-foreground">This session no longer exists. Close this tab or pick another session.</p>}
         {loaded && !missing && messages.length === 0 && (
-          <p className="py-6 text-center text-pretty text-sm text-muted-foreground">{readOnly ? 'This session has no messages.' : session?.forkFrom ? 'Continued from a terminal session. Claude Code keeps that conversation; what you send from here is added below.' : 'Nothing here yet. Your first message starts a Claude Code session on your PC.'}</p>
+          <p className="py-6 text-center text-pretty text-sm text-muted-foreground">{readOnly ? 'This session has no messages.' : session?.forkFrom ? 'Continued from a terminal session. Claude Code keeps that conversation; what you send from here is added below.' : `Nothing here yet. Your first message starts a Claude Code session on ${place}.`}</p>
         )}
         <ol className="flex flex-col gap-2">
           {messages.map((message) => (message.role === 'tool' ? (
@@ -200,13 +207,13 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
       </div>
 
       <div className="flex flex-col gap-1.5 border-t border-border bg-surface-0 px-3.5 py-2.5">
-        {status === 'queued' && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-secondary-foreground" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" />Queued · waiting for the laptop bridge to pick it up</p>}
+        {status === 'queued' && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-secondary-foreground" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" />Queued · waiting for the {machine} bridge to pick it up</p>}
         {status === 'running' && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-status-merged" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">Running{session?.statusDetail ? ` · ${session.statusDetail}` : ''}</span></p>}
         {status === 'error' && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The last turn failed{session?.statusDetail ? `: ${session.statusDetail}` : '.'}</p>}
         {sendError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">Not sent: {sendError}</p>}
         {loadError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">{loadError}</p>}
         {sessionError && !data && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The session could not be loaded: {sessionError.message}</p>}
-        {blocker && !readOnly && data?.chatBridge?.online === false && (
+        {blocker && !readOnly && machineUp === false && (
           <p id={blockerId} className="rounded-xs border border-amber-300/50 bg-amber-300/10 px-2.5 py-1.5 text-pretty text-xs text-amber-200" role="status">{blocker}</p>
         )}
         {readOnly && (
@@ -222,7 +229,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
             maxLength={MAX_TEXT}
             value={draft}
             disabled={readOnly || missing}
-            placeholder={readOnly ? 'Continue as a DOCK session to type...' : 'Message Claude Code on your PC...'}
+            placeholder={readOnly ? 'Continue as a DOCK session to type...' : `Message Claude Code on ${place}...`}
             aria-label="Message"
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={handleKeyDown}

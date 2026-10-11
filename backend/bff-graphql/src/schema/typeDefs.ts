@@ -298,6 +298,9 @@ export const typeDefs = gql`
     endedSeconds: Float
     stalled: Boolean!
     hasTranscript: Boolean!
+    machine: String!
+    handoverTo: String
+    handoverAt: String
     updatedAt: String!
     events: [OrchestrationEvent!]!
     timeline: OrchestrationTimeline
@@ -308,6 +311,7 @@ export const typeDefs = gql`
     id: ID!
     name: String!
     prefix: String!
+    machine: String!
     createdAt: String!
     lastUsedAt: String
   }
@@ -323,6 +327,7 @@ export const typeDefs = gql`
     title: String!
     ticketKey: String
     forkFrom: String
+    machine: String!
     status: String!
     statusDetail: String
     messageCount: Int!
@@ -345,6 +350,12 @@ export const typeDefs = gql`
     lastSeenAt: String
   }
 
+  type ChatMachine {
+    name: String!
+    online: Boolean!
+    lastSeenAt: String
+  }
+
   type ChatLimit {
     usedPercentage: Float!
     resetsAt: String
@@ -359,6 +370,7 @@ export const typeDefs = gql`
 
   type ChatSessionStatus {
     sessionId: ID!
+    machine: String
     model: String
     effort: String
     fastMode: Boolean
@@ -478,7 +490,8 @@ export const typeDefs = gql`
     chatMessages(sessionId: ID!, afterId: Int, beforeId: Int, limit: Int): [ChatMessage!]!
     chatSearch(query: String!, limit: Int): [ChatSearchHit!]!
     chatBridge: ChatBridge!
-    chatStatus: ChatStatus!
+    chatMachines: [ChatMachine!]!
+    chatStatus(machine: String): ChatStatus!
     chatBalloons: [ChatMessage!]!
     sprintList: [SprintSummary!]!
     sprintDashboard(sprintId: Int): SprintDashboard!
@@ -510,10 +523,11 @@ export const typeDefs = gql`
     updateMonitor(id: ID!, input: MonitorTargetInput!): MonitorTarget!
     removeMonitor(id: ID!): Boolean!
     checkMonitors: [MonitorTarget!]!
-    createIngestToken(name: String!): IngestTokenSecret!
+    createIngestToken(name: String!, machine: String): IngestTokenSecret!
     revokeIngestToken(id: ID!): Boolean!
     dismissOrchestration(key: String!): Boolean!
-    createChatSession(title: String, ticketKey: String, forkFrom: ID): ChatSession!
+    moveOrchestration(key: String!, machine: String!): Orchestration!
+    createChatSession(title: String, ticketKey: String, forkFrom: ID, machine: String): ChatSession!
     sendChatMessage(sessionId: ID!, text: String!): ChatMessage!
     renameChatSession(id: ID!, title: String!): ChatSession!
     deleteChatSession(id: ID!): Boolean!

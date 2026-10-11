@@ -29,6 +29,10 @@ jobs:
       - run: npm run lint --workspace=frontend
       - run: npm run build:app
       - run: npm run test:all
+      - run: npx tsx --test src/__tests__/storage-sqlite.integration.test.ts
+        working-directory: backend/bff-graphql
+        env:
+          JIDIS_SQLITE_INTEGRATION: '1'
       - if: github.event_name == 'pull_request'
         run: docker build --file backend/bff-graphql/Dockerfile.app --tag dock:ci .
 

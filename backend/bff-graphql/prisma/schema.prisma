@@ -125,6 +125,9 @@ model OrchestratorRun {
   ledgerUpdatedAt  DateTime  @default(now())
   transcriptAt     DateTime?
   dismissedAt      DateTime?
+  machine          String    @default("laptop")
+  ledgerRaw        String?
+  handover         String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -148,6 +151,7 @@ model IngestToken {
   tokenHash  String    @unique
   lastUsedAt DateTime?
   revokedAt  DateTime?
+  machine    String    @default("laptop")
   createdAt  DateTime  @default(now())
 }
 
@@ -167,6 +171,7 @@ model OrchestratorToolEvent {
 model ChatSession {
   id              String    @id
   source          String
+  machine         String    @default("laptop")
   title           String    @default("")
   ticketKey       String?
   forkFrom        String?
@@ -182,6 +187,7 @@ model ChatSession {
 
   @@index([source, lastMessageAt])
   @@index([ticketKey])
+  @@index([machine, status])
 }
 
 model ChatMessage {

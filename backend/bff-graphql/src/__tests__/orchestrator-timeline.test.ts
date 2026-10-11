@@ -100,7 +100,7 @@ test('event batches update state once and keep every tool call', async () => {
       { event: 'PreToolUse', at: at(3).toISOString(), tool: 'SubagentHandback', agentId: 'abc', agentType: 'Explore' },
       { event: 'SubagentStop', at: at(4).toISOString(), agentId: 'abc', agentType: 'Explore' },
     ],
-  }, at(5));
+  }, at(5), 'laptop');
 
   assert.strictEqual(result?.activity, 'ACTIVE', 'a subagent stopping does not make the ticket idle');
   assert.strictEqual(writes, 1);
@@ -117,10 +117,10 @@ test('event batches update state once and keep every tool call', async () => {
   assert.deepStrictEqual((await service.members('QRD-1', at(6))).map((agent) => agent.name), ['Explore']);
   assert.deepStrictEqual(await service.members('QRD-404', at(6)), []);
 
-  await service.ingestEventBatch({ key: 'QRD-1', events: [{ event: 'Stop', at: at(7).toISOString() }] }, at(7));
+  await service.ingestEventBatch({ key: 'QRD-1', events: [{ event: 'Stop', at: at(7).toISOString() }] }, at(7), 'laptop');
   assert.strictEqual((await service.get('QRD-1', at(10)))?.activity, 'IDLE', 'the main session stopping does');
 
-  assert.strictEqual(await service.ingestEventBatch({ key: 'QRD-404', events: [{ event: 'Stop' }] }, at(8)), null);
+  assert.strictEqual(await service.ingestEventBatch({ key: 'QRD-404', events: [{ event: 'Stop' }] }, at(8), 'laptop'), null);
   assert.throws(() => parseEventBatch({ key: 'QRD-1', events: [] }), OrchestratorInputError);
   assert.throws(() => parseEventBatch({ key: 'QRD-1', events: Array.from({ length: 101 }, () => ({ event: 'Stop' })) }), OrchestratorInputError);
   assert.strictEqual(parseEventBatch({ key: 'QRD-1', events: [{ event: 'Stop', at: '2999-01-01T00:00:00Z' }] }, at(9)).events[0].at.getTime(), at(9).getTime());

@@ -159,7 +159,8 @@ export const resolvers = {
     },
     chatSearch: async (_: unknown, { query, limit }: { query: string; limit?: number }) => chatService.search(query, limit),
     chatBridge: async () => chatService.bridge(),
-    chatStatus: async () => chatService.statusSnapshot(),
+    chatMachines: async () => chatService.machines(await orchestratorService.machines()),
+    chatStatus: async (_: unknown, { machine }: { machine?: string | null }) => chatService.statusSnapshot(machine ?? undefined),
     chatBalloons: async () => chatService.balloons(),
     sprintList: async () => sprintDashboardService.listSprints(),
     sprintDashboard: async (_: unknown, { sprintId }: { sprintId?: number | null }) => sprintDashboardService.getDashboard(sprintId),
@@ -353,18 +354,24 @@ export const resolvers = {
     updateMonitor: async (_: unknown, { id, input }: { id: string, input: any }) => upstreamMonitorService.update(id, input),
     removeMonitor: async (_: unknown, { id }: { id: string }) => upstreamMonitorService.remove(id),
     checkMonitors: async () => upstreamMonitorService.checkAll(),
-    createIngestToken: async (_: unknown, { name }: { name: string }) => {
-      return orchestratorService.createToken(name).catch(orchestratorInputError);
+    createIngestToken: async (_: unknown, { name, machine }: { name: string; machine?: string | null }) => {
+      return orchestratorService.createToken(name, machine).catch(orchestratorInputError);
     },
     revokeIngestToken: async (_: unknown, { id }: { id: string }) => orchestratorService.revokeToken(id),
     dismissOrchestration: async (_: unknown, { key }: { key: string }) => {
       return orchestratorService.dismiss(key).catch(orchestratorInputError);
     },
-    createChatSession: async (_: unknown, args: { title?: string; ticketKey?: string; forkFrom?: string }) => {
+    moveOrchestration: async (_: unknown, { key, machine }: { key: string; machine: string }) => {
+      return orchestratorService.moveRun(key, machine).catch(orchestratorInputError);
+    },
+    createChatSession: async (_: unknown, args: { title?: string; ticketKey?: string; forkFrom?: string; machine?: string | null }) => {
+      if (args.machine && !(await orchestratorService.machines()).includes(args.machine)) {
+        throw new GraphQLError('Unknown machine', { extensions: { code: 'BAD_USER_INPUT' } });
+      }
       return chatService.createSession(args).catch(orchestratorInputError);
     },
     sendChatMessage: async (_: unknown, { sessionId, text }: { sessionId: string; text: string }) => {
-      return chatService.sendMessage(sessionId, text).catch(orchestratorInputError);
+      return chatService.sendMessage(sessionId, text, await orchestratorService.machines()).catch(orchestratorInputError);
     },
     renameChatSession: async (_: unknown, { id, title }: { id: string; title: string }) => {
       return chatService.renameSession(id, title).catch(orchestratorInputError);
@@ -383,13 +390,13 @@ export const resolvers = {
   }
 };
 
-const protectedQueries = [
+export const protectedQueries = [
   'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens',
-  'chatSessions', 'chatSession', 'chatMessages', 'chatSearch', 'chatBridge', 'chatStatus', 'chatBalloons',
+  'chatSessions', 'chatSession', 'chatMessages', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents',
 ] as const;
-const protectedMutations = [
+export const protectedMutations = [
   'saveDemoLink',
   'sendToDiscord',
   'setTicketDependency',
@@ -412,6 +419,7 @@ const protectedMutations = [
   'createIngestToken',
   'revokeIngestToken',
   'dismissOrchestration',
+  'moveOrchestration',
   'createChatSession',
   'sendChatMessage',
   'renameChatSession',

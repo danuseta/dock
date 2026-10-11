@@ -1,5 +1,5 @@
 import { gql } from '@apollo/client';
-import { CHAT_MESSAGE_FIELDS, CHAT_SESSION_FIELDS } from './queries';
+import { CHAT_MESSAGE_FIELDS, CHAT_SESSION_FIELDS, ORCHESTRATION_FIELDS } from './queries';
 
 export const SAVE_DEMO_LINK = gql`
   mutation SaveDemoLink($ticketKey: String!, $url: String!) {
@@ -203,13 +203,14 @@ export const DISCONNECT_GOOGLE_CALENDAR = gql`
 `;
 
 export const CREATE_INGEST_TOKEN = gql`
-  mutation CreateIngestToken($name: String!) {
-    createIngestToken(name: $name) {
+  mutation CreateIngestToken($name: String!, $machine: String) {
+    createIngestToken(name: $name, machine: $machine) {
       token
       record {
         id
         name
         prefix
+        machine
         createdAt
         lastUsedAt
       }
@@ -229,9 +230,17 @@ export const DISMISS_ORCHESTRATION = gql`
   }
 `;
 
+export const MOVE_ORCHESTRATION = gql`
+  mutation MoveOrchestration($key: String!, $machine: String!) {
+    moveOrchestration(key: $key, machine: $machine) {
+      ${ORCHESTRATION_FIELDS}
+    }
+  }
+`;
+
 export const CREATE_CHAT_SESSION = gql`
-  mutation CreateChatSession($title: String, $ticketKey: String, $forkFrom: ID) {
-    createChatSession(title: $title, ticketKey: $ticketKey, forkFrom: $forkFrom) {
+  mutation CreateChatSession($title: String, $ticketKey: String, $forkFrom: ID, $machine: String) {
+    createChatSession(title: $title, ticketKey: $ticketKey, forkFrom: $forkFrom, machine: $machine) {
       ${CHAT_SESSION_FIELDS}
     }
   }

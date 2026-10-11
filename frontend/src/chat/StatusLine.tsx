@@ -19,8 +19,8 @@ const LimitText: React.FC<{ label: string; limit: ChatLimit | null | undefined; 
   );
 };
 
-export const LimitsLine: React.FC<{ className?: string }> = ({ className }) => {
-  const { status, now } = useChatStatus();
+export const LimitsLine: React.FC<{ className?: string; machine?: string | null }> = ({ className, machine }) => {
+  const { status, now } = useChatStatus(machine);
   const limits = status?.limits;
   if (!limits || (!limits.fiveHour && !limits.sevenDay)) return null;
   return (

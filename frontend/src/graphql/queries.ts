@@ -523,7 +523,7 @@ export const GET_GITHUB_REPOS = gql`
   }
 `;
 
-const ORCHESTRATION_FIELDS = `
+export const ORCHESTRATION_FIELDS = `
   key
   kind
   title
@@ -561,6 +561,9 @@ const ORCHESTRATION_FIELDS = `
   endedSeconds
   stalled
   hasTranscript
+  machine
+  handoverTo
+  handoverAt
   updatedAt
 `;
 
@@ -599,6 +602,7 @@ export const GET_INGEST_TOKENS = gql`
       id
       name
       prefix
+      machine
       createdAt
       lastUsedAt
     }
@@ -611,6 +615,7 @@ export const CHAT_SESSION_FIELDS = `
   title
   ticketKey
   forkFrom
+  machine
   status
   statusDetail
   messageCount
@@ -642,6 +647,11 @@ export const GET_CHAT_SESSION = gql`
       ${CHAT_SESSION_FIELDS}
     }
     chatBridge {
+      online
+      lastSeenAt
+    }
+    chatMachines {
+      name
       online
       lastSeenAt
     }
@@ -678,9 +688,19 @@ export const GET_CHAT_BRIDGE = gql`
   }
 `;
 
+export const GET_CHAT_MACHINES = gql`
+  query GetChatMachines {
+    chatMachines {
+      name
+      online
+      lastSeenAt
+    }
+  }
+`;
+
 export const GET_CHAT_STATUS = gql`
-  query GetChatStatus {
-    chatStatus {
+  query GetChatStatus($machine: String) {
+    chatStatus(machine: $machine) {
       limits {
         fiveHour { usedPercentage resetsAt }
         sevenDay { usedPercentage resetsAt }

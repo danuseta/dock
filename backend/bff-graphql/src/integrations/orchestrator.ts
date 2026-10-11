@@ -24,6 +24,10 @@ export type HookEvent = typeof HOOK_EVENTS[number];
 export const ACTIVE_GRACE_MS = 1500;
 export const STALE_ACTIVE_MS = 10 * 60 * 1000;
 export const STALE_IDLE_MS = 30 * 60 * 1000;
+export const DEFAULT_MACHINE = 'laptop';
+const MACHINE_NAME = /^[a-z][a-z0-9-]{0,23}$/;
+const BRANCH_NAME = /^[A-Za-z0-9._/-]{1,200}$/;
+const MAX_LIVE_RUNS_PER_MACHINE = 300;
 
 const TICKET_KEY = /^[A-Z][A-Z0-9_]{0,31}-[1-9]\d{0,9}$/;
 const MAX_AC = 50;
@@ -100,6 +104,14 @@ function httpUrl(value: unknown): string | null {
   } catch {
     return null;
   }
+}
+
+export function normalizeMachine(value: unknown): string {
+  const machine = String(value ?? '').trim().toLowerCase();
+  if (!MACHINE_NAME.test(machine)) {
+    throw new OrchestratorInputError('A machine name starts with a letter and has up to 24 letters, digits or dashes');
+  }
+  return machine;
 }
 
 export function normalizeTicketKey(value: unknown): string {
@@ -311,6 +323,48 @@ interface RunRow {
   ledgerUpdatedAt: Date;
   transcriptAt: Date | null;
   dismissedAt: Date | null;
+  machine?: string;
+  ledgerRaw?: string | null;
+  handover?: string | null;
+}
+
+export interface Handover {
+  from: string;
+  to: string;
+  at: string;
+  note: string | null;
+  branches: { be: string | null; fe: string | null };
+}
+
+const isBranchName = (value: string) => BRANCH_NAME.test(value) && !value.includes('..') && !value.startsWith('-');
+
+function storedBranch(value: unknown): string | null {
+  return typeof value === 'string' && isBranchName(value) ? value : null;
+}
+
+function parseHandover(raw: string | null | undefined): Handover | null {
+  if (!raw) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!isRecord(value) || typeof value.from !== 'string' || typeof value.to !== 'string' || typeof value.at !== 'string') return null;
+    const branches = isRecord(value.branches) ? value.branches : {};
+    return {
+      from: value.from,
+      to: value.to,
+      at: value.at,
+      note: typeof value.note === 'string' ? value.note : null,
+      branches: { be: storedBranch(branches.be), fe: storedBranch(branches.fe) },
+    };
+  } catch {
+    return null;
+  }
+}
+
+function branchInput(value: unknown, name: string): string | null {
+  const branch = typeof value === 'string' ? value.trim() : value;
+  if (branch === undefined || branch === null || branch === '') return null;
+  if (typeof branch !== 'string' || !isBranchName(branch)) throw new OrchestratorInputError(`${name} is not a valid branch name`);
+  return branch;
 }
 
 const FINISHED_STAGES = new Set<string>(['done', 'blocked']);
@@ -357,6 +411,7 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
   const ac = Array.isArray(ledger.ac) ? ledger.ac : [];
   const lastSeen = row.lastEventAt && row.lastEventAt > row.ledgerUpdatedAt ? row.lastEventAt : row.ledgerUpdatedAt;
   const idleMs = Math.max(0, now.getTime() - lastSeen.getTime());
+  const handover = parseHandover(row.handover);
 
   // The ledger's "waiting" is a gate only the owner can open, so it wins over
   // whatever the hooks last reported.
@@ -385,6 +440,9 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
 
   return {
     key: row.key,
+    machine: row.machine ?? DEFAULT_MACHINE,
+    handoverTo: handover?.to ?? null,
+    handoverAt: handover?.at ?? null,
     kind: ledger.kind === 'review' ? 'review' : 'build',
     title: row.title,
     stage: row.stage,
@@ -506,17 +564,36 @@ export class OrchestratorService {
     return attentionItems(await this.list(now));
   }
 
-  async ingestLedger(input: unknown, now = new Date()) {
+  async ingestLedger(input: unknown, now: Date, machine: string) {
     const ledger = parseLedger(input, now);
     const previous = await this.storage.getOrchestratorRun(ledger.key);
-    const row = await this.storage.upsertOrchestratorRun(ledger.key, {
+    const owner = previous?.machine ?? DEFAULT_MACHINE;
+    const dismissedElsewhere = Boolean(previous?.dismissedAt) && owner !== machine;
+    if (previous && ((!previous.dismissedAt && owner !== machine) || (dismissedElsewhere && (await this.machines()).includes(owner)))) {
+      return { ...toOrchestration(previous, now), ignored: true };
+    }
+    if ((!previous || previous.dismissedAt) && await this.storage.countLiveOrchestratorRuns(machine) >= MAX_LIVE_RUNS_PER_MACHINE) {
+      throw new OrchestratorInputError(`A maximum of ${MAX_LIVE_RUNS_PER_MACHINE} live tickets per machine is supported. Dismiss finished tickets on the Agents page and push again.`);
+    }
+    const { dirs: _dirs, ports: _ports, ...shared } = input as Record<string, unknown>;
+    const fields = {
       title: ledger.title,
       stage: ledger.stage,
       waiting: ledger.waiting,
       payload: JSON.stringify(ledger),
       ledgerUpdatedAt: new Date(ledger.updatedAt),
-    });
+      machine,
+      ledgerRaw: JSON.stringify(shared),
+    };
+    const taking = dismissedElsewhere;
+    const row = taking
+      ? await this.storage.takeDismissedOrchestratorRun(ledger.key, fields)
+      : await this.storage.upsertOrchestratorRun(ledger.key, fields);
+    if ((row.machine ?? DEFAULT_MACHINE) !== machine) return { ...toOrchestration(row, now), ignored: true };
 
+    if (taking) {
+      await this.storage.addOrchestratorEvent(ledger.key, 'MACHINE', machine, MAX_EVENTS_KEPT);
+    }
     if (!previous || previous.stage !== ledger.stage) {
       await this.storage.addOrchestratorEvent(ledger.key, 'STAGE', ledger.stage, MAX_EVENTS_KEPT);
     }
@@ -525,17 +602,18 @@ export class OrchestratorService {
     } else if (!ledger.waiting && previous?.waiting) {
       await this.storage.addOrchestratorEvent(ledger.key, 'RESUMED', null, MAX_EVENTS_KEPT);
     }
-    return toOrchestration(row, now);
+    return { ...toOrchestration(row, now), ignored: false };
   }
 
   /**
    * Hooks fire on every tool call, so this path is one read and one write.
    * The event log only grows when the state actually changes.
    */
-  async ingestHookEvent(input: unknown, now = new Date()) {
+  async ingestHookEvent(input: unknown, now: Date, machine: string) {
     const { key, event, detail } = parseHookEvent(input);
     const row = await this.storage.getOrchestratorRun(key);
     if (!row) return null;
+    if ((row.machine ?? DEFAULT_MACHINE) !== machine) return { ...toOrchestration(row, now), ignored: true };
 
     const current: ActivityState = {
       activity: row.activity === 'ACTIVE' || row.activity === 'WAITING' ? row.activity : 'IDLE',
@@ -547,17 +625,18 @@ export class OrchestratorService {
     if (next.activity !== current.activity) {
       await this.storage.addOrchestratorEvent(key, `AGENT_${next.activity}`, next.activityDetail, MAX_EVENTS_KEPT);
     }
-    return toOrchestration(updated, now);
+    return { ...toOrchestration(updated, now), ignored: false };
   }
 
   /**
    * The batched path the hook uses: one read, one state write and one insert
    * for up to a hundred events, however many tools ran in the window.
    */
-  async ingestEventBatch(input: unknown, now = new Date()) {
+  async ingestEventBatch(input: unknown, now: Date, machine: string) {
     const { key, events } = parseEventBatch(input, now);
     const row = await this.storage.getOrchestratorRun(key);
     if (!row) return null;
+    if ((row.machine ?? DEFAULT_MACHINE) !== machine) return { ...toOrchestration(row, now), ignored: true };
 
     const initial: ActivityState = {
       activity: row.activity === 'ACTIVE' || row.activity === 'WAITING' ? row.activity : 'IDLE',
@@ -593,7 +672,7 @@ export class OrchestratorService {
     if (state.activity !== initial.activity) {
       await this.storage.addOrchestratorEvent(key, `AGENT_${state.activity}`, state.activityDetail, MAX_EVENTS_KEPT);
     }
-    return toOrchestration(updated, now);
+    return { ...toOrchestration(updated, now), ignored: false };
   }
 
   async dismiss(keyInput: string) {
@@ -603,13 +682,112 @@ export class OrchestratorService {
     return true;
   }
 
+  private sharedLedger(row: RunRow) {
+    let ledger: unknown = null;
+    try { ledger = JSON.parse(row.ledgerRaw || row.payload); } catch { ledger = null; }
+    return { key: row.key, machine: row.machine ?? DEFAULT_MACHINE, ledgerUpdatedAt: row.ledgerUpdatedAt.toISOString(), handover: parseHandover(row.handover), ledger };
+  }
+
+  private async liveRun(input: unknown, withLedger = false) {
+    if (!isRecord(input)) throw new OrchestratorInputError('A request object is required');
+    const key = normalizeTicketKey(input.key);
+    const row = withLedger ? await this.storage.getOrchestratorRunWithLedger(key) : await this.storage.getOrchestratorRun(key);
+    return row && !row.dismissedAt ? row : null;
+  }
+
+  async ledgerList(machine: string) {
+    const rows = await this.storage.getOrchestratorRuns();
+    return {
+      runs: rows
+        .filter((row) => !row.dismissedAt && ((row.machine ?? DEFAULT_MACHINE) === machine || parseHandover(row.handover)?.to === machine))
+        .map((row) => ({
+          key: row.key,
+          title: row.title,
+          stage: row.stage,
+          machine: row.machine ?? DEFAULT_MACHINE,
+          ledgerUpdatedAt: row.ledgerUpdatedAt.toISOString(),
+          handoverTo: parseHandover(row.handover)?.to ?? null,
+          mine: (row.machine ?? DEFAULT_MACHINE) === machine,
+        })),
+    };
+  }
+
+  async ledgerGet(input: unknown, machine: string) {
+    const row = await this.liveRun(input, true);
+    if (!row) return null;
+    const visible = (row.machine ?? DEFAULT_MACHINE) === machine || parseHandover(row.handover)?.to === machine;
+    return visible ? this.sharedLedger(row) : null;
+  }
+
+  async ledgerHandover(input: unknown, machine: string, now = new Date()) {
+    const row = await this.liveRun(input);
+    if (!row) return null;
+    const owner = row.machine ?? DEFAULT_MACHINE;
+    if (owner !== machine) throw new OrchestratorInputError('Only the owning machine can hand a ticket over');
+    const body = input as Record<string, unknown>;
+    if (body.cancel === true) {
+      await this.storage.updateOrchestratorRun(row.key, { handover: null });
+      if (row.handover) await this.storage.addOrchestratorEvent(row.key, 'HANDOVER_CANCELLED', parseHandover(row.handover)?.to ?? null, MAX_EVENTS_KEPT);
+      return { key: row.key, handover: null };
+    }
+    const to = String(body.to ?? '').trim().toLowerCase();
+    if (!(await this.machines()).includes(to)) throw new OrchestratorInputError('Unknown machine');
+    if (to === owner) throw new OrchestratorInputError('to must differ from the owner');
+    const branches = isRecord(body.branches) ? body.branches : {};
+    const handover: Handover = {
+      from: owner,
+      to,
+      at: now.toISOString(),
+      note: typeof body.note === 'string' ? optionalText(body.note.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' '), 500) : null,
+      branches: { be: branchInput(branches.be, 'branches.be'), fe: branchInput(branches.fe, 'branches.fe') },
+    };
+    await this.storage.updateOrchestratorRun(row.key, { handover: JSON.stringify(handover) });
+    await this.storage.addOrchestratorEvent(row.key, 'HANDOVER', to, MAX_EVENTS_KEPT);
+    return { key: row.key, handover };
+  }
+
+  async ledgerAccept(input: unknown, machine: string) {
+    const row = await this.liveRun(input, true);
+    if (!row) return null;
+    if ((row.machine ?? DEFAULT_MACHINE) === machine) return this.sharedLedger(row);
+    const offer = parseHandover(row.handover);
+    if (offer?.to !== machine) throw new OrchestratorInputError('This ticket is not offered to this machine');
+    const won = await this.storage.changeOrchestratorRunOwner(row.key, { machine: row.machine ?? DEFAULT_MACHINE, handover: row.handover ?? null }, machine);
+    const current = await this.storage.getOrchestratorRunWithLedger(row.key);
+    if (!won) {
+      if (current && !current.dismissedAt && (current.machine ?? DEFAULT_MACHINE) === machine) return this.sharedLedger(current);
+      throw new OrchestratorInputError('This ticket is not offered to this machine');
+    }
+    await this.storage.addOrchestratorEvent(row.key, 'MACHINE', machine, MAX_EVENTS_KEPT);
+    return this.sharedLedger(current!);
+  }
+
+  async moveRun(keyInput: string, machineInput: string, now = new Date()) {
+    const key = normalizeTicketKey(keyInput);
+    const machine = normalizeMachine(machineInput);
+    if (!(await this.machines()).includes(machine)) throw new OrchestratorInputError('Unknown machine');
+    const row = await this.storage.getOrchestratorRun(key);
+    if (!row) throw new OrchestratorInputError('Unknown ticket');
+    if ((row.machine ?? DEFAULT_MACHINE) === machine) return this.present(row, now);
+    const won = await this.storage.changeOrchestratorRunOwner(key, { machine: row.machine ?? DEFAULT_MACHINE, handover: row.handover ?? null }, machine);
+    const current = await this.storage.getOrchestratorRun(key);
+    if (!won) {
+      if (current && (current.machine ?? DEFAULT_MACHINE) === machine) return this.present(current, now);
+      throw new OrchestratorInputError('The ticket changed while it was being moved. Try again.');
+    }
+    await this.storage.addOrchestratorEvent(key, 'MACHINE', machine, MAX_EVENTS_KEPT);
+    return this.present(current!, now);
+  }
+
   private transcriptFile(key: string) {
     return path.join(this.transcriptDirectory, `${key}.json`);
   }
 
-  async saveTranscript(input: unknown, now = new Date()) {
+  async saveTranscript(input: unknown, now: Date, machine: string) {
     const { key, files, stats } = parseTranscript(input);
-    if (!await this.storage.getOrchestratorRun(key)) return null;
+    const row = await this.storage.getOrchestratorRun(key);
+    if (!row) return null;
+    if ((row.machine ?? DEFAULT_MACHINE) !== machine) return { ignored: true, owner: row.machine ?? DEFAULT_MACHINE };
     await mkdir(this.transcriptDirectory, { recursive: true });
     const target = this.transcriptFile(key);
     const pending = `${target}.${process.pid}.tmp`;
@@ -639,36 +817,52 @@ export class OrchestratorService {
       prefix: token.prefix,
       createdAt: token.createdAt.toISOString(),
       lastUsedAt: token.lastUsedAt?.toISOString() ?? null,
+      machine: token.machine,
     }));
   }
 
-  async createToken(nameInput: string) {
+  async machines() {
+    const tokens = await this.storage.getIngestTokens();
+    return [...new Set(tokens.map((token) => token.machine))];
+  }
+
+  async createToken(nameInput: string, machineInput?: string | null) {
     const name = text(nameInput, 60);
     if (!name) throw new OrchestratorInputError('Token name is required');
+    const machine = normalizeMachine(machineInput?.trim() || DEFAULT_MACHINE);
     if (await this.storage.countIngestTokens() >= MAX_TOKENS) {
       throw new OrchestratorInputError(`A maximum of ${MAX_TOKENS} ingest tokens is supported`);
     }
     const generated = generateIngestToken();
-    const record = await this.storage.createIngestToken({ name, prefix: generated.prefix, tokenHash: generated.tokenHash });
+    const record = await this.storage.createIngestToken({ name, prefix: generated.prefix, tokenHash: generated.tokenHash, machine });
     return {
       token: generated.token,
-      record: { id: record.id, name: record.name, prefix: record.prefix, createdAt: record.createdAt.toISOString(), lastUsedAt: null },
+      record: { id: record.id, name: record.name, prefix: record.prefix, createdAt: record.createdAt.toISOString(), lastUsedAt: null, machine: record.machine },
     };
   }
 
   async revokeToken(id: string) {
     if (!id) return false;
-    return (await this.storage.revokeIngestToken(id)).count > 0;
+    const token = (await this.storage.getIngestTokens()).find((item) => item.id === id);
+    const revoked = (await this.storage.revokeIngestToken(id)).count > 0;
+    if (revoked && token && !(await this.machines()).includes(token.machine)) {
+      for (const row of await this.storage.getOrchestratorRuns()) {
+        if (parseHandover(row.handover)?.to !== token.machine) continue;
+        await this.storage.updateOrchestratorRun(row.key, { handover: null });
+        await this.storage.addOrchestratorEvent(row.key, 'HANDOVER_CANCELLED', `${token.machine} (token revoked)`, MAX_EVENTS_KEPT);
+      }
+    }
+    return revoked;
   }
 
-  async authenticate(token: string, now = new Date()) {
+  async authenticateMachine(token: string, now = new Date()) {
     const record = await this.storage.findIngestToken(hashIngestToken(token));
-    if (!record) return false;
+    if (!record) return null;
     // lastUsedAt is informational; once a minute is enough and keeps hook traffic to one write.
     if (!record.lastUsedAt || now.getTime() - record.lastUsedAt.getTime() > 60_000) {
       await this.storage.touchIngestToken(record.id, now).catch(() => undefined);
     }
-    return true;
+    return record.machine;
   }
 }
 

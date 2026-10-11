@@ -8,11 +8,13 @@ import { Badge, Button, Card, Dialog, Page, PageHeader } from '../components/ui'
 import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
-import { formatAge, hasTrouble, isArchived, pageOf, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
+import { completeRun, formatAge, hasTrouble, isArchived, offerOf, pageOf, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
 import { RAIL_STAGES, railIndex } from '../agents/office/layout';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 import { AgentFlowGraph } from '../components/AgentFlowGraph';
-import { ticketBalloons, type ChatMessage } from '../chat/messages';
+import { machineOf, machinePlace, ticketBalloons, type ChatMessage } from '../chat/messages';
+import { MachineChip } from '../chat/MachineControls';
+import { MoveTicket } from '../agents/MoveTicket';
 import { chatStore } from '../chat/store';
 import { LimitsLine } from '../chat/StatusLine';
 import { useOpenForTicket } from '../chat/useOpenForTicket';
@@ -65,6 +67,7 @@ const eventLabel: Record<string, string> = {
   STAGE: 'Moved to', WAITING: 'Waiting on you', RESUMED: 'Resumed',
   AGENT_ACTIVE: 'Working', AGENT_IDLE: 'Idle', AGENT_WAITING: 'Asking',
   ACTIVE: 'Working', IDLE: 'Idle',
+  HANDOVER: 'Offered to', MACHINE: 'Now on',
 };
 
 const StageChip: React.FC<{ stage: string; kind?: string }> = ({ stage, kind }) => (
@@ -78,8 +81,14 @@ const StatusChip: React.FC<{ status: RunStatus; review?: AgentRun['review'] }> =
   <span className={cn('inline-flex items-center rounded-xs border px-2 py-0.5 font-mono text-[0.66rem] font-bold', statusTone[status])}>{statusLabel(status, review)}</span>
 );
 
+const OfferBadge: React.FC<{ run: AgentRun; className?: string }> = ({ run, className }) => {
+  const offer = offerOf(run);
+  if (!offer) return null;
+  return <span className={cn('inline-flex items-center rounded-xs border border-amber-300/50 bg-amber-300/10 px-1.5 py-px font-mono text-[0.62rem] font-bold text-amber-200', className)}>{offer.label}</span>;
+};
+
 const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) => {
-  const { data, loading, error, refetch } = useQuery(GET_ORCHESTRATIONS, { ...CACHED_QUERY_OPTIONS, pollInterval: POLL_MS });
+  const { data, loading, error, refetch } = useQuery(GET_ORCHESTRATIONS, { ...CACHED_QUERY_OPTIONS, returnPartialData: false, pollInterval: POLL_MS });
   const [dismissOrchestration, { loading: dismissing }] = useMutation(DISMISS_ORCHESTRATION);
   const { data: balloonData } = useQuery<{ chatBalloons: ChatMessage[]; chatSessions: Array<{ id: string; ticketKey?: string | null }> }>(GET_CHAT_BALLOONS, { fetchPolicy: 'network-only', pollInterval: POLL_MS });
   const balloons = useMemo(() => ticketBalloons(balloonData?.chatBalloons || [], balloonData?.chatSessions || []), [balloonData]);
@@ -104,7 +113,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
     return () => window.clearInterval(timer);
   }, []);
 
-  const serverRuns: AgentRun[] | undefined = data?.orchestrations;
+  const serverRuns = useMemo<AgentRun[] | undefined>(() => data?.orchestrations?.map(completeRun), [data?.orchestrations]);
   useEffect(() => { setReceivedAt(Date.now() / 1000); }, [serverRuns]);
 
   const sampling = sampleStartedAt !== null;
@@ -261,6 +270,8 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                             {cards.map((run) => (
                               <button key={run.key} type="button" className={cn('rounded-xs border border-border-glow border-l-[3px] bg-surface-0 px-2 py-1.5 text-left hover:border-accent', run.waiting ? 'border-l-amber-300' : hasTrouble(run) ? 'border-l-status-conflict' : 'border-l-status-merged', selected?.key === run.key && 'border-accent')} onClick={() => { setSelectedKey(run.key); setBoardOpen(false); }}>
                                 <span className="flex items-center justify-between gap-2 font-mono text-xs font-extrabold text-accent"><span>{run.key}</span><span className="font-semibold text-muted-foreground tabular-nums">{run.acPassed}/{run.acTotal}</span></span>
+                                <span className="mt-0.5 block font-mono text-[0.62rem] font-semibold text-muted-foreground">{machineOf(run)}</span>
+                                <OfferBadge run={run} className="mt-0.5" />
                                 <span className="mt-0.5 line-clamp-2 text-[0.74rem] text-secondary-foreground">{run.waiting || run.title || 'Untitled'}</span>
                               </button>
                             ))}
@@ -325,7 +336,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                     )}
                     {listed.items.map((run) => (
                       <tr key={run.key} className={cn('cursor-pointer border-t border-border hover:bg-surface-1', selected?.key === run.key && 'bg-surface-1')} onClick={() => setSelectedKey(run.key)}>
-                        <td className="px-4 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => setSelectedKey(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><span className="mt-0.5 block max-w-[320px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
+                        <td className="px-4 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => setSelectedKey(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><span className="sr-only">, machine </span><span className="ml-2 font-mono text-[0.62rem] font-semibold text-muted-foreground">{machineOf(run)}</span><OfferBadge run={run} className="ml-2" /><span className="mt-0.5 block max-w-[320px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
                         <td className="px-4 py-3"><StageChip stage={run.stage} kind={run.kind} /></td>
                         <td className="px-4 py-3"><StatusChip status={statusOf(run)} review={run.review} /></td>
                         <td className="px-4 py-3 font-mono text-xs tabular-nums">{run.acPassed}/{run.acTotal}{run.acFailed > 0 && <span className="ml-1.5 text-status-conflict">{run.acFailed} failed</span>}</td>
@@ -358,17 +369,20 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                 {selected.kind === 'review' && <span className="rounded-xs border border-border-glow px-2 py-0.5 font-mono text-[0.66rem] font-bold text-secondary-foreground">REVIEW</span>}
                 <StageChip stage={selected.stage} kind={selected.kind} />
                 <StatusChip status={statusOf(selected)} review={selected.review} />
-                {!selected.sample && <Button size="sm" className="ml-auto h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key)}><MessagesSquare size={13} aria-hidden="true" />Chat</Button>}
+                <MachineChip name={machineOf(selected)} />
+                <OfferBadge run={selected} />
+                {!selected.sample && <Button size="sm" className="ml-auto h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key, machineOf(selected))}><MessagesSquare size={13} aria-hidden="true" />Chat</Button>}
               </div>
               {chatError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The chat could not be opened: {chatError}</p>}
               <h2 className="text-pretty font-display text-base leading-snug font-bold">{selected.title || 'Untitled'}</h2>
+              {!selected.sample && <MoveTicket key={selected.key} run={selected} />}
 
               {selected.waiting && (
                 <div className="rounded-[8px] border border-amber-300/50 bg-amber-300/10 px-3 py-2.5 text-sm">
                   <b className="mb-0.5 block font-mono text-[0.66rem] font-bold uppercase tracking-[0.08em] text-amber-200">Waiting on you</b>
                   <span className="text-pretty">{selected.waiting}</span>
-                  <p className="mt-1.5 text-pretty text-xs text-muted-foreground">Answer here, or in the Claude Code session on your laptop.</p>
-                  {!selected.sample && <Button size="sm" className="mt-2 h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key)}>Reply here</Button>}
+                  <p className="mt-1.5 text-pretty text-xs text-muted-foreground">Answer here, or in the Claude Code session on {machinePlace(machineOf(selected))}.</p>
+                  {!selected.sample && <Button size="sm" className="mt-2 h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key, machineOf(selected))}>Reply here</Button>}
                 </div>
               )}
 
@@ -500,7 +514,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
         <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 border-b border-border bg-surface-0 px-5 py-2.5">
           <h2 className="font-display text-[0.95rem] font-bold">Session flow</h2>
           {selected && <span className="font-mono text-xs font-bold text-accent">{selected.key}</span>}
-          <span className="text-pretty text-[0.78rem] text-muted-foreground">{showReplay ? 'The uploaded Claude Code session, with secrets masked on the laptop.' : 'Live from the stage, gate and tool-call events your laptop reports.'}</span>
+          <span className="text-pretty text-[0.78rem] text-muted-foreground">{showReplay ? `The uploaded Claude Code session, with secrets masked on ${selected ? machinePlace(machineOf(selected)) : 'the laptop'}.` : `Live from the stage, gate and tool-call events ${selected ? machinePlace(machineOf(selected)) : 'your laptop'} reports.`}</span>
           {canReplay && (
             <div className="ml-auto flex rounded-sm border border-border bg-surface-1 p-0.5 max-[700px]:ml-0" role="group" aria-label="Session flow view">
               {([['live', 'Live graph'], ['replay', 'Replay detail']] as const).map(([id, label]) => (

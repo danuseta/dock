@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import test from 'node:test';
 import type { CookieOptions, Request, Response } from 'express';
-import { isTailscaleRequest, PinRateLimiter, SessionManager, shouldRequirePin } from '../auth/session';
+import { isTailscaleRequest, missingPinWarning, PinRateLimiter, SessionManager, shouldRequirePin } from '../auth/session';
 
 function responseStub() {
   const cookies: string[] = [];
@@ -93,5 +93,21 @@ test('auto PIN mode trusts Tailscale requests but keeps local access protected',
   } finally {
     if (previousMode === undefined) delete process.env.DOCK_PIN_MODE;
     else process.env.DOCK_PIN_MODE = previousMode;
+  }
+});
+
+test('the server warns when the PIN is required by mode but none is stored', () => {
+  const previous = process.env.DOCK_PIN_MODE;
+  try {
+    process.env.DOCK_PIN_MODE = 'always';
+    assert.match(missingPinWarning(false) ?? '', /DOCK_PIN_MODE is always but no master PIN is stored/);
+    assert.strictEqual(missingPinWarning(true), null);
+    assert.strictEqual(shouldRequirePin(requestWithCookie(), false), false, 'the first PIN can still be set');
+    for (const mode of ['auto', 'disabled', undefined]) {
+      if (mode) process.env.DOCK_PIN_MODE = mode; else delete process.env.DOCK_PIN_MODE;
+      assert.strictEqual(missingPinWarning(false), null);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.DOCK_PIN_MODE; else process.env.DOCK_PIN_MODE = previous;
   }
 });

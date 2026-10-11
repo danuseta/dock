@@ -5,7 +5,8 @@ import { CREATE_CHAT_SESSION } from '../graphql/mutations';
 import { GET_CHAT_MESSAGES, GET_CHAT_SESSION } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import { ChatThread } from './ChatThread';
-import { SLOW_POLL_MS, newestAssistantId, type ChatMessage, type ChatSession } from './messages';
+import { MachinePicker, useMachineChoice } from './MachineControls';
+import { SLOW_POLL_MS, machineOf, newestAssistantId, severalMachines, tabLabel, type ChatMessage, type ChatSession } from './messages';
 import { LimitsLine } from './StatusLine';
 import { chatStore, useChatState } from './store';
 
@@ -31,13 +32,21 @@ const UnreadProbe: React.FC<{ sessionId: string; lastSeen: number; onChange: (se
   return null;
 };
 
-const ChatTab: React.FC<{ sessionId: string; active: boolean; unread: boolean }> = ({ sessionId, active, unread }) => {
+const ChatTab: React.FC<{ sessionId: string; active: boolean; unread: boolean; multipleMachines: boolean; onMachine: (sessionId: string, machine: string) => void }> = ({ sessionId, active, unread, multipleMachines, onMachine }) => {
   const { data } = useQuery<{ chatSession: ChatSession | null }>(GET_CHAT_SESSION, { variables: { id: sessionId }, fetchPolicy: 'cache-first' });
   const session = data?.chatSession;
-  const label = session?.title || session?.ticketKey || 'New session';
+  const label = tabLabel(session, multipleMachines);
+  const tabRef = useRef<HTMLDivElement>(null);
+  const machine = session ? machineOf(session) : null;
+  useEffect(() => {
+    if (machine) onMachine(sessionId, machine);
+  }, [sessionId, machine, onMachine]);
+  useEffect(() => {
+    if (active) tabRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  }, [active]);
   const working = session?.status === 'queued' || session?.status === 'running';
   return (
-    <div className={cn('flex h-7 max-w-[180px] flex-none items-center rounded-xs border border-transparent text-secondary-foreground', active ? 'border-border-glow bg-surface-2 text-foreground' : 'hover:bg-surface-1')}>
+    <div ref={tabRef} className={cn('flex h-7 max-w-[180px] flex-none items-center rounded-xs border border-transparent text-secondary-foreground', active ? 'border-border-glow bg-surface-2 text-foreground' : 'hover:bg-surface-1')}>
       <button
         type="button"
         role="tab"
@@ -59,8 +68,11 @@ const ChatTab: React.FC<{ sessionId: string; active: boolean; unread: boolean }>
 
 export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
   const state = useChatState();
+  const { machines, machine, choose } = useMachineChoice();
+  const { data: activeData } = useQuery<{ chatSession: ChatSession | null }>(GET_CHAT_SESSION, { variables: { id: state.active }, skip: !state.active, fetchPolicy: 'cache-first' });
   const [createSession, { loading: creating }] = useMutation<{ createChatSession: ChatSession }>(CREATE_CHAT_SESSION);
   const [unread, setUnread] = useState<Record<string, boolean>>({});
+  const [tabMachines, setTabMachines] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const panelRef = useRef<HTMLElement>(null);
   const launcherRef = useRef<HTMLButtonElement>(null);
@@ -71,6 +83,10 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
 
   const reportUnread = useCallback((sessionId: string, value: boolean) => {
     setUnread((current) => (Boolean(current[sessionId]) === value ? current : { ...current, [sessionId]: value }));
+  }, []);
+
+  const reportMachine = useCallback((sessionId: string, value: string) => {
+    setTabMachines((current) => (current[sessionId] === value ? current : { ...current, [sessionId]: value }));
   }, []);
 
   useEffect(() => {
@@ -87,7 +103,7 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
   const newSession = async () => {
     setError('');
     try {
-      const result = await createSession();
+      const result = await createSession({ variables: { machine } });
       const created = result.data?.createChatSession;
       if (!created) throw new Error('DOCK did not return a session');
       chatStore.openSession(created.id);
@@ -166,15 +182,16 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
           <header className="flex flex-none items-center gap-1 border-b border-border bg-surface-0 px-2 py-1.5">
             <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none]" role="tablist" aria-label="Open sessions">
               {state.tabs.length === 0 && <span className="px-1.5 font-display text-xs font-bold">Chat</span>}
-              {state.tabs.map((id) => <ChatTab key={id} sessionId={id} active={id === state.active} unread={Boolean(unread[id]) && id !== state.active} />)}
+              {state.tabs.map((id) => <ChatTab key={id} sessionId={id} active={id === state.active} multipleMachines={severalMachines(machines, state.tabs.flatMap((tab) => tabMachines[tab] ?? []))} unread={Boolean(unread[id]) && id !== state.active} onMachine={reportMachine} />)}
             </div>
+            <MachinePicker machines={machines} value={machine} onChange={choose} disabled={creating} className="max-w-[220px] flex-none whitespace-nowrap" />
             <button type="button" className={control} aria-label="New session" title="New session" disabled={creating} onClick={() => void newSession()}><Plus size={14} aria-hidden="true" /></button>
             <button type="button" className={cn(control, 'max-[699px]:hidden')} aria-label={drawer ? 'Pop out' : 'Dock to bottom'} title={drawer ? 'Pop out' : 'Dock to bottom'} onClick={() => chatStore.setMode(drawer ? 'float' : 'drawer')}>
               {drawer ? <PictureInPicture2 size={14} aria-hidden="true" /> : <PanelBottom size={14} aria-hidden="true" />}
             </button>
             <button type="button" className={control} aria-label="Minimise chat" title="Minimise" onClick={minimise}><Minus size={14} aria-hidden="true" /></button>
           </header>
-          <LimitsLine className="flex-none border-b border-border bg-surface-0 px-3.5 py-1.5" />
+          <LimitsLine machine={activeData?.chatSession ? machineOf(activeData.chatSession) : undefined} className="flex-none border-b border-border bg-surface-0 px-3.5 py-1.5" />
           {error && <p className="flex-none border-b border-border px-3.5 py-1.5 text-pretty text-xs break-words text-status-conflict" role="alert">A new session could not be started: {error}</p>}
           {state.active
             ? <ChatThread key={state.active} sessionId={state.active} className="min-h-0 flex-1" />

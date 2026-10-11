@@ -2,6 +2,11 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { prisma } from './client';
 import { decrypt, encrypt, hashPin, verifyPin } from './crypto';
 
+const RUN_WITHOUT_LEDGER = {
+  key: true, title: true, stage: true, waiting: true, payload: true, activity: true, activityDetail: true, activityEndedAt: true,
+  lastEventAt: true, ledgerUpdatedAt: true, transcriptAt: true, dismissedAt: true, machine: true, handover: true, createdAt: true, updatedAt: true,
+} as const;
+
 const SENSITIVE_KEYS = new Set([
   'jiraApiToken',
   'githubToken',
@@ -184,19 +189,42 @@ export class StorageService {
   }
 
   getOrchestratorRuns() {
-    return this.db.orchestratorRun.findMany({ orderBy: [{ ledgerUpdatedAt: 'desc' }, { key: 'asc' }] });
+    return this.db.orchestratorRun.findMany({ select: RUN_WITHOUT_LEDGER, orderBy: [{ ledgerUpdatedAt: 'desc' }, { key: 'asc' }] });
   }
 
   getOrchestratorRun(key: string) {
+    return this.db.orchestratorRun.findUnique({ where: { key }, select: RUN_WITHOUT_LEDGER });
+  }
+
+  getOrchestratorRunWithLedger(key: string) {
     return this.db.orchestratorRun.findUnique({ where: { key } });
   }
 
-  upsertOrchestratorRun(key: string, data: { title: string; stage: string; waiting: string; payload: string; ledgerUpdatedAt: Date }) {
-    return this.db.orchestratorRun.upsert({
-      where: { key },
-      update: { ...data, dismissedAt: null },
-      create: { key, ...data },
-    });
+  countLiveOrchestratorRuns(machine: string) {
+    return this.db.orchestratorRun.count({ where: { machine, dismissedAt: null } });
+  }
+
+  async upsertOrchestratorRun(key: string, data: { title: string; stage: string; waiting: string; payload: string; ledgerUpdatedAt: Date; machine: string; ledgerRaw: string | null }) {
+    const { machine, ...fields } = data;
+    const updated = await this.db.orchestratorRun.updateMany({ where: { key, machine }, data: { ...fields, dismissedAt: null } });
+    if (updated.count === 0) {
+      try {
+        return await this.db.orchestratorRun.create({ data: { key, ...data } });
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) throw error;
+      }
+    }
+    return this.db.orchestratorRun.findUniqueOrThrow({ where: { key } });
+  }
+
+  async takeDismissedOrchestratorRun(key: string, data: { title: string; stage: string; waiting: string; payload: string; ledgerUpdatedAt: Date; machine: string; ledgerRaw: string | null }) {
+    await this.db.orchestratorRun.updateMany({ where: { key, dismissedAt: { not: null } }, data: { ...data, handover: null, dismissedAt: null, activity: 'IDLE', activityDetail: null, activityEndedAt: null, lastEventAt: null, transcriptAt: null } });
+    return this.db.orchestratorRun.findUniqueOrThrow({ where: { key } });
+  }
+
+  async changeOrchestratorRunOwner(key: string, expected: { machine: string; handover: string | null }, machine: string) {
+    const moved = await this.db.orchestratorRun.updateMany({ where: { key, ...expected }, data: { machine, handover: null } });
+    return moved.count === 1;
   }
 
   updateOrchestratorRun(key: string, data: {
@@ -206,8 +234,9 @@ export class StorageService {
     lastEventAt?: Date;
     transcriptAt?: Date;
     dismissedAt?: Date | null;
+    handover?: string | null;
   }) {
-    return this.db.orchestratorRun.update({ where: { key }, data });
+    return this.db.orchestratorRun.update({ where: { key }, data, select: RUN_WITHOUT_LEDGER });
   }
 
   getOrchestratorEvents(ticketKey: string, take: number) {
@@ -252,7 +281,7 @@ export class StorageService {
     return this.db.ingestToken.count({ where: { revokedAt: null } });
   }
 
-  createIngestToken(data: { name: string; prefix: string; tokenHash: string }) {
+  createIngestToken(data: { name: string; prefix: string; tokenHash: string; machine: string }) {
     return this.db.ingestToken.create({ data });
   }
 
@@ -291,7 +320,7 @@ export class StorageService {
   }
 
   createChatSession(data: {
-    id: string; source: string; title: string; ticketKey: string | null; forkFrom?: string | null;
+    id: string; source: string; machine?: string; title: string; ticketKey: string | null; forkFrom?: string | null;
     messageCount?: number; startedAt: Date; lastMessageAt: Date;
   }) {
     return this.db.chatSession.create({ data });
@@ -366,8 +395,13 @@ export class StorageService {
     return this.db.chatMessage.count({ where: { sessionId, state: { in: states } } });
   }
 
-  getQueuedChatMessages(take: number) {
-    return this.db.chatMessage.findMany({ where: { state: 'queued', role: 'user' }, orderBy: { id: 'asc' }, take });
+  async getQueuedChatMessages(machine: string, take: number) {
+    const rows = await this.db.$queryRaw<Array<{ id: number | bigint; sessionId: string; text: string }>>(Prisma.sql`
+      SELECT m."id", m."sessionId", m."text" FROM "ChatMessage" m
+      JOIN "ChatSession" s ON s."id" = m."sessionId"
+      WHERE m."state" = 'queued' AND m."role" = 'user' AND s."source" = 'dock' AND s."machine" = ${machine}
+      ORDER BY m."id" ASC LIMIT ${take}`);
+    return rows.map((row) => ({ id: Number(row.id), sessionId: row.sessionId, text: row.text }));
   }
 
   /** The state check is part of the write, so two bridges cannot take the same message. */
