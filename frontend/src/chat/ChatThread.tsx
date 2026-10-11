@@ -137,6 +137,17 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
   }, [messages]);
 
   useEffect(() => {
+    const element = scrollRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(() => {
+      if (stickRef.current) element.scrollTop = element.scrollHeight;
+    });
+    observer.observe(element);
+    if (element.lastElementChild) observer.observe(element.lastElementChild);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
     const newest = newestAssistantId(messages);
     if (newest > 0) chatStore.markSeen(sessionId, newest);
   }, [messages, sessionId]);
@@ -175,7 +186,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     <div className={cn('flex min-h-0 flex-col', className)}>
       {session && <div className="flex flex-none items-center gap-2 border-b border-border bg-surface-0 px-3.5 py-1.5 font-mono text-[0.66rem] text-muted-foreground"><span>Runs on</span><MachineChip name={machine} online={machineUp} /></div>}
       <SessionStatusLine sessionId={sessionId} className="flex-none bg-surface-0" />
-      <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto px-3.5 py-3" role="log" aria-label="Conversation">
+      <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3.5 py-3" role="log" aria-label="Conversation">
         {loadingOlder && <p className="pb-2 text-center font-mono text-[0.66rem] text-muted-foreground" role="status">Loading older messages...</p>}
         {!loaded && !loadError && !missing && <p className="py-6 text-center text-sm text-muted-foreground" role="status">Loading the conversation...</p>}
         {missing && <p className="py-6 text-center text-pretty text-sm text-muted-foreground">This session no longer exists. Close this tab or pick another session.</p>}
@@ -188,10 +199,10 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
               <span aria-hidden="true">›</span><span className="min-w-0 break-words">{message.text}</span>
             </li>
           ) : (
-            <li key={message.id} className={cn('flex max-w-[86%] flex-col', message.role === 'user' ? 'items-end self-end' : 'items-start self-start')}>
+            <li key={message.id} className={cn('flex min-w-0 max-w-[86%] flex-col', message.role === 'user' ? 'items-end self-end' : 'items-start self-start')}>
               <p
                 className={cn(
-                  'whitespace-pre-wrap break-words rounded-[10px] border px-3 py-2 text-[0.82rem] leading-relaxed [overflow-wrap:anywhere]',
+                  'max-w-full whitespace-pre-wrap break-words rounded-[10px] border px-3 py-2 text-[0.82rem] leading-relaxed [overflow-wrap:anywhere]',
                   message.role === 'user' ? 'rounded-br-xs border-accent/30 bg-accent-dim' : 'rounded-bl-xs border-border bg-surface-1',
                   isOptimistic(message) && 'opacity-60',
                 )}
@@ -206,7 +217,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
         </ol>
       </div>
 
-      <div className="flex flex-col gap-1.5 border-t border-border bg-surface-0 px-3.5 py-2.5">
+      <div className="flex flex-col gap-1.5 border-t border-border bg-surface-0 px-3.5 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))]">
         {status === 'queued' && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-secondary-foreground" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" />Queued · waiting for the {machine} bridge to pick it up</p>}
         {status === 'running' && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-status-merged" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">Running{session?.statusDetail ? ` · ${session.statusDetail}` : ''}</span></p>}
         {status === 'error' && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The last turn failed{session?.statusDetail ? `: ${session.statusDetail}` : '.'}</p>}
@@ -224,7 +235,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
         )}
         <div className="flex items-end gap-2">
           <textarea
-            className="max-h-40 min-h-[40px] min-w-0 flex-1 resize-none rounded-sm border border-border bg-surface-1 px-3 py-2 font-body text-[0.82rem] text-foreground placeholder:text-muted-foreground focus-visible:border-border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-50"
+            className="max-h-40 min-h-[40px] min-w-0 max-[900px]:min-h-11 flex-1 resize-none rounded-sm border border-border bg-surface-1 px-3 py-2 font-body text-[0.82rem] text-foreground placeholder:text-muted-foreground focus-visible:border-border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-50"
             rows={2}
             maxLength={MAX_TEXT}
             value={draft}
@@ -234,7 +245,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={handleKeyDown}
           />
-          <Button size="sm" variant="primary" className="h-10" disabled={Boolean(blocker) || missing || !draft.trim()} aria-label="Send message" aria-describedby={blocker ? blockerId : undefined} onClick={() => void send()}>
+          <Button size="sm" variant="primary" className="h-10 max-[900px]:h-11 max-[900px]:min-w-11" disabled={Boolean(blocker) || missing || !draft.trim()} aria-label="Send message" aria-describedby={blocker ? blockerId : undefined} onClick={() => void send()}>
             <SendHorizontal size={14} aria-hidden="true" />Send
           </Button>
         </div>

@@ -61,3 +61,12 @@
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-border-glow);
 }
+
+@media (max-width: 1023px), (pointer: coarse) {
+  input,
+  textarea,
+  select,
+  [contenteditable]:not([contenteditable='false']) {
+    font-size: 16px;
+  }
+}

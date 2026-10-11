@@ -8,10 +8,35 @@ const GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
 const OAUTH_STATE_NAMESPACE = 'google-oauth-state';
 const OAUTH_STATE_TTL_SECONDS = 30 * 60;
+const FAILURE_BACKOFF_MS = 60 * 1000;
+const SIGN_IN_REJECTED_MESSAGE = 'Google rejected the saved sign-in. Connect Google Calendar again in Settings.';
+const REQUEST_REJECTED_MESSAGE = 'Google rejected the calendar request. Check the Calendar ID in Settings.';
+const TEMPORARY_FAILURE_MESSAGE = 'Google Calendar could not be reached. DOCK will retry shortly.';
 
 interface OAuthState {
   value: string;
   expiresAt: number;
+}
+
+interface CalendarFailure {
+  credential: string;
+  message: string;
+  retryAt: number;
+}
+
+export class CalendarUnavailableError extends Error {
+  constructor(message: string, readonly retryable: boolean, readonly logLine: string) {
+    super(message);
+  }
+}
+
+function googleErrorLine(error: unknown): string {
+  const response = (error as { response?: { status?: number; data?: { error?: string | { status?: string; message?: string }; error_description?: string } } })?.response;
+  const data = response?.data;
+  const parts = typeof data?.error === 'string'
+    ? [data.error, data.error_description]
+    : [data?.error?.status, data?.error?.message];
+  return [`status=${response?.status ?? 'none'}`, ...parts.filter((part) => typeof part === 'string' && part)].join(' ');
 }
 
 export interface CalendarEvent {
@@ -41,6 +66,7 @@ export function normalizeCalendarEvent(event: any, calendarId: string): Calendar
 
 export class GoogleCalendarService {
   private readonly states = new Map<string, OAuthState>();
+  private failure: CalendarFailure | null = null;
 
   constructor(private readonly storage = new StorageService()) {}
 
@@ -114,6 +140,7 @@ export class GoogleCalendarService {
     });
     const refreshToken = response.data?.refresh_token || settings.googleRefreshToken;
     if (!refreshToken) throw new Error('Google did not return a refresh token');
+    this.failure = null;
     if (response.data?.refresh_token) {
       await this.storage.upsertSetting('googleRefreshToken', refreshToken, 'Google Calendar OAuth refresh token');
     }
@@ -133,6 +160,12 @@ export class GoogleCalendarService {
     const response = await axios.post(GOOGLE_TOKEN_URL, body.toString(), {
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       timeout: 10000,
+    }).catch((error) => {
+      const status = error?.response?.status;
+      if (status === 400 || status === 401) {
+        throw new CalendarUnavailableError(SIGN_IN_REJECTED_MESSAGE, false, `token refresh rejected ${googleErrorLine(error)}`);
+      }
+      throw error;
     });
     if (!response.data?.access_token) throw new Error('Google access token refresh failed');
     return response.data.access_token;
@@ -157,26 +190,59 @@ export class GoogleCalendarService {
     const cached = await this.storage.getCache('google-calendar', cacheKey).catch(() => null);
     if (Array.isArray(cached)) return cached;
 
-    const token = await this.accessToken(settings);
-    const response = await axios.get(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-        params: {
-          timeMin: from.toISOString(),
-          timeMax: to.toISOString(),
-          singleEvents: true,
-          orderBy: 'startTime',
-          maxResults: limit,
+    const credential = createHash('sha256')
+      .update([settings.googleClientId, settings.googleClientSecret, settings.googleRefreshToken].join('\n'))
+      .digest('hex');
+    if (this.failure?.credential === credential && Date.now() < this.failure.retryAt) {
+      throw new CalendarUnavailableError(this.failure.message, true, '');
+    }
+
+    try {
+      const token = await this.accessToken(settings);
+      const response = await axios.get(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          params: {
+            timeMin: from.toISOString(),
+            timeMax: to.toISOString(),
+            singleEvents: true,
+            orderBy: 'startTime',
+            maxResults: limit,
+          },
+          timeout: 10000,
         },
-        timeout: 10000,
-      },
-    );
-    const events = (response.data?.items || [])
-      .map((event: any) => normalizeCalendarEvent(event, calendarId))
-      .filter((event: CalendarEvent | null): event is CalendarEvent => event !== null);
-    await this.storage.upsertCache('google-calendar', cacheKey, events, 300).catch(() => undefined);
-    return events;
+      );
+      const events = (response.data?.items || [])
+        .map((event: any) => normalizeCalendarEvent(event, calendarId))
+        .filter((event: CalendarEvent | null): event is CalendarEvent => event !== null);
+      this.failure = null;
+      await this.storage.upsertCache('google-calendar', cacheKey, events, 300).catch(() => undefined);
+      return events;
+    } catch (error) {
+      throw this.recordFailure(credential, error);
+    }
+  }
+
+  lastError(): string | null {
+    return this.failure?.message ?? null;
+  }
+
+  private recordFailure(credential: string, error: unknown): CalendarUnavailableError {
+    const status = (error as { response?: { status?: number } })?.response?.status;
+    const known = error instanceof CalendarUnavailableError ? error : null;
+    const message = known?.message
+      ?? (status === 400 || status === 404 ? REQUEST_REJECTED_MESSAGE : TEMPORARY_FAILURE_MESSAGE);
+    const logLine = known?.logLine ?? `events request failed ${googleErrorLine(error)}`;
+    if (this.failure?.credential !== credential || this.failure.message !== message) {
+      console.warn(`[Google Calendar] ${logLine}`);
+    }
+    this.failure = {
+      credential,
+      message,
+      retryAt: known && !known.retryable ? Number.POSITIVE_INFINITY : Date.now() + FAILURE_BACKOFF_MS,
+    };
+    return new CalendarUnavailableError(message, this.failure.retryAt !== Number.POSITIVE_INFINITY, logLine);
   }
 
   async disconnect(): Promise<void> {
@@ -186,6 +252,7 @@ export class GoogleCalendarService {
         headers: { 'content-type': 'application/x-www-form-urlencoded' }, timeout: 10000,
       }).catch(() => undefined);
     }
+    this.failure = null;
     await this.storage.deleteSetting('googleRefreshToken');
   }
 }

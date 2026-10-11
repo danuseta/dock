@@ -10,6 +10,7 @@ import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy'
 import { ChatThread } from '../chat/ChatThread';
 import { LimitsLine, SessionStatusView } from '../chat/StatusLine';
 import { useChatStatus } from '../chat/useChatStatus';
+import { useFullViewport } from '../chat/useFullViewport';
 import { MachineChip, MachinePicker } from '../chat/MachineControls';
 import { useMachineChoice } from '../chat/useMachineChoice';
 import { SLOW_POLL_MS, machineOf, machineOnline, relativeTime, type ChatSession } from '../chat/messages';
@@ -109,6 +110,8 @@ const SessionsPage: React.FC = () => {
     }
   };
 
+  useFullViewport(Boolean(selected), '(max-width: 900px)');
+
   if (isInitialQueryLoading(loading, data)) return <Page width="full"><LoadingSkeleton /></Page>;
 
   return (
@@ -121,7 +124,7 @@ const SessionsPage: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <MachinePicker machines={machines} value={machine} onChange={choose} disabled={creating} />
-          <Button size="sm" variant="primary" disabled={creating} onClick={() => void create({ machine })}><Plus size={14} aria-hidden="true" />New session</Button>
+          <Button size="sm" variant="primary" className="max-[900px]:h-11" disabled={creating} onClick={() => void create({ machine })}><Plus size={14} aria-hidden="true" />New session</Button>
         </div>
       </PageHeader>
 
@@ -131,7 +134,7 @@ const SessionsPage: React.FC = () => {
         <Card className={cn('flex h-[calc(100dvh-196px)] min-h-[420px] max-[900px]:h-[calc(100dvh-320px)] flex-col bg-surface-0 p-0', selected && 'max-[900px]:hidden')}>
           <div className="relative flex-none border-b border-border p-3">
             <Search size={14} className="pointer-events-none absolute top-1/2 left-6 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-            <Input className="h-9 pl-9 text-[0.82rem]" type="search" value={searchText} placeholder="Search every message..." aria-label="Search messages" onChange={(event) => setSearchText(event.target.value)} />
+            <Input className="h-9 pl-9 text-[0.82rem] max-[900px]:h-11" type="search" value={searchText} placeholder="Search every message..." aria-label="Search messages" onChange={(event) => setSearchText(event.target.value)} />
           </div>
           <p className={cn(sectionLabel, 'flex flex-none items-center justify-between px-3.5 pt-3 pb-1.5')}>
             <span>{searching ? `Results for "${query}"` : 'Sessions'}</span>
@@ -178,7 +181,7 @@ const SessionsPage: React.FC = () => {
           </div>
         </Card>
 
-        <Card className={cn('flex h-[calc(100dvh-196px)] min-h-[420px] max-[900px]:h-[calc(100dvh-320px)] flex-col bg-surface-0 p-0', !selected && 'max-[900px]:hidden')}>
+        <Card className={cn('flex h-[calc(100dvh-196px)] min-h-[420px] max-[900px]:h-[calc(100dvh-320px)] flex-col bg-surface-0 p-0', !selected && 'max-[900px]:hidden', selected && 'max-[900px]:fixed max-[900px]:inset-x-0 max-[900px]:top-[var(--vv-top,0px)] max-[900px]:z-[45] max-[900px]:h-[var(--vv-h,100dvh)] max-[900px]:min-h-0 max-[900px]:rounded-none max-[900px]:border-0')}>
           {!selected ? (
             <div className="grid flex-1 place-items-center p-6 text-center">
               <div>
@@ -188,25 +191,27 @@ const SessionsPage: React.FC = () => {
             </div>
           ) : (
             <>
-              <div className="flex flex-none flex-wrap items-center gap-2 border-b border-border px-3.5 py-2.5">
-                <Button size="sm" variant="ghost" className="hidden h-7 px-2 max-[900px]:inline-flex" aria-label="Back to the session list" onClick={() => select(null)}><ArrowLeft size={14} aria-hidden="true" /></Button>
+              <div className="flex flex-none flex-wrap items-center gap-2 border-b border-border px-3.5 pt-[max(0.625rem,env(safe-area-inset-top))] pb-2.5">
+                <Button size="sm" variant="ghost" className="hidden h-7 px-2 max-[900px]:inline-flex max-[900px]:h-11 max-[900px]:min-w-11" aria-label="Back to the session list" onClick={() => select(null)}><ArrowLeft size={14} aria-hidden="true" /></Button>
+                <div className="contents max-[900px]:order-3 max-[900px]:flex max-[900px]:basis-full max-[900px]:flex-wrap max-[900px]:items-center max-[900px]:gap-2">
                 <SourceChip source={selected.source} />
                 {selected.source === 'cli' && <span className={cn(chip, 'border-border text-muted-foreground')}>READ-ONLY</span>}
                 {selected.ticketKey && <span className={cn(chip, 'border-accent/30 bg-accent-dim text-accent')}>{selected.ticketKey}</span>}
+                </div>
                 {titleDraft === null ? (
-                  <h2 className="min-w-0 flex-1 truncate font-display text-[0.95rem] font-bold" title={titleOf(selected)}>{titleOf(selected)}</h2>
+                  <h2 className="min-w-0 flex-1 truncate font-display text-[0.95rem] font-bold max-[900px]:order-1" title={titleOf(selected)}>{titleOf(selected)}</h2>
                 ) : (
-                  <form className="flex min-w-0 flex-1 items-center gap-1.5" onSubmit={(event) => { event.preventDefault(); void saveTitle(); }}>
-                    <Input className="h-8 min-w-0 flex-1 px-2.5 text-[0.82rem]" value={titleDraft} maxLength={TITLE_MAX} aria-label="Session title" autoFocus onChange={(event) => setTitleDraft(event.target.value)} />
-                    <Button size="sm" type="submit" variant="primary" disabled={renaming || !titleDraft.trim()}>Save</Button>
-                    <Button size="sm" variant="ghost" onClick={() => setTitleDraft(null)}>Cancel</Button>
+                  <form className="flex min-w-0 flex-1 items-center gap-1.5 max-[900px]:order-1" onSubmit={(event) => { event.preventDefault(); void saveTitle(); }}>
+                    <Input className="h-8 min-w-0 flex-1 px-2.5 text-[0.82rem] max-[900px]:h-11" value={titleDraft} maxLength={TITLE_MAX} aria-label="Session title" autoFocus onChange={(event) => setTitleDraft(event.target.value)} />
+                    <Button size="sm" type="submit" variant="primary" className="max-[900px]:h-11" disabled={renaming || !titleDraft.trim()}>Save</Button>
+                    <Button size="sm" variant="ghost" className="max-[900px]:h-11" onClick={() => setTitleDraft(null)}>Cancel</Button>
                   </form>
                 )}
                 {titleDraft === null && (
-                  <div className="flex flex-none items-center gap-1">
-                    {selected.source === 'dock' && <Button size="sm" className="h-7" onClick={() => chatStore.openSession(selected.id)}>Open in chat</Button>}
-                    <Button size="sm" variant="ghost" className="h-7 px-2" aria-label="Rename session" title="Rename" onClick={() => setTitleDraft(selected.title)}><Pencil size={13} aria-hidden="true" /></Button>
-                    <Button size="sm" variant="ghost" className="h-7 px-2" aria-label="Delete session" title="Delete" onClick={() => { setActionError(''); setDeleteTarget(selected); }}><Trash2 size={13} aria-hidden="true" /></Button>
+                  <div className="flex flex-none items-center gap-1 max-[900px]:order-2">
+                    {selected.source === 'dock' && <Button size="sm" className="h-7 max-[900px]:h-11" onClick={() => chatStore.openSession(selected.id)}>Open in chat</Button>}
+                    <Button size="sm" variant="ghost" className="h-7 px-2 max-[900px]:h-11 max-[900px]:min-w-11" aria-label="Rename session" title="Rename" onClick={() => setTitleDraft(selected.title)}><Pencil size={13} aria-hidden="true" /></Button>
+                    <Button size="sm" variant="ghost" className="h-7 px-2 max-[900px]:h-11 max-[900px]:min-w-11" aria-label="Delete session" title="Delete" onClick={() => { setActionError(''); setDeleteTarget(selected); }}><Trash2 size={13} aria-hidden="true" /></Button>
                   </div>
                 )}
               </div>

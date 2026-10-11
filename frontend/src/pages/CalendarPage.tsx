@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@apollo/client';
 import { CalendarDays, ChevronLeft, ChevronRight, ExternalLink, List } from 'lucide-react';
 import { GET_CALENDAR, GET_SETTINGS } from '../graphql/queries';
@@ -30,13 +30,17 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onNavigate }) => {
     timeMin: month.toISOString(),
     timeMax: new Date(month.getFullYear(), month.getMonth() + 1, 1).toISOString(),
   }), [month]);
-  const { data: settingsData } = useQuery(GET_SETTINGS, CACHED_QUERY_OPTIONS);
+  const { data: settingsData, refetch: refetchSettings } = useQuery(GET_SETTINGS, CACHED_QUERY_OPTIONS);
   const { data, loading, error, refetch } = useQuery(GET_CALENDAR, {
     ...CACHED_QUERY_OPTIONS,
     variables: { ...range, maxResults: 50 },
   });
   const connected = settingsData?.settings?.googleCalendarConnected;
+  const calendarError: string | null = settingsData?.settings?.googleCalendarError || null;
   const events: CalendarEvent[] = data?.calendarEvents || [];
+  useEffect(() => {
+    if (data && connected) void refetchSettings();
+  }, [data, connected, refetchSettings]);
   const monthLabel = month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
   const selectView = (nextView: CalendarView) => {
@@ -76,6 +80,12 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onNavigate }) => {
         </Card>
       ) : error ? (
         <Card className="border-status-conflict text-status-conflict" role="alert">Calendar failed to load: {error.message}</Card>
+      ) : calendarError ? (
+        <Card className="border-status-conflict py-10 text-center" role="alert">
+          <h2 className="text-balance font-display text-xl font-bold text-status-conflict">Google Calendar is not loading</h2>
+          <p className="mx-auto mt-2 max-w-2xl text-pretty text-muted-foreground">{calendarError}</p>
+          <Button variant="primary" className="mt-5" onClick={() => onNavigate('/settings')}>Open Settings</Button>
+        </Card>
       ) : <>
         <Card className="mb-4 flex flex-wrap items-center justify-between gap-3 py-3">
           <div className="flex items-center gap-2">

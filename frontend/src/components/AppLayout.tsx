@@ -6,6 +6,7 @@ import { NAVIGATION_PREFERENCES_EVENT, NavigationPreferences, readNavigationPref
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 import { ChatDock } from '../chat/ChatDock';
+import { version as appVersion } from '../../package.json';
 
 interface AppLayoutProps { currentPath: string; onNavigate: (path: string) => void; children: React.ReactNode; }
 
@@ -131,7 +132,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, c
         <span className={cn(
           'hidden whitespace-nowrap font-mono text-[0.67rem] font-bold text-muted-foreground min-[761px]:block',
           isSidebar ? 'min-[761px]:w-full min-[761px]:border-t min-[761px]:border-border min-[761px]:px-2 min-[761px]:pt-[13px] min-[761px]:pb-0.5 min-[761px]:text-center' : 'min-[761px]:border-l min-[761px]:border-border min-[761px]:pl-2',
-        )}>v1.0.1</span>
+        )}>v{appVersion}</span>
         {isSidebar && (
           <button
             type="button"

@@ -15,6 +15,20 @@ const SENSITIVE_KEYS = new Set([
   'googleRefreshToken',
 ]);
 
+export interface ChatActivityInput {
+  eventId: string;
+  parentId: string | null;
+  kind: string;
+  agent: string;
+  name: string;
+  label: string;
+  summary: string;
+  detail: string | null;
+  status: string;
+  startedAt: Date;
+  endedAt: Date | null;
+}
+
 export class StorageService {
   constructor(private readonly db: PrismaClient = prisma) {}
 
@@ -341,8 +355,9 @@ export class StorageService {
   }
 
   async deleteChatSession(id: string) {
-    const [, sessions] = await this.db.$transaction([
+    const [, , sessions] = await this.db.$transaction([
       this.db.chatMessage.deleteMany({ where: { sessionId: id } }),
+      this.db.chatActivity.deleteMany({ where: { sessionId: id } }),
       this.db.chatSession.deleteMany({ where: { id } }),
     ]);
     return sessions.count > 0;
@@ -370,8 +385,144 @@ export class StorageService {
     });
     if (oldestKept) {
       await this.db.chatMessage.deleteMany({ where: { sessionId, id: { lt: oldestKept.id } } });
+      await this.deleteChatActivityBefore(sessionId, oldestKept.id);
     }
     return this.db.chatMessage.count({ where: { sessionId } });
+  }
+
+  countChatActivity(sessionId: string, turnId: number) {
+    return this.db.chatActivity.count({ where: { sessionId, turnId } });
+  }
+
+  deleteChatActivityBefore(sessionId: string, turnId: number) {
+    return this.db.chatActivity.deleteMany({ where: { sessionId, turnId: { lt: turnId } } });
+  }
+
+  upsertChatActivity(sessionId: string, turnId: number, events: ChatActivityInput[], maxRows: number, droppedId: string, at: Date) {
+    return this.db.$transaction(async (tx) => {
+      await tx.$executeRaw`UPDATE "ChatSession" SET "id" = "id" WHERE "id" = ${sessionId}`;
+      let seq = (await tx.chatActivity.aggregate({ where: { sessionId }, _max: { seq: true } }))._max.seq ?? 0;
+      const known = new Map((await tx.chatActivity.findMany({
+        where: { sessionId, turnId, eventId: { in: events.map((event) => event.eventId) } },
+      })).map((row) => [row.eventId, row]));
+      let used = await tx.chatActivity.count({ where: { sessionId, turnId, eventId: { not: droppedId } } });
+      let accepted = 0;
+      let dropped = 0;
+      for (const event of events) {
+        const row = known.get(event.eventId);
+        if (!row) {
+          if (used >= maxRows) {
+            dropped += 1;
+            continue;
+          }
+          used += 1;
+          seq += 1;
+          known.set(event.eventId, await tx.chatActivity.create({ data: { sessionId, turnId, ...event, seq } }));
+        } else if (row.status !== 'running' && event.status === 'running') {
+          accepted += 1;
+          continue;
+        } else {
+          const next = {
+            status: event.status,
+            endedAt: event.endedAt ?? row.endedAt,
+            label: event.label,
+            summary: event.summary,
+            detail: event.detail ?? row.detail,
+          };
+          const changed = next.status !== row.status || next.label !== row.label || next.summary !== row.summary
+            || next.detail !== row.detail || next.endedAt?.getTime() !== row.endedAt?.getTime();
+          if (changed) {
+            seq += 1;
+            known.set(event.eventId, await tx.chatActivity.update({ where: { id: row.id }, data: { ...next, seq } }));
+          }
+        }
+        accepted += 1;
+      }
+      if (dropped > 0) {
+        const before = known.get(droppedId) ?? await tx.chatActivity.findUnique({
+          where: { sessionId_turnId_eventId: { sessionId, turnId, eventId: droppedId } },
+        });
+        const total = Number(before?.summary ?? 0) + dropped;
+        const data = { label: `${total} steps not shown`, summary: String(total), status: 'ok', endedAt: at };
+        seq += 1;
+        if (before) await tx.chatActivity.update({ where: { id: before.id }, data: { ...data, seq } });
+        else {
+          await tx.chatActivity.create({
+            data: { sessionId, turnId, eventId: droppedId, kind: 'note', agent: 'main', name: 'dropped', startedAt: at, ...data, seq },
+          });
+        }
+      }
+      return { accepted, dropped, seq };
+    });
+  }
+
+  async getChatActivity(
+    sessionId: string,
+    filter: { afterSeq?: number | null; fromTurnId?: number | null; beforeTurnId?: number | null },
+    take: number,
+  ) {
+    const turnId = {
+      ...(filter.fromTurnId != null ? { gte: filter.fromTurnId } : {}),
+      ...(filter.beforeTurnId != null ? { lt: filter.beforeTurnId } : {}),
+    };
+    const rows = await this.db.chatActivity.findMany({
+      where: { sessionId, ...(filter.afterSeq != null ? { seq: { gt: filter.afterSeq } } : {}), turnId },
+      select: {
+        id: true, sessionId: true, turnId: true, eventId: true, parentId: true, kind: true, agent: true, name: true,
+        label: true, summary: true, status: true, seq: true, startedAt: true, endedAt: true,
+      },
+      orderBy: [{ seq: 'asc' }, { id: 'asc' }],
+      take,
+    });
+    const withDetail = new Set((await this.db.chatActivity.findMany({
+      where: { id: { in: rows.map((row) => row.id) }, detail: { not: null } }, select: { id: true },
+    })).map((row) => row.id));
+    return rows.map((row) => ({ ...row, hasDetail: withDetail.has(row.id) }));
+  }
+
+  async getChatActivityDetail(sessionId: string, id: number) {
+    return (await this.db.chatActivity.findFirst({ where: { id, sessionId }, select: { detail: true } }))?.detail ?? null;
+  }
+
+  closeRunningChatActivity(sessionId: string, turnId: number | null, status: string, endedAt: Date) {
+    return this.db.$transaction(async (tx) => {
+      const running = await tx.chatActivity.findMany({
+        where: { sessionId, status: 'running', ...(turnId === null ? {} : { turnId }) }, select: { id: true },
+      });
+      if (running.length === 0) return 0;
+      let seq = (await tx.chatActivity.aggregate({ where: { sessionId }, _max: { seq: true } }))._max.seq ?? 0;
+      for (const row of running) {
+        seq += 1;
+        await tx.chatActivity.update({ where: { id: row.id }, data: { status, endedAt, seq } });
+      }
+      return running.length;
+    });
+  }
+
+  async pruneChatActivity({ detailBefore, rowsBefore, maxRows }: { detailBefore: Date; rowsBefore: Date; maxRows: number }) {
+    const cutDetail = await this.db.chatActivity.updateMany({
+      where: { startedAt: { lt: detailBefore }, detail: { not: null } }, data: { detail: null },
+    });
+    const old = await this.db.chatActivity.deleteMany({ where: { startedAt: { lt: rowsBefore } } });
+    let evicted = 0;
+    for (;;) {
+      const perMachine = await this.db.$queryRaw<Array<{ machine: string; rows: number | bigint }>>(Prisma.sql`
+        SELECT COALESCE(s."machine", '') AS "machine", COUNT(*) AS "rows" FROM "ChatActivity" a
+        LEFT JOIN "ChatSession" s ON s."id" = a."sessionId" GROUP BY COALESCE(s."machine", '')`);
+      const counts = perMachine.map((row) => ({ machine: row.machine, rows: Number(row.rows) })).sort((a, b) => b.rows - a.rows);
+      const excess = counts.reduce((sum, row) => sum + row.rows, 0) - maxRows;
+      if (excess <= 0) break;
+      const tied = counts.filter((row) => row.rows === counts[0].rows).length;
+      const gap = counts[0].rows - (counts.find((row) => row.rows < counts[0].rows)?.rows ?? 0);
+      const remove = Math.min(Math.ceil(excess / tied), gap);
+      const removed = await this.db.$executeRaw(Prisma.sql`
+        DELETE FROM "ChatActivity" WHERE "id" IN (
+          SELECT a."id" FROM "ChatActivity" a LEFT JOIN "ChatSession" s ON s."id" = a."sessionId"
+          WHERE COALESCE(s."machine", '') = ${counts[0].machine} ORDER BY a."id" ASC LIMIT ${remove})`);
+      if (removed === 0) break;
+      evicted += removed;
+    }
+    return { detailCleared: cutDetail.count, expired: old.count, evicted };
   }
 
   getChatMessage(id: number) {
