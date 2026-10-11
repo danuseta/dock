@@ -400,6 +400,7 @@ export class StorageService {
 
   upsertChatActivity(sessionId: string, turnId: number, events: ChatActivityInput[], maxRows: number, droppedId: string, at: Date) {
     return this.db.$transaction(async (tx) => {
+      await tx.$executeRaw`UPDATE "ChatSession" SET "id" = "id" WHERE "id" = ${sessionId}`;
       let seq = (await tx.chatActivity.aggregate({ where: { sessionId }, _max: { seq: true } }))._max.seq ?? 0;
       const known = new Map((await tx.chatActivity.findMany({
         where: { sessionId, turnId, eventId: { in: events.map((event) => event.eventId) } },

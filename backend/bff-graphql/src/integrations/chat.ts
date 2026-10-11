@@ -642,13 +642,16 @@ export class ChatService {
       throw new OrchestratorInputError('replyTo is not a message of this session');
     }
     const open = replyTo.state === 'taken';
-    const write = this.activityWrites.then(() => this.storage.upsertChatActivity(
-      session.id, replyTo.id, open ? request.events : [], MAX_ACTIVITY_PER_TURN, SERVER_DROPPED_ID, now,
-    ));
+    const write = this.activityWrites.then(async () => {
+      const result = await this.storage.upsertChatActivity(
+        session.id, replyTo.id, open ? request.events : [], MAX_ACTIVITY_PER_TURN, SERVER_DROPPED_ID, now,
+      );
+      if (open) await this.storage.updateChatSession(session.id, { lastDeltaAt: now });
+      await this.pruneActivity(now);
+      return result;
+    });
     this.activityWrites = write.catch(() => undefined);
     const { accepted, dropped, seq } = await write;
-    if (open) await this.storage.updateChatSession(session.id, { lastDeltaAt: now });
-    await this.pruneActivity(now);
     return { accepted, seq, dropped, closed: !open };
   }
 }
