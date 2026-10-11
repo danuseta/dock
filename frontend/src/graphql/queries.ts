@@ -667,6 +667,38 @@ export const GET_CHAT_MESSAGES = gql`
   }
 `;
 
+export const CHAT_ACTIVITY_FIELDS = `
+  id
+  sessionId
+  turnId
+  eventId
+  parentId
+  kind
+  agent
+  name
+  label
+  summary
+  status
+  hasDetail
+  seq
+  startedAt
+  endedAt
+`;
+
+export const GET_CHAT_ACTIVITY = gql`
+  query GetChatActivity($sessionId: ID!, $afterSeq: Int, $fromTurnId: Int, $beforeTurnId: Int, $limit: Int) {
+    chatActivity(sessionId: $sessionId, afterSeq: $afterSeq, fromTurnId: $fromTurnId, beforeTurnId: $beforeTurnId, limit: $limit) {
+      ${CHAT_ACTIVITY_FIELDS}
+    }
+  }
+`;
+
+export const GET_CHAT_ACTIVITY_DETAIL = gql`
+  query GetChatActivityDetail($sessionId: ID!, $id: Int!) {
+    chatActivityDetail(sessionId: $sessionId, id: $id)
+  }
+`;
+
 export const SEARCH_CHAT = gql`
   query SearchChat($query: String!, $limit: Int) {
     chatSearch(query: $query, limit: $limit) {

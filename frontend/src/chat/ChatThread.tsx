@@ -11,6 +11,9 @@ import {
 } from './messages';
 import { MachineChip } from './MachineControls';
 import { SessionStatusLine } from './StatusLine';
+import { ActivityGroup } from './activity/ActivityGroup';
+import { isThreadGroup } from './activity/activity';
+import { useTurnActivity } from './activity/useTurnActivity';
 import { chatStore } from './store';
 
 interface ChatThreadProps {
@@ -51,6 +54,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
   );
   const session = data?.chatSession;
   const status = session?.status;
+  const activity = useTurnActivity(sessionId, status, messages, scrollRef);
   const busy = isTurnInProgress(status, messages);
   const pollMs = pollInterval(busy);
   const machine = machineOf(session);
@@ -134,7 +138,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     } else if (stickRef.current) {
       element.scrollTop = element.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, activity.byTurn]);
 
   useEffect(() => {
     const element = scrollRef.current;
@@ -194,7 +198,9 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
           <p className="py-6 text-center text-pretty text-sm text-muted-foreground">{readOnly ? 'This session has no messages.' : session?.forkFrom ? 'Continued from a terminal session. Claude Code keeps that conversation; what you send from here is added below.' : `Nothing here yet. Your first message starts a Claude Code session on ${place}.`}</p>
         )}
         <ol className="flex flex-col gap-2">
-          {messages.map((message) => (message.role === 'tool' ? (
+          {activity.items.map((message) => (isThreadGroup(message) ? (
+            <ActivityGroup key={message.key} group={message} live={message.last && message.turnId === activity.liveTurnId} turnRunning={message.turnId === activity.liveTurnId} store={activity.store} stickRef={stickRef} />
+          ) : message.role === 'tool' ? (
             <li key={message.id} className="flex min-w-0 items-baseline gap-1.5 font-mono text-[0.68rem] text-muted-foreground" title={timeOf(message.at)}>
               <span aria-hidden="true">›</span><span className="min-w-0 break-words">{message.text}</span>
             </li>
