@@ -19,6 +19,8 @@ services:
       TRUST_PROXY: "true"
       DOCK_PIN_MODE: ${DOCK_PIN_MODE:-always}
       DOCKER_API_URL: http://docker-proxy:2375
+      BRAIN_SERVICE_URL: ${BRAIN_SERVICE_URL:-}
+      BRAIN_INTERNAL_SECRET: ${BRAIN_INTERNAL_SECRET:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -26,6 +28,7 @@ services:
     networks:
       - default
       - docker-inventory
+      - brain
     mem_limit: 384m
     cpus: 0.75
     security_opt:
@@ -52,4 +55,7 @@ volumes:
 
 networks:
   docker-inventory:
+    internal: true
+  brain:
+    name: dock_brain
     internal: true

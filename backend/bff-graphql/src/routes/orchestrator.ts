@@ -7,6 +7,29 @@ import { StorageService } from '../storage/service';
 
 const clientKey = (request: Request) => request.ip || request.socket.remoteAddress || 'unknown';
 
+export const ingestAuth = (service: OrchestratorService, limiter: PinRateLimiter) => async (request: Request, response: Response, next: express.NextFunction) => {
+  try {
+    const token = bearerToken(request);
+    const machine = token ? await service.authenticateMachine(token) : null;
+    if (machine) {
+      response.locals.machine = machine;
+      next();
+      return;
+    }
+    // Only failures are throttled, so a noisy stranger cannot lock out a valid token.
+    const key = clientKey(request);
+    const retryAfter = limiter.retryAfterSeconds(key);
+    if (retryAfter > 0) {
+      response.status(429).set('retry-after', String(retryAfter)).json({ error: 'Too many failed attempts' });
+      return;
+    }
+    limiter.recordFailure(key);
+    response.status(401).json({ error: 'A valid ingest token is required' });
+  } catch (error) {
+    next(error);
+  }
+};
+
 /**
  * Laptop -> DOCK. Every route needs an ingest token: the PIN session and the
  * Tailscale trust that unlock the dashboard do not apply here.
@@ -18,28 +41,7 @@ export function createOrchestratorIngestRouter(
 ): Router {
   const router = Router();
 
-  router.use(async (request, response, next) => {
-    try {
-      const token = bearerToken(request);
-      const machine = token ? await service.authenticateMachine(token) : null;
-      if (machine) {
-        response.locals.machine = machine;
-        next();
-        return;
-      }
-      // Only failures are throttled, so a noisy stranger cannot lock out a valid token.
-      const key = clientKey(request);
-      const retryAfter = limiter.retryAfterSeconds(key);
-      if (retryAfter > 0) {
-        response.status(429).set('retry-after', String(retryAfter)).json({ error: 'Too many failed attempts' });
-        return;
-      }
-      limiter.recordFailure(key);
-      response.status(401).json({ error: 'A valid ingest token is required' });
-    } catch (error) {
-      next(error);
-    }
-  });
+  router.use(ingestAuth(service, limiter));
 
   const handle = (work: (body: unknown, signal: AbortSignal, machine: string) => Promise<unknown>) => async (request: Request, response: Response) => {
     // A long poll stops when the laptop hangs up, so it cannot take a message nobody is waiting for.
