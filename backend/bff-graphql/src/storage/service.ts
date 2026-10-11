@@ -101,9 +101,9 @@ export class StorageService {
     return this.db.sprintIssueEvents.findUnique({ where: { sprintId } });
   }
 
-  upsertSprintIssueEvents(sprintId: number, issues: string, fetchedAt: Date) {
+  upsertSprintIssueEvents(sprintId: number, issues: string, fetchedAt: Date, labelPool?: string) {
     return this.db.sprintIssueEvents.upsert({
-      where: { sprintId }, update: { issues, fetchedAt }, create: { sprintId, issues, fetchedAt },
+      where: { sprintId }, update: { issues, fetchedAt, labelPool }, create: { sprintId, issues, fetchedAt, labelPool },
     });
   }
 

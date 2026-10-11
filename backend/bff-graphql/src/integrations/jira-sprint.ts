@@ -22,6 +22,7 @@ const ISSUE_FIELDS = [
   'story_points', 'customfield_10016', 'customfield_10028', 'customfield_10034',
 ];
 const PAGE_SIZE = 100;
+const MAX_LABEL_PAGES = 10;
 const CHANGELOG_CONCURRENCY = 3;
 const MAX_RETRIES = 4;
 const REQUEST_TIMEOUT_MS = 30000;
@@ -151,11 +152,21 @@ export class JiraSprintClient {
   }
 
   async fetchSprintIssues(sprintId: number): Promise<SprintIssue[]> {
+    return this.fetchIssues(`sprint = ${Number(sprintId)} ORDER BY created ASC`);
+  }
+
+  async fetchLabelIssues(label: string, projectKeys: string[] = []): Promise<SprintIssue[]> {
+    const quote = (value: string) => `"${value.replace(/["\\]/g, '')}"`;
+    const scope = projectKeys.length ? ` AND project in (${projectKeys.map(quote).join(', ')})` : '';
+    return this.fetchIssues(`labels = ${quote(label)}${scope} ORDER BY created ASC`, MAX_LABEL_PAGES);
+  }
+
+  private async fetchIssues(jql: string, maxPages = Infinity): Promise<SprintIssue[]> {
     const raw: any[] = [];
     let nextPageToken: string | undefined;
-    do {
+    for (let pages = 0; pages === 0 || (nextPageToken && pages < maxPages); pages++) {
       const page = await this.http.post('/rest/api/3/search/jql', {
-        jql: `sprint = ${Number(sprintId)} ORDER BY created ASC`,
+        jql,
         fields: ISSUE_FIELDS,
         expand: 'changelog',
         maxResults: PAGE_SIZE,
@@ -163,7 +174,8 @@ export class JiraSprintClient {
       });
       raw.push(...(page.issues || []));
       nextPageToken = page.nextPageToken;
-    } while (nextPageToken);
+    }
+    if (nextPageToken) throw new Error(`Search stopped after ${maxPages} pages with more results left: ${jql}`);
 
     return mapLimit(raw, CHANGELOG_CONCURRENCY, async (issue) => {
       const changelog = issue.changelog || {};

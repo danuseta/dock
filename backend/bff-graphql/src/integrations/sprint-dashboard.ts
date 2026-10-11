@@ -1,14 +1,16 @@
 import { StorageService } from '../storage/service';
 import { JiraSprintClient, createJiraHttp, type BoardSprint } from './jira-sprint';
 import {
-  DEFAULT_SPRINT_CONFIG, RULES_VERSION, buildTrend, computeSprintMetrics, detectRoster,
-  type SprintConfig, type SprintIssue, type SprintResult,
+  DEFAULT_SPRINT_CONFIG, RULES_VERSION, buildTrend, computeSprintMetrics, detectRoster, sprintLabel,
+  type SprintConfig, type SprintContext, type SprintIssue, type SprintResult,
 } from './sprint-metrics';
 
 const BOARD_KEY = 'sprintBoardId';
 const CONFIG_KEY = 'sprintDashboardConfig';
 const MAX_BACKFILL = 30;
 const STALE_AFTER_MS = 24 * 3600 * 1000;
+const LABEL_SEARCH_FAILED = 'Label search failed: ';
+const LABEL_POOL_MISSING = 'Label pool has not been fetched; run the backfill';
 
 export class SprintBusyError extends Error {
   constructor() {
@@ -44,8 +46,8 @@ export interface SprintStore {
     sprintId: number; name: string; state: string; startDate: Date; endDate: Date;
     result?: string | null; computedAt?: Date | null; lastError?: string | null;
   }): Promise<unknown>;
-  getSprintIssueEvents(sprintId: number): Promise<{ issues: string } | null>;
-  upsertSprintIssueEvents(sprintId: number, issues: string, fetchedAt: Date): Promise<unknown>;
+  getSprintIssueEvents(sprintId: number): Promise<{ issues: string; fetchedAt: Date; labelPool: string | null } | null>;
+  upsertSprintIssueEvents(sprintId: number, issues: string, fetchedAt: Date, labelPool?: string): Promise<unknown>;
 }
 
 export interface RefreshState {
@@ -83,9 +85,16 @@ export function parseSprintConfig(json: string | null | undefined): SprintConfig
   if (!Array.isArray(roster) || roster.some((m: any) => !m || [m.full, m.short, m.token].some((v) => typeof v !== 'string' || !v.trim()))) {
     throw new SprintInputError('Each roster override needs full, short, and token');
   }
+  if (roster.some((m: any) => m.reviewer !== undefined && typeof m.reviewer !== 'boolean')) {
+    throw new SprintInputError('Each roster reviewer flag must be true or false');
+  }
   const config: SprintConfig = { ...DEFAULT_SPRINT_CONFIG, ...parsed, roster };
-  for (const key of ['loadTarget', 'targetPerDev', 'bugMarginPerDev', 'slaDays', 'tzOffsetHours', 'weekendWeight', 'dailyHour'] as const) {
+  for (const key of ['loadTarget', 'targetPerDev', 'bugMarginPerDev', 'slaDays', 'tzOffsetHours', 'dailyHour'] as const) {
     if (typeof config[key] !== 'number' || !Number.isFinite(config[key])) throw new SprintInputError(`Sprint config ${key} must be a number`);
+  }
+  const cutoffs = config.cutoffs;
+  if (!cutoffs || typeof cutoffs !== 'object' || Array.isArray(cutoffs) || Object.values(cutoffs).some((v) => typeof v !== 'string' || Number.isNaN(Date.parse(v)))) {
+    throw new SprintInputError('Sprint config cutoffs must map a sprint label to a date-time');
   }
   if (config.loadTarget <= 0) throw new SprintInputError('Sprint config loadTarget must be above zero');
   if (!Number.isInteger(config.dailyHour) || config.dailyHour < 0 || config.dailyHour > 23) throw new SprintInputError('Sprint config dailyHour must be 0 to 23');
@@ -95,6 +104,15 @@ export function parseSprintConfig(json: string | null | undefined): SprintConfig
 function isCurrent(result: string | null): boolean {
   if (!result) return false;
   try { return JSON.parse(result).rulesVersion === RULES_VERSION; } catch { return false; }
+}
+
+function nextSprintOf<T extends { name: string }>(current: T, all: T[], startOf: (item: T) => number, tzMs: number): T | undefined {
+  const prefixOf = (name: string) => sprintLabel(name).label.replace(/\d+$/, '');
+  const dayOf = (item: T) => Math.floor((startOf(item) + tzMs) / 86400000);
+  const prefix = prefixOf(current.name);
+  return all
+    .filter((other) => prefixOf(other.name) === prefix && dayOf(other) > dayOf(current))
+    .sort((a, b) => startOf(a) - startOf(b))[0];
 }
 
 export class SprintDashboardService {
@@ -137,10 +155,10 @@ export class SprintDashboardService {
     await this.recomputeAll(config);
   }
 
-  private windowOf(row: SnapshotRow) {
+  private windowOf(row: SnapshotRow, next?: SnapshotRow) {
     return {
       id: row.sprintId, name: row.name, state: (row.state === 'active' ? 'active' : 'closed') as 'active' | 'closed',
-      start: row.startDate.toISOString(), end: row.endDate.toISOString(),
+      start: row.startDate.toISOString(), end: row.endDate.toISOString(), nextStart: next?.startDate.toISOString(),
     };
   }
 
@@ -150,18 +168,33 @@ export class SprintDashboardService {
 
   private async recomputeAll(base: SprintConfig): Promise<void> {
     const rows = await this.store.getSprintSnapshots();
-    const stored = new Map<number, SprintIssue[]>();
+    const stored = new Map<number, { issues: SprintIssue[]; fetchedAt: Date; labelPool: string | null }>();
     for (const row of rows) {
       const events = await this.store.getSprintIssueEvents(row.sprintId);
-      if (events) stored.set(row.sprintId, JSON.parse(events.issues) as SprintIssue[]);
-    }
-    const config = { ...base, roster: detectRoster([...stored.values()].flat(), base.roster) };
-    for (const row of rows) {
-      const issues = stored.get(row.sprintId);
-      if (!issues) continue;
+      if (!events) continue;
       try {
-        const result = computeSprintMetrics(this.windowOf(row), issues, config);
-        await this.store.upsertSprintSnapshot({ ...this.identityOf(row), result: JSON.stringify(result), lastError: null });
+        stored.set(row.sprintId, { issues: JSON.parse(events.issues) as SprintIssue[], fetchedAt: events.fetchedAt, labelPool: events.labelPool });
+      } catch (error) {
+        await this.store.upsertSprintSnapshot({ ...this.identityOf(row), lastError: describeError(error) });
+      }
+    }
+    const config = { ...base, roster: detectRoster([...stored.values()].flatMap((entry) => entry.issues), base.roster) };
+    const ordered = [...rows].sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
+    const tzMs = config.tzOffsetHours * 3600 * 1000;
+    for (const row of rows) {
+      const entry = stored.get(row.sprintId);
+      if (!entry) continue;
+      const at = ordered.indexOf(row);
+      try {
+        const context: SprintContext = {
+          fetchedAt: entry.fetchedAt.toISOString(),
+          labelPool: entry.labelPool ? JSON.parse(entry.labelPool) as SprintIssue[] : [],
+          reviewPool: [ordered[at - 1], ordered[at + 1]].flatMap((neighbour) => (neighbour && stored.get(neighbour.sprintId)?.issues) || []),
+        };
+        const next = nextSprintOf(row, rows, (item) => item.startDate.getTime(), tzMs);
+        const lastError = row.lastError?.startsWith(LABEL_SEARCH_FAILED) ? row.lastError : entry.labelPool == null ? LABEL_POOL_MISSING : null;
+        const result = computeSprintMetrics(this.windowOf(row, next), entry.issues, config, context);
+        await this.store.upsertSprintSnapshot({ ...this.identityOf(row), result: JSON.stringify(result), lastError });
       } catch (error) {
         await this.store.upsertSprintSnapshot({ ...this.identityOf(row), lastError: describeError(error) });
       }
@@ -175,17 +208,30 @@ export class SprintDashboardService {
     };
     try {
       const issues = await client.fetchSprintIssues(sprint.id);
+      const inSprint = new Set(issues.map((issue) => issue.key));
+      let labelPool: SprintIssue[] | undefined;
+      let labelError: string | null = null;
+      try {
+        labelPool = (await client.fetchLabelIssues(sprintLabel(sprint.name).label, await this.projectKeys())).filter((issue) => !inSprint.has(issue.key));
+      } catch (error) {
+        labelError = `${LABEL_SEARCH_FAILED}${describeError(error)}`;
+        this.state.error = this.state.error ?? labelError;
+      }
       const fetchedAt = this.now();
-      await this.store.upsertSprintIssueEvents(sprint.id, JSON.stringify(issues), fetchedAt);
+      await this.store.upsertSprintIssueEvents(sprint.id, JSON.stringify(issues), fetchedAt, labelPool && JSON.stringify(labelPool));
       const result = computeSprintMetrics(
         { id: sprint.id, name: sprint.name, state: sprint.state, start: base.startDate.toISOString(), end: base.endDate.toISOString() },
-        issues, config,
+        issues, config, { fetchedAt: fetchedAt.toISOString(), labelPool },
       );
-      await this.store.upsertSprintSnapshot({ ...base, result: JSON.stringify(result), computedAt: fetchedAt, lastError: null });
+      await this.store.upsertSprintSnapshot({ ...base, result: JSON.stringify(result), computedAt: fetchedAt, lastError: labelError });
     } catch (error) {
       await this.store.upsertSprintSnapshot({ ...base, lastError: describeError(error) });
       throw error;
     }
+  }
+
+  private async projectKeys(): Promise<string[]> {
+    return ((await this.setting('jiraProjectKeys')) || '').split(',').map((key) => key.trim()).filter(Boolean);
   }
 
   private async prepare(): Promise<{ client: JiraSprintClient; config: SprintConfig; sprints: BoardSprint[] }> {
@@ -193,8 +239,7 @@ export class SprintDashboardService {
     const client = await this.clientFactory();
     let boardId = await this.boardId();
     if (!boardId) {
-      const projectKeys = ((await this.setting('jiraProjectKeys')) || '').split(',').map((key) => key.trim()).filter(Boolean);
-      boardId = (await client.findBoardId(projectKeys)) || '';
+      boardId = (await client.findBoardId(await this.projectKeys())) || '';
       if (!boardId) throw new SprintInputError('No Scrum board found in Jira for the configured projects');
       await this.store.upsertSetting(BOARD_KEY, boardId, 'Jira board id for the sprint dashboard');
     }
@@ -229,10 +274,13 @@ export class SprintDashboardService {
       const { client, config, sprints } = await this.prepare();
       const wanted = [...sprints].sort((a, b) => Date.parse(b.startDate) - Date.parse(a.startDate)).slice(0, count);
       const existing = new Map((await this.store.getSprintSnapshots()).map((r) => [r.sprintId, r]));
-      const todo = wanted.filter((s) => {
+      const todo: BoardSprint[] = [];
+      for (const s of wanted) {
         const row = existing.get(s.id);
-        return !(row && row.state === 'closed' && s.state === 'closed' && isCurrent(row.result));
-      });
+        const done = row && row.state === 'closed' && s.state === 'closed' && isCurrent(row.result)
+          && (await this.store.getSprintIssueEvents(s.id))?.labelPool != null;
+        if (!done) todo.push(s);
+      }
       this.state.total = todo.length;
       let failed = 0;
       for (const sprint of todo) {
@@ -249,7 +297,17 @@ export class SprintDashboardService {
       this.start('Daily sprint update', 0, async () => {
         const { client, config, sprints } = await this.prepare();
         const existing = new Map((await this.store.getSprintSnapshots()).map((r) => [r.sprintId, r]));
-        const todo = sprints.filter((s) => s.state === 'active' || existing.get(s.id)?.state === 'active');
+        const tzMs = config.tzOffsetHours * 3600 * 1000;
+        const todo: BoardSprint[] = [];
+        for (const s of sprints) {
+          let final = false;
+          if (s.state === 'closed' && existing.has(s.id)) {
+            const next = nextSprintOf(s, sprints, (item) => Date.parse(item.startDate), tzMs);
+            const events = next && await this.store.getSprintIssueEvents(s.id);
+            final = !!events && !!next && events.fetchedAt.getTime() < Date.parse(next.startDate);
+          }
+          if (s.state === 'active' || existing.get(s.id)?.state === 'active' || final) todo.push(s);
+        }
         this.state.total = todo.length;
         let failed = 0;
         for (const sprint of todo) {
