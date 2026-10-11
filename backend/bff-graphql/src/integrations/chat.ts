@@ -317,6 +317,7 @@ function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 export class ChatService {
   private readonly bridgeSeenAt = new Map<string, Date>();
+  private activityWrites: Promise<unknown> = Promise.resolve();
   private readonly sessionStatus = new Map<string, Map<string, ParsedStatus & { receivedAt: Date }>>();
   private readonly limitsSeen = new Map<string, LimitsSeen>();
   private lastActivityPruneAt = 0;
@@ -641,9 +642,11 @@ export class ChatService {
       throw new OrchestratorInputError('replyTo is not a message of this session');
     }
     const open = replyTo.state === 'taken';
-    const { accepted, dropped, seq } = await this.storage.upsertChatActivity(
+    const write = this.activityWrites.then(() => this.storage.upsertChatActivity(
       session.id, replyTo.id, open ? request.events : [], MAX_ACTIVITY_PER_TURN, SERVER_DROPPED_ID, now,
-    );
+    ));
+    this.activityWrites = write.catch(() => undefined);
+    const { accepted, dropped, seq } = await write;
     if (open) await this.storage.updateChatSession(session.id, { lastDeltaAt: now });
     await this.pruneActivity(now);
     return { accepted, seq, dropped, closed: !open };
