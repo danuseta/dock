@@ -10,7 +10,8 @@ import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy'
 import { ChatThread } from '../chat/ChatThread';
 import { LimitsLine, SessionStatusView } from '../chat/StatusLine';
 import { useChatStatus } from '../chat/useChatStatus';
-import { MachineChip, MachinePicker, useMachineChoice } from '../chat/MachineControls';
+import { MachineChip, MachinePicker } from '../chat/MachineControls';
+import { useMachineChoice } from '../chat/useMachineChoice';
 import { SLOW_POLL_MS, machineOf, machineOnline, relativeTime, type ChatSession } from '../chat/messages';
 import { chatStore } from '../chat/store';
 
