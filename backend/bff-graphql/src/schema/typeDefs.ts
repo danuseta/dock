@@ -150,6 +150,7 @@ export const typeDefs = gql`
     discordMessageTemplate: String!
     hasGoogleClientSecret: Boolean!
     googleCalendarConnected: Boolean!
+    googleCalendarError: String
     serviceHealthRefreshSeconds: Int!
     hasMasterPin: Boolean
   }
@@ -345,6 +346,24 @@ export const typeDefs = gql`
     at: String!
   }
 
+  type ChatActivity {
+    id: Int!
+    sessionId: ID!
+    turnId: Int!
+    eventId: String!
+    parentId: String
+    kind: String!
+    agent: String!
+    name: String!
+    label: String!
+    summary: String!
+    status: String!
+    hasDetail: Boolean!
+    seq: Int!
+    startedAt: String!
+    endedAt: String
+  }
+
   type ChatBridge {
     online: Boolean!
     lastSeenAt: String
@@ -488,6 +507,8 @@ export const typeDefs = gql`
     chatSessions(source: String, limit: Int): [ChatSession!]!
     chatSession(id: ID!): ChatSession
     chatMessages(sessionId: ID!, afterId: Int, beforeId: Int, limit: Int): [ChatMessage!]!
+    chatActivity(sessionId: ID!, afterSeq: Int, fromTurnId: Int, beforeTurnId: Int, limit: Int): [ChatActivity!]!
+    chatActivityDetail(sessionId: ID!, id: Int!): String
     chatSearch(query: String!, limit: Int): [ChatSearchHit!]!
     chatBridge: ChatBridge!
     chatMachines: [ChatMachine!]!

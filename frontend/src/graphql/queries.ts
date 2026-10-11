@@ -230,6 +230,7 @@ export const GET_SETTINGS = gql`
       discordMessageTemplate
       hasGoogleClientSecret
       googleCalendarConnected
+      googleCalendarError
       serviceHealthRefreshSeconds
       hasMasterPin
     }

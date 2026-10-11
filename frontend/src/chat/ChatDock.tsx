@@ -6,6 +6,7 @@ import { GET_CHAT_MESSAGES, GET_CHAT_SESSION } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import { ChatThread } from './ChatThread';
 import { MachinePicker } from './MachineControls';
+import { useFullViewport } from './useFullViewport';
 import { useMachineChoice } from './useMachineChoice';
 import { SLOW_POLL_MS, machineOf, newestAssistantId, severalMachines, tabLabel, type ChatMessage, type ChatSession } from './messages';
 import { LimitsLine } from './StatusLine';
@@ -16,7 +17,7 @@ interface ChatDockProps {
   inset: { left: number; right: number; bottom: number };
 }
 
-const control = 'grid size-7 flex-none place-items-center rounded-xs border border-transparent bg-transparent text-secondary-foreground transition-colors duration-150 hover:border-border hover:bg-surface-1 hover:text-foreground';
+const control = 'grid size-7 flex-none place-items-center max-[699px]:size-11 rounded-xs border border-transparent bg-transparent text-secondary-foreground transition-colors duration-150 hover:border-border hover:bg-surface-1 hover:text-foreground';
 
 /** Watches one open tab that is not on screen for an assistant message newer than the last one read. */
 const UnreadProbe: React.FC<{ sessionId: string; lastSeen: number; onChange: (sessionId: string, unread: boolean) => void }> = ({ sessionId, lastSeen, onChange }) => {
@@ -47,7 +48,7 @@ const ChatTab: React.FC<{ sessionId: string; active: boolean; unread: boolean; m
   }, [active]);
   const working = session?.status === 'queued' || session?.status === 'running';
   return (
-    <div ref={tabRef} className={cn('flex h-7 max-w-[180px] flex-none items-center rounded-xs border border-transparent text-secondary-foreground', active ? 'border-border-glow bg-surface-2 text-foreground' : 'hover:bg-surface-1')}>
+    <div ref={tabRef} className={cn('flex h-7 max-w-[180px] flex-none items-center max-[699px]:h-[46px] rounded-xs border border-transparent text-secondary-foreground', active ? 'border-border-glow bg-surface-2 text-foreground' : 'hover:bg-surface-1')}>
       <button
         type="button"
         role="tab"
@@ -60,7 +61,7 @@ const ChatTab: React.FC<{ sessionId: string; active: boolean; unread: boolean; m
         <span className="truncate">{label}</span>
         {unread && <span className="sr-only"> (new reply)</span>}
       </button>
-      <button type="button" className="grid size-6 flex-none place-items-center rounded-xs border-0 bg-transparent text-muted-foreground hover:text-foreground" aria-label={`Close ${label}`} onClick={() => chatStore.closeTab(sessionId)}>
+      <button type="button" className="grid size-6 flex-none place-items-center max-[699px]:size-11 rounded-xs border-0 bg-transparent text-muted-foreground hover:text-foreground" aria-label={`Close ${label}`} onClick={() => chatStore.closeTab(sessionId)}>
         <X size={12} aria-hidden="true" />
       </button>
     </div>
@@ -80,6 +81,7 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
   const refocusLauncher = useRef(false);
   const open = state.mode !== 'closed';
   const drawer = state.mode === 'drawer';
+  useFullViewport(open, '(max-width: 699px)');
   const anyUnread = state.tabs.some((id) => unread[id]);
 
   const reportUnread = useCallback((sessionId: string, value: boolean) => {
@@ -160,7 +162,7 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
           className={cn(
             'fixed z-30 flex flex-col overflow-hidden border border-border-glow bg-surface-0 shadow-card',
             // Narrow screens: both shapes are one sheet across the bottom, over the navigation bar.
-            'max-[699px]:inset-x-0 max-[699px]:bottom-0 max-[699px]:z-[45] max-[699px]:h-[min(78dvh,640px)] max-[699px]:rounded-t-md max-[699px]:border-x-0 max-[699px]:border-b-0',
+            'max-[699px]:inset-x-0 max-[699px]:top-[var(--vv-top,0px)] max-[699px]:z-[45] max-[699px]:h-[var(--vv-h,100dvh)] max-[699px]:rounded-none max-[699px]:border-0',
             drawer
               ? 'min-[700px]:inset-x-0 min-[700px]:bottom-[82px] min-[700px]:h-[min(var(--chat-height),80dvh)] min-[700px]:rounded-t-md min-[700px]:border-b-0 min-[761px]:right-[var(--chat-right)] min-[761px]:bottom-[var(--chat-bottom)] min-[761px]:left-[var(--chat-left)]'
               : 'min-[700px]:right-5 min-[700px]:bottom-[150px] min-[700px]:h-[min(520px,calc(100dvh-170px))] min-[700px]:w-[420px] min-[700px]:rounded-md min-[761px]:right-[calc(var(--chat-right)+20px)] min-[761px]:bottom-[calc(var(--chat-bottom)+84px)] min-[761px]:h-[min(520px,calc(100dvh-104px-var(--chat-bottom)))]',
@@ -180,7 +182,7 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
               onKeyDown={handleResizeKey}
             />
           )}
-          <header className="flex flex-none items-center gap-1 border-b border-border bg-surface-0 px-2 py-1.5">
+          <header className="flex flex-none items-center gap-1 border-b border-border bg-surface-0 px-2 py-1.5 max-[699px]:pt-[max(0.375rem,env(safe-area-inset-top))]">
             <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none]" role="tablist" aria-label="Open sessions">
               {state.tabs.length === 0 && <span className="px-1.5 font-display text-xs font-bold">Chat</span>}
               {state.tabs.map((id) => <ChatTab key={id} sessionId={id} active={id === state.active} multipleMachines={severalMachines(machines, state.tabs.flatMap((tab) => tabMachines[tab] ?? []))} unread={Boolean(unread[id]) && id !== state.active} onMachine={reportMachine} />)}
@@ -202,7 +204,7 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
                   <MessagesSquare size={26} className="mx-auto mb-2 text-muted-foreground" aria-hidden="true" />
                   <p className="font-display text-sm font-bold">No session open</p>
                   <p className="mt-1 text-pretty text-xs text-muted-foreground">Start a new one here, or pick one on the Sessions page.</p>
-                  <button type="button" className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-sm border border-accent bg-accent px-3 font-display text-xs font-semibold text-black hover:bg-accent-hover disabled:opacity-50" disabled={creating} onClick={() => void newSession()}><Plus size={14} aria-hidden="true" />New session</button>
+                  <button type="button" className="mt-3 inline-flex h-8 max-[699px]:h-11 items-center gap-1.5 rounded-sm border border-accent bg-accent px-3 font-display text-xs font-semibold text-black hover:bg-accent-hover disabled:opacity-50" disabled={creating} onClick={() => void newSession()}><Plus size={14} aria-hidden="true" />New session</button>
                 </div>
               </div>
             )}

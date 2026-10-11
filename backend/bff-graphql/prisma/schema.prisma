@@ -202,6 +202,28 @@ model ChatMessage {
   @@index([state])
 }
 
+model ChatActivity {
+  id        Int       @id @default(autoincrement())
+  sessionId String
+  turnId    Int
+  eventId   String
+  parentId  String?
+  kind      String
+  agent     String    @default("main")
+  name      String
+  label     String    @default("")
+  summary   String    @default("")
+  detail    String?
+  status    String    @default("running")
+  seq       Int
+  startedAt DateTime
+  endedAt   DateTime?
+
+  @@unique([sessionId, turnId, eventId])
+  @@index([sessionId, seq])
+  @@index([startedAt])
+}
+
 model SprintSnapshot {
   sprintId   Int       @id
   name       String

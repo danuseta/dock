@@ -4,7 +4,7 @@ import { DiscordAPI } from '../datasources/DiscordAPI';
 import { StorageAPI } from '../datasources/StorageAPI';
 import { GraphQLError } from 'graphql';
 import { shouldRequirePin, type AuthContext } from '../auth/session';
-import { googleCalendarService } from '../integrations/google-calendar';
+import { CalendarUnavailableError, googleCalendarService } from '../integrations/google-calendar';
 import { upstreamMonitorService } from '../integrations/upstream-monitor';
 import { dockerRuntimeService } from '../integrations/docker-runtime';
 import { OrchestratorInputError, orchestratorService } from '../integrations/orchestrator';
@@ -137,6 +137,7 @@ export const resolvers = {
         return await googleCalendarService.listEvents(args.timeMin, args.timeMax, args.maxResults);
       } catch (error: any) {
         if (error.message === 'Google Calendar is not connected') return [];
+        if (error instanceof CalendarUnavailableError) return [];
         console.error('[BFF Calendar] Failed to load events:', error.response?.status || error.message);
         return [];
       }
@@ -157,6 +158,10 @@ export const resolvers = {
     chatMessages: async (_: unknown, args: { sessionId: string; afterId?: number; beforeId?: number; limit?: number }) => {
       return chatService.messages(args.sessionId, args.afterId, args.beforeId, args.limit).catch(orchestratorInputError);
     },
+    chatActivity: async (_: unknown, args: { sessionId: string; afterSeq?: number; fromTurnId?: number; beforeTurnId?: number; limit?: number }) => {
+      return chatService.activityRows(args.sessionId, args).catch(orchestratorInputError);
+    },
+    chatActivityDetail: async (_: unknown, { sessionId, id }: { sessionId: string; id: number }) => chatService.activityDetail(sessionId, id),
     chatSearch: async (_: unknown, { query, limit }: { query: string; limit?: number }) => chatService.search(query, limit),
     chatBridge: async () => chatService.bridge(),
     chatMachines: async () => chatService.machines(await orchestratorService.machines()),
@@ -210,6 +215,10 @@ export const resolvers = {
 
   MonitorTarget: {
     lastCheckedAt: (parent: any) => parent.lastCheckedAt?.toISOString?.() || parent.lastCheckedAt || null,
+  },
+
+  Settings: {
+    googleCalendarError: () => googleCalendarService.lastError(),
   },
 
   Mutation: {
@@ -393,7 +402,7 @@ export const resolvers = {
 export const protectedQueries = [
   'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens',
-  'chatSessions', 'chatSession', 'chatMessages', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
+  'chatSessions', 'chatSession', 'chatMessages', 'chatActivity', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents',
 ] as const;
 export const protectedMutations = [

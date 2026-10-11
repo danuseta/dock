@@ -12,7 +12,7 @@ import {
   normalizeDiscordMessageTemplate,
 } from '../integrations/discord';
 import { buildPullRequestCacheKey, hasCanonicalTicketReference } from '../integrations/github';
-import { GoogleCalendarService, normalizeCalendarEvent } from '../integrations/google-calendar';
+import { CalendarUnavailableError, GoogleCalendarService, normalizeCalendarEvent } from '../integrations/google-calendar';
 import { isValidServiceHealthRefreshSeconds, StorageAPI } from '../datasources/StorageAPI';
 import { JiraService } from '../integrations/jira';
 import { JiraAPI, JiraTicketLookupError } from '../datasources/JiraAPI';
@@ -725,6 +725,111 @@ test('internal integration behavior', async (t) => {
       assert.match(cacheKey, /primary/);
     } finally {
       axios.post = originalPost;
+    }
+  });
+
+  const connectedCalendarStorage = (refreshToken = 'refresh-token-secret') => ({
+    getSettings: async () => [
+      { key: 'googleClientId', value: 'client-id.apps.googleusercontent.com' },
+      { key: 'googleClientSecret', value: 'client-secret-value' },
+      { key: 'googleRefreshToken', value: refreshToken },
+    ],
+    getCache: async () => null,
+    upsertCache: async () => undefined,
+  });
+  const googleResponseError = (status: number, data: unknown) => Object.assign(new Error(`Request failed with status code ${status}`), {
+    response: { status, data },
+  });
+
+  await t.test('stops calling Google and explains a rejected saved sign-in', async () => {
+    const service = new GoogleCalendarService(connectedCalendarStorage() as any);
+    const originalPost = axios.post;
+    const originalGet = axios.get;
+    const originalWarn = console.warn;
+    const warnings: string[] = [];
+    let refreshCalls = 0;
+    (axios as any).post = async () => {
+      refreshCalls += 1;
+      throw googleResponseError(400, { error: 'invalid_grant', error_description: 'Token has been expired or revoked.' });
+    };
+    (axios as any).get = async () => { throw new Error('events must not be requested without an access token'); };
+    console.warn = (...args: unknown[]) => { warnings.push(args.join(' ')); };
+
+    try {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await assert.rejects(
+          () => service.listEvents('2026-08-29T00:00:00.000Z', '2026-08-30T00:00:00.000Z', 25),
+          (error: unknown) => error instanceof CalendarUnavailableError
+            && error.message === 'Google rejected the saved sign-in. Connect Google Calendar again in Settings.',
+        );
+      }
+      assert.strictEqual(refreshCalls, 1);
+      assert.strictEqual(warnings.length, 1);
+      assert.match(warnings[0], /^\[Google Calendar\] token refresh rejected status=400 invalid_grant Token has been expired or revoked\.$/);
+      assert.ok(!warnings[0].includes('refresh-token-secret') && !warnings[0].includes('client-secret-value'));
+      assert.strictEqual(service.lastError(), 'Google rejected the saved sign-in. Connect Google Calendar again in Settings.');
+    } finally {
+      axios.post = originalPost;
+      axios.get = originalGet;
+      console.warn = originalWarn;
+    }
+  });
+
+  await t.test('retries a rejected sign-in once the refresh token changes', async () => {
+    let refreshToken = 'refresh-token-old';
+    const storage = { ...connectedCalendarStorage(), getSettings: async () => (await connectedCalendarStorage(refreshToken).getSettings()) };
+    const service = new GoogleCalendarService(storage as any);
+    const originalPost = axios.post;
+    const originalGet = axios.get;
+    const originalWarn = console.warn;
+    console.warn = () => undefined;
+    (axios as any).post = async (_url: string, body: string) => {
+      if (body.includes('refresh-token-old')) throw googleResponseError(400, { error: 'invalid_grant' });
+      return { data: { access_token: 'access-token-new' } };
+    };
+    (axios as any).get = async () => ({ data: { items: [] } });
+
+    try {
+      await assert.rejects(() => service.listEvents(), CalendarUnavailableError);
+      refreshToken = 'refresh-token-new';
+      assert.deepStrictEqual(await service.listEvents(), []);
+      assert.strictEqual(service.lastError(), null);
+    } finally {
+      axios.post = originalPost;
+      axios.get = originalGet;
+      console.warn = originalWarn;
+    }
+  });
+
+  await t.test('logs Google detail once and backs off when the events request is rejected', async () => {
+    const service = new GoogleCalendarService(connectedCalendarStorage() as any);
+    const originalPost = axios.post;
+    const originalGet = axios.get;
+    const originalWarn = console.warn;
+    const warnings: string[] = [];
+    let eventCalls = 0;
+    (axios as any).post = async () => ({ data: { access_token: 'access-token-secret' } });
+    (axios as any).get = async () => {
+      eventCalls += 1;
+      throw googleResponseError(400, { error: { code: 400, message: 'Bad Request', status: 'INVALID_ARGUMENT' } });
+    };
+    console.warn = (...args: unknown[]) => { warnings.push(args.join(' ')); };
+
+    try {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await assert.rejects(
+          () => service.listEvents(),
+          (error: unknown) => error instanceof CalendarUnavailableError
+            && error.message === 'Google rejected the calendar request. Check the Calendar ID in Settings.',
+        );
+      }
+      assert.strictEqual(eventCalls, 1);
+      assert.deepStrictEqual(warnings, ['[Google Calendar] events request failed status=400 INVALID_ARGUMENT Bad Request']);
+      assert.ok(!warnings[0].includes('access-token-secret'));
+    } finally {
+      axios.post = originalPost;
+      axios.get = originalGet;
+      console.warn = originalWarn;
     }
   });
 

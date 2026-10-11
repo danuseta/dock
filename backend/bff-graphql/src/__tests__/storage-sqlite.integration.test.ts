@@ -219,3 +219,48 @@ test('SQLite storage takes a dismissed ticket only for its own machine or a mach
 
   await service.revokeToken(workspace.record.id);
 });
+
+test('SQLite storage keeps chat activity per turn with its own seq and removes it with the session or the trimmed turn', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }] = await Promise.all([
+    import('../storage/service'),
+    import('../storage/client'),
+  ]);
+  const storage = new StorageService(prisma);
+  t.after(() => prisma.$disconnect());
+
+  const at = new Date('2026-10-11T03:00:00.000Z');
+  const sessionId = 'aaaaaaaa-0000-4000-8000-000000000011';
+  await storage.createChatSession({ id: sessionId, source: 'dock', title: 'ZED-101', ticketKey: 'ZED-101', startedAt: at, lastMessageAt: at });
+  const first = await storage.createChatMessage({ sessionId, role: 'user', text: 'one', state: 'done', at });
+  const second = await storage.createChatMessage({ sessionId, role: 'user', text: 'two', state: 'taken', at });
+  const row = (eventId: string, extra: object = {}) => ({
+    eventId, parentId: null, kind: 'tool', agent: 'main', name: 'Bash', label: 'Bash', summary: 'ls', detail: null, status: 'running', startedAt: at, endedAt: null, ...extra,
+  });
+  const upsert = (turnId: number, events: ReturnType<typeof row>[]) => storage.upsertChatActivity(sessionId, turnId, events, 400, 'dropped-server', at);
+
+  assert.deepStrictEqual(await upsert(first.id, [row('toolu_01')]), { accepted: 1, dropped: 0, seq: 1 });
+  assert.deepStrictEqual(await upsert(first.id, [row('toolu_01', { status: 'ok', endedAt: at, detail: 'out' })]), { accepted: 1, dropped: 0, seq: 2 });
+  assert.deepStrictEqual(await upsert(first.id, [row('toolu_01', { status: 'ok', endedAt: at, detail: 'out' })]), { accepted: 1, dropped: 0, seq: 2 }, 'a repeat writes nothing');
+  assert.deepStrictEqual(await upsert(second.id, [row('toolu_01'), row('toolu_02')]), { accepted: 2, dropped: 0, seq: 4 }, 'the same event id in another turn is another row');
+  assert.strictEqual(await storage.countChatActivity(sessionId, first.id), 1);
+
+  await assert.rejects(
+    prisma.chatActivity.create({ data: { sessionId, turnId: first.id, ...row('toolu_01'), seq: 9 } }),
+    /Unique constraint/,
+    'the table refuses a second row for the same session, turn and event',
+  );
+  const listed = await storage.getChatActivity(sessionId, { afterSeq: 2 }, 10);
+  assert.deepStrictEqual(listed.map((item) => [item.eventId, item.seq, item.hasDetail, 'detail' in item]), [['toolu_01', 3, false, false], ['toolu_02', 4, false, false]]);
+  const all = await storage.getChatActivity(sessionId, {}, 10);
+  assert.deepStrictEqual(all.map((item) => [item.turnId, item.seq, item.hasDetail]), [[first.id, 2, true], [second.id, 3, false], [second.id, 4, false]]);
+  assert.strictEqual(await storage.getChatActivityDetail(sessionId, all[0].id), 'out');
+  assert.strictEqual(await storage.getChatActivityDetail('another-session', all[0].id), null);
+  assert.strictEqual(await storage.closeRunningChatActivity(sessionId, second.id, 'stopped', at), 2);
+
+  await storage.trimChatMessages(sessionId, 1);
+  assert.deepStrictEqual((await storage.getChatActivity(sessionId, {}, 10)).map((item) => [item.turnId, item.status]), [[second.id, 'stopped'], [second.id, 'stopped']], 'the turn of the trimmed message loses its activity');
+  assert.strictEqual(await storage.deleteChatSession(sessionId), true);
+  assert.strictEqual(await prisma.chatActivity.count({ where: { sessionId } }), 0);
+});

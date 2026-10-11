@@ -84,6 +84,7 @@ export function createOrchestratorIngestRouter(
   router.post('/sessions', express.json({ limit: '2mb' }), handle((body, _signal, machine) => chat.syncSession(body, machine)));
   router.post('/chat/claim', small, handle((body, signal, machine) => chat.claim(body, signal, machine)));
   router.post('/chat/delta', small, handle((body, _signal, machine) => chat.delta(body, machine)));
+  router.post('/chat/activity', small, handle((body, _signal, machine) => chat.activity(body, machine)));
   router.post('/chat/status', small, handle(async (body, _signal, machine) => chat.ingestStatus(body, machine)));
 
   router.use((error: unknown, _request: Request, response: Response, _next: express.NextFunction) => {

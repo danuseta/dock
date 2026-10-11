@@ -1,5 +1,26 @@
 import { randomUUID } from 'node:crypto';
 import { StorageService } from '../storage/service';
+import {
+  ACTIVITY_DETAIL_KEEP_MS,
+  ACTIVITY_ID,
+  ACTIVITY_KINDS,
+  ACTIVITY_LIMITS,
+  ACTIVITY_PRUNE_INTERVAL_MS,
+  ACTIVITY_ROWS_KEEP_MS,
+  ACTIVITY_STATUSES,
+  ACTIVITY_VERSION,
+  MAX_ACTIVITY_EVENTS,
+  MAX_ACTIVITY_PER_TURN,
+  MAX_ACTIVITY_ROWS,
+  SERVER_DROPPED_ID,
+  activityText,
+  fitActivityEvent,
+  maskActivityText,
+  toActivity,
+  type ActivityEvent,
+  type ActivityKind,
+  type ActivityStatus,
+} from './chat-activity';
 import { DEFAULT_MACHINE, OrchestratorInputError, normalizeMachine, normalizeTicketKey } from './orchestrator';
 
 export const CHAT_SOURCES = ['cli', 'dock'] as const;
@@ -33,6 +54,7 @@ const CLAIM_CANDIDATES = 20;
 const SESSIONS_LIMIT = { fallback: 100, max: 300 };
 const MESSAGES_LIMIT = { fallback: 200, max: 500 };
 const SEARCH_LIMIT = { fallback: 30, max: 100 };
+const ACTIVITY_ROWS_LIMIT = { fallback: 200, max: 500 };
 
 const CHAT_ID = /^[A-Za-z0-9-]{1,64}$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;
@@ -138,6 +160,53 @@ export function parseDelta(input: unknown, now = new Date()) {
     detail: text(input.detail, MAX_DETAIL_CHARS) || null,
     done: flag(input.done, 'done'),
     error: text(input.error, MAX_ERROR_CHARS) || null,
+  };
+}
+
+function activityId(value: unknown, name: string): string {
+  if (typeof value !== 'string' || !ACTIVITY_ID.test(value) || value === SERVER_DROPPED_ID || maskActivityText(value) !== value) {
+    throw new OrchestratorInputError(`${name} must be an id of letters, digits, dashes and underscores`);
+  }
+  return value;
+}
+
+function parseActivityEvent(input: unknown, now: Date): ActivityEvent {
+  if (!isRecord(input)) throw new OrchestratorInputError('Each event needs an id, kind, name, status and start time');
+  if (typeof input.kind !== 'string' || !ACTIVITY_KINDS.includes(input.kind as ActivityKind)) {
+    throw new OrchestratorInputError(`kind must be one of ${ACTIVITY_KINDS.join(', ')}`);
+  }
+  if (typeof input.status !== 'string' || !ACTIVITY_STATUSES.includes(input.status as ActivityStatus)) {
+    throw new OrchestratorInputError(`status must be one of ${ACTIVITY_STATUSES.join(', ')}`);
+  }
+  const name = activityText(input.name, ACTIVITY_LIMITS.name, true);
+  if (!name) throw new OrchestratorInputError('An event needs a name');
+  return fitActivityEvent({
+    eventId: activityId(input.id, 'id'),
+    parentId: input.parentId === undefined || input.parentId === null ? null : activityId(input.parentId, 'parentId'),
+    kind: input.kind as ActivityKind,
+    agent: activityText(input.agent, ACTIVITY_LIMITS.agent, true) || 'main',
+    name,
+    label: activityText(input.label, ACTIVITY_LIMITS.label, true),
+    summary: activityText(input.summary, ACTIVITY_LIMITS.summary, true),
+    detail: activityText(input.detail, ACTIVITY_LIMITS.detail) || null,
+    status: input.status as ActivityStatus,
+    startedAt: isoDate(input.startedAt, 'startedAt', now),
+    endedAt: input.endedAt === undefined || input.endedAt === null ? null : isoDate(input.endedAt, 'endedAt', now),
+  });
+}
+
+export function parseActivity(input: unknown, now = new Date()) {
+  if (!isRecord(input)) throw new OrchestratorInputError('An activity object is required');
+  if (input.v !== ACTIVITY_VERSION) throw new OrchestratorInputError(`v must be ${ACTIVITY_VERSION}`);
+  if (!Number.isInteger(input.replyTo) || Number(input.replyTo) < 1) throw new OrchestratorInputError('replyTo must be a message id');
+  if (!Array.isArray(input.events)) throw new OrchestratorInputError('events must be a list');
+  if (input.events.length > MAX_ACTIVITY_EVENTS) {
+    throw new OrchestratorInputError(`A maximum of ${MAX_ACTIVITY_EVENTS} events per request is supported`);
+  }
+  return {
+    sessionId: chatId(input.sessionId, 'sessionId'),
+    replyTo: Number(input.replyTo),
+    events: input.events.map((event) => parseActivityEvent(event, now)),
   };
 }
 
@@ -250,6 +319,7 @@ export class ChatService {
   private readonly bridgeSeenAt = new Map<string, Date>();
   private readonly sessionStatus = new Map<string, Map<string, ParsedStatus & { receivedAt: Date }>>();
   private readonly limitsSeen = new Map<string, LimitsSeen>();
+  private lastActivityPruneAt = 0;
 
   constructor(
     private readonly storage = new StorageService(),
@@ -268,6 +338,29 @@ export class ChatService {
     for (const session of stale) {
       await this.storage.moveChatMessages(session.id, 'taken', 'failed');
       await this.storage.updateChatSession(session.id, { status: 'error', statusDetail: STALE_TEXT });
+      await this.closeActivity(session.id, null);
+    }
+  }
+
+  private async closeActivity(sessionId: string, turnId: number | null) {
+    try {
+      await this.storage.closeRunningChatActivity(sessionId, turnId, 'stopped', this.now());
+    } catch (error) {
+      console.error('[Chat] closing activity failed:', error instanceof Error ? error.message : 'unknown error');
+    }
+  }
+
+  private async pruneActivity(now: Date) {
+    if (now.getTime() - this.lastActivityPruneAt < ACTIVITY_PRUNE_INTERVAL_MS) return;
+    this.lastActivityPruneAt = now.getTime();
+    try {
+      await this.storage.pruneChatActivity({
+        detailBefore: new Date(now.getTime() - ACTIVITY_DETAIL_KEEP_MS),
+        rowsBefore: new Date(now.getTime() - ACTIVITY_ROWS_KEEP_MS),
+        maxRows: MAX_ACTIVITY_ROWS,
+      });
+    } catch (error) {
+      console.error('[Chat] pruning activity failed:', error instanceof Error ? error.message : 'unknown error');
     }
   }
 
@@ -295,6 +388,24 @@ export class ChatService {
       limit(limitInput, MESSAGES_LIMIT),
     );
     return rows.map(toMessage);
+  }
+
+  async activityRows(
+    sessionId: string,
+    args: { afterSeq?: number | null; fromTurnId?: number | null; beforeTurnId?: number | null; limit?: number | null },
+  ) {
+    if (!CHAT_ID.test(String(sessionId))) return [];
+    const rows = await this.storage.getChatActivity(
+      sessionId,
+      { afterSeq: cursor(args.afterSeq, 'afterSeq'), fromTurnId: cursor(args.fromTurnId, 'fromTurnId'), beforeTurnId: cursor(args.beforeTurnId, 'beforeTurnId') },
+      limit(args.limit, ACTIVITY_ROWS_LIMIT),
+    );
+    return rows.map(toActivity);
+  }
+
+  async activityDetail(sessionId: string, id: number) {
+    if (!CHAT_ID.test(String(sessionId)) || !Number.isInteger(id)) return null;
+    return this.storage.getChatActivityDetail(sessionId, id);
   }
 
   async search(queryInput: string, limitInput?: number | null) {
@@ -514,7 +625,28 @@ export class ChatService {
       }
     }
     const updated = await this.storage.updateChatSession(session.id, update);
+    if (replyTo.state === 'taken' && (delta.error || delta.done)) await this.closeActivity(session.id, replyTo.id);
     return { id: updated.id, status: updated.status, messageCount };
+  }
+
+  async activity(input: unknown, machine: string) {
+    const now = this.now();
+    const request = parseActivity(input, now);
+    this.bridgeSeenAt.set(machine, now);
+    const session = await this.storage.getChatSession(request.sessionId);
+    if (!session || session.machine !== machine) return null;
+    if (session.source !== 'dock') throw new OrchestratorInputError('Only a DOCK session takes activity');
+    const replyTo = await this.storage.getChatMessage(request.replyTo);
+    if (!replyTo || replyTo.sessionId !== session.id || replyTo.role !== 'user') {
+      throw new OrchestratorInputError('replyTo is not a message of this session');
+    }
+    const open = replyTo.state === 'taken';
+    const { accepted, dropped, seq } = await this.storage.upsertChatActivity(
+      session.id, replyTo.id, open ? request.events : [], MAX_ACTIVITY_PER_TURN, SERVER_DROPPED_ID, now,
+    );
+    if (open) await this.storage.updateChatSession(session.id, { lastDeltaAt: now });
+    await this.pruneActivity(now);
+    return { accepted, seq, dropped, closed: !open };
   }
 }
 

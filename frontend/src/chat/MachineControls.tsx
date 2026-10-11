@@ -16,7 +16,7 @@ export const MachinePicker: React.FC<{ machines: ChatMachine[] | undefined; valu
   return (
     <Select
       aria-label="Machine for the new session"
-      className={cn('h-8 w-auto min-w-[110px] px-2.5 text-xs', className)}
+      className={cn('h-8 w-auto min-w-[110px] px-2.5 text-xs max-[900px]:h-11', className)}
       value={value}
       onValueChange={onChange}
       disabled={disabled}
