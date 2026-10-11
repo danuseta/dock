@@ -49,6 +49,7 @@ export function useSprintDashboard(sprintId: number | null) {
       await refetchDashboard();
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Request failed');
+      void refetchDashboard().catch(() => undefined);
     }
   };
 
@@ -60,7 +61,7 @@ export function useSprintDashboard(sprintId: number | null) {
     refreshState,
     running,
     loading: dashboard.loading && dashboard.data === undefined,
-    error: dashboard.error?.message || actionError,
+    error: dashboard.error?.message || (running ? '' : actionError),
     busy: starting || backfilling || running,
     refresh: () => (summary ? run(() => refreshMutation({ variables: { sprintId: summary.id } })) : Promise.resolve()),
     backfill: () => run(() => backfillMutation({ variables: { count: BACKFILL_COUNT } })),
