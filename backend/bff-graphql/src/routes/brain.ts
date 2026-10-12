@@ -10,10 +10,13 @@ const UPSTREAM_STATUS_MESSAGES = new Map<number, string>([
   [400, 'Brain rejected the request'],
   [403, 'Brain access denied'],
   [404, 'Note not found'],
+  [409, 'Brain could not accept the note title'],
   [413, 'Brain rejected the request size'],
   [429, 'Brain rate limit reached'],
+  [503, 'Brain is busy'],
   [507, 'Brain storage is full'],
 ]);
+const RETRY_AFTER_STATUSES = new Set([429, 503]);
 
 export interface BrainProxyLimits {
   timeoutMs?: number;
@@ -169,7 +172,7 @@ export function createBrainProxyRouter(
     if (outcome.kind === 'status') {
       const message = UPSTREAM_STATUS_MESSAGES.get(outcome.status);
       if (message) {
-        if (outcome.status === 429 && outcome.retryAfter) response.set('retry-after', outcome.retryAfter);
+        if (RETRY_AFTER_STATUSES.has(outcome.status) && outcome.retryAfter) response.set('retry-after', outcome.retryAfter);
         response.status(outcome.status).json({ error: message });
         return;
       }

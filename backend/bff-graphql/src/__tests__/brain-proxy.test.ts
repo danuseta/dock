@@ -361,12 +361,13 @@ test('upstream error bodies are never relayed', async (t) => {
     [400, 400, undefined],
     [403, 403, undefined],
     [404, 404, undefined],
+    [409, 409, undefined],
     [413, 413, undefined],
     [429, 429, '30'],
+    [503, 503, '30'],
     [507, 507, undefined],
     [401, 502, undefined],
     [500, 502, undefined],
-    [503, 502, undefined],
     [302, 502, undefined],
     [201, 502, undefined],
   ];
@@ -377,7 +378,7 @@ test('upstream error bodies are never relayed', async (t) => {
         response.setHeader('content-type', 'application/json');
         response.setHeader('x-leak', CANARY);
         response.setHeader('set-cookie', `leak=${CANARY}`);
-        if (from === 429) response.setHeader('retry-after', '30');
+        if (from === 429 || from === 503) response.setHeader('retry-after', '30');
         response.end(JSON.stringify({ error: `${CANARY} at http://${upstream.url} with ${SECRET}`, stack: CANARY }));
       };
       const answer = await call('retrieve', laptop);
