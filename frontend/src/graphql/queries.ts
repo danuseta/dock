@@ -623,6 +623,20 @@ export const CHAT_SESSION_FIELDS = `
   startedAt
   lastMessageAt
   lastText
+  waiting
+`;
+
+export const CHAT_INTERACTION_FIELDS = `
+  id
+  sessionId
+  turnId
+  kind
+  title
+  body
+  state
+  createdAt
+  expiresAt
+  answeredAt
 `;
 
 export const CHAT_MESSAGE_FIELDS = `
@@ -632,6 +646,14 @@ export const CHAT_MESSAGE_FIELDS = `
   text
   state
   at
+  stopped
+  attachments {
+    id
+    name
+    mime
+    size
+    state
+  }
 `;
 
 export const GET_CHAT_SESSIONS = gql`
@@ -646,6 +668,20 @@ export const GET_CHAT_SESSION = gql`
   query GetChatSession($id: ID!) {
     chatSession(id: $id) {
       ${CHAT_SESSION_FIELDS}
+      pending {
+        ${CHAT_INTERACTION_FIELDS}
+      }
+      settled {
+        id
+        state
+        decision
+      }
+      options {
+        model
+        effort
+        permissionMode
+        fast
+      }
     }
     chatBridge {
       online
@@ -655,6 +691,7 @@ export const GET_CHAT_SESSION = gql`
       name
       online
       lastSeenAt
+      capabilities
     }
   }
 `;

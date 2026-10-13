@@ -1,5 +1,5 @@
 import { gql } from '@apollo/client';
-import { CHAT_MESSAGE_FIELDS, CHAT_SESSION_FIELDS, ORCHESTRATION_FIELDS } from './queries';
+import { CHAT_INTERACTION_FIELDS, CHAT_MESSAGE_FIELDS, CHAT_SESSION_FIELDS, ORCHESTRATION_FIELDS } from './queries';
 
 export const SAVE_DEMO_LINK = gql`
   mutation SaveDemoLink($ticketKey: String!, $url: String!) {
@@ -247,9 +247,25 @@ export const CREATE_CHAT_SESSION = gql`
 `;
 
 export const SEND_CHAT_MESSAGE = gql`
-  mutation SendChatMessage($sessionId: ID!, $text: String!) {
-    sendChatMessage(sessionId: $sessionId, text: $text) {
+  mutation SendChatMessage($sessionId: ID!, $text: String!, $attachmentIds: [ID!], $options: ChatTurnOptionsInput) {
+    sendChatMessage(sessionId: $sessionId, text: $text, attachmentIds: $attachmentIds, options: $options) {
       ${CHAT_MESSAGE_FIELDS}
+    }
+  }
+`;
+
+export const ANSWER_CHAT_INTERACTION = gql`
+  mutation AnswerChatInteraction($sessionId: ID!, $id: Int!, $decision: String!, $answers: [ChatAnswerInput!], $note: String) {
+    answerChatInteraction(sessionId: $sessionId, id: $id, decision: $decision, answers: $answers, note: $note) {
+      ${CHAT_INTERACTION_FIELDS}
+    }
+  }
+`;
+
+export const STOP_CHAT_TURN = gql`
+  mutation StopChatTurn($sessionId: ID!) {
+    stopChatTurn(sessionId: $sessionId) {
+      ${CHAT_SESSION_FIELDS}
     }
   }
 `;

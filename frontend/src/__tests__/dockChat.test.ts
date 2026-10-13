@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import test from 'node:test';
 import {
-  BRIDGE_OFFLINE, balloonText, initialMachine, isTurnInProgress, machineNames, machineOf, machineOnline, mergeMessages, newestAssistantId, oldestId, pollCursor, pollInterval, relativeTime, sendBlocker, severalMachines, tabLabel, ticketBalloons,
+  BRIDGE_OFFLINE, balloonText, initialMachine, isImageAttachment, isStopping, isTurnInProgress, machineCapabilities, machineNames, machineOf, machineOnline, mergeMessages, newestAssistantId, oldestId, pollCursor, pollInterval, relativeTime, sendBlocker, sessionTurnOptions, severalMachines, tabLabel, ticketBalloons,
   type ChatMachine, type ChatMessage,
 } from '../chat/messages';
 import {
@@ -167,4 +167,35 @@ test('chat state survives a reload and ignores a broken or foreign value', () =>
   assert.deepStrictEqual(parseChatState(null), initialChatState);
   const repaired = parseChatState(JSON.stringify({ mode: 'sideways', tabs: ['a', 'a', 7, ''], active: 'gone', drawerHeight: 3, lastSeen: { a: 2, gone: 9, b: 'x' } }));
   assert.deepStrictEqual(repaired, { ...initialChatState, tabs: ['a'], active: 'a', lastSeen: { a: 2 } });
+});
+
+test('machine capabilities: an old or unknown machine reports none, so no new control shows', () => {
+  const machines: ChatMachine[] = [{ name: 'laptop', online: true }, { name: 'workspace', online: true, capabilities: ['interactive', 'stop'] }, { name: 'odd', online: true, capabilities: null }];
+  assert.deepStrictEqual(machineCapabilities(machines, 'workspace'), ['interactive', 'stop']);
+  assert.deepStrictEqual(machineCapabilities(machines, 'laptop'), []);
+  assert.deepStrictEqual(machineCapabilities(machines, 'odd'), []);
+  assert.deepStrictEqual(machineCapabilities(machines, 'missing'), []);
+  assert.deepStrictEqual(machineCapabilities(undefined, 'laptop'), []);
+});
+
+test('session turn options: nothing stored means no options', () => {
+  assert.strictEqual(sessionTurnOptions(undefined), null);
+  assert.strictEqual(sessionTurnOptions({ options: null }), null);
+  assert.strictEqual(sessionTurnOptions({ options: { model: null, effort: null, permissionMode: null, fast: null } }), null);
+  assert.deepStrictEqual(sessionTurnOptions({ options: { model: 'sonnet', effort: 'low', permissionMode: undefined, fast: null } }), { model: 'sonnet', effort: 'low', permissionMode: null, fast: null });
+});
+
+test('stopping shows from the tap until the session leaves queued or running', () => {
+  assert.strictEqual(isStopping(true, 'running'), true);
+  assert.strictEqual(isStopping(true, 'queued'), true);
+  assert.strictEqual(isStopping(true, 'idle'), false);
+  assert.strictEqual(isStopping(true, 'error'), false);
+  assert.strictEqual(isStopping(false, 'running'), false);
+});
+
+test('attachments: only a stored image type is shown as a thumbnail', () => {
+  assert.strictEqual(isImageAttachment({ id: 'a', name: 'x.png', mime: 'image/png', size: 3, state: 'fetched' }), true);
+  assert.strictEqual(isImageAttachment({ id: 'a', name: 'x.png', mime: 'image/png', size: 3, state: 'deleted' }), false);
+  assert.strictEqual(isImageAttachment({ id: 'a', name: 'x.svg', mime: 'image/svg+xml', size: 3, state: 'attached' }), false);
+  assert.strictEqual(isImageAttachment({ id: 'a', name: 'x.pdf', mime: 'application/pdf', size: 3, state: 'attached' }), false);
 });

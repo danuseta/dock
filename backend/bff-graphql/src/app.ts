@@ -14,6 +14,7 @@ import {
 } from './auth/session';
 import { createGoogleCalendarRouter } from './auth/google-calendar-router';
 import { createBrainProxyRouter } from './routes/brain';
+import { createChatAttachmentRouter } from './routes/chat-attachments';
 import { createOrchestratorApiRouter, createOrchestratorIngestRouter } from './routes/orchestrator';
 
 export interface CreateAppOptions {
@@ -50,6 +51,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<JidisAp
   // Mounted ahead of the global parser: ingest routes carry their own body limits.
   app.use('/ingest/orchestrator', createOrchestratorIngestRouter());
   app.use('/ingest/brain', createBrainProxyRouter());
+  app.use('/api/chat/attachments', createChatAttachmentRouter());
   app.use(express.json());
 
   app.use('/auth/google', createGoogleCalendarRouter());

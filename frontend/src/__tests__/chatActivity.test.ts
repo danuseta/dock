@@ -248,3 +248,20 @@ test('a failed detail fetch is tried again when asked', async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepStrictEqual(store.get(1), { state: 'ready', text: 'back' });
 });
+
+test('a turn the user stopped reads Stopped, not failed, and a group with no steps is not shown', () => {
+  const rows = [row({ status: 'error', startedAt: at(2), endedAt: at(5) })];
+  const summary = groupSummary(rows, 0, true);
+  assert.deepStrictEqual({ failed: summary.failed, stopped: summary.stopped }, { failed: 0, stopped: 1 });
+  assert.strictEqual(summaryText({ ...summary, durationMs: 31_000 }), '1 step · Stopped · 31 s');
+  assert.strictEqual(summaryText({ ...groupSummary(rows, 0), durationMs: 31_000 }), '1 step · 1 failed · 31 s');
+  assert.strictEqual(announcement(rows, false, true), 'Stopped: 1 step');
+
+  const messages = [{ ...message(10, 'user', 0), stopped: true }, message(12, 'assistant', 5), message(20, 'user', 30), message(22, 'assistant', 32)];
+  const items = threadItems(messages, groupByTurn([
+    row({ turnId: 10, startedAt: at(2), status: 'error' }),
+    row({ turnId: 20, kind: 'note', name: 'thinking', startedAt: at(31) }),
+  ]));
+  const groups = items.filter(isThreadGroup) as ThreadGroup[];
+  assert.deepStrictEqual(groups.map((group) => [group.turnId, group.stopped, group.last]), [[10, true, true]]);
+});

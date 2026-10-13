@@ -15,6 +15,7 @@ import { MachineChip, MachinePicker } from '../chat/MachineControls';
 import { useMachineChoice } from '../chat/useMachineChoice';
 import { SLOW_POLL_MS, machineOf, machineOnline, relativeTime, type ChatSession } from '../chat/messages';
 import { chatStore } from '../chat/store';
+import { SESSIONS_PATH, sessionIdFromSearch, sessionUrl } from '../chat/sessionRoute';
 
 interface SearchHit { session: ChatSession; messageId: number; snippet: string; at: string }
 
@@ -35,7 +36,7 @@ const SessionsPage: React.FC = () => {
   const [createSession, { loading: creating }] = useMutation<{ createChatSession: ChatSession }>(CREATE_CHAT_SESSION);
   const [renameSession, { loading: renaming }] = useMutation(RENAME_CHAT_SESSION);
   const [deleteSession, { loading: deleting }] = useMutation(DELETE_CHAT_SESSION);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => sessionIdFromSearch(window.location.search));
   const [searchText, setSearchText] = useState('');
   const [query, setQuery] = useState('');
   const [actionError, setActionError] = useState('');
@@ -65,7 +66,16 @@ const SessionsPage: React.FC = () => {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    const handlePopState = () => {
+      if (window.location.pathname === SESSIONS_PATH) setSelectedId(sessionIdFromSearch(window.location.search));
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   const select = (id: string | null) => {
+    if (id !== sessionIdFromSearch(window.location.search)) window.history.pushState({}, '', sessionUrl(id));
     setSelectedId(id);
     setTitleDraft(null);
     setActionError('');
@@ -164,6 +174,7 @@ const SessionsPage: React.FC = () => {
                       <SourceChip source={session.source} />
                       <MachineChip name={machineOf(session)} online={machineOnline(machines, machineOf(session))} />
                       <span className="min-w-0 flex-1 truncate font-display text-[0.8rem] font-semibold">{titleOf(session)}</span>
+                      {session.waiting && <span className="flex-none rounded-xs border border-amber-300/50 bg-amber-300/10 px-1.5 py-px font-mono text-[0.62rem] font-bold text-amber-200">waiting</span>}
                       {(session.status === 'queued' || session.status === 'running') && <i className="size-1.5 flex-none animate-pulse rounded-full bg-status-merged" title="Working" aria-hidden="true" />}
                       {session.status === 'error' && <i className="size-1.5 flex-none rounded-full bg-status-conflict" title="The last turn failed" aria-hidden="true" />}
                     </span>

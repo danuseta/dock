@@ -86,6 +86,8 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'chatActivityDetail',
       'chatBalloons',
       'chatBridge',
+      'chatCommands',
+      'chatMachineOptions',
       'chatMachines',
       'chatMessages',
       'chatSearch',
@@ -115,6 +117,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
     assert.deepStrictEqual(mutationFields, [
       'addMonitor',
       'addQuickLink',
+      'answerChatInteraction',
       'backfillSprintDashboards',
       'changeMasterPin',
       'checkConflicts',
@@ -139,6 +142,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'sendToDiscord',
       'setMasterPin',
       'setTicketDependency',
+      'stopChatTurn',
       'updateMonitor',
       'updateSettings',
       'updateSprintDashboardSettings',
@@ -186,6 +190,16 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       ['ChatMachine', 'name', 'String!'],
       ['ChatMachine', 'online', 'Boolean!'],
       ['ChatMachine', 'lastSeenAt', 'String'],
+      ['ChatMachine', 'capabilities', '[String!]!'],
+      ['ChatMachine', 'claudeVersion', 'String'],
+      ['ChatSession', 'waiting', 'Boolean!'],
+      ['ChatSession', 'pending', '[ChatInteraction!]!'],
+      ['ChatSession', 'options', 'ChatTurnOptions'],
+      ['ChatMessage', 'attachments', '[ChatAttachment!]!'],
+      ['ChatInteraction', 'body', 'String!'],
+      ['ChatInteraction', 'answeredAt', 'String'],
+      ['ChatModel', 'efforts', '[String!]!'],
+      ['ChatMachineOptions', 'fastAvailable', 'Boolean!'],
     ]) {
       assert.strictEqual(String(field(type, name).type), shape, `${type}.${name}`);
     }
@@ -198,6 +212,21 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       mutation.createChatSession.args.map((arg) => [arg.name, String(arg.type)]),
       [['title', 'String'], ['ticketKey', 'String'], ['forkFrom', 'ID'], ['machine', 'String']],
     );
+    assert.deepStrictEqual(query.chatCommands.args.map((arg) => [arg.name, String(arg.type)]), [['machine', 'String!'], ['query', 'String'], ['limit', 'Int']]);
+    assert.strictEqual(String(query.chatCommands.type), '[ChatCommand!]!');
+    assert.deepStrictEqual(query.chatMachineOptions.args.map((arg) => [arg.name, String(arg.type)]), [['machine', 'String!']]);
+    assert.strictEqual(String(query.chatMachineOptions.type), 'ChatMachineOptions');
+    assert.deepStrictEqual(
+      mutation.sendChatMessage.args.map((arg) => [arg.name, String(arg.type)]),
+      [['sessionId', 'ID!'], ['text', 'String!'], ['attachmentIds', '[ID!]'], ['options', 'ChatTurnOptionsInput']],
+    );
+    assert.deepStrictEqual(
+      mutation.answerChatInteraction.args.map((arg) => [arg.name, String(arg.type)]),
+      [['sessionId', 'ID!'], ['id', 'Int!'], ['decision', 'String!'], ['answers', '[ChatAnswerInput!]'], ['note', 'String']],
+    );
+    assert.strictEqual(String(mutation.answerChatInteraction.type), 'ChatInteraction!');
+    assert.deepStrictEqual(mutation.stopChatTurn.args.map((arg) => [arg.name, String(arg.type)]), [['sessionId', 'ID!']]);
+    assert.strictEqual(String(mutation.stopChatTurn.type), 'ChatSession!');
     assert.deepStrictEqual(mutation.moveOrchestration.args.map((arg) => [arg.name, String(arg.type)]), [['key', 'String!'], ['machine', 'String!']]);
     assert.strictEqual(String(mutation.moveOrchestration.type), 'Orchestration!');
   });

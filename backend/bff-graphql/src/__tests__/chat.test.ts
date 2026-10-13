@@ -106,6 +106,18 @@ function memoryStorage() {
       const last = ofSession(id).filter((message) => message.role !== 'tool').at(-1);
       return last ? [[id, last.text.slice(0, length)]] : [];
     })),
+    getOverdueChatSessions: async () => [],
+    getQuietChatTurns: async () => ({ silent: [], unstopped: [] }),
+    getChatMessageIdsInState: async (sessionId: string, states: string[]) => ofSession(sessionId)
+      .filter((message) => states.includes(message.state)).map((message) => message.id),
+    cancelChatInteractions: async () => ({ count: 0 }),
+    getPendingChatInteractions: async () => [],
+    getStaleChatDrafts: async () => [],
+    hasOverdueChatInteractions: async () => false,
+    expireChatInteractions: async () => ({ count: 0 }),
+    getWaitingChatSessionIds: async () => new Set<string>(),
+    pruneChatInteractions: async () => ({ expired: 0, evicted: 0 }),
+    getChatMachineInfo: async () => null,
     countIngestTokens: async () => tokens.length,
     createIngestToken: async (data: any) => {
       const token = { id: String(sequence += 1), ...data, createdAt: new Date(), lastUsedAt: null, revokedAt: null };

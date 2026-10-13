@@ -9,6 +9,7 @@ import { upstreamMonitorService } from '../integrations/upstream-monitor';
 import { dockerRuntimeService } from '../integrations/docker-runtime';
 import { OrchestratorInputError, orchestratorService } from '../integrations/orchestrator';
 import { chatService } from '../integrations/chat';
+import type { AnswerInput } from '../integrations/chat-interactions';
 import { SprintBusyError, SprintInputError, sprintDashboardService } from '../integrations/sprint-dashboard';
 
 const jiraAPI = new JiraAPI();
@@ -156,7 +157,8 @@ export const resolvers = {
     },
     chatSession: async (_: unknown, { id }: { id: string }) => chatService.session(id),
     chatMessages: async (_: unknown, args: { sessionId: string; afterId?: number; beforeId?: number; limit?: number }) => {
-      return chatService.messages(args.sessionId, args.afterId, args.beforeId, args.limit).catch(orchestratorInputError);
+      return chatService.messages(args.sessionId, args.afterId, args.beforeId, args.limit)
+        .then((rows) => chatService.withAttachments(rows)).catch(orchestratorInputError);
     },
     chatActivity: async (_: unknown, args: { sessionId: string; afterSeq?: number; fromTurnId?: number; beforeTurnId?: number; limit?: number }) => {
       return chatService.activityRows(args.sessionId, args).catch(orchestratorInputError);
@@ -164,7 +166,13 @@ export const resolvers = {
     chatActivityDetail: async (_: unknown, { sessionId, id }: { sessionId: string; id: number }) => chatService.activityDetail(sessionId, id),
     chatSearch: async (_: unknown, { query, limit }: { query: string; limit?: number }) => chatService.search(query, limit),
     chatBridge: async () => chatService.bridge(),
-    chatMachines: async () => chatService.machines(await orchestratorService.machines()),
+    chatMachines: async () => chatService.machinesWithInfo(await orchestratorService.machines()),
+    chatCommands: async (_: unknown, { machine, query, limit }: { machine: string; query?: string | null; limit?: number | null }) => {
+      return chatService.commands(machine, query, limit, await orchestratorService.machines()).catch(orchestratorInputError);
+    },
+    chatMachineOptions: async (_: unknown, { machine }: { machine: string }) => {
+      return chatService.machineOptions(machine, await orchestratorService.machines()).catch(orchestratorInputError);
+    },
     chatStatus: async (_: unknown, { machine }: { machine?: string | null }) => chatService.statusSnapshot(machine ?? undefined),
     chatBalloons: async () => chatService.balloons(),
     sprintList: async () => sprintDashboardService.listSprints(),
@@ -379,9 +387,19 @@ export const resolvers = {
       }
       return chatService.createSession(args).catch(orchestratorInputError);
     },
-    sendChatMessage: async (_: unknown, { sessionId, text }: { sessionId: string; text: string }) => {
-      return chatService.sendMessage(sessionId, text, await orchestratorService.machines()).catch(orchestratorInputError);
+    sendChatMessage: async (
+      _: unknown,
+      { sessionId, text, attachmentIds, options }: { sessionId: string; text: string; attachmentIds?: string[] | null; options?: unknown },
+    ) => {
+      return chatService.sendMessage(sessionId, text, await orchestratorService.machines(), { attachmentIds, options }).catch(orchestratorInputError);
     },
+    answerChatInteraction: async (
+      _: unknown,
+      args: { sessionId: string; id: number; decision: string; answers?: AnswerInput[] | null; note?: string | null },
+    ) => {
+      return chatService.answerInteraction(args.sessionId, args.id, args.decision, args.answers, args.note).catch(orchestratorInputError);
+    },
+    stopChatTurn: async (_: unknown, { sessionId }: { sessionId: string }) => chatService.stopTurn(sessionId).catch(orchestratorInputError),
     renameChatSession: async (_: unknown, { id, title }: { id: string; title: string }) => {
       return chatService.renameSession(id, title).catch(orchestratorInputError);
     },
@@ -396,13 +414,21 @@ export const resolvers = {
       await sprintDashboardService.updateSettings(boardId, config).catch(sprintError);
       return true;
     },
-  }
+  },
+  ChatSession: {
+    pending: async (session: { id: string; status: string; machine: string }) => chatService.pending(session.id, session.status, session.machine),
+    settled: async (session: { id: string; status: string; machine: string }) => chatService.settled(session.id, session.status, session.machine),
+  },
+  ChatMessage: {
+    attachments: (message: { attachments?: unknown[] }) => message.attachments ?? [],
+  },
 };
 
 export const protectedQueries = [
   'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens',
   'chatSessions', 'chatSession', 'chatMessages', 'chatActivity', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
+  'chatCommands', 'chatMachineOptions',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents',
 ] as const;
 export const protectedMutations = [
@@ -431,6 +457,8 @@ export const protectedMutations = [
   'moveOrchestration',
   'createChatSession',
   'sendChatMessage',
+  'answerChatInteraction',
+  'stopChatTurn',
   'renameChatSession',
   'deleteChatSession',
   'refreshSprintDashboard',

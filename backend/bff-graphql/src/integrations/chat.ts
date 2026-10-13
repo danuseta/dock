@@ -21,6 +21,35 @@ import {
   type ActivityKind,
   type ActivityStatus,
 } from './chat-activity';
+import { ATTACHMENT_LIMITS, chatAttachmentService, type ChatAttachmentService } from './chat-attachments';
+import {
+  INTERACTION_KEEP_MS,
+  MAX_ASKS_PER_TURN,
+  MAX_INTERACTION_ROWS,
+  MAX_PENDING_ASKS,
+  PENDING_LIST_LIMIT,
+  TAKEN_HARD_MS,
+  TAKEN_HARD_TEXT,
+  TurnNotifier,
+  WAIT_TOUCH_MS,
+  checkAnswer,
+  checkTurnOptions,
+  parseAsk,
+  parseCaps,
+  parseCatalog,
+  parseStoredAnswer,
+  parseStoredCaps,
+  parseStoredCatalog,
+  parseStoredOptions,
+  parseTurnOptions,
+  parseWait,
+  searchCommands,
+  type AnswerInput,
+  type BridgeCaps,
+  type Catalog,
+  type InteractionKind,
+  type WaitAnswer,
+} from './chat-interactions';
 import { DEFAULT_MACHINE, OrchestratorInputError, normalizeMachine, normalizeTicketKey } from './orchestrator';
 
 export const CHAT_SOURCES = ['cli', 'dock'] as const;
@@ -38,10 +67,18 @@ export const MAX_CLAIM_WAIT_SECONDS = 25;
 export const CLAIM_POLL_MS = 500;
 export const STALE_TAKEN_MS = 15 * 60 * 1000;
 export const STALE_TEXT = 'The bridge stopped answering';
+export const SILENT_TAKEN_MS = 2 * 60 * 1000;
+export const SILENT_TEXT = 'The machine stopped responding';
+export const STOP_GRACE_MS = 45 * 1000;
+export const SETTLED_LIST_LIMIT = 5;
 export const BRIDGE_ONLINE_MS = 60 * 1000;
 export const BALLOON_MAX_AGE_MS = 30 * 60 * 1000;
 export const STATUS_STALE_MS = 5 * 60 * 1000;
 export const MAX_STATUS_SESSIONS = 200;
+export const STOPPED_TEXT = 'Stopped';
+export const STOPPED_QUEUED_TEXT = 'Stopped before it started';
+export const ATTACHMENT_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+export const DRAFT_MAX_MS = 60 * 1000;
 const MAX_DELTA_ITEMS = 200;
 const MAX_DETAIL_CHARS = 200;
 const MAX_ERROR_CHARS = 500;
@@ -134,13 +171,14 @@ export function parseSessionSync(input: unknown, now = new Date()) {
   };
 }
 
-export function parseClaim(input: unknown): { wait: number } {
+export function parseClaim(input: unknown): { wait: number; caps?: BridgeCaps } {
   if (!isRecord(input)) throw new OrchestratorInputError('A claim object is required');
   const wait = input.wait === undefined || input.wait === null ? 0 : input.wait;
   if (typeof wait !== 'number' || !Number.isFinite(wait) || wait < 0 || wait > MAX_CLAIM_WAIT_SECONDS) {
     throw new OrchestratorInputError(`wait must be between 0 and ${MAX_CLAIM_WAIT_SECONDS} seconds`);
   }
-  return { wait };
+  const caps = parseCaps(input.caps);
+  return caps ? { wait, caps } : { wait };
 }
 
 export function parseDelta(input: unknown, now = new Date()) {
@@ -160,6 +198,7 @@ export function parseDelta(input: unknown, now = new Date()) {
     detail: text(input.detail, MAX_DETAIL_CHARS) || null,
     done: flag(input.done, 'done'),
     error: text(input.error, MAX_ERROR_CHARS) || null,
+    ...(input.stopped === undefined ? {} : { stopped: flag(input.stopped, 'stopped') }),
   };
 }
 
@@ -278,11 +317,46 @@ interface SessionRow {
   messageCount: number;
   startedAt: Date;
   lastMessageAt: Date;
+  options?: string | null;
 }
 
-interface MessageRow { id: number; sessionId: string; role: string; text: string; state: string; at: Date }
+interface InteractionRow {
+  id: number;
+  sessionId: string;
+  turnId: number;
+  kind: string;
+  title: string;
+  body: string;
+  state: string;
+  createdAt: Date;
+  expiresAt: Date;
+  answeredAt: Date | null;
+}
 
-function toSession(row: SessionRow, lastText: string | null) {
+interface MachineInfo { caps: BridgeCaps | null; capsJson: string; catalog: Catalog | null; catalogHash: string }
+
+interface MessageRow { id: number; sessionId: string; role: string; text: string; state: string; at: Date; stopRequestedAt?: Date | null }
+
+function knownMachine(machine: string, machines: string[]) {
+  if (typeof machine !== 'string' || !machines.includes(machine)) throw new OrchestratorInputError('Unknown machine');
+}
+
+function toInteraction(row: InteractionRow) {
+  return {
+    id: row.id,
+    sessionId: row.sessionId,
+    turnId: row.turnId,
+    kind: row.kind,
+    title: row.title,
+    body: row.body,
+    state: row.state,
+    createdAt: row.createdAt.toISOString(),
+    expiresAt: row.expiresAt.toISOString(),
+    answeredAt: row.answeredAt?.toISOString() ?? null,
+  };
+}
+
+function toSession(row: SessionRow, lastText: string | null, waiting = false) {
   return {
     id: row.id,
     source: row.source,
@@ -296,11 +370,13 @@ function toSession(row: SessionRow, lastText: string | null) {
     startedAt: row.startedAt.toISOString(),
     lastMessageAt: row.lastMessageAt.toISOString(),
     lastText,
+    waiting,
+    options: parseStoredOptions(row.options),
   };
 }
 
 function toMessage(row: MessageRow) {
-  return { id: row.id, sessionId: row.sessionId, role: row.role, text: row.text, state: row.state, at: row.at.toISOString() };
+  return { id: row.id, sessionId: row.sessionId, role: row.role, text: row.text, state: row.state, at: row.at.toISOString(), stopped: Boolean(row.stopRequestedAt) };
 }
 
 function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -321,25 +397,210 @@ export class ChatService {
   private readonly sessionStatus = new Map<string, Map<string, ParsedStatus & { receivedAt: Date }>>();
   private readonly limitsSeen = new Map<string, LimitsSeen>();
   private lastActivityPruneAt = 0;
+  private lastAttachmentPruneAt = 0;
+  private readonly notifier = new TurnNotifier();
+  private readonly machineInfo = new Map<string, MachineInfo>();
+  private readonly openWaits = new Map<number, AbortController>();
 
   constructor(
     private readonly storage = new StorageService(),
     private readonly now: () => Date = () => new Date(),
     private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void> = defaultSleep,
+    private readonly attachments: Pick<ChatAttachmentService, 'attach' | 'release' | 'forMessages' | 'forClaim' | 'openForBridge' | 'deleteForSession' | 'prune'> = chatAttachmentService,
   ) {}
+
+  private serial<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.activityWrites.then(work);
+    this.activityWrites = run.catch(() => undefined);
+    return run;
+  }
+
+  waiters() {
+    return this.notifier.size();
+  }
 
   private async present(rows: SessionRow[]) {
     const lastTexts = await this.storage.getChatLastTexts(rows.map((row) => row.id), LAST_TEXT_CHARS);
-    return rows.map((row) => toSession(row, lastTexts.get(row.id) ?? null));
+    const waiting = await this.storage.getWaitingChatSessionIds(rows.filter((row) => row.status === 'running').map((row) => row.id), this.now());
+    return rows.map((row) => toSession(row, lastTexts.get(row.id) ?? null, waiting.has(row.id)));
   }
 
   /** A turn the bridge took and then went silent on is given up, so the session can be used again. */
   private async failStale() {
-    const stale = await this.storage.getStaleChatSessions(new Date(this.now().getTime() - STALE_TAKEN_MS));
-    for (const session of stale) {
-      await this.storage.moveChatMessages(session.id, 'taken', 'failed');
-      await this.storage.updateChatSession(session.id, { status: 'error', statusDetail: STALE_TEXT });
-      await this.closeActivity(session.id, null);
+    const now = this.now().getTime();
+    const stale = await this.storage.getStaleChatSessions(new Date(now - STALE_TAKEN_MS));
+    const overdue = await this.storage.getOverdueChatSessions(new Date(now - TAKEN_HARD_MS));
+    for (const draft of await this.storage.getStaleChatDrafts(new Date(now - DRAFT_MAX_MS))) await this.discardDraft(draft.id);
+    const staleIds = new Set(stale.map((session) => session.id));
+    for (const session of stale) await this.giveUp(session.id, STALE_TEXT);
+    for (const session of overdue) if (!staleIds.has(session.id)) await this.giveUp(session.id, TAKEN_HARD_TEXT);
+    const ended = new Set([...staleIds, ...overdue.map((session) => session.id)]);
+    const quiet = await this.storage.getQuietChatTurns(new Date(now - SILENT_TAKEN_MS), new Date(now - STOP_GRACE_MS));
+    for (const turn of quiet.unstopped) {
+      if (ended.has(turn.sessionId)) continue;
+      ended.add(turn.sessionId);
+      await this.endStopped(turn.sessionId, turn.turnId);
+    }
+    const silent = quiet.silent.filter((turn) => !ended.has(turn.sessionId));
+    const waiting = await this.storage.getWaitingChatSessionIds(silent.map((turn) => turn.sessionId), this.now());
+    for (const turn of silent) if (!waiting.has(turn.sessionId)) await this.giveUp(turn.sessionId, SILENT_TEXT);
+  }
+
+  private async endStopped(sessionId: string, turnId: number) {
+    if (!await this.storage.moveChatMessage(turnId, sessionId, 'taken', 'done')) return;
+    await this.storage.updateChatSession(sessionId, { status: 'idle', statusDetail: STOPPED_TEXT });
+    await this.closeActivity(sessionId, turnId);
+    await this.serial(() => this.storage.cancelChatInteractions(sessionId, turnId));
+    this.notifier.wake(turnId);
+  }
+
+  private async giveUp(sessionId: string, detail: string) {
+    const turns = await this.storage.getChatMessageIdsInState(sessionId, ['taken']);
+    await this.storage.moveChatMessages(sessionId, 'taken', 'failed');
+    await this.storage.updateChatSession(sessionId, { status: 'error', statusDetail: detail });
+    await this.closeActivity(sessionId, null);
+    await this.serial(() => this.storage.cancelChatInteractions(sessionId, null));
+    for (const turnId of turns) this.notifier.wake(turnId);
+  }
+
+  private async discardDraft(id: number) {
+    if (await this.storage.deleteChatDraft(id)) await this.attachments.release(id);
+  }
+
+  private async closeTurn(sessionId: string, turnId: number) {
+    if ((await this.storage.getPendingChatInteractions(sessionId, 1)).length > 0) {
+      await this.serial(() => this.storage.cancelChatInteractions(sessionId, turnId));
+    }
+    this.notifier.wake(turnId);
+  }
+
+  private async isInteractive(machine: string) {
+    return (await this.info(machine)).caps?.features.includes('interactive') === true;
+  }
+
+  private async expireOverdue(sessionId: string, now: Date) {
+    if (await this.storage.hasOverdueChatInteractions(sessionId, now)) {
+      await this.serial(() => this.storage.expireChatInteractions(sessionId, now));
+    }
+  }
+
+  private async info(machine: string): Promise<MachineInfo> {
+    const known = this.machineInfo.get(machine);
+    if (known) return known;
+    const row = await this.storage.getChatMachineInfo(machine);
+    const info: MachineInfo = {
+      caps: row ? parseStoredCaps(row.caps) : null,
+      capsJson: row?.caps ?? '',
+      catalog: row ? parseStoredCatalog(row.catalog) : null,
+      catalogHash: row?.catalogHash ?? '',
+    };
+    this.machineInfo.set(machine, info);
+    return info;
+  }
+
+  private async recordCaps(machine: string, caps: BridgeCaps) {
+    const info = await this.info(machine);
+    const json = JSON.stringify(caps);
+    if (info.capsJson === json) return;
+    info.caps = caps;
+    info.capsJson = json;
+    await this.serial(() => this.storage.upsertChatMachineInfo(machine, { caps: json }));
+  }
+
+  private async clearCaps(machine: string) {
+    const info = await this.info(machine);
+    if (!info.caps && info.capsJson === '') return;
+    await this.serial(() => this.storage.upsertChatMachineInfo(machine, { caps: '' }));
+    info.caps = null;
+    info.capsJson = '';
+  }
+
+  async ingestCatalog(input: unknown, machine: string) {
+    const catalog = parseCatalog(input);
+    const info = await this.info(machine);
+    await this.serial(() => this.storage.upsertChatMachineInfo(machine, { catalog: JSON.stringify(catalog), catalogHash: catalog.hash }));
+    info.catalog = catalog;
+    info.catalogHash = catalog.hash;
+    return { hash: catalog.hash };
+  }
+
+  async commands(machine: string, query: string | null | undefined, limitInput: number | null | undefined, machines: string[]) {
+    knownMachine(machine, machines);
+    return searchCommands((await this.info(machine)).catalog?.commands ?? [], query, limitInput);
+  }
+
+  async machineOptions(machine: string, machines: string[]) {
+    knownMachine(machine, machines);
+    const { caps, catalog } = await this.info(machine);
+    if (!caps && !catalog) return null;
+    return {
+      models: catalog?.models ?? [],
+      modes: caps?.modes ?? [],
+      fastAvailable: caps?.features.includes('fast') === true && catalog?.fast.available === true,
+    };
+  }
+
+  async machinesWithInfo(names: string[]) {
+    return Promise.all(this.machines(names).map(async (machine) => {
+      const { caps } = await this.info(machine.name);
+      return { ...machine, capabilities: caps?.features ?? [], claudeVersion: caps?.claude || null };
+    }));
+  }
+
+  async pending(sessionId: string, status: string, machine: string) {
+    if (status !== 'running' || !CHAT_ID.test(String(sessionId))) return [];
+    try {
+      if (!await this.isInteractive(machine)) return [];
+      const now = this.now();
+      await this.expireOverdue(sessionId, now);
+      return (await this.storage.getPendingChatInteractions(sessionId, PENDING_LIST_LIMIT, now)).map(toInteraction);
+    } catch (error) {
+      console.error('[Chat] reading pending requests failed:', error instanceof Error ? error.message : 'unknown error');
+      return [];
+    }
+  }
+
+  async settled(sessionId: string, status: string, machine: string) {
+    if (status !== 'running' || !CHAT_ID.test(String(sessionId))) return [];
+    try {
+      if (!await this.isInteractive(machine)) return [];
+      const turn = await this.storage.getOpenChatMessage(sessionId);
+      if (turn?.state !== 'taken') return [];
+      return (await this.storage.getSettledChatInteractions(sessionId, turn.id, SETTLED_LIST_LIMIT)).map((row) => ({
+        id: row.id,
+        state: row.state,
+        decision: row.state === 'answered' ? parseStoredAnswer(row.answer)?.decision ?? null : null,
+      }));
+    } catch (error) {
+      console.error('[Chat] reading settled requests failed:', error instanceof Error ? error.message : 'unknown error');
+      return [];
+    }
+  }
+
+  async withAttachments<T extends { id: number; role: string }>(rows: T[]) {
+    const ids = rows.filter((row) => row.role === 'user').map((row) => row.id);
+    let byMessage: Awaited<ReturnType<ChatAttachmentService['forMessages']>> = new Map();
+    if (ids.length > 0) {
+      try {
+        byMessage = await this.attachments.forMessages(ids);
+      } catch (error) {
+        console.error('[Chat] reading attachments failed:', error instanceof Error ? error.message : 'unknown error');
+      }
+    }
+    return rows.map((row) => ({ ...row, attachments: byMessage.get(row.id) ?? [] }));
+  }
+
+  openAttachment(input: unknown, machine: string) {
+    return this.attachments.openForBridge(input, machine);
+  }
+
+  private async pruneAttachments(now: Date) {
+    if (now.getTime() - this.lastAttachmentPruneAt < ATTACHMENT_PRUNE_INTERVAL_MS) return;
+    this.lastAttachmentPruneAt = now.getTime();
+    try {
+      await this.attachments.prune(now);
+    } catch (error) {
+      console.error('[Chat] pruning attachments failed:', error instanceof Error ? error.message : 'unknown error');
     }
   }
 
@@ -360,6 +621,7 @@ export class ChatService {
         rowsBefore: new Date(now.getTime() - ACTIVITY_ROWS_KEEP_MS),
         maxRows: MAX_ACTIVITY_ROWS,
       });
+      await this.storage.pruneChatInteractions({ before: new Date(now.getTime() - INTERACTION_KEEP_MS), maxRows: MAX_INTERACTION_ROWS });
     } catch (error) {
       console.error('[Chat] pruning activity failed:', error instanceof Error ? error.message : 'unknown error');
     }
@@ -505,12 +767,22 @@ export class ChatService {
     return toSession(row, null);
   }
 
-  async sendMessage(sessionIdInput: string, textInput: string, machines: string[]) {
+  async sendMessage(
+    sessionIdInput: string,
+    textInput: string,
+    machines: string[],
+    extras: { attachmentIds?: string[] | null; options?: unknown } = {},
+  ) {
     const sessionId = chatId(sessionIdInput, 'sessionId');
     const body = typeof textInput === 'string' ? textInput.trim() : '';
-    if (body.length < 1 || body.length > MAX_SEND_CHARS) {
+    const attachmentIds = [...new Set(extras.attachmentIds ?? [])];
+    if (attachmentIds.length > ATTACHMENT_LIMITS.perMessage) {
+      throw new OrchestratorInputError(`A maximum of ${ATTACHMENT_LIMITS.perMessage} attachments per message is supported`);
+    }
+    if ((body.length < 1 && attachmentIds.length < 1) || body.length > MAX_SEND_CHARS) {
       throw new OrchestratorInputError(`A message needs between 1 and ${MAX_SEND_CHARS} characters`);
     }
+    const options = parseTurnOptions(extras.options);
     await this.failStale();
     const session = await this.storage.getChatSession(sessionId);
     if (!session) throw new OrchestratorInputError('Unknown chat session');
@@ -518,14 +790,180 @@ export class ChatService {
     if (!machines.includes(session.machine)) {
       throw new OrchestratorInputError(`No ingest token exists for the machine ${session.machine}, so nothing would answer this message`);
     }
-    if (await this.storage.countChatMessagesInState(sessionId, ['queued', 'taken']) > 0) {
+    if (await this.storage.countChatMessagesInState(sessionId, ['draft', 'queued', 'taken']) > 0) {
       throw new OrchestratorInputError('This session is still working on the previous message');
     }
+    if (attachmentIds.length > 0 || options) {
+      const { caps, catalog } = await this.info(session.machine);
+      if (attachmentIds.length > 0 && caps?.features.includes('attachments') !== true) {
+        throw new OrchestratorInputError('This machine cannot receive attachments yet');
+      }
+      if (options) checkTurnOptions(options, caps, catalog);
+    }
     const now = this.now();
-    const message = await this.storage.createChatMessage({ sessionId, role: 'user', text: body, state: 'queued', at: now });
+    const optionsJson = options ? JSON.stringify(options) : null;
+    let message = await this.storage.createChatMessage({
+      sessionId, role: 'user', text: body, state: attachmentIds.length > 0 ? 'draft' : 'queued', at: now, options: optionsJson,
+    });
+    let attached: Awaited<ReturnType<ChatAttachmentService['attach']>> = [];
+    if (attachmentIds.length > 0) {
+      try {
+        attached = await this.attachments.attach(sessionId, message.id, attachmentIds);
+        if (!await this.storage.moveChatMessage(message.id, sessionId, 'draft', 'queued')) {
+          throw new OrchestratorInputError('The message could not be sent. Try again.');
+        }
+      } catch (error) {
+        await this.discardDraft(message.id).catch((cleanup) => {
+          console.error('[Chat] removing a draft failed:', cleanup instanceof Error ? cleanup.message : 'unknown error');
+        });
+        throw error;
+      }
+      message = { ...message, state: 'queued' };
+    }
     const messageCount = await this.storage.trimChatMessages(sessionId, MAX_MESSAGES_KEPT);
-    await this.storage.updateChatSession(sessionId, { status: 'queued', statusDetail: null, messageCount, lastMessageAt: now });
-    return toMessage(message);
+    await this.storage.updateChatSession(sessionId, {
+      status: 'queued', statusDetail: null, messageCount, lastMessageAt: now, ...(optionsJson ? { options: optionsJson } : {}),
+    });
+    return { ...toMessage(message), ...(attached.length > 0 ? { attachments: attached } : {}) };
+  }
+
+  private async turnMessage(sessionId: string, id: number) {
+    const message = await this.storage.getChatMessage(id);
+    if (!message || message.sessionId !== sessionId || message.role !== 'user') {
+      throw new OrchestratorInputError('replyTo is not a message of this session');
+    }
+    return message;
+  }
+
+  async stopTurn(sessionIdInput: string) {
+    const sessionId = chatId(sessionIdInput, 'sessionId');
+    await this.failStale();
+    const session = await this.storage.getChatSession(sessionId);
+    if (!session) throw new OrchestratorInputError('Unknown chat session');
+    if (session.source !== 'dock') throw new OrchestratorInputError('Only a DOCK session can be stopped');
+    let open = await this.storage.getOpenChatMessage(sessionId);
+    if (open?.state === 'queued') {
+      if (await this.storage.moveChatMessage(open.id, sessionId, 'queued', 'failed')) {
+        const row = await this.storage.updateChatSession(sessionId, { status: 'idle', statusDetail: STOPPED_QUEUED_TEXT });
+        return (await this.present([row]))[0];
+      }
+      open = await this.storage.getOpenChatMessage(sessionId);
+    }
+    if (open?.state === 'taken') {
+      const turnId = open.id;
+      await this.serial(() => this.storage.requestChatStop(turnId, sessionId, this.now()));
+      this.notifier.wake(turnId);
+    }
+    return (await this.present([(await this.storage.getChatSession(sessionId))!]))[0];
+  }
+
+  async ask(input: unknown, machine: string) {
+    const now = this.now();
+    const request = parseAsk(input, now);
+    this.bridgeSeenAt.set(machine, now);
+    const session = await this.storage.getChatSession(request.sessionId);
+    if (!session || session.machine !== machine) return null;
+    if (session.source !== 'dock') throw new OrchestratorInputError('Only a DOCK session takes requests');
+    const replyTo = await this.turnMessage(session.id, request.replyTo);
+    if (replyTo.state !== 'taken') return { id: 0, expiresAt: now.toISOString(), closed: true };
+    const created = await this.serial(() => this.storage.createChatInteraction({
+      sessionId: session.id,
+      turnId: replyTo.id,
+      requestId: request.requestId,
+      kind: request.kind,
+      title: request.title,
+      body: request.body,
+      expiresAt: request.expiresAt,
+    }, { pending: MAX_PENDING_ASKS, perTurn: MAX_ASKS_PER_TURN }, now));
+    if (created.refused === 'pending') throw new OrchestratorInputError(`A maximum of ${MAX_PENDING_ASKS} pending requests per turn is supported`);
+    if (created.refused === 'turn') throw new OrchestratorInputError(`A maximum of ${MAX_ASKS_PER_TURN} requests per turn is supported`);
+    if (!session.lastDeltaAt || now.getTime() - session.lastDeltaAt.getTime() >= WAIT_TOUCH_MS) {
+      await this.serial(() => this.storage.updateChatSession(session.id, { lastDeltaAt: now }));
+    }
+    return { id: created.row!.id, expiresAt: created.row!.expiresAt.toISOString(), closed: false };
+  }
+
+  private async turnState(sessionId: string, turnId: number, interactive: boolean) {
+    const message = await this.storage.getChatMessage(turnId);
+    if (interactive) await this.expireOverdue(sessionId, this.now());
+    const rows = await this.storage.getUndeliveredChatInteractions(sessionId, turnId);
+    const answers = rows.map((row): WaitAnswer => ({
+      requestId: row.requestId,
+      kind: row.kind as InteractionKind,
+      state: row.state === 'expired' ? 'expired' : 'answered',
+      answer: row.state === 'expired' ? null : parseStoredAnswer(row.answer),
+    }));
+    const stop = Boolean(message?.stopRequestedAt);
+    const closed = message?.state !== 'taken';
+    return { ready: stop || closed || answers.length > 0, result: { stop, answers, closed } };
+  }
+
+  async wait(input: unknown, signal: AbortSignal | undefined, machine: string) {
+    const request = parseWait(input);
+    const now = this.now();
+    this.bridgeSeenAt.set(machine, now);
+    const session = await this.storage.getChatSession(request.sessionId);
+    if (!session || session.machine !== machine) return null;
+    if (session.source !== 'dock') throw new OrchestratorInputError('Only a DOCK session takes waits');
+    const replyTo = await this.turnMessage(session.id, request.replyTo);
+    if (request.caps) await this.recordCaps(machine, request.caps);
+    if (request.ack.length > 0) {
+      await this.serial(() => this.storage.markChatInteractionsDelivered(session.id, replyTo.id, request.ack, now));
+    }
+    if (request.cancelled.length > 0) {
+      await this.serial(() => this.storage.cancelChatInteractionsByRequest(session.id, replyTo.id, request.cancelled));
+    }
+    if (replyTo.state === 'taken') {
+      if (replyTo.takenAt && now.getTime() - replyTo.takenAt.getTime() >= TAKEN_HARD_MS) {
+        await this.giveUp(session.id, TAKEN_HARD_TEXT);
+      } else if (!session.lastDeltaAt || now.getTime() - session.lastDeltaAt.getTime() >= WAIT_TOUCH_MS) {
+        await this.serial(() => this.storage.updateChatSession(session.id, { lastDeltaAt: now }));
+      }
+    }
+    const local = new AbortController();
+    if (request.wait > 0) {
+      this.openWaits.get(replyTo.id)?.abort();
+      this.openWaits.set(replyTo.id, local);
+    }
+    const hangup = () => local.abort();
+    if (signal?.aborted) local.abort();
+    signal?.addEventListener('abort', hangup, { once: true });
+    const woken = this.notifier.wait(replyTo.id, local.signal);
+    try {
+      const interactive = await this.isInteractive(machine);
+      let state = await this.turnState(session.id, replyTo.id, interactive);
+      if (!state.ready && request.wait > 0 && !local.signal.aborted) {
+        await Promise.race([woken, this.sleep(request.wait * 1000, local.signal)]);
+        state = await this.turnState(session.id, replyTo.id, interactive);
+      }
+      return state.result;
+    } finally {
+      local.abort();
+      if (this.openWaits.get(replyTo.id) === local) this.openWaits.delete(replyTo.id);
+      signal?.removeEventListener('abort', hangup);
+    }
+  }
+
+  async answerInteraction(sessionIdInput: string, id: number, decision: string, answers: AnswerInput[] | null | undefined, note: unknown) {
+    const sessionId = chatId(sessionIdInput, 'sessionId');
+    const row = Number.isInteger(id) ? await this.storage.getChatInteraction(id) : null;
+    if (!row || row.sessionId !== sessionId) throw new OrchestratorInputError('Unknown request');
+    const now = this.now();
+    if (row.state === 'pending' && row.expiresAt < now) {
+      await this.serial(() => this.storage.expireChatInteractions(sessionId, now));
+      throw new OrchestratorInputError('This request expired');
+    }
+    if (row.state === 'expired') throw new OrchestratorInputError('This request expired');
+    if (row.state !== 'pending') throw new OrchestratorInputError('This request is no longer pending');
+    if ((await this.storage.getChatMessage(row.turnId))?.state !== 'taken') {
+      await this.serial(() => this.storage.cancelChatInteractions(sessionId, row.turnId));
+      throw new OrchestratorInputError('This request is no longer pending');
+    }
+    const answer = JSON.stringify(checkAnswer(row, decision, answers, note));
+    const saved = await this.serial(() => this.storage.answerChatInteraction(row.id, answer, now));
+    if (!saved) throw new OrchestratorInputError('This request is no longer pending');
+    this.notifier.wake(row.turnId);
+    return toInteraction({ ...row, state: 'answered', answeredAt: now });
   }
 
   async renameSession(idInput: string, titleInput: string) {
@@ -538,7 +976,17 @@ export class ChatService {
 
   async deleteSession(id: string) {
     if (!CHAT_ID.test(String(id))) return false;
-    return this.storage.deleteChatSession(id);
+    const turns = await this.storage.getChatMessageIdsInState(id, ['taken']);
+    const deleted = await this.storage.deleteChatSession(id);
+    if (deleted) {
+      for (const turnId of turns) this.notifier.wake(turnId);
+      try {
+        await this.attachments.deleteForSession(id);
+      } catch (error) {
+        console.error('[Chat] removing attachments failed:', error instanceof Error ? error.message : 'unknown error');
+      }
+    }
+    return deleted;
   }
 
   /** History of a terminal session, pushed from the laptop in batches. */
@@ -559,19 +1007,26 @@ export class ChatService {
     return { id: sync.id, messageCount };
   }
 
-  private async takeNext(machine: string) {
+  private async takeNext(machine: string, caps: BridgeCaps | null) {
     for (const message of await this.storage.getQueuedChatMessages(machine, CLAIM_CANDIDATES)) {
       if (await this.storage.countChatMessagesInState(message.sessionId, ['taken']) > 0) continue;
       const session = await this.storage.getChatSession(message.sessionId);
       if (!session) continue;
-      if (!await this.storage.moveChatMessage(message.id, message.sessionId, 'queued', 'taken')) continue;
-      await this.storage.updateChatSession(session.id, { status: 'running', statusDetail: null, lastDeltaAt: this.now() });
-      return {
+      const takenAt = this.now();
+      if (!await this.storage.moveChatMessage(message.id, message.sessionId, 'queued', 'taken', caps ? { takenAt } : {})) continue;
+      await this.storage.updateChatSession(session.id, { status: 'running', statusDetail: null, lastDeltaAt: takenAt });
+      const taken = {
         id: message.id,
         sessionId: message.sessionId,
         text: message.text,
         claudeSessionId: session.claudeSessionId,
         forkFrom: session.forkFrom,
+      };
+      if (!caps) return taken;
+      return {
+        ...taken,
+        attachments: caps.features.includes('attachments') ? await this.attachments.forClaim(message.id) : [],
+        options: parseStoredOptions(message.options),
       };
     }
     return null;
@@ -579,16 +1034,24 @@ export class ChatService {
 
   /** Long poll: the oldest queued message, or `null` once `wait` seconds pass or the bridge hangs up. */
   async claim(input: unknown, signal: AbortSignal | undefined, machine: string) {
-    const { wait } = parseClaim(input);
+    const { wait, caps = null } = parseClaim(input);
     const deadline = this.now().getTime() + wait * 1000;
     await this.failStale();
+    let extra: { wantCatalog?: true } = {};
+    if (caps) {
+      await this.recordCaps(machine, caps);
+      if (caps.features.includes('attachments')) await this.pruneAttachments(this.now());
+      if (caps.catalogHash !== null && (await this.info(machine)).catalogHash !== caps.catalogHash) extra = { wantCatalog: true };
+    } else {
+      await this.clearCaps(machine);
+    }
     for (;;) {
-      if (signal?.aborted) return { message: null };
+      if (signal?.aborted) return { message: null, ...extra };
       this.bridgeSeenAt.set(machine, this.now());
-      const message = await this.takeNext(machine);
-      if (message) return { message };
+      const message = await this.takeNext(machine, caps);
+      if (message) return { message, ...extra };
       const left = deadline - this.now().getTime();
-      if (left <= 0) return { message: null };
+      if (left <= 0) return { message: null, ...extra };
       await this.sleep(Math.min(CLAIM_POLL_MS, left), signal);
     }
   }
@@ -610,24 +1073,31 @@ export class ChatService {
     const update: Parameters<StorageService['updateChatSession']>[1] = { messageCount };
     if (delta.items.length > 0) update.lastMessageAt = now;
     if (delta.claudeSessionId) update.claudeSessionId = delta.claudeSessionId;
-    // A turn that was already given up as stale keeps its error; late output is still shown.
-    if (replyTo.state === 'taken') {
-      update.lastDeltaAt = now;
-      if (delta.error) {
-        await this.storage.moveChatMessage(replyTo.id, session.id, 'taken', 'failed');
-        update.status = 'error';
-        update.statusDetail = delta.error;
-      } else if (delta.done) {
-        await this.storage.moveChatMessage(replyTo.id, session.id, 'taken', 'done');
-        update.status = 'idle';
-        update.statusDetail = null;
-      } else if (delta.detail) {
-        update.statusDetail = delta.detail;
+    let ended = false;
+    try {
+      // A turn that was already given up as stale keeps its error; late output is still shown.
+      if (replyTo.state === 'taken') {
+        update.lastDeltaAt = now;
+        if (delta.error) {
+          await this.storage.moveChatMessage(replyTo.id, session.id, 'taken', 'failed');
+          ended = true;
+          update.status = 'error';
+          update.statusDetail = delta.error;
+        } else if (delta.done) {
+          await this.storage.moveChatMessage(replyTo.id, session.id, 'taken', 'done');
+          ended = true;
+          update.status = 'idle';
+          update.statusDetail = delta.stopped ? STOPPED_TEXT : null;
+        } else if (delta.detail) {
+          update.statusDetail = delta.detail;
+        }
       }
+      const updated = await this.storage.updateChatSession(session.id, update);
+      return { id: updated.id, status: updated.status, messageCount };
+    } finally {
+      if (ended) await this.closeActivity(session.id, replyTo.id);
+      if (ended || replyTo.state !== 'taken') await this.closeTurn(session.id, replyTo.id);
     }
-    const updated = await this.storage.updateChatSession(session.id, update);
-    if (replyTo.state === 'taken' && (delta.error || delta.done)) await this.closeActivity(session.id, replyTo.id);
-    return { id: updated.id, status: updated.status, messageCount };
   }
 
   async activity(input: unknown, machine: string) {

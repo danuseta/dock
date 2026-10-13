@@ -335,6 +335,10 @@ export const typeDefs = gql`
     startedAt: String!
     lastMessageAt: String!
     lastText: String
+    waiting: Boolean!
+    pending: [ChatInteraction!]!
+    settled: [ChatSettled!]!
+    options: ChatTurnOptions
   }
 
   type ChatMessage {
@@ -344,6 +348,75 @@ export const typeDefs = gql`
     text: String!
     state: String!
     at: String!
+    stopped: Boolean!
+    attachments: [ChatAttachment!]!
+  }
+
+  type ChatSettled {
+    id: Int!
+    state: String!
+    decision: String
+  }
+
+  type ChatInteraction {
+    id: Int!
+    sessionId: ID!
+    turnId: Int!
+    kind: String!
+    title: String!
+    body: String!
+    state: String!
+    createdAt: String!
+    expiresAt: String!
+    answeredAt: String
+  }
+
+  type ChatAttachment {
+    id: ID!
+    name: String!
+    mime: String!
+    size: Int!
+    state: String!
+  }
+
+  type ChatTurnOptions {
+    model: String
+    effort: String
+    permissionMode: String
+    fast: Boolean
+  }
+
+  type ChatCommand {
+    name: String!
+    description: String!
+    argumentHint: String!
+    kind: String!
+  }
+
+  type ChatModel {
+    value: String!
+    label: String!
+    efforts: [String!]!
+    fast: Boolean!
+  }
+
+  type ChatMachineOptions {
+    models: [ChatModel!]!
+    modes: [String!]!
+    fastAvailable: Boolean!
+  }
+
+  input ChatTurnOptionsInput {
+    model: String
+    effort: String
+    permissionMode: String
+    fast: Boolean
+  }
+
+  input ChatAnswerInput {
+    index: Int!
+    labels: [String!]!
+    other: String
   }
 
   type ChatActivity {
@@ -373,6 +446,8 @@ export const typeDefs = gql`
     name: String!
     online: Boolean!
     lastSeenAt: String
+    capabilities: [String!]!
+    claudeVersion: String
   }
 
   type ChatLimit {
@@ -514,6 +589,8 @@ export const typeDefs = gql`
     chatMachines: [ChatMachine!]!
     chatStatus(machine: String): ChatStatus!
     chatBalloons: [ChatMessage!]!
+    chatCommands(machine: String!, query: String, limit: Int): [ChatCommand!]!
+    chatMachineOptions(machine: String!): ChatMachineOptions
     sprintList: [SprintSummary!]!
     sprintDashboard(sprintId: Int): SprintDashboard!
     sprintTrend: String!
@@ -549,7 +626,9 @@ export const typeDefs = gql`
     dismissOrchestration(key: String!): Boolean!
     moveOrchestration(key: String!, machine: String!): Orchestration!
     createChatSession(title: String, ticketKey: String, forkFrom: ID, machine: String): ChatSession!
-    sendChatMessage(sessionId: ID!, text: String!): ChatMessage!
+    sendChatMessage(sessionId: ID!, text: String!, attachmentIds: [ID!], options: ChatTurnOptionsInput): ChatMessage!
+    answerChatInteraction(sessionId: ID!, id: Int!, decision: String!, answers: [ChatAnswerInput!], note: String): ChatInteraction!
+    stopChatTurn(sessionId: ID!): ChatSession!
     renameChatSession(id: ID!, title: String!): ChatSession!
     deleteChatSession(id: ID!): Boolean!
     refreshSprintDashboard(sprintId: Int!): SprintRefreshState!
