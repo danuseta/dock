@@ -4,7 +4,8 @@ import { ArrowDown, ArrowUp, Bot, Building2, ChevronLeft, ChevronRight, Clock, E
 import { GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
 import { CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
-import { Badge, Button, Card, Dialog, Page, PageHeader } from '../components/ui';
+import { Badge, Button, Card, Dialog, Page, PageHeader, PhoneCards } from '../components/ui';
+import { isPhone } from '../lib/phone';
 import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
@@ -98,7 +99,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
   const { data: balloonData } = useQuery<{ chatBalloons: ChatMessage[]; chatSessions: Array<{ id: string; ticketKey?: string | null }> }>(GET_CHAT_BALLOONS, { fetchPolicy: 'network-only', pollInterval: POLL_MS });
   const balloons = useMemo(() => ticketBalloons(balloonData?.chatBalloons || [], balloonData?.chatSessions || []), [balloonData]);
   const { openForTicket, opening: openingChat, error: chatError } = useOpenForTicket();
-  const [view, setView] = useState<View>(() => (window.matchMedia('(max-width: 760px)').matches ? 'table' : 'office'));
+  const [view, setView] = useState<View>(() => (isPhone() ? 'table' : 'office'));
   const [flowView, setFlowView] = useState<FlowView>('live');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [sampleStartedAt, setSampleStartedAt] = useState<number | null>(null);
@@ -189,6 +190,12 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
     }
   };
 
+  // On a phone the run's panel sits below the table, so picking a row has to bring it into view.
+  const pickRun = (key: string) => {
+    setSelectedKey(key);
+    if (isPhone()) requestAnimationFrame(() => document.getElementById('agent-run-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
+
   const runAction = async (work: () => Promise<void>) => {
     setCronError('');
     try {
@@ -217,7 +224,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
               <button
                 key={id}
                 type="button"
-                className={cn('flex h-8 items-center gap-1.5 rounded-xs px-3 font-display text-xs font-semibold text-secondary-foreground transition-colors duration-150', view === id && 'bg-accent text-black')}
+                className={cn('flex h-8 max-[760px]:h-11 items-center gap-1.5 rounded-xs px-3 font-display text-xs font-semibold text-secondary-foreground transition-colors duration-150', view === id && 'bg-accent text-black')}
                 aria-pressed={view === id}
                 onClick={() => setView(id)}
               >
@@ -328,14 +335,14 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
               <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
                 <div className="flex rounded-sm border border-border bg-surface-1 p-0.5" role="group" aria-label="Tickets shown">
                   {([['active', 'Active', active.length], ['archive', 'Archive', archived.length]] as const).map(([id, label, count]) => (
-                    <button key={id} type="button" className={cn('flex h-7 items-center gap-1.5 rounded-xs px-3 font-display text-xs font-semibold text-secondary-foreground transition-colors duration-150', tableTab === id && 'bg-accent text-black')} aria-pressed={tableTab === id} onClick={() => { setTableTab(id); setPage(1); }}>
+                    <button key={id} type="button" className={cn('flex h-7 max-[760px]:h-11 items-center gap-1.5 rounded-xs px-3 font-display text-xs font-semibold text-secondary-foreground transition-colors duration-150', tableTab === id && 'bg-accent text-black')} aria-pressed={tableTab === id} onClick={() => { setTableTab(id); setPage(1); }}>
                       {label}<span className="font-mono tabular-nums opacity-70">{count}</span>
                     </button>
                   ))}
                 </div>
                 <span className="text-pretty text-xs text-muted-foreground">{tableTab === 'archive' ? 'Finished tickets. They no longer count in the totals above.' : 'Tickets an agent is still on.'}</span>
               </div>
-              <div className="overflow-x-auto">
+              <PhoneCards>
                 <table className="w-full min-w-[860px] border-collapse text-left text-sm">
                   <thead className="bg-surface-1 text-xs text-muted-foreground">
                     <tr>
@@ -354,8 +361,8 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                       <tr><td colSpan={TABLE_COLUMNS.length} className="px-4 py-10 text-center text-sm text-muted-foreground">{tableTab === 'archive' ? 'Nothing archived yet. A ticket moves here when it is done.' : 'No ticket is being worked on right now.'}</td></tr>
                     )}
                     {listed.items.map((run) => (
-                      <tr key={run.key} className={cn('cursor-pointer border-t border-border hover:bg-surface-1', selected?.key === run.key && 'bg-surface-1')} onClick={() => setSelectedKey(run.key)}>
-                        <td className="px-4 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => setSelectedKey(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><span className="sr-only">, machine </span><span className="ml-2 font-mono text-[0.62rem] font-semibold text-muted-foreground">{machineOf(run)}</span><OfferBadge run={run} className="ml-2" /><span className="mt-0.5 block max-w-[320px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
+                      <tr key={run.key} className={cn('cursor-pointer border-t border-border hover:bg-surface-1', selected?.key === run.key && 'bg-surface-1')} onClick={() => pickRun(run.key)}>
+                        <td className="px-4 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => pickRun(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><span className="sr-only">, machine </span><span className="ml-2 font-mono text-[0.62rem] font-semibold text-muted-foreground">{machineOf(run)}</span><OfferBadge run={run} className="ml-2" /><span className="mt-0.5 block max-w-[320px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
                         <td className="px-4 py-3"><StageChip stage={run.stage} kind={run.kind} /></td>
                         <td className="px-4 py-3"><StatusChip status={statusOf(run)} review={run.review} /></td>
                         <td className="px-4 py-3 font-mono text-xs tabular-nums">{run.acPassed}/{run.acTotal}{run.acFailed > 0 && <span className="ml-1.5 text-status-conflict">{run.acFailed} failed</span>}</td>
@@ -365,7 +372,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </PhoneCards>
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
                 <span className="tabular-nums">{listed.from === 0 ? '0 tickets' : `${listed.from}–${listed.to} of ${tableTab === 'archive' ? archived.length : active.length}`}</span>
                 <div className="flex items-center gap-2">
@@ -378,7 +385,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
           )}
         </Card>
 
-        <Card className="flex max-h-[600px] flex-col gap-3.5 overflow-y-auto bg-surface-0 p-[18px] max-[1120px]:max-h-none" aria-live="polite">
+        <Card id="agent-run-detail" className="flex max-h-[600px] scroll-mt-4 flex-col gap-3.5 overflow-y-auto bg-surface-0 p-[18px] max-[1120px]:max-h-none" aria-live="polite">
           {!selected ? (
             <p className="text-pretty text-sm text-muted-foreground">Select a character, a wall card or a table row to see that ticket's run.</p>
           ) : (

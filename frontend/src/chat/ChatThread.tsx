@@ -4,6 +4,7 @@ import { Loader2, SendHorizontal } from 'lucide-react';
 import { SEND_CHAT_MESSAGE, STOP_CHAT_TURN } from '../graphql/mutations';
 import { GET_CHAT_MESSAGES, GET_CHAT_SESSION } from '../graphql/queries';
 import { Button } from '../components/ui';
+import { isPhone } from '../lib/phone';
 import { cn } from '../lib/cn';
 import {
   isOptimistic, isStopping, isTurnInProgress, machineCapabilities, machineOf, machineOnline, machinePlace, mergeMessages, newestAssistantId, oldestId, optimisticMessage, pollCursor, pollInterval, sendBlocker, sessionTurnOptions,
@@ -271,7 +272,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
               value=""
               readOnly
               disabled
-              placeholder={readOnly ? 'Continue as a DOCK session to type...' : `Message Claude Code on ${place}...`}
+              placeholder={readOnly ? 'Continue as a DOCK session to type...' : isPhone() ? 'Message Claude Code...' : `Message Claude Code on ${place}...`}
               aria-label="Message"
             />
             <Button size="sm" variant="primary" className="h-10 max-[900px]:h-11 max-[900px]:min-w-11" disabled aria-label="Send message">

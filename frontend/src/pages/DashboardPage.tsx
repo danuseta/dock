@@ -237,7 +237,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
           </p>
         </div>
       ) : (
-        <div className="flex min-h-[650px] w-full items-start gap-5 overflow-x-auto pb-6">
+        <div className="flex min-h-[650px] w-full items-start gap-5 overflow-x-auto pb-6 max-[760px]:min-h-0 max-[760px]:flex-col max-[760px]:overflow-x-visible">
           {columnsToRender.map((column) => {
             const ColumnIcon = column.icon;
             const columnTickets = sprintFilteredTickets.filter((t: any) => {
@@ -255,7 +255,9 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
                 key={column.id}
                 className={cn(
                   'flex max-h-[calc(100dvh-220px)] shrink-0 flex-col rounded-md border border-border bg-surface-1 shadow-md',
-                  isSingleColumnMode ? 'w-full min-w-full' : 'w-[350px] min-w-[350px]'
+                  'max-[760px]:max-h-none max-[760px]:w-full max-[760px]:min-w-0',
+                  isSingleColumnMode ? 'w-full min-w-full' : 'w-[350px] min-w-[350px]',
+                  !isSingleColumnMode && columnTickets.length === 0 && 'max-[760px]:hidden',
                 )}
               >
                 <div className={cn('flex items-center justify-between rounded-t-md border-b border-border px-4 py-3.5', column.header)}>

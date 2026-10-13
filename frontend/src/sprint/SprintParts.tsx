@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Badge, Card } from '../components/ui';
+import { Badge, Card, PhoneCards } from '../components/ui';
 import { cn } from '../lib/cn';
 import { toneVariant } from './format';
 import type { IssueRef, Tone } from './types';
@@ -13,12 +13,14 @@ export const SectionCard = ({ title, sub, children }: { title: string; sub?: Rea
 );
 
 export const Table = ({ head, children, minWidth = 720 }: { head: Array<{ label: string; numeric?: boolean }>; children: ReactNode; minWidth?: number }) => (
+  <PhoneCards>
   <table className="w-full border-collapse text-left text-sm" style={{ minWidth }}>
     <thead className="bg-surface-1 text-xs text-muted-foreground">
       <tr>{head.map((column) => <th key={column.label} className={cn('px-4 py-3 font-medium', column.numeric && 'text-right')}>{column.label}</th>)}</tr>
     </thead>
     <tbody>{children}</tbody>
   </table>
+  </PhoneCards>
 );
 
 export const Tr = ({ children }: { children: ReactNode }) => <tr className="border-t border-border hover:bg-surface-1">{children}</tr>;

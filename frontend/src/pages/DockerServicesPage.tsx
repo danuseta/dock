@@ -3,7 +3,7 @@ import { useLazyQuery, useQuery } from '@apollo/client';
 import { Box, Eye, RefreshCw, Search, Terminal, X } from 'lucide-react';
 import { GET_DOCKER_CONTAINER_LOGS, GET_DOCKER_RUNTIME, GET_SETTINGS } from '../graphql/queries';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
-import { Button, Card, Dialog, IconButton, Input, Page, PageHeader, Select } from '../components/ui';
+import { Button, Card, Dialog, IconButton, Input, Page, PageHeader, PhoneCards, Select } from '../components/ui';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { cn } from '../lib/cn';
 import { dockerStatusTone, formatBytes, type DockerContainer, type DockerRuntime } from '../lib/dockerRuntime';
@@ -66,7 +66,7 @@ const DockerServicesPage = () => {
       </Card>
 
       <Card className="overflow-hidden p-0">
-        <div className="overflow-x-auto">
+        <PhoneCards>
           <table className="w-full min-w-[1180px] border-collapse text-left text-sm">
             <thead className="bg-surface-1 text-xs text-muted-foreground"><tr><th className="px-4 py-3 font-medium">Container</th><th className="px-4 py-3 font-medium">Image</th><th className="px-4 py-3 font-medium">Status</th><th className="px-4 py-3 font-medium">Ports</th><th className="px-4 py-3 font-medium">Uptime</th><th className="px-4 py-3 font-medium">CPU</th><th className="px-4 py-3 font-medium">Memory</th><th className="px-4 py-3 text-right font-medium">Actions</th></tr></thead>
             <tbody>
@@ -82,7 +82,7 @@ const DockerServicesPage = () => {
               </tr>)}
             </tbody>
           </table>
-        </div>
+        </PhoneCards>
         {containers.length === 0 && <div className="py-12 text-center"><Box className="mx-auto mb-3 size-8 text-muted-foreground" aria-hidden="true" /><p className="text-pretty text-sm text-muted-foreground">{runtime?.available ? 'No containers match these filters.' : 'Docker inventory is unavailable.'}</p></div>}
       </Card>
 

@@ -10,7 +10,7 @@ import { ChatDock } from '../chat/ChatDock';
 import { version as appVersion } from '../../package.json';
 
 // A phone tab: icon over a short label, 44 px tall.
-const PHONE_TAB = 'max-[760px]:h-11 max-[760px]:w-[60px] max-[760px]:flex-col max-[760px]:gap-0.5 max-[760px]:text-[0.6rem]';
+const PHONE_TAB = 'max-[760px]:h-11 max-[760px]:w-[60px] max-[760px]:flex-col max-[760px]:gap-0.5 max-[760px]:text-[0.6875rem]';
 
 interface AppLayoutProps { currentPath: string; onNavigate: (path: string) => void; unreachable: boolean; onRetry: () => void; children: React.ReactNode; }
 
