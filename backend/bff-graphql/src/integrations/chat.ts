@@ -75,6 +75,8 @@ export const BRIDGE_ONLINE_MS = 60 * 1000;
 export const BALLOON_MAX_AGE_MS = 30 * 60 * 1000;
 export const STATUS_STALE_MS = 5 * 60 * 1000;
 export const MAX_STATUS_SESSIONS = 200;
+// Limits outlive a restart; after the 7 day window has passed they describe nothing.
+const LIMITS_KEEP_SECONDS = 8 * 24 * 60 * 60;
 export const STOPPED_TEXT = 'Stopped';
 export const STOPPED_QUEUED_TEXT = 'Stopped before it started';
 export const ATTACHMENT_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
@@ -731,8 +733,22 @@ export class ChatService {
     mine.delete(status.sessionId);
     mine.set(status.sessionId, { ...status, receivedAt });
     if (mine.size > MAX_STATUS_SESSIONS) mine.delete(mine.keys().next().value!);
-    if (status.fiveHour || status.sevenDay) this.limitsSeen.set(machine, { fiveHour: status.fiveHour, sevenDay: status.sevenDay, receivedAt });
+    if (status.fiveHour || status.sevenDay) {
+      this.limitsSeen.set(machine, { fiveHour: status.fiveHour, sevenDay: status.sevenDay, receivedAt });
+      await this.storage.upsertCache('chat', 'limits', Object.fromEntries(this.limitsSeen), LIMITS_KEEP_SECONDS).catch(() => undefined);
+    }
     return { sessionId: status.sessionId };
+  }
+
+  /** Reads the limits the last process saved, so a restart does not blank them until the next push. */
+  async restoreLimits() {
+    const saved = await this.storage.getCache('chat', 'limits').catch(() => null);
+    if (!isRecord(saved)) return;
+    const window = (value: any): LimitWindow | null => (value ? { usedPercentage: value.usedPercentage, resetsAt: value.resetsAt ? new Date(value.resetsAt) : null } : null);
+    for (const [machine, seen] of Object.entries(saved as Record<string, any>)) {
+      if (this.limitsSeen.has(machine)) continue;
+      this.limitsSeen.set(machine, { fiveHour: window(seen.fiveHour), sevenDay: window(seen.sevenDay), receivedAt: new Date(seen.receivedAt) });
+    }
   }
 
   async balloons() {
