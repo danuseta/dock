@@ -1,3 +1,8 @@
+import { IMAGE_TYPES, type TurnOptions } from './composer/composerLogic';
+import type { ChatInteraction, SettledInteraction } from './interactions/interactions';
+
+export interface ChatAttachment { id: string; name: string; mime: string; size: number; state: string }
+
 export interface ChatMessage {
   id: number;
   sessionId: string;
@@ -5,6 +10,8 @@ export interface ChatMessage {
   text: string;
   state: 'queued' | 'taken' | 'done' | 'failed' | string;
   at: string;
+  stopped?: boolean;
+  attachments?: ChatAttachment[] | null;
 }
 
 export interface ChatSession {
@@ -20,9 +27,13 @@ export interface ChatSession {
   startedAt: string;
   lastMessageAt: string;
   lastText?: string | null;
+  waiting?: boolean;
+  pending?: ChatInteraction[] | null;
+  settled?: SettledInteraction[] | null;
+  options?: { model?: string | null; effort?: string | null; permissionMode?: string | null; fast?: boolean | null } | null;
 }
 
-export interface ChatMachine { name: string; online: boolean; lastSeenAt?: string | null }
+export interface ChatMachine { name: string; online: boolean; lastSeenAt?: string | null; capabilities?: string[] | null; claudeVersion?: string | null }
 
 export const DEFAULT_MACHINE = 'laptop';
 export const MACHINE_KEY = 'dock.chat.machine';
@@ -33,6 +44,16 @@ export const SLOW_POLL_MS = 10000;
 
 /** A message the browser has shown before the server confirmed it carries a negative id. */
 export const isOptimistic = (message: ChatMessage) => message.id < 0;
+
+export const optimisticMessage = (sessionId: string, input: { text: string; attachments: readonly ChatAttachment[] }, id: number, at: string): ChatMessage => ({
+  id,
+  sessionId,
+  role: 'user',
+  text: input.text,
+  state: 'queued',
+  at,
+  ...(input.attachments.length > 0 ? { attachments: [...input.attachments] } : {}),
+});
 
 /**
  * Joins two batches into one thread: one entry per id (the incoming copy wins, so a state change
@@ -77,6 +98,19 @@ export function newestAssistantId(messages: ChatMessage[]): number {
 export function isTurnInProgress(status: string | undefined, messages: ChatMessage[]): boolean {
   return status === 'queued' || status === 'running' || messages.some((message) => isOptimistic(message) || isOpenTurn(message));
 }
+
+export const isStopping = (requested: boolean, status: string | undefined) => requested && (status === 'queued' || status === 'running');
+
+export const machineCapabilities = (machines: ChatMachine[] | null | undefined, name: string): readonly string[] => machines?.find((machine) => machine.name === name)?.capabilities ?? [];
+
+export function sessionTurnOptions(session?: Pick<ChatSession, 'options'> | null): TurnOptions | null {
+  const stored = session?.options;
+  if (!stored) return null;
+  const options: TurnOptions = { model: stored.model ?? null, effort: stored.effort ?? null, permissionMode: stored.permissionMode ?? null, fast: stored.fast ?? null };
+  return options.model === null && options.effort === null && options.permissionMode === null && options.fast === null ? null : options;
+}
+
+export const isImageAttachment = (attachment: ChatAttachment) => attachment.state !== 'deleted' && IMAGE_TYPES.includes(attachment.mime);
 
 export const pollInterval = (busy: boolean) => (busy ? FAST_POLL_MS : SLOW_POLL_MS);
 

@@ -22,11 +22,11 @@ export interface ChatActivity {
 
 export interface ActivityNode { event: ChatActivity; children: ActivityNode[] }
 
-export interface ThreadGroup { key: string; turnId: number; events: ChatActivity[]; last: boolean }
+export interface ThreadGroup { key: string; turnId: number; events: ChatActivity[]; last: boolean; stopped: boolean }
 
 export type ThreadItem = ChatMessage | ThreadGroup;
 
-export interface GroupSummary { steps: number; failed: number; denied: number; stopped: number; running: number; durationMs: number }
+export interface GroupSummary { steps: number; failed: number; denied: number; stopped: number; running: number; durationMs: number; userStopped?: boolean }
 
 export interface LiveLine { id: number; label: string; path: string[]; startedAt: string }
 
@@ -128,7 +128,7 @@ const droppedOf = (event: ChatActivity) => {
   return Number.isFinite(count) && count > 0 ? count : 0;
 };
 
-export function groupSummary(events: ChatActivity[], now: number): GroupSummary {
+export function groupSummary(events: ChatActivity[], now: number, userStopped = false): GroupSummary {
   let steps = 0;
   let failed = 0;
   let denied = 0;
@@ -139,16 +139,16 @@ export function groupSummary(events: ChatActivity[], now: number): GroupSummary 
   for (const event of events) {
     if (isDropped(event)) steps += droppedOf(event);
     else if (event.kind !== 'note') steps += 1;
-    if (event.status === 'error') failed += 1;
+    if (event.status === 'error' && !userStopped) failed += 1;
     if (event.status === 'denied') denied += 1;
-    if (event.status === 'stopped') stopped += 1;
+    if (event.status === 'stopped' || (event.status === 'error' && userStopped)) stopped += 1;
     if (event.status === 'running') running += 1;
     const started = startOf(event);
     if (Number.isFinite(started) && started < first) first = started;
     const ended = event.endedAt ? Date.parse(event.endedAt) : event.status === 'running' ? now : started;
     if (Number.isFinite(ended) && ended > last) last = ended;
   }
-  return { steps, failed, denied, stopped, running, durationMs: Number.isFinite(first) && last > first ? last - first : 0 };
+  return { steps, failed, denied, stopped, running, durationMs: Number.isFinite(first) && last > first ? last - first : 0, userStopped };
 }
 
 export function liveLine(events: ChatActivity[]): LiveLine | null {
@@ -206,19 +206,19 @@ export function countsText(summary: GroupSummary): string {
 export function summaryText(summary: GroupSummary): string {
   return [
     countsText(summary),
-    summary.stopped > 0 ? `${summary.stopped} stopped` : null,
+    summary.userStopped ? 'Stopped' : summary.stopped > 0 ? `${summary.stopped} stopped` : null,
     summary.durationMs > 0 ? formatDuration(summary.durationMs) : null,
   ].filter((part): part is string => part !== null).join(' · ');
 }
 
-export function announcement(events: ChatActivity[], live: boolean): string {
+export function announcement(events: ChatActivity[], live: boolean, userStopped = false): string {
   if (live) {
     let latest: ChatActivity | undefined;
     for (const event of events) if ((event.status === 'error' || event.status === 'denied') && (!latest || event.seq > latest.seq)) latest = event;
     return latest ? `Step ${statusText(latest.status)}: ${latest.label}` : '';
   }
-  const summary = groupSummary(events, 0);
-  return ['Finished', stepsText(summary.steps), summary.failed > 0 ? `${summary.failed} failed` : null, summary.denied > 0 ? `${summary.denied} blocked` : null].filter((part): part is string => part !== null).join(', ').replace(', ', ': ');
+  const summary = groupSummary(events, 0, userStopped);
+  return [userStopped ? 'Stopped' : 'Finished', stepsText(summary.steps), summary.failed > 0 ? `${summary.failed} failed` : null, summary.denied > 0 ? `${summary.denied} blocked` : null].filter((part): part is string => part !== null).join(', ').replace(', ', ': ');
 }
 
 export function capRows<T>(items: T[], shown: number): { visible: T[]; hidden: number } {
@@ -270,11 +270,12 @@ export function threadItems(messages: ChatMessage[], byTurn: Map<number, ChatAct
       if (list) list.push(event);
       else slots.set(slot, [event]);
     }
+    for (const [slot, events] of slots) if (groupSummary(events, 0).steps === 0) slots.delete(slot);
     const lastSlot = Math.max(...slots.keys());
     anchors.forEach((anchor, position) => {
       items.push(anchor);
       const events = slots.get(position);
-      if (events) items.push({ key: `group-${head.id}-${anchor.id}`, turnId: head.id, events: events.sort(compareEvents), last: position === lastSlot });
+      if (events) items.push({ key: `group-${head.id}-${anchor.id}`, turnId: head.id, events: events.sort(compareEvents), last: position === lastSlot, stopped: head.stopped === true });
     });
   }
   return items;

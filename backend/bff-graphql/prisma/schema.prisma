@@ -182,6 +182,7 @@ model ChatSession {
   startedAt       DateTime
   lastMessageAt   DateTime
   lastDeltaAt     DateTime?
+  options         String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -191,12 +192,15 @@ model ChatSession {
 }
 
 model ChatMessage {
-  id        Int      @id @default(autoincrement())
-  sessionId String
-  role      String
-  text      String
-  state     String   @default("done")
-  at        DateTime
+  id              Int       @id @default(autoincrement())
+  sessionId       String
+  role            String
+  text            String
+  state           String    @default("done")
+  at              DateTime
+  options         String?
+  takenAt         DateTime?
+  stopRequestedAt DateTime?
 
   @@index([sessionId, id])
   @@index([state])
@@ -222,6 +226,51 @@ model ChatActivity {
   @@unique([sessionId, turnId, eventId])
   @@index([sessionId, seq])
   @@index([startedAt])
+}
+
+model ChatInteraction {
+  id          Int       @id @default(autoincrement())
+  sessionId   String
+  turnId      Int
+  requestId   String
+  kind        String
+  title       String    @default("")
+  body        String
+  state       String    @default("pending")
+  answer      String?
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime
+  answeredAt  DateTime?
+  deliveredAt DateTime?
+
+  @@unique([sessionId, turnId, requestId])
+  @@index([sessionId, state])
+  @@index([createdAt])
+}
+
+model ChatAttachment {
+  id        String    @id
+  sessionId String
+  messageId Int?
+  name      String
+  mime      String
+  size      Int
+  sha256    String
+  state     String    @default("uploaded")
+  createdAt DateTime  @default(now())
+  fetchedAt DateTime?
+
+  @@index([sessionId, messageId])
+  @@index([messageId])
+  @@index([state, createdAt])
+}
+
+model ChatMachineInfo {
+  machine     String   @id
+  caps        String   @default("")
+  catalog     String   @default("")
+  catalogHash String   @default("")
+  updatedAt   DateTime @updatedAt
 }
 
 model SprintSnapshot {

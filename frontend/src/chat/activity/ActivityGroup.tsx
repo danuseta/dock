@@ -24,11 +24,11 @@ export const ActivityGroup = memo(function ActivityGroup({ group, live, turnRunn
   const tapTop = useRef<number | null>(null);
   const clockOn = useMemo(() => events.some((event) => event.status === 'running'), [events]);
   const now = useNow(clockOn);
-  const summary = useMemo(() => groupSummary(events, now), [events, now]);
+  const summary = useMemo(() => groupSummary(events, now, group.stopped), [events, now, group.stopped]);
   const line = useMemo(() => (live ? liveLine(events) : null), [live, events]);
   const tree = useMemo(() => (open ? buildTree(events) : []), [open, events]);
-  const spoken = useThrottledText(announced && group.last && (live || !turnRunning) ? announcement(events, live) : '', ANNOUNCE_MS);
-  const status = summary.failed > 0 ? 'error' : summary.denied > 0 ? 'denied' : summary.stopped > 0 ? 'stopped' : 'ok';
+  const spoken = useThrottledText(announced && group.last && (live || !turnRunning) ? announcement(events, live, group.stopped) : '', ANNOUNCE_MS);
+  const status = summary.failed > 0 ? 'error' : summary.denied > 0 ? 'denied' : summary.stopped > 0 || summary.userStopped ? 'stopped' : 'ok';
 
   useEffect(() => {
     if (live) setAnnounced(true);
@@ -92,4 +92,4 @@ export const ActivityGroup = memo(function ActivityGroup({ group, live, turnRunn
       </div>
     </li>
   );
-}, (previous, next) => previous.live === next.live && previous.turnRunning === next.turnRunning && previous.store === next.store && previous.group.key === next.group.key && previous.group.last === next.group.last && sameEvents(previous.group.events, next.group.events));
+}, (previous, next) => previous.live === next.live && previous.turnRunning === next.turnRunning && previous.store === next.store && previous.group.key === next.group.key && previous.group.last === next.group.last && previous.group.stopped === next.group.stopped && sameEvents(previous.group.events, next.group.events));

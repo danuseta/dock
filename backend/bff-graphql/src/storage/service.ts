@@ -29,6 +29,16 @@ export interface ChatActivityInput {
   endedAt: Date | null;
 }
 
+export interface ChatInteractionInput {
+  sessionId: string;
+  turnId: number;
+  requestId: string;
+  kind: string;
+  title: string;
+  body: string;
+  expiresAt: Date;
+}
+
 export class StorageService {
   constructor(private readonly db: PrismaClient = prisma) {}
 
@@ -350,14 +360,16 @@ export class StorageService {
     startedAt?: Date;
     lastMessageAt?: Date;
     lastDeltaAt?: Date;
+    options?: string | null;
   }) {
     return this.db.chatSession.update({ where: { id }, data });
   }
 
   async deleteChatSession(id: string) {
-    const [, , sessions] = await this.db.$transaction([
+    const [, , , sessions] = await this.db.$transaction([
       this.db.chatMessage.deleteMany({ where: { sessionId: id } }),
       this.db.chatActivity.deleteMany({ where: { sessionId: id } }),
+      this.db.chatInteraction.deleteMany({ where: { sessionId: id } }),
       this.db.chatSession.deleteMany({ where: { id } }),
     ]);
     return sessions.count > 0;
@@ -367,8 +379,17 @@ export class StorageService {
     return this.db.chatMessage.deleteMany({ where: { sessionId } });
   }
 
-  createChatMessage(data: { sessionId: string; role: string; text: string; state: string; at: Date }) {
+  createChatMessage(data: { sessionId: string; role: string; text: string; state: string; at: Date; options?: string | null }) {
     return this.db.chatMessage.create({ data });
+  }
+
+  deleteChatMessage(id: number) {
+    return this.db.chatMessage.deleteMany({ where: { id } });
+  }
+
+  async deleteChatDraft(id: number) {
+    const deleted = await this.db.chatMessage.deleteMany({ where: { id, state: 'draft' } });
+    return deleted.count === 1;
   }
 
   /** Appends messages, drops the oldest beyond `keep` and returns how many the session has now. */
@@ -536,9 +557,9 @@ export class StorageService {
       ...(cursor.beforeId != null ? { lt: cursor.beforeId } : {}),
     };
     if (cursor.afterId != null) {
-      return this.db.chatMessage.findMany({ where: { sessionId, id }, orderBy: { id: 'asc' }, take });
+      return this.db.chatMessage.findMany({ where: { sessionId, id, state: { not: 'draft' } }, orderBy: { id: 'asc' }, take });
     }
-    const newest = await this.db.chatMessage.findMany({ where: { sessionId, id }, orderBy: { id: 'desc' }, take });
+    const newest = await this.db.chatMessage.findMany({ where: { sessionId, id, state: { not: 'draft' } }, orderBy: { id: 'desc' }, take });
     return newest.reverse();
   }
 
@@ -547,18 +568,162 @@ export class StorageService {
   }
 
   async getQueuedChatMessages(machine: string, take: number) {
-    const rows = await this.db.$queryRaw<Array<{ id: number | bigint; sessionId: string; text: string }>>(Prisma.sql`
-      SELECT m."id", m."sessionId", m."text" FROM "ChatMessage" m
+    const rows = await this.db.$queryRaw<Array<{ id: number | bigint; sessionId: string; text: string; options: string | null }>>(Prisma.sql`
+      SELECT m."id", m."sessionId", m."text", m."options" FROM "ChatMessage" m
       JOIN "ChatSession" s ON s."id" = m."sessionId"
       WHERE m."state" = 'queued' AND m."role" = 'user' AND s."source" = 'dock' AND s."machine" = ${machine}
       ORDER BY m."id" ASC LIMIT ${take}`);
-    return rows.map((row) => ({ id: Number(row.id), sessionId: row.sessionId, text: row.text }));
+    return rows.map((row) => ({ id: Number(row.id), sessionId: row.sessionId, text: row.text, options: row.options }));
   }
 
   /** The state check is part of the write, so two bridges cannot take the same message. */
-  async moveChatMessage(id: number, sessionId: string, from: string, to: string) {
-    const moved = await this.db.chatMessage.updateMany({ where: { id, sessionId, state: from }, data: { state: to } });
+  async moveChatMessage(id: number, sessionId: string, from: string, to: string, extra: { takenAt?: Date } = {}) {
+    const moved = await this.db.chatMessage.updateMany({ where: { id, sessionId, state: from }, data: { state: to, ...extra } });
     return moved.count === 1;
+  }
+
+  async getChatMessageIdsInState(sessionId: string, states: string[]) {
+    return (await this.db.chatMessage.findMany({ where: { sessionId, state: { in: states } }, select: { id: true }, orderBy: { id: 'asc' } }))
+      .map((row) => row.id);
+  }
+
+  getOpenChatMessage(sessionId: string) {
+    return this.db.chatMessage.findFirst({ where: { sessionId, role: 'user', state: { in: ['queued', 'taken'] } }, orderBy: { id: 'asc' } });
+  }
+
+  getStaleChatDrafts(before: Date) {
+    return this.db.chatMessage.findMany({ where: { state: 'draft', at: { lt: before } }, select: { id: true, sessionId: true } });
+  }
+
+  async getOverdueChatSessions(takenBefore: Date) {
+    const rows = await this.db.chatMessage.findMany({
+      where: { state: 'taken', takenAt: { lt: takenBefore } }, select: { sessionId: true }, distinct: ['sessionId'],
+    });
+    return rows.map((row) => ({ id: row.sessionId }));
+  }
+
+  async getQuietChatTurns(silentBefore: Date, stopBefore: Date) {
+    const running = await this.db.chatSession.findMany({
+      where: { status: 'running', lastDeltaAt: { lt: silentBefore } }, select: { id: true },
+    });
+    const silent = running.length === 0 ? [] : await this.db.chatMessage.findMany({
+      where: { state: 'taken', takenAt: { not: null }, sessionId: { in: running.map((row) => row.id) } }, select: { id: true, sessionId: true },
+    });
+    const unstopped = await this.db.chatMessage.findMany({
+      where: { state: 'taken', takenAt: { not: null }, stopRequestedAt: { lt: stopBefore } }, select: { id: true, sessionId: true },
+    });
+    return {
+      silent: silent.map((row) => ({ sessionId: row.sessionId, turnId: row.id })),
+      unstopped: unstopped.map((row) => ({ sessionId: row.sessionId, turnId: row.id })),
+    };
+  }
+
+  async requestChatStop(id: number, sessionId: string, at: Date) {
+    const marked = await this.db.chatMessage.updateMany({ where: { id, sessionId, state: 'taken', stopRequestedAt: null }, data: { stopRequestedAt: at } });
+    return marked.count === 1;
+  }
+
+  createChatInteraction(data: ChatInteractionInput, limits: { pending: number; perTurn: number }, now: Date) {
+    return this.db.$transaction(async (tx) => {
+      await tx.$executeRaw`UPDATE "ChatSession" SET "id" = "id" WHERE "id" = ${data.sessionId}`;
+      const known = await tx.chatInteraction.findUnique({
+        where: { sessionId_turnId_requestId: { sessionId: data.sessionId, turnId: data.turnId, requestId: data.requestId } },
+      });
+      if (known) return { row: known, refused: null };
+      await tx.chatInteraction.updateMany({
+        where: { sessionId: data.sessionId, turnId: data.turnId, state: 'pending', expiresAt: { lt: now } }, data: { state: 'expired' },
+      });
+      const pending = await tx.chatInteraction.count({ where: { sessionId: data.sessionId, turnId: data.turnId, state: 'pending' } });
+      if (pending >= limits.pending) return { row: null, refused: 'pending' as const };
+      const total = await tx.chatInteraction.count({ where: { sessionId: data.sessionId, turnId: data.turnId } });
+      if (total >= limits.perTurn) return { row: null, refused: 'turn' as const };
+      return { row: await tx.chatInteraction.create({ data }), refused: null };
+    });
+  }
+
+  getChatInteraction(id: number) {
+    return this.db.chatInteraction.findUnique({ where: { id } });
+  }
+
+  async answerChatInteraction(id: number, answer: string, at: Date) {
+    const answered = await this.db.chatInteraction.updateMany({
+      where: { id, state: 'pending', expiresAt: { gte: at } }, data: { state: 'answered', answer, answeredAt: at },
+    });
+    return answered.count === 1;
+  }
+
+  expireChatInteractions(sessionId: string | null, now: Date) {
+    return this.db.chatInteraction.updateMany({
+      where: { ...(sessionId === null ? {} : { sessionId }), state: 'pending', expiresAt: { lt: now } }, data: { state: 'expired' },
+    });
+  }
+
+  cancelChatInteractions(sessionId: string, turnId: number | null) {
+    return this.db.chatInteraction.updateMany({
+      where: { sessionId, state: 'pending', ...(turnId === null ? {} : { turnId }) }, data: { state: 'cancelled' },
+    });
+  }
+
+  cancelChatInteractionsByRequest(sessionId: string, turnId: number, requestIds: string[]) {
+    return this.db.$transaction(async (tx) => {
+      await tx.$executeRaw`UPDATE "ChatSession" SET "id" = "id" WHERE "id" = ${sessionId}`;
+      const cancelled = await tx.chatInteraction.updateMany({
+        where: { sessionId, turnId, requestId: { in: requestIds }, state: 'pending' }, data: { state: 'cancelled' },
+      });
+      return cancelled.count;
+    });
+  }
+
+  getPendingChatInteractions(sessionId: string, take: number, notBefore?: Date) {
+    return this.db.chatInteraction.findMany({
+      where: { sessionId, state: 'pending', ...(notBefore ? { expiresAt: { gte: notBefore } } : {}) }, orderBy: { id: 'asc' }, take,
+    });
+  }
+
+  getSettledChatInteractions(sessionId: string, turnId: number, take: number) {
+    return this.db.chatInteraction.findMany({
+      where: { sessionId, turnId, state: { in: ['answered', 'expired', 'cancelled'] } }, orderBy: { id: 'desc' }, take,
+    });
+  }
+
+  async hasOverdueChatInteractions(sessionId: string, now: Date) {
+    const row = await this.db.chatInteraction.findFirst({ where: { sessionId, state: 'pending', expiresAt: { lt: now } }, select: { id: true } });
+    return row !== null;
+  }
+
+  getUndeliveredChatInteractions(sessionId: string, turnId: number) {
+    return this.db.chatInteraction.findMany({
+      where: { sessionId, turnId, state: { in: ['answered', 'expired'] }, deliveredAt: null }, orderBy: { id: 'asc' },
+    });
+  }
+
+  markChatInteractionsDelivered(sessionId: string, turnId: number, requestIds: string[], at: Date) {
+    return this.db.chatInteraction.updateMany({
+      where: { sessionId, turnId, requestId: { in: requestIds }, state: { in: ['answered', 'expired'] }, deliveredAt: null }, data: { deliveredAt: at },
+    });
+  }
+
+  async getWaitingChatSessionIds(sessionIds: string[], now: Date) {
+    if (sessionIds.length === 0) return new Set<string>();
+    const rows = await this.db.chatInteraction.findMany({
+      where: { sessionId: { in: sessionIds }, state: 'pending', expiresAt: { gte: now } }, select: { sessionId: true }, distinct: ['sessionId'],
+    });
+    return new Set(rows.map((row) => row.sessionId));
+  }
+
+  async pruneChatInteractions({ before, maxRows }: { before: Date; maxRows: number }) {
+    const old = await this.db.chatInteraction.deleteMany({ where: { createdAt: { lt: before } } });
+    const newest = await this.db.chatInteraction.findFirst({ orderBy: { id: 'desc' }, skip: maxRows - 1, select: { id: true } });
+    const over = newest ? await this.db.chatInteraction.deleteMany({ where: { id: { lt: newest.id } } }) : { count: 0 };
+    return { expired: old.count, evicted: over.count };
+  }
+
+  getChatMachineInfo(machine: string) {
+    return this.db.chatMachineInfo.findUnique({ where: { machine } });
+  }
+
+  upsertChatMachineInfo(machine: string, data: { caps?: string; catalog?: string; catalogHash?: string }) {
+    return this.db.chatMachineInfo.upsert({ where: { machine }, update: data, create: { machine, ...data } });
   }
 
   moveChatMessages(sessionId: string, from: string, to: string) {
@@ -573,7 +738,7 @@ export class StorageService {
   async searchChatMessages(query: string, take: number) {
     const pattern = `%${query.replace(/[!%_]/g, '!$&')}%`;
     const found = await this.db.$queryRaw<Array<{ id: number | bigint }>>(Prisma.sql`
-      SELECT "id" FROM "ChatMessage" WHERE "text" LIKE ${pattern} ESCAPE '!'
+      SELECT "id" FROM "ChatMessage" WHERE "text" LIKE ${pattern} ESCAPE '!' AND "state" <> 'draft'
       ORDER BY "at" DESC, "id" DESC LIMIT ${take}`);
     const ids = found.map((row) => Number(row.id));
     const rows = await this.db.chatMessage.findMany({ where: { id: { in: ids } } });
@@ -587,7 +752,7 @@ export class StorageService {
       SELECT "sessionId", substr("text", 1, ${length}) AS "text" FROM "ChatMessage"
       WHERE "id" IN (
         SELECT MAX("id") FROM "ChatMessage"
-        WHERE "sessionId" IN (${Prisma.join(sessionIds)}) AND "role" IN ('user', 'assistant')
+        WHERE "sessionId" IN (${Prisma.join(sessionIds)}) AND "role" IN ('user', 'assistant') AND "state" <> 'draft'
         GROUP BY "sessionId"
       )`);
     return new Map(rows.map((row) => [row.sessionId, row.text]));

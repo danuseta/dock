@@ -1,4 +1,6 @@
 import express, { type Request, type Response, Router } from 'express';
+import { createReadStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 import { bearerToken } from '../auth/ingest-token';
 import { PinRateLimiter, sessionManager, shouldRequirePin } from '../auth/session';
 import { ChatService, chatService } from '../integrations/chat';
@@ -88,6 +90,36 @@ export function createOrchestratorIngestRouter(
   router.post('/chat/delta', small, handle((body, _signal, machine) => chat.delta(body, machine)));
   router.post('/chat/activity', small, handle((body, _signal, machine) => chat.activity(body, machine)));
   router.post('/chat/status', small, handle(async (body, _signal, machine) => chat.ingestStatus(body, machine)));
+  router.post('/chat/wait', small, handle((body, signal, machine) => chat.wait(body, signal, machine)));
+  router.post('/chat/ask', small, handle((body, _signal, machine) => chat.ask(body, machine)));
+  router.post('/chat/catalog', express.json({ limit: '512kb' }), handle((body, _signal, machine) => chat.ingestCatalog(body, machine)));
+  router.post('/chat/attachment', small, async (request: Request, response: Response) => {
+    try {
+      const file = await chat.openAttachment(request.body, response.locals.machine);
+      if (!file) {
+        response.status(404).json({ error: 'Unknown ticket. Send its status first.' });
+        return;
+      }
+      response.status(200).set({
+        'content-type': 'application/octet-stream',
+        'content-length': String(file.size),
+        'x-dock-sha256': file.sha256,
+        'cache-control': 'no-store',
+      });
+      await pipeline(createReadStream(file.path), response);
+    } catch (error) {
+      if (response.headersSent) {
+        response.destroy();
+        return;
+      }
+      if (error instanceof OrchestratorInputError) {
+        response.status(400).json({ error: error.message });
+        return;
+      }
+      console.error('[Orchestrator] attachment failed:', error instanceof Error ? error.message : 'unknown error');
+      response.status(500).json({ error: 'Ingest failed' });
+    }
+  });
 
   router.use((error: unknown, _request: Request, response: Response, _next: express.NextFunction) => {
     const { status, type } = (error ?? {}) as { status?: number; type?: string };

@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useApolloClient, useQuery } from '@apollo/client';
 import { Loader2, SendHorizontal } from 'lucide-react';
-import { SEND_CHAT_MESSAGE } from '../graphql/mutations';
+import { SEND_CHAT_MESSAGE, STOP_CHAT_TURN } from '../graphql/mutations';
 import { GET_CHAT_MESSAGES, GET_CHAT_SESSION } from '../graphql/queries';
 import { Button } from '../components/ui';
 import { cn } from '../lib/cn';
 import {
-  isOptimistic, isTurnInProgress, machineOf, machineOnline, machinePlace, mergeMessages, newestAssistantId, oldestId, pollCursor, pollInterval, sendBlocker,
+  isOptimistic, isStopping, isTurnInProgress, machineCapabilities, machineOf, machineOnline, machinePlace, mergeMessages, newestAssistantId, oldestId, optimisticMessage, pollCursor, pollInterval, sendBlocker, sessionTurnOptions,
   type ChatMachine, type ChatMessage, type ChatSession,
 } from './messages';
 import { MachineChip } from './MachineControls';
@@ -14,6 +14,11 @@ import { SessionStatusLine } from './StatusLine';
 import { ActivityGroup } from './activity/ActivityGroup';
 import { isThreadGroup } from './activity/activity';
 import { useTurnActivity } from './activity/useTurnActivity';
+import { Composer } from './composer/Composer';
+import type { SendPayload } from './composer/composerLogic';
+import { InteractionCards } from './interactions/InteractionCards';
+import { MessageAttachments } from './interactions/MessageAttachments';
+import { useInteractionLog } from './interactions/useInteractionLog';
 import { chatStore } from './store';
 
 interface ChatThreadProps {
@@ -25,7 +30,6 @@ interface ChatThreadProps {
 
 const NEWEST_PAGE = 200;
 const OLDER_PAGE = 100;
-const MAX_TEXT = 8000;
 const NEAR_BOTTOM_PX = 80;
 
 const messageOf = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
@@ -39,7 +43,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [sendError, setSendError] = useState('');
-  const [draft, setDraft] = useState('');
+  const [stopRequested, setStopRequested] = useState(false);
   const messagesRef = useRef(messages);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
@@ -63,7 +67,14 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
   const machineHasToken = data?.chatMachines && data.chatMachines.length > 0 ? data.chatMachines.some((item) => item.name === machine) : undefined;
   const blocker = sendBlocker({ source: session?.source, busy, bridgeOnline: machineUp, machine, machineHasToken, lastSeenAt: machineSeenAt });
   const place = machinePlace(machine);
+  const capabilities = machineCapabilities(data?.chatMachines, machine);
+  const interactions = useInteractionLog(session?.pending, session?.settled);
+  const stopping = isStopping(stopRequested, status);
   const readOnly = session?.source === 'cli';
+
+  useEffect(() => {
+    if (status !== 'queued' && status !== 'running') setStopRequested(false);
+  }, [status]);
 
   useEffect(() => {
     startPolling(pollMs);
@@ -156,31 +167,37 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     if (newest > 0) chatStore.markSeen(sessionId, newest);
   }, [messages, sessionId]);
 
-  const send = async () => {
-    const text = draft.trim();
-    if (!text || blocker) return;
-    const pending: ChatMessage = { id: -Date.now(), sessionId, role: 'user', text, state: 'queued', at: new Date().toISOString() };
+  const send = async (payload: SendPayload) => {
+    const pending: ChatMessage = optimisticMessage(sessionId, payload, -Date.now(), new Date().toISOString());
     setSendError('');
-    setDraft('');
     stickRef.current = true;
     setMessages((current) => mergeMessages(current, [pending]));
     try {
-      const result = await client.mutate<{ sendChatMessage: ChatMessage }>({ mutation: SEND_CHAT_MESSAGE, variables: { sessionId, text } });
+      const variables: Record<string, unknown> = { sessionId, text: payload.text };
+      if (payload.attachmentIds.length > 0) variables.attachmentIds = payload.attachmentIds;
+      if (payload.options) variables.options = payload.options;
+      const result = await client.mutate<{ sendChatMessage: ChatMessage }>({ mutation: SEND_CHAT_MESSAGE, variables });
       const confirmed = result.data?.sendChatMessage;
       if (!confirmed) throw new Error('DOCK did not confirm the message');
       setMessages((current) => mergeMessages(current.filter((message) => message.id !== pending.id), [confirmed]));
       void refetch();
     } catch (error) {
       setMessages((current) => current.filter((message) => message.id !== pending.id));
-      setDraft((current) => current || text);
       setSendError(messageOf(error, 'The message could not be sent'));
+      throw error;
     }
   };
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
-    event.preventDefault();
-    void send();
+  const stop = async () => {
+    setStopRequested(true);
+    setSendError('');
+    try {
+      await client.mutate({ mutation: STOP_CHAT_TURN, variables: { sessionId } });
+      void refetch();
+    } catch (error) {
+      setStopRequested(false);
+      setSendError(messageOf(error, 'The turn could not be stopped'));
+    }
   };
 
   const missing = data !== undefined && data.chatSession === null;
@@ -190,7 +207,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     <div className={cn('flex min-h-0 flex-col', className)}>
       {session && <div className="flex flex-none items-center gap-2 border-b border-border bg-surface-0 px-3.5 py-1.5 font-mono text-[0.66rem] text-muted-foreground"><span>Runs on</span><MachineChip name={machine} online={machineUp} /></div>}
       <SessionStatusLine sessionId={sessionId} className="flex-none bg-surface-0" />
-      <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3.5 py-3" role="log" aria-label="Conversation">
+      <div ref={scrollRef} onScroll={handleScroll} className="min-h-[6.5rem] flex-1 overflow-y-auto overscroll-contain px-3.5 py-3" role="log" aria-label="Conversation">
         {loadingOlder && <p className="pb-2 text-center font-mono text-[0.66rem] text-muted-foreground" role="status">Loading older messages...</p>}
         {!loaded && !loadError && !missing && <p className="py-6 text-center text-sm text-muted-foreground" role="status">Loading the conversation...</p>}
         {missing && <p className="py-6 text-center text-pretty text-sm text-muted-foreground">This session no longer exists. Close this tab or pick another session.</p>}
@@ -206,26 +223,33 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
             </li>
           ) : (
             <li key={message.id} className={cn('flex min-w-0 max-w-[86%] flex-col', message.role === 'user' ? 'items-end self-end' : 'items-start self-start')}>
-              <p
-                className={cn(
-                  'max-w-full whitespace-pre-wrap break-words rounded-[10px] border px-3 py-2 text-[0.82rem] leading-relaxed [overflow-wrap:anywhere]',
-                  message.role === 'user' ? 'rounded-br-xs border-accent/30 bg-accent-dim' : 'rounded-bl-xs border-border bg-surface-1',
-                  isOptimistic(message) && 'opacity-60',
-                )}
-                title={timeOf(message.at)}
-              >
-                <span className="sr-only">{message.role === 'user' ? 'You: ' : 'Claude: '}</span>{message.text}
-              </p>
+              {(message.text || !message.attachments?.length) && (
+                <p
+                  className={cn(
+                    'max-w-full whitespace-pre-wrap break-words rounded-[10px] border px-3 py-2 text-[0.82rem] leading-relaxed [overflow-wrap:anywhere]',
+                    message.role === 'user' ? 'rounded-br-xs border-accent/30 bg-accent-dim' : 'rounded-bl-xs border-border bg-surface-1',
+                    isOptimistic(message) && 'opacity-60',
+                  )}
+                  title={timeOf(message.at)}
+                >
+                  <span className="sr-only">{message.role === 'user' ? 'You: ' : 'Claude: '}</span>{message.text}
+                </p>
+              )}
+              {message.attachments && <MessageAttachments attachments={message.attachments} />}
               {isOptimistic(message) && <span className="mt-0.5 font-mono text-[0.62rem] text-muted-foreground">Sending...</span>}
-              {message.state === 'failed' && <span className="mt-0.5 font-mono text-[0.62rem] text-status-conflict">Not answered</span>}
+              {message.stopped && message.state !== 'queued' && message.state !== 'taken' ? (
+                <span className="mt-0.5 font-mono text-[0.62rem] text-muted-foreground">Stopped</span>
+              ) : message.state === 'failed' && <span className="mt-0.5 font-mono text-[0.62rem] text-status-conflict">Not answered</span>}
             </li>
           )))}
         </ol>
       </div>
 
+      {!missing && <InteractionCards sessionId={sessionId} cards={interactions.cards} lines={interactions.lines} messages={messages} onSettled={interactions.record} />}
+
       <div className="flex flex-col gap-1.5 border-t border-border bg-surface-0 px-3.5 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))]">
         {status === 'queued' && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-secondary-foreground" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" />Queued · waiting for the {machine} bridge to pick it up</p>}
-        {status === 'running' && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-status-merged" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">Running{session?.statusDetail ? ` · ${session.statusDetail}` : ''}</span></p>}
+        {status === 'running' && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-status-merged" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">Running{interactions.cards.length > 0 ? ' · waiting for your answer' : session?.statusDetail ? ` · ${session.statusDetail}` : ''}</span></p>}
         {status === 'error' && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The last turn failed{session?.statusDetail ? `: ${session.statusDetail}` : '.'}</p>}
         {sendError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">Not sent: {sendError}</p>}
         {loadError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">{loadError}</p>}
@@ -239,22 +263,34 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
             {readOnlyAction}
           </div>
         )}
-        <div className="flex items-end gap-2">
-          <textarea
-            className="max-h-40 min-h-[40px] min-w-0 max-[900px]:min-h-11 flex-1 resize-none rounded-sm border border-border bg-surface-1 px-3 py-2 font-body text-[0.82rem] text-foreground placeholder:text-muted-foreground focus-visible:border-border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-50"
-            rows={2}
-            maxLength={MAX_TEXT}
-            value={draft}
-            disabled={readOnly || missing}
-            placeholder={readOnly ? 'Continue as a DOCK session to type...' : `Message Claude Code on ${place}...`}
-            aria-label="Message"
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={handleKeyDown}
+        {readOnly || missing ? (
+          <div className="flex items-end gap-2">
+            <textarea
+              className="max-h-40 min-h-[40px] min-w-0 max-[900px]:min-h-11 flex-1 resize-none rounded-sm border border-border bg-surface-1 px-3 py-2 font-body text-[0.82rem] text-foreground placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              rows={2}
+              value=""
+              readOnly
+              disabled
+              placeholder={readOnly ? 'Continue as a DOCK session to type...' : `Message Claude Code on ${place}...`}
+              aria-label="Message"
+            />
+            <Button size="sm" variant="primary" className="h-10 max-[900px]:h-11 max-[900px]:min-w-11" disabled aria-label="Send message">
+              <SendHorizontal size={14} aria-hidden="true" />Send
+            </Button>
+          </div>
+        ) : (
+          <Composer
+            sessionId={sessionId}
+            machine={machine}
+            capabilities={capabilities}
+            blocker={blocker}
+            busy={busy}
+            stopping={stopping}
+            sessionOptions={sessionTurnOptions(session)}
+            onSend={send}
+            onStop={() => void stop()}
           />
-          <Button size="sm" variant="primary" className="h-10 max-[900px]:h-11 max-[900px]:min-w-11" disabled={Boolean(blocker) || missing || !draft.trim()} aria-label="Send message" aria-describedby={blocker ? blockerId : undefined} onClick={() => void send()}>
-            <SendHorizontal size={14} aria-hidden="true" />Send
-          </Button>
-        </div>
+        )}
       </div>
     </div>
   );
