@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { createApp } from './app';
 import { missingPinWarning } from './auth/session';
+import { chatService } from './integrations/chat';
 import { sprintDashboardService } from './integrations/sprint-dashboard';
 import { startSprintScheduler } from './integrations/sprint-scheduler';
 import { StorageService } from './storage/service';
@@ -11,6 +12,7 @@ export async function startServer(): Promise<void> {
   const { app, frontendEnabled } = await createApp();
   const pinWarning = missingPinWarning(await new StorageService().hasMasterPin().catch(() => true));
   if (pinWarning) console.warn(pinWarning);
+  await chatService.restoreLimits();
 
   app.listen(port, () => {
     const shellStatus = frontendEnabled ? 'with React SPA' : 'API only';

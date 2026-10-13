@@ -28,8 +28,11 @@ function memoryStorage() {
   let messages: any[] = [];
   const tokens: any[] = [];
   let sequence = 0;
+  const cache = new Map<string, string>();
   const ofSession = (sessionId: string) => messages.filter((message) => message.sessionId === sessionId);
   const storage = {
+    getCache: async (namespace: string, key: string) => JSON.parse(cache.get(`${namespace}:${key}`) ?? 'null'),
+    upsertCache: async (namespace: string, key: string, value: unknown) => { cache.set(`${namespace}:${key}`, JSON.stringify(value)); },
     getChatSessions: async (source: string | null, take: number) => [...sessions.values()]
       .filter((session) => !source || session.source === source)
       .sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime())
@@ -753,4 +756,17 @@ test('every chat route acts as the machine of the token', async (t) => {
   assert.strictEqual(claimed.body.result.message.id, remote.message.id, '/chat/claim takes the message of the token machine');
   const delta = await post('/chat/delta', { sessionId: remote.session.id, replyTo: remote.message.id, done: true });
   assert.strictEqual(delta.status, 200, '/chat/delta is accepted for a session of the token machine');
+});
+
+test('limits survive a restart: a new service on the same storage restores them, per machine', async () => {
+  const { service, storage, now } = clockedService();
+  await service.ingestStatus(statusBody(), 'laptop');
+  await service.ingestStatus(statusBody({ sessionId: 'ws-line', fiveHour: { usedPercentage: 10 }, sevenDay: undefined }), 'workspace');
+
+  const restarted = new ChatService(storage, now);
+  assert.deepStrictEqual(restarted.statusSnapshot(), { limits: null, sessions: [] }, 'nothing is known before the restore');
+  await restarted.restoreLimits();
+  assert.deepStrictEqual(restarted.statusSnapshot('laptop').limits, service.statusSnapshot('laptop').limits);
+  assert.deepStrictEqual(restarted.statusSnapshot('workspace').limits, service.statusSnapshot('workspace').limits);
+  assert.deepStrictEqual(restarted.statusSnapshot().sessions, [], 'session lines are not kept');
 });
