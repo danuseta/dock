@@ -537,9 +537,9 @@ const SettingsPage: React.FC = () => {
         </main>
       </div>
 
-      <div className={cn('fixed right-6 z-20 flex items-center gap-4 rounded-md border border-border-glow bg-surface-2 p-2 pl-4 shadow-card max-[760px]:right-4 max-[760px]:bottom-[max(6rem,calc(env(safe-area-inset-bottom)+6rem))] max-[760px]:left-4 max-[760px]:justify-between', navigationPreferences.mode === 'bottom' ? 'bottom-[max(6rem,calc(env(safe-area-inset-bottom)+6rem))]' : 'bottom-[max(1.5rem,env(safe-area-inset-bottom))]')}>
+      <div className={cn('fixed right-6 z-20 flex items-center gap-4 rounded-md border border-border-glow bg-surface-2 p-2 pl-4 shadow-card max-[760px]:right-[76px] max-[760px]:bottom-[86px] max-[760px]:left-2.5 max-[760px]:h-12 max-[760px]:justify-between max-[760px]:gap-2 max-[760px]:p-1.5 max-[760px]:pl-3', !hasUnsavedChanges && 'max-[760px]:hidden', navigationPreferences.mode === 'bottom' ? 'bottom-[max(6rem,calc(env(safe-area-inset-bottom)+6rem))]' : 'bottom-[max(1.5rem,env(safe-area-inset-bottom))]')}>
         <span className="text-xs text-muted-foreground max-[420px]:hidden">{hasUnsavedChanges ? 'Unsaved changes' : 'No unsaved changes'}</span>
-        <Button variant="primary" className="h-11 px-5" onClick={() => handleSave()} disabled={!isRefreshIntervalValid || Boolean(discordTemplateError)}><Save size={17} aria-hidden="true" />Save &amp; Encrypt Settings</Button>
+        <Button variant="primary" className="h-11 px-5 max-[760px]:h-9 max-[760px]:flex-1 max-[760px]:px-3" onClick={() => handleSave()} disabled={!isRefreshIntervalValid || Boolean(discordTemplateError)}><Save size={17} aria-hidden="true" />Save &amp; Encrypt Settings</Button>
       </div>
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </Page>

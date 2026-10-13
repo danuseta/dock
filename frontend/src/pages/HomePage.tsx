@@ -28,7 +28,7 @@ const highlightColors = [
 const panelClass = 'min-w-0 rounded-md border border-border bg-surface-0';
 const panelHeaderClass = 'flex items-center justify-between gap-2.5 border-b border-border px-[17px] py-[15px]';
 const panelTitleClass = 'text-balance font-display text-[0.82rem] font-bold';
-const textActionClass = 'h-6 border-0 px-0 py-0 text-[0.68rem] text-muted-foreground hover:border-transparent hover:bg-transparent hover:text-foreground';
+const textActionClass = 'h-6 max-[760px]:h-11 border-0 px-0 py-0 text-[0.68rem] text-muted-foreground hover:border-transparent hover:bg-transparent hover:text-foreground';
 
 const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
   const [healthRefreshSeconds, setHealthRefreshSeconds] = useState(DEFAULT_SERVICE_HEALTH_REFRESH_SECONDS);
@@ -124,7 +124,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
           <section className="min-w-0" aria-labelledby="quick-links-title">
             <div className="mb-2 flex items-center justify-between">
               <h2 id="quick-links-title" className={panelTitleClass}>Quick links</h2>
-              <IconButton variant="ghost" className="size-6" onClick={() => { setLinkError(''); setShowForm(true); }} aria-label="Add quick link" title="Add quick link"><Plus size={14} aria-hidden="true" /></IconButton>
+              <IconButton variant="ghost" className="size-6 max-[760px]:size-11" onClick={() => { setLinkError(''); setShowForm(true); }} aria-label="Add quick link" title="Add quick link"><Plus size={14} aria-hidden="true" /></IconButton>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {(coreData?.quickLinks || []).map((link: any) => {

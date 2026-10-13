@@ -98,7 +98,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
   const { data: balloonData } = useQuery<{ chatBalloons: ChatMessage[]; chatSessions: Array<{ id: string; ticketKey?: string | null }> }>(GET_CHAT_BALLOONS, { fetchPolicy: 'network-only', pollInterval: POLL_MS });
   const balloons = useMemo(() => ticketBalloons(balloonData?.chatBalloons || [], balloonData?.chatSessions || []), [balloonData]);
   const { openForTicket, opening: openingChat, error: chatError } = useOpenForTicket();
-  const [view, setView] = useState<View>('office');
+  const [view, setView] = useState<View>(() => (window.matchMedia('(max-width: 760px)').matches ? 'table' : 'office'));
   const [flowView, setFlowView] = useState<FlowView>('live');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [sampleStartedAt, setSampleStartedAt] = useState<number | null>(null);
@@ -254,10 +254,10 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
               <div className="flex flex-wrap items-center gap-1.5 border-b border-border bg-surface-0 px-3 py-2" role="group" aria-label="Point of view">
                 <span className={cn(sectionLabel, 'mr-1')}>View</span>
                 {OFFICE_VIEWS.map(([id, label]) => (
-                  <button key={id} type="button" className={cn('h-7 rounded-xs px-2.5 font-display text-xs font-semibold text-secondary-foreground transition-colors duration-150 hover:text-foreground', officeView === id && 'bg-accent text-black hover:text-black')} aria-pressed={officeView === id} onClick={() => chooseView(id)}>{label}</button>
+                  <button key={id} type="button" className={cn('h-7 max-[760px]:h-11 rounded-xs px-2.5 font-display text-xs font-semibold text-secondary-foreground transition-colors duration-150 hover:text-foreground', officeView === id && 'bg-accent text-black hover:text-black')} aria-pressed={officeView === id} onClick={() => chooseView(id)}>{label}</button>
                 ))}
                 <select
-                  className={cn('h-7 max-w-[190px] rounded-xs border-0 bg-surface-2 px-2 font-display text-xs font-semibold text-secondary-foreground', teamView && 'bg-accent text-black')}
+                  className={cn('h-7 max-[760px]:h-11 max-w-[190px] rounded-xs border-0 bg-surface-2 px-2 font-display text-xs font-semibold text-secondary-foreground', teamView && 'bg-accent text-black')}
                   aria-label="Team view for a ticket"
                   value={teamView}
                   onChange={(event) => chooseView(event.target.value ? `ticket:${event.target.value}` : 'overview')}
@@ -265,7 +265,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                   <option value="">Team…</option>
                   {active.map((run) => <option key={run.key} value={run.key}>{run.key} · {stageName(run.stage, run.kind)}</option>)}
                 </select>
-                <button type="button" className={cn('h-7 rounded-xs px-2.5 font-display text-xs font-semibold text-secondary-foreground transition-colors duration-150 hover:text-foreground', boardOpen && 'bg-accent text-black hover:text-black')} aria-pressed={boardOpen} onClick={() => setBoardOpen((open) => !open)}>Board</button>
+                <button type="button" className={cn('h-7 max-[760px]:h-11 rounded-xs px-2.5 font-display text-xs font-semibold text-secondary-foreground transition-colors duration-150 hover:text-foreground', boardOpen && 'bg-accent text-black hover:text-black')} aria-pressed={boardOpen} onClick={() => setBoardOpen((open) => !open)}>Board</button>
               </div>
             )}
             <div className="relative">

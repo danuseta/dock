@@ -86,7 +86,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   };
 
   const renderBackButton = () => onBack ? (
-    <button onClick={onBack} className="mb-5 inline-flex min-h-6 items-center gap-2 font-mono text-[0.82rem] font-semibold text-muted-foreground transition-colors duration-150 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
+    <button onClick={onBack} className="mb-5 inline-flex min-h-6 max-[760px]:min-h-11 items-center gap-2 font-mono text-[0.82rem] font-semibold text-muted-foreground transition-colors duration-150 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
       <ArrowLeft size={14} aria-hidden="true" />
       <span>Dashboard</span>
       <span className="opacity-40">/</span>
@@ -243,7 +243,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
             <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-border pt-3 font-mono text-sm text-muted-foreground">
               {assignee && <span className="flex items-center gap-1.5"><User size={15} className="text-secondary-foreground" aria-hidden="true" />Assignee: <strong className="text-foreground">{assignee}</strong></span>}
               {ticket.sprintName && ticket.sprintName !== 'No Sprint' && <span className={cn('text-[0.78rem] font-semibold', isOldSprint ? 'text-muted-foreground' : 'text-status-merged')}>{ticket.sprintName}</span>}
-              {ticket.url && <a href={ticket.url} target="_blank" rel="noreferrer" className="flex min-h-6 items-center gap-1.5 font-bold text-accent hover:underline"><ExternalLink size={15} aria-hidden="true" />Open in Jira</a>}
+              {ticket.url && <a href={ticket.url} target="_blank" rel="noreferrer" className="flex min-h-6 max-[760px]:min-h-11 items-center gap-1.5 font-bold text-accent hover:underline"><ExternalLink size={15} aria-hidden="true" />Open in Jira</a>}
             </div>
           </Card>
 
@@ -287,7 +287,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
                       <PRBadge status={pr.status} />
                     </div>
                     <div className="flex w-fit max-w-full items-center gap-1.5 overflow-hidden rounded-sm border border-border bg-surface-1 px-2 py-1 font-mono text-[0.78rem]"><GitBranch size={13} className="shrink-0 text-secondary-foreground" aria-hidden="true" /><span className="truncate font-semibold">{pr.headBranch || 'feature'}</span><ArrowRight size={12} className="shrink-0 text-muted-foreground" aria-hidden="true" /><Badge variant="accent">{pr.baseBranch || 'main'}</Badge></div>
-                    <a href={pr.url} target="_blank" rel="noreferrer" className="flex min-h-6 items-center text-balance text-sm font-semibold hover:underline">{pr.title}</a>
+                    <a href={pr.url} target="_blank" rel="noreferrer" className="flex min-h-6 max-[760px]:min-h-11 items-center text-balance text-sm font-semibold hover:underline">{pr.title}</a>
                     <div className="flex gap-2 border-t border-border pt-2.5">
                       <Button size="sm" className={cn('flex-1', currentTab === 'commits' && 'border-accent bg-accent-dim text-accent')} onClick={() => togglePRTab(pr.id, 'commits')}><GitCommit size={13} aria-hidden="true" />Commits ({pr.commitsCount ?? (pr.commits?.length || 0)})</Button>
                       <Button size="sm" className={cn('flex-1', currentTab === 'files' && 'border-accent bg-accent-dim text-accent')} onClick={() => togglePRTab(pr.id, 'files')}><FileCode size={13} aria-hidden="true" />Files ({pr.changedFilesCount ?? (pr.files?.length || 0)})</Button>
