@@ -1,5 +1,8 @@
 import { StorageAPI } from './StorageAPI';
 import { GitHubService, SearchPRsOptions } from '../integrations/github';
+import type { PullRequestProblem } from '../integrations/attention';
+
+const PROBLEM_LABEL: Record<PullRequestProblem, string> = { CONFLICT: 'Merge conflict', PR_CHANGES_REQUESTED: 'Changes requested', PR_CHECKS_FAILING: 'Checks failing' };
 
 export class GitHubAPI {
   private storageAPI: StorageAPI;
@@ -117,21 +120,16 @@ export class GitHubAPI {
       );
       if (!Array.isArray(items)) return [];
 
-      return items.map((item: any) => {
-        const type = 'CONFLICT';
-        const message = `Merge conflict on PR #${item.number}: ${item.title}`;
-        
-        return {
-          id: String(item.id || `${item.repo}-${item.number}`),
-          type,
-          message,
-          ticketKey: item.ticketKey || null,
-          prUrl: item.url || item.html_url || item.prUrl || '',
-          owner: item.owner || null,
-          repo: item.repo || null,
-          pullNumber: item.number || null
-        };
-      });
+      return items.flatMap((item: any) => (item.problems as PullRequestProblem[]).map((type) => ({
+        id: `${item.id}-${type}`,
+        type,
+        message: `${PROBLEM_LABEL[type]} on PR #${item.number}: ${item.title}`,
+        ticketKey: item.ticketKey || null,
+        prUrl: item.url || '',
+        owner: item.owner || null,
+        repo: item.repo || null,
+        pullNumber: item.number || null,
+      })));
     } catch (error: any) {
       console.error('[BFF GitHubAPI] Error getting needs attention:', error.response?.status, error.response?.data || error.message);
       return [];
