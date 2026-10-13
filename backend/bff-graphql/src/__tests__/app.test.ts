@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import type { Express } from 'express';
-import { createApp } from '../app';
+import { buildOf, createApp } from '../app';
 
 async function listen(app: Express) {
   const server = http.createServer(app);
@@ -39,7 +39,7 @@ test('DOCK monolith shell serves API and SPA from one Express app', async (t) =>
   await t.test('keeps the health endpoint as JSON', async () => {
     const response = await fetch(`${runtime.baseUrl}/health`);
     assert.strictEqual(response.status, 200);
-    assert.deepStrictEqual(await response.json(), { status: 'ok', service: 'bff-graphql' });
+    assert.deepStrictEqual(await response.json(), { status: 'ok', service: 'bff-graphql', build: null }, 'this shell has no hashed entry script');
   });
 
   await t.test('serves static assets and SPA route fallback', async () => {
@@ -96,4 +96,9 @@ test('DOCK monolith shell serves API and SPA from one Express app', async (t) =>
     assert.strictEqual(callback.status, 302);
     assert.strictEqual(callback.headers.get('location'), '/settings?google=failed&reason=access-denied');
   });
+});
+
+test('the build of a page is the hashed name of its entry script', () => {
+  assert.strictEqual(buildOf('<script type="module" crossorigin src="/assets/index-Bx9_k2-a.js"></script><link rel="stylesheet" href="/assets/index-DfQ1.css">'), '/assets/index-Bx9_k2-a.js');
+  assert.strictEqual(buildOf('<!doctype html><title>DOCK shell</title>'), null);
 });

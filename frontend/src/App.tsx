@@ -14,6 +14,7 @@ import MonitoringPage from './pages/MonitoringPage';
 import DockerServicesPage from './pages/DockerServicesPage';
 import SessionsPage from './pages/SessionsPage';
 import SprintPage from './pages/SprintPage';
+import { PageBoundary } from './components/PageBoundary';
 import { PinLockModal } from './components/PinLockModal';
 import { LoadingSkeleton } from './components/LoadingSkeleton';
 import { Button, Page } from './components/ui';
@@ -137,7 +138,7 @@ function App() {
 
   return (
     <AppLayout currentPath={currentPath === '/ticket' ? '/dashboard' : currentPath} onNavigate={handleNavigate} unreachable={unreachable} onRetry={() => void refetch()}>
-      {!isLocked && renderPage()}
+      {!isLocked && <PageBoundary key={currentPath}>{renderPage()}</PageBoundary>}
       <PinLockModal 
         isOpen={isLocked} 
         onUnlock={handleUnlock} 
