@@ -19,8 +19,9 @@ test('settings: defaults when nothing is saved, saved fields win, wrong values a
   }
 });
 
-test('acceptance criteria need the heading and real text under it', () => {
+test('acceptance criteria need the heading and at least one criterion under it', () => {
   assert.strictEqual(hasAcceptanceCriteria(AC), true);
+  assert.strictEqual(hasAcceptanceCriteria('Acceptance criteria\n\n- Button works'), true, 'one short criterion is enough');
   assert.strictEqual(hasAcceptanceCriteria('ACCEPTANCE CRITERIA: Backend\n\n1. Three new models exist, as in the RFC database section.'), true);
   for (const none of [null, '', 'Token counts are not in the audit log. They are written per agent run.', 'Acceptance criteria\n\n.', 'Acceptance criteria\n\n- TBD']) {
     assert.strictEqual(hasAcceptanceCriteria(none), false, String(none));

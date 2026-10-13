@@ -40,7 +40,6 @@ const WEBHOOK_KEY = 'orchestratorCronWebhookUrl';
 const CACHE = 'orchestrator-cron';
 const TICK_MS = 60 * 1000;
 const WIB_OFFSET_MS = 7 * 3600 * 1000;
-const MIN_AC_CHARS = 40;
 const MAX_PING_CHARS = 1900;
 
 export const PARKED_TEXT = 'No acceptance criteria on the ticket. Confirm to start anyway, or fill them in.';
@@ -99,12 +98,12 @@ export function parseCronSettings(raw: string | null | undefined): CronSettings 
   };
 }
 
-/** A heading "Acceptance criteria" with real text after it. A lone dot under the heading does not count. */
+/** A heading "Acceptance criteria" with at least one criterion under it: a line of two words or more. A lone dot or "TBD" is not one. */
 export function hasAcceptanceCriteria(description: string | null | undefined): boolean {
   const text = description || '';
   const at = text.search(/acceptance criteria/i);
   if (at < 0) return false;
-  return text.slice(at).replace(/acceptance criteria/i, '').replace(/\s+/g, '').length >= MIN_AC_CHARS;
+  return text.slice(at).split('\n').slice(1).some((line) => (line.match(/[\p{L}\p{N}]+/gu) || []).length >= 2);
 }
 
 export interface CronTicket { key: string; title: string; description?: string | null; status: string; sprintState?: string | null; labels?: string[] }
