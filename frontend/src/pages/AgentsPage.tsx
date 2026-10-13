@@ -1,20 +1,21 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowDown, ArrowUp, Bot, Building2, ChevronLeft, ChevronRight, ExternalLink, EyeOff, GitPullRequest, Hand, MessagesSquare, Moon, Play, Square, Table2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Bot, Building2, ChevronLeft, ChevronRight, Clock, ExternalLink, EyeOff, GitPullRequest, Hand, MessagesSquare, Moon, Octagon, Play, Square, Table2, X } from 'lucide-react';
 import { GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
-import { DISMISS_ORCHESTRATION } from '../graphql/mutations';
+import { CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Badge, Button, Card, Dialog, Page, PageHeader } from '../components/ui';
 import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
-import { completeRun, formatAge, hasTrouble, isArchived, offerOf, pageOf, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
+import { PARKED_TEXT, completeRun, formatAge, hasTrouble, isArchived, offerOf, pageOf, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
 import { RAIL_STAGES, railIndex } from '../agents/office/layout';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 import { AgentFlowGraph } from '../components/AgentFlowGraph';
 import { machineOf, machinePlace, ticketBalloons, type ChatMessage } from '../chat/messages';
 import { MachineChip } from '../chat/MachineControls';
 import { MoveTicket } from '../agents/MoveTicket';
+import { CronSettingsPanel } from '../agents/CronSettingsPanel';
 import { chatStore } from '../chat/store';
 import { LimitsLine } from '../chat/StatusLine';
 import { useOpenForTicket } from '../chat/useOpenForTicket';
@@ -90,6 +91,10 @@ const OfferBadge: React.FC<{ run: AgentRun; className?: string }> = ({ run, clas
 const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) => {
   const { data, loading, error, refetch } = useQuery(GET_ORCHESTRATIONS, { ...CACHED_QUERY_OPTIONS, returnPartialData: false, pollInterval: POLL_MS });
   const [dismissOrchestration, { loading: dismissing }] = useMutation(DISMISS_ORCHESTRATION);
+  const [confirmOrchestration, { loading: confirming }] = useMutation(CONFIRM_ORCHESTRATION);
+  const [stopAllAgents, { loading: stoppingAll }] = useMutation(STOP_ALL_AGENTS);
+  const [showCron, setShowCron] = useState(false);
+  const [cronError, setCronError] = useState('');
   const { data: balloonData } = useQuery<{ chatBalloons: ChatMessage[]; chatSessions: Array<{ id: string; ticketKey?: string | null }> }>(GET_CHAT_BALLOONS, { fetchPolicy: 'network-only', pollInterval: POLL_MS });
   const balloons = useMemo(() => ticketBalloons(balloonData?.chatBalloons || [], balloonData?.chatSessions || []), [balloonData]);
   const { openForTicket, opening: openingChat, error: chatError } = useOpenForTicket();
@@ -183,6 +188,15 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
     }
   };
 
+  const runAction = async (work: () => Promise<void>) => {
+    setCronError('');
+    try {
+      await work();
+    } catch (failure: any) {
+      setCronError(failure.message || 'The action failed');
+    }
+  };
+
   if (isInitialQueryLoading(loading, data)) return <Page width="full"><LoadingSkeleton /></Page>;
 
   const empty = runs.length === 0;
@@ -210,6 +224,8 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
               </button>
             ))}
           </div>
+          <Button size="sm" aria-pressed={showCron} onClick={() => setShowCron((open) => !open)}><Clock size={14} aria-hidden="true" />Cron</Button>
+          <Button size="sm" variant="danger" disabled={stoppingAll} onClick={() => void runAction(async () => { await stopAllAgents(); })}><Octagon size={14} aria-hidden="true" />Stop all</Button>
           {sampling
             ? <Button size="sm" onClick={() => { setSampleStartedAt(null); setSelectedKey(null); }}><Square size={14} aria-hidden="true" />Stop sample</Button>
             : (serverRuns || []).length === 0 && <Button size="sm" variant="primary" onClick={() => { setSampleStartedAt(Date.now() / 1000); setSelectedKey('SAMPLE-2'); }}><Play size={14} aria-hidden="true" />Run a sample</Button>}
@@ -217,6 +233,8 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
       </PageHeader>
 
       {error && !data && <Card className="mb-4 border-status-conflict text-status-conflict" role="alert">Agent runs failed to load: {error.message}</Card>}
+      {cronError && <Card className="mb-4 border-status-conflict text-status-conflict" role="alert">{cronError}</Card>}
+      {showCron && <CronSettingsPanel />}
 
       <section className="mb-4 grid grid-cols-4 overflow-hidden rounded-md border border-border bg-surface-1 max-[700px]:grid-cols-2 [&>div]:border-r [&>div]:border-border [&>div:last-child]:border-r-0 max-[700px]:[&>div:nth-child(2)]:border-r-0 max-[700px]:[&>div:nth-child(-n+2)]:border-b" aria-label="Agent overview">
         {metrics.map((metric) => (
@@ -382,7 +400,9 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                   <b className="mb-0.5 block font-mono text-[0.66rem] font-bold uppercase tracking-[0.08em] text-amber-200">Waiting on you</b>
                   <span className="text-pretty">{selected.waiting}</span>
                   <p className="mt-1.5 text-pretty text-xs text-muted-foreground">Answer here, or in the Claude Code session on {machinePlace(machineOf(selected))}.</p>
-                  {!selected.sample && <Button size="sm" className="mt-2 h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key, machineOf(selected))}>Reply here</Button>}
+                  {!selected.sample && selected.waiting === PARKED_TEXT
+                    ? <Button size="sm" variant="primary" className="mt-2 h-7 px-2.5" disabled={confirming} onClick={() => void runAction(async () => { await confirmOrchestration({ variables: { key: selected.key } }); await refetch(); })}>Confirm and start</Button>
+                    : !selected.sample && <Button size="sm" className="mt-2 h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key, machineOf(selected))}>Reply here</Button>}
                 </div>
               )}
 

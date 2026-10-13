@@ -235,3 +235,6 @@ export function pageOf<T>(items: T[], page: number, size: number): { items: T[];
   const slice = items.slice(start, start + size);
   return { items: slice, page: current, pages, from: slice.length ? start + 1 : 0, to: start + slice.length };
 }
+
+// The gate the orchestrator cron puts on a ticket it did not start. Must match PARKED_TEXT in backend/bff-graphql/src/integrations/orchestrator-cron.ts.
+export const PARKED_TEXT = 'No acceptance criteria on the ticket. Confirm to start anyway, or fill them in.';

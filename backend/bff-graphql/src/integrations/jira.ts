@@ -49,6 +49,18 @@ export class JiraClient {
     return response.data;
   }
 
+  /** Moves the issue to the status with this name; false when the workflow offers no such move from where the issue is. */
+  async transitionTo(credentials: JiraCredentials, ticketKey: string, statusName: string): Promise<boolean> {
+    const client = this.getClient(credentials);
+    const path = `/rest/api/3/issue/${encodeURIComponent(ticketKey)}/transitions`;
+    const response = await client.get(path);
+    const wanted = statusName.trim().toLowerCase();
+    const transition = (response.data?.transitions || []).find((item: any) => String(item?.to?.name || '').trim().toLowerCase() === wanted);
+    if (!transition) return false;
+    await client.post(path, { transition: { id: transition.id } });
+    return true;
+  }
+
   async listProjects(credentials: JiraCredentials): Promise<JiraProject[]> {
     const response = await this.getClient(credentials).get('/rest/api/3/project/search', {
       params: { orderBy: 'name', maxResults: 100 },
@@ -154,6 +166,7 @@ export class JiraService {
   }
 
   listProjects(credentials: JiraCredentials) { return this.client.listProjects(credentials); }
+  transitionTo(credentials: JiraCredentials, ticketKey: string, statusName: string) { return this.client.transitionTo(credentials, ticketKey, statusName); }
   validateCredentials(credentials: JiraCredentials) { return this.client.validateCredentials(credentials); }
 
   formatTicket(issue: any, domain: string) {

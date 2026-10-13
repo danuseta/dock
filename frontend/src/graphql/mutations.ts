@@ -283,3 +283,27 @@ export const DELETE_CHAT_SESSION = gql`
     deleteChatSession(id: $id)
   }
 `;
+
+export const UPDATE_ORCHESTRATOR_CRON_SETTINGS = gql`
+  mutation UpdateOrchestratorCronSettings($config: String!, $webhookUrl: String) {
+    updateOrchestratorCronSettings(config: $config, webhookUrl: $webhookUrl)
+  }
+`;
+
+export const RUN_ORCHESTRATOR_CRON_NOW = gql`
+  mutation RunOrchestratorCronNow {
+    runOrchestratorCronNow
+  }
+`;
+
+export const CONFIRM_ORCHESTRATION = gql`
+  mutation ConfirmOrchestration($key: String!) {
+    confirmOrchestration(key: $key)
+  }
+`;
+
+export const STOP_ALL_AGENTS = gql`
+  mutation StopAllAgents {
+    stopAllAgents
+  }
+`;
