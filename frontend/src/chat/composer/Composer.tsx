@@ -13,6 +13,7 @@ import { useAttachments } from './useAttachments';
 import { useCommands } from './useCommands';
 import { readOpen, writeOpen } from './optionsSummary';
 import { useTurnOptions } from './useTurnOptions';
+import { isPhone } from '../../lib/phone';
 
 const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilities, blocker, busy, stopping, sessionOptions, onSend, onStop }) => {
   const features = composerFeatures(capabilities);
@@ -135,7 +136,7 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
           rows={2}
           maxLength={MAX_TEXT}
           value={draft}
-          placeholder={`Message Claude Code on ${machinePlace(machine)}...`}
+          placeholder={isPhone() ? 'Type your message...' : `Message Claude Code on ${machinePlace(machine)}...`}
           aria-label="Message"
           role={features.picker ? 'combobox' : undefined}
           aria-autocomplete={features.picker ? 'list' : undefined}

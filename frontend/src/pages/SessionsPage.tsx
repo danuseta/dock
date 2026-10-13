@@ -205,9 +205,9 @@ const SessionsPage: React.FC = () => {
               <div className="flex flex-none flex-wrap items-center gap-2 border-b border-border px-3.5 pt-[max(0.625rem,env(safe-area-inset-top))] pb-2.5">
                 <Button size="sm" variant="ghost" className="hidden h-7 px-2 max-[900px]:inline-flex max-[900px]:h-11 max-[900px]:min-w-11" aria-label="Back to the session list" onClick={() => select(null)}><ArrowLeft size={14} aria-hidden="true" /></Button>
                 <div className="contents max-[900px]:order-3 max-[900px]:flex max-[900px]:basis-full max-[900px]:flex-wrap max-[900px]:items-center max-[900px]:gap-2">
-                <SourceChip source={selected.source} />
-                {selected.source === 'cli' && <span className={cn(chip, 'border-border text-muted-foreground')}>READ-ONLY</span>}
+                {selected.source === 'cli' && <><SourceChip source="cli" /><span className={cn(chip, 'border-border text-muted-foreground')}>READ-ONLY</span></>}
                 {selected.ticketKey && <span className={cn(chip, 'border-accent/30 bg-accent-dim text-accent')}>{selected.ticketKey}</span>}
+                <span className="ml-auto flex-none"><MachineChip name={machineOf(selected)} online={machineOnline(machines, machineOf(selected))} /></span>
                 </div>
                 {titleDraft === null ? (
                   <h2 className="min-w-0 flex-1 truncate font-display text-[0.95rem] font-bold max-[900px]:order-1" title={titleOf(selected)}>{titleOf(selected)}</h2>
@@ -220,7 +220,6 @@ const SessionsPage: React.FC = () => {
                 )}
                 {titleDraft === null && (
                   <div className="flex flex-none items-center gap-1 max-[900px]:order-2">
-                    {selected.source === 'dock' && <Button size="sm" className="h-7 max-[900px]:h-11" onClick={() => chatStore.openSession(selected.id)}>Open in chat</Button>}
                     <Button size="sm" variant="ghost" className="h-7 px-2 max-[900px]:h-11 max-[900px]:min-w-11" aria-label="Rename session" title="Rename" onClick={() => setTitleDraft(selected.title)}><Pencil size={13} aria-hidden="true" /></Button>
                     <Button size="sm" variant="ghost" className="h-7 px-2 max-[900px]:h-11 max-[900px]:min-w-11" aria-label="Delete session" title="Delete" onClick={() => { setActionError(''); setDeleteTarget(selected); }}><Trash2 size={13} aria-hidden="true" /></Button>
                   </div>
@@ -231,6 +230,7 @@ const SessionsPage: React.FC = () => {
                 key={selected.id}
                 sessionId={selected.id}
                 className="min-h-0 flex-1"
+                hideMachine
                 readOnlyAction={<Button size="sm" variant="primary" disabled={creating} onClick={() => void create({ forkFrom: selected.id, title: selected.title || undefined, ticketKey: selected.ticketKey })}>Continue as a DOCK session</Button>}
               />
             </>
