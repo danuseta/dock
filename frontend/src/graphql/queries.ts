@@ -816,3 +816,9 @@ export const GET_ORCHESTRATOR_CRON_SETTINGS = gql`
     }
   }
 `;
+
+export const GET_PUSH_PUBLIC_KEY = gql`
+  query GetPushPublicKey {
+    pushPublicKey
+  }
+`;

@@ -603,6 +603,7 @@ export const typeDefs = gql`
     sprintIssueEvents(sprintId: Int!): String!
     sprintDashboardSettings: SprintDashboardSettings!
     orchestratorCronSettings: OrchestratorCronSettings!
+    pushPublicKey: String!
   }
 
   type Mutation {
@@ -645,5 +646,8 @@ export const typeDefs = gql`
     runOrchestratorCronNow: String!
     confirmOrchestration(key: String!): Boolean!
     stopAllAgents: Int!
+    subscribePush(endpoint: String!, p256dh: String!, auth: String!): Boolean!
+    unsubscribePush(endpoint: String!): Boolean!
+    sendTestPush: Int!
   }
 `;

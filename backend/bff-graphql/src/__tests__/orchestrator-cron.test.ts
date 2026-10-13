@@ -58,6 +58,7 @@ interface Start {
   webhook?: string;
   moves?: boolean;
   dependencies?: Array<{ ticketKey: string; dependsOnKey: string }>;
+  pushDevices?: boolean;
 }
 
 function world(start: Start = {}) {
@@ -73,6 +74,7 @@ function world(start: Start = {}) {
     moved: [] as string[],
     stopped: [] as string[],
     posts: [] as Array<{ url: string; body: unknown }>,
+    pushes: [] as Array<{ title: string; body: string; url: string }>,
   };
   if (start.webhook) state.settings.set('orchestratorCronWebhookUrl', start.webhook);
   const deps: CronDeps = {
@@ -99,6 +101,8 @@ function world(start: Start = {}) {
     runningSessions: async () => ['s-1', 's-2'],
     stopTurn: async (sessionId) => { state.stopped.push(sessionId); },
     post: async (url, body) => { state.posts.push({ url, body }); },
+    hasPushDevices: async () => start.pushDevices ?? false,
+    push: async (message) => { state.pushes.push(message); },
   };
   return { state, cron: new OrchestratorCron(deps) };
 }
@@ -177,6 +181,12 @@ test('each run that waits on the owner pings Discord once; the first look after 
 
   const silent = world({ runs: [waiting] });
   assert.deepStrictEqual([await silent.cron.notifyWaiting(), silent.state.posts.length], [[], 0], 'no webhook, no ping');
+
+  const phone = world({ runs: [], pushDevices: true });
+  await phone.cron.notifyWaiting();
+  phone.state.runs = [waiting];
+  assert.deepStrictEqual(await phone.cron.notifyWaiting(), ['QRD-7']);
+  assert.deepStrictEqual([phone.state.posts.length, phone.state.pushes], [0, [{ title: 'QRD-7 waits on you', body: 'Which endpoint?', url: '/agents' }]], 'a phone alone gets the push, with no Discord post');
 });
 
 test('settings are saved after validation; the webhook is kept, replaced or cleared; the tick runs a due round once', async () => {

@@ -1,4 +1,5 @@
 import { ApolloClient, InMemoryCache, createHttpLink } from '@apollo/client';
+import { keepCacheOnDevice } from './offline';
 import { mergeReliableAssignee } from './queryPolicy';
 
 const graphqlUrl = import.meta.env.VITE_GRAPHQL_URL || 'http://localhost:4000/graphql';
@@ -11,9 +12,7 @@ const httpLink = createHttpLink({
   credentials: 'include',
 });
 
-export const apolloClient = new ApolloClient({
-  link: httpLink,
-  cache: new InMemoryCache({
+const cache = new InMemoryCache({
     typePolicies: {
       Ticket: {
         keyFields: ['key'],
@@ -25,5 +24,7 @@ export const apolloClient = new ApolloClient({
       // Agent ids are only unique inside one ticket's run, so they must not be merged across tickets.
       TimelineAgent: { keyFields: false },
     },
-  }),
 });
+keepCacheOnDevice(cache);
+
+export const apolloClient = new ApolloClient({ link: httpLink, cache });

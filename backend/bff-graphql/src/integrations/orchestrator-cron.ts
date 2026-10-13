@@ -41,6 +41,7 @@ const CACHE = 'orchestrator-cron';
 const TICK_MS = 60 * 1000;
 const WIB_OFFSET_MS = 7 * 3600 * 1000;
 const MAX_PING_CHARS = 1900;
+const MAX_PUSH_CHARS = 180;
 
 export const PARKED_TEXT = 'No acceptance criteria on the ticket. Confirm to start anyway, or fill them in.';
 export const PR_GATE_TEXT = "PR open: waiting for the owner's review";
@@ -163,6 +164,8 @@ export interface CronDeps {
   runningSessions(): Promise<string[]>;
   stopTurn(sessionId: string): Promise<unknown>;
   post(webhookUrl: string, body: unknown): Promise<unknown>;
+  hasPushDevices(): Promise<boolean>;
+  push(message: { title: string; body: string; url: string }): Promise<unknown>;
 }
 
 export class OrchestratorCron {
@@ -284,10 +287,13 @@ export class OrchestratorCron {
     return sessions.length;
   }
 
-  /** One Discord ping per run and reason it waits on the owner. The first call after a webhook is set only remembers what waits already. */
+  /**
+   * One notice per run and reason it waits on the owner: a Discord ping when a webhook is set, a push to every phone that asked for one.
+   * The first call after either is set up only remembers what waits already.
+   */
   async notifyWaiting(): Promise<string[]> {
     const webhookUrl = await this.deps.settingValue(WEBHOOK_KEY);
-    if (!webhookUrl) return [];
+    if (!webhookUrl && !(await this.deps.hasPushDevices())) return [];
     const { notifyUserId } = await this.settings();
     const waiting = (await this.deps.runs()).filter((run) => run.waiting);
     const marks = waiting.map((run) => `${run.key}\n${run.waiting}`);
@@ -297,7 +303,8 @@ export class OrchestratorCron {
     for (const run of known ? waiting.filter((item) => !known.has(`${item.key}\n${item.waiting}`)) : []) {
       const mention = notifyUserId ? `<@${notifyUserId}> ` : '';
       const content = `${mention}**${run.key}** ${run.title}\n${run.waiting}`.slice(0, MAX_PING_CHARS);
-      await this.deps.post(webhookUrl, { content, allowed_mentions: { users: notifyUserId ? [notifyUserId] : [] } });
+      if (webhookUrl) await this.deps.post(webhookUrl, { content, allowed_mentions: { users: notifyUserId ? [notifyUserId] : [] } });
+      await this.deps.push({ title: `${run.key} waits on you`, body: String(run.waiting).slice(0, MAX_PUSH_CHARS), url: '/agents' });
       pinged.push(run.key);
     }
     await this.deps.cacheSet('notified', marks);

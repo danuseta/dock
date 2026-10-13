@@ -8,9 +8,9 @@ import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 import { ChatDock } from '../chat/ChatDock';
 import { version as appVersion } from '../../package.json';
 
-interface AppLayoutProps { currentPath: string; onNavigate: (path: string) => void; children: React.ReactNode; }
+interface AppLayoutProps { currentPath: string; onNavigate: (path: string) => void; unreachable: boolean; onRetry: () => void; children: React.ReactNode; }
 
-export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, children }) => {
+export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, unreachable, onRetry, children }) => {
   const [preferences, setPreferences] = useState(readNavigationPreferences);
   const { data } = useQuery(GET_NEEDS_ATTENTION, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
   const conflictCount = data?.needsAttention?.length || 0;
@@ -148,7 +148,15 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, c
           </button>
         )}
       </aside>
-      <main className={cn('min-h-dvh min-w-0 pb-[82px] min-[761px]:pb-0', mainOffset)}>{children}</main>
+      <main className={cn('min-h-dvh min-w-0 pb-[82px] min-[761px]:pb-0', mainOffset)}>
+        {unreachable && (
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-status-warn/40 bg-status-warn/10 px-4 py-2 text-center text-sm text-status-warn" role="status">
+            <span>DOCK cannot be reached. This is what this device saw last.</span>
+            <button type="button" className="font-semibold underline underline-offset-2" onClick={onRetry}>Try again</button>
+          </div>
+        )}
+        {children}
+      </main>
       <ChatDock inset={chatInset} />
     </div>
   );
