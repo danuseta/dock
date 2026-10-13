@@ -411,7 +411,10 @@ const SettingsPage: React.FC = () => {
       </header>
 
       <div className="grid grid-cols-[220px_minmax(0,1fr)] items-start gap-7 max-[800px]:grid-cols-1">
-        <aside className="sticky top-6 min-w-0 max-w-full max-[800px]:static max-[800px]:overflow-x-auto" aria-label="Settings categories">
+        <div className="hidden max-[760px]:block">
+          <Select aria-label="Settings section" value={activeSection} onValueChange={(value) => setActiveSection(value as SettingsSection)} options={settingsSections.map((section) => ({ value: section.id, label: section.label }))} />
+        </div>
+        <aside className="sticky top-6 min-w-0 max-w-full max-[800px]:static max-[800px]:overflow-x-auto max-[760px]:hidden" aria-label="Settings categories">
           {(['Preferences', 'Connections'] as const).map((group) => (
             <div key={group} className="mb-4 max-[800px]:mb-0 max-[800px]:inline-block max-[800px]:align-top">
               <p className="mb-2 px-2 text-[0.6875rem] font-semibold text-muted-foreground max-[800px]:sr-only">{group.toUpperCase()}</p>

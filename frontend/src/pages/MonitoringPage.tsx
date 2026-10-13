@@ -4,7 +4,7 @@ import { Activity, ExternalLink, Pencil, Plus, RefreshCw, Trash2, X } from 'luci
 import { GET_MONITORS } from '../graphql/queries';
 import { ADD_MONITOR, CHECK_MONITORS, REMOVE_MONITOR, UPDATE_MONITOR } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
-import { Button, Card, Dialog, IconButton, Input, Page, PageHeader } from '../components/ui';
+import { Button, Card, Dialog, IconButton, Input, Page, PageHeader, PhoneCards } from '../components/ui';
 import { cn } from '../lib/cn';
 import { DockerRuntimeCard } from '../components/DockerRuntimeCard';
 import { DEFAULT_SERVICE_HEALTH_REFRESH_SECONDS, normalizeServiceHealthRefreshSeconds } from '../lib/serviceHealthRefresh';
@@ -133,7 +133,7 @@ const MonitoringPage: React.FC<MonitoringPageProps> = ({ onNavigate }) => {
       <div className="grid grid-cols-[minmax(0,1fr)_340px] items-start gap-4 max-[1120px]:grid-cols-1">
       {monitors.length === 0 ? <Card className="py-10 text-center"><Activity size={34} className="mx-auto mb-2.5 text-muted-foreground" aria-hidden="true" /><p className="text-pretty text-muted-foreground">No services yet.</p><Button variant="primary" className="mt-4" onClick={() => setEditor(createEmptyMonitor())}><Plus size={16} aria-hidden="true" />Add your first service</Button></Card> : (
         <Card className="overflow-hidden p-0">
-          <div className="overflow-x-auto">
+          <PhoneCards>
             <table className="w-full min-w-[980px] border-collapse text-left text-sm">
               <thead className="bg-surface-1 text-xs text-muted-foreground">
                 <tr><th className="px-4 py-3 font-medium">Service</th><th className="px-4 py-3 font-medium">Endpoint</th><th className="px-4 py-3 font-medium">Status</th><th className="px-4 py-3 font-medium">HTTP</th><th className="px-4 py-3 font-medium">Latency</th><th className="px-4 py-3 font-medium">Last checked</th><th className="px-4 py-3 text-right font-medium">Actions</th></tr>
@@ -153,7 +153,7 @@ const MonitoringPage: React.FC<MonitoringPageProps> = ({ onNavigate }) => {
                 })}
               </tbody>
             </table>
-          </div>
+          </PhoneCards>
         </Card>
       )}
         <DockerRuntimeCard runtime={data?.dockerRuntime} onNavigate={onNavigate} />

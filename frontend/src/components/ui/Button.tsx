@@ -12,9 +12,9 @@ const variants: Record<ButtonVariant, string> = {
 };
 
 const sizes: Record<ButtonSize, string> = {
-  sm: 'h-8 px-3 text-xs',
-  md: 'h-10 px-5 text-sm',
-  icon: 'size-10 p-0',
+  sm: 'h-8 px-3 text-xs max-[760px]:h-11',
+  md: 'h-10 px-5 text-sm max-[760px]:h-11',
+  icon: 'size-10 p-0 max-[760px]:size-11',
 };
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {

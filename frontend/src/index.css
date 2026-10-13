@@ -62,11 +62,97 @@
   background: var(--color-border-glow);
 }
 
-@media (max-width: 1023px), (pointer: coarse) {
-  input,
-  textarea,
-  select,
-  [contenteditable]:not([contenteditable='false']) {
-    font-size: 16px;
+/*
+ * Phones. The rules every page gets on a small screen; nothing here applies above 760 px, the width the
+ * max-[760px]: classes and lib/phone.ts use.
+ */
+@media (max-width: 760px) {
+  /* No text under 11 px, whichever small size a component picked. */
+  [class*='text-[0.5'],
+  [class*='text-[0.6rem]'],
+  [class*='text-[0.61rem]'],
+  [class*='text-[0.62rem]'],
+  [class*='text-[0.63rem]'],
+  [class*='text-[0.64rem]'],
+  [class*='text-[0.65rem]'] {
+    font-size: 0.6875rem;
+  }
+
+  /* A table inside <PhoneCards>: every row a card, the first cell its title, the other cells "name, value" lines. */
+  .phone-cards {
+    overflow-x: visible;
+    padding: 10px;
+  }
+
+  .phone-cards table,
+  .phone-cards tbody {
+    display: block;
+    width: 100%;
+    min-width: 0 !important;
+  }
+
+  .phone-cards thead {
+    display: none;
+  }
+
+  .phone-cards tbody tr {
+    display: block;
+    margin-bottom: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md, 10px);
+    background: var(--color-surface-0);
+  }
+
+  .phone-cards tbody tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .phone-cards td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    max-width: none !important;
+    padding: 4px 0 !important;
+    border: 0;
+    text-align: right;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  /* A long value shrinks and truncates instead of pushing the card wider. */
+  .phone-cards td > * {
+    min-width: 0;
+  }
+
+  .phone-cards td::before {
+    content: attr(data-label);
+    flex: none;
+    color: var(--color-muted-foreground);
+    font-family: var(--font-body);
+    font-size: 0.75rem;
+    font-weight: 400;
+    text-align: left;
+  }
+
+  .phone-cards td:first-child {
+    display: block;
+    margin-bottom: 4px;
+    padding-bottom: 8px !important;
+    border-bottom: 1px solid var(--color-border);
+    text-align: left;
+  }
+
+  .phone-cards td:first-child::before,
+  .phone-cards td[data-label='']::before,
+  .phone-cards td:only-child::before {
+    content: none;
+  }
+
+  .phone-cards td:only-child {
+    margin-bottom: 0;
+    padding-bottom: 4px !important;
+    border-bottom: 0;
   }
 }
