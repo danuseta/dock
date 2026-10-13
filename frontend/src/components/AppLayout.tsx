@@ -3,6 +3,7 @@ import { Activity, AlertTriangle, BarChart3, Bot, Box, CalendarDays, ChevronLeft
 import { useQuery } from '@apollo/client';
 import { GET_NEEDS_ATTENTION } from '../graphql/queries';
 import { NAVIGATION_PREFERENCES_EVENT, NavigationPreferences, readNavigationPreferences, saveNavigationPreferences } from '../lib/navigationPreferences';
+import { applyUpdate, checkForUpdate } from '../lib/appUpdate';
 import { cn } from '../lib/cn';
 import { PHONE_PRIMARY_PATHS, phoneMore } from '../lib/phoneNavigation';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
@@ -19,6 +20,14 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
   const { data } = useQuery(GET_NEEDS_ATTENTION, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
   const conflictCount = data?.needsAttention?.length || 0;
   const [moreOpen, setMoreOpen] = useState(false);
+  const [updateOffered, setUpdateOffered] = useState(false);
+
+  // A phone keeps the app alive in the background for days, so a deploy is looked for each time it comes back.
+  useEffect(() => {
+    const check = () => { if (document.visibilityState === 'visible') void checkForUpdate().then(setUpdateOffered); };
+    document.addEventListener('visibilitychange', check);
+    return () => document.removeEventListener('visibilitychange', check);
+  }, []);
 
   useEffect(() => {
     const handlePreferenceChange = (event: Event) => setPreferences((event as CustomEvent<NavigationPreferences>).detail);
@@ -194,6 +203,12 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
       )}
       {/* On a phone the chat button floats above the navigation; the extra room lets the last row scroll clear of it. */}
       <main className={cn('min-h-dvh min-w-0 pb-[150px] min-[761px]:pb-0', mainOffset)}>
+        {updateOffered && (
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-border-glow bg-surface-1 px-4 py-2 text-center text-sm text-secondary-foreground" role="status">
+            <span>A new version of DOCK is ready.</span>
+            <button type="button" className="font-semibold text-accent underline underline-offset-2" onClick={() => applyUpdate()}>Update</button>
+          </div>
+        )}
         {unreachable && (
           <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-status-warn/40 bg-status-warn/10 px-4 py-2 text-center text-sm text-status-warn" role="status">
             <span>DOCK cannot be reached. This is what this device saw last.</span>

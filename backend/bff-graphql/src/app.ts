@@ -2,7 +2,7 @@ import { ApolloServer } from '@apollo/server';
 import { expressMiddleware } from '@apollo/server/express4';
 import cors from 'cors';
 import express, { Express } from 'express';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { resolvers } from './resolvers';
 import { typeDefs } from './schema/typeDefs';
@@ -32,6 +32,9 @@ function defaultFrontendDistPath(): string {
   return path.resolve(__dirname, '../../../frontend/dist');
 }
 
+/** The build a page belongs to: the hashed name of its entry script, the same value the running page reads from its own script tag. */
+export const buildOf = (indexHtml: string): string | null => indexHtml.match(/\/assets\/index-[\w-]+\.js/)?.[0] ?? null;
+
 export async function createApp(options: CreateAppOptions = {}): Promise<JidisApp> {
   const app = express();
   const apolloServer = new ApolloServer<AuthContext>({ typeDefs, resolvers });
@@ -40,6 +43,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<JidisAp
   );
   const frontendIndexPath = path.join(frontendDistPath, 'index.html');
   const frontendEnabled = existsSync(frontendIndexPath);
+  const build = frontendEnabled ? buildOf(readFileSync(frontendIndexPath, 'utf8')) : null;
 
   await apolloServer.start();
 
@@ -70,7 +74,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<JidisAp
   }));
 
   app.get('/health', (_request, response) => {
-    response.status(200).json({ status: 'ok', service: 'bff-graphql' });
+    response.status(200).json({ status: 'ok', service: 'bff-graphql', build });
   });
 
   if (frontendEnabled) {

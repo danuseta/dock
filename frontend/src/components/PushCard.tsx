@@ -72,8 +72,8 @@ export const PushCard = () => {
       {support === 'ready' && (
         <div className="flex flex-wrap items-center gap-3">
           {on
-            ? <Button disabled={busy} onClick={() => void disable()}>Turn off</Button>
-            : <Button variant="primary" disabled={busy} onClick={() => void enable()}>Turn on</Button>}
+            ? <Button disabled={busy} onClick={() => void disable()}>{busy ? 'Working...' : 'Turn off'}</Button>
+            : <Button variant="primary" disabled={busy} onClick={() => void enable()}>{busy ? 'Working...' : 'Turn on'}</Button>}
           {on && <Button disabled={busy} onClick={() => void test()}>Send a test</Button>}
           {message && <span role="status" className={message.failed ? 'text-sm text-status-conflict' : 'text-sm text-status-merged'}>{message.text}</span>}
         </div>
