@@ -4,7 +4,6 @@ import { Loader2, SendHorizontal } from 'lucide-react';
 import { SEND_CHAT_MESSAGE, STOP_CHAT_TURN } from '../graphql/mutations';
 import { GET_CHAT_MESSAGES, GET_CHAT_SESSION } from '../graphql/queries';
 import { Button } from '../components/ui';
-import { isPhone } from '../lib/phone';
 import { cn } from '../lib/cn';
 import {
   isOptimistic, isStopping, isTurnInProgress, machineCapabilities, machineOf, machineOnline, machinePlace, mergeMessages, newestAssistantId, oldestId, optimisticMessage, pollCursor, pollInterval, sendBlocker, sessionTurnOptions,
@@ -27,6 +26,8 @@ interface ChatThreadProps {
   className?: string;
   /** Shown beside the read-only line of a terminal session, for example a "Continue" button. */
   readOnlyAction?: React.ReactNode;
+  /** The Sessions page names the machine in its own header, so it leaves this thread's "Runs on" line out. */
+  hideMachine?: boolean;
 }
 
 const NEWEST_PAGE = 200;
@@ -36,7 +37,7 @@ const NEAR_BOTTOM_PX = 80;
 const messageOf = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
 const timeOf = (at: string) => new Date(at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 
-export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, readOnlyAction }) => {
+export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, readOnlyAction, hideMachine }) => {
   const client = useApolloClient();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -206,7 +207,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
 
   return (
     <div className={cn('flex min-h-0 flex-col', className)}>
-      {session && <div className="flex flex-none items-center gap-2 border-b border-border bg-surface-0 px-3.5 py-1.5 font-mono text-[0.66rem] text-muted-foreground"><span>Runs on</span><MachineChip name={machine} online={machineUp} /></div>}
+      {session && !hideMachine && <div className="flex flex-none items-center gap-2 border-b border-border bg-surface-0 px-3.5 py-1.5 font-mono text-[0.66rem] text-muted-foreground"><span>Runs on</span><MachineChip name={machine} online={machineUp} /></div>}
       <SessionStatusLine sessionId={sessionId} className="flex-none bg-surface-0" />
       <div ref={scrollRef} onScroll={handleScroll} className="min-h-[6.5rem] flex-1 overflow-y-auto overscroll-contain px-3.5 py-3" role="log" aria-label="Conversation">
         {loadingOlder && <p className="pb-2 text-center font-mono text-[0.66rem] text-muted-foreground" role="status">Loading older messages...</p>}
@@ -272,7 +273,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
               value=""
               readOnly
               disabled
-              placeholder={readOnly ? 'Continue as a DOCK session to type...' : isPhone() ? 'Message Claude Code...' : `Message Claude Code on ${place}...`}
+              placeholder={readOnly ? 'Continue as a DOCK session to type...' : `Message Claude Code on ${place}...`}
               aria-label="Message"
             />
             <Button size="sm" variant="primary" className="h-10 max-[900px]:h-11 max-[900px]:min-w-11" disabled aria-label="Send message">
