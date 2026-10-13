@@ -310,8 +310,9 @@ test('SQLite storage keeps chat interactions unique per request, caps them, and 
   );
 
   for (const id of ['r2', 'r3', 'r4']) assert.strictEqual((await storage.createChatInteraction(ask(id), limits, at)).refused, null);
-  const racing = await Promise.all(['r5', 'r6', 'r7'].map((id) => storage.createChatInteraction(ask(id), limits, at)));
-  assert.deepStrictEqual(racing.map((item) => item.refused), ['pending', 'pending', 'pending'], 'a fifth pending ask of a turn is refused');
+  const extra: Array<string | null> = [];
+  for (const id of ['r5', 'r6', 'r7']) extra.push((await storage.createChatInteraction(ask(id), limits, at)).refused);
+  assert.deepStrictEqual(extra, ['pending', 'pending', 'pending'], 'a fifth pending ask of a turn is refused');
   const rowOf = (requestId: string) => prisma.chatInteraction.findFirstOrThrow({ where: { sessionId, requestId } });
 
   assert.deepStrictEqual((await storage.getPendingChatInteractions(sessionId, 4)).map((row) => row.requestId), ['r1', 'r2', 'r3', 'r4']);
