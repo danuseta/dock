@@ -12,6 +12,7 @@ const SENSITIVE_KEYS = new Set([
   'githubToken',
   'discordWebhookUrl',
   'orchestratorCronWebhookUrl',
+  'pushVapidPrivateKey',
   'googleClientSecret',
   'googleRefreshToken',
 ]);

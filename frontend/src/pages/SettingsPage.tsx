@@ -10,6 +10,7 @@ import { UPDATE_SETTINGS, VALIDATE_JIRA, VALIDATE_GITHUB, VALIDATE_DISCORD, SET_
 import { Toast } from '../components/Toast';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { IngestTokensSection } from '../components/IngestTokensSection';
+import { PushCard } from '../components/PushCard';
 import { NAVIGATION_PREFERENCES_EVENT, NavigationMode, NavigationPreferences, readNavigationPreferences, saveNavigationPreferences } from '../lib/navigationPreferences';
 import { Badge, Button, Card, Checkbox, IconButton, Input, Page, Select, Textarea } from '../components/ui';
 import { cn } from '../lib/cn';
@@ -446,6 +447,8 @@ const SettingsPage: React.FC = () => {
                 </div>
                 {(navigationPreferences.mode === 'left' || navigationPreferences.mode === 'right') && <label className="mt-4 flex cursor-pointer items-center gap-3 rounded-sm border border-border bg-surface-0 p-3"><Checkbox checked={navigationPreferences.collapsed} onChange={(event) => updateSidebarSize(event.target.checked)} /><span><strong className="block text-sm">Start with minimized sidebar</strong><small className="text-muted-foreground">Show icons only until you expand it.</small></span></label>}
               </Card>
+
+              <PushCard />
 
               <Card aria-labelledby="service-health-title">
                 <div className="mb-5 flex flex-wrap items-start justify-between gap-3"><div className="flex gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-sm bg-surface-2 text-accent"><Activity size={18} aria-hidden="true" /></span><div><h3 id="service-health-title" className="font-display text-lg font-bold">Service health</h3><p className="mt-1 text-pretty text-sm text-muted-foreground">Set how often Home and Services automatically check upstream health.</p></div></div><Badge variant="success">ACTIVE</Badge></div>

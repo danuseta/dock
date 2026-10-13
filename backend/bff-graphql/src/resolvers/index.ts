@@ -12,6 +12,7 @@ import { chatService } from '../integrations/chat';
 import { mergeAttention, withoutSettledTickets } from '../integrations/attention';
 import { CronInputError } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
+import { pushService } from '../integrations/push';
 import type { AnswerInput } from '../integrations/chat-interactions';
 import { SprintBusyError, SprintInputError, sprintDashboardService } from '../integrations/sprint-dashboard';
 
@@ -195,6 +196,7 @@ export const resolvers = {
     sprintIssueEvents: async (_: unknown, { sprintId }: { sprintId: number }) => sprintDashboardService.issueEvents(sprintId),
     sprintDashboardSettings: async () => sprintDashboardService.getSettings(),
     orchestratorCronSettings: async () => orchestratorCron.getSettings(),
+    pushPublicKey: async () => pushService.publicKey(),
     dockerContainerLogs: async (_: unknown, { id, tail }: { id: string; tail?: number }) => {
       try {
         return await dockerRuntimeService.logs(id, tail);
@@ -439,6 +441,15 @@ export const resolvers = {
       return true;
     },
     stopAllAgents: async () => orchestratorCron.stopAll(),
+    subscribePush: async (_: unknown, input: { endpoint: string; p256dh: string; auth: string }) => {
+      await pushService.subscribe(input).catch(cronError);
+      return true;
+    },
+    unsubscribePush: async (_: unknown, { endpoint }: { endpoint: string }) => {
+      await pushService.unsubscribe(endpoint);
+      return true;
+    },
+    sendTestPush: async () => pushService.send({ title: 'DOCK', body: 'Notifications work on this device.', url: '/' }),
   },
   ChatSession: {
     pending: async (session: { id: string; status: string; machine: string }) => chatService.pending(session.id, session.status, session.machine),
@@ -454,7 +465,7 @@ export const protectedQueries = [
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens',
   'chatSessions', 'chatSession', 'chatMessages', 'chatActivity', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions',
-  'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings',
+  'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'pushPublicKey',
 ] as const;
 export const protectedMutations = [
   'saveDemoLink',
@@ -493,6 +504,9 @@ export const protectedMutations = [
   'runOrchestratorCronNow',
   'confirmOrchestration',
   'stopAllAgents',
+  'subscribePush',
+  'unsubscribePush',
+  'sendTestPush',
 ] as const;
 
 for (const field of protectedQueries) {

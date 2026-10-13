@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, useEffect } from 'react';
-import { useQuery, useMutation } from '@apollo/client';
+import { useApolloClient, useQuery, useMutation } from '@apollo/client';
 import { Loader2 } from 'lucide-react';
 import { GET_AUTH_STATUS } from './graphql/queries';
 import { VERIFY_MASTER_PIN } from './graphql/mutations';
@@ -21,7 +21,23 @@ import { Button, Page } from './components/ui';
 const AgentsPage = lazy(() => import('./pages/AgentsPage'));
 
 function App() {
-  const { data, error, refetch } = useQuery(GET_AUTH_STATUS, { fetchPolicy: 'network-only' });
+  const client = useApolloClient();
+  const { data: live, error, refetch } = useQuery(GET_AUTH_STATUS, { fetchPolicy: 'network-only' });
+  // The server cannot be reached: carry on with what this device saw last instead of stopping at a retry screen.
+  const unreachable = Boolean(error?.networkError);
+  const data = live ?? (unreachable ? client.readQuery({ query: GET_AUTH_STATUS }) : undefined);
+
+  // Back in the foreground or back on a network: ask again without waiting for a tap.
+  useEffect(() => {
+    if (!unreachable) return undefined;
+    const retry = () => { if (document.visibilityState === 'visible') void refetch(); };
+    document.addEventListener('visibilitychange', retry);
+    window.addEventListener('online', retry);
+    return () => {
+      document.removeEventListener('visibilitychange', retry);
+      window.removeEventListener('online', retry);
+    };
+  }, [unreachable, refetch]);
   const [verifyMasterPin] = useMutation(VERIFY_MASTER_PIN);
 
   const getInitialRoute = () => {
@@ -120,7 +136,7 @@ function App() {
   const isLocked = data.authStatus.hasMasterPin && !data.authStatus.authenticated;
 
   return (
-    <AppLayout currentPath={currentPath === '/ticket' ? '/dashboard' : currentPath} onNavigate={handleNavigate}>
+    <AppLayout currentPath={currentPath === '/ticket' ? '/dashboard' : currentPath} onNavigate={handleNavigate} unreachable={unreachable} onRetry={() => void refetch()}>
       {!isLocked && renderPage()}
       <PinLockModal 
         isOpen={isLocked} 

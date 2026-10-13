@@ -307,3 +307,21 @@ export const STOP_ALL_AGENTS = gql`
     stopAllAgents
   }
 `;
+
+export const SUBSCRIBE_PUSH = gql`
+  mutation SubscribePush($endpoint: String!, $p256dh: String!, $auth: String!) {
+    subscribePush(endpoint: $endpoint, p256dh: $p256dh, auth: $auth)
+  }
+`;
+
+export const UNSUBSCRIBE_PUSH = gql`
+  mutation UnsubscribePush($endpoint: String!) {
+    unsubscribePush(endpoint: $endpoint)
+  }
+`;
+
+export const SEND_TEST_PUSH = gql`
+  mutation SendTestPush {
+    sendTestPush
+  }
+`;

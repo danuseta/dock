@@ -3,6 +3,7 @@ import { StorageService } from '../storage/service';
 import { chatService } from './chat';
 import { orchestratorService } from './orchestrator';
 import { CRON_CACHE, OrchestratorCron, postWebhook } from './orchestrator-cron';
+import { pushService } from './push';
 
 const storage = new StorageService();
 const jira = new JiraAPI();
@@ -30,4 +31,6 @@ export const orchestratorCron = new OrchestratorCron({
   runningSessions: async () => (await chatService.sessions('dock', SESSIONS_LOOKED_AT)).filter((session) => session.status !== 'idle').map((session) => session.id),
   stopTurn: (sessionId) => chatService.stopTurn(sessionId),
   post: postWebhook,
+  hasPushDevices: async () => (await pushService.subscriptions()).length > 0,
+  push: (message) => pushService.send(message),
 });
