@@ -42,7 +42,7 @@ const NeedsAttentionPage: React.FC<NeedsAttentionPageProps> = ({ onTicketClick }
       <Card className="mb-8 border-status-conflict/60 bg-status-conflict-bg shadow-none">
         <div className="flex items-center gap-4">
           <div className="rounded-sm bg-status-conflict-bg p-4 text-status-conflict"><AlertTriangle size={36} aria-hidden="true" /></div>
-          <div><h1 className="text-balance font-display text-2xl font-bold text-status-conflict">Needs Immediate Attention</h1><p className="mt-1 text-pretty text-secondary-foreground">Pull requests with merge conflicts, and tickets whose agent is waiting on you, failed a check or went quiet.</p></div>
+          <div><h1 className="text-balance font-display text-2xl font-bold text-status-conflict">Needs Immediate Attention</h1><p className="mt-1 text-pretty text-secondary-foreground">Pull requests with merge conflicts, requested changes or failing checks, and tickets whose agent is waiting on you, failed a check or went quiet.</p></div>
         </div>
       </Card>
 
@@ -60,11 +60,11 @@ const NeedsAttentionPage: React.FC<NeedsAttentionPageProps> = ({ onTicketClick }
             </Card>
           ) : <Card key={item.id} className="flex flex-wrap items-center justify-between gap-4 border-status-conflict/40">
             <div className="flex min-w-0 items-center gap-4">
-              <Badge variant="danger" className="shrink-0 gap-1.5 px-3.5 py-2.5 text-sm"><AlertTriangle size={16} aria-hidden="true" /><span>{item.ticketKey || 'CONFLICT'}</span></Badge>
+              <Badge variant="danger" className="shrink-0 gap-1.5 px-3.5 py-2.5 text-sm"><AlertTriangle size={16} aria-hidden="true" /><span>{item.ticketKey || 'PULL REQUEST'}</span></Badge>
               <div className="min-w-0"><h3 className="text-balance text-lg font-medium">{item.message}</h3>{item.prUrl && <a href={item.prUrl} target="_blank" rel="noreferrer" className="mt-0.5 flex min-h-6 items-center gap-1 truncate font-mono text-sm text-accent hover:underline"><ExternalLink size={14} className="shrink-0" aria-hidden="true" /><span className="truncate">{item.prUrl}</span></a>}</div>
             </div>
             <div className="flex items-center gap-2">
-              {item.owner && item.repo && item.pullNumber && <Button size="sm" variant="danger" onClick={() => handleInspectConflict(item.owner, item.repo, item.pullNumber)}><GitMerge size={16} aria-hidden="true" />Inspect File Conflict</Button>}
+              {item.type === 'CONFLICT' && item.owner && item.repo && item.pullNumber && <Button size="sm" variant="danger" onClick={() => handleInspectConflict(item.owner, item.repo, item.pullNumber)}><GitMerge size={16} aria-hidden="true" />Inspect File Conflict</Button>}
               {item.ticketKey && <Button size="sm" variant="primary" onClick={() => onTicketClick(item.ticketKey)}>Inspect Ticket</Button>}
             </div>
           </Card>)}

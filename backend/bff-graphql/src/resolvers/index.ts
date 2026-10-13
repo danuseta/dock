@@ -9,6 +9,7 @@ import { upstreamMonitorService } from '../integrations/upstream-monitor';
 import { dockerRuntimeService } from '../integrations/docker-runtime';
 import { OrchestratorInputError, orchestratorService } from '../integrations/orchestrator';
 import { chatService } from '../integrations/chat';
+import { mergeAttention, withoutSettledTickets } from '../integrations/attention';
 import type { AnswerInput } from '../integrations/chat-interactions';
 import { SprintBusyError, SprintInputError, sprintDashboardService } from '../integrations/sprint-dashboard';
 
@@ -114,14 +115,18 @@ export const resolvers = {
       return storageAPI.getTicketRelationGroup(ticketKey);
     },
     needsAttention: async () => {
-      const [agentItems, conflicts] = await Promise.all([
+      const [agentItems, pullRequestItems] = await Promise.all([
         orchestratorService.needsAttention().catch((error) => {
           console.error('[BFF Orchestrator] Failed to load attention items:', error instanceof Error ? error.message : 'unknown error');
           return [];
         }),
         githubAPI.getNeedsAttention(),
       ]);
-      return [...agentItems, ...conflicts];
+      const items = mergeAttention(agentItems, pullRequestItems);
+      const keys = [...new Set(items.map((item) => item.ticketKey).filter(isPresent))];
+      const tickets = await Promise.all(keys.map((key) => jiraAPI.getTicket(key).catch(() => null)));
+      const statusOf = new Map(tickets.filter(isPresent).map((ticket: any) => [String(ticket.key), String(ticket.status)]));
+      return withoutSettledTickets(items, statusOf);
     },
     settings: async () => {
       return await storageAPI.getPublicSettings();

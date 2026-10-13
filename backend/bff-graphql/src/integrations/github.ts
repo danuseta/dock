@@ -2,6 +2,7 @@ import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import { createHash } from 'node:crypto';
 import { StorageService } from '../storage/service';
 import { checkRunsState, combineChecks, commitStatusState, reviewDecisionOf, type PullRequestSignal } from './pr-signals';
+import { pullRequestProblems } from './attention';
 
 function credentialCacheId(token: string): string {
   return createHash('sha256').update(token).digest('hex').slice(0, 16);
@@ -29,6 +30,8 @@ export function hasCanonicalTicketReference(pr: any, ticketKey: string): boolean
 }
 
 const SIGNAL_PULL_REQUESTS = 5;
+const NEEDS_ATTENTION_TTL_SECONDS = 300;
+const MERGEABILITY_PENDING_TTL_SECONDS = 15;
 const SIGNAL_REFRESH_MS = 5 * 60 * 1000;
 
 export interface SearchPRsOptions {
@@ -335,25 +338,30 @@ export class GitHubService {
     return repos;
   }
 
+  /** The owner's open pull requests that have a merge conflict, a changes-requested review or failing checks. */
   async getNeedsAttention(pat: string, repos: string[]) {
-    const cacheKey = `needs_attention_${credentialCacheId(pat)}_${repos.slice().sort().join(',')}`;
+    const cacheKey = `needs_attention_v2_${credentialCacheId(pat)}_${repos.slice().sort().join(',')}`;
     const cached = await this.storage.getCache('github', cacheKey).catch(() => null);
     if (Array.isArray(cached)) return cached;
     try {
       const client = new GitHubClient(pat);
+      let mergeabilityPending = false;
       const results = (await Promise.all((await client.searchOwnOpenPRs(repos)).map(async (pr: any) => {
         const [owner, repo] = (pr.repository_url || '').split('/').slice(-2);
         if (!owner || !repo) return null;
         const status = await client.getPRStatus(owner, repo, pr.number);
-        if (status.mergeable !== false && status.mergeable_state !== 'dirty') return null;
+        if (status.mergeable === null) mergeabilityPending = true;
+        const problems = pullRequestProblems(status, await client.getPRSignal(owner, repo, pr.number, status.head?.sha));
+        if (problems.length === 0) return null;
         const match = `${pr.title || ''} ${status.head?.ref || ''} ${pr.body || ''}`.match(/([A-Za-z]+-\d+)/);
         return {
           id: String(pr.id), title: pr.title, url: pr.html_url || pr.url,
-          hasConflicts: true, owner, repo, number: pr.number,
+          problems, owner, repo, number: pr.number,
           ticketKey: match ? match[1].toUpperCase() : null,
         };
       }))).filter(Boolean);
-      await this.storage.upsertCache('github', cacheKey, results, 120);
+      // GitHub answers mergeable: null while it is still computing; that answer is asked again soon instead of kept.
+      await this.storage.upsertCache('github', cacheKey, results, mergeabilityPending ? MERGEABILITY_PENDING_TTL_SECONDS : NEEDS_ATTENTION_TTL_SECONDS);
       return results;
     } catch (error: any) {
       console.error('[GitHub] Failed to fetch needs-attention:', error.message);
