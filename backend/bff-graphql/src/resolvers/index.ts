@@ -10,6 +10,8 @@ import { dockerRuntimeService } from '../integrations/docker-runtime';
 import { OrchestratorInputError, orchestratorService } from '../integrations/orchestrator';
 import { chatService } from '../integrations/chat';
 import { mergeAttention, withoutSettledTickets } from '../integrations/attention';
+import { CronInputError } from '../integrations/orchestrator-cron';
+import { orchestratorCron } from '../integrations/orchestrator-cron-live';
 import type { AnswerInput } from '../integrations/chat-interactions';
 import { SprintBusyError, SprintInputError, sprintDashboardService } from '../integrations/sprint-dashboard';
 
@@ -29,6 +31,13 @@ function orchestratorInputError(error: unknown): never {
 function sprintError(error: unknown): never {
   if (error instanceof SprintInputError || error instanceof SprintBusyError) {
     throw new GraphQLError(error.message, { extensions: { code: error instanceof SprintBusyError ? 'CONFLICT' : 'BAD_USER_INPUT' } });
+  }
+  throw error;
+}
+
+function cronError(error: unknown): never {
+  if (error instanceof CronInputError || error instanceof OrchestratorInputError) {
+    throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
   }
   throw error;
 }
@@ -185,6 +194,7 @@ export const resolvers = {
     sprintTrend: async () => sprintDashboardService.trend(),
     sprintIssueEvents: async (_: unknown, { sprintId }: { sprintId: number }) => sprintDashboardService.issueEvents(sprintId),
     sprintDashboardSettings: async () => sprintDashboardService.getSettings(),
+    orchestratorCronSettings: async () => orchestratorCron.getSettings(),
     dockerContainerLogs: async (_: unknown, { id, tail }: { id: string; tail?: number }) => {
       try {
         return await dockerRuntimeService.logs(id, tail);
@@ -419,6 +429,16 @@ export const resolvers = {
       await sprintDashboardService.updateSettings(boardId, config).catch(sprintError);
       return true;
     },
+    updateOrchestratorCronSettings: async (_: unknown, { config, webhookUrl }: { config: string; webhookUrl?: string | null }) => {
+      await orchestratorCron.updateSettings(config, webhookUrl).catch(cronError);
+      return true;
+    },
+    runOrchestratorCronNow: async () => JSON.stringify(await orchestratorCron.runRound()),
+    confirmOrchestration: async (_: unknown, { key }: { key: string }) => {
+      await orchestratorCron.confirm(key).catch(cronError);
+      return true;
+    },
+    stopAllAgents: async () => orchestratorCron.stopAll(),
   },
   ChatSession: {
     pending: async (session: { id: string; status: string; machine: string }) => chatService.pending(session.id, session.status, session.machine),
@@ -434,7 +454,7 @@ export const protectedQueries = [
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens',
   'chatSessions', 'chatSession', 'chatMessages', 'chatActivity', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions',
-  'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents',
+  'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings',
 ] as const;
 export const protectedMutations = [
   'saveDemoLink',
@@ -469,6 +489,10 @@ export const protectedMutations = [
   'refreshSprintDashboard',
   'backfillSprintDashboards',
   'updateSprintDashboardSettings',
+  'updateOrchestratorCronSettings',
+  'runOrchestratorCronNow',
+  'confirmOrchestration',
+  'stopAllAgents',
 ] as const;
 
 for (const field of protectedQueries) {

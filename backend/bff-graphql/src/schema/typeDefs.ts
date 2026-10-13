@@ -562,6 +562,12 @@ export const typeDefs = gql`
     config: String!
   }
 
+  type OrchestratorCronSettings {
+    config: String!
+    webhookSet: Boolean!
+    lastRound: String!
+  }
+
   type Query {
     authStatus: AuthStatus!
     dashboard: [TicketGroup!]!
@@ -596,6 +602,7 @@ export const typeDefs = gql`
     sprintTrend: String!
     sprintIssueEvents(sprintId: Int!): String!
     sprintDashboardSettings: SprintDashboardSettings!
+    orchestratorCronSettings: OrchestratorCronSettings!
   }
 
   type Mutation {
@@ -634,5 +641,9 @@ export const typeDefs = gql`
     refreshSprintDashboard(sprintId: Int!): SprintRefreshState!
     backfillSprintDashboards(count: Int!): SprintRefreshState!
     updateSprintDashboardSettings(boardId: String!, config: String!): Boolean!
+    updateOrchestratorCronSettings(config: String!, webhookUrl: String): Boolean!
+    runOrchestratorCronNow: String!
+    confirmOrchestration(key: String!): Boolean!
+    stopAllAgents: Int!
   }
 `;

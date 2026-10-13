@@ -55,6 +55,17 @@ export class JiraAPI {
     }
   }
 
+  /** True when the ticket was moved; a missing transition or a Jira error is false, never a throw. */
+  async transitionTicket(key: string, statusName: string): Promise<boolean> {
+    try {
+      const { credentials } = await this.getConfiguration();
+      return await this.jiraService.transitionTo(credentials, key, statusName);
+    } catch (error: any) {
+      console.error(`[BFF JiraAPI] Error moving ${key} to ${statusName}:`, error?.response?.status || error?.code || error?.message || 'unknown error');
+      return false;
+    }
+  }
+
   async refreshTickets() {
     try {
       const { credentials, projectKeys } = await this.getConfiguration();

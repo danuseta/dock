@@ -806,3 +806,13 @@ export const GET_CHAT_BALLOONS = gql`
     }
   }
 `;
+
+export const GET_ORCHESTRATOR_CRON_SETTINGS = gql`
+  query GetOrchestratorCronSettings {
+    orchestratorCronSettings {
+      config
+      webhookSet
+      lastRound
+    }
+  }
+`;
