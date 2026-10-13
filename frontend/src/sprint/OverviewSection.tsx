@@ -42,14 +42,15 @@ export const OverviewSection = ({ result }: { result: SprintResult }) => {
             className={cn('flex min-w-0 items-center justify-center overflow-hidden whitespace-nowrap px-1 text-xs font-semibold text-black', segment.tone)}
             style={{ flex: segment.value }}
           >
-            {segment.label} {fmt(segment.value)}
+            <span className="max-[760px]:hidden">{segment.label} {fmt(segment.value)}</span>
           </div>
         ))}
       </div>
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground max-[760px]:flex-col max-[760px]:gap-y-1.5">
         {segments.map((segment) => (
           <span key={segment.label} className="inline-flex items-center gap-1.5">
             <i className={cn('inline-block size-2.5 rounded-xs', segment.tone)} />{segment.note}
+            <b className="ml-auto hidden font-mono text-foreground tabular-nums max-[760px]:inline">{fmt(segment.value)}</b>
           </span>
         ))}
       </div>

@@ -28,7 +28,7 @@ export function MonthCalendar({ month, events, variant = 'compact' }: MonthCalen
   const full = variant === 'full';
 
   return (
-    <div>
+    <div className={cn(full && 'mx-auto max-w-[720px]')}>
       <div className={cn('mb-[5px] grid grid-cols-7', full ? 'gap-2' : 'gap-[3px]')} aria-hidden="true">
         {weekdays.map((day) => <span className={cn('text-center font-bold text-muted-foreground', full ? 'py-1 text-xs' : 'text-[0.56rem]')} key={day}>{day}</span>)}
       </div>

@@ -143,7 +143,7 @@ const MonitoringPage: React.FC<MonitoringPageProps> = ({ onNavigate }) => {
                   const tone = statusTone(monitor.lastStatus);
                   return <tr className="border-t border-border hover:bg-surface-1" key={monitor.id}>
                     <td className="px-4 py-3"><div className="flex items-center gap-2"><span className={cn('size-2.5 shrink-0 rounded-full', tone.dot)} aria-hidden="true" /><strong className="font-display">{monitor.name}</strong></div>{monitor.lastError && <p className="mt-1 max-w-[240px] truncate text-xs text-status-conflict" title={monitor.lastError}>{monitor.lastError}</p>}</td>
-                    <td className="max-w-[320px] px-4 py-3"><a className="flex items-center gap-1.5 font-mono text-xs text-accent hover:underline" href={monitor.url} target="_blank" rel="noreferrer"><span className="truncate">{monitor.url}</span><ExternalLink className="size-3.5 shrink-0" aria-hidden="true" /></a></td>
+                    <td className="max-w-[320px] px-4 py-3"><a className="flex items-center gap-1.5 font-mono text-xs text-accent hover:underline max-[760px]:min-h-11" href={monitor.url} target="_blank" rel="noreferrer"><span className="truncate">{monitor.url}</span><ExternalLink className="size-3.5 shrink-0" aria-hidden="true" /></a></td>
                     <td className={cn('px-4 py-3 font-mono text-xs font-bold', tone.text)}>{monitor.lastStatus || 'UNKNOWN'}</td>
                     <td className="px-4 py-3 font-mono text-xs tabular-nums">{monitor.lastStatusCode || '—'} / {monitor.expectedStatus}</td>
                     <td className="px-4 py-3 font-mono text-xs tabular-nums">{monitor.lastLatencyMs == null ? '—' : `${monitor.lastLatencyMs} ms`}</td>
