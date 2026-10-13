@@ -129,7 +129,8 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
       : serverRuns || []),
     [sampling, sampleTick, serverRuns],
   );
-  const selected = runs.find((run) => run.key === selectedKey) || runs.find((run) => run.waiting) || runs[0] || null;
+  // Nothing picked yet: show a run that is still going, never one from the archive.
+  const selected = runs.find((run) => run.key === selectedKey) || runs.find((run) => run.waiting && !isArchived(run)) || runs.find((run) => !isArchived(run)) || null;
 
   const { data: detailData } = useQuery(GET_ORCHESTRATION, {
     ...CACHED_QUERY_OPTIONS,
