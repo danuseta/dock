@@ -85,7 +85,7 @@ const DisclosureRow: React.FC<RowProps> = ({ node, store, now }) => {
 export const ActivityRow = memo(function ActivityRow({ node, store, now }: RowProps) {
   const { event, children } = node;
   if (isDropped(event)) return <li className="px-2.5 py-1.5 text-muted-foreground">{event.label}</li>;
-  if (event.kind === 'note') return <li className="px-2.5 py-1 text-[0.64rem] text-muted-foreground/80">{event.label || event.name}{event.summary ? ` · ${event.summary}` : ''}</li>;
+  if (event.kind === 'note' && !event.hasDetail) return <li className="px-2.5 py-1 text-[0.64rem] text-muted-foreground/80">{event.label || event.name}{event.summary ? ` · ${event.summary}` : ''}</li>;
   if (event.hasDetail || children.length > 0) return <DisclosureRow node={node} store={store} now={now} />;
   return <li className={cn('px-2.5 py-1.5', rowTone(event.status))}><RowHead event={event} now={now} /></li>;
 }, (previous, next) => previous.store === next.store && sameTree(previous.node, next.node) && (previous.now === next.now || !hasRunning(next.node)));
