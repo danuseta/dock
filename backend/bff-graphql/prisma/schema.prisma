@@ -56,6 +56,13 @@ model TicketDependency {
   @@index([dependsOnKey])
 }
 
+/// A work order number set in DOCK; it wins over the ticket's "#N" Jira label. Never written to Jira.
+model TicketOrder {
+  ticketKey String   @id
+  position  Int
+  updatedAt DateTime @updatedAt
+}
+
 model QuickLink {
   id String @id @default(uuid())
   title String
@@ -183,6 +190,8 @@ model ChatSession {
   lastMessageAt   DateTime
   lastDeltaAt     DateTime?
   options         String?
+  /// "cron" for a session the orchestrator cron opened (it takes a cron slot), "manual" otherwise.
+  origin          String    @default("manual")
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 

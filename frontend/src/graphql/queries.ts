@@ -22,6 +22,8 @@ export const GET_DASHBOARD = gql`
         sprintState
         storyPoints
         labels
+        workOrder
+        workOrderSource
         orchestration {
           key
           stage
@@ -50,6 +52,8 @@ export const GET_TICKET_DETAIL = gql`
       sprintState
       storyPoints
       labels
+      workOrder
+      workOrderSource
       pullRequests {
         id
         title
@@ -125,6 +129,8 @@ export const GET_TICKET_DETAIL_CORE = gql`
       sprintState
       storyPoints
       labels
+      workOrder
+      workOrderSource
     }
     ticketRelationGroup(ticketKey: $key) {
       primaryKey
@@ -812,8 +818,14 @@ export const GET_ORCHESTRATOR_CRON_SETTINGS = gql`
     orchestratorCronSettings {
       config
       webhookSet
-      lastRound
+      lastFill
     }
+  }
+`;
+
+export const GET_ORCHESTRATOR_CRON_STATUS = gql`
+  query GetOrchestratorCronStatus {
+    orchestratorCronStatus
   }
 `;
 

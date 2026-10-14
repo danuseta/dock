@@ -284,6 +284,18 @@ export const DELETE_CHAT_SESSION = gql`
   }
 `;
 
+export const SET_TICKET_WORK_ORDER = gql`
+  mutation SetTicketWorkOrder($ticketKey: String!, $position: Int!) {
+    setTicketWorkOrder(ticketKey: $ticketKey, position: $position)
+  }
+`;
+
+export const CLEAR_TICKET_WORK_ORDER = gql`
+  mutation ClearTicketWorkOrder($ticketKey: String!) {
+    clearTicketWorkOrder(ticketKey: $ticketKey)
+  }
+`;
+
 export const UPDATE_ORCHESTRATOR_CRON_SETTINGS = gql`
   mutation UpdateOrchestratorCronSettings($config: String!, $webhookUrl: String) {
     updateOrchestratorCronSettings(config: $config, webhookUrl: $webhookUrl)

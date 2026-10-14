@@ -16,12 +16,13 @@ import {
   FileText,
   ArrowRight,
   Link2,
+  ListOrdered,
   Unlink,
   CheckCircle2,
 } from 'lucide-react';
 import { GET_DASHBOARD, GET_TICKET_DETAIL_CORE, GET_TICKET_DETAIL_ENRICHMENT } from '../graphql/queries';
 import { TicketAgentPanel } from '../components/TicketAgentPanel';
-import { CLEAR_TICKET_DEPENDENCY, SAVE_DEMO_LINK, SEND_TO_DISCORD, SET_TICKET_DEPENDENCY, CHECK_CONFLICTS } from '../graphql/mutations';
+import { CLEAR_TICKET_DEPENDENCY, CLEAR_TICKET_WORK_ORDER, SAVE_DEMO_LINK, SEND_TO_DISCORD, SET_TICKET_DEPENDENCY, SET_TICKET_WORK_ORDER, CHECK_CONFLICTS } from '../graphql/mutations';
 import { PRBadge } from '../components/PRBadge';
 import { ConflictModal } from '../components/ConflictModal';
 import { DiscordPreviewModal } from '../components/DiscordPreviewModal';
@@ -64,6 +65,9 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const [sendToDiscord, { loading: sendingDiscord }] = useMutation(SEND_TO_DISCORD);
   const [setTicketDependency, { loading: savingDependency }] = useMutation(SET_TICKET_DEPENDENCY);
   const [clearTicketDependency, { loading: clearingDependency }] = useMutation(CLEAR_TICKET_DEPENDENCY);
+  const [setTicketWorkOrder, { loading: savingOrder }] = useMutation(SET_TICKET_WORK_ORDER);
+  const [clearTicketWorkOrder, { loading: clearingOrder }] = useMutation(CLEAR_TICKET_WORK_ORDER);
+  const [workOrder, setWorkOrder] = useState('');
   const [checkConflicts] = useMutation(CHECK_CONFLICTS);
   
   const [showConflictModal, setShowConflictModal] = useState(false);
@@ -77,6 +81,30 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   useEffect(() => {
     setDependsOnKey(coreData?.ticketRelationGroup?.dependsOnKey || '');
   }, [coreData?.ticketRelationGroup?.dependsOnKey, ticketKey]);
+
+  useEffect(() => {
+    setWorkOrder(coreData?.ticketDetail?.workOrder != null ? String(coreData.ticketDetail.workOrder) : '');
+  }, [coreData?.ticketDetail?.workOrder, ticketKey]);
+
+  const handleSaveWorkOrder = async () => {
+    try {
+      await setTicketWorkOrder({ variables: { ticketKey, position: Number(workOrder) } });
+      await refetchAll();
+      setToast({ message: `${ticketKey} is #${workOrder} in the cron's work order.`, type: 'success' });
+    } catch (err: any) {
+      setToast({ message: err.message || 'Failed to save the work order', type: 'error' });
+    }
+  };
+
+  const handleClearWorkOrder = async () => {
+    try {
+      await clearTicketWorkOrder({ variables: { ticketKey } });
+      await refetchAll();
+      setToast({ message: 'The DOCK work order is removed; a #N Jira label applies again.', type: 'success' });
+    } catch (err: any) {
+      setToast({ message: err.message || 'Failed to remove the work order', type: 'error' });
+    }
+  };
 
   const togglePRTab = (prId: string, tab: 'commits' | 'files') => {
     setActivePRTab(prev => ({
@@ -260,6 +288,19 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
           </Card>
 
           <TicketAgentPanel ticketKey={ticket.key} />
+
+          <Card>
+            <div className="mb-3 flex items-center gap-2 border-b border-border pb-3"><ListOrdered size={19} className="text-accent" aria-hidden="true" /><h2 className="text-balance font-display text-lg font-bold">Work order</h2></div>
+            <p className="mb-3 text-pretty text-xs leading-5 text-muted-foreground">
+              The cron takes To Do tickets lowest number first. {ticket.workOrderSource === 'label' ? `Now #${ticket.workOrder} from the Jira label.` : ticket.workOrderSource === 'dock' ? 'Set in DOCK; it wins over a Jira label.' : 'No number: taken after the numbered tickets.'} Never written to Jira.
+            </p>
+            <label htmlFor="work-order" className="mb-1.5 block font-mono text-xs text-muted-foreground">Order of {ticket.key}</label>
+            <div className="flex flex-wrap gap-2">
+              <Input id="work-order" className="w-24 font-mono" inputMode="numeric" value={workOrder} onChange={(event) => setWorkOrder(event.target.value.replace(/[^0-9]/g, ''))} placeholder="#" disabled={savingOrder || clearingOrder} />
+              <Button variant="primary" onClick={handleSaveWorkOrder} disabled={!workOrder || (ticket.workOrderSource === 'dock' && String(ticket.workOrder) === workOrder) || savingOrder || clearingOrder}><Save size={15} aria-hidden="true" />{savingOrder ? 'Saving...' : 'Save order'}</Button>
+              {ticket.workOrderSource === 'dock' && <Button variant="danger" onClick={handleClearWorkOrder} disabled={savingOrder || clearingOrder}><Unlink size={15} aria-hidden="true" />{clearingOrder ? 'Removing...' : 'Remove'}</Button>}
+            </div>
+          </Card>
 
           <Card>
             <div className="mb-3 flex items-center gap-2 border-b border-border pb-3"><Link2 size={19} className="text-accent" aria-hidden="true" /><h2 className="text-balance font-display text-lg font-bold">Ticket Dependency</h2></div>

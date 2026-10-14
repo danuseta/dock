@@ -88,7 +88,12 @@ function memoryStorage() {
         const session = sessions.get(message.sessionId);
         return message.state === 'queued' && message.role === 'user' && session?.source === 'dock' && session.machine === machine;
       })
-      .slice(0, take).map((message) => ({ id: message.id, sessionId: message.sessionId, text: message.text })),
+      .slice(0, take).map((message) => ({ id: message.id, sessionId: message.sessionId, text: message.text, origin: sessions.get(message.sessionId)?.origin ?? 'manual' })),
+    countCronSlots: async (machine: string) => {
+      const cron = [...sessions.values()].filter((session) => session.origin === 'cron' && session.source === 'dock' && session.machine === machine);
+      const has = (id: string, state: string) => ofSession(id).some((message) => message.state === state);
+      return { busy: cron.filter((session) => has(session.id, 'taken')).length, waiting: cron.filter((session) => has(session.id, 'queued') && !has(session.id, 'taken')).length };
+    },
     moveChatMessage: async (id: number, sessionId: string, from: string, to: string) => {
       const row = messages.find((message) => message.id === id && message.sessionId === sessionId && message.state === from);
       if (row) row.state = to;
@@ -769,4 +774,24 @@ test('limits survive a restart: a new service on the same storage restores them,
   assert.deepStrictEqual(restarted.statusSnapshot('laptop').limits, service.statusSnapshot('laptop').limits);
   assert.deepStrictEqual(restarted.statusSnapshot('workspace').limits, service.statusSnapshot('workspace').limits);
   assert.deepStrictEqual(restarted.statusSnapshot().sessions, [], 'session lines are not kept');
+});
+
+test('claim: a cron message waits while every cron slot is in use and runs in the first one that frees; manual sessions never wait', async () => {
+  const memory = memoryStorage();
+  const chat = new ChatService(memory.storage, () => new Date('2026-10-14T03:00:00.000Z'), async () => undefined);
+  chat.cronLimit = async () => 2;
+  const open = (origin: 'cron' | 'manual', ticketKey: string) => chat.createSession({ machine: 'workspace', ticketKey, title: ticketKey, origin });
+  const [a, b, answered, manual] = await Promise.all([open('cron', 'QRD-1'), open('cron', 'QRD-2'), open('cron', 'QRD-3'), open('manual', 'QRD-9')]);
+  for (const session of [a, b]) await chat.sendMessage(session.id, 'build', ['workspace']);
+  assert.strictEqual((await chat.claim({ wait: 0 }, undefined, 'workspace')).message?.sessionId, a.id);
+  assert.strictEqual((await chat.claim({ wait: 0 }, undefined, 'workspace')).message?.sessionId, b.id);
+
+  await chat.sendMessage(answered.id, 'use the second endpoint', ['workspace']);
+  await chat.sendMessage(manual.id, 'hi', ['workspace']);
+  assert.strictEqual((await chat.claim({ wait: 0 }, undefined, 'workspace')).message?.sessionId, manual.id, 'the manual chat is not held');
+  assert.strictEqual((await chat.claim({ wait: 0 }, undefined, 'workspace')).message, null, 'the answer waits: 2 of 2 in use');
+  assert.strictEqual(memory.sessions.get(answered.id).statusDetail, 'Waiting for a cron slot (2 of 2 in use)');
+
+  for (const message of memory.messages()) if (message.sessionId === a.id && message.state === 'taken') message.state = 'done';
+  assert.strictEqual((await chat.claim({ wait: 0 }, undefined, 'workspace')).message?.sessionId, answered.id, 'the first free slot goes to the answer');
 });

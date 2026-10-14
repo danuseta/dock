@@ -16,7 +16,8 @@ import { AgentFlowGraph } from '../components/AgentFlowGraph';
 import { machineOf, machinePlace, ticketBalloons, type ChatMessage } from '../chat/messages';
 import { MachineChip } from '../chat/MachineControls';
 import { MoveTicket } from '../agents/MoveTicket';
-import { CronSettingsPanel } from '../agents/CronSettingsPanel';
+import { CronSettingsDialog } from '../agents/CronSettingsDialog';
+import { CronRow } from '../agents/CronRow';
 import { chatStore } from '../chat/store';
 import { LimitsLine } from '../chat/StatusLine';
 import { useOpenForTicket } from '../chat/useOpenForTicket';
@@ -232,7 +233,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
               </button>
             ))}
           </div>
-          <Button size="sm" aria-pressed={showCron} onClick={() => setShowCron((open) => !open)}><Clock size={14} aria-hidden="true" />Cron</Button>
+          <Button size="sm" aria-haspopup="dialog" onClick={() => setShowCron(true)}><Clock size={14} aria-hidden="true" />Cron</Button>
           <Button size="sm" variant="danger" disabled={stoppingAll} onClick={() => void runAction(async () => { await stopAllAgents(); })}><Octagon size={14} aria-hidden="true" />Stop all</Button>
           {sampling
             ? <Button size="sm" onClick={() => { setSampleStartedAt(null); setSelectedKey(null); }}><Square size={14} aria-hidden="true" />Stop sample</Button>
@@ -242,7 +243,8 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
 
       {error && !data && <Card className="mb-4 border-status-conflict text-status-conflict" role="alert">Agent runs failed to load: {error.message}</Card>}
       {cronError && <Card className="mb-4 border-status-conflict text-status-conflict" role="alert">{cronError}</Card>}
-      {showCron && <CronSettingsPanel />}
+      <CronSettingsDialog open={showCron} onClose={() => setShowCron(false)} />
+      <CronRow pollMs={POLL_MS} onOpenSettings={() => setShowCron(true)} />
 
       <section className="mb-4 grid grid-cols-4 overflow-hidden rounded-md border border-border bg-surface-1 max-[700px]:grid-cols-2 [&>div]:border-r [&>div]:border-border [&>div:last-child]:border-r-0 max-[700px]:[&>div:nth-child(2)]:border-r-0 max-[700px]:[&>div:nth-child(-n+2)]:border-b" aria-label="Agent overview">
         {metrics.map((metric) => (

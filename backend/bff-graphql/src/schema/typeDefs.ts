@@ -14,6 +14,10 @@ export const typeDefs = gql`
     sprintState: String
     storyPoints: Float
     labels: [String!]!
+    """Work order for the cron: the number set in DOCK, else the ticket's "#N" Jira label."""
+    workOrder: Int
+    """"dock" when the number was set in DOCK, "label" when it comes from a Jira label."""
+    workOrderSource: String
     pullRequests: [PullRequest!]
     demoLink: DemoLink
     orchestration: Orchestration
@@ -565,7 +569,7 @@ export const typeDefs = gql`
   type OrchestratorCronSettings {
     config: String!
     webhookSet: Boolean!
-    lastRound: String!
+    lastFill: String!
   }
 
   type Query {
@@ -603,6 +607,8 @@ export const typeDefs = gql`
     sprintIssueEvents(sprintId: Int!): String!
     sprintDashboardSettings: SprintDashboardSettings!
     orchestratorCronSettings: OrchestratorCronSettings!
+    """JSON: cron slots in use, today's count against the cap, and the last fill (started, parked, deferred)."""
+    orchestratorCronStatus: String!
     pushPublicKey: String!
   }
 
@@ -612,6 +618,8 @@ export const typeDefs = gql`
     sendToDiscord(ticketKey: String!, customMessage: String, threadId: String, threadName: String): Boolean
     setTicketDependency(ticketKey: String!, dependsOnKey: String!): TicketRelationGroup!
     clearTicketDependency(ticketKey: String!): TicketRelationGroup!
+    setTicketWorkOrder(ticketKey: String!, position: Int!): Boolean!
+    clearTicketWorkOrder(ticketKey: String!): Boolean!
     updateSettings(input: SettingsInput!): Boolean
     validateJira(url: String, email: String, token: String): ValidationResult
     validateGitHub(token: String): ValidationResult

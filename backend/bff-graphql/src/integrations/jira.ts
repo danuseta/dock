@@ -230,6 +230,7 @@ export class JiraService {
       sprintName,
       sprintState,
       storyPoints: typeof storyPointValue === 'number' && !Number.isNaN(storyPointValue) ? storyPointValue : null,
+      parentKey: typeof fields.parent?.key === 'string' ? fields.parent.key : null,
       labels: Array.isArray(fields.labels)
         ? fields.labels.filter((label: unknown): label is string => typeof label === 'string' && label.trim().length > 0)
         : [],

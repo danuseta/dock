@@ -403,6 +403,8 @@ export class ChatService {
   private readonly notifier = new TurnNotifier();
   private readonly machineInfo = new Map<string, MachineInfo>();
   private readonly openWaits = new Map<number, AbortController>();
+  /** "Agents at once" of the orchestrator cron; wired by the cron so this file does not depend on it. null: no limit. */
+  cronLimit: () => Promise<number | null> = async () => null;
 
   constructor(
     private readonly storage = new StorageService(),
@@ -758,7 +760,7 @@ export class ChatService {
     return newest.flatMap((message) => (message && message.at >= since ? [toMessage(message)] : []));
   }
 
-  async createSession(input: { title?: string | null; ticketKey?: string | null; forkFrom?: string | null; machine?: string | null }) {
+  async createSession(input: { title?: string | null; ticketKey?: string | null; forkFrom?: string | null; machine?: string | null; origin?: 'cron' | 'manual' }) {
     const forkFrom = optionalChatId(input.forkFrom, 'forkFrom');
     const source = forkFrom ? await this.storage.getChatSession(forkFrom) : null;
     if (forkFrom && source?.source !== 'cli') {
@@ -779,6 +781,7 @@ export class ChatService {
       forkFrom,
       startedAt: now,
       lastMessageAt: now,
+      origin: input.origin === 'cron' ? 'cron' : 'manual',
     });
     return toSession(row, null);
   }
@@ -1023,11 +1026,23 @@ export class ChatService {
     return { id: sync.id, messageCount };
   }
 
+  /**
+   * The oldest queued message the bridge may run. A message of a cron session waits while the cron's slots are all
+   * in use; it keeps its place, so the owner's answer runs in the first slot that frees up. Manual sessions never wait.
+   */
   private async takeNext(machine: string, caps: BridgeCaps | null) {
-    for (const message of await this.storage.getQueuedChatMessages(machine, CLAIM_CANDIDATES)) {
+    const queued = await this.storage.getQueuedChatMessages(machine, CLAIM_CANDIDATES);
+    const limit = queued.some((message) => message.origin === 'cron') ? await this.cronLimit() : null;
+    const slots = limit === null ? null : await this.storage.countCronSlots(machine);
+    for (const message of queued) {
       if (await this.storage.countChatMessagesInState(message.sessionId, ['taken']) > 0) continue;
       const session = await this.storage.getChatSession(message.sessionId);
       if (!session) continue;
+      if (message.origin === 'cron' && limit !== null && slots && slots.busy >= limit) {
+        const detail = `Waiting for a cron slot (${slots.busy} of ${limit} in use)`;
+        if (session.statusDetail !== detail) await this.storage.updateChatSession(session.id, { statusDetail: detail });
+        continue;
+      }
       const takenAt = this.now();
       if (!await this.storage.moveChatMessage(message.id, message.sessionId, 'queued', 'taken', caps ? { takenAt } : {})) continue;
       await this.storage.updateChatSession(session.id, { status: 'running', statusDetail: null, lastDeltaAt: takenAt });

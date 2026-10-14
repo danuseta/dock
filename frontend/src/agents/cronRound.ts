@@ -1,26 +1,75 @@
-/** What one round of the orchestrator cron did, as the server reports it. */
-export interface RoundLog { at: string; skipped: string | null; started: string[]; parked: string[]; notMoved: string[]; failed: string[] }
+/** What one fill of the orchestrator cron did, as the server reports it. */
+export interface FillLog {
+  at: string;
+  skipped: string | null;
+  started: string[];
+  parked: string[];
+  deferred: Array<{ key: string; reason: string }>;
+  notMoved: string[];
+  failed: string[];
+}
 
-export function roundSummary(round: RoundLog | null): string {
-  if (!round) return 'No round has run yet.';
-  const when = new Date(round.at).toLocaleString();
-  if (round.skipped) return `${when}: skipped, ${round.skipped}.`;
+/** The cron row on the Agents page. */
+export interface CronStatus {
+  enabled: boolean;
+  slots: { busy: number; waiting: number };
+  parallel: number;
+  startedToday: number;
+  maxPerDay: number;
+  lastFill: FillLog | null;
+}
+
+export function fillSummary(fill: FillLog | null): string {
+  if (!fill) return 'Nothing has run yet.';
+  const when = new Date(fill.at).toLocaleString();
+  if (fill.skipped) return `${when}: nothing taken, ${fill.skipped}.`;
   const parts = [
-    `started ${round.started.join(', ') || 'nothing'}`,
-    round.parked.length ? `parked ${round.parked.join(', ')}` : '',
-    round.notMoved.length ? `Jira did not move ${round.notMoved.join(', ')}` : '',
-    round.failed.length ? `failed ${round.failed.join(', ')}` : '',
+    `started ${fill.started.join(', ') || 'nothing'}`,
+    fill.parked.length ? `parked ${fill.parked.join(', ')}` : '',
+    fill.notMoved.length ? `Jira did not move ${fill.notMoved.join(', ')}` : '',
+    fill.failed.length ? `failed ${fill.failed.join(', ')}` : '',
   ].filter(Boolean);
   return `${when}: ${parts.join('; ')}.`;
 }
 
-/** The cron config as the form holds it: every field a string or a boolean, lists as comma-separated text. */
+/** Deferred tickets grouped by reason: "slots full: 2 of 2 in use: QRD-3, QRD-4". */
+export function deferredLines(fill: FillLog | null): string[] {
+  const byReason = new Map<string, string[]>();
+  for (const item of fill?.deferred || []) byReason.set(item.reason, [...(byReason.get(item.reason) || []), item.key]);
+  return [...byReason].map(([reason, keys]) => `${reason}: ${keys.join(', ')}`);
+}
+
+export const WEEK_DAYS = [
+  { value: 1, label: 'Mon' }, { value: 2, label: 'Tue' }, { value: 3, label: 'Wed' }, { value: 4, label: 'Thu' },
+  { value: 5, label: 'Fri' }, { value: 6, label: 'Sat' }, { value: 7, label: 'Sun' },
+];
+
+export const MODE_OPTIONS = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'acceptEdits', label: 'Accept edits' },
+  { value: 'manual', label: 'Manual' },
+];
+
+export const MODE_HINT: Record<string, string> = {
+  auto: 'Claude decides; a risky action is refused and the agent finds another way.',
+  acceptEdits: 'File edits go through; commands still ask you.',
+  manual: 'Every tool asks you.',
+};
+
+/** The cron config as the form holds it: text fields as strings, lists as comma-separated text, work days as numbers. */
 export interface CronForm {
   enabled: boolean;
-  hoursWib: string;
   machine: string;
   parallel: string;
-  perRound: string;
+  workStart: string;
+  workEnd: string;
+  workDays: number[];
+  activeFrom: string;
+  activeUntil: string;
+  maxPerDay: string;
+  mode: string;
+  /** "QRD-1232=feat/V1-Playbook, QRD-900=feat/x" */
+  epicBase: string;
   sprint: string;
   labels: string;
   todoStatuses: string;
@@ -37,10 +86,16 @@ export function formFromConfig(configJson: string): CronForm {
   const config = JSON.parse(configJson);
   return {
     enabled: config.enabled,
-    hoursWib: config.hoursWib.join(', '),
     machine: config.machine,
     parallel: String(config.parallel),
-    perRound: String(config.perRound),
+    workStart: String(config.workStart),
+    workEnd: String(config.workEnd),
+    workDays: config.workDays,
+    activeFrom: config.activeFrom || '',
+    activeUntil: config.activeUntil || '',
+    maxPerDay: String(config.maxPerDay),
+    mode: config.mode,
+    epicBase: Object.entries(config.epicBase as Record<string, string>).map(([epic, branch]) => `${epic}=${branch}`).join(', '),
     sprint: config.sprint,
     labels: config.labels.join(', '),
     todoStatuses: config.todoStatuses.join(', '),
@@ -55,12 +110,22 @@ export function formFromConfig(configJson: string): CronForm {
 /** The JSON the server validates. Numbers that are not numbers go through as they are, so the server names the wrong field. */
 export function configFromForm(form: CronForm): string {
   const number = (text: string) => (text.trim() === '' || Number.isNaN(Number(text)) ? text : Number(text));
+  const epicBase = Object.fromEntries(list(form.epicBase).map((pair) => {
+    const at = pair.indexOf('=');
+    return at < 0 ? [pair, ''] : [pair.slice(0, at).trim(), pair.slice(at + 1).trim()];
+  }));
   return JSON.stringify({
     enabled: form.enabled,
-    hoursWib: list(form.hoursWib).map(number),
     machine: form.machine,
     parallel: number(form.parallel),
-    perRound: number(form.perRound),
+    workStart: number(form.workStart),
+    workEnd: number(form.workEnd),
+    workDays: [...form.workDays].sort((a, b) => a - b),
+    activeFrom: form.activeFrom || null,
+    activeUntil: form.activeUntil || null,
+    maxPerDay: number(form.maxPerDay),
+    mode: form.mode,
+    epicBase,
     sprint: form.sprint,
     labels: list(form.labels),
     todoStatuses: list(form.todoStatuses),
