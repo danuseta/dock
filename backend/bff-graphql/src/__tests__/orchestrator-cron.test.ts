@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import test from 'node:test';
 import {
-  CronInputError, DEFAULT_CRON_SETTINGS, OrchestratorCron, PARKED_TEXT, baseFor, candidates, hasAcceptanceCriteria, labelOrder, outsideWindow, parseCronSettings,
+  CronInputError, DEFAULT_CRON_SETTINGS, OrchestratorCron, PARKED_TEXT, baseFor, candidates, hasAcceptanceCriteria, labelOrder, ticketHasAcceptanceCriteria, outsideWindow, parseCronSettings,
   startPrompt, wib, type CronDeps, type CronRun, type CronSettings, type CronTicket,
 } from '../integrations/orchestrator-cron';
 
@@ -198,6 +198,25 @@ test('the agreed scenario: a stuck ticket frees its slot, the answer takes the n
   w.answer('QRD-4'); await w.step();
   w.endTurn('QRD-1'); await w.step();
   assert.deepStrictEqual(w.running(), ['QRD-4', 'QRD-6'], '12:10 #1 done: the answer to #4 runs');
+});
+
+test('acceptance criteria also count when they live in the Jira Acceptance Criteria field', () => {
+  const pointer = 'Technical detail only. Problem Definition, User Story and Acceptance Criteria live in their own fields.';
+  assert.strictEqual(ticketHasAcceptanceCriteria({ description: 'Board ID: h-reveal', acceptanceCriteria: '* The tool set is rebuilt between steps' }), true);
+  assert.strictEqual(ticketHasAcceptanceCriteria({ description: AC, acceptanceCriteria: null }), true, 'the description heading still works');
+  assert.strictEqual(ticketHasAcceptanceCriteria({ description: 'Board ID: h-reveal', acceptanceCriteria: null }), false);
+  assert.strictEqual(ticketHasAcceptanceCriteria({ description: 'Board ID: h-reveal', acceptanceCriteria: '.' }), false, 'a lone dot is not a criterion');
+  assert.strictEqual(ticketHasAcceptanceCriteria({ description: pointer, acceptanceCriteria: '* Size is shown per datapoint' }), true);
+});
+
+test('a ticket whose criteria are only in the Jira field is started, not parked', async () => {
+  const tickets = [
+    ticket('QRD-1', { description: 'Board ID: h-reveal', acceptanceCriteria: '* The tool set is rebuilt between steps' }),
+    ticket('QRD-2', { description: 'Board ID: g-stack', acceptanceCriteria: null }),
+  ];
+  const w = world({ tickets, config: { parallel: 2 } });
+  const log = await w.cron.runFill();
+  assert.deepStrictEqual([log.started, log.parked], [['QRD-1'], ['QRD-2']]);
 });
 
 test('two answers take slots in the order they were given', async () => {

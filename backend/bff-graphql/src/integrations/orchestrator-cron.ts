@@ -162,7 +162,13 @@ export function hasAcceptanceCriteria(description: string | null | undefined): b
   return text.slice(at).split('\n').slice(1).some((line) => (line.match(/[\p{L}\p{N}]+/gu) || []).length >= 2);
 }
 
-export interface CronTicket { key: string; title: string; description?: string | null; status: string; sprintState?: string | null; labels?: string[]; parentKey?: string | null }
+export interface CronTicket { key: string; title: string; description?: string | null; acceptanceCriteria?: string | null; status: string; sprintState?: string | null; labels?: string[]; parentKey?: string | null }
+
+/** The Jira Acceptance Criteria field when it holds a criterion, else an "Acceptance criteria" heading in the description. */
+export function ticketHasAcceptanceCriteria(ticket: Pick<CronTicket, 'description' | 'acceptanceCriteria'>): boolean {
+  const field = (ticket.acceptanceCriteria || '').split('\n').some((line) => (line.match(/[\p{L}\p{N}]+/gu) || []).length >= 2);
+  return field || hasAcceptanceCriteria(ticket.description);
+}
 
 const sameText = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 const ticketNumber = (key: string) => Number(key.split('-')[1]) || 0;
@@ -359,7 +365,7 @@ export class OrchestratorCron {
     const defer = (key: string, reason: string) => { if (log.deferred.length < MAX_DEFERRED_LOGGED) log.deferred.push({ key, reason }); };
     for (const ticket of candidates(tickets, new Set(taken), blocked, settings, dockOrder)) {
       try {
-        if (!hasAcceptanceCriteria(ticket.description)) {
+        if (!ticketHasAcceptanceCriteria(ticket)) {
           if (day.parked.length >= settings.maxPerDay) { defer(ticket.key, `daily cap reached: ${settings.maxPerDay} parked today`); continue; }
           await this.saveRun(ticket, settings.machine, now, PARKED_TEXT);
           day.parked.push(ticket.key);
