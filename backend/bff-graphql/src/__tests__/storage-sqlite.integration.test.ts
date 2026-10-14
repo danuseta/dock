@@ -593,3 +593,36 @@ INSERT INTO "ChatMessage" ("sessionId","role","text","at") VALUES ('legacy-1','u
   assert.strictEqual(await client.chatSession.count(), 1);
   assert.strictEqual(await client.chatMessage.count(), 1);
 });
+
+test('SQLite storage counts cron slots per machine and keeps DOCK work orders', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }] = await Promise.all([
+    import('../storage/service'),
+    import('../storage/client'),
+  ]);
+  const storage = new StorageService(prisma);
+  t.after(() => prisma.$disconnect());
+
+  const at = new Date('2026-10-14T00:00:00.000Z');
+  const id = (n: number) => `cccccccc-0000-4000-8000-00000000000${n}`;
+  const open = (n: number, origin: 'cron' | 'manual', machine = 'workspace') => storage.createChatSession({ id: id(n), source: 'dock', machine, title: String(n), ticketKey: null, startedAt: at, lastMessageAt: at, origin });
+  await open(1, 'cron'); await open(2, 'cron'); await open(3, 'cron'); await open(4, 'manual'); await open(5, 'cron', 'laptop');
+  const say = (n: number, state: string, role = 'user') => storage.createChatMessage({ sessionId: id(n), role, text: 'x', state, at });
+  await say(1, 'taken');
+  await say(2, 'taken'); await say(2, 'queued');
+  await say(3, 'queued'); await say(3, 'done', 'assistant');
+  await say(4, 'taken');
+  await say(5, 'taken');
+  assert.deepStrictEqual(await storage.countCronSlots('workspace'), { busy: 2, waiting: 1 }, 'a queued message behind a running turn is not waiting for a slot; manual and other machines do not count');
+  assert.deepStrictEqual(await storage.countCronSlots('phone'), { busy: 0, waiting: 0 });
+  assert.deepStrictEqual((await storage.getQueuedChatMessages('workspace', 10)).map((m) => [m.sessionId, m.origin]), [[id(2), 'cron'], [id(3), 'cron']]);
+  assert.strictEqual((await storage.getChatSession(id(4)))?.origin, 'manual');
+
+  await storage.setTicketOrder('QRD-7', 3);
+  await storage.setTicketOrder('QRD-7', 1);
+  await storage.setTicketOrder('QRD-8', 2);
+  await storage.deleteTicketOrder('QRD-8');
+  await storage.deleteTicketOrder('QRD-404');
+  assert.deepStrictEqual([...(await storage.getTicketOrders()).entries()], [['QRD-7', 1]]);
+});

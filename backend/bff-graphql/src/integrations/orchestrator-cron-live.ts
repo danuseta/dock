@@ -20,6 +20,8 @@ export const orchestratorCron = new OrchestratorCron({
   ticket: (key) => jira.getTicket(key),
   moveTicket: (key, statusName) => jira.transitionTicket(key, statusName),
   dependencies: () => storage.getTicketDependencies(),
+  dockOrder: () => storage.getTicketOrders(),
+  slots: (machine) => storage.countCronSlots(machine),
   machines: () => orchestratorService.machines(),
   online: (machine) => chatService.bridge(machine).online,
   fiveHourUsed: (machine) => chatService.statusSnapshot(machine).limits?.fiveHour ?? null,
@@ -34,3 +36,5 @@ export const orchestratorCron = new OrchestratorCron({
   hasPushDevices: async () => (await pushService.subscriptions()).length > 0,
   push: (message) => pushService.send(message),
 });
+
+chatService.cronLimit = async () => (await orchestratorCron.settings().catch(() => null))?.parallel ?? null;

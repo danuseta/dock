@@ -21,6 +21,8 @@ interface TicketCardProps {
     sprintState?: string;
     storyPoints?: number | null;
     labels?: string[];
+    workOrder?: number | null;
+    workOrderSource?: string | null;
     pullRequests?: any[];
     demoLink?: { url: string };
     orchestration?: AgentRunSummary | null;
@@ -48,6 +50,16 @@ export const TicketCard: React.FC<TicketCardProps> = ({ ticket, onClick }) => {
           <span className="rounded-xs border border-accent/30 bg-accent-dim px-[9px] py-[3px] font-mono text-sm font-extrabold text-accent">
             {ticket.key}
           </span>
+
+          {ticket.workOrder != null && (
+            <span
+              className="rounded-xs border border-sky-300/35 bg-sky-300/10 px-[7px] py-0.5 font-mono text-xs font-extrabold text-sky-200 tabular-nums"
+              title={ticket.workOrderSource === 'dock' ? 'Work order set in DOCK' : 'Work order from the Jira label'}
+              aria-label={`Work order ${ticket.workOrder}`}
+            >
+              #{ticket.workOrder}
+            </span>
+          )}
 
           {ticket.storyPoints != null && (
             <span className="rounded-xs border border-amber-300/35 bg-amber-300/10 px-[7px] py-0.5 font-mono text-xs font-extrabold text-amber-200 tabular-nums">

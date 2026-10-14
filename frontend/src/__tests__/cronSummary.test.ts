@@ -1,24 +1,43 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { roundSummary } from '../agents/cronRound';
+import { deferredLines, fillSummary, type FillLog } from '../agents/cronRound';
 
-test('the last round reads as one sentence', () => {
-  const at = '2026-10-14T02:05:00.000Z';
+const at = '2026-10-14T02:05:00.000Z';
+const fill = (overrides: Partial<FillLog> = {}): FillLog => ({ at, skipped: null, started: [], parked: [], deferred: [], notMoved: [], failed: [], ...overrides });
+
+test('the last fill reads as one sentence', () => {
   const when = new Date(at).toLocaleString();
-  assert.strictEqual(roundSummary(null), 'No round has run yet.');
-  assert.strictEqual(roundSummary({ at, skipped: 'machine workspace is offline', started: [], parked: [], notMoved: [], failed: [] }), `${when}: skipped, machine workspace is offline.`);
-  assert.strictEqual(roundSummary({ at, skipped: null, started: [], parked: [], notMoved: [], failed: [] }), `${when}: started nothing.`);
+  assert.strictEqual(fillSummary(null), 'Nothing has run yet.');
+  assert.strictEqual(fillSummary(fill({ skipped: 'outside work hours: not a work day' })), `${when}: nothing taken, outside work hours: not a work day.`);
+  assert.strictEqual(fillSummary(fill()), `${when}: started nothing.`);
   assert.strictEqual(
-    roundSummary({ at, skipped: null, started: ['QRD-1', 'QRD-3'], parked: ['QRD-2'], notMoved: ['QRD-3'], failed: ['QRD-9'] }),
+    fillSummary(fill({ started: ['QRD-1', 'QRD-3'], parked: ['QRD-2'], notMoved: ['QRD-3'], failed: ['QRD-9'] })),
     `${when}: started QRD-1, QRD-3; parked QRD-2; Jira did not move QRD-3; failed QRD-9.`,
   );
 });
 
-test('the settings form round-trips the config and turns its text fields back into lists and numbers', async () => {
+test('deferred tickets are grouped by their reason', () => {
+  const full = 'slots full: 2 of 2 in use';
+  const cap = 'daily cap reached: 6 started today';
+  assert.deepStrictEqual(deferredLines(fill({ deferred: [{ key: 'QRD-3', reason: full }, { key: 'QRD-8', reason: cap }, { key: 'QRD-4', reason: full }] })), [
+    `${full}: QRD-3, QRD-4`,
+    `${cap}: QRD-8`,
+  ]);
+  assert.deepStrictEqual(deferredLines(null), []);
+});
+
+test('the settings form round-trips the config and turns its text fields back into lists, numbers and an epic map', async () => {
   const { configFromForm, formFromConfig } = await import('../agents/cronRound');
-  const config = { enabled: true, hoursWib: [9, 14], machine: 'workspace', parallel: 2, perRound: 3, sprint: 'active', labels: ['be', 'fe'], todoStatuses: ['To Do'], inProgressStatus: 'In Progress', model: null, effort: 'high', usageBrakePercent: 70, notifyUserId: '123456789' };
+  const config = {
+    enabled: true, machine: 'workspace', parallel: 2, workStart: 9, workEnd: 17, workDays: [1, 2, 3, 4, 5], activeFrom: null, activeUntil: '2026-12-31',
+    maxPerDay: 6, mode: 'auto', epicBase: { 'QRD-1232': 'feat/V1-Playbook' }, sprint: 'active', labels: ['be', 'fe'], todoStatuses: ['To Do'],
+    inProgressStatus: 'In Progress', model: null, effort: 'high', usageBrakePercent: 70, notifyUserId: '123456789',
+  };
   const form = formFromConfig(JSON.stringify(config));
-  assert.deepStrictEqual([form.hoursWib, form.labels, form.model, form.parallel], ['9, 14', 'be, fe', '', '2']);
+  assert.deepStrictEqual([form.labels, form.model, form.parallel, form.epicBase, form.activeFrom], ['be, fe', '', '2', 'QRD-1232=feat/V1-Playbook', '']);
   assert.deepStrictEqual(JSON.parse(configFromForm(form)), config);
-  assert.deepStrictEqual(JSON.parse(configFromForm({ ...form, hoursWib: ' 8 ,, 20 ', labels: '', parallel: 'two' })), { ...config, hoursWib: [8, 20], labels: [], parallel: 'two' });
+  assert.deepStrictEqual(
+    JSON.parse(configFromForm({ ...form, workDays: [6, 1], labels: '', parallel: 'two', epicBase: 'QRD-1232 = feat/V1-Playbook, QRD-7=dev' })),
+    { ...config, workDays: [1, 6], labels: [], parallel: 'two', epicBase: { 'QRD-1232': 'feat/V1-Playbook', 'QRD-7': 'dev' } },
+  );
 });

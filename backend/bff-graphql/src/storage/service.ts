@@ -89,6 +89,18 @@ export class StorageService {
     });
   }
 
+  async getTicketOrders(): Promise<Map<string, number>> {
+    return new Map((await this.db.ticketOrder.findMany()).map((row) => [row.ticketKey, row.position]));
+  }
+
+  setTicketOrder(ticketKey: string, position: number) {
+    return this.db.ticketOrder.upsert({ where: { ticketKey }, update: { position }, create: { ticketKey, position } });
+  }
+
+  deleteTicketOrder(ticketKey: string) {
+    return this.db.ticketOrder.delete({ where: { ticketKey } }).catch(() => undefined);
+  }
+
   deleteTicketDependency(ticketKey: string) {
     return this.db.ticketDependency.delete({ where: { ticketKey } }).catch(() => undefined);
   }
@@ -347,7 +359,7 @@ export class StorageService {
 
   createChatSession(data: {
     id: string; source: string; machine?: string; title: string; ticketKey: string | null; forkFrom?: string | null;
-    messageCount?: number; startedAt: Date; lastMessageAt: Date;
+    messageCount?: number; startedAt: Date; lastMessageAt: Date; origin?: 'cron' | 'manual';
   }) {
     return this.db.chatSession.create({ data });
   }
@@ -570,12 +582,24 @@ export class StorageService {
   }
 
   async getQueuedChatMessages(machine: string, take: number) {
-    const rows = await this.db.$queryRaw<Array<{ id: number | bigint; sessionId: string; text: string; options: string | null }>>(Prisma.sql`
-      SELECT m."id", m."sessionId", m."text", m."options" FROM "ChatMessage" m
+    const rows = await this.db.$queryRaw<Array<{ id: number | bigint; sessionId: string; text: string; options: string | null; origin: string }>>(Prisma.sql`
+      SELECT m."id", m."sessionId", m."text", m."options", s."origin" FROM "ChatMessage" m
       JOIN "ChatSession" s ON s."id" = m."sessionId"
       WHERE m."state" = 'queued' AND m."role" = 'user' AND s."source" = 'dock' AND s."machine" = ${machine}
       ORDER BY m."id" ASC LIMIT ${take}`);
-    return rows.map((row) => ({ id: Number(row.id), sessionId: row.sessionId, text: row.text, options: row.options }));
+    return rows.map((row) => ({ id: Number(row.id), sessionId: row.sessionId, text: row.text, options: row.options, origin: row.origin }));
+  }
+
+  /** Cron sessions on a machine with a running turn (busy), and those with a user message queued and no running turn (waiting). */
+  async countCronSlots(machine: string): Promise<{ busy: number; waiting: number }> {
+    const [row] = await this.db.$queryRaw<Array<{ busy: number | bigint; waiting: number | bigint }>>(Prisma.sql`
+      SELECT
+        COUNT(DISTINCT CASE WHEN m."state" = 'taken' THEN s."id" END) AS "busy",
+        COUNT(DISTINCT CASE WHEN m."state" = 'queued' AND m."role" = 'user'
+          AND NOT EXISTS (SELECT 1 FROM "ChatMessage" t WHERE t."sessionId" = s."id" AND t."state" = 'taken') THEN s."id" END) AS "waiting"
+      FROM "ChatSession" s JOIN "ChatMessage" m ON m."sessionId" = s."id"
+      WHERE s."origin" = 'cron' AND s."source" = 'dock' AND s."machine" = ${machine} AND m."state" IN ('taken', 'queued')`);
+    return { busy: Number(row?.busy ?? 0), waiting: Number(row?.waiting ?? 0) };
   }
 
   /** The state check is part of the write, so two bridges cannot take the same message. */

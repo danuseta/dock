@@ -12,6 +12,7 @@ import { chatService } from '../integrations/chat';
 import { mergeAttention, withoutSettledTickets } from '../integrations/attention';
 import { CronInputError } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
+import { labelOrder } from '../integrations/orchestrator-cron';
 import { pushService } from '../integrations/push';
 import type { AnswerInput } from '../integrations/chat-interactions';
 import { SprintBusyError, SprintInputError, sprintDashboardService } from '../integrations/sprint-dashboard';
@@ -196,6 +197,7 @@ export const resolvers = {
     sprintIssueEvents: async (_: unknown, { sprintId }: { sprintId: number }) => sprintDashboardService.issueEvents(sprintId),
     sprintDashboardSettings: async () => sprintDashboardService.getSettings(),
     orchestratorCronSettings: async () => orchestratorCron.getSettings(),
+    orchestratorCronStatus: async () => JSON.stringify(await orchestratorCron.status()),
     pushPublicKey: async () => pushService.publicKey(),
     dockerContainerLogs: async (_: unknown, { id, tail }: { id: string; tail?: number }) => {
       try {
@@ -212,6 +214,8 @@ export const resolvers = {
   
   Ticket: {
     labels: (parent: any) => Array.isArray(parent.labels) ? parent.labels : [],
+    workOrder: async (parent: any) => (await storageAPI.ticketOrders()).get(parent.key) ?? labelOrder(parent.labels),
+    workOrderSource: async (parent: any) => ((await storageAPI.ticketOrders()).has(parent.key) ? 'dock' : labelOrder(parent.labels) === null ? null : 'label'),
     pullRequests: async (parent: any) => {
       return await githubAPI.getPullRequestsForTicket(parent.key, {
         staleWhileRevalidate: parent.__dashboard === true,
@@ -306,6 +310,16 @@ export const resolvers = {
       } catch (error) {
         throw new GraphQLError(error instanceof Error ? error.message : 'Invalid ticket dependency', { extensions: { code: 'BAD_USER_INPUT' } });
       }
+    },
+    setTicketWorkOrder: async (_: unknown, { ticketKey, position }: { ticketKey: string; position: number }) => {
+      await storageAPI.setTicketOrder(ticketKey, position).catch((error) => {
+        throw new GraphQLError(error instanceof Error ? error.message : 'Invalid work order', { extensions: { code: 'BAD_USER_INPUT' } });
+      });
+      return true;
+    },
+    clearTicketWorkOrder: async (_: unknown, { ticketKey }: { ticketKey: string }) => {
+      await storageAPI.clearTicketOrder(ticketKey);
+      return true;
     },
     clearTicketDependency: async (_: unknown, { ticketKey }: { ticketKey: string }) => {
       try {
@@ -435,7 +449,7 @@ export const resolvers = {
       await orchestratorCron.updateSettings(config, webhookUrl).catch(cronError);
       return true;
     },
-    runOrchestratorCronNow: async () => JSON.stringify(await orchestratorCron.runRound()),
+    runOrchestratorCronNow: async () => JSON.stringify(await orchestratorCron.runFill(true)),
     confirmOrchestration: async (_: unknown, { key }: { key: string }) => {
       await orchestratorCron.confirm(key).catch(cronError);
       return true;
@@ -465,13 +479,15 @@ export const protectedQueries = [
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens',
   'chatSessions', 'chatSession', 'chatMessages', 'chatActivity', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions',
-  'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'pushPublicKey',
+  'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey',
 ] as const;
 export const protectedMutations = [
   'saveDemoLink',
   'sendToDiscord',
   'setTicketDependency',
   'clearTicketDependency',
+  'setTicketWorkOrder',
+  'clearTicketWorkOrder',
   'updateSettings',
   'validateJira',
   'validateGitHub',

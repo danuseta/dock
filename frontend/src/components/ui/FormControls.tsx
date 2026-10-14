@@ -28,6 +28,8 @@ export interface SelectProps {
   id?: string;
   'aria-label': string;
   'aria-describedby'?: string;
+  /** Where the list renders. Inside a modal <dialog> pass an element of the dialog, or the list sits under the modal's top layer. */
+  container?: HTMLElement | null;
 }
 
 export const Select = ({
@@ -43,6 +45,7 @@ export const Select = ({
   id,
   'aria-label': ariaLabel,
   'aria-describedby': ariaDescribedBy,
+  container,
 }: SelectProps) => (
   <SelectPrimitive.Root
     value={value}
@@ -66,7 +69,7 @@ export const Select = ({
         <ChevronDown className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
-    <SelectPrimitive.Portal>
+    <SelectPrimitive.Portal container={container}>
       <SelectPrimitive.Content
         position="popper"
         align="start"

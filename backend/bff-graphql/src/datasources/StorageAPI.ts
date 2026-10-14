@@ -84,6 +84,25 @@ export class StorageAPI {
     return this.getTicketRelationGroup(ticketKey);
   }
 
+  private orders: { at: number; value: Promise<Map<string, number>> } | null = null;
+
+  /** DOCK work order numbers by ticket key, read at most once every two seconds (one board render asks per ticket). */
+  ticketOrders(): Promise<Map<string, number>> {
+    if (!this.orders || Date.now() - this.orders.at > 2000) this.orders = { at: Date.now(), value: this.storage.getTicketOrders() };
+    return this.orders.value;
+  }
+
+  async setTicketOrder(ticketKeyInput: string, position: number) {
+    if (!Number.isInteger(position) || position < 1 || position > 999) throw new Error('The order must be a whole number from 1 to 999');
+    await this.storage.setTicketOrder(normalizeTicketKey(ticketKeyInput), position);
+    this.orders = null;
+  }
+
+  async clearTicketOrder(ticketKeyInput: string) {
+    await this.storage.deleteTicketOrder(normalizeTicketKey(ticketKeyInput));
+    this.orders = null;
+  }
+
   async clearTicketDependency(ticketKeyInput: string) {
     const ticketKey = normalizeTicketKey(ticketKeyInput);
     await this.storage.deleteTicketDependency(ticketKey);
