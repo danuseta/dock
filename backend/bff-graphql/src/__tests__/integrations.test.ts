@@ -42,6 +42,23 @@ test('internal integration behavior', async (t) => {
     assert.strictEqual(ticket?.storyPoints, 5);
     assert.deepStrictEqual(ticket?.labels, ['fe-pass', 'needs-review', 'uat_pass']);
     assert.match(ticket?.description || '', /Internal call only/);
+    assert.strictEqual(ticket?.acceptanceCriteria, null);
+  });
+
+  await t.test('reads the Jira Acceptance Criteria field as text', () => {
+    const service = new JiraService({} as any, {} as any);
+    const adf = service.formatTicket({
+      key: 'QRD-1242',
+      fields: {
+        summary: 'Tool registration',
+        customfield_10332: { type: 'doc', content: [{ type: 'bulletList', content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'The tool set is rebuilt between steps' }] }] }] }] },
+      },
+    }, 'company.atlassian.net');
+    assert.match(adf?.acceptanceCriteria || '', /The tool set is rebuilt between steps/);
+    const plain = service.formatTicket({ key: 'QRD-1', fields: { customfield_10332: '* Button saves the form\n' } }, 'company.atlassian.net');
+    assert.strictEqual(plain?.acceptanceCriteria, '* Button saves the form');
+    const blank = service.formatTicket({ key: 'QRD-2', fields: { customfield_10332: '   ' } }, 'company.atlassian.net');
+    assert.strictEqual(blank?.acceptanceCriteria, null);
   });
 
   await t.test('includes Jira, PR, and demo links in Discord summary', () => {

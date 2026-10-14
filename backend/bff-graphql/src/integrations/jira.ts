@@ -197,22 +197,27 @@ export class JiraService {
       }
     }
 
+    const extractText = (node: any): string => {
+      if (!node) return '';
+      if (node.type === 'text' && node.text) return node.text;
+      const text = Array.isArray(node.content)
+        ? node.content.map(extractText).join(node.type === 'listItem' ? ' ' : '')
+        : '';
+      return ['paragraph', 'heading', 'codeBlock'].includes(node.type) ? `${text}\n\n` : text;
+    };
+
     let description = 'No detailed description provided in this Jira issue.';
     if (typeof issue.fields?.description === 'string') description = issue.fields.description;
     else if (issue.fields?.description && typeof issue.fields.description === 'object') {
-      const extractText = (node: any): string => {
-        if (!node) return '';
-        if (node.type === 'text' && node.text) return node.text;
-        const text = Array.isArray(node.content)
-          ? node.content.map(extractText).join(node.type === 'listItem' ? ' ' : '')
-          : '';
-        return ['paragraph', 'heading', 'codeBlock'].includes(node.type) ? `${text}\n\n` : text;
-      };
       const extracted = extractText(issue.fields.description).trim();
       if (extracted) description = extracted;
     }
 
     const fields = issue.fields || {};
+    const acceptanceCriteriaValue = fields.customfield_10332;
+    const acceptanceCriteria = (typeof acceptanceCriteriaValue === 'string'
+      ? acceptanceCriteriaValue
+      : acceptanceCriteriaValue && typeof acceptanceCriteriaValue === 'object' ? extractText(acceptanceCriteriaValue) : '').trim() || null;
     const storyPointValue = fields.story_points
       ?? fields.customfield_10016
       ?? fields.customfield_10028
@@ -222,6 +227,7 @@ export class JiraService {
       key,
       title: fields.summary || 'Untitled Ticket',
       description,
+      acceptanceCriteria,
       status: fields.status?.name || 'Unknown Status',
       assignee: fields.assignee?.displayName || fields.assignee?.emailAddress || 'Assignee unavailable',
       url: `https://${domain}/browse/${key}`,
