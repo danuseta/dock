@@ -260,7 +260,7 @@ test('the bridge capabilities are parsed, capped and ignored when they are not v
   const caps = parseCaps({ ...CAPS, kit: 'k'.repeat(60), features: ['stop', 'stop', 'teleport', 'fast'], modes: ['plan', 'bypassPermissions', 'auto', 'dontAsk', 'default'], catalogHash: 'not a hash!' });
   assert.deepStrictEqual(
     [caps?.kit.length, caps?.features, caps?.modes, caps?.catalogHash],
-    [40, ['stop', 'fast'], ['plan', 'default'], null],
+    [40, ['stop', 'fast'], ['plan', 'auto', 'default'], null],
   );
   assert.strictEqual(parseCaps({ ...CAPS, features: Array.from({ length: 40 }, () => 'stop') })?.features.length, 1);
 });
@@ -366,6 +366,11 @@ test('turn options are parsed and checked against the machine capabilities and c
   await assert.rejects(ctx.service.sendMessage(second.id, 'hi', MACHINES, { options: { model: 'sonnet', effort: 'xhigh' } }), /effort/);
   await assert.rejects(ctx.service.sendMessage(second.id, 'hi', MACHINES, { options: { model: 'haiku', effort: 'low' } }), /effort/, 'haiku lists no efforts');
   await assert.rejects(ctx.service.sendMessage(second.id, 'hi', MACHINES, { options: { fast: true } }), /fast/, 'no fast capability');
+  await assert.rejects(ctx.service.sendMessage(second.id, 'hi', MACHINES, { options: { permissionMode: 'auto' } }), /permission mode/, 'a bridge that does not offer auto');
+  await ctx.service.claim({ wait: 0, caps: { ...CAPS, catalogHash: 'abc123', modes: [...CAPS.modes, 'auto'] } }, undefined, 'laptop');
+  const cron = await ctx.service.createSession({ title: 'Cron' });
+  const auto = await ctx.service.sendMessage(cron.id, 'build', MACHINES, { options: { permissionMode: 'auto' } });
+  assert.strictEqual(JSON.parse(ctx.messages().find((message) => message.id === auto.id).options).permissionMode, 'auto', 'the cron starts tickets in auto mode');
   const sent = await ctx.service.sendMessage(second.id, 'hi', MACHINES, { options: { model: 'sonnet', effort: 'high', permissionMode: 'plan' } });
   assert.deepStrictEqual(JSON.parse(ctx.messages().find((message) => message.id === sent.id).options), { model: 'sonnet', effort: 'high', permissionMode: 'plan', fast: null });
   assert.deepStrictEqual(JSON.parse(ctx.sessions.get(second.id).options), { model: 'sonnet', effort: 'high', permissionMode: 'plan', fast: null }, 'options are stored on the session too');

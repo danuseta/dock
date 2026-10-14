@@ -4,7 +4,7 @@ import { OrchestratorInputError } from './orchestrator';
 export const CAPS_VERSION = 2;
 export const CAPS_FEATURES = ['interactive', 'questions', 'plan', 'stop', 'attachments', 'commands', 'model', 'effort', 'fast'] as const;
 export type CapsFeature = typeof CAPS_FEATURES[number];
-export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan'] as const;
+export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto'] as const;
 export type PermissionMode = typeof PERMISSION_MODES[number];
 export const INTERACTION_KINDS = ['permission', 'question', 'plan'] as const;
 export type InteractionKind = typeof INTERACTION_KINDS[number];
