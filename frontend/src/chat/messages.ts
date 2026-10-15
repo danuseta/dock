@@ -36,7 +36,8 @@ export interface ChatSession {
 export interface ChatMachine { name: string; online: boolean; lastSeenAt?: string | null; capabilities?: string[] | null; claudeVersion?: string | null }
 
 export const DEFAULT_MACHINE = 'laptop';
-export const MACHINE_KEY = 'dock.chat.machine';
+/** The only machine DOCK opens chat sessions on. */
+export const CHAT_MACHINE = 'workspace';
 export const BRIDGE_OFFLINE = 'The laptop bridge is offline. Start it with: node dock-chat.cjs run';
 export const BALLOON_LENGTH = 70;
 export const FAST_POLL_MS = 1000;
@@ -126,17 +127,8 @@ export const tabLabel = (session: { title?: string | null; ticketKey?: string | 
   return multipleMachines && session ? `${label} · ${machineOf(session)}` : label;
 };
 
-export const severalMachines = (machines: ChatMachine[] | null | undefined, openSessionMachines: string[]): boolean => new Set([...machineNames(machines), ...openSessionMachines]).size > 1;
-
 /** The machines a session can be started on; a missing or empty list means only the laptop. */
 export const machineNames = (machines?: ChatMachine[] | null): string[] => (machines && machines.length > 0 ? machines.map((machine) => machine.name) : [DEFAULT_MACHINE]);
-
-/** The machine a new session starts on: the last one used, else the first online one, else the laptop. */
-export function initialMachine(machines: ChatMachine[] | null | undefined, stored?: string | null): string {
-  const names = machineNames(machines);
-  if (stored && names.includes(stored)) return stored;
-  return machines?.find((machine) => machine.online)?.name ?? DEFAULT_MACHINE;
-}
 
 /** Whether one machine's bridge is up. Without a machine list the aggregate answer is all there is. */
 export function machineOnline(machines: ChatMachine[] | null | undefined, name: string, aggregate?: boolean): boolean | undefined {

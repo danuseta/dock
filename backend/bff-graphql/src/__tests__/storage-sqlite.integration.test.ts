@@ -495,6 +495,10 @@ test('SQLite never shows a draft in the thread, search or last text, and sweeps 
   assert.deepStrictEqual((await storage.getChatMessages(sessionId, {}, 50)).map((item) => item.id), [done.id]);
   assert.deepStrictEqual((await storage.getChatMessages(sessionId, { afterId: 0 }, 50)).map((item) => item.id), [done.id]);
   assert.deepStrictEqual((await storage.searchChatMessages('zebra', 50)).filter((item) => item.sessionId === sessionId).map((item) => item.id), [done.id]);
+  assert.deepStrictEqual((await storage.searchChatMessages('zebra', 50, 'laptop')).filter((item) => item.sessionId === sessionId).map((item) => item.id), [done.id]);
+  assert.deepStrictEqual((await storage.searchChatMessages('zebra', 50, 'workspace')).filter((item) => item.sessionId === sessionId), [], 'search keeps to the machine');
+  assert.ok((await storage.getChatSessions(null, 300, 'laptop')).some((item) => item.id === sessionId));
+  assert.ok(!(await storage.getChatSessions(null, 300, 'workspace')).some((item) => item.id === sessionId));
   assert.strictEqual((await storage.getChatLastTexts([sessionId], 50)).get(sessionId), 'sent zebra');
   assert.deepStrictEqual((await storage.getStaleChatDrafts(new Date(at.getTime() + 500))).filter((item) => item.sessionId === sessionId), []);
   assert.deepStrictEqual((await storage.getStaleChatDrafts(new Date(at.getTime() + 2000))).filter((item) => item.sessionId === sessionId), [{ id: draft.id, sessionId }]);
@@ -722,4 +726,40 @@ test('SQLite keeps session options, an auto title, saved status lines and an age
   const restarted = new ChatService(storage);
   await restarted.restoreLimits();
   assert.deepStrictEqual(restarted.statusSnapshot('laptop').sessions.map((line) => [line.sessionId, line.model, line.costUsd]), [[dock.id, 'sonnet', 0.75]]);
+});
+
+test('SQLite counts and removes every session of one machine with its rows', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }, { ChatService }, { removeMachineSessions }] = await Promise.all([
+    import('../storage/service'),
+    import('../storage/client'),
+    import('../integrations/chat'),
+    import('../integrations/chat-cleanup'),
+  ]);
+  const storage = new StorageService(prisma);
+  const chat = new ChatService(storage);
+  t.after(() => prisma.$disconnect());
+  const at = new Date('2026-10-15T00:00:00.000Z');
+  const machine = `gone-${Date.now().toString(36)}`;
+  const ids = [`${machine}-cli`, `${machine}-dock`];
+  await storage.createChatSession({ id: ids[0], source: 'cli', machine, title: '', ticketKey: null, startedAt: at, lastMessageAt: at });
+  await storage.createChatSession({ id: ids[1], source: 'dock', machine, title: '', ticketKey: null, startedAt: at, lastMessageAt: at });
+  await storage.addChatMessages(ids[0], [{ role: 'user', text: 'one', at }, { role: 'assistant', text: 'two', at }], 5000);
+  await storage.createChatMessage({ sessionId: ids[1], role: 'user', text: 'three', state: 'done', at });
+
+  const deps = {
+    sessions: (name: string) => storage.getChatSessionsOnMachine(name),
+    counts: (name: string) => storage.countChatRowsOnMachine(name),
+    deleteSession: (id: string) => chat.deleteSession(id),
+    forgetStatus: (name: string) => chat.forgetStatus(name),
+  };
+  const dry = await removeMachineSessions(deps, machine, false);
+  assert.deepStrictEqual([dry.sessions, dry.messages, dry.activity, dry.interactions, dry.attachments, dry.attachmentBytes], [{ total: 2, cli: 1, dock: 1 }, 3, 0, 0, 0, 0]);
+  assert.strictEqual((await storage.getChatSessionsOnMachine(machine)).length, 2, 'a dry run changes nothing');
+
+  const applied = await removeMachineSessions(deps, machine, true);
+  assert.deepStrictEqual([applied.deleted, applied.failed], [2, []]);
+  assert.deepStrictEqual(await storage.getChatSessionsOnMachine(machine), []);
+  assert.strictEqual((await storage.getChatMessages(ids[0], {}, 50)).length, 0);
 });

@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { ArrowLeft, MessagesSquare, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { CREATE_CHAT_SESSION, DELETE_CHAT_SESSION, RENAME_CHAT_SESSION } from '../graphql/mutations';
-import { GET_CHAT_SESSIONS, SEARCH_CHAT } from '../graphql/queries';
+import { GET_CHAT_SESSION, GET_CHAT_SESSIONS, SEARCH_CHAT } from '../graphql/queries';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
+import { Toast } from '../components/Toast';
 import { Button, Card, Dialog, Input, Page, PageHeader } from '../components/ui';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
@@ -11,8 +12,8 @@ import { ChatThread } from '../chat/ChatThread';
 import { LimitsLine, SessionStatusView } from '../chat/StatusLine';
 import { useChatStatus } from '../chat/useChatStatus';
 import { useFullViewport } from '../chat/useFullViewport';
-import { MachineChip, MachinePicker } from '../chat/MachineControls';
-import { useMachineChoice } from '../chat/useMachineChoice';
+import { MachineChip } from '../chat/MachineControls';
+import { useChatMachines } from '../chat/useChatMachines';
 import { SLOW_POLL_MS, machineOf, machineOnline, sessionTitle as titleOf, type ChatSession } from '../chat/messages';
 import { ReadOnlyChip, SessionRow, SourceChip, TicketChip } from '../chat/SessionRow';
 import { chatStore } from '../chat/store';
@@ -38,7 +39,9 @@ const SessionsPage: React.FC = () => {
   const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ChatSession | null>(null);
   const { status: liveStatus, now: statusNow } = useChatStatus();
-  const { machines, machine, choose } = useMachineChoice();
+  const machines = useChatMachines();
+  const [gone, setGone] = useState(false);
+  const closeGone = useCallback(() => setGone(false), []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setQuery(searchText.trim()), 300);
@@ -54,7 +57,20 @@ const SessionsPage: React.FC = () => {
 
   const sessions = data?.chatSessions || [];
   const hits = searchData?.chatSearch || [];
-  const selected = sessions.find((session) => session.id === selectedId) || hits.find((hit) => hit.session.id === selectedId)?.session || null;
+  const listed = sessions.find((session) => session.id === selectedId) || hits.find((hit) => hit.session.id === selectedId)?.session || null;
+  // A link to a session outside the list: ask for it, and leave for the list when DOCK no longer has it.
+  const { data: lookup } = useQuery<{ chatSession: ChatSession | null }>(GET_CHAT_SESSION, {
+    variables: { id: selectedId },
+    skip: !selectedId || !data || Boolean(listed),
+    fetchPolicy: 'network-only',
+  });
+  const selected = listed || lookup?.chatSession || null;
+  useEffect(() => {
+    if (!selectedId || listed || lookup?.chatSession !== null) return;
+    window.history.replaceState({}, '', sessionUrl(null));
+    setSelectedId(null);
+    setGone(true);
+  }, [selectedId, listed, lookup]);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
@@ -76,7 +92,7 @@ const SessionsPage: React.FC = () => {
     setActionError('');
   };
 
-  const create = async (variables: { title?: string; ticketKey?: string | null; forkFrom?: string; machine?: string }) => {
+  const create = async (variables: { title?: string; ticketKey?: string | null; forkFrom?: string }) => {
     setActionError('');
     try {
       const result = await createSession({ variables });
@@ -124,12 +140,11 @@ const SessionsPage: React.FC = () => {
       <PageHeader>
         <div>
           <h1 className="text-balance font-display text-3xl font-black">Sessions</h1>
-          <p className="mt-1 text-pretty text-secondary-foreground">Claude Code history from your PC, and the sessions you run from DOCK.</p>
+          <p className="mt-1 text-pretty text-secondary-foreground">Claude Code history from the workspace, and the sessions you run from DOCK.</p>
           <LimitsLine machine={selected ? machineOf(selected) : undefined} className="mt-2" />
         </div>
         <div className="flex items-center gap-2">
-          <MachinePicker machines={machines} value={machine} onChange={choose} disabled={creating} />
-          <Button size="sm" variant="primary" className="max-[900px]:h-11" disabled={creating} onClick={() => void create({ machine })}><Plus size={14} aria-hidden="true" />New session</Button>
+          <Button size="sm" variant="primary" className="max-[900px]:h-11" disabled={creating} onClick={() => void create({})}><Plus size={14} aria-hidden="true" />New session</Button>
         </div>
       </PageHeader>
 
@@ -168,7 +183,7 @@ const SessionsPage: React.FC = () => {
             ) : (
               <>
                 {searchText.trim().length === 1 && <p className="px-1.5 pb-2 text-xs text-muted-foreground">Type at least {SEARCH_MIN} characters to search.</p>}
-                {sessions.length === 0 && <p className="px-1.5 py-6 text-center text-pretty text-sm text-muted-foreground">No session yet. Start one here, or run <span className="font-mono text-xs">node dock-push.cjs sessions</span> on your PC to bring in the history.</p>}
+                {sessions.length === 0 && <p className="px-1.5 py-6 text-center text-pretty text-sm text-muted-foreground">No session yet. Start one here, or run <span className="font-mono text-xs">node dock-push.cjs sessions</span> on the workspace to bring in the history.</p>}
                 {sessions.map((session) => (
                   <SessionRow
                     key={session.id}
@@ -234,11 +249,12 @@ const SessionsPage: React.FC = () => {
         </Card>
       </div>
       {actionError && !selected && <p className="mt-3 text-pretty text-sm text-status-conflict" role="alert">{actionError}</p>}
+      {gone && <Toast message="That session no longer exists." type="info" onClose={closeGone} />}
 
       <Dialog open={Boolean(deleteTarget)} onClose={() => !deleting && setDeleteTarget(null)} dismissible={!deleting} labelledBy="delete-session-title" describedBy="delete-session-description">
         <Card className="w-[min(440px,calc(100vw-2rem))] shadow-card">
           <h2 id="delete-session-title" className="text-balance font-display text-xl font-bold">Delete this session?</h2>
-          <p id="delete-session-description" className="mt-2 text-pretty text-sm text-muted-foreground">{deleteTarget ? titleOf(deleteTarget) : ''} and its messages are removed from DOCK. {deleteTarget?.source === 'cli' ? 'The session on your PC is not touched.' : 'This cannot be undone.'}</p>
+          <p id="delete-session-description" className="mt-2 text-pretty text-sm text-muted-foreground">{deleteTarget ? titleOf(deleteTarget) : ''} and its messages are removed from DOCK. {deleteTarget?.source === 'cli' ? 'The session on the workspace is not touched.' : 'This cannot be undone.'}</p>
           {actionError && <p className="mt-3 text-pretty text-sm text-status-conflict" role="alert">{actionError}</p>}
           <div className="mt-6 flex justify-end gap-2"><Button onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button><Button variant="danger" onClick={handleDelete} disabled={deleting}>{deleting ? 'Deleting...' : 'Delete session'}</Button></div>
         </Card>

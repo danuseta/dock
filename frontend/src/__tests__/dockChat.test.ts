@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import test from 'node:test';
 import {
-  BRIDGE_OFFLINE, balloonText, initialMachine, isImageAttachment, isStopping, isTurnInProgress, machineCapabilities, machineNames, machineOf, machineOnline, mergeMessages, newestAssistantId, oldestId, pollCursor, pollInterval, relativeTime, sendBlocker, sessionTurnOptions, severalMachines, tabLabel, ticketBalloons,
+  BRIDGE_OFFLINE, balloonText, isImageAttachment, isStopping, isTurnInProgress, machineCapabilities, machineNames, machineOf, machineOnline, mergeMessages, newestAssistantId, oldestId, pollCursor, pollInterval, relativeTime, sendBlocker, sessionTurnOptions, tabLabel, ticketBalloons,
   type ChatMachine, type ChatMessage,
 } from '../chat/messages';
 import {
@@ -58,11 +58,6 @@ test('machines: the first session machine, per-machine online state and the offl
 
   assert.deepStrictEqual(machineNames(both), ['laptop', 'workspace']);
   assert.deepStrictEqual([machineNames(undefined), machineNames(null), machineNames([])], [['laptop'], ['laptop'], ['laptop']], 'no machine list means only the laptop');
-  assert.strictEqual(initialMachine(both), 'workspace', 'the first online machine');
-  assert.strictEqual(initialMachine(both, 'laptop'), 'laptop', 'the last one used wins while it still exists');
-  assert.strictEqual(initialMachine(both, 'gone'), 'workspace', 'a stored machine that no longer exists is ignored');
-  assert.strictEqual(initialMachine([{ name: 'workspace', online: false }]), 'laptop', 'nothing online falls back to the laptop');
-  assert.strictEqual(initialMachine(undefined, 'workspace'), 'laptop');
 
   assert.deepStrictEqual([machineOnline(both, 'laptop'), machineOnline(both, 'workspace'), machineOnline(both, 'other')], [false, true, false]);
   assert.strictEqual(machineOnline(undefined, 'laptop', true), true, 'without a machine list the aggregate answers');
@@ -85,14 +80,6 @@ test('chat tabs: the machine joins the label only when more than one machine exi
   assert.strictEqual(tabLabel({ title: 'Fix login', ticketKey: 'QRD-1', machine: 'laptop' }, true), 'Fix login · laptop');
   assert.strictEqual(tabLabel({ title: '', ticketKey: 'QRD-1' }, false), 'QRD-1');
   assert.strictEqual(tabLabel(undefined, true), 'New session', 'a tab whose session is not loaded yet has no machine to show');
-});
-
-test('chat tabs: sessions on different machines are told apart even when the token list names one machine', () => {
-  assert.strictEqual(severalMachines(undefined, []), false);
-  assert.strictEqual(severalMachines([{ name: 'laptop', online: true }], ['laptop']), false);
-  assert.strictEqual(severalMachines([{ name: 'laptop', online: true }], ['laptop', 'workspace']), true, 'a session on a machine without a token still counts');
-  assert.strictEqual(severalMachines([], ['workspace']), true, 'no token list means the laptop plus the open sessions');
-  assert.strictEqual(severalMachines([{ name: 'laptop', online: true }, { name: 'workspace', online: false }], []), true);
 });
 
 test('chat balloons: one short line per ticket from its newest assistant message', () => {

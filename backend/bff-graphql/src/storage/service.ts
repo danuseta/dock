@@ -335,14 +335,36 @@ export class StorageService {
     return this.db.ingestToken.updateMany({ where: { id, revokedAt: null }, data: { revokedAt: new Date() } });
   }
 
-  getChatSessions(source: string | null, take: number) {
+  getChatSessions(source: string | null, take: number, machine: string | null = null) {
     return this.db.chatSession.findMany({
-      where: source ? { source } : {}, orderBy: [{ lastMessageAt: 'desc' }, { id: 'asc' }], take,
+      where: { ...(source ? { source } : {}), ...(machine ? { machine } : {}) }, orderBy: [{ lastMessageAt: 'desc' }, { id: 'asc' }], take,
     });
   }
 
   getChatSession(id: string) {
     return this.db.chatSession.findUnique({ where: { id } });
+  }
+
+  getChatSessionsOnMachine(machine: string) {
+    return this.db.chatSession.findMany({ where: { machine }, select: { id: true, source: true }, orderBy: { id: 'asc' } });
+  }
+
+  /** What removing every session of a machine would take with it, attachment files included. */
+  async countChatRowsOnMachine(machine: string) {
+    const onMachine = Prisma.sql`"sessionId" IN (SELECT "id" FROM "ChatSession" WHERE "machine" = ${machine})`;
+    const count = async (table: string) => {
+      const [row] = await this.db.$queryRaw<Array<{ total: number | bigint }>>(Prisma.sql`SELECT COUNT(*) AS "total" FROM ${Prisma.raw(`"${table}"`)} WHERE ${onMachine}`);
+      return Number(row?.total ?? 0);
+    };
+    const [files] = await this.db.$queryRaw<Array<{ total: number | bigint; bytes: number | bigint | null }>>(Prisma.sql`
+      SELECT COUNT(*) AS "total", SUM("size") AS "bytes" FROM "ChatAttachment" WHERE "state" <> 'deleted' AND ${onMachine}`);
+    return {
+      messages: await count('ChatMessage'),
+      activity: await count('ChatActivity'),
+      interactions: await count('ChatInteraction'),
+      attachments: Number(files?.total ?? 0),
+      attachmentBytes: Number(files?.bytes ?? 0),
+    };
   }
 
   getChatSessionsByIds(ids: string[]) {
@@ -773,10 +795,11 @@ export class StorageService {
   }
 
   /** Case-insensitive for ASCII. Prisma's `contains` leaves % and _ as wildcards on sqlite, so the pattern is escaped here. */
-  async searchChatMessages(query: string, take: number) {
+  async searchChatMessages(query: string, take: number, machine: string | null = null) {
     const pattern = `%${query.replace(/[!%_]/g, '!$&')}%`;
+    const onMachine = machine ? Prisma.sql`AND "sessionId" IN (SELECT "id" FROM "ChatSession" WHERE "machine" = ${machine})` : Prisma.empty;
     const found = await this.db.$queryRaw<Array<{ id: number | bigint }>>(Prisma.sql`
-      SELECT "id" FROM "ChatMessage" WHERE "text" LIKE ${pattern} ESCAPE '!' AND "state" <> 'draft'
+      SELECT "id" FROM "ChatMessage" WHERE "text" LIKE ${pattern} ESCAPE '!' AND "state" <> 'draft' ${onMachine}
       ORDER BY "at" DESC, "id" DESC LIMIT ${take}`);
     const ids = found.map((row) => Number(row.id));
     const rows = await this.db.chatMessage.findMany({ where: { id: { in: ids } } });

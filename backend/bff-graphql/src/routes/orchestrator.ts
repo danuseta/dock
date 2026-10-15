@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { bearerToken } from '../auth/ingest-token';
 import { PinRateLimiter, sessionManager, shouldRequirePin } from '../auth/session';
-import { ChatService, chatService } from '../integrations/chat';
+import { CHAT_MACHINE, ChatService, chatService } from '../integrations/chat';
 import { AttachmentRefusal } from '../integrations/chat-attachments';
 import { MAX_TRANSCRIPT_BYTES, OrchestratorInputError, OrchestratorService, orchestratorService } from '../integrations/orchestrator';
 import { StorageService } from '../storage/service';
@@ -86,7 +86,14 @@ export function createOrchestratorIngestRouter(
     return run && { key: run.key, activity: run.activity, ...(run.ignored ? { ignored: true, owner: run.machine } : {}) };
   }));
   router.post('/transcript', express.json({ limit: MAX_TRANSCRIPT_BYTES + 1024 * 1024 }), handle((body, _signal, machine) => service.saveTranscript(body, new Date(), machine)));
-  router.post('/sessions', express.json({ limit: '2mb' }), handle((body, _signal, machine) => chat.syncSession(body, machine)));
+  const historyMachineOnly = (_request: Request, response: Response, next: express.NextFunction) => {
+    if (response.locals.machine === CHAT_MACHINE) {
+      next();
+      return;
+    }
+    response.status(403).json({ error: `Session history is only kept for the ${CHAT_MACHINE} machine. Turn off the sessions sync on ${response.locals.machine}.` });
+  };
+  router.post('/sessions', historyMachineOnly, express.json({ limit: '2mb' }), handle((body, _signal, machine) => chat.syncSession(body, machine)));
   router.post('/chat/claim', small, handle((body, signal, machine) => chat.claim(body, signal, machine)));
   router.post('/chat/delta', small, handle((body, _signal, machine) => chat.delta(body, machine)));
   router.post('/chat/activity', small, handle((body, _signal, machine) => chat.activity(body, machine)));

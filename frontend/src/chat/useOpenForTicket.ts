@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { useApolloClient } from '@apollo/client';
 import { CREATE_CHAT_SESSION } from '../graphql/mutations';
 import { GET_CHAT_SESSIONS } from '../graphql/queries';
-import { machineOf, type ChatSession } from './messages';
+import type { ChatSession } from './messages';
 import { chatStore } from './store';
 
 /**
@@ -14,15 +14,15 @@ export function useOpenForTicket() {
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState('');
 
-  const openForTicket = useCallback(async (ticketKey: string, machine?: string) => {
+  const openForTicket = useCallback(async (ticketKey: string) => {
     setOpening(true);
     setError('');
     try {
       const { data } = await client.query<{ chatSessions: ChatSession[] }>({ query: GET_CHAT_SESSIONS, variables: { source: 'dock', limit: 300 }, fetchPolicy: 'network-only' });
       // The list arrives newest first.
-      let session = data.chatSessions.find((item) => item.ticketKey === ticketKey && (!machine || machineOf(item) === machine));
+      let session = data.chatSessions.find((item) => item.ticketKey === ticketKey);
       if (!session) {
-        const created = await client.mutate<{ createChatSession: ChatSession }>({ mutation: CREATE_CHAT_SESSION, variables: { title: ticketKey, ticketKey, machine } });
+        const created = await client.mutate<{ createChatSession: ChatSession }>({ mutation: CREATE_CHAT_SESSION, variables: { title: ticketKey, ticketKey } });
         session = created.data?.createChatSession;
       }
       if (!session) throw new Error('DOCK did not return a session');

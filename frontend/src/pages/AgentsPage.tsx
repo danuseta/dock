@@ -9,11 +9,12 @@ import { isPhone } from '../lib/phone';
 import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
-import { PARKED_TEXT, START_FAILED_TEXT, completeRun, formatAge, hasTrouble, isArchived, offerOf, pageOf, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
+import { FILTER_KINDS, FILTER_MACHINES, PARKED_TEXT, START_FAILED_TEXT, completeRun, formatAge, hasTrouble, isArchived, kindLabel, matchesRunFilter, offerOf, pageOf, runFilterFromSearch, runFilterSearch, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunFilter, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
+import { KindBadge } from '../agents/KindBadge';
 import { RAIL_STAGES, railIndex } from '../agents/office/layout';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 import { AgentFlowGraph } from '../components/AgentFlowGraph';
-import { machineOf, machinePlace, ticketBalloons, type ChatMessage } from '../chat/messages';
+import { CHAT_MACHINE, machineOf, machinePlace, ticketBalloons, type ChatMessage } from '../chat/messages';
 import { MachineChip } from '../chat/MachineControls';
 import { MoveTicket } from '../agents/MoveTicket';
 import { CronSettingsDialog } from '../agents/CronSettingsDialog';
@@ -114,6 +115,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
   const [tableTab, setTableTab] = useState<TableTab>('active');
   const [sort, setSort] = useState<RunSort>({ column: 'activity', descending: false });
   const [page, setPage] = useState(1);
+  const [filter, setFilter] = useState<RunFilter>(() => runFilterFromSearch(window.location.search));
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now() / 1000), 1000);
@@ -125,12 +127,13 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
 
   const sampling = sampleStartedAt !== null;
   const sampleTick = sampling ? Math.floor(now - sampleStartedAt) : 0;
-  const runs = useMemo<AgentRun[]>(
+  const allRuns = useMemo<AgentRun[]>(
     () => (sampling
       ? sampleRuns(sampleTick).map((run) => (run.key === 'SAMPLE-2' ? { ...run, members: sampleTimeline(sampleTick).agents.filter((agent) => agent.parentId) } : run))
       : serverRuns || []),
     [sampling, sampleTick, serverRuns],
   );
+  const runs = useMemo(() => allRuns.filter((run) => matchesRunFilter(run, filter)), [allRuns, filter]);
   // Nothing picked yet: show a run that is still going, never one from the archive.
   const selected = runs.find((run) => run.key === selectedKey) || runs.find((run) => run.waiting && !isArchived(run)) || runs.find((run) => !isArchived(run)) || null;
 
@@ -166,6 +169,11 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
     } catch {
       // The view is a convenience; without storage it simply resets on reload.
     }
+  };
+  const chooseFilter = (next: RunFilter) => {
+    setFilter(next);
+    setPage(1);
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}${runFilterSearch(window.location.search, next)}`);
   };
   const sortBy = (column: RunSortColumn) => {
     setSort((current) => ({ column, descending: current.column === column ? !current.descending : false }));
@@ -208,7 +216,11 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
 
   if (isInitialQueryLoading(loading, data)) return <Page width="full"><LoadingSkeleton /></Page>;
 
-  const empty = runs.length === 0;
+  const empty = allRuns.length === 0;
+  const filterGroups = [
+    { name: 'machine', label: 'Machine', options: FILTER_MACHINES.map((value) => [value, value] as const) },
+    { name: 'kind', label: 'Type', options: FILTER_KINDS.map((value) => [value, kindLabel(value)] as const) },
+  ] as const;
 
   return (
     <Page width="full">
@@ -245,6 +257,29 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
       {cronError && <Card className="mb-4 border-status-conflict text-status-conflict" role="alert">{cronError}</Card>}
       <CronSettingsDialog open={showCron} onClose={() => setShowCron(false)} />
       <CronRow pollMs={POLL_MS} onOpenSettings={() => setShowCron(true)} />
+
+      {!empty && (
+        <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2" role="group" aria-label="Filter runs">
+          {filterGroups.map((group) => (
+            <div key={group.name} className="flex items-center gap-2">
+              <span className={sectionLabel}>{group.label}</span>
+              <div className="flex rounded-sm border border-border bg-surface-1 p-0.5" role="group" aria-label={`${group.label} shown`}>
+                {([[null, 'All'], ...group.options] as const).map(([value, label]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    className={cn('flex h-7 max-[760px]:h-11 items-center rounded-xs px-3 font-display text-xs font-semibold text-secondary-foreground transition-colors duration-150', filter[group.name] === value && 'bg-accent text-black')}
+                    aria-pressed={filter[group.name] === value}
+                    onClick={() => chooseFilter({ ...filter, [group.name]: value })}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <section className="mb-4 grid grid-cols-4 overflow-hidden rounded-md border border-border bg-surface-1 max-[700px]:grid-cols-2 [&>div]:border-r [&>div]:border-border [&>div:last-child]:border-r-0 max-[700px]:[&>div:nth-child(2)]:border-r-0 max-[700px]:[&>div:nth-child(-n+2)]:border-b" aria-label="Agent overview">
         {metrics.map((metric) => (
@@ -298,7 +333,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                             {cards.map((run) => (
                               <button key={run.key} type="button" className={cn('rounded-xs border border-border-glow border-l-[3px] bg-surface-0 px-2 py-1.5 text-left hover:border-accent', run.waiting ? 'border-l-amber-300' : hasTrouble(run) ? 'border-l-status-conflict' : 'border-l-status-merged', selected?.key === run.key && 'border-accent')} onClick={() => { setSelectedKey(run.key); setBoardOpen(false); }}>
                                 <span className="flex items-center justify-between gap-2 font-mono text-xs font-extrabold text-accent"><span>{run.key}</span><span className="font-semibold text-muted-foreground tabular-nums">{run.acPassed}/{run.acTotal}</span></span>
-                                <span className="mt-0.5 block font-mono text-[0.62rem] font-semibold text-muted-foreground">{machineOf(run)}</span>
+                                <span className="mt-0.5 flex flex-wrap gap-1"><MachineChip name={machineOf(run)} /><KindBadge kind={run.kind} /></span>
                                 <OfferBadge run={run} className="mt-0.5" />
                                 <span className="mt-0.5 line-clamp-2 text-[0.74rem] text-secondary-foreground">{run.waiting || run.title || 'Untitled'}</span>
                               </button>
@@ -364,7 +399,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                     )}
                     {listed.items.map((run) => (
                       <tr key={run.key} className={cn('cursor-pointer border-t border-border hover:bg-surface-1', selected?.key === run.key && 'bg-surface-1')} onClick={() => pickRun(run.key)}>
-                        <td className="px-4 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => pickRun(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><span className="sr-only">, machine </span><span className="ml-2 font-mono text-[0.62rem] font-semibold text-muted-foreground">{machineOf(run)}</span><OfferBadge run={run} className="ml-2" /><span className="mt-0.5 block max-w-[320px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
+                        <td className="px-4 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => pickRun(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><span className="sr-only">, machine </span><MachineChip name={machineOf(run)} className="ml-2" /><KindBadge kind={run.kind} className="ml-1" /><OfferBadge run={run} className="ml-2" /><span className="mt-0.5 block max-w-[320px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
                         <td className="px-4 py-3"><StageChip stage={run.stage} kind={run.kind} /></td>
                         <td className="px-4 py-3"><StatusChip status={statusOf(run)} review={run.review} /></td>
                         <td className="px-4 py-3 font-mono text-xs tabular-nums">{run.acPassed}/{run.acTotal}{run.acFailed > 0 && <span className="ml-1.5 text-status-conflict">{run.acFailed} failed</span>}</td>
@@ -394,12 +429,12 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
             <>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-xs border border-accent/30 bg-accent-dim px-[9px] py-[3px] font-mono text-sm font-extrabold text-accent">{selected.key}</span>
-                {selected.kind === 'review' && <span className="rounded-xs border border-border-glow px-2 py-0.5 font-mono text-[0.66rem] font-bold text-secondary-foreground">REVIEW</span>}
+                <KindBadge kind={selected.kind} />
                 <StageChip stage={selected.stage} kind={selected.kind} />
                 <StatusChip status={statusOf(selected)} review={selected.review} />
                 <MachineChip name={machineOf(selected)} />
                 <OfferBadge run={selected} />
-                {!selected.sample && <Button size="sm" className="ml-auto h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key, machineOf(selected))}><MessagesSquare size={13} aria-hidden="true" />Chat</Button>}
+                {!selected.sample && <Button size="sm" className="ml-auto h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key)}><MessagesSquare size={13} aria-hidden="true" />Chat</Button>}
               </div>
               {chatError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The chat could not be opened: {chatError}</p>}
               <h2 className="text-pretty font-display text-base leading-snug font-bold">{selected.title || 'Untitled'}</h2>
@@ -409,10 +444,10 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                 <div className="rounded-[8px] border border-amber-300/50 bg-amber-300/10 px-3 py-2.5 text-sm">
                   <b className="mb-0.5 block font-mono text-[0.66rem] font-bold uppercase tracking-[0.08em] text-amber-200">Waiting on you</b>
                   <span className="text-pretty">{selected.waiting}</span>
-                  <p className="mt-1.5 text-pretty text-xs text-muted-foreground">Answer here, or in the Claude Code session on {machinePlace(machineOf(selected))}.</p>
+                  <p className="mt-1.5 text-pretty text-xs text-muted-foreground">{machineOf(selected) === CHAT_MACHINE ? 'Answer here, or' : 'Answer'} in the Claude Code session on {machinePlace(machineOf(selected))}.</p>
                   {!selected.sample && (selected.waiting === PARKED_TEXT || selected.waiting === START_FAILED_TEXT)
                     ? <Button size="sm" variant="primary" className="mt-2 h-7 px-2.5" disabled={confirming} onClick={() => void runAction(async () => { await confirmOrchestration({ variables: { key: selected.key } }); await refetch(); })}>{selected.waiting === PARKED_TEXT ? 'Confirm and start' : 'Retry'}</Button>
-                    : !selected.sample && <Button size="sm" className="mt-2 h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key, machineOf(selected))}>Reply here</Button>}
+                    : !selected.sample && machineOf(selected) === CHAT_MACHINE && <Button size="sm" className="mt-2 h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key)}>Reply here</Button>}
                 </div>
               )}
 
