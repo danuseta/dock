@@ -232,7 +232,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
   return (
     <div className={cn('flex min-h-0 flex-col', className)}>
       {session && !hideMachine && <div className="flex flex-none items-center gap-2 border-b border-border bg-surface-0 px-3.5 py-1.5 font-mono text-[0.66rem] text-muted-foreground"><span>Runs on</span><MachineChip name={machine} online={machineUp} /></div>}
-      {session && <SessionHeader session={session} machine={machine} capabilities={capabilities} showTitle={!hideMachine} />}
+      {session && <SessionHeader session={session} showTitle={!hideMachine} />}
       <SessionStatusLine sessionId={sessionId} machine={machine} className="flex-none bg-surface-0" />
       <div ref={scrollRef} onScroll={handleScroll} className="min-h-[6.5rem] flex-1 overflow-y-auto overscroll-contain px-3.5 py-3" role="log" aria-label="Conversation">
         {loadingOlder && <p className="pb-2 text-center font-mono text-[0.66rem] text-muted-foreground" role="status">Loading older messages...</p>}

@@ -26,7 +26,7 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
   const textarea = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const attachments = useAttachments(sessionId, features.attachments);
-  const control = useTurnOptions(machine, features, sessionOptions);
+  const control = useTurnOptions(sessionId, machine, features, sessionOptions);
 
   const query = features.picker ? slashQuery(draft) : null;
   const pickerOpen = query !== null && !dismissed;

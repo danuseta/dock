@@ -4,6 +4,7 @@ import { cn } from '../../lib/cn';
 import { MODE_LABELS, PERMISSION_MODES, effortChoices, type ComposerFeatures, type MachineOptions, type TurnOptions } from './composerLogic';
 import { hasChangedChoice, optionsSummary } from './optionsSummary';
 import type { TurnOptionsControl } from './useTurnOptions';
+import { defaultLabel, defaultsText, modelsText, type SessionMachineOptions } from '../sessionOptions';
 
 interface OptionsBarProps {
   features: ComposerFeatures;
@@ -36,8 +37,9 @@ export const OptionsBar: React.FC<OptionsBarProps> = ({ features, control, disab
   const value = (field: keyof TurnOptions) => (options[field] as string | null) ?? '';
   const parts = optionsSummary(options, machine, { model: showModel, effort: efforts.length > 0, mode: modes.length > 0, fast: showFast });
   const panelId = 'chat-options-panel';
+  const named = machine as SessionMachineOptions;
   return (
-    <div className="flex min-w-0 flex-col gap-1.5" role="group" aria-label="Options for the next message">
+    <div className="flex min-w-0 flex-col gap-1.5" role="group" aria-label="Options for this session">
       <button
         type="button"
         aria-expanded={open}
@@ -59,7 +61,7 @@ export const OptionsBar: React.FC<OptionsBarProps> = ({ features, control, disab
       {showModel && (
         <Field label="Model">
           <select className={selectClass} value={value('model')} disabled={disabled} onChange={change(control.setModel)}>
-            <option value="">Default</option>
+            <option value="">{defaultLabel('model', named)}</option>
             {machine.models.map((model) => <option key={model.value} value={model.value}>{model.label}</option>)}
           </select>
         </Field>
@@ -67,7 +69,7 @@ export const OptionsBar: React.FC<OptionsBarProps> = ({ features, control, disab
       {efforts.length > 0 && (
         <Field label="Effort">
           <select className={selectClass} value={value('effort')} disabled={disabled} onChange={change(control.setEffort)}>
-            <option value="">Default</option>
+            <option value="">{defaultLabel('effort', named)}</option>
             {efforts.map((level) => <option key={level} value={level}>{level}</option>)}
           </select>
         </Field>
@@ -75,7 +77,7 @@ export const OptionsBar: React.FC<OptionsBarProps> = ({ features, control, disab
       {modes.length > 0 && (
         <Field label="Mode">
           <select className={selectClass} value={value('permissionMode')} disabled={disabled} onChange={change(control.setMode)}>
-            <option value="">Machine default</option>
+            <option value="">{defaultLabel('permissionMode', named)}</option>
             {modes.map((mode) => <option key={mode} value={mode}>{MODE_LABELS[mode] ?? mode}</option>)}
           </select>
         </Field>
@@ -92,6 +94,9 @@ export const OptionsBar: React.FC<OptionsBarProps> = ({ features, control, disab
           Fast mode
         </button>
       )}
+      <p className="w-full font-mono text-[0.62rem] text-muted-foreground [overflow-wrap:anywhere]">
+        Machine defaults: {defaultsText(named)}{machine.models.length > 0 ? ` · Models: ${modelsText(machine.models)}` : ''}
+      </p>
       </div>
     </div>
   );
