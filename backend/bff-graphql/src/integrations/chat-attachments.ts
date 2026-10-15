@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { once } from 'node:events';
 import { createWriteStream } from 'node:fs';
 import { mkdir, readdir, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
@@ -225,8 +226,9 @@ export class ChatAttachmentService {
     const target = this.file(id);
     await mkdir(this.dir(), { recursive: true });
     const gate = new UploadGate(declared, kind);
+    const out = createWriteStream(target, { flags: 'wx' });
     try {
-      await pipeline(body, gate, createWriteStream(target, { flags: 'wx' }));
+      await pipeline(body, gate, out);
       if (gate.size === 0) throw new AttachmentRefusal(400, 'The file is empty');
       const row = await this.store.create({
         id,
@@ -244,6 +246,7 @@ export class ChatAttachmentService {
       await this.prune(this.now());
       return toView(row);
     } catch (error) {
+      if (!out.closed) await once(out, 'close').catch(() => undefined);
       await removeFile(target);
       throw error;
     }
