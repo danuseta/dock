@@ -11,6 +11,7 @@ import { ChatAttachmentService } from '../integrations/chat-attachments';
 import {
   ASK_TTL_SECONDS,
   TAKEN_HARD_MS,
+  TAKEN_HARD_TEXT,
   TurnNotifier,
   checkAnswer,
   parseAsk,
@@ -768,11 +769,10 @@ test('a taken turn whose bridge goes silent ends as an error in two minutes, unl
   const session = await ctx.service.session(turn.sessionId);
   assert.deepStrictEqual([session?.status, session?.statusDetail], ['error', SILENT_TEXT]);
   assert.strictEqual(ctx.messages().find((message) => message.id === turn.replyTo).state, 'failed');
-  const late = await ctx.service.delta({ ...turn, items: [{ role: 'assistant', text: 'late', at: ctx.now().toISOString() }], done: true }, 'laptop');
-  assert.strictEqual(late?.status, 'error', 'a late delta does not revive the turn');
-  assert.strictEqual(ctx.messages().find((message) => message.id === turn.replyTo).state, 'failed');
   await ctx.service.sendMessage(turn.sessionId, 'again', MACHINES);
   assert.strictEqual((await ctx.service.session(turn.sessionId))?.status, 'queued');
+  await ctx.service.delta({ ...turn, items: [{ role: 'assistant', text: 'late', at: ctx.now().toISOString() }], done: true }, 'laptop');
+  assert.strictEqual(ctx.messages().find((message) => message.id === turn.replyTo).state, 'failed', 'a newer message is waiting: the old turn is not revived');
 
   const asking = setup();
   const askTurn = await takenTurn(asking);
@@ -795,6 +795,57 @@ test('a taken turn whose bridge goes silent ends as an error in two minutes, unl
   assert.strictEqual((await legacy.service.session(legacyTurn.sessionId))?.status, 'running', 'a bridge without capabilities keeps the old 15 minute rule');
   legacy.advance(STALE_TAKEN_MS);
   assert.strictEqual((await legacy.service.session(legacyTurn.sessionId))?.status, 'error');
+});
+
+test('a late delta from the machine revives a turn that was failed only for going quiet, and a later done settles it', async () => {
+  const ctx = setup();
+  const turn = await takenTurn(ctx);
+  const state = () => ctx.messages().find((message) => message.id === turn.replyTo).state;
+  ctx.advance(SILENT_TAKEN_MS + 1000);
+  assert.deepStrictEqual([(await ctx.service.session(turn.sessionId))?.status, state()], ['error', 'failed']);
+
+  const early = await ctx.service.delta({ ...turn, items: [{ role: 'assistant', text: 'still working', at: ctx.now().toISOString() }], detail: 'Bash' }, 'laptop');
+  assert.deepStrictEqual([early?.status, state()], ['running', 'taken']);
+  const revived = await ctx.service.session(turn.sessionId);
+  assert.deepStrictEqual([revived?.status, revived?.statusDetail], ['running', 'Bash']);
+  assert.ok(ctx.messages().some((message) => message.text === 'still working'), 'the items are stored');
+
+  const done = await ctx.service.delta({ ...turn, items: [{ role: 'assistant', text: 'summary', at: ctx.now().toISOString() }], done: true }, 'laptop');
+  assert.deepStrictEqual([done?.status, state()], ['idle', 'done']);
+
+  const lone = setup();
+  const loneTurn = await takenTurn(lone);
+  lone.advance(SILENT_TAKEN_MS + 1000);
+  await lone.service.session(loneTurn.sessionId);
+  const settled = await lone.service.delta({ ...loneTurn, items: [], done: true }, 'laptop');
+  assert.strictEqual(settled?.status, 'idle', 'a done as the first late delta settles at once');
+});
+
+test('a late delta does not revive a turn failed by a real error, the hard cap or an owner stop', async () => {
+  const errored = setup();
+  const erroredTurn = await takenTurn(errored);
+  await errored.service.delta({ ...erroredTurn, items: [], error: 'Claude Code exited with code 1' }, 'laptop');
+  const afterError = await errored.service.delta({ ...erroredTurn, items: [{ role: 'assistant', text: 'late', at: errored.now().toISOString() }], done: true }, 'laptop');
+  assert.strictEqual(afterError?.status, 'error');
+  assert.strictEqual(errored.messages().find((message) => message.id === erroredTurn.replyTo).state, 'failed');
+
+  const capped = setup();
+  const cappedTurn = await takenTurn(capped);
+  await capped.storage.moveChatMessage(cappedTurn.replyTo, cappedTurn.sessionId, 'taken', 'failed');
+  await capped.storage.updateChatSession(cappedTurn.sessionId, { status: 'error', statusDetail: TAKEN_HARD_TEXT });
+  assert.strictEqual((await capped.service.delta({ ...cappedTurn, items: [], done: true }, 'laptop'))?.status, 'error');
+  assert.strictEqual(capped.messages().find((message) => message.id === cappedTurn.replyTo).state, 'failed');
+
+  const stopped = setup();
+  const stoppedTurn = await takenTurn(stopped);
+  await stopped.service.stopTurn(stoppedTurn.sessionId);
+  stopped.advance(STOP_GRACE_MS + 1000);
+  await stopped.service.wait({ ...stoppedTurn, wait: 0 }, undefined, 'laptop');
+  await stopped.service.wait({ ...stoppedTurn, wait: 0 }, undefined, 'laptop');
+  assert.strictEqual((await stopped.service.session(stoppedTurn.sessionId))?.status, 'idle', 'the owner stop ended the turn');
+  const afterStop = await stopped.service.delta({ ...stoppedTurn, items: [{ role: 'assistant', text: 'late', at: stopped.now().toISOString() }], detail: 'Bash' }, 'laptop');
+  assert.strictEqual(afterStop?.status, 'idle');
+  assert.strictEqual(stopped.messages().find((message) => message.id === stoppedTurn.replyTo).state, 'done');
 });
 
 test('a stop the bridge never acknowledges ends the turn as stopped, even across a restart', async () => {
