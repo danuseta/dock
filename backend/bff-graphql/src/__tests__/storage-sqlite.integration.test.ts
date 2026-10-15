@@ -626,3 +626,15 @@ test('SQLite storage counts cron slots per machine and keeps DOCK work orders', 
   await storage.deleteTicketOrder('QRD-404');
   assert.deepStrictEqual([...(await storage.getTicketOrders()).entries()], [['QRD-7', 1]]);
 });
+
+test('SQLite switches to write-ahead logging and stays there', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const { prisma, useWriteAheadLog } = await import('../storage/client');
+  t.after(() => prisma.$disconnect());
+
+  assert.strictEqual(await useWriteAheadLog(), 'wal');
+  assert.strictEqual(await useWriteAheadLog(), 'wal', 'a second call changes nothing');
+  const [row] = await prisma.$queryRawUnsafe<Array<{ journal_mode: string }>>('PRAGMA journal_mode');
+  assert.strictEqual(row.journal_mode, 'wal');
+});
