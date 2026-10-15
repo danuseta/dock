@@ -22,6 +22,11 @@ export const CHAT_MACHINE_OPTIONS = gql`
       }
       modes
       fastAvailable
+      defaults {
+        model
+        effort
+        permissionMode
+      }
     }
   }
 `;

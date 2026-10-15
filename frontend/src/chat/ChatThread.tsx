@@ -10,7 +10,10 @@ import {
   type ChatMachine, type ChatMessage, type ChatSession,
 } from './messages';
 import { MachineChip } from './MachineControls';
+import { SessionHeader } from './SessionHeader';
 import { SessionStatusLine } from './StatusLine';
+import { Markdown } from './Markdown';
+import { recallMessages, rememberMessages } from './messageCache';
 import { ActivityGroup } from './activity/ActivityGroup';
 import { isThreadGroup } from './activity/activity';
 import { useTurnActivity } from './activity/useTurnActivity';
@@ -39,14 +42,19 @@ const timeOf = (at: string) => new Date(at).toLocaleString('en-GB', { day: '2-di
 
 export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, readOnlyAction, hideMachine }) => {
   const client = useApolloClient();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [hasOlder, setHasOlder] = useState(false);
+  const [recalled] = useState(() => recallMessages(sessionId));
+  const [messages, setMessages] = useState<ChatMessage[]>(() => recalled?.messages ?? []);
+  const [loaded, setLoaded] = useState(Boolean(recalled));
+  const [hasOlder, setHasOlder] = useState(recalled?.hasOlder ?? false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [sendError, setSendError] = useState('');
   const [stopRequested, setStopRequested] = useState(false);
   const messagesRef = useRef(messages);
+  const statusRef = useRef<string | undefined>(undefined);
+  const sessionRef = useRef(sessionId);
+  const inFlightRef = useRef(false);
+  const pollNowRef = useRef<() => void>(() => undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const heightBeforeOlder = useRef<number | null>(null);
@@ -54,12 +62,19 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     messagesRef.current = messages;
   }, [messages]);
 
+  useEffect(() => {
+    rememberMessages(sessionId, messages, hasOlder);
+  }, [sessionId, messages, hasOlder]);
+
   const { data, error: sessionError, refetch, startPolling, stopPolling } = useQuery<{ chatSession: ChatSession | null; chatBridge: { online: boolean; lastSeenAt?: string | null }; chatMachines?: ChatMachine[] | null }>(
     GET_CHAT_SESSION,
     { variables: { id: sessionId }, fetchPolicy: 'cache-and-network' },
   );
   const session = data?.chatSession;
   const status = session?.status;
+  useLayoutEffect(() => {
+    statusRef.current = status;
+  }, [status]);
   const activity = useTurnActivity(sessionId, status, messages, scrollRef);
   const busy = isTurnInProgress(status, messages);
   const pollMs = pollInterval(busy);
@@ -88,34 +103,43 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     return result.data.chatMessages;
   }, [client, sessionId]);
 
-  // One poll at a time. It also runs at once when the session's status changes, so the last lines of a turn do not wait for the slow poll.
   useEffect(() => {
-    let cancelled = false;
-    let inFlight = false;
+    sessionRef.current = sessionId;
+    return () => {
+      sessionRef.current = '';
+    };
+  }, [sessionId]);
+
+  // One poll at a time. A batch that arrives is kept as long as the thread still shows the same session, even when the poll restarts meanwhile.
+  useEffect(() => {
     const poll = async () => {
-      if (inFlight) return;
-      inFlight = true;
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
+      const requested = sessionId;
       try {
-        const cursor = pollCursor(messagesRef.current, status);
+        const cursor = pollCursor(messagesRef.current, statusRef.current);
         const batch = await fetchMessages(cursor === undefined ? { limit: NEWEST_PAGE } : { afterId: cursor });
-        if (cancelled) return;
+        if (sessionRef.current !== requested) return;
         if (cursor === undefined) setHasOlder(batch.length >= NEWEST_PAGE);
         setMessages((current) => mergeMessages(current, batch));
         setLoaded(true);
         setLoadError('');
       } catch (error) {
-        if (!cancelled) setLoadError(messageOf(error, 'The messages could not be loaded'));
+        if (sessionRef.current === requested) setLoadError(messageOf(error, 'The messages could not be loaded'));
       } finally {
-        inFlight = false;
+        inFlightRef.current = false;
       }
     };
+    pollNowRef.current = () => void poll();
     void poll();
     const timer = window.setInterval(() => void poll(), pollMs);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [fetchMessages, pollMs, status]);
+    return () => window.clearInterval(timer);
+  }, [fetchMessages, pollMs, sessionId]);
+
+  // The session's status changed: poll at once, so the last lines of a turn do not wait for the slow poll.
+  useEffect(() => {
+    pollNowRef.current();
+  }, [status]);
 
   const loadOlder = async () => {
     const before = oldestId(messagesRef.current);
@@ -208,7 +232,8 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
   return (
     <div className={cn('flex min-h-0 flex-col', className)}>
       {session && !hideMachine && <div className="flex flex-none items-center gap-2 border-b border-border bg-surface-0 px-3.5 py-1.5 font-mono text-[0.66rem] text-muted-foreground"><span>Runs on</span><MachineChip name={machine} online={machineUp} /></div>}
-      <SessionStatusLine sessionId={sessionId} className="flex-none bg-surface-0" />
+      {session && <SessionHeader session={session} machine={machine} capabilities={capabilities} showTitle={!hideMachine} />}
+      <SessionStatusLine sessionId={sessionId} machine={machine} className="flex-none bg-surface-0" />
       <div ref={scrollRef} onScroll={handleScroll} className="min-h-[6.5rem] flex-1 overflow-y-auto overscroll-contain px-3.5 py-3" role="log" aria-label="Conversation">
         {loadingOlder && <p className="pb-2 text-center font-mono text-[0.66rem] text-muted-foreground" role="status">Loading older messages...</p>}
         {!loaded && !loadError && !missing && <p className="py-6 text-center text-sm text-muted-foreground" role="status">Loading the conversation...</p>}
@@ -225,18 +250,25 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
             </li>
           ) : (
             <li key={message.id} className={cn('flex min-w-0 max-w-[86%] flex-col', message.role === 'user' ? 'items-end self-end' : 'items-start self-start')}>
-              {(message.text || !message.attachments?.length) && (
+              {(message.text || !message.attachments?.length) && (message.role === 'user' ? (
                 <p
                   className={cn(
                     'max-w-full whitespace-pre-wrap break-words rounded-[10px] border px-3 py-2 text-[0.82rem] leading-relaxed [overflow-wrap:anywhere]',
-                    message.role === 'user' ? 'rounded-br-xs border-accent/30 bg-accent-dim' : 'rounded-bl-xs border-border bg-surface-1',
+                    'rounded-br-xs border-accent/30 bg-accent-dim',
                     isOptimistic(message) && 'opacity-60',
                   )}
                   title={timeOf(message.at)}
                 >
-                  <span className="sr-only">{message.role === 'user' ? 'You: ' : 'Claude: '}</span>{message.text}
+                  <span className="sr-only">You: </span>{message.text}
                 </p>
-              )}
+              ) : (
+                <div
+                  className="max-w-full break-words rounded-[10px] rounded-bl-xs border border-border bg-surface-1 px-3 py-2 text-[0.82rem] leading-relaxed [overflow-wrap:anywhere]"
+                  title={timeOf(message.at)}
+                >
+                  <span className="sr-only">Claude: </span><Markdown text={message.text} />
+                </div>
+              ))}
               {message.attachments && <MessageAttachments attachments={message.attachments} />}
               {isOptimistic(message) && <span className="mt-0.5 font-mono text-[0.62rem] text-muted-foreground">Sending...</span>}
               {message.stopped && message.state !== 'queued' && message.state !== 'taken' ? (
