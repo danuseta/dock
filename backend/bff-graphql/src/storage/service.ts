@@ -602,6 +602,18 @@ export class StorageService {
     return { busy: Number(row?.busy ?? 0), waiting: Number(row?.waiting ?? 0) };
   }
 
+  /** Ticket keys whose latest cron session, opened after `since`, ended without a reply and has nothing queued or running. */
+  async getDeadCronStartKeys(since: Date): Promise<string[]> {
+    const rows = await this.db.$queryRaw<Array<{ ticketKey: string }>>(Prisma.sql`
+      SELECT s."ticketKey" AS "ticketKey"
+      FROM "ChatSession" s
+      WHERE s."origin" = 'cron' AND s."source" = 'dock' AND s."ticketKey" IS NOT NULL AND s."status" = 'idle' AND s."startedAt" >= ${since}
+        AND s."startedAt" = (SELECT MAX(x."startedAt") FROM "ChatSession" x WHERE x."origin" = 'cron' AND x."ticketKey" = s."ticketKey")
+        AND EXISTS (SELECT 1 FROM "ChatMessage" m WHERE m."sessionId" = s."id" AND m."role" = 'user')
+        AND NOT EXISTS (SELECT 1 FROM "ChatMessage" m WHERE m."sessionId" = s."id" AND (m."role" <> 'user' OR m."state" IN ('queued', 'taken')))`);
+    return rows.map((row) => row.ticketKey);
+  }
+
   /** The state check is part of the write, so two bridges cannot take the same message. */
   async moveChatMessage(id: number, sessionId: string, from: string, to: string, extra: { takenAt?: Date } = {}) {
     const moved = await this.db.chatMessage.updateMany({ where: { id, sessionId, state: from }, data: { state: to, ...extra } });

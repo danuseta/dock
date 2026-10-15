@@ -8,6 +8,7 @@ import { pushService } from './push';
 const storage = new StorageService();
 const jira = new JiraAPI();
 const SESSIONS_LOOKED_AT = 200;
+const DEAD_START_LOOKBACK_MS = 2 * 24 * 3600 * 1000;
 
 /** The cron wired to the real storage, Jira, chat and orchestrator services. */
 export const orchestratorCron = new OrchestratorCron({
@@ -26,6 +27,7 @@ export const orchestratorCron = new OrchestratorCron({
   online: (machine) => chatService.bridge(machine).online,
   fiveHourUsed: (machine) => chatService.statusSnapshot(machine).limits?.fiveHour ?? null,
   takenKeys: async () => (await storage.getOrchestratorRuns()).map((run) => run.key),
+  deadStarts: () => storage.getDeadCronStartKeys(new Date(Date.now() - DEAD_START_LOOKBACK_MS)),
   runs: () => orchestratorService.list(),
   saveRun: (ledger, machine) => orchestratorService.ingestLedger(ledger, new Date(), machine),
   openSession: (input) => chatService.createSession(input),

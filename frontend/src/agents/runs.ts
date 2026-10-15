@@ -238,3 +238,5 @@ export function pageOf<T>(items: T[], page: number, size: number): { items: T[];
 
 // The gate the orchestrator cron puts on a ticket it did not start. Must match PARKED_TEXT in backend/bff-graphql/src/integrations/orchestrator-cron.ts.
 export const PARKED_TEXT = 'No acceptance criteria on the ticket. Confirm to start anyway, or fill them in.';
+// The gate on a cron ticket whose session ended before the agent answered. Must match START_FAILED_TEXT in backend/bff-graphql/src/integrations/orchestrator-cron.ts.
+export const START_FAILED_TEXT = 'The cron session ended before the agent answered. Fix the machine, then retry.';
