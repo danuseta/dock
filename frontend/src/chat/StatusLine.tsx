@@ -43,8 +43,8 @@ export const SessionStatusView: React.FC<{ status: ChatSessionStatus; now: numbe
   );
 };
 
-export const SessionStatusLine: React.FC<{ sessionId: string; className?: string }> = ({ sessionId, className }) => {
-  const { status, now } = useChatStatus();
+export const SessionStatusLine: React.FC<{ sessionId: string; machine?: string | null; className?: string }> = ({ sessionId, machine, className }) => {
+  const { status, now } = useChatStatus(machine);
   const own = status?.sessions.find((item) => item.sessionId === sessionId);
   return own ? <SessionStatusView status={own} now={now} className={cn('border-b border-border px-3.5 py-1.5', className)} /> : null;
 };

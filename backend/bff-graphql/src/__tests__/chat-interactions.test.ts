@@ -189,6 +189,8 @@ const attachmentsStub = (calls: string[] = [], overrides: Partial<Pick<ChatAttac
   deleteForSession: async (sessionId: string) => { calls.push(`delete:${sessionId}`); },
   prune: async () => { calls.push('prune'); },
   release: async (messageId: number) => { calls.push(`release:${messageId}`); },
+  receive: async () => { throw new OrchestratorInputError('no upload'); },
+  discard: async () => 'missing' as const,
   ...overrides,
 });
 
@@ -373,9 +375,9 @@ test('turn options are parsed and checked against the machine capabilities and c
   assert.strictEqual(JSON.parse(ctx.messages().find((message) => message.id === auto.id).options).permissionMode, 'auto', 'the cron starts tickets in auto mode');
   const sent = await ctx.service.sendMessage(second.id, 'hi', MACHINES, { options: { model: 'sonnet', effort: 'high', permissionMode: 'plan' } });
   assert.deepStrictEqual(JSON.parse(ctx.messages().find((message) => message.id === sent.id).options), { model: 'sonnet', effort: 'high', permissionMode: 'plan', fast: null });
-  assert.deepStrictEqual(JSON.parse(ctx.sessions.get(second.id).options), { model: 'sonnet', effort: 'high', permissionMode: 'plan', fast: null }, 'options are stored on the session too');
-  assert.deepStrictEqual((await ctx.service.session(second.id))?.options, { model: 'sonnet', effort: 'high', permissionMode: 'plan', fast: null });
-  assert.strictEqual((await ctx.service.session(dock.id))?.options, null);
+  assert.deepStrictEqual(JSON.parse(ctx.sessions.get(second.id).options), { model: null, effort: null, permissionMode: 'auto', fast: null }, 'a choice sent with one message is not written to the session');
+  assert.deepStrictEqual((await ctx.service.session(second.id))?.options, { model: null, effort: null, permissionMode: 'auto', fast: null });
+  assert.deepStrictEqual((await ctx.service.session(dock.id))?.options, { model: null, effort: null, permissionMode: 'auto', fast: null }, 'a new DOCK session starts in auto mode');
 
   const noCaps = setup();
   const lone = await noCaps.service.createSession({ title: 'Old bridge', machine: 'workspace' });
@@ -1090,7 +1092,10 @@ async function ingestEnv(t: TestContext, chat: ChatService, memory: ReturnType<t
     request.end(JSON.stringify(body));
     return request;
   };
-  return { post, open };
+  const raw = (route: string, body: Buffer | string, type: string, machine: keyof typeof tokens | null = 'laptop') => fetch(`http://127.0.0.1:${address.port}/ingest/orchestrator/${route}`, {
+    method: 'POST', headers: { 'content-type': type, ...(machine ? { authorization: `Bearer ${tokens[machine]}` } : {}) }, body: typeof body === 'string' ? body : new Uint8Array(body),
+  });
+  return { post, open, raw };
 }
 
 function realAttachments(dir: string, memory: ReturnType<typeof memoryStorage>) {
@@ -1219,4 +1224,186 @@ test('a bridge that hangs up on /chat/wait releases its waiter', async (t) => {
   third.destroy();
   await until(() => chat.waiters() === 0);
   assert.strictEqual(chat.waiters(), 0);
+});
+
+test('the catalogue carries the machine defaults, and a catalogue without them reads as no defaults', async () => {
+  const none = { model: null, effort: null, permissionMode: null };
+  assert.deepStrictEqual(parseCatalog(CATALOG).defaults, none);
+  assert.deepStrictEqual(parseCatalog({ ...CATALOG, defaults: 'x' }).defaults, none);
+  assert.deepStrictEqual(
+    parseCatalog({ ...CATALOG, defaults: { model: 'claude-opus-5-5', effort: 'high', permissionMode: 'auto' } }).defaults,
+    { model: 'claude-opus-5-5', effort: 'high', permissionMode: 'auto' },
+  );
+  assert.deepStrictEqual(
+    parseCatalog({ ...CATALOG, defaults: { model: 'opus[1m]', effort: '--bad', permissionMode: 'two words' } }).defaults,
+    { model: 'opus[1m]', effort: null, permissionMode: null },
+    'only a short safe word is kept',
+  );
+  assert.deepStrictEqual(parseCatalog({ ...CATALOG, defaults: { model: 5, effort: null } }).defaults, none);
+
+  const ctx = setup();
+  assert.strictEqual(await ctx.service.machineOptions('laptop', MACHINES), null);
+  await ctx.service.claim({ wait: 0, caps: { ...CAPS, catalogHash: 'abc123' } }, undefined, 'laptop');
+  await ctx.service.ingestCatalog({ ...CATALOG, defaults: { model: 'sonnet', effort: 'high', permissionMode: 'default' } }, 'laptop');
+  assert.deepStrictEqual((await ctx.service.machineOptions('laptop', MACHINES))?.defaults, { model: 'sonnet', effort: 'high', permissionMode: 'default' });
+  await ctx.service.ingestCatalog(CATALOG, 'laptop');
+  assert.deepStrictEqual((await ctx.service.machineOptions('laptop', MACHINES))?.defaults, none);
+});
+
+test('a session keeps its own options, and a message overlays them field by field', async () => {
+  const ctx = setup();
+  const caps = { ...CAPS, catalogHash: 'abc123', modes: [...CAPS.modes, 'auto'] };
+  await ctx.service.claim({ wait: 0, caps }, undefined, 'laptop');
+  await ctx.service.ingestCatalog(CATALOG, 'laptop');
+  const dock = await ctx.service.createSession({ title: 'Own options' });
+  const stored = (id: number) => JSON.parse(ctx.messages().find((message) => message.id === id).options);
+  const finish = async (id: number) => {
+    await ctx.service.claim({ wait: 0, caps }, undefined, 'laptop');
+    await ctx.service.delta({ sessionId: dock.id, replyTo: id, done: true }, 'laptop');
+  };
+
+  const set = await ctx.service.setSessionOptions(dock.id, { model: 'sonnet', effort: 'low', permissionMode: 'plan' });
+  assert.deepStrictEqual(set.options, { model: 'sonnet', effort: 'low', permissionMode: 'plan', fast: null });
+
+  const plain = await ctx.service.sendMessage(dock.id, 'one', MACHINES);
+  assert.deepStrictEqual(stored(plain.id), { model: 'sonnet', effort: 'low', permissionMode: 'plan', fast: null }, 'the message carries the session options');
+  await finish(plain.id);
+
+  const over = await ctx.service.sendMessage(dock.id, 'two', MACHINES, { options: { effort: 'high', permissionMode: 'auto' } });
+  assert.deepStrictEqual(stored(over.id), { model: 'sonnet', effort: 'high', permissionMode: 'auto', fast: null }, 'the message wins field by field');
+  assert.deepStrictEqual((await ctx.service.session(dock.id))?.options, { model: 'sonnet', effort: 'low', permissionMode: 'plan', fast: null }, 'and leaves the session as it was');
+  await finish(over.id);
+
+  await assert.rejects(ctx.service.setSessionOptions(dock.id, { model: 'opus' }), /not offered/);
+  await assert.rejects(ctx.service.setSessionOptions(dock.id, { permissionMode: 'bypassPermissions' }), OrchestratorInputError);
+  await assert.rejects(ctx.service.setSessionOptions(dock.id, { model: 'sonnet', effort: 'xhigh' }), /effort/);
+  await assert.rejects(ctx.service.setSessionOptions('unknown-session', { model: 'sonnet' }), /Unknown chat session/);
+  assert.deepStrictEqual((await ctx.service.session(dock.id))?.options, { model: 'sonnet', effort: 'low', permissionMode: 'plan', fast: null });
+
+  assert.strictEqual((await ctx.service.setSessionOptions(dock.id, {})).options, null);
+  const bare = await ctx.service.sendMessage(dock.id, 'three', MACHINES);
+  assert.strictEqual(ctx.messages().find((message) => message.id === bare.id).options, null, 'no options at all means the machine decides');
+});
+
+test('stored session options a machine cannot honour are left out instead of refusing the message', async () => {
+  const old = setup();
+  const lone = await old.service.createSession({ title: 'Old bridge' });
+  assert.strictEqual((await old.service.session(lone.id))?.options?.permissionMode, 'auto');
+  const sent = await old.service.sendMessage(lone.id, 'hi', MACHINES);
+  assert.strictEqual(old.messages().find((message) => message.id === sent.id).options, null, 'a bridge without capabilities gets nothing');
+  const claim = await old.service.claim({ wait: 0 }, undefined, 'laptop');
+  assert.deepStrictEqual(claim.message, { id: sent.id, sessionId: lone.id, text: 'hi', claudeSessionId: null, forkFrom: null });
+
+  const ctx = setup();
+  await ctx.service.claim({ wait: 0, caps: { ...CAPS, catalogHash: 'abc123' } }, undefined, 'laptop');
+  await ctx.service.ingestCatalog(CATALOG, 'laptop');
+  const dock = await ctx.service.createSession({ title: 'No auto' });
+  await ctx.service.setSessionOptions(dock.id, { model: 'sonnet', permissionMode: 'plan' });
+  await ctx.service.ingestCatalog({ ...CATALOG, models: [{ value: 'haiku', label: 'Haiku', efforts: [], fast: false }] }, 'laptop');
+  const sent2 = await ctx.service.sendMessage(dock.id, 'hi', MACHINES);
+  assert.deepStrictEqual(JSON.parse(ctx.messages().find((message) => message.id === sent2.id).options), { model: null, effort: null, permissionMode: 'plan', fast: null }, 'the model the machine no longer offers is dropped');
+});
+
+test('the first message names a session that has no title, and only then', async () => {
+  const ctx = setup();
+  const blank = await ctx.service.createSession({});
+  assert.strictEqual(blank.title, '');
+  const text = `  Review <b>this</b>\n\n   PR ${'x'.repeat(100)}`;
+  const sent = await ctx.service.sendMessage(blank.id, text, MACHINES);
+  const title = (await ctx.service.session(blank.id))?.title ?? '';
+  assert.strictEqual(title.length, 80);
+  assert.ok(title.startsWith('Review this PR xxxx'));
+  await ctx.service.claim({ wait: 0 }, undefined, 'laptop');
+  await ctx.service.delta({ sessionId: blank.id, replyTo: sent.id, done: true }, 'laptop');
+  await ctx.service.sendMessage(blank.id, 'something else', MACHINES);
+  assert.strictEqual((await ctx.service.session(blank.id))?.title, title, 'a later message does not rename it');
+
+  const named = await ctx.service.createSession({ title: 'QRD-1' });
+  await ctx.service.sendMessage(named.id, 'hello there', MACHINES);
+  assert.strictEqual((await ctx.service.session(named.id))?.title, 'QRD-1');
+
+  const renamed = await ctx.service.createSession({});
+  await ctx.service.renameSession(renamed.id, 'Mine');
+  await ctx.service.sendMessage(renamed.id, 'hello there', MACHINES);
+  assert.strictEqual((await ctx.service.session(renamed.id))?.title, 'Mine');
+});
+
+function uploadStore(memory: ReturnType<typeof memoryStorage>) {
+  const rows = new Map<string, any>();
+  const live = () => [...rows.values()].filter((row) => row.state !== 'deleted');
+  const store = {
+    create: async (row: any) => { rows.set(row.id, { ...row }); return row; },
+    get: async (id: string) => rows.get(id) ?? null,
+    getMany: async (ids: string[]) => ids.flatMap((id) => (rows.has(id) ? [rows.get(id)] : [])),
+    forMessages: async (ids: number[]) => live().filter((row) => ids.includes(row.messageId)),
+    countBySessionState: async (sessionId: string, state: string) => live().filter((row) => row.sessionId === sessionId && row.state === state).length,
+    update: async (id: string, data: object) => { Object.assign(rows.get(id) ?? {}, data); },
+    claim: async (sessionId: string, ids: string[], messageId: number) => {
+      const hit = live().filter((row) => ids.includes(row.id) && row.sessionId === sessionId && row.state === 'uploaded');
+      for (const row of hit) Object.assign(row, { messageId, state: 'attached' });
+      return hit.length;
+    },
+    release: async (messageId: number) => { for (const row of live()) if (row.messageId === messageId && row.state === 'attached') Object.assign(row, { messageId: null, state: 'uploaded' }); },
+    remove: async (id: string) => { rows.delete(id); },
+    removeUploaded: async (id: string) => rows.get(id)?.state === 'uploaded' && rows.delete(id),
+    purgeDeleted: async () => undefined,
+    forSession: async (sessionId: string) => live().filter((row) => row.sessionId === sessionId),
+    live: async () => live(),
+    removeSession: async () => undefined,
+  } as unknown as ChatAttachmentStore;
+  const lookup = {
+    session: async (id: string) => memory.sessions.get(id) ?? null,
+    message: async (id: number) => memory.messages().find((message) => message.id === id) ?? null,
+  };
+  return { rows, store, lookup };
+}
+
+test('a file from the agent becomes an assistant message of the turn, and every wrong caller is refused', async (t) => {
+  const memory = memoryStorage();
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'dock-upload-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { rows, store, lookup } = uploadStore(memory);
+  const chat = new ChatService(memory.storage, undefined, undefined, new ChatAttachmentService(store, lookup, { dir: () => dir }));
+  const env = await ingestEnv(t, chat, memory);
+  const upload = (query: Record<string, string>, body: Buffer | string, type: string, machine: 'laptop' | 'workspace' = 'laptop') => env.raw(
+    `chat/upload?${new URLSearchParams(query)}`, body, type, machine,
+  );
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 1)]);
+
+  const dock = await chat.createSession({ title: 'Files' });
+  const sent = await chat.sendMessage(dock.id, 'screenshot please', MACHINES);
+  await chat.claim({ wait: 0, caps: CAPS }, undefined, 'laptop');
+  const query = { sessionId: dock.id, replyTo: String(sent.id), name: 'shot.png' };
+
+  const ok = await upload(query, png, 'image/png');
+  const body = await ok.json() as { ok: boolean; result: { messageId: number } };
+  assert.strictEqual(ok.status, 200);
+  assert.strictEqual(body.ok, true);
+  const message = memory.messages().find((item) => item.id === body.result.messageId);
+  assert.deepStrictEqual([message.role, message.state, message.text, message.sessionId], ['assistant', 'done', 'Attachment: shot.png', dock.id]);
+  const [row] = [...rows.values()];
+  assert.deepStrictEqual([row.messageId, row.state, row.mime, row.name], [message.id, 'attached', 'image/png', 'shot.png']);
+  assert.strictEqual(memory.sessions.get(dock.id).messageCount, 2);
+  const listed = await chat.withAttachments([{ id: message.id, role: 'assistant' }, { id: sent.id, role: 'user' }]);
+  assert.deepStrictEqual(listed.map((item) => item.attachments.length), [1, 0], 'an assistant row carries its attachments');
+
+  const refused = async (response: Response, status: number) => {
+    assert.strictEqual(response.status, status);
+    await response.arrayBuffer();
+  };
+  await refused(await upload(query, png, 'image/png', 'workspace'), 400);
+  await refused(await upload({ ...query, sessionId: 'unknown-session' }, png, 'image/png'), 400);
+  await refused(await upload({ ...query, replyTo: '9999' }, png, 'image/png'), 400);
+  await refused(await upload({ ...query, replyTo: String(message.id) }, png, 'image/png'), 400);
+  await refused(await upload({ ...query, replyTo: 'x' }, png, 'image/png'), 400);
+  await refused(await env.raw(`chat/upload?${new URLSearchParams(query)}`, png, 'image/png', null), 401);
+  await refused(await upload(query, Buffer.alloc(6 * 1024 * 1024, 1), 'image/png'), 413);
+  await refused(await upload(query, Buffer.from('PK'), 'application/zip'), 415);
+  await refused(await upload(query, Buffer.from('not an image at all'), 'image/png'), 415);
+  await refused(await upload(query, Buffer.alloc(0), 'text/plain'), 400);
+  assert.strictEqual(memory.messages().filter((item) => item.role === 'assistant').length, 1, 'a refused file leaves no message');
+  assert.strictEqual(rows.size, 1, 'and no stored file');
+
+  await chat.syncSession({ session: { id: 'cli-session', title: 'Terminal', startedAt: '2026-10-12T00:00:00Z', lastMessageAt: '2026-10-12T00:00:00Z' }, messages: [] }, 'laptop');
+  await refused(await upload({ ...query, sessionId: 'cli-session' }, png, 'image/png'), 400);
 });

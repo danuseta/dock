@@ -359,7 +359,7 @@ export class StorageService {
 
   createChatSession(data: {
     id: string; source: string; machine?: string; title: string; ticketKey: string | null; forkFrom?: string | null;
-    messageCount?: number; startedAt: Date; lastMessageAt: Date; origin?: 'cron' | 'manual';
+    messageCount?: number; startedAt: Date; lastMessageAt: Date; origin?: 'cron' | 'manual'; options?: string | null;
   }) {
     return this.db.chatSession.create({ data });
   }

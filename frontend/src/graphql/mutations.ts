@@ -337,3 +337,17 @@ export const SEND_TEST_PUSH = gql`
     sendTestPush
   }
 `;
+
+export const SET_CHAT_SESSION_OPTIONS = gql`
+  mutation SetChatSessionOptions($id: ID!, $options: ChatTurnOptionsInput!) {
+    setChatSessionOptions(id: $id, options: $options) {
+      ${CHAT_SESSION_FIELDS}
+      options {
+        model
+        effort
+        permissionMode
+        fast
+      }
+    }
+  }
+`;

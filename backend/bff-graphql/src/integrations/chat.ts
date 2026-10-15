@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { Readable } from 'node:stream';
 import { StorageService } from '../storage/service';
 import {
   ACTIVITY_DETAIL_KEEP_MS,
@@ -33,7 +34,9 @@ import {
   TurnNotifier,
   WAIT_TOUCH_MS,
   checkAnswer,
+  NO_DEFAULTS,
   checkTurnOptions,
+  mergeTurnOptions,
   parseAsk,
   parseCaps,
   parseCatalog,
@@ -44,6 +47,7 @@ import {
   parseTurnOptions,
   parseWait,
   searchCommands,
+  usableTurnOptions,
   type AnswerInput,
   type BridgeCaps,
   type Catalog,
@@ -77,6 +81,10 @@ export const STATUS_STALE_MS = 5 * 60 * 1000;
 export const MAX_STATUS_SESSIONS = 200;
 // Limits outlive a restart; after the 7 day window has passed they describe nothing.
 const LIMITS_KEEP_SECONDS = 8 * 24 * 60 * 60;
+const STATUS_KEEP_SECONDS = 30 * 24 * 60 * 60;
+const MANUAL_SESSION_OPTIONS = { model: null, effort: null, permissionMode: 'auto', fast: null };
+const TITLE_FROM_TEXT_CHARS = 80;
+const MAX_UPLOAD_NAME_CHARS = 200;
 export const STOPPED_TEXT = 'Stopped';
 export const STOPPED_QUEUED_TEXT = 'Stopped before it started';
 export const ATTACHMENT_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
@@ -281,6 +289,7 @@ export function parseStatus(input: unknown) {
     contextTokens: optionalNumber(input.contextTokens, 'contextTokens'),
     contextSize: optionalNumber(input.contextSize, 'contextSize'),
     costUsd: optionalNumber(input.costUsd, 'costUsd'),
+    turnCostUsd: optionalNumber(input.turnCostUsd, 'turnCostUsd'),
     cacheWarm: optionalFlag(input.cacheWarm, 'cacheWarm'),
     cacheHitRatio: optionalNumber(input.cacheHitRatio, 'cacheHitRatio'),
     fiveHour: limitWindow(input.fiveHour, 'fiveHour'),
@@ -288,7 +297,8 @@ export function parseStatus(input: unknown) {
   };
 }
 
-type ParsedStatus = ReturnType<typeof parseStatus>;
+type ParsedStatus = Omit<ReturnType<typeof parseStatus>, 'turnCostUsd'>;
+type SavedStatus = ParsedStatus & { receivedAt: Date };
 type LimitWindow = NonNullable<ReturnType<typeof limitWindow>>;
 type LimitsSeen = { fiveHour: LimitWindow | null; sevenDay: LimitWindow | null; receivedAt: Date };
 
@@ -377,6 +387,11 @@ function toSession(row: SessionRow, lastText: string | null, waiting = false) {
   };
 }
 
+/** Same rule as the terminal sessions: markup tags out, whitespace folded, the first 80 characters. */
+function titleFromText(value: string): string {
+  return value.replace(/<\/?[a-z_-]+(?:\s[^>]*)?>/gi, ' ').trim().replace(/\s+/g, ' ').slice(0, TITLE_FROM_TEXT_CHARS).trim();
+}
+
 function toMessage(row: MessageRow) {
   return { id: row.id, sessionId: row.sessionId, role: row.role, text: row.text, state: row.state, at: row.at.toISOString(), stopped: Boolean(row.stopRequestedAt) };
 }
@@ -396,7 +411,7 @@ function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
 export class ChatService {
   private readonly bridgeSeenAt = new Map<string, Date>();
   private activityWrites: Promise<unknown> = Promise.resolve();
-  private readonly sessionStatus = new Map<string, Map<string, ParsedStatus & { receivedAt: Date }>>();
+  private readonly sessionStatus = new Map<string, Map<string, SavedStatus>>();
   private readonly limitsSeen = new Map<string, LimitsSeen>();
   private lastActivityPruneAt = 0;
   private lastAttachmentPruneAt = 0;
@@ -410,7 +425,7 @@ export class ChatService {
     private readonly storage = new StorageService(),
     private readonly now: () => Date = () => new Date(),
     private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void> = defaultSleep,
-    private readonly attachments: Pick<ChatAttachmentService, 'attach' | 'release' | 'forMessages' | 'forClaim' | 'openForBridge' | 'deleteForSession' | 'prune'> = chatAttachmentService,
+    private readonly attachments: Pick<ChatAttachmentService, 'attach' | 'release' | 'forMessages' | 'forClaim' | 'openForBridge' | 'deleteForSession' | 'prune' | 'receive' | 'discard'> = chatAttachmentService,
   ) {}
 
   private serial<T>(work: () => Promise<T>): Promise<T> {
@@ -541,6 +556,7 @@ export class ChatService {
       models: catalog?.models ?? [],
       modes: caps?.modes ?? [],
       fastAvailable: caps?.features.includes('fast') === true && catalog?.fast.available === true,
+      defaults: catalog?.defaults ?? NO_DEFAULTS,
     };
   }
 
@@ -582,7 +598,7 @@ export class ChatService {
   }
 
   async withAttachments<T extends { id: number; role: string }>(rows: T[]) {
-    const ids = rows.filter((row) => row.role === 'user').map((row) => row.id);
+    const ids = rows.filter((row) => row.role === 'user' || row.role === 'assistant').map((row) => row.id);
     let byMessage: Awaited<ReturnType<ChatAttachmentService['forMessages']>> = new Map();
     if (ids.length > 0) {
       try {
@@ -726,15 +742,17 @@ export class ChatService {
   }
 
   async ingestStatus(input: unknown, machine: string) {
-    const status = parseStatus(input);
-    const known = await this.storage.getChatSession(status.sessionId);
-    if (known && known.machine !== machine) return { sessionId: status.sessionId, ignored: true, owner: known.machine };
+    const { turnCostUsd, ...parsed } = parseStatus(input);
+    const known = await this.storage.getChatSession(parsed.sessionId);
+    if (known && known.machine !== machine) return { sessionId: parsed.sessionId, ignored: true, owner: known.machine };
     const receivedAt = this.now();
-    const mine = this.sessionStatus.get(machine) ?? new Map<string, ParsedStatus & { receivedAt: Date }>();
+    const mine = this.sessionStatus.get(machine) ?? new Map<string, SavedStatus>();
     this.sessionStatus.set(machine, mine);
+    const status = known?.source === 'dock' ? this.carryOver(parsed, mine.get(parsed.sessionId), turnCostUsd) : parsed;
     mine.delete(status.sessionId);
     mine.set(status.sessionId, { ...status, receivedAt });
     if (mine.size > MAX_STATUS_SESSIONS) mine.delete(mine.keys().next().value!);
+    if (known?.source === 'dock') await this.saveSessionStatus();
     if (status.fiveHour || status.sevenDay) {
       this.limitsSeen.set(machine, { fiveHour: status.fiveHour, sevenDay: status.sevenDay, receivedAt });
       await this.storage.upsertCache('chat', 'limits', Object.fromEntries(this.limitsSeen), LIMITS_KEEP_SECONDS).catch(() => undefined);
@@ -742,14 +760,60 @@ export class ChatService {
     return { sessionId: status.sessionId };
   }
 
-  /** Reads the limits the last process saved, so a restart does not blank them until the next push. */
+  /** A DOCK turn reports only what changed: a field it leaves out keeps its last value, and the turn's cost adds to the total. */
+  private carryOver(status: ParsedStatus, previous: SavedStatus | undefined, turnCostUsd: number | null): ParsedStatus {
+    return {
+      ...status,
+      model: status.model ?? previous?.model ?? null,
+      effort: status.effort ?? previous?.effort ?? null,
+      fastMode: status.fastMode ?? previous?.fastMode ?? null,
+      contextPercentage: status.contextPercentage ?? previous?.contextPercentage ?? null,
+      contextTokens: status.contextTokens ?? previous?.contextTokens ?? null,
+      contextSize: status.contextSize ?? previous?.contextSize ?? null,
+      costUsd: turnCostUsd === null ? status.costUsd ?? previous?.costUsd ?? null : (previous?.costUsd ?? 0) + turnCostUsd,
+      cacheWarm: status.cacheWarm ?? previous?.cacheWarm ?? null,
+      cacheHitRatio: status.cacheHitRatio ?? previous?.cacheHitRatio ?? null,
+    };
+  }
+
+  private saveSessionStatus() {
+    const saved = Object.fromEntries([...this.sessionStatus].map(([machine, byId]) => [
+      machine,
+      [...byId.values()].map(({ fiveHour, sevenDay, receivedAt, ...status }) => ({ ...status, receivedAt: receivedAt.toISOString() })),
+    ]));
+    return this.serial(() => this.storage.upsertCache('chat', 'sessionStatus', saved, STATUS_KEEP_SECONDS)).catch(() => undefined);
+  }
+
+  /** Reads the limits and session lines the last process saved, so a restart does not blank them until the next push. */
   async restoreLimits() {
     const saved = await this.storage.getCache('chat', 'limits').catch(() => null);
+    if (isRecord(saved)) {
+      const window = (value: any): LimitWindow | null => (value ? { usedPercentage: value.usedPercentage, resetsAt: value.resetsAt ? new Date(value.resetsAt) : null } : null);
+      for (const [machine, seen] of Object.entries(saved as Record<string, any>)) {
+        if (this.limitsSeen.has(machine)) continue;
+        this.limitsSeen.set(machine, { fiveHour: window(seen.fiveHour), sevenDay: window(seen.sevenDay), receivedAt: new Date(seen.receivedAt) });
+      }
+    }
+    await this.restoreSessionStatus();
+  }
+
+  private async restoreSessionStatus() {
+    const saved = await this.storage.getCache('chat', 'sessionStatus').catch(() => null);
     if (!isRecord(saved)) return;
-    const window = (value: any): LimitWindow | null => (value ? { usedPercentage: value.usedPercentage, resetsAt: value.resetsAt ? new Date(value.resetsAt) : null } : null);
-    for (const [machine, seen] of Object.entries(saved as Record<string, any>)) {
-      if (this.limitsSeen.has(machine)) continue;
-      this.limitsSeen.set(machine, { fiveHour: window(seen.fiveHour), sevenDay: window(seen.sevenDay), receivedAt: new Date(seen.receivedAt) });
+    for (const [machine, lines] of Object.entries(saved)) {
+      if (!Array.isArray(lines)) continue;
+      const mine = this.sessionStatus.get(machine) ?? new Map<string, SavedStatus>();
+      this.sessionStatus.set(machine, mine);
+      for (const line of lines.slice(-MAX_STATUS_SESSIONS)) {
+        try {
+          const { turnCostUsd, ...status } = parseStatus(line);
+          const receivedAt = new Date(isRecord(line) ? String(line.receivedAt) : '');
+          if (!mine.has(status.sessionId) && !Number.isNaN(receivedAt.getTime())) mine.set(status.sessionId, { ...status, receivedAt });
+        } catch {
+          continue;
+        }
+      }
+      while (mine.size > MAX_STATUS_SESSIONS) mine.delete(mine.keys().next().value!);
     }
   }
 
@@ -782,6 +846,7 @@ export class ChatService {
       startedAt: now,
       lastMessageAt: now,
       origin: input.origin === 'cron' ? 'cron' : 'manual',
+      ...(input.origin === 'cron' ? {} : { options: JSON.stringify(MANUAL_SESSION_OPTIONS) }),
     });
     return toSession(row, null);
   }
@@ -812,15 +877,14 @@ export class ChatService {
     if (await this.storage.countChatMessagesInState(sessionId, ['draft', 'queued', 'taken']) > 0) {
       throw new OrchestratorInputError('This session is still working on the previous message');
     }
-    if (attachmentIds.length > 0 || options) {
-      const { caps, catalog } = await this.info(session.machine);
-      if (attachmentIds.length > 0 && caps?.features.includes('attachments') !== true) {
-        throw new OrchestratorInputError('This machine cannot receive attachments yet');
-      }
-      if (options) checkTurnOptions(options, caps, catalog);
+    const { caps, catalog } = await this.info(session.machine);
+    if (attachmentIds.length > 0 && caps?.features.includes('attachments') !== true) {
+      throw new OrchestratorInputError('This machine cannot receive attachments yet');
     }
+    if (options) checkTurnOptions(options, caps, catalog);
+    const effective = mergeTurnOptions(usableTurnOptions(parseStoredOptions(session.options), caps, catalog), options);
     const now = this.now();
-    const optionsJson = options ? JSON.stringify(options) : null;
+    const optionsJson = effective ? JSON.stringify(effective) : null;
     let message = await this.storage.createChatMessage({
       sessionId, role: 'user', text: body, state: attachmentIds.length > 0 ? 'draft' : 'queued', at: now, options: optionsJson,
     });
@@ -840,8 +904,9 @@ export class ChatService {
       message = { ...message, state: 'queued' };
     }
     const messageCount = await this.storage.trimChatMessages(sessionId, MAX_MESSAGES_KEPT);
+    const title = session.title.trim() === '' ? titleFromText(body) : '';
     await this.storage.updateChatSession(sessionId, {
-      status: 'queued', statusDetail: null, messageCount, lastMessageAt: now, ...(optionsJson ? { options: optionsJson } : {}),
+      status: 'queued', statusDetail: null, messageCount, lastMessageAt: now, ...(title ? { title } : {}),
     });
     return { ...toMessage(message), ...(attached.length > 0 ? { attachments: attached } : {}) };
   }
@@ -991,6 +1056,53 @@ export class ChatService {
     if (!await this.storage.getChatSession(id)) throw new OrchestratorInputError('Unknown chat session');
     const row = await this.storage.updateChatSession(id, { title: text(titleInput, MAX_TITLE_CHARS) });
     return (await this.present([row]))[0];
+  }
+
+  async setSessionOptions(idInput: string, input: unknown) {
+    const id = chatId(idInput, 'id');
+    const options = parseTurnOptions(input);
+    const session = await this.storage.getChatSession(id);
+    if (!session) throw new OrchestratorInputError('Unknown chat session');
+    if (session.source !== 'dock') throw new OrchestratorInputError('Only a DOCK session has options');
+    if (options) {
+      const { caps, catalog } = await this.info(session.machine);
+      checkTurnOptions(options, caps, catalog);
+    }
+    const row = await this.storage.updateChatSession(id, { options: options ? JSON.stringify(options) : null });
+    return (await this.present([row]))[0];
+  }
+
+  /** A file the agent made, kept as an assistant message of the turn it answers. */
+  async receiveUpload(
+    query: Record<string, unknown>,
+    file: { contentType: string; contentLength: number | null; body: Readable },
+    machine: string,
+  ) {
+    const sessionId = chatId(query.sessionId, 'sessionId');
+    const replyTo = typeof query.replyTo === 'string' && /^\d{1,15}$/.test(query.replyTo) ? Number(query.replyTo) : 0;
+    const session = await this.storage.getChatSession(sessionId);
+    if (!session || session.machine !== machine) throw new OrchestratorInputError('Unknown chat session');
+    if (session.source !== 'dock') throw new OrchestratorInputError('Only a DOCK session takes files');
+    await this.turnMessage(session.id, replyTo);
+    const name = text(query.name, MAX_UPLOAD_NAME_CHARS) || 'file';
+    this.bridgeSeenAt.set(machine, this.now());
+    const stored = await this.attachments.receive({ sessionId: session.id, name, contentType: file.contentType, contentLength: file.contentLength }, file.body);
+    try {
+      const now = this.now();
+      const message = await this.storage.createChatMessage({ sessionId: session.id, role: 'assistant', text: `Attachment: ${stored.name}`, state: 'done', at: now });
+      try {
+        await this.attachments.attach(session.id, message.id, [stored.id]);
+      } catch (error) {
+        await this.storage.deleteChatMessage(message.id);
+        throw error;
+      }
+      const messageCount = await this.storage.trimChatMessages(session.id, MAX_MESSAGES_KEPT);
+      await this.storage.updateChatSession(session.id, { messageCount, lastMessageAt: now });
+      return { messageId: message.id };
+    } catch (error) {
+      await this.attachments.discard(stored.id).catch(() => undefined);
+      throw error;
+    }
   }
 
   async deleteSession(id: string) {

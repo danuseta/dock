@@ -434,6 +434,9 @@ export const resolvers = {
     renameChatSession: async (_: unknown, { id, title }: { id: string; title: string }) => {
       return chatService.renameSession(id, title).catch(orchestratorInputError);
     },
+    setChatSessionOptions: async (_: unknown, { id, options }: { id: string; options: unknown }) => {
+      return chatService.setSessionOptions(id, options).catch(orchestratorInputError);
+    },
     deleteChatSession: async (_: unknown, { id }: { id: string }) => chatService.deleteSession(id),
     refreshSprintDashboard: async (_: unknown, { sprintId }: { sprintId: number }) => {
       try { return sprintDashboardService.startRefresh(sprintId); } catch (error) { return sprintError(error); }
@@ -512,6 +515,7 @@ export const protectedMutations = [
   'answerChatInteraction',
   'stopChatTurn',
   'renameChatSession',
+  'setChatSessionOptions',
   'deleteChatSession',
   'refreshSprintDashboard',
   'backfillSprintDashboards',

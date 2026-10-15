@@ -795,3 +795,50 @@ test('claim: a cron message waits while every cron slot is in use and runs in th
   for (const message of memory.messages()) if (message.sessionId === a.id && message.state === 'taken') message.state = 'done';
   assert.strictEqual((await chat.claim({ wait: 0 }, undefined, 'workspace')).message?.sessionId, answered.id, 'the first free slot goes to the answer');
 });
+
+test('a DOCK turn adds its cost to the session total, keeps what a later push leaves out, and survives a restart', async () => {
+  const { service, storage, now } = clockedService();
+  const dock = await service.createSession({ title: 'Cost' });
+  const turn = (overrides: object = {}) => ({ sessionId: dock.id, model: 'claude-opus-5-5', effort: 'high', contextTokens: 1000, contextSize: 200000, contextPercentage: 0.5, turnCostUsd: 0.5, ...overrides });
+  const line = (chat: ChatService) => chat.statusSnapshot('laptop').sessions.find((status) => status.sessionId === dock.id);
+
+  await service.ingestStatus(turn(), 'laptop');
+  assert.strictEqual(line(service)?.costUsd, 0.5);
+  assert.strictEqual('turnCostUsd' in (line(service) ?? {}), false, 'the turn cost is not part of the line');
+  await service.ingestStatus(turn({ turnCostUsd: 0.25, contextTokens: 3000 }), 'laptop');
+  assert.deepStrictEqual([line(service)?.costUsd, line(service)?.contextTokens], [0.75, 3000]);
+
+  await service.ingestStatus({ sessionId: dock.id, fiveHour: { usedPercentage: 30 } }, 'laptop');
+  assert.deepStrictEqual([line(service)?.costUsd, line(service)?.model, line(service)?.effort], [0.75, 'claude-opus-5-5', 'high'], 'a limits-only push does not blank the line');
+  assert.strictEqual(service.statusSnapshot('laptop').limits?.fiveHour?.usedPercentage, 30);
+
+  const restarted = new ChatService(storage, now);
+  assert.deepStrictEqual(restarted.statusSnapshot().sessions, [], 'nothing is known before the restore');
+  await restarted.restoreLimits();
+  assert.deepStrictEqual(line(restarted), line(service), 'the line comes back as it was, receive time included');
+  await restarted.ingestStatus(turn({ turnCostUsd: 1 }), 'laptop');
+  assert.strictEqual(line(restarted)?.costUsd, 1.75, 'the total goes on from the saved one');
+
+  await assert.rejects(service.ingestStatus(turn({ turnCostUsd: -1 }), 'laptop'), OrchestratorInputError);
+  await assert.rejects(service.ingestStatus(turn({ turnCostUsd: 'free' }), 'laptop'), OrchestratorInputError);
+
+  await service.syncSession(syncBody(), 'laptop');
+  await service.ingestStatus(statusBody({ turnCostUsd: 3 }), 'laptop');
+  assert.strictEqual(service.statusSnapshot('laptop').sessions.find((status) => status.sessionId === CLI_ID)?.costUsd, 12.5, 'a terminal session keeps the cost it pushed');
+});
+
+test('saved session lines are bounded per machine and a damaged save is ignored', async () => {
+  const { service, storage, now } = clockedService();
+  const dock = await service.createSession({ title: 'Many' });
+  for (let n = 0; n < MAX_STATUS_SESSIONS + 5; n += 1) await service.ingestStatus({ sessionId: `flood-${n}` }, 'laptop');
+  await service.ingestStatus({ sessionId: dock.id, turnCostUsd: 1 }, 'laptop');
+  const restarted = new ChatService(storage, now);
+  await restarted.restoreLimits();
+  assert.strictEqual(restarted.statusSnapshot('laptop').sessions.length, MAX_STATUS_SESSIONS);
+  assert.strictEqual(restarted.statusSnapshot('laptop').sessions.at(-1)?.sessionId, dock.id);
+
+  await storage.upsertCache('chat', 'sessionStatus', { laptop: [{ sessionId: 'bad id' }, { sessionId: 'no-time' }, 'x', null], workspace: 'nope' });
+  const damaged = new ChatService(storage, now);
+  await damaged.restoreLimits();
+  assert.deepStrictEqual(damaged.statusSnapshot().sessions, []);
+});

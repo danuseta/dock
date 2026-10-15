@@ -147,6 +147,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'sendChatMessage',
       'sendTestPush',
       'sendToDiscord',
+      'setChatSessionOptions',
       'setMasterPin',
       'setTicketDependency',
       'setTicketWorkOrder',
