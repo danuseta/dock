@@ -13,23 +13,18 @@ import { useChatStatus } from '../chat/useChatStatus';
 import { useFullViewport } from '../chat/useFullViewport';
 import { MachineChip, MachinePicker } from '../chat/MachineControls';
 import { useMachineChoice } from '../chat/useMachineChoice';
-import { SLOW_POLL_MS, machineOf, machineOnline, relativeTime, type ChatSession } from '../chat/messages';
+import { SLOW_POLL_MS, machineOf, machineOnline, sessionTitle as titleOf, type ChatSession } from '../chat/messages';
+import { ReadOnlyChip, SessionRow, SourceChip, TicketChip } from '../chat/SessionRow';
 import { chatStore } from '../chat/store';
 import { SESSIONS_PATH, sessionIdFromSearch, sessionUrl } from '../chat/sessionRoute';
 
 interface SearchHit { session: ChatSession; messageId: number; snippet: string; at: string }
 
 const sectionLabel = 'font-mono text-[0.66rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
-const chip = 'inline-flex flex-none items-center rounded-xs border px-1.5 py-px font-mono text-[0.62rem] font-bold';
 const SEARCH_MIN = 2;
 const TITLE_MAX = 120;
 
-const titleOf = (session: ChatSession) => session.title || session.ticketKey || 'Untitled session';
 const errorText = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
-
-const SourceChip: React.FC<{ source: string }> = ({ source }) => (
-  <span className={cn(chip, source === 'dock' ? 'border-accent/30 bg-accent-dim text-accent' : 'border-border-glow text-secondary-foreground')}>{source === 'dock' ? 'DOCK' : 'CLI'}</span>
-);
 
 const SessionsPage: React.FC = () => {
   const { data, loading, error, refetch } = useQuery<{ chatSessions: ChatSession[] }>(GET_CHAT_SESSIONS, { ...CACHED_QUERY_OPTIONS, variables: { limit: 300 }, pollInterval: SLOW_POLL_MS });
@@ -157,11 +152,17 @@ const SessionsPage: React.FC = () => {
                 {!searchError && searchLoading && hits.length === 0 && <p className="px-1.5 py-6 text-center text-sm text-muted-foreground" role="status">Searching...</p>}
                 {!searchError && !searchLoading && hits.length === 0 && <p className="px-1.5 py-6 text-center text-pretty text-sm text-muted-foreground">No message contains "{query}".</p>}
                 {hits.map((hit) => (
-                  <button key={`${hit.session.id}-${hit.messageId}`} type="button" className={cn('mb-1 block w-full rounded-xs border border-transparent px-2.5 py-2 text-left hover:bg-surface-1', hit.session.id === selectedId && 'border-border-glow bg-surface-1')} onClick={() => select(hit.session.id)}>
-                    <span className="flex items-center gap-1.5"><SourceChip source={hit.session.source} /><MachineChip name={machineOf(hit.session)} /><span className="min-w-0 truncate font-display text-[0.8rem] font-semibold">{titleOf(hit.session)}</span></span>
-                    <span className="mt-1 line-clamp-2 text-[0.76rem] break-words text-secondary-foreground">{hit.snippet}</span>
-                    <span className="mt-1 block font-mono text-[0.64rem] text-muted-foreground">{relativeTime(hit.at, now)}</span>
-                  </button>
+                  <SessionRow
+                    key={`${hit.session.id}-${hit.messageId}`}
+                    session={hit.session}
+                    machine={machineOf(hit.session)}
+                    online={machineOnline(machines, machineOf(hit.session))}
+                    selected={hit.session.id === selectedId}
+                    now={now}
+                    onSelect={() => select(hit.session.id)}
+                    snippet={hit.snippet}
+                    snippetAt={hit.at}
+                  />
                 ))}
               </>
             ) : (
@@ -169,23 +170,17 @@ const SessionsPage: React.FC = () => {
                 {searchText.trim().length === 1 && <p className="px-1.5 pb-2 text-xs text-muted-foreground">Type at least {SEARCH_MIN} characters to search.</p>}
                 {sessions.length === 0 && <p className="px-1.5 py-6 text-center text-pretty text-sm text-muted-foreground">No session yet. Start one here, or run <span className="font-mono text-xs">node dock-push.cjs sessions</span> on your PC to bring in the history.</p>}
                 {sessions.map((session) => (
-                  <button key={session.id} type="button" className={cn('mb-1 block w-full rounded-xs border border-transparent px-2.5 py-2 text-left hover:bg-surface-1', session.id === selectedId && 'border-border-glow bg-surface-1')} aria-current={session.id === selectedId ? 'true' : undefined} onClick={() => select(session.id)}>
-                    <span className="flex items-center gap-1.5">
-                      <SourceChip source={session.source} />
-                      <MachineChip name={machineOf(session)} online={machineOnline(machines, machineOf(session))} />
-                      <span className="min-w-0 flex-1 truncate font-display text-[0.8rem] font-semibold">{titleOf(session)}</span>
-                      {session.waiting && <span className="flex-none rounded-xs border border-amber-300/50 bg-amber-300/10 px-1.5 py-px font-mono text-[0.62rem] font-bold text-amber-200">waiting</span>}
-                      {(session.status === 'queued' || session.status === 'running') && <i className="size-1.5 flex-none animate-pulse rounded-full bg-status-merged" title="Working" aria-hidden="true" />}
-                      {session.status === 'error' && <i className="size-1.5 flex-none rounded-full bg-status-conflict" title="The last turn failed" aria-hidden="true" />}
-                    </span>
-                    {session.lastText && <span className="mt-1 block truncate text-[0.76rem] text-secondary-foreground">{session.lastText}</span>}
+                  <SessionRow
+                    key={session.id}
+                    session={session}
+                    machine={machineOf(session)}
+                    online={machineOnline(machines, machineOf(session))}
+                    selected={session.id === selectedId}
+                    now={now}
+                    onSelect={() => select(session.id)}
+                  >
                     {liveStatus?.sessions.filter((item) => item.sessionId === session.id).map((item) => <SessionStatusView key={item.sessionId} status={item} now={statusNow} className="mt-1" />)}
-                    <span className="mt-1 flex items-center gap-2 font-mono text-[0.64rem] text-muted-foreground tabular-nums">
-                      {session.ticketKey && <span className="font-bold text-accent">{session.ticketKey}</span>}
-                      <span>{relativeTime(session.lastMessageAt, now)}</span>
-                      <span className="ml-auto">{session.messageCount} {session.messageCount === 1 ? 'message' : 'messages'}</span>
-                    </span>
-                  </button>
+                  </SessionRow>
                 ))}
               </>
             )}
@@ -205,8 +200,9 @@ const SessionsPage: React.FC = () => {
               <div className="flex flex-none flex-wrap items-center gap-2 border-b border-border px-3.5 pt-[max(0.625rem,env(safe-area-inset-top))] pb-2.5">
                 <Button size="sm" variant="ghost" className="hidden h-7 px-2 max-[900px]:inline-flex max-[900px]:h-11 max-[900px]:min-w-11" aria-label="Back to the session list" onClick={() => select(null)}><ArrowLeft size={14} aria-hidden="true" /></Button>
                 <div className="contents max-[900px]:order-3 max-[900px]:flex max-[900px]:basis-full max-[900px]:flex-wrap max-[900px]:items-center max-[900px]:gap-2">
-                {selected.source === 'cli' && <><SourceChip source="cli" /><span className={cn(chip, 'border-border text-muted-foreground')}>READ-ONLY</span></>}
-                {selected.ticketKey && <span className={cn(chip, 'border-accent/30 bg-accent-dim text-accent')}>{selected.ticketKey}</span>}
+                <SourceChip source={selected.source} />
+                {selected.source === 'cli' && <ReadOnlyChip />}
+                {selected.ticketKey && <TicketChip ticketKey={selected.ticketKey} />}
                 <span className="ml-auto flex-none"><MachineChip name={machineOf(selected)} online={machineOnline(machines, machineOf(selected))} /></span>
                 </div>
                 {titleDraft === null ? (
@@ -220,8 +216,8 @@ const SessionsPage: React.FC = () => {
                 )}
                 {titleDraft === null && (
                   <div className="flex flex-none items-center gap-1 max-[900px]:order-2">
-                    <Button size="sm" variant="ghost" className="h-7 px-2 max-[900px]:h-11 max-[900px]:min-w-11" aria-label="Rename session" title="Rename" onClick={() => setTitleDraft(selected.title)}><Pencil size={13} aria-hidden="true" /></Button>
-                    <Button size="sm" variant="ghost" className="h-7 px-2 max-[900px]:h-11 max-[900px]:min-w-11" aria-label="Delete session" title="Delete" onClick={() => { setActionError(''); setDeleteTarget(selected); }}><Trash2 size={13} aria-hidden="true" /></Button>
+                    <Button size="sm" variant="ghost" className="h-8 px-2 max-[900px]:h-11 max-[900px]:min-w-11" aria-label="Rename session" title="Rename" onClick={() => setTitleDraft(selected.title)}><Pencil size={13} aria-hidden="true" /></Button>
+                    <Button size="sm" variant="ghost" className="h-8 px-2 max-[900px]:h-11 max-[900px]:min-w-11" aria-label="Delete session" title="Delete" onClick={() => { setActionError(''); setDeleteTarget(selected); }}><Trash2 size={13} aria-hidden="true" /></Button>
                   </div>
                 )}
               </div>
