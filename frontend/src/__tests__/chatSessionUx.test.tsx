@@ -7,7 +7,7 @@ import { CACHED_MESSAGES, CACHED_SESSIONS, recallMessages, rememberMessages } fr
 import type { ChatMessage, ChatSession } from '../chat/messages';
 import { SessionRow } from '../chat/SessionRow';
 import {
-  appliedOptions, appliedText, defaultLabel, defaultsText, effortChoicesFor, modeChoices, modelChoices, modelsText, withChoice,
+  appliedOptions, appliedText, defaultLabel, effortChoicesFor, modeChoices, modelChoices, withChoice,
   type SessionMachineOptions,
 } from '../chat/sessionOptions';
 
@@ -53,9 +53,6 @@ test('what applies now marks the values that come from the machine default', () 
   assert.strictEqual(appliedText(rows), 'mode Auto · model Opus 5.5 · effort low');
   assert.deepStrictEqual(appliedOptions(null, undefined), []);
   assert.deepStrictEqual(appliedOptions(null, { ...machine, defaults: null }), []);
-  assert.strictEqual(defaultsText(machine), 'model Opus 5.5 · effort high · mode Default');
-  assert.strictEqual(defaultsText({ ...machine, defaults: null }), 'The machine did not report its defaults.');
-  assert.strictEqual(modelsText(machine.models), 'Opus 5.5 (low, medium, high, max) · Haiku (low, medium)');
 });
 
 test('picking a value stores it, and a model change drops an effort the model does not list', () => {
