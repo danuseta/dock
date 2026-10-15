@@ -216,24 +216,31 @@ export const baseFor = (ticket: Pick<CronTicket, 'parentKey'>, settings: CronSet
 
 const baseLine = (base: string | null) => (base ? [`Open the pull request against ${base}, not develop.`] : []);
 
+const CONTRACT_LINE = 'Follow rules/ticket-contract.md: find and read the Confluence contract for this ticket before writing code; if a contract is found but cannot be read, stop and report why.';
+const VAULT_LINE = 'Before you finish, save a session note with brain.py save.';
+
 /** The prompt for a ticket with acceptance criteria: built without stopping to ask. */
 export const startPrompt = (key: string, base: string | null = null) => [
   `Build ticket ${key} with the build-ticket skill.`,
   'The ticket has acceptance criteria: do not stop to ask. When something is ambiguous, take the reading closest to the AC,',
   `record it with status.cjs decide ${key} "<what and why>", and continue.`,
+  CONTRACT_LINE,
   `Stop only when the pull request is open (set the ledger gate to "${PR_GATE_TEXT}"), or when you cannot go on without the owner:`,
   'missing access or token, the environment is down, a prerequisite ticket is not done. Say which. A question you still have may go with the PR message.',
   'List every decision taken without the owner in the PR body and in your last chat message.',
   ...baseLine(base),
   'Do not make the demo video until the owner approves in this chat.',
+  VAULT_LINE,
 ].join(' ');
 
 /** The prompt for a parked ticket the owner confirmed: the AC are missing, so asking stays allowed. */
 export const confirmedPrompt = (key: string, base: string | null = null) => [
   `Build ticket ${key} with the build-ticket skill.`,
+  CONTRACT_LINE,
   `Stop when the pull request is open: set the ledger gate to "${PR_GATE_TEXT}" and wait.`,
   ...baseLine(base),
   'Do not make the demo video until the owner approves in this chat.',
+  VAULT_LINE,
 ].join(' ');
 
 export interface DeferredTicket { key: string; reason: string }

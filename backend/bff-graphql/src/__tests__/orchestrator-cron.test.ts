@@ -2,7 +2,7 @@ import assert from 'node:assert';
 import test from 'node:test';
 import {
   CronInputError, DEFAULT_CRON_SETTINGS, OrchestratorCron, PARKED_TEXT, baseFor, candidates, hasAcceptanceCriteria, labelOrder, ticketHasAcceptanceCriteria, outsideWindow, parseCronSettings,
-  startPrompt, wib, type CronDeps, type CronRun, type CronSettings, type CronTicket,
+  confirmedPrompt, startPrompt, wib, type CronDeps, type CronRun, type CronSettings, type CronTicket,
 } from '../integrations/orchestrator-cron';
 
 const AC = 'Context.\n\nAcceptance criteria\n\nReloading the page still shows Disconnected.\n\nA manually disabled channel keeps its status.';
@@ -74,6 +74,14 @@ test('the start prompt does not ask on a ticket with AC, lists decisions, and na
   assert.match(prompt, /against feat\/V1-Playbook, not develop/);
   assert.doesNotMatch(startPrompt('QRD-1', baseFor({ parentKey: 'QRD-99' }, settings())), /not develop/);
   assert.strictEqual(baseFor({ parentKey: null }, settings()), null);
+});
+
+test('both prompts send the session to the contract rule and to the vault', () => {
+  for (const prompt of [startPrompt('QRD-1240'), confirmedPrompt('QRD-1240')]) {
+    assert.match(prompt, /rules\/ticket-contract\.md/);
+    assert.match(prompt, /cannot be read, stop and report/);
+    assert.match(prompt, /brain\.py save/);
+  }
 });
 
 interface Start {
