@@ -465,6 +465,14 @@ export class ChatService {
     for (const turn of silent) if (!waiting.has(turn.sessionId)) await this.giveUp(turn.sessionId, SILENT_TEXT);
   }
 
+  /** A delta from the machine for a turn that was failed only because it went quiet shows the machine is alive: the turn is taken again. */
+  private async reviveStale(session: SessionRow, replyTo: MessageRow) {
+    if (replyTo.state !== 'failed' || session.status !== 'error') return false;
+    if (session.statusDetail !== SILENT_TEXT && session.statusDetail !== STALE_TEXT) return false;
+    if ((await this.storage.getChatMessageIdsInState(session.id, ['queued', 'taken'])).length > 0) return false;
+    return this.storage.moveChatMessage(replyTo.id, session.id, 'failed', 'taken');
+  }
+
   private async endStopped(sessionId: string, turnId: number) {
     if (!await this.storage.moveChatMessage(turnId, sessionId, 'taken', 'done')) return;
     await this.storage.updateChatSession(sessionId, { status: 'idle', statusDetail: STOPPED_TEXT });
@@ -1217,10 +1225,16 @@ export class ChatService {
     if (delta.items.length > 0) update.lastMessageAt = now;
     if (delta.claudeSessionId) update.claudeSessionId = delta.claudeSessionId;
     let ended = false;
+    const revived = await this.reviveStale(session, replyTo);
+    const open = revived || replyTo.state === 'taken';
     try {
-      // A turn that was already given up as stale keeps its error; late output is still shown.
-      if (replyTo.state === 'taken') {
+      // A turn given up for any other reason keeps its error; late output is still shown.
+      if (open) {
         update.lastDeltaAt = now;
+        if (revived) {
+          update.status = 'running';
+          update.statusDetail = null;
+        }
         if (delta.error) {
           await this.storage.moveChatMessage(replyTo.id, session.id, 'taken', 'failed');
           ended = true;
@@ -1239,7 +1253,7 @@ export class ChatService {
       return { id: updated.id, status: updated.status, messageCount };
     } finally {
       if (ended) await this.closeActivity(session.id, replyTo.id);
-      if (ended || replyTo.state !== 'taken') await this.closeTurn(session.id, replyTo.id);
+      if (ended || !open) await this.closeTurn(session.id, replyTo.id);
     }
   }
 

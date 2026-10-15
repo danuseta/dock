@@ -402,8 +402,9 @@ test('a taken message with no delta for 15 minutes is failed on the next list or
   assert.strictEqual((await service.messages(dock.id))[0].state, 'failed');
 
   const late = await service.delta({ sessionId: dock.id, replyTo: sent.id, done: true, items: [{ role: 'assistant', text: 'late answer', at: '2026-10-08T00:00:00.000Z' }] }, 'laptop');
-  assert.deepStrictEqual([late?.status, late?.messageCount], ['error', 2], 'late output is kept but the turn stays failed');
-  assert.strictEqual(sessions.get(dock.id).statusDetail, STALE_TEXT);
+  assert.deepStrictEqual([late?.status, late?.messageCount], ['idle', 2], 'late output from the same machine revives the turn and the done settles it');
+  assert.strictEqual((await service.messages(dock.id))[0].state, 'done');
+  assert.strictEqual(sessions.get(dock.id).statusDetail, null);
 
   const again = await service.sendMessage(dock.id, 'retry', MACHINES);
   await service.claim({ wait: 0 }, undefined, 'laptop');
