@@ -626,3 +626,30 @@ test('SQLite storage counts cron slots per machine and keeps DOCK work orders', 
   await storage.deleteTicketOrder('QRD-404');
   assert.deepStrictEqual([...(await storage.getTicketOrders()).entries()], [['QRD-7', 1]]);
 });
+
+test('SQLite storage finds tickets whose latest cron session died before the agent answered', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }] = await Promise.all([
+    import('../storage/service'),
+    import('../storage/client'),
+  ]);
+  const storage = new StorageService(prisma);
+  t.after(() => prisma.$disconnect());
+
+  const id = (n: number) => `dddddddd-0000-4000-8000-00000000000${n}`;
+  const minute = (m: number) => new Date(Date.UTC(2026, 9, 15, 8, m));
+  const open = (n: number, ticketKey: string, m: number, origin: 'cron' | 'manual' = 'cron') =>
+    storage.createChatSession({ id: id(n), source: 'dock', machine: 'workspace', title: ticketKey, ticketKey, startedAt: minute(m), lastMessageAt: minute(m), origin });
+  const say = (n: number, state: string, role = 'user') => storage.createChatMessage({ sessionId: id(n), role, text: 'x', state, at: minute(30) });
+  await open(1, 'QRD-1', 1); await say(1, 'done');
+  await open(2, 'QRD-2', 1); await say(2, 'done'); await say(2, 'done', 'assistant');
+  await open(3, 'QRD-3', 1); await say(3, 'taken');
+  await open(4, 'QRD-4', 1); await say(4, 'done');
+  await open(5, 'QRD-4', 5); await say(5, 'queued');
+  await open(6, 'QRD-6', 1, 'manual'); await say(6, 'done');
+  await open(7, 'QRD-7', 1);
+
+  assert.deepStrictEqual((await storage.getDeadCronStartKeys(minute(0))).sort(), ['QRD-1'], 'a reply, a running or queued turn, a newer session, a manual session and an empty session all keep a ticket out');
+  assert.deepStrictEqual(await storage.getDeadCronStartKeys(minute(2)), [], 'sessions opened before the lookback are ignored');
+});

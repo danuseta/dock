@@ -14,6 +14,10 @@ test('the last fill reads as one sentence', () => {
     fillSummary(fill({ started: ['QRD-1', 'QRD-3'], parked: ['QRD-2'], notMoved: ['QRD-3'], failed: ['QRD-9'] })),
     `${when}: started QRD-1, QRD-3; parked QRD-2; Jira did not move QRD-3; failed QRD-9.`,
   );
+  assert.strictEqual(
+    fillSummary(fill({ started: ['QRD-4'], released: ['QRD-1'] })),
+    `${when}: started QRD-4; start failed, back to To Do: QRD-1.`,
+  );
 });
 
 test('deferred tickets are grouped by their reason', () => {

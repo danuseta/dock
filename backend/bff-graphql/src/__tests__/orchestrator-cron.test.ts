@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import test from 'node:test';
 import {
-  CronInputError, DEFAULT_CRON_SETTINGS, OrchestratorCron, PARKED_TEXT, candidates, hasAcceptanceCriteria, labelOrder, ticketHasAcceptanceCriteria, outsideWindow, parseCronSettings,
+  CronInputError, DEFAULT_CRON_SETTINGS, OrchestratorCron, PARKED_TEXT, START_FAILED_TEXT, candidates, hasAcceptanceCriteria, labelOrder, ticketHasAcceptanceCriteria, outsideWindow, parseCronSettings,
   confirmedPrompt, startPrompt, wib, type CronDeps, type CronRun, type CronSettings, type CronTicket,
 } from '../integrations/orchestrator-cron';
 
@@ -114,9 +114,10 @@ function world(start: Start = {}) {
     tickets: start.tickets ?? [],
     runs: start.runs ?? [] as CronRun[],
     online: start.online ?? true,
-    sessions: [] as Array<{ id: string; ticketKey: string; machine: string; origin: string; state: SessionState; queuedAt: number }>,
+    sessions: [] as Array<{ id: string; ticketKey: string; machine: string; origin: string; state: SessionState; queuedAt: number; replied: boolean }>,
     sent: [] as Array<{ sessionId: string; text: string; options: Record<string, string> }>,
     moved: [] as string[],
+    movedTo: [] as Array<[string, string]>,
     stopped: [] as string[],
     posts: [] as Array<{ url: string; body: unknown }>,
     pushes: [] as Array<{ title: string; body: string; url: string }>,
@@ -132,7 +133,7 @@ function world(start: Start = {}) {
     cacheSet: async (key, value) => { state.cache.set(key, JSON.parse(JSON.stringify(value))); },
     tickets: async () => state.tickets,
     ticket: async (key) => state.tickets.find((item) => item.key === key) ?? null,
-    moveTicket: async (key) => { state.moved.push(key); return start.moves ?? true; },
+    moveTicket: async (key, statusName) => { state.moved.push(key); state.movedTo.push([key, statusName]); return start.moves ?? true; },
     dependencies: async () => start.dependencies ?? [],
     dockOrder: async () => start.dockOrder ?? new Map(),
     slots: async () => ({ busy: state.sessions.filter((s) => s.state === 'running').length, waiting: state.sessions.filter((s) => s.state === 'queued').length }),
@@ -140,13 +141,17 @@ function world(start: Start = {}) {
     online: () => state.online,
     fiveHourUsed: () => start.used ?? null,
     takenKeys: async () => state.runs.map((run) => run.key),
+    deadStarts: async () => [...new Set(state.sessions.map((s) => s.ticketKey))]
+      .map((key) => state.sessions.filter((s) => s.ticketKey === key).at(-1)!)
+      .filter((s) => s.state === 'idle' && s.queuedAt > 0 && !s.replied)
+      .map((s) => s.ticketKey),
     runs: async () => state.runs,
     saveRun: async (ledger, machine) => {
       const run: CronRun = { key: String(ledger.key), machine, title: String(ledger.title), waiting: String(ledger.waiting) || null, activity: 'IDLE' };
       state.runs = [...state.runs.filter((item) => item.key !== run.key), run];
     },
     openSession: async (input) => {
-      const session = { id: `s-${state.sessions.length + 1}`, ...input, state: 'idle' as SessionState, queuedAt: 0 };
+      const session = { id: `s-${state.sessions.length + 1}`, ...input, state: 'idle' as SessionState, queuedAt: 0, replied: false };
       state.sessions.push(session);
       return session;
     },
@@ -162,7 +167,7 @@ function world(start: Start = {}) {
     push: async (message) => { state.pushes.push(message); },
   };
   const cron = new OrchestratorCron(deps);
-  const byKey = (key: string) => state.sessions.find((session) => session.ticketKey === key)!;
+  const byKey = (key: string) => state.sessions.filter((session) => session.ticketKey === key).at(-1)!;
   /** The bridge claiming until the gate says no. */
   const claim = () => {
     for (;;) {
@@ -172,12 +177,14 @@ function world(start: Start = {}) {
     }
   };
   /** A turn ends: the agent asks the owner, or the PR is open. Either way the slot is free. */
-  const endTurn = (key: string) => { byKey(key).state = 'idle'; };
+  const endTurn = (key: string) => { Object.assign(byKey(key), { state: 'idle', replied: true }); };
+  /** The turn ends before the agent says anything, as when a hook blocks the prompt. */
+  const dieOnStart = (key: string) => { byKey(key).state = 'idle'; };
   /** The owner answers in the chat: the session queues again, behind messages queued earlier. */
   const answer = (key: string) => Object.assign(byKey(key), { state: 'queued', queuedAt: ++state.clock });
   const step = async () => { await cron.runFill(); claim(); };
   const running = () => state.sessions.filter((s) => s.state === 'running').map((s) => s.ticketKey).sort();
-  return { state, cron, claim, endTurn, answer, step, running };
+  return { state, cron, claim, endTurn, dieOnStart, answer, step, running };
 }
 
 test('the agreed scenario: a stuck ticket frees its slot, the answer takes the next free slot before new tickets, a parked ticket takes none', async () => {
@@ -358,4 +365,31 @@ test('stop all asks every running session to stop', async () => {
   const { state, cron } = world();
   assert.strictEqual(await cron.stopAll(), 2);
   assert.deepStrictEqual(state.stopped, ['s-1', 's-2']);
+});
+
+test('a cron session that dies before the agent answers frees its quota, waits on the owner and goes back to To Do; retry starts it again', async () => {
+  const w = world({ tickets: [ticket('QRD-1'), ticket('QRD-2'), ticket('QRD-3')], config: { parallel: 2, maxPerDay: 2 } });
+  await w.step();
+  assert.deepStrictEqual(w.running(), ['QRD-1', 'QRD-2']);
+
+  w.dieOnStart('QRD-1');
+  w.endTurn('QRD-2');
+  await w.step();
+  const fill = (await w.cron.lastFill())!;
+  assert.deepStrictEqual(fill.released, ['QRD-1'], 'only the session without a reply is released');
+  assert.deepStrictEqual(fill.started, ['QRD-3'], 'the freed quota goes to the next ticket');
+  assert.strictEqual(w.state.runs.find((run) => run.key === 'QRD-1')?.waiting, START_FAILED_TEXT);
+  assert.deepStrictEqual(w.state.movedTo.filter(([key]) => key === 'QRD-1'), [['QRD-1', 'In Progress'], ['QRD-1', 'To Do']]);
+  assert.strictEqual((await w.cron.status()).startedToday, 2);
+
+  await w.step();
+  assert.deepStrictEqual((await w.cron.lastFill())!.released, [], 'a released run is not released again');
+  assert.strictEqual(w.state.movedTo.filter(([key]) => key === 'QRD-1').length, 2);
+
+  await w.cron.confirm('QRD-1');
+  assert.strictEqual(w.state.sent.at(-1)?.text, startPrompt('QRD-1'), 'the retry uses the normal prompt, not the asking-allowed one');
+  assert.strictEqual(w.state.runs.find((run) => run.key === 'QRD-1')?.waiting, null);
+  w.claim();
+  await w.step();
+  assert.deepStrictEqual((await w.cron.lastFill())!.released, [], 'the old dead session no longer counts once a new one is open');
 });
