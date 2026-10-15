@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import test from 'node:test';
 import {
-  CronInputError, DEFAULT_CRON_SETTINGS, OrchestratorCron, PARKED_TEXT, baseFor, candidates, hasAcceptanceCriteria, labelOrder, ticketHasAcceptanceCriteria, outsideWindow, parseCronSettings,
+  CronInputError, DEFAULT_CRON_SETTINGS, OrchestratorCron, PARKED_TEXT, candidates, hasAcceptanceCriteria, labelOrder, ticketHasAcceptanceCriteria, outsideWindow, parseCronSettings,
   confirmedPrompt, startPrompt, wib, type CronDeps, type CronRun, type CronSettings, type CronTicket,
 } from '../integrations/orchestrator-cron';
 
@@ -17,13 +17,13 @@ test('settings: defaults when nothing is saved, saved fields win, v1 keys are ig
     [DEFAULT_CRON_SETTINGS.enabled, DEFAULT_CRON_SETTINGS.workStart, DEFAULT_CRON_SETTINGS.workEnd, DEFAULT_CRON_SETTINGS.workDays, DEFAULT_CRON_SETTINGS.maxPerDay, DEFAULT_CRON_SETTINGS.mode],
     [false, 9, 17, [1, 2, 3, 4, 5], 6, 'auto'],
   );
-  const saved = parseCronSettings(JSON.stringify({ enabled: true, hoursWib: [9], perRound: 3, workDays: [5, 1, 1], parallel: 1, labels: [' be ', 'be'], epicBase: { 'qrd-1232': 'feat/V1-Playbook' } }));
-  assert.deepStrictEqual([saved.enabled, saved.workDays, saved.parallel, saved.labels, saved.epicBase], [true, [1, 5], 1, ['be'], { 'QRD-1232': 'feat/V1-Playbook' }]);
-  assert.ok(!('hoursWib' in saved) && !('perRound' in saved));
+  const saved = parseCronSettings(JSON.stringify({ enabled: true, hoursWib: [9], perRound: 3, workDays: [5, 1, 1], parallel: 1, labels: [' be ', 'be'], epicBase: { 'QRD-1232': 'feat/V1-Playbook' } }));
+  assert.deepStrictEqual([saved.enabled, saved.workDays, saved.parallel, saved.labels], [true, [1, 5], 1, ['be']]);
+  assert.ok(!('hoursWib' in saved) && !('perRound' in saved) && !('epicBase' in saved), 'keys from older configs are dropped');
   for (const bad of [
     '{', '[]', '{"parallel":0}', '{"workStart":17,"workEnd":9}', '{"workEnd":25}', '{"workDays":[]}', '{"workDays":[8]}', '{"maxPerDay":0}',
     '{"activeFrom":"2026-10-20","activeUntil":"2026-10-01"}', '{"activeFrom":"14-10-2026"}', '{"mode":"bypassPermissions"}',
-    '{"epicBase":{"playbook":"x"}}', '{"epicBase":{"QRD-1":"--force"}}', '{"sprint":"next"}', '{"todoStatuses":[]}', '{"usageBrakePercent":101}',
+    '{"sprint":"next"}', '{"todoStatuses":[]}', '{"usageBrakePercent":101}',
     '{"notifyUserId":"danu"}', '{"enabled":"yes"}', '{"machine":""}',
   ]) {
     assert.throws(() => parseCronSettings(bad), CronInputError, bad);
@@ -66,14 +66,16 @@ test('work window: hours, work days and active dates, all in WIB', () => {
   assert.strictEqual(outsideWindow(WED_0905, settings({ activeFrom: '2026-10-14', activeUntil: '2026-10-14' })), null, 'both ends are inclusive');
 });
 
-test('the start prompt does not ask on a ticket with AC, lists decisions, and names the epic base', () => {
-  const prompt = startPrompt('QRD-1240', baseFor({ parentKey: 'QRD-1232' }, settings()));
+test('the start prompt does not ask on a ticket with AC, lists decisions, and leaves the pull request to the owner', () => {
+  const prompt = startPrompt('QRD-1240');
   assert.match(prompt, /do not stop to ask/);
   assert.match(prompt, /status\.cjs decide QRD-1240/);
-  assert.match(prompt, /PR body and in your last chat message/);
-  assert.match(prompt, /against feat\/V1-Playbook, not develop/);
-  assert.doesNotMatch(startPrompt('QRD-1', baseFor({ parentKey: 'QRD-99' }, settings())), /not develop/);
-  assert.strictEqual(baseFor({ parentKey: null }, settings()), null);
+  assert.match(prompt, /decision taken without the owner in your last chat message/);
+  assert.match(prompt, /committed on the ticket branch and ready for review/);
+  for (const text of [prompt, confirmedPrompt('QRD-1240')]) {
+    assert.match(text, /Do not push and do not open a pull request/);
+    assert.doesNotMatch(text, /develop|feat\/V1-Playbook|against/);
+  }
 });
 
 test('both prompts send the session to the contract rule and to the vault', () => {
@@ -267,13 +269,12 @@ test('outside the work window nothing is taken, but a queued answer still runs w
   assert.deepStrictEqual((await w.cron.runFill(true)).started, [], '"Run now" ignores the window, but the slot is still in use');
 });
 
-test('a fill starts in the chosen mode with model and effort, opens cron sessions, and names the base branch', async () => {
+test('a fill starts in the chosen mode with model and effort and opens cron sessions', async () => {
   const { state, cron } = world({ tickets: [ticket('QRD-1', { parentKey: 'QRD-1232' })], config: { model: 'opus', effort: 'high', mode: 'manual' } });
   await cron.runFill();
   assert.deepStrictEqual(state.sessions.map((s) => [s.ticketKey, s.machine, s.origin]), [['QRD-1', 'workspace', 'cron']]);
   assert.deepStrictEqual(state.sent[0].options, { permissionMode: 'default', model: 'opus', effort: 'high' });
   assert.match(state.sent[0].text, /^Build ticket QRD-1 with the build-ticket skill\. The ticket has acceptance criteria: do not stop to ask/);
-  assert.match(state.sent[0].text, /feat\/V1-Playbook/);
   assert.deepStrictEqual(state.moved, ['QRD-1']);
   const auto = world({ tickets: [ticket('QRD-1')] });
   await auto.cron.runFill();
@@ -322,7 +323,7 @@ test('each run that waits on the owner pings Discord once; the first look after 
   assert.deepStrictEqual(state.posts, [{ url: 'https://discord.com/api/webhooks/1/abc', body: { content: `<@123456789> **QRD-8** New work\n${PARKED_TEXT}`, allowed_mentions: { users: ['123456789'] } } }]);
   assert.deepStrictEqual(await cron.notifyWaiting(), [], 'no second ping for the same reason');
 
-  state.runs = [{ ...waiting, waiting: "PR open: waiting for the owner's review" }];
+  state.runs = [{ ...waiting, waiting: 'Ready for review: waiting for the owner' }];
   assert.deepStrictEqual(await cron.notifyWaiting(), ['QRD-7'], 'a new reason on the same run pings again');
 
   const silent = world({ runs: [waiting] });

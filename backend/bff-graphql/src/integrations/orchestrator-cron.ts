@@ -22,7 +22,6 @@ export interface CronSettings {
   maxPerDay: number;
   mode: CronMode;
   /** Epic key → the base branch its tickets open their pull request against. */
-  epicBase: Record<string, string>;
   sprint: 'active' | 'any';
   labels: string[];
   todoStatuses: string[];
@@ -44,7 +43,6 @@ export const DEFAULT_CRON_SETTINGS: CronSettings = {
   activeUntil: null,
   maxPerDay: 6,
   mode: 'auto',
-  epicBase: { 'QRD-1232': 'feat/V1-Playbook' },
   sprint: 'active',
   labels: [],
   todoStatuses: ['To Do'],
@@ -67,7 +65,7 @@ const MAX_DEFERRED_LOGGED = 30;
 const BRIDGE_MODE: Record<CronMode, string> = { auto: 'auto', acceptEdits: 'acceptEdits', manual: 'default' };
 
 export const PARKED_TEXT = 'No acceptance criteria on the ticket. Confirm to start anyway, or fill them in.';
-export const PR_GATE_TEXT = "PR open: waiting for the owner's review";
+export const PR_GATE_TEXT = "Ready for review: waiting for the owner";
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -85,18 +83,6 @@ function optionalDate(value: unknown, name: string): string | null {
   if (value === null || value === undefined || value === '') return null;
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) throw new CronInputError(`${name} must be a date YYYY-MM-DD`);
   return value;
-}
-
-function epicBase(value: unknown): Record<string, string> {
-  if (!isRecord(value)) throw new CronInputError('epicBase must map an epic key to a branch');
-  const out: Record<string, string> = {};
-  for (const [epic, branch] of Object.entries(value)) {
-    const key = epic.trim().toUpperCase();
-    if (!/^[A-Z][A-Z0-9]+-\d+$/.test(key)) throw new CronInputError(`${epic} is not an epic key`);
-    if (typeof branch !== 'string' || branch.trim().startsWith('-') || !/^[\w./-]{1,120}$/.test(branch.trim())) throw new CronInputError(`The base branch for ${key} is not a branch name`);
-    out[key] = branch.trim();
-  }
-  return out;
 }
 
 function optionalWord(value: unknown, name: string): string | null {
@@ -142,7 +128,6 @@ export function parseCronSettings(raw: string | null | undefined): CronSettings 
     activeUntil,
     maxPerDay: integer(merged.maxPerDay, 'maxPerDay', 1, 50),
     mode: merged.mode as CronMode,
-    epicBase: epicBase(merged.epicBase),
     sprint: merged.sprint,
     labels: words(merged.labels, 'labels'),
     todoStatuses,
@@ -212,33 +197,31 @@ export function outsideWindow(now: Date, settings: CronSettings): string | null 
   return null;
 }
 
-export const baseFor = (ticket: Pick<CronTicket, 'parentKey'>, settings: CronSettings): string | null => (ticket.parentKey ? settings.epicBase[ticket.parentKey.toUpperCase()] ?? null : null);
 
-const baseLine = (base: string | null) => (base ? [`Open the pull request against ${base}, not develop.`] : []);
-
+const NO_PR_LINE = 'Do not push and do not open a pull request: the owner asks for it in this chat when the work is OK.';
 const CONTRACT_LINE = 'Follow rules/ticket-contract.md: find and read the Confluence contract for this ticket before writing code; if a contract is found but cannot be read, stop and report why.';
 const VAULT_LINE = 'Before you finish, save a session note with brain.py save.';
 
 /** The prompt for a ticket with acceptance criteria: built without stopping to ask. */
-export const startPrompt = (key: string, base: string | null = null) => [
+export const startPrompt = (key: string) => [
   `Build ticket ${key} with the build-ticket skill.`,
   'The ticket has acceptance criteria: do not stop to ask. When something is ambiguous, take the reading closest to the AC,',
   `record it with status.cjs decide ${key} "<what and why>", and continue.`,
   CONTRACT_LINE,
-  `Stop only when the pull request is open (set the ledger gate to "${PR_GATE_TEXT}"), or when you cannot go on without the owner:`,
-  'missing access or token, the environment is down, a prerequisite ticket is not done. Say which. A question you still have may go with the PR message.',
-  'List every decision taken without the owner in the PR body and in your last chat message.',
-  ...baseLine(base),
+  `Stop when the work is committed on the ticket branch and ready for review (set the ledger gate to "${PR_GATE_TEXT}"), or when you cannot go on without the owner:`,
+  'missing access or token, the environment is down, a prerequisite ticket is not done. Say which. A question you still have goes in your last chat message.',
+  'List every decision taken without the owner in your last chat message.',
+  NO_PR_LINE,
   'Do not make the demo video until the owner approves in this chat.',
   VAULT_LINE,
 ].join(' ');
 
 /** The prompt for a parked ticket the owner confirmed: the AC are missing, so asking stays allowed. */
-export const confirmedPrompt = (key: string, base: string | null = null) => [
+export const confirmedPrompt = (key: string) => [
   `Build ticket ${key} with the build-ticket skill.`,
   CONTRACT_LINE,
-  `Stop when the pull request is open: set the ledger gate to "${PR_GATE_TEXT}" and wait.`,
-  ...baseLine(base),
+  `Stop when the work is committed on the ticket branch and ready for review: set the ledger gate to "${PR_GATE_TEXT}" and wait.`,
+  NO_PR_LINE,
   'Do not make the demo video until the owner approves in this chat.',
   VAULT_LINE,
 ].join(' ');
@@ -385,7 +368,7 @@ export class OrchestratorCron {
           free -= 1;
           day.started.push(ticket.key);
           log.started.push(ticket.key);
-          if (!(await this.start(ticket, settings, now, startPrompt(ticket.key, baseFor(ticket, settings))))) log.notMoved.push(ticket.key);
+          if (!(await this.start(ticket, settings, now, startPrompt(ticket.key)))) log.notMoved.push(ticket.key);
         }
       } catch (error) {
         console.error(`[Orchestrator cron] ${ticket.key} failed:`, error instanceof Error ? error.message : 'unknown error');
@@ -429,7 +412,7 @@ export class OrchestratorCron {
     const ticket = await this.deps.ticket(key);
     if (!ticket) throw new CronInputError('The ticket was not found in Jira');
     const settings = { ...(await this.settings()), machine: run.machine };
-    await this.start(ticket, settings, this.deps.now(), confirmedPrompt(ticket.key, baseFor(ticket, settings)));
+    await this.start(ticket, settings, this.deps.now(), confirmedPrompt(ticket.key));
   }
 
   async stopAll(): Promise<number> {

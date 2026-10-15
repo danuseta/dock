@@ -160,9 +160,6 @@ export const CronSettingsDialog = ({ open, onClose }: { open: boolean; onClose: 
                       <Input {...text('effort')} placeholder="default" />
                     </Field>
                   </div>
-                  <Field id="cron-epicBase" label="Base branch per epic" hint="EPIC=branch, separated by commas. Other tickets go to develop.">
-                    <Input {...text('epicBase')} placeholder="QRD-1232=feat/V1-Playbook" />
-                  </Field>
                 </Section>
 
                 <Section title="Which tickets">
