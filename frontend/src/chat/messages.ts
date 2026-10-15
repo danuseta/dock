@@ -114,6 +114,7 @@ export const isImageAttachment = (attachment: ChatAttachment) => attachment.stat
 
 export const pollInterval = (busy: boolean) => (busy ? FAST_POLL_MS : SLOW_POLL_MS);
 
+export const sessionTitle = (session: ChatSession) => session.title || session.ticketKey || 'Untitled session';
 export const machineOf = (session?: { machine?: string | null } | null) => session?.machine || DEFAULT_MACHINE;
 
 /** Where a machine's work happens, in a sentence: the laptop reads as "your laptop", any other machine by name. */

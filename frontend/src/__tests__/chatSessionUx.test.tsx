@@ -4,9 +4,10 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Markdown } from '../chat/Markdown';
 import { CACHED_MESSAGES, CACHED_SESSIONS, recallMessages, rememberMessages } from '../chat/messageCache';
-import type { ChatMessage } from '../chat/messages';
+import type { ChatMessage, ChatSession } from '../chat/messages';
+import { SessionRow } from '../chat/SessionRow';
 import {
-  appliedOptions, appliedText, defaultLabel, defaultsText, effortChoicesFor, modeChoices, modelChoices, modelsText, withChoice,
+  appliedOptions, appliedText, defaultLabel, effortChoicesFor, modeChoices, modelChoices, withChoice,
   type SessionMachineOptions,
 } from '../chat/sessionOptions';
 
@@ -52,9 +53,6 @@ test('what applies now marks the values that come from the machine default', () 
   assert.strictEqual(appliedText(rows), 'mode Auto · model Opus 5.5 · effort low');
   assert.deepStrictEqual(appliedOptions(null, undefined), []);
   assert.deepStrictEqual(appliedOptions(null, { ...machine, defaults: null }), []);
-  assert.strictEqual(defaultsText(machine), 'model Opus 5.5 · effort high · mode Default');
-  assert.strictEqual(defaultsText({ ...machine, defaults: null }), 'The machine did not report its defaults.');
-  assert.strictEqual(modelsText(machine.models), 'Opus 5.5 (low, medium, high, max) · Haiku (low, medium)');
 });
 
 test('picking a value stores it, and a model change drops an effort the model does not list', () => {
@@ -108,4 +106,26 @@ test('raw HTML in a reply is never rendered', () => {
   assert.doesNotMatch(html, /<img/);
   assert.doesNotMatch(html, /<b>/);
   assert.doesNotMatch(html, /javascript:/);
+});
+
+test('a search hit row shows the same chips and markers as the session list row', () => {
+  const session: ChatSession = {
+    id: 's1', source: 'dock', title: 'Fix login', ticketKey: 'QRD-1', machine: 'pc', status: 'running',
+    messageCount: 3, startedAt: '2026-10-15T00:00:00Z', lastMessageAt: '2026-10-15T00:00:00Z', lastText: 'last reply', waiting: true,
+  };
+  const now = Date.parse('2026-10-15T00:05:00Z');
+  const common = { session, machine: 'pc', online: true, selected: false, now, onSelect: () => {} };
+  const listRow = renderToStaticMarkup(<SessionRow {...common} />);
+  const hitRow = renderToStaticMarkup(<SessionRow {...common} snippet="matched text" snippetAt="2026-10-15T00:04:00Z" />);
+  for (const html of [listRow, hitRow]) {
+    assert.match(html, />DOCK</);
+    assert.match(html, /\(online\)/);
+    assert.match(html, />waiting</);
+    assert.match(html, /title="Working"/);
+    assert.match(html, />QRD-1</);
+    assert.match(html, />3 messages</);
+  }
+  assert.match(listRow, /last reply/);
+  assert.match(hitRow, /matched text/);
+  assert.doesNotMatch(hitRow, /last reply/);
 });

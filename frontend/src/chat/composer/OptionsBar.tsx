@@ -4,7 +4,7 @@ import { cn } from '../../lib/cn';
 import { MODE_LABELS, PERMISSION_MODES, effortChoices, type ComposerFeatures, type MachineOptions, type TurnOptions } from './composerLogic';
 import { hasChangedChoice, optionsSummary } from './optionsSummary';
 import type { TurnOptionsControl } from './useTurnOptions';
-import { defaultLabel, defaultsText, modelsText, type SessionMachineOptions } from '../sessionOptions';
+import { defaultLabel, type SessionMachineOptions } from '../sessionOptions';
 
 interface OptionsBarProps {
   features: ComposerFeatures;
@@ -94,9 +94,6 @@ export const OptionsBar: React.FC<OptionsBarProps> = ({ features, control, disab
           Fast mode
         </button>
       )}
-      <p className="w-full font-mono text-[0.62rem] text-muted-foreground [overflow-wrap:anywhere]">
-        Machine defaults: {defaultsText(named)}{machine.models.length > 0 ? ` · Models: ${modelsText(machine.models)}` : ''}
-      </p>
       </div>
     </div>
   );

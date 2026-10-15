@@ -75,20 +75,6 @@ export const appliedOptions = (options: TurnOptions | null, machine: SessionMach
 
 export const appliedText = (rows: readonly AppliedOption[]): string => rows.map((row) => `${row.label.toLowerCase()} ${row.value}`).join(' · ');
 
-export const defaultsText = (machine: SessionMachineOptions | undefined): string => {
-  const defaults = machine?.defaults;
-  const named = [
-    defaults?.model ? `model ${modelName(machine?.models ?? [], defaults.model)}` : null,
-    defaults?.effort ? `effort ${defaults.effort}` : null,
-    defaults?.permissionMode ? `mode ${modeName(defaults.permissionMode)}` : null,
-  ].filter((part): part is string => part !== null);
-  return named.length > 0 ? named.join(' · ') : 'The machine did not report its defaults.';
-};
-
-export const modelsText = (models: readonly ChatModel[]): string => models.map((model) => (
-  model.efforts.length > 0 ? `${model.label} (${model.efforts.join(', ')})` : model.label
-)).join(' · ');
-
 const EMPTY: TurnOptions = { model: null, effort: null, permissionMode: null, fast: null };
 
 /** The options to store after the reader picks a value; a model change drops an effort that model does not list. */
