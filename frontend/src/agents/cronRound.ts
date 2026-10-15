@@ -7,6 +7,8 @@ export interface FillLog {
   deferred: Array<{ key: string; reason: string }>;
   notMoved: string[];
   failed: string[];
+  /** Missing in a fill saved before released runs were reported. */
+  released?: string[];
 }
 
 /** The cron row on the Agents page. */
@@ -28,6 +30,7 @@ export function fillSummary(fill: FillLog | null): string {
     fill.parked.length ? `parked ${fill.parked.join(', ')}` : '',
     fill.notMoved.length ? `Jira did not move ${fill.notMoved.join(', ')}` : '',
     fill.failed.length ? `failed ${fill.failed.join(', ')}` : '',
+    fill.released?.length ? `start failed, back to To Do: ${fill.released.join(', ')}` : '',
   ].filter(Boolean);
   return `${when}: ${parts.join('; ')}.`;
 }

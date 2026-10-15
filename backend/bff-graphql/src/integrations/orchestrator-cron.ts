@@ -65,6 +65,7 @@ const MAX_DEFERRED_LOGGED = 30;
 const BRIDGE_MODE: Record<CronMode, string> = { auto: 'auto', acceptEdits: 'acceptEdits', manual: 'default' };
 
 export const PARKED_TEXT = 'No acceptance criteria on the ticket. Confirm to start anyway, or fill them in.';
+export const START_FAILED_TEXT = 'The cron session ended before the agent answered. Fix the machine, then retry.';
 export const PR_GATE_TEXT = "Ready for review: waiting for the owner";
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -227,7 +228,7 @@ export const confirmedPrompt = (key: string) => [
 ].join(' ');
 
 export interface DeferredTicket { key: string; reason: string }
-export interface FillLog { at: string; day: string; skipped: string | null; started: string[]; parked: string[]; deferred: DeferredTicket[]; notMoved: string[]; failed: string[] }
+export interface FillLog { at: string; day: string; skipped: string | null; started: string[]; parked: string[]; deferred: DeferredTicket[]; notMoved: string[]; failed: string[]; released: string[] }
 export interface CronSlots { busy: number; waiting: number }
 export interface CronStatus { enabled: boolean; slots: CronSlots; parallel: number; startedToday: number; maxPerDay: number; lastFill: FillLog | null }
 
@@ -252,6 +253,8 @@ export interface CronDeps {
   fiveHourUsed(machine: string): { usedPercentage: number; resetsAt: string | null } | null;
   /** Every run that ever existed, dismissed ones too: a ticket is picked once. */
   takenKeys(): Promise<string[]>;
+  /** Tickets whose latest cron session ended its first turn without a single reply from the agent. */
+  deadStarts(): Promise<string[]>;
   runs(): Promise<CronRun[]>;
   saveRun(ledger: Record<string, unknown>, machine: string): Promise<unknown>;
   openSession(input: { ticketKey: string; machine: string; title: string; origin: 'cron' }): Promise<{ id: string }>;
@@ -320,7 +323,11 @@ export class OrchestratorCron {
     const now = this.deps.now();
     const settings = await this.settings();
     const { date } = wib(now);
-    const log: FillLog = { at: now.toISOString(), day: date, skipped: null, started: [], parked: [], deferred: [], notMoved: [], failed: [] };
+    const log: FillLog = { at: now.toISOString(), day: date, skipped: null, started: [], parked: [], deferred: [], notMoved: [], failed: [], released: [] };
+    log.released = await this.releaseDeadStarts(settings, now, date).catch((error) => {
+      console.error('[Orchestrator cron] Release failed:', error instanceof Error ? error.message : 'unknown error');
+      return [];
+    });
     log.skipped = await this.reasonToSkip(settings, now, ignoreWindow);
     if (!log.skipped) {
       const day = await this.dayCount(date);
@@ -377,6 +384,25 @@ export class OrchestratorCron {
     }
   }
 
+  /**
+   * A cron session that died before the agent answered (a hook that blocks the prompt, a machine that is not ready) did no work.
+   * Its run waits on the owner with a retry, it stops counting toward today's cap, and the ticket goes back to To Do.
+   */
+  private async releaseDeadStarts(settings: CronSettings, now: Date, date: string): Promise<string[]> {
+    const dead = new Set(await this.deps.deadStarts());
+    if (!dead.size) return [];
+    const runs = (await this.deps.runs()).filter((run) => dead.has(run.key) && !run.waiting);
+    if (!runs.length) return [];
+    const day = await this.dayCount(date);
+    for (const run of runs) {
+      await this.saveRun(run, run.machine, now, START_FAILED_TEXT);
+      day.started = day.started.filter((key) => key !== run.key);
+      await this.deps.moveTicket(run.key, settings.todoStatuses[0]).catch(() => false);
+    }
+    await this.deps.cacheSet(`day:${date}`, day);
+    return runs.map((run) => run.key);
+  }
+
   /** Tickets whose dependency is not settled yet. */
   private async blockedKeys(): Promise<Set<string>> {
     const blocked = new Set<string>();
@@ -387,7 +413,7 @@ export class OrchestratorCron {
     return blocked;
   }
 
-  private saveRun(ticket: CronTicket, machine: string, now: Date, waiting: string) {
+  private saveRun(ticket: Pick<CronTicket, 'key' | 'title'>, machine: string, now: Date, waiting: string) {
     return this.deps.saveRun({ key: ticket.key, kind: 'build', title: ticket.title, stage: 'gate', waiting, note: 'Started by the orchestrator cron', updatedAt: now.toISOString() }, machine);
   }
 
@@ -405,14 +431,17 @@ export class OrchestratorCron {
     return this.deps.moveTicket(ticket.key, settings.inProgressStatus);
   }
 
-  /** The owner's answer to a parked ticket: start it although it has no acceptance criteria. It queues for a slot like an answer. */
+  /**
+   * The owner's answer to a parked ticket: start it although it has no acceptance criteria. It queues for a slot like an answer.
+   * A ticket whose cron session died before the agent answered is started again with the normal prompt.
+   */
   async confirm(key: string): Promise<void> {
     const run = (await this.deps.runs()).find((item) => item.key === key);
-    if (!run || run.waiting !== PARKED_TEXT) throw new CronInputError('This ticket is not waiting for a confirmation');
+    if (!run || (run.waiting !== PARKED_TEXT && run.waiting !== START_FAILED_TEXT)) throw new CronInputError('This ticket is not waiting for a confirmation');
     const ticket = await this.deps.ticket(key);
     if (!ticket) throw new CronInputError('The ticket was not found in Jira');
     const settings = { ...(await this.settings()), machine: run.machine };
-    await this.start(ticket, settings, this.deps.now(), confirmedPrompt(ticket.key));
+    await this.start(ticket, settings, this.deps.now(), run.waiting === PARKED_TEXT ? confirmedPrompt(ticket.key) : startPrompt(ticket.key));
   }
 
   async stopAll(): Promise<number> {

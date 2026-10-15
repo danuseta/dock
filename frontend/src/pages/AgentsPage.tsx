@@ -9,7 +9,7 @@ import { isPhone } from '../lib/phone';
 import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
-import { PARKED_TEXT, completeRun, formatAge, hasTrouble, isArchived, offerOf, pageOf, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
+import { PARKED_TEXT, START_FAILED_TEXT, completeRun, formatAge, hasTrouble, isArchived, offerOf, pageOf, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
 import { RAIL_STAGES, railIndex } from '../agents/office/layout';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 import { AgentFlowGraph } from '../components/AgentFlowGraph';
@@ -410,8 +410,8 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                   <b className="mb-0.5 block font-mono text-[0.66rem] font-bold uppercase tracking-[0.08em] text-amber-200">Waiting on you</b>
                   <span className="text-pretty">{selected.waiting}</span>
                   <p className="mt-1.5 text-pretty text-xs text-muted-foreground">Answer here, or in the Claude Code session on {machinePlace(machineOf(selected))}.</p>
-                  {!selected.sample && selected.waiting === PARKED_TEXT
-                    ? <Button size="sm" variant="primary" className="mt-2 h-7 px-2.5" disabled={confirming} onClick={() => void runAction(async () => { await confirmOrchestration({ variables: { key: selected.key } }); await refetch(); })}>Confirm and start</Button>
+                  {!selected.sample && (selected.waiting === PARKED_TEXT || selected.waiting === START_FAILED_TEXT)
+                    ? <Button size="sm" variant="primary" className="mt-2 h-7 px-2.5" disabled={confirming} onClick={() => void runAction(async () => { await confirmOrchestration({ variables: { key: selected.key } }); await refetch(); })}>{selected.waiting === PARKED_TEXT ? 'Confirm and start' : 'Retry'}</Button>
                     : !selected.sample && <Button size="sm" className="mt-2 h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key, machineOf(selected))}>Reply here</Button>}
                 </div>
               )}
