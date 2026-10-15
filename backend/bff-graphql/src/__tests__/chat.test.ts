@@ -33,8 +33,8 @@ function memoryStorage() {
   const storage = {
     getCache: async (namespace: string, key: string) => JSON.parse(cache.get(`${namespace}:${key}`) ?? 'null'),
     upsertCache: async (namespace: string, key: string, value: unknown) => { cache.set(`${namespace}:${key}`, JSON.stringify(value)); },
-    getChatSessions: async (source: string | null, take: number) => [...sessions.values()]
-      .filter((session) => !source || session.source === source)
+    getChatSessions: async (source: string | null, take: number, machine: string | null = null) => [...sessions.values()]
+      .filter((session) => (!source || session.source === source) && (!machine || session.machine === machine))
       .sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime())
       .slice(0, take),
     getChatSession: async (id: string) => sessions.get(id) ?? null,
@@ -106,8 +106,9 @@ function memoryStorage() {
     },
     getNewestChatMessage: async (sessionId: string, role: string) => ofSession(sessionId)
       .filter((message) => message.role === role).at(-1) ?? null,
-    searchChatMessages: async (query: string, take: number) => messages
+    searchChatMessages: async (query: string, take: number, machine: string | null = null) => messages
       .filter((message) => message.text.toLowerCase().includes(query.toLowerCase()))
+      .filter((message) => !machine || sessions.get(message.sessionId)?.machine === machine)
       .sort((a, b) => b.at.getTime() - a.at.getTime() || b.id - a.id)
       .slice(0, take),
     getChatLastTexts: async (sessionIds: string[], length: number) => new Map(sessionIds.flatMap((id): Array<[string, string]> => {
@@ -455,6 +456,7 @@ test('chat ingest routes share the ingest token and the 404 / 400 conventions', 
   const orchestrator = new OrchestratorService(storage, os.tmpdir());
   const chat = new ChatService(storage);
   const { token } = await orchestrator.createToken('laptop');
+  const history = (await orchestrator.createToken('workspace', 'workspace')).token;
   const app = express();
   app.use('/ingest/orchestrator', createOrchestratorIngestRouter(orchestrator, new PinRateLimiter(5, 60_000), chat));
   const server = http.createServer(app);
@@ -474,16 +476,21 @@ test('chat ingest routes share the ingest token and the 404 / 400 conventions', 
   assert.strictEqual((await post('/chat/claim', { wait: 0 }, 'dock_ing_wrong')).status, 401);
   assert.strictEqual((await post('/chat/delta', {}, null)).status, 401);
 
-  const synced = await post('/sessions', syncBody());
+  const fromLaptop = await post('/sessions', syncBody());
+  assert.strictEqual(fromLaptop.status, 403, 'history from any machine but workspace is refused');
+  assert.match((await fromLaptop.json()).error, /only kept for the workspace machine/);
+  assert.strictEqual((await post('/sessions', '{not json')).status, 403, 'refused before the body is read');
+
+  const synced = await post('/sessions', syncBody(), history);
   assert.strictEqual(synced.status, 200);
   assert.deepStrictEqual(await synced.json(), { ok: true, result: { id: CLI_ID, messageCount: 3 } });
-  assert.strictEqual((await post('/sessions', syncBody({ messages: 'x' }))).status, 400);
-  assert.strictEqual((await post('/sessions', '{not json')).status, 400);
-  assert.strictEqual((await post('/sessions', syncBody({ messages: [{ role: 'user', text: 'x'.repeat(2 * 1024 * 1024), at: '2026-10-07T08:00:00.000Z' }] }))).status, 413);
+  assert.strictEqual((await post('/sessions', syncBody({ messages: 'x' }), history)).status, 400);
+  assert.strictEqual((await post('/sessions', '{not json', history)).status, 400);
+  assert.strictEqual((await post('/sessions', syncBody({ messages: [{ role: 'user', text: 'x'.repeat(2 * 1024 * 1024), at: '2026-10-07T08:00:00.000Z' }] }), history)).status, 413);
   assert.strictEqual((await post('/chat/delta', { sessionId: CLI_ID, replyTo: 1, items: [{ role: 'assistant', text: 'x'.repeat(300 * 1024), at: '2026-10-07T08:00:00.000Z' }] })).status, 413);
 
   const dock = await chat.createSession({ title: 'From the browser' });
-  const refused = await post('/sessions', syncBody({ session: { ...syncBody().session, id: dock.id } }));
+  const refused = await post('/sessions', syncBody({ session: { ...syncBody().session, id: dock.id } }), history);
   assert.strictEqual(refused.status, 400);
 
   const empty = await post('/chat/claim', { wait: 0 });
@@ -512,7 +519,7 @@ test('chat ingest routes share the ingest token and the 404 / 400 conventions', 
   assert.strictEqual((await post('/chat/status', statusBody({ sessionId: 'bad id' }))).status, 400);
   assert.strictEqual((await post('/chat/status', statusBody({ costUsd: 'free' }))).status, 400);
   assert.deepStrictEqual(chat.statusSnapshot(), { limits: null, sessions: [] });
-  const stored = await post('/chat/status', statusBody());
+  const stored = await post('/chat/status', statusBody(), history);
   assert.deepStrictEqual([stored.status, await stored.json()], [200, { ok: true, result: { sessionId: CLI_ID } }]);
   assert.strictEqual(chat.statusSnapshot().sessions[0].sessionId, CLI_ID);
 });
@@ -655,6 +662,27 @@ test('a session is created for a machine, keeps it, and is refused to any other 
 
   await service.renameSession(fork.id, 'renamed');
   assert.strictEqual(sessions.get(fork.id).machine, 'workspace', 'no call moves a session to another machine');
+});
+
+test('a machine filter keeps the list, one session and search to that machine', async () => {
+  const { service } = clockedService();
+  await service.syncSession(syncBody(), 'laptop');
+  const remote = await service.createSession({ title: 'Remote', machine: 'workspace' });
+  const local = await service.createSession({ title: 'Local', machine: 'laptop' });
+  await service.sendMessage(remote.id, 'the redirect on workspace', MACHINES);
+  await service.sendMessage(local.id, 'the redirect on laptop', MACHINES);
+
+  assert.deepStrictEqual((await service.sessions(null, null, 'workspace')).map((session) => session.id), [remote.id]);
+  assert.deepStrictEqual((await service.sessions('cli', null, 'workspace')), [], 'the laptop history is left out');
+  assert.strictEqual((await service.sessions()).length, 3, 'no filter lists every machine');
+
+  assert.strictEqual((await service.session(remote.id, 'workspace'))?.id, remote.id);
+  assert.strictEqual(await service.session(local.id, 'workspace'), null);
+  assert.strictEqual(await service.session(CLI_ID, 'workspace'), null);
+  assert.strictEqual((await service.session(local.id))?.id, local.id);
+
+  assert.deepStrictEqual((await service.search('redirect', null, 'workspace')).map((hit) => hit.session.id), [remote.id]);
+  assert.strictEqual((await service.search('redirect')).length, 3);
 });
 
 test('the ingest token decides the machine of a claim', async (t) => {

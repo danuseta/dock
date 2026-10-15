@@ -56,6 +56,8 @@ import {
 } from './chat-interactions';
 import { DEFAULT_MACHINE, OrchestratorInputError, normalizeMachine, normalizeTicketKey } from './orchestrator';
 
+/** The only machine whose sessions DOCK lists, searches, opens and accepts history from. */
+export const CHAT_MACHINE = 'workspace';
 export const CHAT_SOURCES = ['cli', 'dock'] as const;
 export type ChatSource = typeof CHAT_SOURCES[number];
 export const CHAT_ROLES = ['user', 'assistant', 'tool'] as const;
@@ -655,20 +657,20 @@ export class ChatService {
     }
   }
 
-  async sessions(sourceInput?: string | null, limitInput?: number | null) {
+  async sessions(sourceInput?: string | null, limitInput?: number | null, machine: string | null = null) {
     const source = sourceInput === undefined || sourceInput === null ? null : sourceInput;
     if (source !== null && !CHAT_SOURCES.includes(source as ChatSource)) {
       throw new OrchestratorInputError(`Source must be one of ${CHAT_SOURCES.join(', ')}`);
     }
     await this.failStale();
-    return this.present(await this.storage.getChatSessions(source, limit(limitInput, SESSIONS_LIMIT)));
+    return this.present(await this.storage.getChatSessions(source, limit(limitInput, SESSIONS_LIMIT), machine));
   }
 
-  async session(id: string) {
+  async session(id: string, machine: string | null = null) {
     if (!CHAT_ID.test(String(id))) return null;
     await this.failStale();
     const row = await this.storage.getChatSession(id);
-    return row ? (await this.present([row]))[0] : null;
+    return row && (machine === null || row.machine === machine) ? (await this.present([row]))[0] : null;
   }
 
   async messages(sessionId: string, afterId?: number | null, beforeId?: number | null, limitInput?: number | null) {
@@ -699,10 +701,10 @@ export class ChatService {
     return this.storage.getChatActivityDetail(sessionId, id);
   }
 
-  async search(queryInput: string, limitInput?: number | null) {
+  async search(queryInput: string, limitInput?: number | null, machine: string | null = null) {
     const query = text(queryInput, MAX_QUERY_CHARS);
     if (query.length < MIN_QUERY_CHARS) return [];
-    const rows = await this.storage.searchChatMessages(query, limit(limitInput, SEARCH_LIMIT));
+    const rows = await this.storage.searchChatMessages(query, limit(limitInput, SEARCH_LIMIT), machine);
     const sessions = await this.present(await this.storage.getChatSessionsByIds([...new Set(rows.map((row) => row.sessionId))]));
     const byId = new Map(sessions.map((session) => [session.id, session]));
     return rows.flatMap((row) => {
@@ -803,6 +805,13 @@ export class ChatService {
       }
     }
     await this.restoreSessionStatus();
+  }
+
+  /** Drops the status lines a machine left, in memory and in the saved copy. */
+  async forgetStatus(machine: string) {
+    await this.restoreSessionStatus();
+    this.sessionStatus.delete(machine);
+    await this.saveSessionStatus();
   }
 
   private async restoreSessionStatus() {

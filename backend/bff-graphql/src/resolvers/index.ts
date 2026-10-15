@@ -8,7 +8,7 @@ import { CalendarUnavailableError, googleCalendarService } from '../integrations
 import { upstreamMonitorService } from '../integrations/upstream-monitor';
 import { dockerRuntimeService } from '../integrations/docker-runtime';
 import { OrchestratorInputError, orchestratorService } from '../integrations/orchestrator';
-import { chatService } from '../integrations/chat';
+import { CHAT_MACHINE, chatService } from '../integrations/chat';
 import { mergeAttention, withoutSettledTickets } from '../integrations/attention';
 import { CronInputError } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
@@ -169,9 +169,9 @@ export const resolvers = {
     orchestration: async (_: unknown, { key }: { key: string }) => orchestratorService.get(key),
     ingestTokens: async () => orchestratorService.tokens(),
     chatSessions: async (_: unknown, { source, limit }: { source?: string; limit?: number }) => {
-      return chatService.sessions(source, limit).catch(orchestratorInputError);
+      return chatService.sessions(source, limit, CHAT_MACHINE).catch(orchestratorInputError);
     },
-    chatSession: async (_: unknown, { id }: { id: string }) => chatService.session(id),
+    chatSession: async (_: unknown, { id }: { id: string }) => chatService.session(id, CHAT_MACHINE),
     chatMessages: async (_: unknown, args: { sessionId: string; afterId?: number; beforeId?: number; limit?: number }) => {
       return chatService.messages(args.sessionId, args.afterId, args.beforeId, args.limit)
         .then((rows) => chatService.withAttachments(rows)).catch(orchestratorInputError);
@@ -180,7 +180,7 @@ export const resolvers = {
       return chatService.activityRows(args.sessionId, args).catch(orchestratorInputError);
     },
     chatActivityDetail: async (_: unknown, { sessionId, id }: { sessionId: string; id: number }) => chatService.activityDetail(sessionId, id),
-    chatSearch: async (_: unknown, { query, limit }: { query: string; limit?: number }) => chatService.search(query, limit),
+    chatSearch: async (_: unknown, { query, limit }: { query: string; limit?: number }) => chatService.search(query, limit, CHAT_MACHINE),
     chatBridge: async () => chatService.bridge(),
     chatMachines: async () => chatService.machinesWithInfo(await orchestratorService.machines()),
     chatCommands: async (_: unknown, { machine, query, limit }: { machine: string; query?: string | null; limit?: number | null }) => {
@@ -413,10 +413,13 @@ export const resolvers = {
       return orchestratorService.moveRun(key, machine).catch(orchestratorInputError);
     },
     createChatSession: async (_: unknown, args: { title?: string; ticketKey?: string; forkFrom?: string; machine?: string | null }) => {
-      if (args.machine && !(await orchestratorService.machines()).includes(args.machine)) {
+      if (args.machine && args.machine !== CHAT_MACHINE) {
+        throw new GraphQLError(`Chat sessions run on ${CHAT_MACHINE} only`, { extensions: { code: 'BAD_USER_INPUT' } });
+      }
+      if (!(await orchestratorService.machines()).includes(CHAT_MACHINE)) {
         throw new GraphQLError('Unknown machine', { extensions: { code: 'BAD_USER_INPUT' } });
       }
-      return chatService.createSession(args).catch(orchestratorInputError);
+      return chatService.createSession({ ...args, machine: CHAT_MACHINE }).catch(orchestratorInputError);
     },
     sendChatMessage: async (
       _: unknown,

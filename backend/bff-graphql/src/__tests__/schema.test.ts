@@ -267,6 +267,10 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
         mutations.createChatSession({}, { title: 'Probe', machine: 'workspace' }, unlocked),
         /Unknown machine/,
       );
+      await assert.rejects(
+        mutations.createChatSession({}, { title: 'Probe', machine: 'laptop' }, unlocked),
+        /Chat sessions run on workspace only/,
+      );
     } finally {
       StorageAPI.prototype.hasMasterPin = originalPin;
       orchestratorService.machines = originalMachines;
