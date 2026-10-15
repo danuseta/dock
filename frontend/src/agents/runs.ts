@@ -1,3 +1,4 @@
+import { machineOf } from '../chat/messages';
 import { poseOf, slotFromServer, type Pose } from './office/activity';
 
 export interface AgentAc { n: number; state: string; text: string; evidence?: string | null }
@@ -79,7 +80,38 @@ export const FLOW_RAIL = [
   { id: 'pr', name: 'PR', color: '#62cf9f' },
 ] as const;
 
-export type AgentRunSummary = Pick<AgentRun, 'key' | 'stage' | 'waiting' | 'acPassed' | 'acFailed' | 'acTotal' | 'activity' | 'stalled' | 'finished'>;
+export type AgentRunSummary = Pick<AgentRun, 'key' | 'stage' | 'waiting' | 'acPassed' | 'acFailed' | 'acTotal' | 'activity' | 'stalled' | 'finished' | 'machine' | 'kind'>;
+
+/** A review run reads as Review; a build run, or one that does not say, is a Task. */
+export const kindLabel = (kind?: string | null) => (kind === 'review' ? 'Review' : 'Task');
+
+export const FILTER_MACHINES = ['laptop', 'workspace'] as const;
+export const FILTER_KINDS = ['review', 'task'] as const;
+export interface RunFilter { machine: typeof FILTER_MACHINES[number] | null; kind: typeof FILTER_KINDS[number] | null }
+
+const pick = <T extends string>(value: string | null, allowed: readonly T[]): T | null => (allowed.includes(value as T) ? value as T : null);
+
+/** The Agents filter as the URL keeps it: `?machine=laptop&kind=review`; anything else means all. */
+export function runFilterFromSearch(search: string): RunFilter {
+  const params = new URLSearchParams(search);
+  return { machine: pick(params.get('machine'), FILTER_MACHINES), kind: pick(params.get('kind'), FILTER_KINDS) };
+}
+
+/** The query string for a filter, keeping any other parameter the URL already has. */
+export function runFilterSearch(search: string, filter: RunFilter): string {
+  const params = new URLSearchParams(search);
+  for (const name of ['machine', 'kind'] as const) {
+    if (filter[name]) params.set(name, filter[name]!);
+    else params.delete(name);
+  }
+  const query = params.toString();
+  return query ? `?${query}` : '';
+}
+
+export const matchesRunFilter = (run: Pick<AgentRun, 'machine' | 'kind'>, filter: RunFilter) => (
+  (!filter.machine || machineOf(run) === filter.machine)
+  && (!filter.kind || (filter.kind === 'review') === (run.kind === 'review'))
+);
 
 export const STAGE_LABEL: Record<string, string> = {
   gate: 'Gate', plan: 'Plan', code: 'Code', test: 'Test', verify: 'Verify',

@@ -26,6 +26,8 @@ export const GET_DASHBOARD = gql`
         workOrderSource
         orchestration {
           key
+          machine
+          kind
           stage
           waiting
           acPassed
@@ -330,6 +332,8 @@ export const GET_HOME_SECONDARY = gql`
     }
     orchestrations {
       key
+      machine
+      kind
       title
       stage
       waiting

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Bot, Hand } from 'lucide-react';
-import { PARKED_TEXT, START_FAILED_TEXT, stageColor, stageLabel, type AgentRunSummary } from '../agents/runs';
+import { PARKED_TEXT, START_FAILED_TEXT, kindLabel, stageColor, stageLabel, type AgentRunSummary } from '../agents/runs';
+import { machineOf } from '../chat/messages';
 import { cn } from '../lib/cn';
 
 /** One line on a ticket card: where the agent is and whether it needs the owner. */
@@ -19,6 +20,8 @@ export const AgentRunStrip: React.FC<{ run: AgentRunSummary; className?: string 
       <i className="size-1.5 shrink-0 rounded-full" style={{ background: stageColor(run.stage) }} aria-hidden="true" />
       <span className="shrink-0">{stageLabel(run.stage).toUpperCase()}</span>
       <span className="shrink-0 tabular-nums opacity-80">AC {run.acPassed}/{run.acTotal}</span>
+      <span className="shrink-0 text-[0.62rem] font-semibold opacity-80">{machineOf(run)}</span>
+      <span className="shrink-0 text-[0.62rem] font-semibold opacity-80">{kindLabel(run.kind)}</span>
       <span className="min-w-0 truncate font-semibold">{run.waiting === PARKED_TEXT ? '?? Confirm to start' : run.waiting === START_FAILED_TEXT ? 'Start failed' : run.waiting ? 'Waiting on you' : run.acFailed > 0 ? 'AC failed' : run.stalled ? 'Stalled' : ''}</span>
     </div>
   );

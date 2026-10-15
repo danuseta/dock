@@ -5,10 +5,8 @@ import { CREATE_CHAT_SESSION } from '../graphql/mutations';
 import { GET_CHAT_MESSAGES, GET_CHAT_SESSION } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import { ChatThread } from './ChatThread';
-import { MachinePicker } from './MachineControls';
 import { useFullViewport } from './useFullViewport';
-import { useMachineChoice } from './useMachineChoice';
-import { SLOW_POLL_MS, machineOf, newestAssistantId, severalMachines, tabLabel, type ChatMessage, type ChatSession } from './messages';
+import { SLOW_POLL_MS, machineOf, newestAssistantId, tabLabel, type ChatMessage, type ChatSession } from './messages';
 import { LimitsLine } from './StatusLine';
 import { chatStore, useChatState } from './store';
 
@@ -70,7 +68,6 @@ const ChatTab: React.FC<{ sessionId: string; active: boolean; unread: boolean; m
 
 export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
   const state = useChatState();
-  const { machines, machine, choose } = useMachineChoice();
   const { data: activeData } = useQuery<{ chatSession: ChatSession | null }>(GET_CHAT_SESSION, { variables: { id: state.active }, skip: !state.active, fetchPolicy: 'cache-first' });
   const [createSession, { loading: creating }] = useMutation<{ createChatSession: ChatSession }>(CREATE_CHAT_SESSION);
   const [unread, setUnread] = useState<Record<string, boolean>>({});
@@ -106,7 +103,7 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
   const newSession = async () => {
     setError('');
     try {
-      const result = await createSession({ variables: { machine } });
+      const result = await createSession();
       const created = result.data?.createChatSession;
       if (!created) throw new Error('DOCK did not return a session');
       chatStore.openSession(created.id);
@@ -185,9 +182,8 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
           <header className="flex flex-none items-center gap-1 border-b border-border bg-surface-0 px-2 py-1.5 max-[699px]:pt-[max(0.375rem,env(safe-area-inset-top))]">
             <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none]" role="tablist" aria-label="Open sessions">
               {state.tabs.length === 0 && <span className="px-1.5 font-display text-xs font-bold">Chat</span>}
-              {state.tabs.map((id) => <ChatTab key={id} sessionId={id} active={id === state.active} multipleMachines={severalMachines(machines, state.tabs.flatMap((tab) => tabMachines[tab] ?? []))} unread={Boolean(unread[id]) && id !== state.active} onMachine={reportMachine} />)}
+              {state.tabs.map((id) => <ChatTab key={id} sessionId={id} active={id === state.active} multipleMachines={new Set(state.tabs.flatMap((tab) => tabMachines[tab] ?? [])).size > 1} unread={Boolean(unread[id]) && id !== state.active} onMachine={reportMachine} />)}
             </div>
-            <MachinePicker machines={machines} value={machine} onChange={choose} disabled={creating} className="max-w-[220px] flex-none whitespace-nowrap" />
             <button type="button" className={control} aria-label="New session" title="New session" disabled={creating} onClick={() => void newSession()}><Plus size={14} aria-hidden="true" /></button>
             <button type="button" className={cn(control, 'max-[699px]:hidden')} aria-label={drawer ? 'Pop out' : 'Dock to bottom'} title={drawer ? 'Pop out' : 'Dock to bottom'} onClick={() => chatStore.setMode(drawer ? 'float' : 'drawer')}>
               {drawer ? <PictureInPicture2 size={14} aria-hidden="true" /> : <PanelBottom size={14} aria-hidden="true" />}
