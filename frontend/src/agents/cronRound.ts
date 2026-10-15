@@ -68,8 +68,6 @@ export interface CronForm {
   activeUntil: string;
   maxPerDay: string;
   mode: string;
-  /** "QRD-1232=feat/V1-Playbook, QRD-900=feat/x" */
-  epicBase: string;
   sprint: string;
   labels: string;
   todoStatuses: string;
@@ -95,7 +93,6 @@ export function formFromConfig(configJson: string): CronForm {
     activeUntil: config.activeUntil || '',
     maxPerDay: String(config.maxPerDay),
     mode: config.mode,
-    epicBase: Object.entries(config.epicBase as Record<string, string>).map(([epic, branch]) => `${epic}=${branch}`).join(', '),
     sprint: config.sprint,
     labels: config.labels.join(', '),
     todoStatuses: config.todoStatuses.join(', '),
@@ -110,10 +107,6 @@ export function formFromConfig(configJson: string): CronForm {
 /** The JSON the server validates. Numbers that are not numbers go through as they are, so the server names the wrong field. */
 export function configFromForm(form: CronForm): string {
   const number = (text: string) => (text.trim() === '' || Number.isNaN(Number(text)) ? text : Number(text));
-  const epicBase = Object.fromEntries(list(form.epicBase).map((pair) => {
-    const at = pair.indexOf('=');
-    return at < 0 ? [pair, ''] : [pair.slice(0, at).trim(), pair.slice(at + 1).trim()];
-  }));
   return JSON.stringify({
     enabled: form.enabled,
     machine: form.machine,
@@ -125,7 +118,6 @@ export function configFromForm(form: CronForm): string {
     activeUntil: form.activeUntil || null,
     maxPerDay: number(form.maxPerDay),
     mode: form.mode,
-    epicBase,
     sprint: form.sprint,
     labels: list(form.labels),
     todoStatuses: list(form.todoStatuses),
