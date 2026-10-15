@@ -4,6 +4,7 @@ import { pipeline } from 'node:stream/promises';
 import { bearerToken } from '../auth/ingest-token';
 import { PinRateLimiter, sessionManager, shouldRequirePin } from '../auth/session';
 import { ChatService, chatService } from '../integrations/chat';
+import { AttachmentRefusal } from '../integrations/chat-attachments';
 import { MAX_TRANSCRIPT_BYTES, OrchestratorInputError, OrchestratorService, orchestratorService } from '../integrations/orchestrator';
 import { StorageService } from '../storage/service';
 
@@ -93,6 +94,29 @@ export function createOrchestratorIngestRouter(
   router.post('/chat/wait', small, handle((body, signal, machine) => chat.wait(body, signal, machine)));
   router.post('/chat/ask', small, handle((body, _signal, machine) => chat.ask(body, machine)));
   router.post('/chat/catalog', express.json({ limit: '512kb' }), handle((body, _signal, machine) => chat.ingestCatalog(body, machine)));
+  router.post('/chat/upload', async (request: Request, response: Response) => {
+    const declared = Number(request.get('content-length'));
+    try {
+      const result = await chat.receiveUpload(request.query, {
+        contentType: request.get('content-type') ?? '',
+        contentLength: request.get('content-length') !== undefined && Number.isFinite(declared) ? declared : null,
+        body: request,
+      }, response.locals.machine);
+      response.status(200).json({ ok: true, result });
+    } catch (error) {
+      if (error instanceof AttachmentRefusal) {
+        response.status(error.status).json({ error: error.message });
+        return;
+      }
+      if (error instanceof OrchestratorInputError) {
+        response.status(400).json({ error: error.message });
+        return;
+      }
+      if (request.destroyed || request.aborted) return;
+      console.error('[Orchestrator] upload failed:', error instanceof Error ? error.message : 'unknown error');
+      response.status(500).json({ error: 'Ingest failed' });
+    }
+  });
   router.post('/chat/attachment', small, async (request: Request, response: Response) => {
     try {
       const file = await chat.openAttachment(request.body, response.locals.machine);

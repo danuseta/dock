@@ -665,3 +665,61 @@ test('SQLite storage finds tickets whose latest cron session died before the age
   assert.deepStrictEqual((await storage.getDeadCronStartKeys(minute(0))).sort(), ['QRD-1'], 'a reply, a running or queued turn, a newer session, a manual session and an empty session all keep a ticket out');
   assert.deepStrictEqual(await storage.getDeadCronStartKeys(minute(2)), [], 'sessions opened before the lookback are ignored');
 });
+
+test('SQLite keeps session options, an auto title, saved status lines and an agent file as an assistant message', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }, { ChatService }, { ChatAttachmentService }, { prismaChatAttachmentStore, prismaChatSessionLookup }] = await Promise.all([
+    import('../storage/service'),
+    import('../storage/client'),
+    import('../integrations/chat'),
+    import('../integrations/chat-attachments'),
+    import('../storage/chat-attachments'),
+  ]);
+  const storage = new StorageService(prisma);
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'dock-ux-'));
+  t.after(async () => {
+    await prisma.$disconnect();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const chat = new ChatService(storage, undefined, undefined, new ChatAttachmentService(prismaChatAttachmentStore, prismaChatSessionLookup, { dir: () => dir }));
+  const caps = { v: 2, kit: '1.0.0', claude: '2.1.296', features: ['interactive', 'model', 'effort'], modes: ['default', 'auto'], catalogHash: 'ux1' };
+
+  const dock = await chat.createSession({ machine: 'laptop' });
+  assert.deepStrictEqual((await storage.getChatSession(dock.id))?.options, JSON.stringify({ model: null, effort: null, permissionMode: 'auto', fast: null }), 'a new DOCK session starts in auto mode');
+  const cron = await chat.createSession({ machine: 'laptop', title: 'QRD-1', origin: 'cron' });
+  assert.strictEqual((await storage.getChatSession(cron.id))?.options, null, 'a cron session sends its mode with each message');
+
+  await chat.claim({ wait: 0, caps }, undefined, 'laptop');
+  await chat.ingestCatalog({ hash: 'ux1', commands: [], models: [{ value: 'sonnet', label: 'Sonnet', efforts: ['low', 'high'], fast: false }], fast: { available: false, reason: null }, defaults: { model: 'sonnet', effort: 'high', permissionMode: 'default' } }, 'laptop');
+  assert.deepStrictEqual((await chat.machineOptions('laptop', ['laptop']))?.defaults, { model: 'sonnet', effort: 'high', permissionMode: 'default' });
+  const restartedChat = new ChatService(storage);
+  assert.deepStrictEqual((await restartedChat.machineOptions('laptop', ['laptop']))?.defaults, { model: 'sonnet', effort: 'high', permissionMode: 'default' }, 'the defaults are stored with the catalogue');
+
+  await chat.setSessionOptions(dock.id, { model: 'sonnet', effort: 'low', permissionMode: 'auto' });
+  const sent = await chat.sendMessage(dock.id, '  Check <b>this</b> PR  ', ['laptop'], { options: { effort: 'high' } });
+  const queued = await storage.getChatMessage(sent.id);
+  assert.deepStrictEqual(JSON.parse(queued?.options ?? 'null'), { model: 'sonnet', effort: 'high', permissionMode: 'auto', fast: null });
+  assert.strictEqual((await storage.getChatSession(dock.id))?.title, 'Check this PR');
+  assert.strictEqual((await storage.getChatSession(dock.id))?.options, JSON.stringify({ model: 'sonnet', effort: 'low', permissionMode: 'auto', fast: null }));
+
+  await chat.claim({ wait: 0, caps }, undefined, 'laptop');
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(32, 7)]);
+  const { Readable } = await import('node:stream');
+  const { messageId } = await chat.receiveUpload(
+    { sessionId: dock.id, replyTo: String(sent.id), name: 'shot.png' },
+    { contentType: 'image/png', contentLength: png.length, body: Readable.from([png]) },
+    'laptop',
+  );
+  const reply = await storage.getChatMessage(messageId);
+  assert.deepStrictEqual([reply?.role, reply?.state, reply?.text], ['assistant', 'done', 'Attachment: shot.png']);
+  const [shown] = await chat.withAttachments([{ id: messageId, role: 'assistant' }]);
+  assert.deepStrictEqual(shown.attachments.map((item) => [item.name, item.mime, item.state]), [['shot.png', 'image/png', 'attached']]);
+  assert.strictEqual((await storage.getChatSession(dock.id))?.messageCount, 2);
+
+  await chat.ingestStatus({ sessionId: dock.id, model: 'sonnet', turnCostUsd: 0.5 }, 'laptop');
+  await chat.ingestStatus({ sessionId: dock.id, turnCostUsd: 0.25 }, 'laptop');
+  const restarted = new ChatService(storage);
+  await restarted.restoreLimits();
+  assert.deepStrictEqual(restarted.statusSnapshot('laptop').sessions.map((line) => [line.sessionId, line.model, line.costUsd]), [[dock.id, 'sonnet', 0.75]]);
+});

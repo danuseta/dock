@@ -404,10 +404,17 @@ export const typeDefs = gql`
     fast: Boolean!
   }
 
+  type ChatMachineDefaults {
+    model: String
+    effort: String
+    permissionMode: String
+  }
+
   type ChatMachineOptions {
     models: [ChatModel!]!
     modes: [String!]!
     fastAvailable: Boolean!
+    defaults: ChatMachineDefaults!
   }
 
   input ChatTurnOptionsInput {
@@ -646,6 +653,7 @@ export const typeDefs = gql`
     answerChatInteraction(sessionId: ID!, id: Int!, decision: String!, answers: [ChatAnswerInput!], note: String): ChatInteraction!
     stopChatTurn(sessionId: ID!): ChatSession!
     renameChatSession(id: ID!, title: String!): ChatSession!
+    setChatSessionOptions(id: ID!, options: ChatTurnOptionsInput!): ChatSession!
     deleteChatSession(id: ID!): Boolean!
     refreshSprintDashboard(sprintId: Int!): SprintRefreshState!
     backfillSprintDashboards(count: Int!): SprintRefreshState!

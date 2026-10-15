@@ -61,12 +61,17 @@ export interface WaitAnswer { requestId: string; kind: InteractionKind; state: '
 
 export interface CatalogCommand { name: string; description: string; argumentHint: string; kind: 'builtin' | 'skill' }
 export interface CatalogModel { value: string; label: string; efforts: string[]; fast: boolean }
+export interface CatalogDefaults { model: string | null; effort: string | null; permissionMode: string | null }
 export interface Catalog {
   hash: string;
   commands: CatalogCommand[];
   models: CatalogModel[];
   fast: { available: boolean; reason: string | null };
+  defaults: CatalogDefaults;
 }
+
+export const NO_DEFAULTS: CatalogDefaults = { model: null, effort: null, permissionMode: null };
+const DEFAULT_WORD = /^[A-Za-z0-9][A-Za-z0-9._:[\]-]{0,79}$/;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -221,6 +226,15 @@ function parseEfforts(value: unknown): string[] {
   return [...new Set(value.map((item) => short(item, CATALOG_LIMITS.effort)).filter(Boolean))].slice(0, CATALOG_LIMITS.efforts);
 }
 
+function defaultWord(value: unknown): string | null {
+  return typeof value === 'string' && DEFAULT_WORD.test(value.trim()) ? value.trim() : null;
+}
+
+function parseDefaults(value: unknown): CatalogDefaults {
+  if (!isRecord(value)) return NO_DEFAULTS;
+  return { model: defaultWord(value.model), effort: defaultWord(value.effort), permissionMode: defaultWord(value.permissionMode) };
+}
+
 export function parseCatalog(input: unknown): Catalog {
   if (!isRecord(input)) throw new OrchestratorInputError('A catalog object is required');
   if (typeof input.hash !== 'string' || !HASH.test(input.hash)) throw new OrchestratorInputError('hash must be an id of letters, digits, dashes and underscores');
@@ -250,7 +264,7 @@ export function parseCatalog(input: unknown): Catalog {
   const fast = isRecord(input.fast)
     ? { available: input.fast.available === true, reason: short(input.fast.reason, CATALOG_LIMITS.reason) || null }
     : { available: false, reason: null };
-  const catalog: Catalog = { hash: input.hash, commands, models, fast };
+  const catalog: Catalog = { hash: input.hash, commands, models, fast, defaults: parseDefaults(input.defaults) };
   if (Buffer.byteLength(JSON.stringify(catalog)) > CATALOG_LIMITS.bytes) throw new OrchestratorInputError('The catalog is too large');
   return catalog;
 }
@@ -318,6 +332,35 @@ export function parseStoredOptions(value: string | null | undefined): TurnOption
   } catch {
     return null;
   }
+}
+
+/** The session's stored options, overlaid field by field by the ones sent with a message. */
+export function mergeTurnOptions(base: TurnOptions | null, over: TurnOptions | null): TurnOptions | null {
+  if (!base || !over) return over ?? base;
+  return {
+    model: over.model ?? base.model,
+    effort: over.effort ?? base.effort,
+    permissionMode: over.permissionMode ?? base.permissionMode,
+    fast: over.fast ?? base.fast,
+  };
+}
+
+/** What a machine can honour of options stored earlier; the rest is left out instead of refusing the message. */
+export function usableTurnOptions(options: TurnOptions | null, caps: BridgeCaps | null, catalog: Catalog | null): TurnOptions | null {
+  if (!options) return null;
+  const fits = (part: Partial<TurnOptions>) => {
+    try {
+      checkTurnOptions({ model: null, effort: null, permissionMode: null, fast: null, ...part }, caps, catalog);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const model = options.model !== null && fits({ model: options.model }) ? options.model : null;
+  const effort = options.effort !== null && fits({ model, effort: options.effort }) ? options.effort : null;
+  const permissionMode = options.permissionMode !== null && fits({ permissionMode: options.permissionMode }) ? options.permissionMode : null;
+  const fast = options.fast !== null && fits({ fast: options.fast }) ? options.fast : null;
+  return model === null && effort === null && permissionMode === null && fast === null ? null : { model, effort, permissionMode, fast };
 }
 
 export function checkTurnOptions(options: TurnOptions, caps: BridgeCaps | null, catalog: Catalog | null): void {
