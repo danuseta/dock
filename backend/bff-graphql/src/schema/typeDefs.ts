@@ -581,6 +581,7 @@ export const typeDefs = gql`
 
   type Query {
     authStatus: AuthStatus!
+    dockMode: String!
     dashboard: [TicketGroup!]!
     ticketDetail(key: String!): Ticket
     ticketRelationGroup(ticketKey: String!): TicketRelationGroup!

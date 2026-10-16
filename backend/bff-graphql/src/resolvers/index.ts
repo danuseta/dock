@@ -16,6 +16,7 @@ import { labelOrder } from '../integrations/orchestrator-cron';
 import { pushService } from '../integrations/push';
 import type { AnswerInput } from '../integrations/chat-interactions';
 import { SprintBusyError, SprintInputError, sprintDashboardService } from '../integrations/sprint-dashboard';
+import { dockMode } from '../mode';
 
 const jiraAPI = new JiraAPI();
 const githubAPI = new GitHubAPI();
@@ -65,6 +66,8 @@ export const resolvers = {
         hasMasterPin: pinEnabled,
       };
     },
+    // Public: the page needs it before the PIN to know which navigation to draw.
+    dockMode: () => dockMode(),
     dashboard: async () => {
       // Scatter-gather parallel fetching
       const [tickets] = await Promise.all([

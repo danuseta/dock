@@ -18,6 +18,7 @@ import { PageBoundary } from './components/PageBoundary';
 import { PinLockModal } from './components/PinLockModal';
 import { LoadingSkeleton } from './components/LoadingSkeleton';
 import { Button, Page } from './components/ui';
+import { DockModeContext, hasPage, type DockMode } from './lib/dockMode';
 
 const AgentsPage = lazy(() => import('./pages/AgentsPage'));
 
@@ -94,8 +95,12 @@ function App() {
     setCurrentPath('/ticket');
   };
 
+  const mode: DockMode = data?.dockMode === 'workspace' ? 'workspace' : 'laptop';
+  // A page this DOCK leaves out, such as an old bookmark, opens Home.
+  const path = hasPage(mode, currentPath) ? currentPath : '/';
+
   const renderPage = () => {
-    switch (currentPath) {
+    switch (path) {
       case '/': return <HomePage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;
       case '/dashboard': return <DashboardPage onTicketClick={navigateToTicket} />;
       case '/agents': return <Suspense fallback={<Page width="full"><LoadingSkeleton /></Page>}><AgentsPage onTicketClick={navigateToTicket} onNavigate={handleNavigate} /></Suspense>;
@@ -137,13 +142,15 @@ function App() {
   const isLocked = data.authStatus.hasMasterPin && !data.authStatus.authenticated;
 
   return (
-    <AppLayout currentPath={currentPath === '/ticket' ? '/dashboard' : currentPath} onNavigate={handleNavigate} unreachable={unreachable} onRetry={() => void refetch()}>
-      {!isLocked && <PageBoundary key={currentPath}>{renderPage()}</PageBoundary>}
-      <PinLockModal 
-        isOpen={isLocked} 
-        onUnlock={handleUnlock} 
-      />
-    </AppLayout>
+    <DockModeContext.Provider value={mode}>
+      <AppLayout currentPath={path === '/ticket' ? '/dashboard' : path} onNavigate={handleNavigate} unreachable={unreachable} onRetry={() => void refetch()}>
+        {!isLocked && <PageBoundary key={path}>{renderPage()}</PageBoundary>}
+        <PinLockModal
+          isOpen={isLocked}
+          onUnlock={handleUnlock}
+        />
+      </AppLayout>
+    </DockModeContext.Provider>
   );
 }
 

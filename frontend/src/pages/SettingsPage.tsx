@@ -14,6 +14,7 @@ import { PushCard } from '../components/PushCard';
 import { NAVIGATION_PREFERENCES_EVENT, NavigationMode, NavigationPreferences, readNavigationPreferences, saveNavigationPreferences } from '../lib/navigationPreferences';
 import { Badge, Button, Card, Checkbox, IconButton, Input, Page, Select, Textarea } from '../components/ui';
 import { cn } from '../lib/cn';
+import { hasPage, useDockMode } from '../lib/dockMode';
 import {
   isValidServiceHealthRefreshSeconds,
   MAX_SERVICE_HEALTH_REFRESH_SECONDS,
@@ -85,6 +86,9 @@ const SettingsHeading = ({ title, description }: { title: string; description: s
 );
 
 const SettingsPage: React.FC = () => {
+  // A connection shows only when its page does: a workspace DOCK has no calendar to connect.
+  const mode = useDockMode();
+  const sections = settingsSections.filter((section) => section.id !== 'calendar' || hasPage(mode, '/calendar'));
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
   const [navigationPreferences, setNavigationPreferences] = useState(readNavigationPreferences);
   const { data, loading, error, refetch } = useQuery(GET_SETTINGS, CACHED_QUERY_OPTIONS);
@@ -412,14 +416,14 @@ const SettingsPage: React.FC = () => {
 
       <div className="grid grid-cols-[220px_minmax(0,1fr)] items-start gap-7 max-[800px]:grid-cols-1">
         <div className="hidden max-[760px]:block">
-          <Select aria-label="Settings section" value={activeSection} onValueChange={(value) => setActiveSection(value as SettingsSection)} options={settingsSections.map((section) => ({ value: section.id, label: section.label }))} />
+          <Select aria-label="Settings section" value={activeSection} onValueChange={(value) => setActiveSection(value as SettingsSection)} options={sections.map((section) => ({ value: section.id, label: section.label }))} />
         </div>
         <aside className="sticky top-6 min-w-0 max-w-full max-[800px]:static max-[800px]:overflow-x-auto max-[760px]:hidden" aria-label="Settings categories">
           {(['Preferences', 'Connections'] as const).map((group) => (
             <div key={group} className="mb-4 max-[800px]:mb-0 max-[800px]:inline-block max-[800px]:align-top">
               <p className="mb-2 px-2 text-[0.6875rem] font-semibold text-muted-foreground max-[800px]:sr-only">{group.toUpperCase()}</p>
               <nav className="flex flex-col gap-1 max-[800px]:flex-row" aria-label={`${group} settings`}>
-                {settingsSections.filter((section) => section.group === group).map((section) => {
+                {sections.filter((section) => section.group === group).map((section) => {
                   const Icon = section.icon;
                   const active = activeSection === section.id;
                   return <button key={section.id} type="button" onClick={() => setActiveSection(section.id)} aria-current={active ? 'page' : undefined} className={cn('grid min-h-12 w-full grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-2 rounded-sm border px-2.5 py-2 text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 max-[800px]:w-auto max-[800px]:grid-cols-[28px_auto]', active ? 'border-border bg-surface-2 text-foreground' : 'border-transparent text-secondary-foreground hover:bg-surface-1 hover:text-foreground')}>
@@ -466,7 +470,7 @@ const SettingsPage: React.FC = () => {
 
               <Card aria-labelledby="connection-overview-title">
                 <div className="mb-4"><h3 id="connection-overview-title" className="font-display text-lg font-bold">Connection overview</h3><p className="mt-1 text-pretty text-sm text-muted-foreground">Review integration status without opening every category.</p></div>
-                <div className="grid grid-cols-2 gap-3 max-[620px]:grid-cols-1">{settingsSections.filter(({ group }) => group === 'Connections').map((section) => { const Icon = section.icon; return <button key={section.id} type="button" onClick={() => setActiveSection(section.id)} className="flex items-center gap-3 rounded-sm border border-border bg-surface-0 p-3 text-left hover:border-border-glow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"><span className="grid size-9 shrink-0 place-items-center rounded-sm bg-surface-2"><Icon size={17} aria-hidden="true" /></span><span className="min-w-0 flex-1"><strong className="block font-display text-sm">{section.label}</strong><small className={connectionStatus[section.id] ? 'text-status-merged' : 'text-muted-foreground'}>{connectionStatus[section.id] ? 'Connected' : 'Not configured'}</small></span><ChevronRight size={16} className="text-muted-foreground" aria-hidden="true" /></button>; })}</div>
+                <div className="grid grid-cols-2 gap-3 max-[620px]:grid-cols-1">{sections.filter(({ group }) => group === 'Connections').map((section) => { const Icon = section.icon; return <button key={section.id} type="button" onClick={() => setActiveSection(section.id)} className="flex items-center gap-3 rounded-sm border border-border bg-surface-0 p-3 text-left hover:border-border-glow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"><span className="grid size-9 shrink-0 place-items-center rounded-sm bg-surface-2"><Icon size={17} aria-hidden="true" /></span><span className="min-w-0 flex-1"><strong className="block font-display text-sm">{section.label}</strong><small className={connectionStatus[section.id] ? 'text-status-merged' : 'text-muted-foreground'}>{connectionStatus[section.id] ? 'Connected' : 'Not configured'}</small></span><ChevronRight size={16} className="text-muted-foreground" aria-hidden="true" /></button>; })}</div>
               </Card>
             </div>
           </section>}

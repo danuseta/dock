@@ -16,6 +16,7 @@ import { createGoogleCalendarRouter } from './auth/google-calendar-router';
 import { createBrainProxyRouter } from './routes/brain';
 import { createChatAttachmentRouter } from './routes/chat-attachments';
 import { createOrchestratorApiRouter, createOrchestratorIngestRouter } from './routes/orchestrator';
+import { dockMode } from './mode';
 
 export interface CreateAppOptions {
   corsOrigin?: string;
@@ -37,6 +38,7 @@ export const buildOf = (indexHtml: string): string | null => indexHtml.match(/\/
 
 export async function createApp(options: CreateAppOptions = {}): Promise<JidisApp> {
   const app = express();
+  const mode = dockMode();
   const apolloServer = new ApolloServer<AuthContext>({ typeDefs, resolvers });
   const frontendDistPath = path.resolve(
     options.frontendDistPath || process.env.FRONTEND_DIST_PATH || defaultFrontendDistPath(),
@@ -53,12 +55,17 @@ export async function createApp(options: CreateAppOptions = {}): Promise<JidisAp
     origin: options.corsOrigin || process.env.CORS_ORIGIN || 'http://localhost:3000',
   }));
   // Mounted ahead of the global parser: ingest routes carry their own body limits.
+  if (mode === 'laptop') {
+    app.use(['/ingest/orchestrator/sessions', '/ingest/orchestrator/chat'], (_request, response) => {
+      response.status(404).json({ error: 'Chat runs on the workspace DOCK. This DOCK only keeps the run ledger.' });
+    });
+  }
   app.use('/ingest/orchestrator', createOrchestratorIngestRouter());
   app.use('/ingest/brain', createBrainProxyRouter());
-  app.use('/api/chat/attachments', createChatAttachmentRouter());
+  if (mode === 'workspace') app.use('/api/chat/attachments', createChatAttachmentRouter());
   app.use(express.json());
 
-  app.use('/auth/google', createGoogleCalendarRouter());
+  if (mode === 'laptop') app.use('/auth/google', createGoogleCalendarRouter());
   app.use('/api/orchestrator', createOrchestratorApiRouter());
 
   app.use('/graphql', expressMiddleware(apolloServer, {

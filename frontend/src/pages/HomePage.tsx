@@ -12,6 +12,7 @@ import { isArchived, type AgentRunSummary } from '../agents/runs';
 import { MonthCalendar } from '../components/MonthCalendar';
 import { Button, Card, Dialog, IconButton, Input, Select } from '../components/ui';
 import { cn } from '../lib/cn';
+import { hasPage, useDockMode } from '../lib/dockMode';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { DEFAULT_SERVICE_HEALTH_REFRESH_SECONDS, normalizeServiceHealthRefreshSeconds } from '../lib/serviceHealthRefresh';
 import type { CalendarEvent } from '../lib/calendar';
@@ -31,11 +32,14 @@ const panelTitleClass = 'text-balance font-display text-[0.82rem] font-bold';
 const textActionClass = 'h-6 max-[760px]:h-11 border-0 px-0 py-0 text-[0.68rem] text-muted-foreground hover:border-transparent hover:bg-transparent hover:text-foreground';
 
 const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
+  const mode = useDockMode();
+  const showCalendar = hasPage(mode, '/calendar');
+  const showDocker = hasPage(mode, '/docker');
   const [healthRefreshSeconds, setHealthRefreshSeconds] = useState(DEFAULT_SERVICE_HEALTH_REFRESH_SECONDS);
   const { data: coreData, loading: coreLoading, error: coreError } = useQuery(GET_HOME_CORE, CACHED_QUERY_OPTIONS);
   const { data: secondaryData, loading: secondaryLoading, error: secondaryError, refetch: refetchSecondary } = useQuery(
     GET_HOME_SECONDARY,
-    { ...CACHED_QUERY_OPTIONS, pollInterval: healthRefreshSeconds * 1000 },
+    { ...CACHED_QUERY_OPTIONS, variables: { calendar: showCalendar, docker: showDocker }, pollInterval: healthRefreshSeconds * 1000 },
   );
   const [addQuickLink, { loading: adding }] = useMutation(ADD_QUICK_LINK, { refetchQueries: [{ query: GET_HOME_CORE }] });
   const [removeQuickLink] = useMutation(REMOVE_QUICK_LINK, { refetchQueries: [{ query: GET_HOME_CORE }] });
@@ -147,14 +151,14 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
             </article>
           )}
 
-          <DockerRuntimeCard runtime={secondaryData?.dockerRuntime} onNavigate={onNavigate} compact loading={secondaryLoading && !secondaryData} />
+          {showDocker && <DockerRuntimeCard runtime={secondaryData?.dockerRuntime} onNavigate={onNavigate} compact loading={secondaryLoading && !secondaryData} />}
         </div>
 
         <div className="grid w-full max-w-[380px] justify-self-end gap-3.5 max-[900px]:justify-self-center max-[600px]:max-w-[360px]">
-          <article className={cn(panelClass, 'relative z-10 overflow-visible')}>
+          {showCalendar && <article className={cn(panelClass, 'relative z-10 overflow-visible')}>
             <header className={panelHeaderClass}><h2 className={panelTitleClass}>{monthLabel}</h2><Button variant="ghost" size="sm" className={textActionClass} onClick={() => onNavigate('/calendar')}>Google Calendar →</Button></header>
             <div className="px-2.5 pt-2 pb-2.5"><MonthCalendar month={now} events={calendarEvents} /></div>
-          </article>
+          </article>}
 
           <article className={panelClass}>
             <header className={panelHeaderClass}><h2 className={panelTitleClass}>Service health</h2><div className="flex items-center gap-[7px]"><span className="font-mono text-[0.63rem] text-muted-foreground tabular-nums">Refresh {healthCountdown}s</span><IconButton variant="ghost" className="size-[26px] rounded-sm border-border" onClick={refreshHealth} aria-label="Refresh service health now"><RefreshCw size={13} aria-hidden="true" /></IconButton></div></header>

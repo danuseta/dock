@@ -6,6 +6,7 @@ import { ADD_MONITOR, CHECK_MONITORS, REMOVE_MONITOR, UPDATE_MONITOR } from '../
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Button, Card, Dialog, IconButton, Input, Page, PageHeader, PhoneCards } from '../components/ui';
 import { cn } from '../lib/cn';
+import { hasPage, useDockMode } from '../lib/dockMode';
 import { DockerRuntimeCard } from '../components/DockerRuntimeCard';
 import { DEFAULT_SERVICE_HEALTH_REFRESH_SECONDS, normalizeServiceHealthRefreshSeconds } from '../lib/serviceHealthRefresh';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
@@ -44,10 +45,11 @@ const metricTones = ['text-accent', 'text-status-merged', 'text-status-conflict'
 interface MonitoringPageProps { onNavigate: (path: string) => void; }
 
 const MonitoringPage: React.FC<MonitoringPageProps> = ({ onNavigate }) => {
+  const showDocker = hasPage(useDockMode(), '/docker');
   const [refreshSeconds, setRefreshSeconds] = useState(DEFAULT_SERVICE_HEALTH_REFRESH_SECONDS);
   const { data, loading, error, refetch } = useQuery(GET_MONITORS, {
     ...CACHED_QUERY_OPTIONS,
-    variables: { refresh: true },
+    variables: { refresh: true, docker: showDocker },
     pollInterval: refreshSeconds * 1000,
   });
   const [addMonitor, { loading: adding }] = useMutation(ADD_MONITOR);
@@ -156,7 +158,7 @@ const MonitoringPage: React.FC<MonitoringPageProps> = ({ onNavigate }) => {
           </PhoneCards>
         </Card>
       )}
-        <DockerRuntimeCard runtime={data?.dockerRuntime} onNavigate={onNavigate} />
+        {showDocker && <DockerRuntimeCard runtime={data?.dockerRuntime} onNavigate={onNavigate} />}
       </div>
 
       <Dialog open={Boolean(editor)} onClose={() => !isSaving && setEditor(null)} dismissible={!isSaving} labelledBy="service-editor-title" describedBy="service-editor-description">
