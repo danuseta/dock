@@ -570,6 +570,12 @@ export class OrchestratorService {
   async ingestLedger(input: unknown, now: Date, machine: string) {
     const ledger = parseLedger(input, now);
     const previous = await this.storage.getOrchestratorRun(ledger.key);
+    // The peer decides who owns a ticket: a leftover ledger here never brings back a run the peer gives to another machine.
+    const other = this.peer && (await this.peer.runs()).find((run) => run.key === ledger.key && run.machine !== machine);
+    if (other) {
+      if (previous && !previous.dismissedAt) await this.stepAside(ledger.key, other.machine, now);
+      return { ...other, ignored: true };
+    }
     const owner = previous?.machine ?? DEFAULT_MACHINE;
     const dismissedElsewhere = Boolean(previous?.dismissedAt) && owner !== machine;
     if (previous && ((!previous.dismissedAt && owner !== machine) || (dismissedElsewhere && (await this.machines()).includes(owner)))) {
@@ -710,8 +716,7 @@ export class OrchestratorService {
       } else {
         const other = theirs.get(row.key);
         if (other) {
-          await this.storage.updateOrchestratorRun(row.key, { dismissedAt: now });
-          await this.storage.addOrchestratorEvent(row.key, 'MACHINE', other.machine, MAX_EVENTS_KEPT);
+          await this.stepAside(row.key, other.machine, now);
           continue;
         }
         const ledger = this.sharedLedger((await this.storage.getOrchestratorRunWithLedger(row.key)) ?? row).ledger;
@@ -721,6 +726,11 @@ export class OrchestratorService {
       sent += 1;
     }
     return sent;
+  }
+
+  private async stepAside(key: string, owner: string, now: Date) {
+    await this.storage.updateOrchestratorRun(key, { dismissedAt: now });
+    await this.storage.addOrchestratorEvent(key, 'MACHINE', owner, MAX_EVENTS_KEPT);
   }
 
   /** What the peer DOCK reads for its own detail panel: the run and its recent events. */

@@ -12,9 +12,9 @@ test('the peer is on only with both its URL and its token', () => {
   assert.ok(ledgerPeerFromEnv({ DOCK_LEDGER_PEER_URL: 'https://dock.example/ingest/orchestrator', DOCK_LEDGER_PEER_TOKEN: 'dock_x' }) instanceof LedgerPeer);
 });
 
-test('peer runs add the other machines, never this machine and never a ticket kept here', () => {
-  const merged = withPeerRuns([run('ZED-1', 'workspace')], [run('ZED-1', 'laptop'), run('ZED-2', 'laptop'), run('ZED-3', 'workspace')], 'workspace');
-  assert.deepStrictEqual(merged.map((item) => [item.key, item.machine, 'peer' in item]), [['ZED-1', 'workspace', false], ['ZED-2', 'laptop', true]]);
+test('peer runs add the other machines, never this machine, and replace a run kept here for a ticket the peer gives away', () => {
+  const merged = withPeerRuns([run('ZED-1', 'workspace'), run('ZED-4', 'workspace')], [run('ZED-1', 'laptop'), run('ZED-2', 'laptop'), run('ZED-3', 'workspace')], 'workspace');
+  assert.deepStrictEqual(merged.map((item) => [item.key, item.machine, 'peer' in item]), [['ZED-4', 'workspace', false], ['ZED-1', 'laptop', true], ['ZED-2', 'laptop', true]]);
 });
 
 test('the peer reads with the bearer token, keeps its last runs through a failed read, and a hanging peer times out', async (t) => {
