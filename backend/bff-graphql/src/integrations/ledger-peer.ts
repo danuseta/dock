@@ -65,6 +65,15 @@ export class LedgerPeer {
       return null;
     }
   }
+
+  /** Asks the peer for a ticket whose ledger is newer here. Answers the owner the peer now has, or null when it cannot tell. */
+  async claim(key: string, updatedAt: string): Promise<string | null> {
+    try {
+      return ((await this.post('/claim', { key, updatedAt })) as { machine?: string } | null)?.machine ?? null;
+    } catch {
+      return null;
+    }
+  }
 }
 
 export function ledgerPeerFromEnv(env: NodeJS.ProcessEnv = process.env): LedgerPeer | null {
