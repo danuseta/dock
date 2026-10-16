@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"python - <<'EOF'\\np='orchestrator.test.ts'\\ns=open(p,encoding='utf8').read()\\nold=\\\"import { createOrchestratorIngestRouter } from '../routes/orchestrator';\\\\n\\\"\\nassert s.count(old)==1\\ns...",
-  "error": "Exit code 2\n/usr/bin/bash: -c: line 108: unexpected EOF while looking for matching `''",
-  "timestamp": "2026-10-16T08:28:41.173Z",
-  "retry_count": 1
-}
