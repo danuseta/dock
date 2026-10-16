@@ -9,6 +9,7 @@ services:
       - "127.0.0.1:3101:4000"
     environment:
       PORT: 4000
+      DOCK_MODE: laptop
       FRONTEND_DIST_PATH: /app/frontend-dist
       DATABASE_URL: file:/app/data/jidis.db
       JIDIS_DATA_DIR: /app/data

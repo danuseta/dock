@@ -8,6 +8,7 @@ import { cn } from '../lib/cn';
 import { PHONE_PRIMARY_PATHS, phoneMore } from '../lib/phoneNavigation';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 import { ChatDock } from '../chat/ChatDock';
+import { hasPage, useDockMode } from '../lib/dockMode';
 import { version as appVersion } from '../../package.json';
 
 // A phone tab: icon over a short label, 44 px tall.
@@ -16,6 +17,7 @@ const PHONE_TAB = 'max-[760px]:h-11 max-[760px]:w-[60px] max-[760px]:flex-col ma
 interface AppLayoutProps { currentPath: string; onNavigate: (path: string) => void; unreachable: boolean; onRetry: () => void; children: React.ReactNode; }
 
 export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, unreachable, onRetry, children }) => {
+  const mode = useDockMode();
   const [preferences, setPreferences] = useState(readNavigationPreferences);
   const { data } = useQuery(GET_NEEDS_ATTENTION, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
   const conflictCount = data?.needsAttention?.length || 0;
@@ -51,7 +53,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
     { path: '/docker', label: 'Docker Services', icon: Box, badge: 0 },
     { path: '/attention', label: 'Needs Attention', icon: AlertTriangle, badge: conflictCount },
     { path: '/settings', label: 'System Settings', icon: SettingsIcon, badge: 0 },
-  ];
+  ].filter((item) => hasPage(mode, item.path));
 
   // A phone has room for four destinations and a More button; the rest sit in the sheet that button opens.
   const more = phoneMore(navItems, currentPath);
@@ -217,7 +219,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
         )}
         {children}
       </main>
-      <ChatDock inset={chatInset} />
+      {hasPage(mode, '/sessions') && <ChatDock inset={chatInset} />}
     </div>
   );
 };

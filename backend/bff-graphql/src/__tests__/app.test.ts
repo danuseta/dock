@@ -98,6 +98,51 @@ test('DOCK monolith shell serves API and SPA from one Express app', async (t) =>
   });
 });
 
+test('each DOCK mode serves only the routes its pages use', async (t) => {
+  const before = process.env.DOCK_MODE;
+  const appIn = async (mode: string) => {
+    process.env.DOCK_MODE = mode;
+    return createApp({ frontendDistPath: 'missing-for-mode-test' });
+  };
+  const laptop = await appIn('laptop');
+  const workspace = await appIn('workspace');
+  const laptopRuntime = await listen(laptop.app);
+  const workspaceRuntime = await listen(workspace.app);
+  t.after(async () => {
+    if (before === undefined) delete process.env.DOCK_MODE;
+    else process.env.DOCK_MODE = before;
+    await laptopRuntime.close();
+    await workspaceRuntime.close();
+    await laptop.apolloServer.stop();
+    await workspace.apolloServer.stop();
+  });
+
+  const modeOf = async (baseUrl: string) => {
+    const response = await fetch(`${baseUrl}/graphql`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: '{ dockMode }' }),
+    });
+    return (await response.json()).data.dockMode;
+  };
+  assert.strictEqual(await modeOf(workspaceRuntime.baseUrl), 'workspace');
+  await assert.rejects(appIn('desktop'), /DOCK_MODE must be one of laptop, workspace/);
+
+  const claim = await fetch(`${laptopRuntime.baseUrl}/ingest/orchestrator/chat/claim`, { method: 'POST' });
+  assert.strictEqual(claim.status, 404, 'a laptop DOCK takes no chat from its bridge');
+  const history = await fetch(`${laptopRuntime.baseUrl}/ingest/orchestrator/sessions`, { method: 'POST' });
+  assert.strictEqual(history.status, 404, 'a laptop DOCK keeps no session history');
+  const ledger = await fetch(`${laptopRuntime.baseUrl}/ingest/orchestrator`, { method: 'POST' });
+  assert.strictEqual(ledger.status, 401, 'the run ledger still asks for its token');
+  const workspaceClaim = await fetch(`${workspaceRuntime.baseUrl}/ingest/orchestrator/chat/claim`, { method: 'POST' });
+  assert.strictEqual(workspaceClaim.status, 401, 'a workspace DOCK takes chat once the bridge shows its token');
+
+  const laptopGoogle = await fetch(`${laptopRuntime.baseUrl}/auth/google/callback`, { redirect: 'manual' });
+  assert.strictEqual(laptopGoogle.status, 302);
+  const workspaceGoogle = await fetch(`${workspaceRuntime.baseUrl}/auth/google/callback`, { redirect: 'manual' });
+  assert.strictEqual(workspaceGoogle.status, 404, 'a workspace DOCK has no calendar to connect');
+});
+
 test('the build of a page is the hashed name of its entry script', () => {
   assert.strictEqual(buildOf('<script type="module" crossorigin src="/assets/index-Bx9_k2-a.js"></script><link rel="stylesheet" href="/assets/index-DfQ1.css">'), '/assets/index-Bx9_k2-a.js');
   assert.strictEqual(buildOf('<!doctype html><title>DOCK shell</title>'), null);

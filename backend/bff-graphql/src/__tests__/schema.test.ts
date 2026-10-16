@@ -95,6 +95,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'chatSessions',
       'chatStatus',
       'dashboard',
+      'dockMode',
       'dockerContainerLogs',
       'dockerRuntime',
       'githubRepos',
@@ -167,7 +168,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
   });
 
   await t.test('should put every root field behind the PIN or on the named public list', () => {
-    const publicQueries = ['authStatus', 'settings'];
+    const publicQueries = ['authStatus', 'dockMode', 'settings'];
     const publicMutations = ['lockSession', 'verifyMasterPin', 'setMasterPin'];
     const schema = buildASTSchema(typeDefs);
     for (const [fields, guarded, open] of [

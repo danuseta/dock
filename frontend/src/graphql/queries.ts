@@ -6,6 +6,7 @@ export const GET_AUTH_STATUS = gql`
       authenticated
       hasMasterPin
     }
+    dockMode
   }
 `;
 
@@ -324,7 +325,7 @@ export const GET_HOME_CORE = gql`
 `;
 
 export const GET_HOME_SECONDARY = gql`
-  query GetHomeSecondary {
+  query GetHomeSecondary($calendar: Boolean = true, $docker: Boolean = true) {
     needsAttention {
       id
       message
@@ -346,7 +347,7 @@ export const GET_HOME_SECONDARY = gql`
       stalled
       finished
     }
-    calendarEvents(maxResults: 50) {
+    calendarEvents(maxResults: 50) @include(if: $calendar) {
       id
       title
       start
@@ -368,7 +369,7 @@ export const GET_HOME_SECONDARY = gql`
     settings {
       serviceHealthRefreshSeconds
     }
-    dockerRuntime {
+    dockerRuntime @include(if: $docker) {
       available
       total
       running
@@ -447,7 +448,7 @@ export const GET_SPRINT_SETTINGS = gql`
 `;
 
 export const GET_MONITORS = gql`
-  query GetMonitors($refresh: Boolean = false) {
+  query GetMonitors($refresh: Boolean = false, $docker: Boolean = true) {
     monitors(refresh: $refresh) {
       id
       name
@@ -463,7 +464,7 @@ export const GET_MONITORS = gql`
     settings {
       serviceHealthRefreshSeconds
     }
-    dockerRuntime {
+    dockerRuntime @include(if: $docker) {
       available
       total
       running
