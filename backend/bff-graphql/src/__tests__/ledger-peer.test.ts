@@ -17,7 +17,7 @@ test('peer runs add the other machines, never this machine and never a ticket ke
   assert.deepStrictEqual(merged.map((item) => [item.key, item.machine, 'peer' in item]), [['ZED-1', 'workspace', false], ['ZED-2', 'laptop', true]]);
 });
 
-test('the peer reads with the bearer token, and a peer that fails or hangs reads as empty', async (t) => {
+test('the peer reads with the bearer token, keeps its last runs through a failed read, and a hanging peer times out', async (t) => {
   const seen: Array<{ url?: string; authorization?: string; body: string }> = [];
   let answer = (response: http.ServerResponse) => { response.end(JSON.stringify({ ok: true, result: [run('ZED-5', 'laptop')] })); };
   const server = http.createServer((request, response) => {
@@ -32,19 +32,20 @@ test('the peer reads with the bearer token, and a peer that fails or hangs reads
   const address = server.address();
   assert.ok(address && typeof address !== 'string');
   t.after(() => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }));
-  const peer = new LedgerPeer(`http://127.0.0.1:${address.port}/ingest/orchestrator`, 'dock_token', 300);
+  const peer = new LedgerPeer(`http://127.0.0.1:${address.port}/ingest/orchestrator`, 'dock_token', 300, undefined, 300);
 
   assert.deepStrictEqual(await peer.runs(), [run('ZED-5', 'laptop')]);
   assert.deepStrictEqual(seen[0], { url: '/ingest/orchestrator/runs', authorization: 'Bearer dock_token', body: '{}' });
 
   answer = (response) => { response.statusCode = 500; response.end('{}'); };
-  assert.deepStrictEqual(await peer.runs(), []);
+  assert.deepStrictEqual(await peer.runs(), [run('ZED-5', 'laptop')], 'a failed read answers the last runs it read');
   assert.strictEqual(await peer.get('ZED-5'), null);
   assert.strictEqual(seen.at(-1)?.body, '{"key":"ZED-5"}');
+  assert.deepStrictEqual(await new LedgerPeer(`http://127.0.0.1:${address.port}/ingest/orchestrator`, 'dock_token', 300, undefined, 300).runs(), [], 'with nothing read yet a failed read is empty');
 
   answer = () => undefined;
   const started = Date.now();
-  assert.deepStrictEqual(await peer.runs(), [], 'a hanging peer times out');
+  assert.deepStrictEqual(await new LedgerPeer(`http://127.0.0.1:${address.port}/ingest/orchestrator`, 'dock_token', 300, undefined, 300).runs(), [], 'a hanging peer times out');
   assert.ok(Date.now() - started < 2000);
 });
 
