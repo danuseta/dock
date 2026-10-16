@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"cd \\\"C:/Users/danus/AppData/Local/Temp/claude/E--jidis/19b637c0-f521-473a-a169-bee4299c7c67/scratchpad\\\" && sed -i 's|const todo = dashboard.filter((g) => /to ?do\\\\|backlog\\\\|open/i.test(g...",
-  "error": "Exit code 1\nsed: -e expression #1, char 371: unknown option to `s'",
-  "timestamp": "2026-10-13T17:14:11.908Z",
-  "retry_count": 1
-}
