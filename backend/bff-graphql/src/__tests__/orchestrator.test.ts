@@ -20,7 +20,7 @@ import {
   toOrchestration,
 } from '../integrations/orchestrator';
 import type { ChatService } from '../integrations/chat';
-import { LedgerPeer } from '../integrations/ledger-peer';
+import { LedgerPeer, type PeerRun } from '../integrations/ledger-peer';
 import { createOrchestratorIngestRouter } from '../routes/orchestrator';
 import type { StorageService } from '../storage/service';
 
@@ -965,11 +965,13 @@ test('a ticket both DOCKs hold for different machines stays with the owner the p
   const now = new Date();
   const at = (minutesAgo: number) => new Date(now.getTime() - minutesAgo * 60_000).toISOString();
   const push = (target: OrchestratorService, key: string, machine: string, minutesAgo: number, title: string) => target.ingestLedger({ ...ledger, key, title, waiting: '', updatedAt: at(minutesAgo) }, now, machine);
+  // Both DOCKs held these before the peer was set up.
+  const beforePeer = new OrchestratorService(local.storage, os.tmpdir());
   await push(vpsService, 'ZED-430', 'laptop', 10, 'laptop newer');
-  await push(service, 'ZED-430', 'workspace', 60, 'workspace older');
+  await push(beforePeer, 'ZED-430', 'workspace', 60, 'workspace older');
   // QRD-1255: a stuck workspace session wrote its ledger after the owner moved the ticket to the laptop.
   await push(vpsService, 'ZED-431', 'laptop', 60, 'laptop owner');
-  await push(service, 'ZED-431', 'workspace', 10, 'workspace leftover');
+  await push(beforePeer, 'ZED-431', 'workspace', 10, 'workspace leftover');
   await push(service, 'ZED-432', 'workspace', 10, 'workspace only');
 
   assert.strictEqual(await service.resyncPeer('workspace', now), 1, 'only the ticket the peer does not give to another machine is sent');
@@ -984,4 +986,27 @@ test('a ticket both DOCKs hold for different machines stays with the owner the p
   const warn = t.mock.method(console, 'warn', () => undefined);
   await service.resyncPeer('workspace', now);
   assert.strictEqual(warn.mock.callCount(), 0, 'a ticket the other machine kept is not dismissed on the peer again');
+});
+
+test('a leftover ledger here never brings back a run the peer gives to another machine', async () => {
+  const local = memoryStorage();
+  const laptopRun = { key: 'ZED-440', machine: 'laptop', stage: 'evidence', waiting: 'Waiting on you' } as unknown as PeerRun;
+  const sent: string[] = [];
+  const service = new OrchestratorService(local.storage, os.tmpdir(), null, { runs: async () => [laptopRun], forward: async (route) => { sent.push(route); } });
+  const now = new Date();
+  const push = (key: string) => service.ingestLedger({ ...ledger, key, stage: 'code', waiting: '', updatedAt: now.toISOString() }, now, 'workspace');
+
+  // QRD-1363: resync set the workspace run aside, then a session start on the workspace rewrote its old ledger.
+  await new OrchestratorService(local.storage, os.tmpdir()).ingestLedger({ ...ledger, key: 'ZED-440', stage: 'code', waiting: '', updatedAt: now.toISOString() }, now, 'workspace');
+  const result = await push('ZED-440');
+  assert.deepStrictEqual([result.ignored, result.machine, result.stage], [true, 'laptop', 'evidence'], 'the answer is the run the peer keeps');
+  assert.ok(local.runs.get('ZED-440').dismissedAt, 'the live run here steps aside');
+  assert.deepStrictEqual(local.events.filter((event) => event.ticketKey === 'ZED-440' && event.kind === 'MACHINE').map((event) => event.detail), ['laptop']);
+
+  await push('ZED-440');
+  assert.ok(local.runs.get('ZED-440').dismissedAt, 'a second push leaves it aside');
+  assert.strictEqual(local.events.filter((event) => event.ticketKey === 'ZED-440' && event.kind === 'MACHINE').length, 1);
+  assert.deepStrictEqual(sent, [], 'nothing is copied to the peer');
+
+  assert.strictEqual((await push('ZED-441')).ignored, false, 'a ticket the peer does not give away is kept here');
 });

@@ -83,8 +83,12 @@ export function ledgerPeerFromEnv(env: NodeJS.ProcessEnv = process.env): LedgerP
 
 export const ledgerPeer = ledgerPeerFromEnv();
 
-/** This DOCK's runs, then the peer's runs of other machines that this DOCK does not keep itself. */
+/**
+ * This DOCK's runs, then the peer's runs of other machines. The peer decides who owns a ticket:
+ * when it gives one to another machine, its run replaces the one this DOCK keeps.
+ */
 export function withPeerRuns<T extends { key: string }>(local: T[], peerRuns: PeerRun[], self: string): Array<T | (PeerRun & { peer: true })> {
-  const keys = new Set(local.map((run) => run.key));
-  return [...local, ...peerRuns.filter((run) => run.machine !== self && !keys.has(run.key)).map((run) => ({ ...run, peer: true as const }))];
+  const theirs = peerRuns.filter((run) => run.machine !== self);
+  const keys = new Set(theirs.map((run) => run.key));
+  return [...local.filter((run) => !keys.has(run.key)), ...theirs.map((run) => ({ ...run, peer: true as const }))];
 }

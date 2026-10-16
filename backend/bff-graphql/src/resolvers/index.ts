@@ -180,9 +180,8 @@ export const resolvers = {
       return withPeerRuns(local, peerRuns, dockMode());
     },
     orchestration: async (_: unknown, { key }: { key: string }) => {
-      const local = await orchestratorService.get(key);
-      if (local || !ledgerPeer) return local;
-      const [run] = withPeerRuns([], [await ledgerPeer.get(key)].filter(isPresent), dockMode());
+      const [local, remote] = await Promise.all([orchestratorService.get(key), ledgerPeer ? ledgerPeer.get(key) : null]);
+      const [run] = withPeerRuns([local].filter(isPresent), [remote].filter(isPresent), dockMode());
       return run ?? null;
     },
     ingestTokens: async () => orchestratorService.tokens(),
@@ -243,9 +242,8 @@ export const resolvers = {
       return await storageAPI.getDemoLink(parent.key);
     },
     orchestration: async (parent: any) => {
-      const local = await orchestratorService.get(parent.key).catch(() => null);
-      if (local || !ledgerPeer) return local;
-      const [run] = withPeerRuns([], (await ledgerPeer.recentRuns()).filter((item) => item.key === parent.key), dockMode());
+      const [local, peerRuns] = await Promise.all([orchestratorService.get(parent.key).catch(() => null), ledgerPeer ? ledgerPeer.recentRuns() : []]);
+      const [run] = withPeerRuns([local].filter(isPresent), peerRuns.filter((item) => item.key === parent.key), dockMode());
       return run ?? null;
     },
   },
