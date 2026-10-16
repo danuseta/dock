@@ -603,6 +603,14 @@ test('internal integration behavior', async (t) => {
     assert.strictEqual(hasCanonicalTicketReference({ title: 'QRD-1241 feat: guardrail rules', body: 'until QRD-1251' }, 'QRD-1251'), false, 'search results carry no branch');
     assert.strictEqual(hasCanonicalTicketReference({ title: 'QRD-1241 and QRD-1251: guardrails', body: '' }, 'QRD-1251'), true);
     assert.strictEqual(hasCanonicalTicketReference({ title: 'Fix utf-8 handling', body: 'Closes QRD-1251', head: { ref: 'fix/utf-8' } }, 'QRD-1251'), true);
+    assert.strictEqual(hasCanonicalTicketReference({ title: 'Fix utf-8 handling', body: 'Closes QRD-1251. Same bug as qrd-1251 on mobile.' }, 'QRD-1251'), true, 'one ticket named twice is still one ticket');
+    const rollup = {
+      title: 'V1 Playbook: pending tickets into feat/V1-Playbook (backend)',
+      body: 'Brings QRD-1345 and QRD-1346 in.\n\nQRD-1242, QRD-1255 and QRD-1363 have no PR yet.',
+      head: { ref: 'release/V1-Playbook-pending' },
+    };
+    assert.strictEqual(hasCanonicalTicketReference(rollup, 'QRD-1255'), false, 'a release list names many tickets and belongs to none of them');
+    assert.strictEqual(hasCanonicalTicketReference(rollup, 'QRD-1345'), false);
   });
 
   await t.test('builds a least-privilege offline Google Calendar OAuth URL', async () => {
