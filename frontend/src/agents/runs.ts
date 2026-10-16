@@ -50,6 +50,7 @@ export interface AgentRun {
   stalled: boolean;
   hasTranscript: boolean;
   machine?: string | null;
+  remote?: boolean;
   handoverTo?: string | null;
   handoverAt?: string | null;
   updatedAt: string;
@@ -241,6 +242,12 @@ export const completeRun = (run: Omit<AgentRun, 'ac'> & { ac?: AgentAc[] | null 
   failures: run.failures ?? [],
   members: run.members ?? [],
 });
+
+/** What the Agents page offers on a run. A sample offers nothing; a run of another DOCK's machine is only read here. */
+export function runActions(run: Pick<AgentRun, 'remote' | 'sample'>) {
+  const editable = !run.sample && !run.remote;
+  return { hide: editable, confirm: editable, move: editable, chat: editable, replay: !run.remote };
+}
 
 /** The machine a ticket is offered to, with the time of the offer. */
 export function offerOf(run: Pick<AgentRun, 'handoverTo' | 'handoverAt'>): { to: string; at: string | null; label: string } | null {

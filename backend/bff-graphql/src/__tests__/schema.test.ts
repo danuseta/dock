@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { buildASTSchema, graphql, parse, validate, type GraphQLSchema } from 'graphql';
+import { buildASTSchema, graphql, parse, validate, type GraphQLObjectType, type GraphQLSchema } from 'graphql';
 import { typeDefs } from '../schema/typeDefs';
 import { protectedMutations, protectedQueries, resolvers } from '../resolvers';
 import { StorageAPI } from '../datasources/StorageAPI';
@@ -243,6 +243,36 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
     assert.strictEqual(String(mutation.stopChatTurn.type), 'ChatSession!');
     assert.deepStrictEqual(mutation.moveOrchestration.args.map((arg) => [arg.name, String(arg.type)]), [['key', 'String!'], ['machine', 'String!']]);
     assert.strictEqual(String(mutation.moveOrchestration.type), 'Orchestration!');
+  });
+
+  await t.test('should mark runs of another DOCK as remote, keep peer runs off the local stores, and keep the cron on the workspace DOCK', async () => {
+    const previousDockMode = process.env.DOCK_MODE;
+    const originalPin = StorageAPI.prototype.hasMasterPin;
+    StorageAPI.prototype.hasMasterPin = async () => false;
+    try {
+      const schema = buildASTSchema(typeDefs);
+      assert.strictEqual(String((schema.getType('Orchestration') as GraphQLObjectType).getFields().remote.type), 'Boolean!');
+      const field = resolvers.Orchestration as Record<string, (parent: any) => unknown>;
+      process.env.DOCK_MODE = 'workspace';
+      assert.deepStrictEqual([field.remote({ machine: 'laptop' }), field.remote({ machine: 'workspace' })], [true, false]);
+      process.env.DOCK_MODE = 'laptop';
+      assert.deepStrictEqual([field.remote({ machine: 'laptop' }), field.remote({ machine: 'workspace' })], [false, true]);
+
+      const peerRun = { key: 'ZED-9', machine: 'laptop', peer: true, events: [{ id: '1', kind: 'STAGE', detail: 'code', at: '2026-10-16T00:00:00.000Z' }] };
+      assert.deepStrictEqual(await field.events(peerRun), peerRun.events);
+      assert.strictEqual(await field.timeline(peerRun), null);
+      assert.deepStrictEqual(await field.members(peerRun), []);
+
+      const mutations = resolvers.Mutation as Record<string, (...args: unknown[]) => Promise<unknown>>;
+      const unlocked = { request: { headers: {}, socket: {} }, authenticated: true } as any;
+      for (const [name, args] of [['updateOrchestratorCronSettings', { config: '{}' }], ['runOrchestratorCronNow', {}], ['confirmOrchestration', { key: 'ZED-9' }]] as const) {
+        await assert.rejects(mutations[name]({}, args, unlocked), /The cron runs on the workspace DOCK/, name);
+      }
+    } finally {
+      StorageAPI.prototype.hasMasterPin = originalPin;
+      if (previousDockMode === undefined) delete process.env.DOCK_MODE;
+      else process.env.DOCK_MODE = previousDockMode;
+    }
   });
 
   await t.test('should reject a chat session on a machine without a token and guard privileged mutations', async () => {

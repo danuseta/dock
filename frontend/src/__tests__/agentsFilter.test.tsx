@@ -3,7 +3,7 @@ import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { KindBadge } from '../agents/KindBadge';
-import { kindLabel, matchesRunFilter, runFilterFromSearch, runFilterSearch } from '../agents/runs';
+import { kindLabel, matchesRunFilter, runActions, runFilterFromSearch, runFilterSearch } from '../agents/runs';
 import { AgentRunStrip } from '../components/AgentRunStrip';
 
 test('agents filter: read from and written to the URL, unknown values mean all', () => {
@@ -42,4 +42,10 @@ test('agents badges: Review or Task with an icon, the strip in plain text', () =
   assert.match(strip, />workspace</);
   assert.match(strip, />Review</);
   assert.match(renderToStaticMarkup(<AgentRunStrip run={{ key: 'QRD-2', stage: 'code', acPassed: 0, acFailed: 0, acTotal: 0, activity: 'IDLE', stalled: false }} />), />laptop<.*>Task</);
+});
+
+test('agents actions: a run of another DOCK is read-only and has no replay here, a sample offers nothing', () => {
+  assert.deepStrictEqual(runActions({}), { hide: true, confirm: true, move: true, chat: true, replay: true });
+  assert.deepStrictEqual(runActions({ remote: true }), { hide: false, confirm: false, move: false, chat: false, replay: false });
+  assert.deepStrictEqual(runActions({ sample: true }), { hide: false, confirm: false, move: false, chat: false, replay: true });
 });

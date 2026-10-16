@@ -9,6 +9,7 @@ import { upstreamMonitorService } from '../integrations/upstream-monitor';
 import { dockerRuntimeService } from '../integrations/docker-runtime';
 import { OrchestratorInputError, orchestratorService } from '../integrations/orchestrator';
 import { CHAT_MACHINE, chatService } from '../integrations/chat';
+import { ledgerPeer, withPeerRuns } from '../integrations/ledger-peer';
 import { mergeAttention, withoutSettledTickets } from '../integrations/attention';
 import { CronInputError } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
@@ -36,6 +37,12 @@ function sprintError(error: unknown): never {
     throw new GraphQLError(error.message, { extensions: { code: error instanceof SprintBusyError ? 'CONFLICT' : 'BAD_USER_INPUT' } });
   }
   throw error;
+}
+
+function requireCron(): void {
+  if (dockMode() !== 'workspace') {
+    throw new GraphQLError('The cron runs on the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });
+  }
 }
 
 function cronError(error: unknown): never {
@@ -168,8 +175,16 @@ export const resolvers = {
     dockerRuntime: async (_: unknown, { includeStats }: { includeStats?: boolean }) => {
       return dockerRuntimeService.runtime(Boolean(includeStats));
     },
-    orchestrations: async () => orchestratorService.list(),
-    orchestration: async (_: unknown, { key }: { key: string }) => orchestratorService.get(key),
+    orchestrations: async () => {
+      const [local, peerRuns] = await Promise.all([orchestratorService.list(), ledgerPeer ? ledgerPeer.runs() : []]);
+      return withPeerRuns(local, peerRuns, dockMode());
+    },
+    orchestration: async (_: unknown, { key }: { key: string }) => {
+      const local = await orchestratorService.get(key);
+      if (local || !ledgerPeer) return local;
+      const [run] = withPeerRuns([], [await ledgerPeer.get(key)].filter(isPresent), dockMode());
+      return run ?? null;
+    },
     ingestTokens: async () => orchestratorService.tokens(),
     chatSessions: async (_: unknown, { source, limit }: { source?: string; limit?: number }) => {
       return chatService.sessions(source, limit, CHAT_MACHINE).catch(orchestratorInputError);
@@ -228,14 +243,19 @@ export const resolvers = {
       return await storageAPI.getDemoLink(parent.key);
     },
     orchestration: async (parent: any) => {
-      return orchestratorService.get(parent.key).catch(() => null);
+      const local = await orchestratorService.get(parent.key).catch(() => null);
+      if (local || !ledgerPeer) return local;
+      const [run] = withPeerRuns([], (await ledgerPeer.recentRuns()).filter((item) => item.key === parent.key), dockMode());
+      return run ?? null;
     },
   },
 
+  // A run read from the peer DOCK brings its own events; its tool events and transcript stay on that DOCK.
   Orchestration: {
-    events: async (parent: { key: string }) => orchestratorService.events(parent.key),
-    timeline: async (parent: { key: string }) => orchestratorService.timeline(parent.key),
-    members: async (parent: { key: string }) => orchestratorService.members(parent.key).catch(() => []),
+    remote: (parent: { machine: string }) => parent.machine !== dockMode(),
+    events: async (parent: { key: string; peer?: boolean; events?: unknown[] }) => (parent.peer ? parent.events ?? [] : orchestratorService.events(parent.key)),
+    timeline: async (parent: { key: string; peer?: boolean }) => (parent.peer ? null : orchestratorService.timeline(parent.key)),
+    members: async (parent: { key: string; peer?: boolean }) => (parent.peer ? [] : orchestratorService.members(parent.key).catch(() => [])),
   },
 
   TicketRelationGroup: {
@@ -410,7 +430,7 @@ export const resolvers = {
     },
     revokeIngestToken: async (_: unknown, { id }: { id: string }) => orchestratorService.revokeToken(id),
     dismissOrchestration: async (_: unknown, { key }: { key: string }) => {
-      return orchestratorService.dismiss(key).catch(orchestratorInputError);
+      return orchestratorService.dismiss(key, dockMode()).catch(orchestratorInputError);
     },
     moveOrchestration: async (_: unknown, { key, machine }: { key: string; machine: string }) => {
       return orchestratorService.moveRun(key, machine).catch(orchestratorInputError);
@@ -455,11 +475,16 @@ export const resolvers = {
       return true;
     },
     updateOrchestratorCronSettings: async (_: unknown, { config, webhookUrl }: { config: string; webhookUrl?: string | null }) => {
+      requireCron();
       await orchestratorCron.updateSettings(config, webhookUrl).catch(cronError);
       return true;
     },
-    runOrchestratorCronNow: async () => JSON.stringify(await orchestratorCron.runFill(true)),
+    runOrchestratorCronNow: async () => {
+      requireCron();
+      return JSON.stringify(await orchestratorCron.runFill(true));
+    },
     confirmOrchestration: async (_: unknown, { key }: { key: string }) => {
+      requireCron();
       await orchestratorCron.confirm(key).catch(cronError);
       return true;
     },

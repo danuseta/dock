@@ -304,6 +304,8 @@ export const typeDefs = gql`
     stalled: Boolean!
     hasTranscript: Boolean!
     machine: String!
+    """The run belongs to another DOCK's machine: shown here, changed only there."""
+    remote: Boolean!
     handoverTo: String
     handoverAt: String
     updatedAt: String!

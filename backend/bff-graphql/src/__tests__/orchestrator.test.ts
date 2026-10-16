@@ -20,6 +20,7 @@ import {
   toOrchestration,
 } from '../integrations/orchestrator';
 import type { ChatService } from '../integrations/chat';
+import { LedgerPeer } from '../integrations/ledger-peer';
 import { createOrchestratorIngestRouter } from '../routes/orchestrator';
 import type { StorageService } from '../storage/service';
 
@@ -233,7 +234,7 @@ test('orchestrator service ingests ledgers, events and builds attention items', 
     assert.throws(() => parseTranscript({ key: 'QRD-1', files: [{ path: '../../etc/passwd', text: '' }] }), OrchestratorInputError);
     assert.strictEqual(await service.readTranscript('../QRD-1387'), null);
 
-    assert.strictEqual(await service.dismiss('QRD-1387'), true);
+    assert.strictEqual(await service.dismiss('QRD-1387', 'laptop'), true);
     assert.deepStrictEqual(await service.list(now), []);
     await service.ingestLedger(ledger, now, 'laptop');
     assert.strictEqual((await service.list(now)).length, 1, 'a new ledger push brings a dismissed run back');
@@ -721,11 +722,11 @@ test('a dismissed ticket is taken only when its machine has no live token', asyn
 
   await push('ZED-320', 'laptop');
   await service.ingestHookEvent({ key: 'ZED-320', event: 'PreToolUse', detail: 'Bash' }, now, 'laptop');
-  await service.dismiss('ZED-320');
+  await service.dismiss('ZED-320', 'laptop');
   assert.strictEqual((await push('ZED-320', 'laptop')).ignored, false, 'the owner revives its own dismissed ticket');
   assert.strictEqual(runs.get('ZED-320').activity, 'ACTIVE', 'a revival by the owner keeps its history');
 
-  await service.dismiss('ZED-320');
+  await service.dismiss('ZED-320', 'laptop');
   const refused = await push('ZED-320', 'workspace', 'Pusher title');
   assert.deepStrictEqual([refused.ignored, refused.machine], [true, 'laptop'], 'another machine cannot take a ticket whose owner still has a token');
   assert.deepStrictEqual([runs.get('ZED-320').machine, runs.get('ZED-320').title, runs.get('ZED-320').dismissedAt === null], ['laptop', 'Zed', false], 'the row stays dismissed');
@@ -734,7 +735,7 @@ test('a dismissed ticket is taken only when its machine has no live token', asyn
   assert.strictEqual((await service.moveRun('ZED-320', 'workspace', now)).machine, 'workspace', 'a dismissed ticket can be moved from the dashboard');
   await service.ingestHookEvent({ key: 'ZED-320', event: 'PreToolUse', detail: 'Edit' }, now, 'workspace');
   runs.set('ZED-320', { ...runs.get('ZED-320'), lastEventAt: now, transcriptAt: now });
-  await service.dismiss('ZED-320');
+  await service.dismiss('ZED-320', 'workspace');
   assert.strictEqual((await push('ZED-320', 'laptop')).ignored, true, 'the same rule holds for the new owner');
 
   await service.revokeToken(workspace.record.id);
@@ -747,7 +748,7 @@ test('a dismissed ticket is taken only when its machine has no live token', asyn
   );
   assert.strictEqual(events.filter((event) => event.kind === 'MACHINE').length, 2, 'the move and the take are logged');
 
-  await service.dismiss('ZED-320');
+  await service.dismiss('ZED-320', 'laptop');
   assert.strictEqual((await service.moveRun('ZED-320', 'laptop', now)).machine, 'laptop', 'a dismissed ticket can be moved');
 });
 
@@ -768,7 +769,7 @@ test('the cap of live tickets applies to creating and reviving, never to an acce
   assert.strictEqual((await push('CAP-1', 'workspace')).ignored, false, 'a ticket the machine already has keeps updating');
   assert.strictEqual((await push('ZED-323', 'laptop')).ignored, false, 'the cap is per machine');
 
-  await service.dismiss('ZED-322');
+  await service.dismiss('ZED-322', 'laptop');
   runs.set('ZED-322', { ...runs.get('ZED-322'), machine: 'workspace' });
   await assert.rejects(push('ZED-322', 'workspace'), /maximum of 300 live tickets/, 'reviving a dismissed ticket counts');
 
@@ -852,4 +853,96 @@ test('cancelling an offer is logged and revoking a token withdraws the offers ma
   await service.revokeToken(spare.record.id);
   assert.strictEqual(runs.get('ZED-351').handover, null, 'no token is left for the machine');
   assert.deepStrictEqual(events.filter((event) => event.kind === 'HANDOVER_CANCELLED').map((event) => [event.ticketKey, event.detail]), [['ZED-350', 'workspace'], ['ZED-351', 'workspace (token revoked)']], 'revoking the last token logs the withdrawn offer');
+});
+
+test('the peer routes list every machine, return one run with its events, and dismiss only the token machine', async (t) => {
+  const { storage, runs } = memoryStorage();
+  const service = new OrchestratorService(storage, os.tmpdir());
+  const laptop = await service.createToken('laptop');
+  const workspace = await service.createToken('workspace', 'workspace');
+  const post = await serveIngest(t, service);
+  const now = new Date();
+  await service.ingestLedger({ ...ledger, key: 'ZED-401', waiting: '', updatedAt: now.toISOString() }, now, 'laptop');
+  await service.ingestLedger({ ...ledger, key: 'ZED-402', waiting: '', updatedAt: now.toISOString() }, now, 'workspace');
+
+  for (const token of [laptop.token, workspace.token]) {
+    assert.deepStrictEqual((await post('/runs', {}, token)).body.result.map((run: { key: string; machine: string }) => [run.key, run.machine]), [['ZED-401', 'laptop'], ['ZED-402', 'workspace']]);
+  }
+  const one = (await post('/runs/get', { key: 'ZED-401' }, workspace.token)).body.result;
+  assert.deepStrictEqual([one.key, one.events.map((event: { kind: string }) => event.kind)], ['ZED-401', ['STAGE']]);
+  assert.strictEqual((await post('/runs/get', { key: 'ZED-404' }, workspace.token)).status, 404);
+
+  const refused = await post('/dismiss', { key: 'ZED-401' }, workspace.token);
+  assert.deepStrictEqual([refused.status, refused.body.error], [400, 'This run belongs to laptop. Hide it on that DOCK.']);
+  assert.strictEqual(runs.get('ZED-401').dismissedAt, null);
+  assert.strictEqual((await post('/dismiss', { key: 'ZED-402' }, workspace.token)).body.result, true);
+  assert.ok(runs.get('ZED-402').dismissedAt, 'the owner dismisses its own run');
+});
+
+test('the workspace DOCK copies its runs to the peer and a dead peer never fails the local ingest', async (t) => {
+  const vps = memoryStorage();
+  const vpsService = new OrchestratorService(vps.storage, os.tmpdir());
+  await vpsService.createToken('laptop');
+  const workspaceToken = await vpsService.createToken('workspace', 'workspace');
+  const app = express();
+  app.use('/ingest/orchestrator', createOrchestratorIngestRouter(vpsService, new PinRateLimiter(2, 60_000)));
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+
+  const pending: Promise<void>[] = [];
+  const track = (peer: LedgerPeer) => ({ forward: (route: string, body: unknown) => { const copy = peer.forward(route, body); pending.push(copy); return copy; } });
+  const settle = () => Promise.all(pending.splice(0));
+  const local = memoryStorage();
+  const service = new OrchestratorService(local.storage, os.tmpdir(), null, track(new LedgerPeer(`http://127.0.0.1:${address.port}/ingest/orchestrator/`, workspaceToken.token)));
+  await service.createToken('workspace', 'workspace');
+  const now = new Date();
+
+  await service.ingestLedger({ ...ledger, key: 'ZED-410', waiting: '', updatedAt: now.toISOString() }, now, 'workspace');
+  await settle();
+  assert.strictEqual(vps.runs.get('ZED-410').machine, 'workspace', 'the ledger is copied as the workspace machine');
+  await service.ingestHookEvent({ key: 'ZED-410', event: 'PreToolUse', detail: 'Edit' }, now, 'workspace');
+  await settle();
+  assert.strictEqual(vps.runs.get('ZED-410').activityDetail, 'Edit', 'a hook event is copied');
+  await service.ingestEventBatch({ key: 'ZED-410', events: [{ event: 'PreToolUse', tool: 'Bash' }] }, now, 'workspace');
+  await settle();
+  assert.strictEqual(vps.runs.get('ZED-410').activityDetail, 'Bash', 'an event batch is copied');
+
+  await vpsService.ingestLedger({ ...ledger, key: 'ZED-411', waiting: '', updatedAt: now.toISOString() }, now, 'laptop');
+  local.runs.set('ZED-411', { ...vps.runs.get('ZED-411') });
+  assert.strictEqual((await service.ingestLedger({ ...ledger, key: 'ZED-411', waiting: '', updatedAt: now.toISOString() }, now, 'workspace')).ignored, true);
+  assert.strictEqual(pending.length, 0, 'an ignored push is not copied');
+
+  await service.dismiss('ZED-410', 'workspace');
+  await settle();
+  assert.ok(vps.runs.get('ZED-410').dismissedAt, 'a dismissal is copied');
+
+  const dead = new OrchestratorService(memoryStorage().storage, os.tmpdir(), null, track(new LedgerPeer('http://127.0.0.1:9/ingest/orchestrator', 'nobody', 500)));
+  await dead.createToken('workspace', 'workspace');
+  const warn = t.mock.method(console, 'warn', () => undefined);
+  assert.strictEqual((await dead.ingestLedger({ ...ledger, key: 'ZED-412', waiting: '', updatedAt: now.toISOString() }, now, 'workspace')).ignored, false);
+  await settle();
+  assert.strictEqual(warn.mock.callCount(), 1, 'the failed copy is only logged');
+});
+
+test('a resync sends the live runs of this machine and the dismissals of the last day again', async () => {
+  const { storage, runs } = memoryStorage();
+  const sent: Array<[string, unknown]> = [];
+  const service = new OrchestratorService(storage, os.tmpdir(), null, { forward: async (route, body) => { sent.push([route, body]); } });
+  const now = new Date('2026-10-16T12:00:00.000Z');
+  const push = (key: string, machine: string) => service.ingestLedger({ ...ledger, key, waiting: '', updatedAt: now.toISOString() }, now, machine);
+  await push('ZED-420', 'workspace');
+  await push('ZED-421', 'workspace');
+  await push('ZED-422', 'workspace');
+  await push('ZED-423', 'laptop');
+  runs.set('ZED-421', { ...runs.get('ZED-421'), dismissedAt: new Date(now.getTime() - 3600_000) });
+  runs.set('ZED-422', { ...runs.get('ZED-422'), dismissedAt: new Date(now.getTime() - 2 * 24 * 3600_000) });
+  sent.length = 0;
+
+  assert.strictEqual(await service.resyncPeer('workspace', now), 2);
+  assert.deepStrictEqual(sent.map(([route, body]) => [route, (body as { key: string }).key]), [['', 'ZED-420'], ['/dismiss', 'ZED-421']]);
+  assert.ok(!('dirs' in (sent[0][1] as object)), 'local paths stay on this machine');
+  assert.strictEqual(await new OrchestratorService(storage, os.tmpdir()).resyncPeer('workspace', now), 0, 'without a peer nothing is sent');
 });

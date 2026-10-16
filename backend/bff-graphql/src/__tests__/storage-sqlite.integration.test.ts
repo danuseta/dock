@@ -196,12 +196,12 @@ test('SQLite storage takes a dismissed ticket only for its own machine or a mach
 
   await push('laptop', 'Laptop title');
   await service.ingestHookEvent({ key: 'ZED-103', event: 'PreToolUse', detail: 'Bash' }, now, 'laptop');
-  await service.dismiss('ZED-103');
+  await service.dismiss('ZED-103', 'laptop');
   assert.strictEqual((await push('laptop', 'Revived')).ignored, false, 'the owner revives its own dismissed ticket');
   const revived = await storage.getOrchestratorRun('ZED-103');
   assert.deepStrictEqual([revived?.title, revived?.dismissedAt, revived?.activity], ['Revived', null, 'ACTIVE']);
 
-  await service.dismiss('ZED-103');
+  await service.dismiss('ZED-103', 'laptop');
   const refused = await push('workspace', 'Pusher title');
   assert.deepStrictEqual([refused.ignored, refused.machine], [true, 'laptop']);
   const kept = await storage.getOrchestratorRun('ZED-103');

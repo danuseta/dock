@@ -6,10 +6,14 @@ import { sprintDashboardService } from './integrations/sprint-dashboard';
 import { startSprintScheduler } from './integrations/sprint-scheduler';
 import { startOrchestratorCron } from './integrations/orchestrator-cron';
 import { orchestratorCron } from './integrations/orchestrator-cron-live';
+import { orchestratorService } from './integrations/orchestrator';
+import { ledgerPeer } from './integrations/ledger-peer';
+import { dockMode } from './mode';
 import { useWriteAheadLog } from './storage/client';
 import { StorageService } from './storage/service';
 
 const port = Number(process.env.PORT || 4000);
+const PEER_RESYNC_MS = 15 * 60 * 1000;
 
 export async function startServer(): Promise<void> {
   const journal = await useWriteAheadLog().catch((error) => `unchanged (${error instanceof Error ? error.message : 'unknown error'})`);
@@ -23,7 +27,15 @@ export async function startServer(): Promise<void> {
     const shellStatus = frontendEnabled ? 'with React SPA' : 'API only';
     console.log(`DOCK GraphQL server running on port ${port} at /graphql (${shellStatus})`);
     startSprintScheduler(sprintDashboardService);
-    startOrchestratorCron(orchestratorCron);
+    // Cron agents start in chat sessions, and chat runs on the workspace DOCK only.
+    if (dockMode() === 'workspace') startOrchestratorCron(orchestratorCron);
+    if (dockMode() === 'workspace' && ledgerPeer) {
+      const resync = () => orchestratorService.resyncPeer('workspace').catch((error) => {
+        console.warn('[LedgerPeer] resync failed:', error instanceof Error ? error.message : 'unknown error');
+      });
+      void resync();
+      setInterval(resync, PEER_RESYNC_MS).unref();
+    }
   });
 }
 

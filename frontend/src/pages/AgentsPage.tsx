@@ -10,7 +10,7 @@ import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
 import { hasPage, useDockMode } from '../lib/dockMode';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
-import { FILTER_KINDS, FILTER_MACHINES, PARKED_TEXT, START_FAILED_TEXT, completeRun, formatAge, hasTrouble, isArchived, kindLabel, matchesRunFilter, offerOf, pageOf, runFilterFromSearch, runFilterSearch, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunFilter, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
+import { FILTER_KINDS, FILTER_MACHINES, PARKED_TEXT, START_FAILED_TEXT, completeRun, formatAge, hasTrouble, isArchived, kindLabel, matchesRunFilter, offerOf, pageOf, runActions, runFilterFromSearch, runFilterSearch, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunFilter, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
 import { KindBadge } from '../agents/KindBadge';
 import { RAIL_STAGES, railIndex } from '../agents/office/layout';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
@@ -150,7 +150,8 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
   const timeline: AgentTimeline | null = sampling
     ? (selected?.key === 'SAMPLE-2' ? sampleTimeline(sampleTick) : null)
     : (detailData?.orchestration?.key === selected?.key ? detailData?.orchestration?.timeline || null : null);
-  const canReplay = Boolean(selected?.hasTranscript) && !sampling;
+  const actions = selected ? runActions(selected) : null;
+  const canReplay = Boolean(selected?.hasTranscript) && !sampling && Boolean(actions?.replay);
   const showReplay = flowView === 'replay' && canReplay;
 
   // Ages keep counting between polls; the server only sends how old things were when it answered.
@@ -247,8 +248,9 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
               </button>
             ))}
           </div>
-          <Button size="sm" aria-haspopup="dialog" onClick={() => setShowCron(true)}><Clock size={14} aria-hidden="true" />Cron</Button>
-          <Button size="sm" variant="danger" disabled={stoppingAll} onClick={() => void runAction(async () => { await stopAllAgents(); })}><Octagon size={14} aria-hidden="true" />Stop all</Button>
+          {/* The cron and Stop all act on chat sessions, so they live on the DOCK that has chat. */}
+          {chat && <Button size="sm" aria-haspopup="dialog" onClick={() => setShowCron(true)}><Clock size={14} aria-hidden="true" />Cron</Button>}
+          {chat && <Button size="sm" variant="danger" disabled={stoppingAll} onClick={() => void runAction(async () => { await stopAllAgents(); })}><Octagon size={14} aria-hidden="true" />Stop all</Button>}
           {sampling
             ? <Button size="sm" onClick={() => { setSampleStartedAt(null); setSelectedKey(null); }}><Square size={14} aria-hidden="true" />Stop sample</Button>
             : (serverRuns || []).length === 0 && <Button size="sm" variant="primary" onClick={() => { setSampleStartedAt(Date.now() / 1000); setSelectedKey('SAMPLE-2'); }}><Play size={14} aria-hidden="true" />Run a sample</Button>}
@@ -257,8 +259,8 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
 
       {error && !data && <Card className="mb-4 border-status-conflict text-status-conflict" role="alert">Agent runs failed to load: {error.message}</Card>}
       {cronError && <Card className="mb-4 border-status-conflict text-status-conflict" role="alert">{cronError}</Card>}
-      <CronSettingsDialog open={showCron} onClose={() => setShowCron(false)} />
-      <CronRow pollMs={POLL_MS} onOpenSettings={() => setShowCron(true)} />
+      {chat && <CronSettingsDialog open={showCron} onClose={() => setShowCron(false)} />}
+      {chat && <CronRow pollMs={POLL_MS} onOpenSettings={() => setShowCron(true)} />}
 
       {!empty && (
         <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2" role="group" aria-label="Filter runs">
@@ -436,20 +438,20 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                 <StatusChip status={statusOf(selected)} review={selected.review} />
                 <MachineChip name={machineOf(selected)} />
                 <OfferBadge run={selected} />
-                {chat && !selected.sample && <Button size="sm" className="ml-auto h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key)}><MessagesSquare size={13} aria-hidden="true" />Chat</Button>}
+                {chat && actions?.chat && <Button size="sm" className="ml-auto h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key)}><MessagesSquare size={13} aria-hidden="true" />Chat</Button>}
               </div>
               {chatError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The chat could not be opened: {chatError}</p>}
               <h2 className="text-pretty font-display text-base leading-snug font-bold">{selected.title || 'Untitled'}</h2>
-              {!selected.sample && <MoveTicket key={selected.key} run={selected} />}
+              {actions?.move && <MoveTicket key={selected.key} run={selected} />}
 
               {selected.waiting && (
                 <div className="rounded-[8px] border border-amber-300/50 bg-amber-300/10 px-3 py-2.5 text-sm">
                   <b className="mb-0.5 block font-mono text-[0.66rem] font-bold uppercase tracking-[0.08em] text-amber-200">Waiting on you</b>
                   <span className="text-pretty">{selected.waiting}</span>
                   <p className="mt-1.5 text-pretty text-xs text-muted-foreground">{machineOf(selected) === CHAT_MACHINE ? 'Answer here, or' : 'Answer'} in the Claude Code session on {machinePlace(machineOf(selected))}.</p>
-                  {!selected.sample && (selected.waiting === PARKED_TEXT || selected.waiting === START_FAILED_TEXT)
+                  {actions?.confirm && (selected.waiting === PARKED_TEXT || selected.waiting === START_FAILED_TEXT)
                     ? <Button size="sm" variant="primary" className="mt-2 h-7 px-2.5" disabled={confirming} onClick={() => void runAction(async () => { await confirmOrchestration({ variables: { key: selected.key } }); await refetch(); })}>{selected.waiting === PARKED_TEXT ? 'Confirm and start' : 'Retry'}</Button>
-                    : !selected.sample && machineOf(selected) === CHAT_MACHINE && <Button size="sm" className="mt-2 h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key)}>Reply here</Button>}
+                    : actions?.chat && machineOf(selected) === CHAT_MACHINE && <Button size="sm" className="mt-2 h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key)}>Reply here</Button>}
                 </div>
               )}
 
@@ -569,7 +571,8 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
               {!selected.sample && (
                 <div className="mt-auto flex flex-wrap gap-2 border-t border-border pt-3.5">
                   <Button size="sm" variant="primary" onClick={() => onTicketClick(selected.key)}>Open ticket</Button>
-                  <Button size="sm" variant="ghost" onClick={() => { setActionError(''); setDismissTarget(selected); }}><EyeOff size={14} aria-hidden="true" />Hide run</Button>
+                  {actions?.hide && <Button size="sm" variant="ghost" onClick={() => { setActionError(''); setDismissTarget(selected); }}><EyeOff size={14} aria-hidden="true" />Hide run</Button>}
+                  {selected.remote && <span className="self-center text-pretty text-xs text-muted-foreground">Read-only here. This run belongs to the {machineOf(selected)} DOCK.</span>}
                 </div>
               )}
             </>
@@ -594,7 +597,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
           ? <iframe key={selected.key} className="block h-[540px] w-full border-0 bg-[#0b0b0c]" title={`Session replay for ${selected.key}`} src={`${import.meta.env.BASE_URL}zoetrope/index.html?key=${encodeURIComponent(selected.key)}&api=${encodeURIComponent(apiOrigin)}`} />
           : selected && timeline
             ? <AgentFlowGraph run={selected} timeline={timeline} />
-            : <p className="px-5 py-8 text-center text-pretty text-sm text-muted-foreground">{!selected ? 'Select a ticket to see its flow.' : sampling ? 'Select SAMPLE-2 to see a sample flow.' : 'Loading the flow...'}</p>}
+            : <p className="px-5 py-8 text-center text-pretty text-sm text-muted-foreground">{!selected ? 'Select a ticket to see its flow.' : sampling ? 'Select SAMPLE-2 to see a sample flow.' : selected.remote && detailData?.orchestration?.key === selected.key ? `The flow and transcript of ${selected.key} stay on the ${machineOf(selected)} DOCK.` : 'Loading the flow...'}</p>}
       </Card>
 
       <Dialog open={Boolean(dismissTarget)} onClose={() => !dismissing && setDismissTarget(null)} dismissible={!dismissing} labelledBy="hide-run-title" describedBy="hide-run-description">
