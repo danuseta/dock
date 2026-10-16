@@ -1,6 +1,7 @@
 import { JiraAPI } from '../datasources/JiraAPI';
 import { StorageService } from '../storage/service';
 import { chatService } from './chat';
+import { ledgerPeer } from './ledger-peer';
 import { orchestratorService } from './orchestrator';
 import { CRON_CACHE, OrchestratorCron, postWebhook } from './orchestrator-cron';
 import { pushService } from './push';
@@ -26,7 +27,11 @@ export const orchestratorCron = new OrchestratorCron({
   machines: () => orchestratorService.machines(),
   online: (machine) => chatService.bridge(machine).online,
   fiveHourUsed: (machine) => chatService.statusSnapshot(machine).limits?.fiveHour ?? null,
-  takenKeys: async () => (await storage.getOrchestratorRuns()).map((run) => run.key),
+  // A ticket the laptop works on lives in the peer DOCK; an unreachable peer leaves only the local runs.
+  takenKeys: async () => {
+    const [local, peerRuns] = await Promise.all([storage.getOrchestratorRuns(), ledgerPeer ? ledgerPeer.runs() : []]);
+    return [...local, ...peerRuns].map((run) => run.key);
+  },
   deadStarts: () => storage.getDeadCronStartKeys(new Date(Date.now() - DEAD_START_LOOKBACK_MS)),
   runs: () => orchestratorService.list(),
   saveRun: (ledger, machine) => orchestratorService.ingestLedger(ledger, new Date(), machine),

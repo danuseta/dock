@@ -3,6 +3,8 @@ import { useQuery } from '@apollo/client';
 import { Bot } from 'lucide-react';
 import { GET_ORCHESTRATION } from '../graphql/queries';
 import { stageColor, stageLabel, type AgentRun } from '../agents/runs';
+import { machineOf, machinePlace } from '../chat/messages';
+import { MachineChip } from '../chat/MachineControls';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 import { Badge, Card } from './ui';
@@ -23,10 +25,14 @@ export const TicketAgentPanel: React.FC<{ ticketKey: string }> = ({ ticketKey })
     <Card className={cn(run.waiting && 'border-amber-300/45')}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
         <h2 className="flex items-center gap-2 font-display text-lg font-bold"><Bot size={19} className="text-accent" aria-hidden="true" />Agent run</h2>
-        <span className="inline-flex items-center gap-1.5 rounded-xs border border-border-glow px-2 py-0.5 font-mono text-[0.66rem] font-bold text-secondary-foreground">
-          <i className="size-1.5 rounded-full" style={{ background: stageColor(run.stage) }} aria-hidden="true" />{stageLabel(run.stage).toUpperCase()}
+        <span className="flex items-center gap-1.5">
+          <MachineChip name={machineOf(run)} />
+          <span className="inline-flex items-center gap-1.5 rounded-xs border border-border-glow px-2 py-0.5 font-mono text-[0.66rem] font-bold text-secondary-foreground">
+            <i className="size-1.5 rounded-full" style={{ background: stageColor(run.stage) }} aria-hidden="true" />{stageLabel(run.stage).toUpperCase()}
+          </span>
         </span>
       </div>
+      <p className="mb-3 text-pretty text-xs text-muted-foreground">Runs on {machineOf(run) === 'workspace' ? 'the Coder workspace' : machinePlace(machineOf(run))}{run.remote ? ', reported by the other DOCK. Read-only here.' : '.'}</p>
 
       {run.waiting && (
         <div className="mb-3 rounded-sm border border-amber-300/50 bg-amber-300/10 px-3 py-2.5 text-sm">

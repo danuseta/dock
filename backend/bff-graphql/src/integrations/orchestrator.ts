@@ -3,6 +3,7 @@ import path from 'node:path';
 import { generateIngestToken, hashIngestToken } from '../auth/ingest-token';
 import { GitHubAPI } from '../datasources/GitHubAPI';
 import { StorageService } from '../storage/service';
+import { ledgerPeer, type LedgerPeer } from './ledger-peer';
 import { buildTimeline } from './orchestrator-timeline';
 import { reviewSignalOf, type ChecksState, type ReviewDecision } from './pr-signals';
 
@@ -38,6 +39,7 @@ const MAX_EVENTS_KEPT = 60;
 const EVENTS_RETURNED = 20;
 const MAX_TOOL_EVENTS_KEPT = 300;
 const MAX_BATCH_EVENTS = 100;
+const RESYNC_DISMISSED_MS = 24 * 3600 * 1000;
 // Tools that are plumbing between agents rather than work worth drawing.
 const HIDDEN_TOOLS = new Set(['SubagentHandback']);
 const SPAWN_TOOLS = new Set(['Agent', 'Task']);
@@ -517,6 +519,7 @@ export class OrchestratorService {
     private readonly storage = new StorageService(),
     private readonly transcriptDirectory = defaultTranscriptDirectory(),
     private readonly lookupPullRequests: PullRequestLookup | null = null,
+    private readonly peer: Pick<LedgerPeer, 'forward'> | null = null,
   ) {}
 
   private async present(row: RunRow, now: Date) {
@@ -602,6 +605,7 @@ export class OrchestratorService {
     } else if (!ledger.waiting && previous?.waiting) {
       await this.storage.addOrchestratorEvent(ledger.key, 'RESUMED', null, MAX_EVENTS_KEPT);
     }
+    void this.peer?.forward('', input);
     return { ...toOrchestration(row, now), ignored: false };
   }
 
@@ -625,6 +629,7 @@ export class OrchestratorService {
     if (next.activity !== current.activity) {
       await this.storage.addOrchestratorEvent(key, `AGENT_${next.activity}`, next.activityDetail, MAX_EVENTS_KEPT);
     }
+    void this.peer?.forward('/event', input);
     return { ...toOrchestration(updated, now), ignored: false };
   }
 
@@ -672,14 +677,47 @@ export class OrchestratorService {
     if (state.activity !== initial.activity) {
       await this.storage.addOrchestratorEvent(key, `AGENT_${state.activity}`, state.activityDetail, MAX_EVENTS_KEPT);
     }
+    void this.peer?.forward('/events', input);
     return { ...toOrchestration(updated, now), ignored: false };
   }
 
-  async dismiss(keyInput: string) {
+  /** Only the machine that owns a run hides it: a run of another machine is read-only here. */
+  async dismiss(keyInput: string, machine: string) {
     const key = normalizeTicketKey(keyInput);
-    if (!await this.storage.getOrchestratorRun(key)) return false;
+    const row = await this.storage.getOrchestratorRun(key);
+    if (!row) return false;
+    if ((row.machine ?? DEFAULT_MACHINE) !== machine) throw new OrchestratorInputError(`This run belongs to ${row.machine ?? DEFAULT_MACHINE}. Hide it on that DOCK.`);
     await this.storage.updateOrchestratorRun(key, { dismissedAt: new Date() });
+    void this.peer?.forward('/dismiss', { key });
     return true;
+  }
+
+  /**
+   * Sends every live run of this machine to the peer again, and the dismissals of the last day:
+   * a copy lost while the peer was down catches up here. Returns how many were sent.
+   */
+  async resyncPeer(machine: string, now = new Date()) {
+    if (!this.peer) return 0;
+    let sent = 0;
+    for (const row of await this.storage.getOrchestratorRuns()) {
+      if ((row.machine ?? DEFAULT_MACHINE) !== machine) continue;
+      if (row.dismissedAt) {
+        if (now.getTime() - row.dismissedAt.getTime() > RESYNC_DISMISSED_MS) continue;
+        await this.peer.forward('/dismiss', { key: row.key });
+      } else {
+        const ledger = this.sharedLedger((await this.storage.getOrchestratorRunWithLedger(row.key)) ?? row).ledger;
+        if (!isRecord(ledger)) continue;
+        await this.peer.forward('', ledger);
+      }
+      sent += 1;
+    }
+    return sent;
+  }
+
+  /** What the peer DOCK reads for its own detail panel: the run and its recent events. */
+  async getWithEvents(keyInput: string, now = new Date()) {
+    const run = await this.get(keyInput, now);
+    return run && { ...run, events: await this.events(run.key) };
   }
 
   private sharedLedger(row: RunRow) {
@@ -878,4 +916,4 @@ export const orchestratorService = new OrchestratorService(undefined, undefined,
     reviewDecision: (signals as Record<string, { reviewDecision?: ReviewDecision }>)[pr.url]?.reviewDecision ?? null,
     checks: (signals as Record<string, { checks?: ChecksState }>)[pr.url]?.checks ?? null,
   }));
-}));
+}), ledgerPeer);

@@ -574,6 +574,7 @@ export const ORCHESTRATION_FIELDS = `
   stalled
   hasTranscript
   machine
+  remote
   handoverTo
   handoverAt
   updatedAt
