@@ -26,7 +26,10 @@ export function hasCanonicalTicketReference(pr: any, ticketKey: string): boolean
   if (names.some((value) => exactKey.test(value))) return true;
   // A pull request that names another ticket in its title or branch only mentions this one in passing.
   if (names.some((value) => OTHER_TICKET_KEY.test(value))) return false;
-  return typeof pr?.body === 'string' && exactKey.test(pr.body);
+  if (typeof pr?.body !== 'string' || !exactKey.test(pr.body)) return false;
+  // A body that names several tickets is a release or roll-up list, not this ticket's pull request.
+  const keys = new Set([...pr.body.matchAll(new RegExp(OTHER_TICKET_KEY.source, 'g'))].map((match) => match[0].replace(/^[^A-Za-z]/, '').toUpperCase()));
+  return keys.size === 1;
 }
 
 const SIGNAL_PULL_REQUESTS = 5;
