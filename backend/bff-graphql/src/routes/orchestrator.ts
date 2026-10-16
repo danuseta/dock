@@ -88,7 +88,6 @@ export function createOrchestratorIngestRouter(
   // The workspace DOCK reads the runs kept here and copies its own dismissals, so both Agents pages agree.
   router.post('/runs', small, handle(() => service.list()));
   router.post('/runs/get', small, handle((body) => service.getWithEvents(String((body as { key?: unknown })?.key ?? ''))));
-  router.post('/claim', small, handle((body, _signal, machine) => service.claimRun(body, machine)));
   router.post('/dismiss', small,handle((body, _signal, machine) => service.dismiss(String((body as { key?: unknown })?.key ?? ''), machine)));
   router.post('/transcript', express.json({ limit: MAX_TRANSCRIPT_BYTES + 1024 * 1024 }), handle((body, _signal, machine) => service.saveTranscript(body, new Date(), machine)));
   const historyMachineOnly = (_request: Request, response: Response, next: express.NextFunction) => {

@@ -519,7 +519,7 @@ export class OrchestratorService {
     private readonly storage = new StorageService(),
     private readonly transcriptDirectory = defaultTranscriptDirectory(),
     private readonly lookupPullRequests: PullRequestLookup | null = null,
-    private readonly peer: Pick<LedgerPeer, 'forward' | 'runs' | 'claim'> | null = null,
+    private readonly peer: Pick<LedgerPeer, 'forward' | 'runs'> | null = null,
   ) {}
 
   private async present(row: RunRow, now: Date) {
@@ -698,7 +698,8 @@ export class OrchestratorService {
    */
   async resyncPeer(machine: string, now = new Date()) {
     if (!this.peer) return 0;
-    // A ticket both DOCKs hold for different machines goes to the newer ledger, so the two pages show one run.
+    // The peer decides who owns a ticket. When it gives one this DOCK also holds to another machine,
+    // the run here steps aside, so both pages show one run. A ledger's own time never takes a ticket.
     const theirs = new Map((await this.peer.runs()).filter((run) => run.machine !== machine).map((run) => [run.key, run]));
     let sent = 0;
     for (const row of await this.storage.getOrchestratorRuns()) {
@@ -708,12 +709,11 @@ export class OrchestratorService {
         await this.peer.forward('/dismiss', { key: row.key });
       } else {
         const other = theirs.get(row.key);
-        if (other && new Date(other.updatedAt) >= row.ledgerUpdatedAt) {
+        if (other) {
           await this.storage.updateOrchestratorRun(row.key, { dismissedAt: now });
           await this.storage.addOrchestratorEvent(row.key, 'MACHINE', other.machine, MAX_EVENTS_KEPT);
           continue;
         }
-        if (other && await this.peer.claim(row.key, row.ledgerUpdatedAt.toISOString()) !== machine) continue;
         const ledger = this.sharedLedger((await this.storage.getOrchestratorRunWithLedger(row.key)) ?? row).ledger;
         if (!isRecord(ledger)) continue;
         await this.peer.forward('', ledger);
@@ -721,18 +721,6 @@ export class OrchestratorService {
       sent += 1;
     }
     return sent;
-  }
-
-  /** The peer DOCK's machine takes a ticket whose ledger it holds newer than this DOCK does. */
-  async claimRun(input: unknown, machine: string) {
-    const row = await this.liveRun(input);
-    if (!row) return null;
-    const owner = row.machine ?? DEFAULT_MACHINE;
-    const updatedAt = new Date(text((input as Record<string, unknown>).updatedAt, 40));
-    if (owner === machine || Number.isNaN(updatedAt.getTime()) || updatedAt <= row.ledgerUpdatedAt) return { key: row.key, machine: owner };
-    const won = await this.storage.changeOrchestratorRunOwner(row.key, { machine: owner, handover: row.handover ?? null }, machine);
-    if (won) await this.storage.addOrchestratorEvent(row.key, 'MACHINE', machine, MAX_EVENTS_KEPT);
-    return { key: row.key, machine: won ? machine : owner };
   }
 
   /** What the peer DOCK reads for its own detail panel: the run and its recent events. */

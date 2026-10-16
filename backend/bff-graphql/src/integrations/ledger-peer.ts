@@ -2,34 +2,40 @@ import { fetch, ProxyAgent } from 'undici';
 import type { Orchestration } from './orchestrator';
 
 const TIMEOUT_MS = 3000;
+// The peer asks GitHub about pull requests while it lists, which can take a few seconds.
+const READ_TIMEOUT_MS = 10_000;
+const LAST_RUNS_MAX_AGE_MS = 5 * 60 * 1000;
 
 export type PeerRun = Orchestration & { events?: Array<{ id: string; kind: string; detail: string | null; at: string }> };
 
 /**
  * The workspace DOCK -> the laptop DOCK on the VPS, with the workspace ingest token.
  * Writes copy this DOCK's runs there; reads bring the laptop's runs here. A peer
- * that is down never fails the local work: writes are logged, reads come back empty.
+ * that is down never fails the local work: writes are logged, a failed read answers the
+ * last runs it read for five minutes, then nothing.
  * The proxy (tailscaled, to reach the tailnet) is used for the peer only, never for Jira or GitHub.
  */
 export class LedgerPeer {
   private readonly dispatcher: ProxyAgent | undefined;
   private recent: { at: number; runs: Promise<PeerRun[]> } | null = null;
+  private last: { at: number; runs: PeerRun[] } | null = null;
 
   constructor(
     private readonly url: string,
     private readonly token: string,
     private readonly timeoutMs = TIMEOUT_MS,
     proxy?: string,
+    private readonly readTimeoutMs = READ_TIMEOUT_MS,
   ) {
     this.dispatcher = proxy ? new ProxyAgent(proxy) : undefined;
   }
 
-  private async post(route: string, body: unknown): Promise<unknown> {
+  private async post(route: string, body: unknown, timeoutMs = this.timeoutMs): Promise<unknown> {
     const response = await fetch(`${this.url.replace(/\/+$/, '')}${route}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.token}` },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal: AbortSignal.timeout(timeoutMs),
       dispatcher: this.dispatcher,
     });
     if (!response.ok) throw new Error(`${route || '/'} answered ${response.status}`);
@@ -45,10 +51,12 @@ export class LedgerPeer {
 
   async runs(): Promise<PeerRun[]> {
     try {
-      const result = await this.post('/runs', {});
-      return Array.isArray(result) ? result as PeerRun[] : [];
+      const result = await this.post('/runs', {}, this.readTimeoutMs);
+      const runs = Array.isArray(result) ? result as PeerRun[] : [];
+      this.last = { at: Date.now(), runs };
+      return runs;
     } catch {
-      return [];
+      return this.last && Date.now() - this.last.at < LAST_RUNS_MAX_AGE_MS ? this.last.runs : [];
     }
   }
 
@@ -60,16 +68,7 @@ export class LedgerPeer {
 
   async get(key: string): Promise<PeerRun | null> {
     try {
-      return (await this.post('/runs/get', { key })) as PeerRun | null;
-    } catch {
-      return null;
-    }
-  }
-
-  /** Asks the peer for a ticket whose ledger is newer here. Answers the owner the peer now has, or null when it cannot tell. */
-  async claim(key: string, updatedAt: string): Promise<string | null> {
-    try {
-      return ((await this.post('/claim', { key, updatedAt })) as { machine?: string } | null)?.machine ?? null;
+      return (await this.post('/runs/get', { key }, this.readTimeoutMs)) as PeerRun | null;
     } catch {
       return null;
     }
