@@ -1070,6 +1070,8 @@ test('the peer applies a Jira status or a reset only to the copy of the machine 
   assert.strictEqual(runs.get('ZED-471'), undefined, 'a reset removes the copy even when this copy never saw a status');
   assert.strictEqual(await service.ingestJiraStatus({ key: 'ZED-472', status: 'To Do', reset: true }, 'workspace', now), false, 'a run of another machine is not touched');
   assert.ok(runs.get('ZED-472'));
+});
+
 test('a review ledger brings its findings with severities, the lgtm parts and the verdict', async () => {
   const { storage } = memoryStorage();
   const service = new OrchestratorService(storage, os.tmpdir());
