@@ -763,3 +763,24 @@ test('SQLite counts and removes every session of one machine with its rows', {
   assert.deepStrictEqual(await storage.getChatSessionsOnMachine(machine), []);
   assert.strictEqual((await storage.getChatMessages(ids[0], {}, 50)).length, 0);
 });
+
+test('SQLite storage removes a reset run with its events and keeps the reset', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }] = await Promise.all([import('../storage/service'), import('../storage/client')]);
+  const storage = new StorageService(prisma);
+  t.after(() => prisma.$disconnect());
+  const fields = { title: 'Reset', stage: 'code', waiting: '', payload: '{}', ledgerUpdatedAt: new Date(), machine: 'workspace', ledgerRaw: null };
+  await storage.upsertOrchestratorRun('ZED-480', fields);
+  await storage.addOrchestratorEvent('ZED-480', 'STAGE', 'code', 60);
+  await storage.updateOrchestratorRun('ZED-480', { jiraStatus: 'In Progress', jiraStage: null });
+  assert.strictEqual((await storage.getOrchestratorRun('ZED-480'))?.jiraStatus, 'In Progress');
+
+  const at = new Date();
+  await storage.resetOrchestratorRun('ZED-480', 'workspace', at);
+  assert.strictEqual(await storage.getOrchestratorRun('ZED-480'), null);
+  assert.deepStrictEqual(await storage.getOrchestratorEvents('ZED-480', 10), []);
+  assert.strictEqual((await storage.getOrchestratorReset('ZED-480'))?.resetAt.getTime(), at.getTime());
+  assert.deepStrictEqual((await storage.getOrchestratorResets('workspace')).map((reset) => reset.key), ['ZED-480']);
+  assert.deepStrictEqual(await storage.getOrchestratorResets('laptop'), []);
+});

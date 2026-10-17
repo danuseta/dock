@@ -4,7 +4,7 @@ import { decrypt, encrypt, hashPin, verifyPin } from './crypto';
 
 const RUN_WITHOUT_LEDGER = {
   key: true, title: true, stage: true, waiting: true, payload: true, activity: true, activityDetail: true, activityEndedAt: true,
-  lastEventAt: true, ledgerUpdatedAt: true, transcriptAt: true, dismissedAt: true, machine: true, handover: true, createdAt: true, updatedAt: true,
+  lastEventAt: true, ledgerUpdatedAt: true, transcriptAt: true, dismissedAt: true, machine: true, handover: true, jiraStatus: true, jiraStage: true, createdAt: true, updatedAt: true,
 } as const;
 
 const SENSITIVE_KEYS = new Set([
@@ -273,8 +273,29 @@ export class StorageService {
     transcriptAt?: Date;
     dismissedAt?: Date | null;
     handover?: string | null;
+    stage?: string;
+    jiraStatus?: string | null;
+    jiraStage?: string | null;
   }) {
     return this.db.orchestratorRun.update({ where: { key }, data, select: RUN_WITHOUT_LEDGER });
+  }
+
+  /** Removes a run with its events, and remembers when, so a ledger older than that cannot bring it back. */
+  async resetOrchestratorRun(key: string, machine: string, resetAt: Date) {
+    await this.db.$transaction([
+      this.db.orchestratorToolEvent.deleteMany({ where: { ticketKey: key } }),
+      this.db.orchestratorEvent.deleteMany({ where: { ticketKey: key } }),
+      this.db.orchestratorRun.deleteMany({ where: { key } }),
+      this.db.orchestratorReset.upsert({ where: { key }, create: { key, machine, resetAt }, update: { machine, resetAt } }),
+    ]);
+  }
+
+  getOrchestratorReset(key: string) {
+    return this.db.orchestratorReset.findUnique({ where: { key } });
+  }
+
+  getOrchestratorResets(machine: string) {
+    return this.db.orchestratorReset.findMany({ where: { machine } });
   }
 
   getOrchestratorEvents(ticketKey: string, take: number) {

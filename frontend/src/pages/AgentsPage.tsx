@@ -73,7 +73,7 @@ const eventLabel: Record<string, string> = {
   STAGE: 'Moved to', WAITING: 'Waiting on you', RESUMED: 'Resumed',
   AGENT_ACTIVE: 'Working', AGENT_IDLE: 'Idle', AGENT_WAITING: 'Asking',
   ACTIVE: 'Working', IDLE: 'Idle',
-  HANDOVER: 'Offered to', MACHINE: 'Now on',
+  HANDOVER: 'Offered to', MACHINE: 'Now on', JIRA: 'Jira status',
 };
 
 const StageChip: React.FC<{ stage: string; kind?: string }> = ({ stage, kind }) => (
