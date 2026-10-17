@@ -880,3 +880,9 @@ export const GET_ELEVENLABS_KEYS = gql`
     }
   }
 `;
+
+export const GET_DEMO_STORAGE = gql`
+  query GetDemoStorage {
+    demoStorage { configured endpoint region bucket folder publicBaseUrl accessKeyMasked secretSet }
+  }
+`;

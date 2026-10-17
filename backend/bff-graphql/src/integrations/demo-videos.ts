@@ -1,6 +1,7 @@
 import type { Readable } from 'node:stream';
 import { DeleteObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { StorageService } from '../storage/service';
+import { demoStorage, type DemoStorage, type DemoStorageConfig } from './demo-storage';
 import { ledgerPeer } from './ledger-peer';
 import { OrchestratorInputError, normalizeTicketKey } from './orchestrator';
 
@@ -10,7 +11,7 @@ const VIDEO_TYPES = new Set(['video/mp4']);
 export interface DemoObject { key: string; size: number; lastModified: Date | null }
 export interface DemoVideo { ticketKey: string; url: string; size: number; updatedAt: string | null }
 
-/** The bucket folder the demo videos live in. */
+/** The bucket the demo videos live in. Keys are full object keys, folder included. */
 export interface DemoStore {
   list(prefix: string): Promise<DemoObject[]>;
   put(key: string, body: Readable | Buffer, contentType: string, length: number): Promise<void>;
@@ -23,33 +24,23 @@ export interface DemoLinks {
   remove(ticketKey: string, url: string): Promise<void>;
 }
 
-export interface DemoConfig { publicBaseUrl: string; prefix: string }
-
-export function s3Store(env: NodeJS.ProcessEnv = process.env): (DemoStore & DemoConfig) | null {
-  const accessKeyId = env.DEMO_S3_ACCESS_KEY?.trim();
-  const secretAccessKey = env.DEMO_S3_SECRET_KEY?.trim();
-  if (!accessKeyId || !secretAccessKey) return null;
-  const endpoint = (env.DEMO_S3_ENDPOINT?.trim() || 'https://kencana.basic.box.cloudeka.id').replace(/\/+$/, '');
-  const bucket = env.DEMO_S3_BUCKET?.trim() || 'porto-rzwbgw';
-  const client = new S3Client({ endpoint, region: env.DEMO_S3_REGION?.trim() || 'kencana', forcePathStyle: true, credentials: { accessKeyId, secretAccessKey } });
+export function s3Store(config: DemoStorageConfig): DemoStore {
+  const client = new S3Client({ endpoint: config.endpoint, region: config.region, forcePathStyle: true, credentials: { accessKeyId: config.accessKey, secretAccessKey: config.secretKey } });
   return {
-    publicBaseUrl: (env.DEMO_PUBLIC_BASE_URL?.trim() || `${endpoint}/${bucket}`).replace(/\/+$/, ''),
-    prefix: env.DEMO_S3_PREFIX?.trim() || 'demo-qonflo/',
     list: async (prefix) => {
       const objects: DemoObject[] = [];
       let token: string | undefined;
       do {
-        const page = await client.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }));
+        const page = await client.send(new ListObjectsV2Command({ Bucket: config.bucket, Prefix: prefix, ContinuationToken: token }));
         for (const item of page.Contents ?? []) if (item.Key) objects.push({ key: item.Key, size: item.Size ?? 0, lastModified: item.LastModified ?? null });
         token = page.IsTruncated ? page.NextContinuationToken : undefined;
       } while (token);
       return objects;
     },
-    // Public-read: the link is permanent and opens from Discord without a login.
     put: async (key, body, contentType, length) => {
-      await client.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType, ContentLength: length, ACL: 'public-read' }));
+      await client.send(new PutObjectCommand({ Bucket: config.bucket, Key: key, Body: body, ContentType: contentType, ContentLength: length }));
     },
-    remove: async (key) => { await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key })); },
+    remove: async (key) => { await client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key })); },
   };
 }
 
@@ -66,54 +57,65 @@ export function demoLinks(storage = new StorageService(), peer = ledgerPeer): De
   };
 }
 
-/** The demo video of each ticket: one object per ticket, QRD-xxxx.mp4, whose link the ticket pages show. */
+/**
+ * The demo video of each ticket: one object per ticket, <folder>/QRD-xxxx.mp4, whose link the ticket pages show.
+ * The link goes through the public base URL (the website's asset proxy), so the bucket stays private and unnamed.
+ */
 export class DemoVideos {
-  constructor(private readonly store: (DemoStore & DemoConfig) | null, private readonly links: DemoLinks) {}
+  private cached: { signature: string; store: DemoStore } | null = null;
 
-  get configured() { return Boolean(this.store); }
+  constructor(
+    private readonly settings: DemoStorage,
+    private readonly links: DemoLinks,
+    private readonly makeStore: (config: DemoStorageConfig) => DemoStore = s3Store,
+  ) {}
 
-  private bucket() {
-    if (!this.store) throw new OrchestratorInputError('Demo storage is not configured: set DEMO_S3_ACCESS_KEY and DEMO_S3_SECRET_KEY for the workspace DOCK');
-    return this.store;
+  async configured() { return Boolean(await this.settings.full()); }
+
+  private async bucket() {
+    const config = await this.settings.full();
+    if (!config) throw new OrchestratorInputError('Demo storage is not configured: set it in Settings > Agents > Demo video storage');
+    const signature = JSON.stringify(config);
+    if (this.cached?.signature !== signature) this.cached = { signature, store: this.makeStore(config) };
+    return { config, store: this.cached.store, prefix: `${config.folder}/` };
   }
 
-  urlOf(ticketKey: string) {
-    const store = this.bucket();
-    return `${store.publicBaseUrl}/${store.prefix}${ticketKey}.mp4`;
+  private urlOf(config: DemoStorageConfig, ticketKey: string) {
+    return `${config.publicBaseUrl}/${config.folder}/${ticketKey}.mp4`;
   }
 
   async list(): Promise<DemoVideo[]> {
-    const store = this.bucket();
+    const { config, store, prefix } = await this.bucket();
     const videos: DemoVideo[] = [];
-    for (const item of await store.list(store.prefix)) {
-      const match = /^([A-Z][A-Z0-9]*-\d+)\.mp4$/.exec(item.key.slice(store.prefix.length));
-      if (match) videos.push({ ticketKey: match[1], url: this.urlOf(match[1]), size: item.size, updatedAt: item.lastModified?.toISOString() ?? null });
+    for (const item of await store.list(prefix)) {
+      const match = /^([A-Z][A-Z0-9]*-\d+)\.mp4$/.exec(item.key.slice(prefix.length));
+      if (match) videos.push({ ticketKey: match[1], url: this.urlOf(config, match[1]), size: item.size, updatedAt: item.lastModified?.toISOString() ?? null });
     }
     return videos.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
   }
 
   async upload(ticketKeyInput: string, body: Readable | Buffer, contentType: string, length: number | null): Promise<DemoVideo> {
-    const store = this.bucket();
     const ticketKey = normalizeTicketKey(ticketKeyInput);
     if (!VIDEO_TYPES.has(contentType.split(';')[0].trim().toLowerCase())) throw new OrchestratorInputError('A demo video is an MP4 file (video/mp4)');
     if (!length || length <= 0) throw new OrchestratorInputError('The upload needs a content length');
     if (length > MAX_DEMO_BYTES) throw new OrchestratorInputError(`A demo video is at most ${MAX_DEMO_BYTES / 1024 / 1024} MB`);
-    await store.put(`${store.prefix}${ticketKey}.mp4`, body, 'video/mp4', length);
-    const url = this.urlOf(ticketKey);
+    const { config, store, prefix } = await this.bucket();
+    await store.put(`${prefix}${ticketKey}.mp4`, body, 'video/mp4', length);
+    const url = this.urlOf(config, ticketKey);
     await this.links.save(ticketKey, url);
     return { ticketKey, url, size: length, updatedAt: new Date().toISOString() };
   }
 
   async remove(ticketKeyInput: string) {
-    const store = this.bucket();
     const ticketKey = normalizeTicketKey(ticketKeyInput);
-    await store.remove(`${store.prefix}${ticketKey}.mp4`);
-    await this.links.remove(ticketKey, this.urlOf(ticketKey));
+    const { config, store, prefix } = await this.bucket();
+    await store.remove(`${prefix}${ticketKey}.mp4`);
+    await this.links.remove(ticketKey, this.urlOf(config, ticketKey));
     return true;
   }
 }
 
-export const demoVideos = new DemoVideos(s3Store(), demoLinks());
+export const demoVideos = new DemoVideos(demoStorage, demoLinks());
 
 /** On the laptop DOCK: a demo link the workspace DOCK set or removed. A removal only clears the link it set. */
 export async function ingestDemoLink(input: unknown, storage = new StorageService()) {

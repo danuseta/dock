@@ -399,3 +399,15 @@ export const UNPARK_ELEVENLABS_KEY = gql`
     unparkElevenLabsKey(name: $name)
   }
 `;
+
+export const SAVE_DEMO_STORAGE = gql`
+  mutation SaveDemoStorage($input: DemoStorageInput!) {
+    saveDemoStorage(input: $input) { configured endpoint region bucket folder publicBaseUrl accessKeyMasked secretSet }
+  }
+`;
+
+export const CLEAR_DEMO_STORAGE = gql`
+  mutation ClearDemoStorage {
+    clearDemoStorage
+  }
+`;

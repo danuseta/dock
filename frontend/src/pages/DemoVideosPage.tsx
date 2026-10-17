@@ -58,12 +58,12 @@ const DemoVideosPage = ({ onTicketClick }: { onTicketClick: (key: string) => voi
   return (
     <Page width="full">
       <PageHeader>
-        <div><h1 className="text-balance font-display text-3xl font-black">Demo videos</h1><p className="mt-1 text-pretty text-secondary-foreground">One video per ticket in the bucket folder demo-qonflo. Its link shows on the ticket page of both DOCKs and goes into the Discord broadcast.</p></div>
+        <div><h1 className="text-balance font-display text-3xl font-black">Demo videos</h1><p className="mt-1 text-pretty text-secondary-foreground">One video per ticket in the folder set in Settings. Its link shows on the ticket page of both DOCKs and goes into the Discord broadcast.</p></div>
         <Button onClick={() => void refetch()} disabled={loading}><RefreshCw size={16} className={cn(loading && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />Refresh</Button>
       </PageHeader>
 
       {error && <Card className="mb-4 border-status-conflict text-pretty text-sm text-status-conflict" role="alert">{error.message}</Card>}
-      {!configured && <Card className="mb-4 text-pretty text-sm text-secondary-foreground" role="status">Demo storage is not configured yet. Set DEMO_S3_ACCESS_KEY and DEMO_S3_SECRET_KEY for the workspace DOCK, then restart it.</Card>}
+      {!configured && <Card className="mb-4 text-pretty text-sm text-secondary-foreground" role="status">Demo storage is not configured yet. Set it in Settings, Agents, Demo video storage.</Card>}
       {notice && <Card className={cn('mb-4 text-pretty text-sm', notice.error ? 'border-status-conflict text-status-conflict' : 'text-status-merged')} role={notice.error ? 'alert' : 'status'}>{notice.text}</Card>}
 
       <Card className="mb-6">

@@ -15,6 +15,7 @@ const SENSITIVE_KEYS = new Set([
   'pushVapidPrivateKey',
   'googleClientSecret',
   'googleRefreshToken',
+  'demoStorage',
 ]);
 
 export interface ChatActivityInput {

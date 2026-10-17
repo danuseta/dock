@@ -273,6 +273,27 @@ export const typeDefs = gql`
     updatedAt: String
   }
 
+  type DemoStorage {
+    configured: Boolean!
+    endpoint: String!
+    region: String!
+    bucket: String!
+    folder: String!
+    publicBaseUrl: String!
+    accessKeyMasked: String
+    secretSet: Boolean!
+  }
+
+  input DemoStorageInput {
+    endpoint: String
+    region: String
+    bucket: String
+    folder: String
+    publicBaseUrl: String
+    accessKey: String
+    secretKey: String
+  }
+
   type DemoVideoList {
     configured: Boolean!
     videos: [DemoVideo!]!
@@ -658,6 +679,7 @@ export const typeDefs = gql`
     orchestration(key: String!): Orchestration
     ingestTokens: [IngestToken!]!
     demoVideos: DemoVideoList!
+    demoStorage: DemoStorage!
     devServers: DevServers!
     devServerLog(name: String!, bytes: Int): String!
     elevenLabsKeys: [ElevenLabsKey!]!
@@ -712,6 +734,8 @@ export const typeDefs = gql`
     createIngestToken(name: String!, machine: String): IngestTokenSecret!
     revokeIngestToken(id: ID!): Boolean!
     deleteDemoVideo(ticketKey: String!): Boolean!
+    saveDemoStorage(input: DemoStorageInput!): DemoStorage!
+    clearDemoStorage: Boolean!
     startDevServer(name: String!): Boolean!
     stopDevServer(name: String!): Boolean!
     restartDevServer(name: String!): Boolean!

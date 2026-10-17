@@ -16,6 +16,7 @@ import { orchestratorCron } from '../integrations/orchestrator-cron-live';
 import { labelOrder } from '../integrations/orchestrator-cron';
 import { pushService } from '../integrations/push';
 import { demoVideos } from '../integrations/demo-videos';
+import { demoStorage, type DemoStorageInput } from '../integrations/demo-storage';
 import { DevServerError, devServers } from '../integrations/dev-servers';
 import { elevenLabsKeys } from '../integrations/elevenlabs-keys';
 import { moveToReview } from '../integrations/broadcast-review';
@@ -218,8 +219,10 @@ export const resolvers = {
     ingestTokens: async () => orchestratorService.tokens(),
     demoVideos: async () => {
       requireDemoVideos();
-      return { configured: demoVideos.configured, videos: demoVideos.configured ? await demoVideos.list().catch(demoVideoError) : [] };
+      const configured = await demoVideos.configured().catch(demoVideoError);
+      return { configured, videos: configured ? await demoVideos.list().catch(demoVideoError) : [] };
     },
+    demoStorage: async () => demoStorage.view().catch(demoVideoError),
     devServers: async () => { requireWorkspace(); return devServers.list(); },
     devServerLog: async (_: unknown, { name, bytes }: { name: string; bytes?: number | null }) => {
       requireWorkspace();
@@ -474,6 +477,8 @@ export const resolvers = {
     },
     revokeIngestToken: async (_: unknown, { id }: { id: string }) => orchestratorService.revokeToken(id),
     deleteDemoVideo: async (_: unknown, { ticketKey }: { ticketKey: string }) => { requireDemoVideos(); return demoVideos.remove(ticketKey).catch(demoVideoError); },
+    saveDemoStorage: async (_: unknown, { input }: { input: DemoStorageInput }) => demoStorage.save(input).catch(demoVideoError),
+    clearDemoStorage: async () => demoStorage.clear().catch(demoVideoError),
     startDevServer: async (_: unknown, { name }: { name: string }) => { requireWorkspace(); return devServers.start(name).catch(devServerError); },
     stopDevServer: async (_: unknown, { name }: { name: string }) => { requireWorkspace(); return devServers.stop(name).catch(devServerError); },
     restartDevServer: async (_: unknown, { name }: { name: string }) => { requireWorkspace(); return devServers.restart(name).catch(devServerError); },
@@ -562,7 +567,7 @@ export const resolvers = {
 
 export const protectedQueries = [
   'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
-  'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'devServers', 'devServerLog', 'demoVideos',
+  'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatMessages', 'chatActivity', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey',
@@ -592,6 +597,8 @@ export const protectedMutations = [
   'createIngestToken',
   'revokeIngestToken',
   'deleteDemoVideo',
+  'saveDemoStorage',
+  'clearDemoStorage',
   'startDevServer',
   'stopDevServer',
   'restartDevServer',
