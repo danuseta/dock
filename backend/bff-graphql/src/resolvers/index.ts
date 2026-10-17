@@ -15,6 +15,7 @@ import { CronInputError } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
 import { labelOrder } from '../integrations/orchestrator-cron';
 import { pushService } from '../integrations/push';
+import { moveToReview } from '../integrations/broadcast-review';
 import type { AnswerInput } from '../integrations/chat-interactions';
 import { SprintBusyError, SprintInputError, sprintDashboardService } from '../integrations/sprint-dashboard';
 import { dockMode } from '../mode';
@@ -318,8 +319,13 @@ export const resolvers = {
         threadId,
         threadName
       };
-      
-      return await discordAPI.sendSummary(payload);
+
+      const sent = await discordAPI.sendSummary(payload);
+      if (sent) {
+        const notMoved = await moveToReview(tickets, (key, status) => jiraAPI.transitionTicket(key, status));
+        if (notMoved.length) console.warn(`[Broadcast] Jira did not move ${notMoved.join(', ')} to PR Review`);
+      }
+      return sent;
     },
     setTicketDependency: async (_: unknown, { ticketKey, dependsOnKey }: { ticketKey: string; dependsOnKey: string }) => {
       const [ticket, dependency] = await Promise.all([jiraAPI.getTicket(ticketKey), jiraAPI.getTicket(dependsOnKey)]);
