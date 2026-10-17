@@ -38,8 +38,16 @@ export class LedgerPeer {
       signal: AbortSignal.timeout(timeoutMs),
       dispatcher: this.dispatcher,
     });
-    if (!response.ok) throw new Error(`${route || '/'} answered ${response.status}`);
+    if (!response.ok) {
+      const answer = await response.json().catch(() => null) as { error?: unknown } | null;
+      throw new Error(typeof answer?.error === 'string' ? answer.error : `${route || '/'} answered ${response.status}`);
+    }
     return ((await response.json()) as { result?: unknown }).result ?? null;
+  }
+
+  /** A call whose answer the caller needs: a failure throws. */
+  call(route: string, body: unknown): Promise<unknown> {
+    return this.post(route, body, this.readTimeoutMs);
   }
 
   /** Not awaited by callers: the copy must not hold up the hook that triggered it. */

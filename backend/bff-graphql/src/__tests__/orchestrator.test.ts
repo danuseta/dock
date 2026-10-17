@@ -33,6 +33,7 @@ const withoutLedger = (row: any) => {
 function memoryStorage() {
   const runs = new Map<string, any>();
   const events: any[] = [];
+  const resets = new Map<string, any>();
   const tokens: any[] = [];
   let sequence = 0;
   const storage = {
@@ -67,6 +68,13 @@ function memoryStorage() {
       return row;
     },
     addOrchestratorToolEvents: async () => undefined,
+    resetOrchestratorRun: async (key: string, machine: string, resetAt: Date) => {
+      runs.delete(key);
+      for (let index = events.length - 1; index >= 0; index -= 1) if (events[index].ticketKey === key) events.splice(index, 1);
+      resets.set(key, { key, machine, resetAt });
+    },
+    getOrchestratorReset: async (key: string) => resets.get(key) ?? null,
+    getOrchestratorResets: async (machine: string) => [...resets.values()].filter((reset) => reset.machine === machine),
     getOrchestratorEvents: async (ticketKey: string, take: number) => events
       .filter((event) => event.ticketKey === ticketKey).reverse().slice(0, take),
     addOrchestratorEvent: async (ticketKey: string, kind: string, detail: string | null) => {
@@ -1009,4 +1017,73 @@ test('a leftover ledger here never brings back a run the peer gives to another m
   assert.deepStrictEqual(sent, [], 'nothing is copied to the peer');
 
   assert.strictEqual((await push('ZED-441')).ignored, false, 'a ticket the peer does not give away is kept here');
+});
+
+test('a Jira status moves the run on, never back, and a ticket moved back to To Do removes it on both DOCKs', async () => {
+  const { storage, runs, events } = memoryStorage();
+  const sent: Array<[string, any]> = [];
+  const service = new OrchestratorService(storage, os.tmpdir(), null, { runs: async () => [], forward: async (route, body) => { sent.push([route, body]); } });
+  const now = new Date();
+  const push = (key: string, stage: string, extra: Record<string, unknown> = {}) => service.ingestLedger({ ...ledger, key, stage, waiting: '', updatedAt: now.toISOString(), ...extra }, now, 'workspace');
+  await push('ZED-460', 'code');
+  await push('ZED-461', 'code');
+  await push('ZED-462', 'code', { kind: 'review' });
+  await new OrchestratorService(storage, os.tmpdir()).ingestLedger({ ...ledger, key: 'ZED-463', stage: 'code', waiting: '', updatedAt: now.toISOString() }, now, 'laptop');
+  sent.length = 0;
+
+  // The cron starts a ticket while it is still To Do: the first status is only recorded.
+  assert.strictEqual(await service.syncJira('workspace', [{ key: 'ZED-460', status: 'To Do' }, { key: 'ZED-461', status: 'In Progress' }, { key: 'ZED-462', status: 'To Do' }, { key: 'ZED-463', status: 'PR Review' }], now), 2);
+  assert.ok(runs.get('ZED-460'), 'a run first seen in To Do stays');
+  assert.strictEqual(runs.get('ZED-462').jiraStatus, undefined, 'a review run is not followed');
+  assert.strictEqual(runs.get('ZED-463').jiraStatus, undefined, 'a run of another machine is not touched');
+  assert.strictEqual(await service.syncJira('workspace', [{ key: 'ZED-461', status: 'In Progress' }], now), 0, 'an unchanged status does nothing');
+
+  await service.syncJira('workspace', [{ key: 'ZED-460', status: 'In Progress' }, { key: 'ZED-461', status: 'PR Review' }], now);
+  assert.strictEqual(runs.get('ZED-461').stage, 'pr');
+  assert.strictEqual((await push('ZED-461', 'code')).stage, 'pr', 'a ledger push never takes the run back behind Jira');
+  await service.syncJira('workspace', [{ key: 'ZED-461', status: 'Done / MERGED' }], now);
+  assert.strictEqual(runs.get('ZED-461').stage, 'done');
+  assert.deepStrictEqual(events.filter((event) => event.ticketKey === 'ZED-461' && event.kind === 'JIRA').map((event) => event.detail), ['In Progress', 'PR Review', 'Done / MERGED']);
+
+  sent.length = 0;
+  await service.syncJira('workspace', [{ key: 'ZED-460', status: 'To Do' }], now);
+  assert.strictEqual(runs.get('ZED-460'), undefined, 'moved back to To Do: the run is gone');
+  assert.deepStrictEqual(sent, [['/jira', { key: 'ZED-460', status: 'To Do', reset: true }]], 'the peer removes its copy too');
+  assert.deepStrictEqual((await service.ledgerList('workspace')).resets.map((reset) => reset.key), ['ZED-460']);
+
+  await assert.rejects(push('ZED-460', 'code', { createdAt: new Date(now.getTime() - 60_000).toISOString() }), /went back to To Do/, 'a leftover ledger does not bring it back');
+  await assert.rejects(push('ZED-460', 'code'), /went back to To Do/, 'nor one without a creation time');
+  const fresh = await push('ZED-460', 'gate', { createdAt: new Date(now.getTime() + 1000).toISOString() });
+  assert.strictEqual(fresh.ignored, false, 'a ledger made after the reset starts the ticket again');
+});
+
+test('the peer applies a Jira status or a reset only to the copy of the machine that sent it', async () => {
+  const { storage, runs } = memoryStorage();
+  const service = new OrchestratorService(storage, os.tmpdir());
+  const now = new Date();
+  for (const [key, machine] of [['ZED-470', 'workspace'], ['ZED-471', 'workspace'], ['ZED-472', 'laptop']]) {
+    await service.ingestLedger({ ...ledger, key, stage: 'code', waiting: '', updatedAt: now.toISOString() }, now, machine);
+  }
+  assert.strictEqual(await service.ingestJiraStatus({ key: 'ZED-470', status: 'PR Review' }, 'workspace', now), true);
+  assert.strictEqual(runs.get('ZED-470').stage, 'pr');
+  assert.strictEqual(await service.ingestJiraStatus({ key: 'ZED-471', status: 'To Do', reset: true }, 'workspace', now), true);
+  assert.strictEqual(runs.get('ZED-471'), undefined, 'a reset removes the copy even when this copy never saw a status');
+  assert.strictEqual(await service.ingestJiraStatus({ key: 'ZED-472', status: 'To Do', reset: true }, 'workspace', now), false, 'a run of another machine is not touched');
+  assert.ok(runs.get('ZED-472'));
+test('a review ledger brings its findings with severities, the lgtm parts and the verdict', async () => {
+  const { storage } = memoryStorage();
+  const service = new OrchestratorService(storage, os.tmpdir());
+  const now = new Date();
+  const run = await service.ingestLedger({
+    ...ledger, key: 'ZED-450', kind: 'review', waiting: '', updatedAt: now.toISOString(),
+    findings: [{ at: now.toISOString(), text: 'written before severities' }, { at: now.toISOString(), severity: 'blocker', text: 'drops the retry' }, { severity: 'major', text: 'unknown severity' }, { severity: 'nit', text: '' }],
+    lgtm: [{ at: now.toISOString(), text: 'the migration' }],
+    verdict: { at: now.toISOString(), value: 'request-change' },
+  }, now, 'laptop');
+  assert.deepStrictEqual(run.findings.map((item: { severity: string; text: string }) => [item.severity, item.text]), [['non-blocking', 'written before severities'], ['blocker', 'drops the retry'], ['non-blocking', 'unknown severity']]);
+  assert.deepStrictEqual(run.lgtm.map((item: { text: string }) => item.text), ['the migration']);
+  assert.deepStrictEqual([run.verdict, run.blockers], ['request-change', 1]);
+
+  const plain = await service.ingestLedger({ ...ledger, key: 'ZED-451', waiting: '', updatedAt: now.toISOString(), verdict: { value: 'maybe' } }, now, 'laptop');
+  assert.deepStrictEqual([plain.findings, plain.lgtm, plain.verdict, plain.blockers], [[], [], null, 0]);
 });

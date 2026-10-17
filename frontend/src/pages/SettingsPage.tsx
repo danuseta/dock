@@ -10,6 +10,7 @@ import { UPDATE_SETTINGS, VALIDATE_JIRA, VALIDATE_GITHUB, VALIDATE_DISCORD, SET_
 import { Toast } from '../components/Toast';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { IngestTokensSection } from '../components/IngestTokensSection';
+import { ElevenLabsKeysSection } from '../components/ElevenLabsKeysSection';
 import { PushCard } from '../components/PushCard';
 import { NAVIGATION_PREFERENCES_EVENT, NavigationMode, NavigationPreferences, readNavigationPreferences, saveNavigationPreferences } from '../lib/navigationPreferences';
 import { Badge, Button, Card, Checkbox, IconButton, Input, Page, Select, Textarea } from '../components/ui';
@@ -540,7 +541,7 @@ const SettingsPage: React.FC = () => {
             </Card>
           </section>}
 
-          {activeSection === 'agents' && <IngestTokensSection />}
+          {activeSection === 'agents' && <><IngestTokensSection /><div className="mt-5"><ElevenLabsKeysSection /></div></>}
         </main>
       </div>
 

@@ -567,6 +567,10 @@ export const ORCHESTRATION_FIELDS = `
   assumptions { n text falsifier state evidence }
   failures { at type what evidence attempt }
   closing { hours fixRounds replans }
+  findings { at severity text }
+  lgtm { at text }
+  verdict
+  blockers
   activity
   activityDetail
   idleSeconds
@@ -854,5 +858,15 @@ export const GET_DEV_SERVERS = gql`
 export const GET_DEV_SERVER_LOG = gql`
   query GetDevServerLog($name: String!, $bytes: Int) {
     devServerLog(name: $name, bytes: $bytes)
+  }
+`;
+export const GET_ELEVENLABS_KEYS = gql`
+  query GetElevenLabsKeys {
+    elevenLabsKeys {
+      name
+      masked
+      parkedUntil
+      current
+    }
   }
 `;

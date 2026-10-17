@@ -135,10 +135,19 @@ model OrchestratorRun {
   machine          String    @default("laptop")
   ledgerRaw        String?
   handover         String?
+  jiraStatus       String?
+  jiraStage        String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
   @@index([stage])
+}
+
+/// A run removed because its ticket went back to To Do in Jira. A ledger made before resetAt does not bring it back.
+model OrchestratorReset {
+  key     String   @id
+  machine String
+  resetAt DateTime @default(now())
 }
 
 model OrchestratorEvent {
@@ -299,4 +308,14 @@ model SprintIssueEvents {
   issues    String
   fetchedAt DateTime
   labelPool String?
+}
+
+/// ElevenLabs keys the machines rotate over. Kept on the laptop DOCK only; the workspace DOCK reads and writes them there.
+model ElevenLabsKey {
+  name        String    @id
+  key         String
+  position    Int
+  current     Boolean   @default(false)
+  parkedUntil DateTime?
+  createdAt   DateTime  @default(now())
 }

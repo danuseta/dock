@@ -373,5 +373,20 @@ export const RESTART_DEV_SERVER = gql`
 export const STOP_WORKTREE_SERVER = gql`
   mutation StopWorktreeServer($port: Int!) {
     stopWorktreeServer(port: $port)
+export const ADD_ELEVENLABS_KEY = gql`
+  mutation AddElevenLabsKey($name: String!, $key: String!) {
+    addElevenLabsKey(name: $name, key: $key)
+  }
+`;
+
+export const REMOVE_ELEVENLABS_KEY = gql`
+  mutation RemoveElevenLabsKey($name: String!) {
+    removeElevenLabsKey(name: $name)
+  }
+`;
+
+export const UNPARK_ELEVENLABS_KEY = gql`
+  mutation UnparkElevenLabsKey($name: String!) {
+    unparkElevenLabsKey(name: $name)
   }
 `;
