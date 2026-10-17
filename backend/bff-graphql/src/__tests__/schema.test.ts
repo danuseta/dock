@@ -98,6 +98,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'dockMode',
       'dockerContainerLogs',
       'dockerRuntime',
+      'elevenLabsKeys',
       'githubRepos',
       'ingestTokens',
       'jiraProjects',
@@ -119,6 +120,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'ticketRelationGroup',
     ]);
     assert.deepStrictEqual(mutationFields, [
+      'addElevenLabsKey',
       'addMonitor',
       'addQuickLink',
       'answerChatInteraction',
@@ -138,6 +140,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'moveOrchestration',
       'refreshData',
       'refreshSprintDashboard',
+      'removeElevenLabsKey',
       'removeMasterPin',
       'removeMonitor',
       'removeQuickLink',
@@ -155,6 +158,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'stopAllAgents',
       'stopChatTurn',
       'subscribePush',
+      'unparkElevenLabsKey',
       'unsubscribePush',
       'updateMonitor',
       'updateOrchestratorCronSettings',

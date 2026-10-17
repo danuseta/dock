@@ -15,6 +15,7 @@ import { CronInputError } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
 import { labelOrder } from '../integrations/orchestrator-cron';
 import { pushService } from '../integrations/push';
+import { elevenLabsKeys } from '../integrations/elevenlabs-keys';
 import type { AnswerInput } from '../integrations/chat-interactions';
 import { SprintBusyError, SprintInputError, sprintDashboardService } from '../integrations/sprint-dashboard';
 import { dockMode } from '../mode';
@@ -43,6 +44,11 @@ function requireCron(): void {
   if (dockMode() !== 'workspace') {
     throw new GraphQLError('The cron runs on the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });
   }
+}
+
+// A key the laptop DOCK refused, or a peer it could not reach, is a message for the Settings page.
+function elevenLabsError(error: unknown): never {
+  throw new GraphQLError(error instanceof Error ? error.message : 'ElevenLabs keys failed', { extensions: { code: 'BAD_USER_INPUT' } });
 }
 
 function cronError(error: unknown): never {
@@ -185,6 +191,7 @@ export const resolvers = {
       return run ?? null;
     },
     ingestTokens: async () => orchestratorService.tokens(),
+    elevenLabsKeys: async () => elevenLabsKeys.list().catch(elevenLabsError),
     chatSessions: async (_: unknown, { source, limit }: { source?: string; limit?: number }) => {
       return chatService.sessions(source, limit, CHAT_MACHINE).catch(orchestratorInputError);
     },
@@ -427,6 +434,9 @@ export const resolvers = {
       return orchestratorService.createToken(name, machine).catch(orchestratorInputError);
     },
     revokeIngestToken: async (_: unknown, { id }: { id: string }) => orchestratorService.revokeToken(id),
+    addElevenLabsKey: async (_: unknown, { name, key }: { name: string; key: string }) => elevenLabsKeys.add(name, key).then(() => true).catch(elevenLabsError),
+    removeElevenLabsKey: async (_: unknown, { name }: { name: string }) => elevenLabsKeys.remove(name).catch(elevenLabsError),
+    unparkElevenLabsKey: async (_: unknown, { name }: { name: string }) => elevenLabsKeys.park(name, null).then(() => true).catch(elevenLabsError),
     dismissOrchestration: async (_: unknown, { key }: { key: string }) => {
       return orchestratorService.dismiss(key, dockMode()).catch(orchestratorInputError);
     },
@@ -508,7 +518,7 @@ export const resolvers = {
 
 export const protectedQueries = [
   'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
-  'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens',
+  'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys',
   'chatSessions', 'chatSession', 'chatMessages', 'chatActivity', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey',
@@ -537,6 +547,9 @@ export const protectedMutations = [
   'checkMonitors',
   'createIngestToken',
   'revokeIngestToken',
+  'addElevenLabsKey',
+  'removeElevenLabsKey',
+  'unparkElevenLabsKey',
   'dismissOrchestration',
   'moveOrchestration',
   'createChatSession',

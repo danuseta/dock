@@ -840,3 +840,14 @@ export const GET_PUSH_PUBLIC_KEY = gql`
     pushPublicKey
   }
 `;
+
+export const GET_ELEVENLABS_KEYS = gql`
+  query GetElevenLabsKeys {
+    elevenLabsKeys {
+      name
+      masked
+      parkedUntil
+      current
+    }
+  }
+`;
