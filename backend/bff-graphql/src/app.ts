@@ -15,6 +15,7 @@ import {
 import { createGoogleCalendarRouter } from './auth/google-calendar-router';
 import { createBrainProxyRouter } from './routes/brain';
 import { createChatAttachmentRouter } from './routes/chat-attachments';
+import { createDemoVideoRouter } from './routes/demo-videos';
 import { createOrchestratorApiRouter, createOrchestratorIngestRouter } from './routes/orchestrator';
 import { dockMode } from './mode';
 
@@ -63,6 +64,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<JidisAp
   app.use('/ingest/orchestrator', createOrchestratorIngestRouter());
   app.use('/ingest/brain', createBrainProxyRouter());
   if (mode === 'workspace') app.use('/api/chat/attachments', createChatAttachmentRouter());
+  if (mode === 'workspace') app.use('/api/demo-videos', createDemoVideoRouter());
   app.use(express.json());
 
   if (mode === 'laptop') app.use('/auth/google', createGoogleCalendarRouter());

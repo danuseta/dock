@@ -12,6 +12,7 @@ import HomePage from './pages/HomePage';
 import CalendarPage from './pages/CalendarPage';
 import MonitoringPage from './pages/MonitoringPage';
 import DockerServicesPage from './pages/DockerServicesPage';
+import DemoVideosPage from './pages/DemoVideosPage';
 import DevServersPage from './pages/DevServersPage';
 import SessionsPage from './pages/SessionsPage';
 import SprintPage from './pages/SprintPage';
@@ -49,7 +50,7 @@ function App() {
       const key = decodeURIComponent(path.split('/').pop() || '');
       return { path: '/ticket', key: key || null };
     }
-    if (path === '/dashboard' || path === '/agents' || path === '/sessions' || path === '/calendar' || path === '/sprint' || path === '/monitoring' || path === '/docker' || path === '/dev-servers' || path === '/attention' || path === '/settings') {
+    if (path === '/dashboard' || path === '/agents' || path === '/sessions' || path === '/calendar' || path === '/sprint' || path === '/monitoring' || path === '/docker' || path === '/demo-videos' || path === '/dev-servers' || path === '/attention' || path === '/settings') {
       return { path, key: null };
     }
     return { path: '/', key: null };
@@ -110,6 +111,7 @@ function App() {
       case '/sprint': return <SprintPage />;
       case '/monitoring': return <MonitoringPage onNavigate={handleNavigate} />;
       case '/docker': return <DockerServicesPage />;
+      case '/demo-videos': return <DemoVideosPage onTicketClick={navigateToTicket} />;
       case '/dev-servers': return <DevServersPage />;
       case '/attention': return <NeedsAttentionPage onTicketClick={navigateToTicket} />;
       case '/settings': return <SettingsPage />;

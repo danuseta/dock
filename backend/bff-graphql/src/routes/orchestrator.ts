@@ -5,6 +5,9 @@ import { bearerToken } from '../auth/ingest-token';
 import { PinRateLimiter, sessionManager, shouldRequirePin } from '../auth/session';
 import { CHAT_MACHINE, ChatService, chatService } from '../integrations/chat';
 import { AttachmentRefusal } from '../integrations/chat-attachments';
+import { demoVideos, ingestDemoLink, type DemoVideos } from '../integrations/demo-videos';
+import { DEMO_STORAGE_ROUTES, demoStorage, demoStorageRoute, type DemoStorage } from '../integrations/demo-storage';
+import { receiveDemoVideo } from './demo-videos';
 import { ELEVENLABS_ROUTES, elevenLabsKeys, elevenLabsRoute, type ElevenLabsKeys } from '../integrations/elevenlabs-keys';
 import { MAX_TRANSCRIPT_BYTES, OrchestratorInputError, OrchestratorService, orchestratorService } from '../integrations/orchestrator';
 import { StorageService } from '../storage/service';
@@ -43,6 +46,8 @@ export function createOrchestratorIngestRouter(
   limiter = new PinRateLimiter(10, 15 * 60 * 1000),
   chat: ChatService = chatService,
   keys: ElevenLabsKeys = elevenLabsKeys,
+  videos: DemoVideos = demoVideos,
+  storageSettings: DemoStorage = demoStorage,
 ): Router {
   const router = Router();
 
@@ -90,6 +95,9 @@ export function createOrchestratorIngestRouter(
   // The workspace DOCK reads the runs kept here and copies its own dismissals, so both Agents pages agree.
   router.post('/runs', small, handle(() => service.list()));
   router.post('/runs/get', small, handle((body) => service.getWithEvents(String((body as { key?: unknown })?.key ?? ''))));
+  for (const route of DEMO_STORAGE_ROUTES) router.post(`/demo-storage/${route}`, small, handle((body) => demoStorageRoute(storageSettings, route, (body ?? {}) as Record<string, unknown>)));
+  router.post('/demo-link', small, handle((body) => ingestDemoLink(body)));
+  router.post('/demo-video', (request: Request, response: Response) => receiveDemoVideo(videos, request.query.key, request, response));
   for (const route of ELEVENLABS_ROUTES) router.post(`/elevenlabs/${route}`, small, handle((body) => elevenLabsRoute(keys, route, (body ?? {}) as Record<string, unknown>)));
   router.post('/jira', small, handle((body, _signal, machine) => service.ingestJiraStatus(body, machine)));
   router.post('/dismiss', small,handle((body, _signal, machine) => service.dismiss(String((body as { key?: unknown })?.key ?? ''), machine)));

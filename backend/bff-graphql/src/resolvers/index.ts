@@ -15,6 +15,8 @@ import { CronInputError } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
 import { labelOrder } from '../integrations/orchestrator-cron';
 import { pushService } from '../integrations/push';
+import { demoVideos } from '../integrations/demo-videos';
+import { demoStorage, type DemoStorageInput } from '../integrations/demo-storage';
 import { DevServerError, devServers } from '../integrations/dev-servers';
 import { elevenLabsKeys } from '../integrations/elevenlabs-keys';
 import { moveToReview } from '../integrations/broadcast-review';
@@ -46,6 +48,17 @@ function requireCron(): void {
   if (dockMode() !== 'workspace') {
     throw new GraphQLError('The cron runs on the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });
   }
+}
+
+function requireDemoVideos(): void {
+  if (dockMode() !== 'workspace') {
+    throw new GraphQLError('Demo videos are kept from the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });
+  }
+}
+
+// A refusal of the bucket or the input is a message for the Demo Video page.
+function demoVideoError(error: unknown): never {
+  throw new GraphQLError(error instanceof Error ? error.message : 'Demo videos failed', { extensions: { code: 'BAD_USER_INPUT' } });
 }
 
 function requireWorkspace(): void {
@@ -204,6 +217,12 @@ export const resolvers = {
       return run ?? null;
     },
     ingestTokens: async () => orchestratorService.tokens(),
+    demoVideos: async () => {
+      requireDemoVideos();
+      const configured = await demoVideos.configured().catch(demoVideoError);
+      return { configured, videos: configured ? await demoVideos.list().catch(demoVideoError) : [] };
+    },
+    demoStorage: async () => demoStorage.view().catch(demoVideoError),
     devServers: async () => { requireWorkspace(); return devServers.list(); },
     devServerLog: async (_: unknown, { name, bytes }: { name: string; bytes?: number | null }) => {
       requireWorkspace();
@@ -457,6 +476,9 @@ export const resolvers = {
       return orchestratorService.createToken(name, machine).catch(orchestratorInputError);
     },
     revokeIngestToken: async (_: unknown, { id }: { id: string }) => orchestratorService.revokeToken(id),
+    deleteDemoVideo: async (_: unknown, { ticketKey }: { ticketKey: string }) => { requireDemoVideos(); return demoVideos.remove(ticketKey).catch(demoVideoError); },
+    saveDemoStorage: async (_: unknown, { input }: { input: DemoStorageInput }) => demoStorage.save(input).catch(demoVideoError),
+    clearDemoStorage: async () => demoStorage.clear().catch(demoVideoError),
     startDevServer: async (_: unknown, { name }: { name: string }) => { requireWorkspace(); return devServers.start(name).catch(devServerError); },
     stopDevServer: async (_: unknown, { name }: { name: string }) => { requireWorkspace(); return devServers.stop(name).catch(devServerError); },
     restartDevServer: async (_: unknown, { name }: { name: string }) => { requireWorkspace(); return devServers.restart(name).catch(devServerError); },
@@ -545,7 +567,7 @@ export const resolvers = {
 
 export const protectedQueries = [
   'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
-  'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'devServers', 'devServerLog',
+  'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatMessages', 'chatActivity', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey',
@@ -574,6 +596,9 @@ export const protectedMutations = [
   'checkMonitors',
   'createIngestToken',
   'revokeIngestToken',
+  'deleteDemoVideo',
+  'saveDemoStorage',
+  'clearDemoStorage',
   'startDevServer',
   'stopDevServer',
   'restartDevServer',

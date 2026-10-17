@@ -352,6 +352,12 @@ export const SET_CHAT_SESSION_OPTIONS = gql`
   }
 `;
 
+export const DELETE_DEMO_VIDEO = gql`
+  mutation DeleteDemoVideo($ticketKey: String!) {
+    deleteDemoVideo(ticketKey: $ticketKey)
+  }
+`;
+
 export const START_DEV_SERVER = gql`
   mutation StartDevServer($name: String!) {
     startDevServer(name: $name)
@@ -391,5 +397,17 @@ export const REMOVE_ELEVENLABS_KEY = gql`
 export const UNPARK_ELEVENLABS_KEY = gql`
   mutation UnparkElevenLabsKey($name: String!) {
     unparkElevenLabsKey(name: $name)
+  }
+`;
+
+export const SAVE_DEMO_STORAGE = gql`
+  mutation SaveDemoStorage($input: DemoStorageInput!) {
+    saveDemoStorage(input: $input) { configured endpoint region bucket folder publicBaseUrl accessKeyMasked secretSet }
+  }
+`;
+
+export const CLEAR_DEMO_STORAGE = gql`
+  mutation ClearDemoStorage {
+    clearDemoStorage
   }
 `;

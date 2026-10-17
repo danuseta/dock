@@ -845,6 +845,15 @@ export const GET_PUSH_PUBLIC_KEY = gql`
   }
 `;
 
+export const GET_DEMO_VIDEOS = gql`
+  query GetDemoVideos {
+    demoVideos {
+      configured
+      videos { ticketKey url size updatedAt }
+    }
+  }
+`;
+
 export const GET_DEV_SERVERS = gql`
   query GetDevServers {
     devServers {
@@ -869,5 +878,11 @@ export const GET_ELEVENLABS_KEYS = gql`
       parkedUntil
       current
     }
+  }
+`;
+
+export const GET_DEMO_STORAGE = gql`
+  query GetDemoStorage {
+    demoStorage { configured endpoint region bucket folder publicBaseUrl accessKeyMasked secretSet }
   }
 `;
