@@ -2,9 +2,9 @@ import { createContext, useContext } from 'react';
 
 export type DockMode = 'laptop' | 'workspace';
 
-/** The pages each DOCK leaves out: the laptop one has no chat, the workspace one has no calendar and no Docker. */
+/** The pages each DOCK leaves out: the laptop one has no chat and no demo videos, the workspace one has no calendar and no Docker. */
 const MISSING_PAGES: Record<DockMode, string[]> = {
-  laptop: ['/sessions'],
+  laptop: ['/sessions', '/demo-videos'],
   workspace: ['/calendar', '/docker'],
 };
 

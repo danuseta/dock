@@ -351,3 +351,9 @@ export const SET_CHAT_SESSION_OPTIONS = gql`
     }
   }
 `;
+
+export const DELETE_DEMO_VIDEO = gql`
+  mutation DeleteDemoVideo($ticketKey: String!) {
+    deleteDemoVideo(ticketKey: $ticketKey)
+  }
+`;

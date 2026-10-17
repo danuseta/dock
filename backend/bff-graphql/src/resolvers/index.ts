@@ -15,6 +15,7 @@ import { CronInputError } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
 import { labelOrder } from '../integrations/orchestrator-cron';
 import { pushService } from '../integrations/push';
+import { demoVideos } from '../integrations/demo-videos';
 import type { AnswerInput } from '../integrations/chat-interactions';
 import { SprintBusyError, SprintInputError, sprintDashboardService } from '../integrations/sprint-dashboard';
 import { dockMode } from '../mode';
@@ -43,6 +44,17 @@ function requireCron(): void {
   if (dockMode() !== 'workspace') {
     throw new GraphQLError('The cron runs on the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });
   }
+}
+
+function requireDemoVideos(): void {
+  if (dockMode() !== 'workspace') {
+    throw new GraphQLError('Demo videos are kept from the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });
+  }
+}
+
+// A refusal of the bucket or the input is a message for the Demo Video page.
+function demoVideoError(error: unknown): never {
+  throw new GraphQLError(error instanceof Error ? error.message : 'Demo videos failed', { extensions: { code: 'BAD_USER_INPUT' } });
 }
 
 function cronError(error: unknown): never {
@@ -185,6 +197,10 @@ export const resolvers = {
       return run ?? null;
     },
     ingestTokens: async () => orchestratorService.tokens(),
+    demoVideos: async () => {
+      requireDemoVideos();
+      return { configured: demoVideos.configured, videos: demoVideos.configured ? await demoVideos.list().catch(demoVideoError) : [] };
+    },
     chatSessions: async (_: unknown, { source, limit }: { source?: string; limit?: number }) => {
       return chatService.sessions(source, limit, CHAT_MACHINE).catch(orchestratorInputError);
     },
@@ -427,6 +443,7 @@ export const resolvers = {
       return orchestratorService.createToken(name, machine).catch(orchestratorInputError);
     },
     revokeIngestToken: async (_: unknown, { id }: { id: string }) => orchestratorService.revokeToken(id),
+    deleteDemoVideo: async (_: unknown, { ticketKey }: { ticketKey: string }) => { requireDemoVideos(); return demoVideos.remove(ticketKey).catch(demoVideoError); },
     dismissOrchestration: async (_: unknown, { key }: { key: string }) => {
       return orchestratorService.dismiss(key, dockMode()).catch(orchestratorInputError);
     },
@@ -508,7 +525,7 @@ export const resolvers = {
 
 export const protectedQueries = [
   'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
-  'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens',
+  'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'demoVideos',
   'chatSessions', 'chatSession', 'chatMessages', 'chatActivity', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey',
@@ -537,6 +554,7 @@ export const protectedMutations = [
   'checkMonitors',
   'createIngestToken',
   'revokeIngestToken',
+  'deleteDemoVideo',
   'dismissOrchestration',
   'moveOrchestration',
   'createChatSession',

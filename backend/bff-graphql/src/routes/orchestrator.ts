@@ -5,6 +5,8 @@ import { bearerToken } from '../auth/ingest-token';
 import { PinRateLimiter, sessionManager, shouldRequirePin } from '../auth/session';
 import { CHAT_MACHINE, ChatService, chatService } from '../integrations/chat';
 import { AttachmentRefusal } from '../integrations/chat-attachments';
+import { demoVideos, ingestDemoLink, type DemoVideos } from '../integrations/demo-videos';
+import { receiveDemoVideo } from './demo-videos';
 import { MAX_TRANSCRIPT_BYTES, OrchestratorInputError, OrchestratorService, orchestratorService } from '../integrations/orchestrator';
 import { StorageService } from '../storage/service';
 
@@ -41,6 +43,7 @@ export function createOrchestratorIngestRouter(
   service: OrchestratorService = orchestratorService,
   limiter = new PinRateLimiter(10, 15 * 60 * 1000),
   chat: ChatService = chatService,
+  videos: DemoVideos = demoVideos,
 ): Router {
   const router = Router();
 
@@ -88,6 +91,8 @@ export function createOrchestratorIngestRouter(
   // The workspace DOCK reads the runs kept here and copies its own dismissals, so both Agents pages agree.
   router.post('/runs', small, handle(() => service.list()));
   router.post('/runs/get', small, handle((body) => service.getWithEvents(String((body as { key?: unknown })?.key ?? ''))));
+  router.post('/demo-link', small, handle((body) => ingestDemoLink(body)));
+  router.post('/demo-video', (request: Request, response: Response) => receiveDemoVideo(videos, request.query.key, request, response));
   router.post('/dismiss', small,handle((body, _signal, machine) => service.dismiss(String((body as { key?: unknown })?.key ?? ''), machine)));
   router.post('/transcript', express.json({ limit: MAX_TRANSCRIPT_BYTES + 1024 * 1024 }), handle((body, _signal, machine) => service.saveTranscript(body, new Date(), machine)));
   const historyMachineOnly = (_request: Request, response: Response, next: express.NextFunction) => {

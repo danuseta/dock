@@ -840,3 +840,12 @@ export const GET_PUSH_PUBLIC_KEY = gql`
     pushPublicKey
   }
 `;
+
+export const GET_DEMO_VIDEOS = gql`
+  query GetDemoVideos {
+    demoVideos {
+      configured
+      videos { ticketKey url size updatedAt }
+    }
+  }
+`;
