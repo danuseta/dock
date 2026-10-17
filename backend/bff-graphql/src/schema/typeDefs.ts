@@ -266,6 +266,13 @@ export const typeDefs = gql`
     attempt: Int!
   }
 
+  type ElevenLabsKey {
+    name: String!
+    masked: String!
+    parkedUntil: String
+    current: Boolean!
+  }
+
   type OrchestrationClosing {
     hours: Float
     fixRounds: Int!
@@ -614,6 +621,7 @@ export const typeDefs = gql`
     orchestrations: [Orchestration!]!
     orchestration(key: String!): Orchestration
     ingestTokens: [IngestToken!]!
+    elevenLabsKeys: [ElevenLabsKey!]!
     chatSessions(source: String, limit: Int): [ChatSession!]!
     chatSession(id: ID!): ChatSession
     chatMessages(sessionId: ID!, afterId: Int, beforeId: Int, limit: Int): [ChatMessage!]!
@@ -664,6 +672,9 @@ export const typeDefs = gql`
     checkMonitors: [MonitorTarget!]!
     createIngestToken(name: String!, machine: String): IngestTokenSecret!
     revokeIngestToken(id: ID!): Boolean!
+    addElevenLabsKey(name: String!, key: String!): Boolean!
+    removeElevenLabsKey(name: String!): Boolean!
+    unparkElevenLabsKey(name: String!): Boolean!
     dismissOrchestration(key: String!): Boolean!
     moveOrchestration(key: String!, machine: String!): Orchestration!
     createChatSession(title: String, ticketKey: String, forkFrom: ID, machine: String): ChatSession!

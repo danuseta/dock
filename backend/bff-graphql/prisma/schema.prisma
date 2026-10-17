@@ -309,3 +309,13 @@ model SprintIssueEvents {
   fetchedAt DateTime
   labelPool String?
 }
+
+/// ElevenLabs keys the machines rotate over. Kept on the laptop DOCK only; the workspace DOCK reads and writes them there.
+model ElevenLabsKey {
+  name        String    @id
+  key         String
+  position    Int
+  current     Boolean   @default(false)
+  parkedUntil DateTime?
+  createdAt   DateTime  @default(now())
+}

@@ -351,3 +351,21 @@ export const SET_CHAT_SESSION_OPTIONS = gql`
     }
   }
 `;
+
+export const ADD_ELEVENLABS_KEY = gql`
+  mutation AddElevenLabsKey($name: String!, $key: String!) {
+    addElevenLabsKey(name: $name, key: $key)
+  }
+`;
+
+export const REMOVE_ELEVENLABS_KEY = gql`
+  mutation RemoveElevenLabsKey($name: String!) {
+    removeElevenLabsKey(name: $name)
+  }
+`;
+
+export const UNPARK_ELEVENLABS_KEY = gql`
+  mutation UnparkElevenLabsKey($name: String!) {
+    unparkElevenLabsKey(name: $name)
+  }
+`;
