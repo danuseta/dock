@@ -567,6 +567,10 @@ export const ORCHESTRATION_FIELDS = `
   assumptions { n text falsifier state evidence }
   failures { at type what evidence attempt }
   closing { hours fixRounds replans }
+  findings { at severity text }
+  lgtm { at text }
+  verdict
+  blockers
   activity
   activityDetail
   idleSeconds

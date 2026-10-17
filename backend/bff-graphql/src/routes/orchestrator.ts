@@ -91,6 +91,7 @@ export function createOrchestratorIngestRouter(
   router.post('/runs', small, handle(() => service.list()));
   router.post('/runs/get', small, handle((body) => service.getWithEvents(String((body as { key?: unknown })?.key ?? ''))));
   for (const route of ELEVENLABS_ROUTES) router.post(`/elevenlabs/${route}`, small, handle((body) => elevenLabsRoute(keys, route, (body ?? {}) as Record<string, unknown>)));
+  router.post('/jira', small, handle((body, _signal, machine) => service.ingestJiraStatus(body, machine)));
   router.post('/dismiss', small,handle((body, _signal, machine) => service.dismiss(String((body as { key?: unknown })?.key ?? ''), machine)));
   router.post('/transcript', express.json({ limit: MAX_TRANSCRIPT_BYTES + 1024 * 1024 }), handle((body, _signal, machine) => service.saveTranscript(body, new Date(), machine)));
   const historyMachineOnly = (_request: Request, response: Response, next: express.NextFunction) => {
