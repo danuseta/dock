@@ -276,6 +276,8 @@ export const typeDefs = gql`
   type DemoVideoList {
     configured: Boolean!
     videos: [DemoVideo!]!
+  }
+
   type DevServer {
     name: String!
     folder: String!

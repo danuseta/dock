@@ -355,6 +355,9 @@ export const SET_CHAT_SESSION_OPTIONS = gql`
 export const DELETE_DEMO_VIDEO = gql`
   mutation DeleteDemoVideo($ticketKey: String!) {
     deleteDemoVideo(ticketKey: $ticketKey)
+  }
+`;
+
 export const START_DEV_SERVER = gql`
   mutation StartDevServer($name: String!) {
     startDevServer(name: $name)

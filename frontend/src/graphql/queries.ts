@@ -850,6 +850,10 @@ export const GET_DEMO_VIDEOS = gql`
     demoVideos {
       configured
       videos { ticketKey url size updatedAt }
+    }
+  }
+`;
+
 export const GET_DEV_SERVERS = gql`
   query GetDevServers {
     devServers {

@@ -58,6 +58,8 @@ function requireDemoVideos(): void {
 // A refusal of the bucket or the input is a message for the Demo Video page.
 function demoVideoError(error: unknown): never {
   throw new GraphQLError(error instanceof Error ? error.message : 'Demo videos failed', { extensions: { code: 'BAD_USER_INPUT' } });
+}
+
 function requireWorkspace(): void {
   if (dockMode() !== 'workspace') {
     throw new GraphQLError('Dev servers run on the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });

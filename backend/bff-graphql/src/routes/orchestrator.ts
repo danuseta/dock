@@ -44,8 +44,8 @@ export function createOrchestratorIngestRouter(
   service: OrchestratorService = orchestratorService,
   limiter = new PinRateLimiter(10, 15 * 60 * 1000),
   chat: ChatService = chatService,
-  videos: DemoVideos = demoVideos,
   keys: ElevenLabsKeys = elevenLabsKeys,
+  videos: DemoVideos = demoVideos,
 ): Router {
   const router = Router();
 
