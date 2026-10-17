@@ -10,8 +10,9 @@ import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
 import { hasPage, useDockMode } from '../lib/dockMode';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
-import { FILTER_KINDS, FILTER_MACHINES, PARKED_TEXT, START_FAILED_TEXT, completeRun, formatAge, hasTrouble, isArchived, kindLabel, matchesRunFilter, offerOf, pageOf, runActions, runFilterFromSearch, runFilterSearch, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunFilter, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
+import { FILTER_KINDS, FILTER_MACHINES, PARKED_TEXT, START_FAILED_TEXT, completeRun, formatAge, reviewFindings, hasTrouble, isArchived, kindLabel, matchesRunFilter, offerOf, pageOf, runActions, runFilterFromSearch, runFilterSearch, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunFilter, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
 import { KindBadge } from '../agents/KindBadge';
+import { VerdictBadge } from '../agents/VerdictBadge';
 import { RAIL_STAGES, railIndex } from '../agents/office/layout';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 import { AgentFlowGraph } from '../components/AgentFlowGraph';
@@ -337,7 +338,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                             {cards.map((run) => (
                               <button key={run.key} type="button" className={cn('rounded-xs border border-border-glow border-l-[3px] bg-surface-0 px-2 py-1.5 text-left hover:border-accent', run.waiting ? 'border-l-amber-300' : hasTrouble(run) ? 'border-l-status-conflict' : 'border-l-status-merged', selected?.key === run.key && 'border-accent')} onClick={() => { setSelectedKey(run.key); setBoardOpen(false); }}>
                                 <span className="flex items-center justify-between gap-2 font-mono text-xs font-extrabold text-accent"><span>{run.key}</span><span className="font-semibold text-muted-foreground tabular-nums">{run.acPassed}/{run.acTotal}</span></span>
-                                <span className="mt-0.5 flex flex-wrap gap-1"><MachineChip name={machineOf(run)} /><KindBadge kind={run.kind} /></span>
+                                <span className="mt-0.5 flex flex-wrap gap-1"><MachineChip name={machineOf(run)} /><KindBadge kind={run.kind} /><VerdictBadge run={run} /></span>
                                 <OfferBadge run={run} className="mt-0.5" />
                                 <span className="mt-0.5 line-clamp-2 text-[0.74rem] text-secondary-foreground">{run.waiting || run.title || 'Untitled'}</span>
                               </button>
@@ -403,7 +404,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                     )}
                     {listed.items.map((run) => (
                       <tr key={run.key} className={cn('cursor-pointer border-t border-border hover:bg-surface-1', selected?.key === run.key && 'bg-surface-1')} onClick={() => pickRun(run.key)}>
-                        <td className="px-4 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => pickRun(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><span className="sr-only">, machine </span><MachineChip name={machineOf(run)} className="ml-2" /><KindBadge kind={run.kind} className="ml-1" /><OfferBadge run={run} className="ml-2" /><span className="mt-0.5 block max-w-[320px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
+                        <td className="px-4 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => pickRun(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><span className="sr-only">, machine </span><MachineChip name={machineOf(run)} className="ml-2" /><KindBadge kind={run.kind} className="ml-1" /><VerdictBadge run={run} className="ml-1" /><OfferBadge run={run} className="ml-2" /><span className="mt-0.5 block max-w-[320px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
                         <td className="px-4 py-3"><StageChip stage={run.stage} kind={run.kind} /></td>
                         <td className="px-4 py-3"><StatusChip status={statusOf(run)} review={run.review} /></td>
                         <td className="px-4 py-3 font-mono text-xs tabular-nums">{run.acPassed}/{run.acTotal}{run.acFailed > 0 && <span className="ml-1.5 text-status-conflict">{run.acFailed} failed</span>}</td>
@@ -434,6 +435,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-xs border border-accent/30 bg-accent-dim px-[9px] py-[3px] font-mono text-sm font-extrabold text-accent">{selected.key}</span>
                 <KindBadge kind={selected.kind} />
+                <VerdictBadge run={selected} />
                 <StageChip stage={selected.stage} kind={selected.kind} />
                 <StatusChip status={statusOf(selected)} review={selected.review} />
                 <MachineChip name={machineOf(selected)} />
@@ -526,6 +528,27 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                       </li>
                     ))}
                   </ol>
+                </div>
+              )}
+
+              {selected.kind === 'review' && (!!selected.findings?.length || !!selected.lgtm?.length || !!selected.verdict) && (
+                <div>
+                  <p className={cn(sectionLabel, 'mb-1')}>Review</p>
+                  <ol className="flex flex-col">
+                    {reviewFindings(selected.findings ?? []).map((finding, index) => (
+                      <li className="grid grid-cols-[1fr_auto] gap-2 border-b border-border py-1.5 text-[0.78rem] last:border-b-0" key={`${finding.at}-${index}`}>
+                        <span className="min-w-0 break-words">{finding.text}</span>
+                        <span className={cn('font-mono text-[0.68rem] font-semibold', finding.severity === 'blocker' ? 'text-status-conflict' : 'text-muted-foreground')}>{finding.severity}</span>
+                      </li>
+                    ))}
+                    {(selected.lgtm ?? []).map((part, index) => (
+                      <li className="grid grid-cols-[1fr_auto] gap-2 border-b border-border py-1.5 text-[0.78rem] last:border-b-0" key={`lgtm-${part.at}-${index}`}>
+                        <span className="min-w-0 break-words">{part.text}</span>
+                        <span className="font-mono text-[0.68rem] font-semibold text-status-merged">lgtm</span>
+                      </li>
+                    ))}
+                  </ol>
+                  {selected.verdict && <p className="mt-1.5 font-mono text-[0.72rem] font-bold">Verdict: {selected.verdict === 'approve' ? 'Approve' : 'Request change'}</p>}
                 </div>
               )}
 

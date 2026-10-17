@@ -61,6 +61,13 @@ export interface LedgerFailure { at: string; type: FailureType; what: string | n
 export interface LedgerClosing { hours: number | null; fixRounds: number; replans: number }
 export const RUN_KINDS = ['build', 'review'] as const;
 export type RunKind = typeof RUN_KINDS[number];
+export const FINDING_SEVERITIES = ['blocker', 'non-blocking', 'nit'] as const;
+export type FindingSeverity = typeof FINDING_SEVERITIES[number];
+export const REVIEW_VERDICTS = ['approve', 'request-change'] as const;
+export type ReviewVerdict = typeof REVIEW_VERDICTS[number];
+export interface LedgerFinding { at: string; severity: FindingSeverity; text: string }
+export interface LedgerLgtm { at: string; text: string }
+const MAX_FINDINGS = 50;
 
 export interface Ledger {
   key: string;
@@ -80,6 +87,9 @@ export interface Ledger {
   assumptions: LedgerAssumption[];
   failures: LedgerFailure[];
   closing: LedgerClosing | null;
+  findings: LedgerFinding[];
+  lgtm: LedgerLgtm[];
+  verdict: ReviewVerdict | null;
   updatedAt: string;
 }
 
@@ -188,6 +198,23 @@ export function parseLedger(input: unknown, now = new Date()): Ledger {
     }
     : null;
 
+  // A finding written before severities existed counts as non-blocking.
+  const findings = (Array.isArray(input.findings) ? input.findings : [])
+    .filter(isRecord)
+    .map((item): LedgerFinding => {
+      const severity = text(item.severity, 20) as FindingSeverity;
+      return { at: text(item.at, 40), severity: FINDING_SEVERITIES.includes(severity) ? severity : 'non-blocking', text: text(item.text, 1000) };
+    })
+    .filter((item) => item.text)
+    .slice(-MAX_FINDINGS);
+  const lgtm = (Array.isArray(input.lgtm) ? input.lgtm : [])
+    .filter(isRecord)
+    .map((item): LedgerLgtm => ({ at: text(item.at, 40), text: text(item.text, 500) }))
+    .filter((item) => item.text)
+    .slice(-MAX_FINDINGS);
+  const verdictValue = isRecord(input.verdict) ? text(input.verdict.value, 20) as ReviewVerdict : null;
+  const verdict = verdictValue && REVIEW_VERDICTS.includes(verdictValue) ? verdictValue : null;
+
   const tests = isRecord(input.tests) ? input.tests : {};
   const pr = isRecord(input.pr) ? input.pr : {};
   const updatedAt = new Date(text(input.updatedAt, 40));
@@ -210,6 +237,9 @@ export function parseLedger(input: unknown, now = new Date()): Ledger {
     assumptions,
     failures,
     closing,
+    findings,
+    lgtm,
+    verdict,
     updatedAt: (Number.isNaN(updatedAt.getTime()) || updatedAt > now ? now : updatedAt).toISOString(),
   };
 }
@@ -489,6 +519,10 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     assumptions: Array.isArray(ledger.assumptions) ? ledger.assumptions : [],
     failures: Array.isArray(ledger.failures) ? ledger.failures : [],
     closing: ledger.closing ?? null,
+    findings: Array.isArray(ledger.findings) ? ledger.findings : [],
+    lgtm: Array.isArray(ledger.lgtm) ? ledger.lgtm : [],
+    verdict: ledger.verdict ?? null,
+    blockers: Array.isArray(ledger.findings) ? ledger.findings.filter((item) => item.severity === 'blocker').length : 0,
     activity,
     activityDetail,
     idleSeconds: Math.floor(idleMs / 1000),
