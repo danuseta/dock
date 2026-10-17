@@ -266,6 +266,30 @@ export const typeDefs = gql`
     attempt: Int!
   }
 
+  type DevServer {
+    name: String!
+    folder: String!
+    port: Int!
+    running: Boolean!
+    pid: Int
+    ticketKey: String
+    hasLog: Boolean!
+  }
+
+  type DevServerAction {
+    at: String!
+    target: String!
+    action: String!
+    ok: Boolean!
+    output: String!
+  }
+
+  type DevServers {
+    main: [DevServer!]!
+    secondary: [DevServer!]!
+    actions: [DevServerAction!]!
+  }
+
   type OrchestrationClosing {
     hours: Float
     fixRounds: Int!
@@ -599,6 +623,8 @@ export const typeDefs = gql`
     orchestrations: [Orchestration!]!
     orchestration(key: String!): Orchestration
     ingestTokens: [IngestToken!]!
+    devServers: DevServers!
+    devServerLog(name: String!, bytes: Int): String!
     chatSessions(source: String, limit: Int): [ChatSession!]!
     chatSession(id: ID!): ChatSession
     chatMessages(sessionId: ID!, afterId: Int, beforeId: Int, limit: Int): [ChatMessage!]!
@@ -649,6 +675,10 @@ export const typeDefs = gql`
     checkMonitors: [MonitorTarget!]!
     createIngestToken(name: String!, machine: String): IngestTokenSecret!
     revokeIngestToken(id: ID!): Boolean!
+    startDevServer(name: String!): Boolean!
+    stopDevServer(name: String!): Boolean!
+    restartDevServer(name: String!): Boolean!
+    stopWorktreeServer(port: Int!): Boolean!
     dismissOrchestration(key: String!): Boolean!
     moveOrchestration(key: String!, machine: String!): Orchestration!
     createChatSession(title: String, ticketKey: String, forkFrom: ID, machine: String): ChatSession!

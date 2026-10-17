@@ -351,3 +351,27 @@ export const SET_CHAT_SESSION_OPTIONS = gql`
     }
   }
 `;
+
+export const START_DEV_SERVER = gql`
+  mutation StartDevServer($name: String!) {
+    startDevServer(name: $name)
+  }
+`;
+
+export const STOP_DEV_SERVER = gql`
+  mutation StopDevServer($name: String!) {
+    stopDevServer(name: $name)
+  }
+`;
+
+export const RESTART_DEV_SERVER = gql`
+  mutation RestartDevServer($name: String!) {
+    restartDevServer(name: $name)
+  }
+`;
+
+export const STOP_WORKTREE_SERVER = gql`
+  mutation StopWorktreeServer($port: Int!) {
+    stopWorktreeServer(port: $port)
+  }
+`;
