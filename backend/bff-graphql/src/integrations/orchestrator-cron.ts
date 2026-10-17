@@ -414,7 +414,7 @@ export class OrchestratorCron {
   }
 
   private saveRun(ticket: Pick<CronTicket, 'key' | 'title'>, machine: string, now: Date, waiting: string) {
-    return this.deps.saveRun({ key: ticket.key, kind: 'build', title: ticket.title, stage: 'gate', waiting, note: 'Started by the orchestrator cron', updatedAt: now.toISOString() }, machine);
+    return this.deps.saveRun({ key: ticket.key, kind: 'build', title: ticket.title, stage: 'gate', waiting, note: 'Started by the orchestrator cron', createdAt: now.toISOString(), updatedAt: now.toISOString() }, machine);
   }
 
   /**

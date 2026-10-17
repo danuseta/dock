@@ -328,7 +328,28 @@ interface RunRow {
   machine?: string;
   ledgerRaw?: string | null;
   handover?: string | null;
+  jiraStatus?: string | null;
+  jiraStage?: string | null;
 }
+
+const TODO_STATUS = 'to do';
+// Where a Jira status puts a run. In Progress and a UAT bug leave the stage to the ledger.
+const JIRA_STAGES: Record<string, OrchestratorStage> = {
+  'pr review': 'pr',
+  'uat merged': 'done',
+  'uat check': 'done',
+  'readyforproduction': 'done',
+  'done / merged': 'done',
+  'done': 'done',
+};
+
+// Blocked is not a step forward: any stage Jira gives moves a blocked run on.
+const stageRank = (stage: string) => (stage === 'blocked' ? -1 : ORCHESTRATOR_STAGES.indexOf(stage as OrchestratorStage));
+
+/** The further of the ledger's stage and the stage Jira gives: a ledger push never takes a run back behind Jira. */
+export const furthestStage = (ledgerStage: string, jiraStage: string | null | undefined) => (
+  jiraStage && stageRank(jiraStage) > stageRank(ledgerStage) ? jiraStage : ledgerStage
+);
 
 export interface Handover {
   from: string;
@@ -576,6 +597,13 @@ export class OrchestratorService {
       if (previous && !previous.dismissedAt) await this.stepAside(ledger.key, other.machine, now);
       return { ...other, ignored: true };
     }
+    if (!previous) {
+      const reset = await this.storage.getOrchestratorReset(ledger.key);
+      const createdAt = Date.parse(String((input as Record<string, unknown>).createdAt ?? ''));
+      if (reset && !(createdAt > reset.resetAt.getTime())) {
+        throw new OrchestratorInputError(`${ledger.key} went back to To Do in Jira after this ledger was made. Archive the ledger and start the ticket again.`);
+      }
+    }
     const owner = previous?.machine ?? DEFAULT_MACHINE;
     const dismissedElsewhere = Boolean(previous?.dismissedAt) && owner !== machine;
     if (previous && ((!previous.dismissedAt && owner !== machine) || (dismissedElsewhere && (await this.machines()).includes(owner)))) {
@@ -585,9 +613,10 @@ export class OrchestratorService {
       throw new OrchestratorInputError(`A maximum of ${MAX_LIVE_RUNS_PER_MACHINE} live tickets per machine is supported. Dismiss finished tickets on the Agents page and push again.`);
     }
     const { dirs: _dirs, ports: _ports, ...shared } = input as Record<string, unknown>;
+    const stage = furthestStage(ledger.stage, previous?.jiraStage);
     const fields = {
       title: ledger.title,
-      stage: ledger.stage,
+      stage,
       waiting: ledger.waiting,
       payload: JSON.stringify(ledger),
       ledgerUpdatedAt: new Date(ledger.updatedAt),
@@ -603,8 +632,8 @@ export class OrchestratorService {
     if (taking) {
       await this.storage.addOrchestratorEvent(ledger.key, 'MACHINE', machine, MAX_EVENTS_KEPT);
     }
-    if (!previous || previous.stage !== ledger.stage) {
-      await this.storage.addOrchestratorEvent(ledger.key, 'STAGE', ledger.stage, MAX_EVENTS_KEPT);
+    if (!previous || previous.stage !== stage) {
+      await this.storage.addOrchestratorEvent(ledger.key, 'STAGE', stage, MAX_EVENTS_KEPT);
     }
     if (ledger.waiting && previous?.waiting !== ledger.waiting) {
       await this.storage.addOrchestratorEvent(ledger.key, 'WAITING', ledger.waiting, MAX_EVENTS_KEPT);
@@ -728,6 +757,50 @@ export class OrchestratorService {
     return sent;
   }
 
+  /**
+   * Every few minutes: the Jira status of each live build run this machine owns. A run whose ticket was moved back
+   * to To Do is removed on both DOCKs; any other change moves the stage on as far as Jira says. Returns how many changed.
+   */
+  async syncJira(machine: string, tickets: Array<{ key: string; status?: string | null }>, now = new Date()) {
+    const statuses = new Map(tickets.map((ticket) => [ticket.key, String(ticket.status ?? '').trim()]));
+    let changed = 0;
+    for (const row of await this.storage.getOrchestratorRuns()) {
+      if ((row.machine ?? DEFAULT_MACHINE) !== machine || row.dismissedAt || toOrchestration(row, now).kind === 'review') continue;
+      const status = statuses.get(row.key);
+      if (!status || status === row.jiraStatus) continue;
+      const reset = await this.applyJiraStatus(row, status, now);
+      void this.peer?.forward('/jira', { key: row.key, status, reset });
+      changed += 1;
+    }
+    return changed;
+  }
+
+  /** A Jira status the owner DOCK saw, applied to this DOCK's copy of that machine's run. */
+  async ingestJiraStatus(input: unknown, machine: string, now = new Date()) {
+    if (!isRecord(input)) throw new OrchestratorInputError('A request object is required');
+    const row = await this.storage.getOrchestratorRun(normalizeTicketKey(input.key));
+    const status = text(input.status, 60);
+    if (!row || !status || (row.machine ?? DEFAULT_MACHINE) !== machine) return false;
+    if (input.reset === true) await this.storage.resetOrchestratorRun(row.key, machine, now);
+    else await this.applyJiraStatus(row, status, now);
+    return true;
+  }
+
+  // The first status seen is only recorded: a run the cron just started is still To Do until Jira moves it.
+  // True when the run was removed because its ticket went back to To Do.
+  private async applyJiraStatus(row: RunRow, status: string, now: Date) {
+    if (status.toLowerCase() === TODO_STATUS && row.jiraStatus) {
+      await this.storage.resetOrchestratorRun(row.key, row.machine ?? DEFAULT_MACHINE, now);
+      return true;
+    }
+    const jiraStage = JIRA_STAGES[status.toLowerCase()] ?? null;
+    const stage = furthestStage(row.stage, jiraStage);
+    await this.storage.updateOrchestratorRun(row.key, { jiraStatus: status, jiraStage, stage });
+    await this.storage.addOrchestratorEvent(row.key, 'JIRA', status, MAX_EVENTS_KEPT);
+    if (stage !== row.stage) await this.storage.addOrchestratorEvent(row.key, 'STAGE', stage, MAX_EVENTS_KEPT);
+    return false;
+  }
+
   private async stepAside(key: string, owner: string, now: Date) {
     await this.storage.updateOrchestratorRun(key, { dismissedAt: now });
     await this.storage.addOrchestratorEvent(key, 'MACHINE', owner, MAX_EVENTS_KEPT);
@@ -753,8 +826,9 @@ export class OrchestratorService {
   }
 
   async ledgerList(machine: string) {
-    const rows = await this.storage.getOrchestratorRuns();
+    const [rows, resets] = await Promise.all([this.storage.getOrchestratorRuns(), this.storage.getOrchestratorResets(machine)]);
     return {
+      resets: resets.map((reset) => ({ key: reset.key, resetAt: reset.resetAt.toISOString() })),
       runs: rows
         .filter((row) => !row.dismissedAt && ((row.machine ?? DEFAULT_MACHINE) === machine || parseHandover(row.handover)?.to === machine))
         .map((row) => ({
