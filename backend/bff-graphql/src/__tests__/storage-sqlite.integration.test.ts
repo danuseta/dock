@@ -763,3 +763,56 @@ test('SQLite counts and removes every session of one machine with its rows', {
   assert.deepStrictEqual(await storage.getChatSessionsOnMachine(machine), []);
   assert.strictEqual((await storage.getChatMessages(ids[0], {}, 50)).length, 0);
 });
+
+test('SQLite keeps ElevenLabs keys encrypted, masked in the list, full in the store, and rotates the current one', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ LocalElevenLabsKeys }, { prisma }] = await Promise.all([import('../integrations/elevenlabs-keys'), import('../storage/client')]);
+  t.after(() => prisma.$disconnect());
+  let now = new Date('2026-10-17T10:00:00.000Z');
+  const keys = new LocalElevenLabsKeys(prisma, () => now);
+
+  await keys.add('suryo', 'sk_aaaaaaaaaaaaaaaa1111');
+  await keys.add('sem', 'sk_bbbbbbbbbbbbbbbb2222');
+  const raw = await prisma.elevenLabsKey.findUnique({ where: { name: 'suryo' } });
+  assert.ok(raw && !raw.key.includes('aaaaaaaa'), 'the key is stored encrypted');
+  assert.deepStrictEqual((await keys.list()).map((item) => [item.name, item.masked, item.current]), [['suryo', 'sk_aaa...1111', true], ['sem', 'sk_bbb...2222', false]]);
+
+  await keys.park('suryo', new Date('2026-10-17T11:00:00.000Z'));
+  await keys.setCurrent('sem');
+  let store = await keys.store();
+  assert.deepStrictEqual(store.order, ['suryo', 'sem']);
+  assert.strictEqual(store.keys.sem, 'sk_bbbbbbbbbbbbbbbb2222');
+  assert.strictEqual(store.current, 1);
+  assert.deepStrictEqual(store.cooldowns, { suryo: new Date('2026-10-17T11:00:00.000Z').getTime() });
+
+  now = new Date('2026-10-17T12:00:00.000Z');
+  store = await keys.store();
+  assert.deepStrictEqual(store.cooldowns, {}, 'a park that ran out is gone');
+
+  await keys.add('suryo', 'sk_cccccccccccccccc3333');
+  assert.deepStrictEqual((await keys.list()).map((item) => item.name), ['suryo', 'sem'], 'adding a name again replaces its key in place');
+  assert.strictEqual(await keys.remove('suryo'), true);
+  assert.strictEqual(await keys.remove('suryo'), false);
+  await assert.rejects(keys.add('bad name', 'sk_x1234567'), /key name/);
+  await assert.rejects(keys.add('ok', 'short'), /8 to 200/);
+test('SQLite storage removes a reset run with its events and keeps the reset', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }] = await Promise.all([import('../storage/service'), import('../storage/client')]);
+  const storage = new StorageService(prisma);
+  t.after(() => prisma.$disconnect());
+  const fields = { title: 'Reset', stage: 'code', waiting: '', payload: '{}', ledgerUpdatedAt: new Date(), machine: 'workspace', ledgerRaw: null };
+  await storage.upsertOrchestratorRun('ZED-480', fields);
+  await storage.addOrchestratorEvent('ZED-480', 'STAGE', 'code', 60);
+  await storage.updateOrchestratorRun('ZED-480', { jiraStatus: 'In Progress', jiraStage: null });
+  assert.strictEqual((await storage.getOrchestratorRun('ZED-480'))?.jiraStatus, 'In Progress');
+
+  const at = new Date();
+  await storage.resetOrchestratorRun('ZED-480', 'workspace', at);
+  assert.strictEqual(await storage.getOrchestratorRun('ZED-480'), null);
+  assert.deepStrictEqual(await storage.getOrchestratorEvents('ZED-480', 10), []);
+  assert.strictEqual((await storage.getOrchestratorReset('ZED-480'))?.resetAt.getTime(), at.getTime());
+  assert.deepStrictEqual((await storage.getOrchestratorResets('workspace')).map((reset) => reset.key), ['ZED-480']);
+  assert.deepStrictEqual(await storage.getOrchestratorResets('laptop'), []);
+});

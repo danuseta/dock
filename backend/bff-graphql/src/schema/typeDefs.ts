@@ -276,12 +276,50 @@ export const typeDefs = gql`
   type DemoVideoList {
     configured: Boolean!
     videos: [DemoVideo!]!
+  type DevServer {
+    name: String!
+    folder: String!
+    port: Int!
+    running: Boolean!
+    pid: Int
+    ticketKey: String
+    hasLog: Boolean!
+  }
+
+  type DevServerAction {
+    at: String!
+    target: String!
+    action: String!
+    ok: Boolean!
+    output: String!
+  }
+
+  type DevServers {
+    main: [DevServer!]!
+    secondary: [DevServer!]!
+    actions: [DevServerAction!]!
+  type ElevenLabsKey {
+    name: String!
+    masked: String!
+    parkedUntil: String
+    current: Boolean!
   }
 
   type OrchestrationClosing {
     hours: Float
     fixRounds: Int!
     replans: Int!
+  }
+
+  type OrchestrationFinding {
+    at: String!
+    severity: String!
+    text: String!
+  }
+
+  type OrchestrationLgtm {
+    at: String!
+    text: String!
   }
 
   type Orchestration {
@@ -309,6 +347,10 @@ export const typeDefs = gql`
     assumptions: [OrchestrationAssumption!]!
     failures: [OrchestrationFailure!]!
     closing: OrchestrationClosing
+    findings: [OrchestrationFinding!]!
+    lgtm: [OrchestrationLgtm!]!
+    verdict: String
+    blockers: Int!
     activity: String!
     activityDetail: String
     idleSeconds: Int!
@@ -612,6 +654,9 @@ export const typeDefs = gql`
     orchestration(key: String!): Orchestration
     ingestTokens: [IngestToken!]!
     demoVideos: DemoVideoList!
+    devServers: DevServers!
+    devServerLog(name: String!, bytes: Int): String!
+    elevenLabsKeys: [ElevenLabsKey!]!
     chatSessions(source: String, limit: Int): [ChatSession!]!
     chatSession(id: ID!): ChatSession
     chatMessages(sessionId: ID!, afterId: Int, beforeId: Int, limit: Int): [ChatMessage!]!
@@ -663,6 +708,13 @@ export const typeDefs = gql`
     createIngestToken(name: String!, machine: String): IngestTokenSecret!
     revokeIngestToken(id: ID!): Boolean!
     deleteDemoVideo(ticketKey: String!): Boolean!
+    startDevServer(name: String!): Boolean!
+    stopDevServer(name: String!): Boolean!
+    restartDevServer(name: String!): Boolean!
+    stopWorktreeServer(port: Int!): Boolean!
+    addElevenLabsKey(name: String!, key: String!): Boolean!
+    removeElevenLabsKey(name: String!): Boolean!
+    unparkElevenLabsKey(name: String!): Boolean!
     dismissOrchestration(key: String!): Boolean!
     moveOrchestration(key: String!, machine: String!): Orchestration!
     createChatSession(title: String, ticketKey: String, forkFrom: ID, machine: String): ChatSession!

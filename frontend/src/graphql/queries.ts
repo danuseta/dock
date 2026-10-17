@@ -567,6 +567,10 @@ export const ORCHESTRATION_FIELDS = `
   assumptions { n text falsifier state evidence }
   failures { at type what evidence attempt }
   closing { hours fixRounds replans }
+  findings { at severity text }
+  lgtm { at text }
+  verdict
+  blockers
   activity
   activityDetail
   idleSeconds
@@ -846,6 +850,28 @@ export const GET_DEMO_VIDEOS = gql`
     demoVideos {
       configured
       videos { ticketKey url size updatedAt }
+export const GET_DEV_SERVERS = gql`
+  query GetDevServers {
+    devServers {
+      main { name folder port running pid ticketKey hasLog }
+      secondary { name folder port running pid ticketKey hasLog }
+      actions { at target action ok output }
+    }
+  }
+`;
+
+export const GET_DEV_SERVER_LOG = gql`
+  query GetDevServerLog($name: String!, $bytes: Int) {
+    devServerLog(name: $name, bytes: $bytes)
+  }
+`;
+export const GET_ELEVENLABS_KEYS = gql`
+  query GetElevenLabsKeys {
+    elevenLabsKeys {
+      name
+      masked
+      parkedUntil
+      current
     }
   }
 `;

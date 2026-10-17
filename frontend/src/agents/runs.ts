@@ -43,6 +43,10 @@ export interface AgentRun {
   assumptions?: { n: number; text: string; falsifier: string; state: string; evidence?: string | null }[];
   failures?: { at: string; type: string; what?: string | null; evidence: string; attempt: number }[];
   closing?: { hours?: number | null; fixRounds: number; replans: number } | null;
+  findings?: { at: string; severity: string; text: string }[];
+  lgtm?: { at: string; text: string }[];
+  verdict?: 'approve' | 'request-change' | null;
+  blockers?: number;
   activity: string;
   activityDetail?: string | null;
   idleSeconds: number;
@@ -240,6 +244,8 @@ export const completeRun = (run: Omit<AgentRun, 'ac'> & { ac?: AgentAc[] | null 
   decisions: run.decisions ?? [],
   assumptions: run.assumptions ?? [],
   failures: run.failures ?? [],
+  findings: run.findings ?? [],
+  lgtm: run.lgtm ?? [],
   members: run.members ?? [],
 });
 
@@ -279,3 +285,10 @@ export function pageOf<T>(items: T[], page: number, size: number): { items: T[];
 export const PARKED_TEXT = 'No acceptance criteria on the ticket. Confirm to start anyway, or fill them in.';
 // The gate on a cron ticket whose session ended before the agent answered. Must match START_FAILED_TEXT in backend/bff-graphql/src/integrations/orchestrator-cron.ts.
 export const START_FAILED_TEXT = 'The cron session ended before the agent answered. Fix the machine, then retry.';
+
+const SEVERITY_ORDER = ['blocker', 'non-blocking', 'nit'];
+
+/** A review's findings as the panel lists them: blockers first, then non-blocking, then nits, each in the order written. */
+export const reviewFindings = <T extends { severity: string }>(findings: T[]): T[] => (
+  [...findings].sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity))
+);

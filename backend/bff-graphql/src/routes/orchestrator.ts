@@ -7,6 +7,7 @@ import { CHAT_MACHINE, ChatService, chatService } from '../integrations/chat';
 import { AttachmentRefusal } from '../integrations/chat-attachments';
 import { demoVideos, ingestDemoLink, type DemoVideos } from '../integrations/demo-videos';
 import { receiveDemoVideo } from './demo-videos';
+import { ELEVENLABS_ROUTES, elevenLabsKeys, elevenLabsRoute, type ElevenLabsKeys } from '../integrations/elevenlabs-keys';
 import { MAX_TRANSCRIPT_BYTES, OrchestratorInputError, OrchestratorService, orchestratorService } from '../integrations/orchestrator';
 import { StorageService } from '../storage/service';
 
@@ -44,6 +45,7 @@ export function createOrchestratorIngestRouter(
   limiter = new PinRateLimiter(10, 15 * 60 * 1000),
   chat: ChatService = chatService,
   videos: DemoVideos = demoVideos,
+  keys: ElevenLabsKeys = elevenLabsKeys,
 ): Router {
   const router = Router();
 
@@ -93,6 +95,8 @@ export function createOrchestratorIngestRouter(
   router.post('/runs/get', small, handle((body) => service.getWithEvents(String((body as { key?: unknown })?.key ?? ''))));
   router.post('/demo-link', small, handle((body) => ingestDemoLink(body)));
   router.post('/demo-video', (request: Request, response: Response) => receiveDemoVideo(videos, request.query.key, request, response));
+  for (const route of ELEVENLABS_ROUTES) router.post(`/elevenlabs/${route}`, small, handle((body) => elevenLabsRoute(keys, route, (body ?? {}) as Record<string, unknown>)));
+  router.post('/jira', small, handle((body, _signal, machine) => service.ingestJiraStatus(body, machine)));
   router.post('/dismiss', small,handle((body, _signal, machine) => service.dismiss(String((body as { key?: unknown })?.key ?? ''), machine)));
   router.post('/transcript', express.json({ limit: MAX_TRANSCRIPT_BYTES + 1024 * 1024 }), handle((body, _signal, machine) => service.saveTranscript(body, new Date(), machine)));
   const historyMachineOnly = (_request: Request, response: Response, next: express.NextFunction) => {

@@ -8,12 +8,14 @@ import { startOrchestratorCron } from './integrations/orchestrator-cron';
 import { orchestratorCron } from './integrations/orchestrator-cron-live';
 import { orchestratorService } from './integrations/orchestrator';
 import { ledgerPeer } from './integrations/ledger-peer';
+import { JiraAPI } from './datasources/JiraAPI';
 import { dockMode } from './mode';
 import { useWriteAheadLog } from './storage/client';
 import { StorageService } from './storage/service';
 
 const port = Number(process.env.PORT || 4000);
 const PEER_RESYNC_MS = 15 * 60 * 1000;
+const JIRA_SYNC_MS = 5 * 60 * 1000;
 
 export async function startServer(): Promise<void> {
   const journal = await useWriteAheadLog().catch((error) => `unchanged (${error instanceof Error ? error.message : 'unknown error'})`);
@@ -36,6 +38,12 @@ export async function startServer(): Promise<void> {
       void resync();
       setInterval(resync, PEER_RESYNC_MS).unref();
     }
+    // Each DOCK follows Jira for the runs its own machine owns.
+    const jira = new JiraAPI();
+    const syncJira = () => jira.getTickets()
+      .then((tickets) => orchestratorService.syncJira(dockMode(), tickets))
+      .catch((error) => console.warn('[Orchestrator] Jira sync failed:', error instanceof Error ? error.message : 'unknown error'));
+    setInterval(syncJira, JIRA_SYNC_MS).unref();
   });
 }
 
