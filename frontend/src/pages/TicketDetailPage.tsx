@@ -213,8 +213,9 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
     try {
       const res = await sendToDiscord({ variables: { ticketKey, customMessage, threadId, threadName } });
       if (res.data?.sendToDiscord) {
-        setToast({ message: 'Summary message posted to Discord channel!', type: 'success' });
+        setToast({ message: 'Summary posted to Discord. Tickets before review moved to PR Review.', type: 'success' });
         setShowDiscordModal(false);
+        await refetchAll();
       } else {
         setToast({ message: 'Failed to post summary to Discord', type: 'error' });
       }
