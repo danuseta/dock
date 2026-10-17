@@ -67,6 +67,8 @@ function requireWorkspace(): void {
 function devServerError(error: unknown): never {
   if (error instanceof DevServerError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
   throw error;
+}
+
 // A key the laptop DOCK refused, or a peer it could not reach, is a message for the Settings page.
 function elevenLabsError(error: unknown): never {
   throw new GraphQLError(error instanceof Error ? error.message : 'ElevenLabs keys failed', { extensions: { code: 'BAD_USER_INPUT' } });

@@ -796,6 +796,8 @@ test('SQLite keeps ElevenLabs keys encrypted, masked in the list, full in the st
   assert.strictEqual(await keys.remove('suryo'), false);
   await assert.rejects(keys.add('bad name', 'sk_x1234567'), /key name/);
   await assert.rejects(keys.add('ok', 'short'), /8 to 200/);
+});
+
 test('SQLite storage removes a reset run with its events and keeps the reset', {
   skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
 }, async (t) => {
