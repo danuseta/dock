@@ -860,6 +860,7 @@ export const GET_DEV_SERVER_LOG = gql`
     devServerLog(name: $name, bytes: $bytes)
   }
 `;
+
 export const GET_ELEVENLABS_KEYS = gql`
   query GetElevenLabsKeys {
     elevenLabsKeys {

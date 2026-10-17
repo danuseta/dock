@@ -288,6 +288,8 @@ export const typeDefs = gql`
     main: [DevServer!]!
     secondary: [DevServer!]!
     actions: [DevServerAction!]!
+  }
+
   type ElevenLabsKey {
     name: String!
     masked: String!
