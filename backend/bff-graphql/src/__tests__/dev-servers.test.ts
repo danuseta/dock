@@ -47,11 +47,12 @@ test('main apps by port, secondary servers by worktree with their ticket, and a 
     30: [1, 'node', `${PROJECTS}/wt-1345-fe`],
     40: [1, 'node', '/home/coder/elsewhere'],
   }, [{ port: 3263, pid: 13 }, { port: 5173, pid: 20 }, { port: 5183, pid: 30 }, { port: 9999, pid: 40 }]);
+  fs.writeFileSync(path.join(logDir, 'wt-qrd-1363-3263.log'), 'listening on 3263\n');
   const servers = new DevServers(system, PROJECTS, logDir, () => new Date('2026-10-17T10:00:00.000Z'));
 
   const listed = await servers.list();
   assert.deepStrictEqual(listed.main.map((app) => [app.name, app.running]), [['backend', false], ['frontend', true], ['widget', false], ['landing', false], ['wastaging', false]]);
-  assert.deepStrictEqual(listed.secondary.map((item) => [item.folder, item.port, item.ticketKey]), [['wt-1345-fe', 5183, null], ['wt-qrd-1363', 3263, 'QRD-1363']], 'a process outside the projects folder is not listed');
+  assert.deepStrictEqual(listed.secondary.map((item) => [item.folder, item.port, item.ticketKey, item.hasLog]), [['wt-1345-fe', 5183, null, false], ['wt-qrd-1363', 3263, 'QRD-1363', true]], 'a process outside the projects folder is not listed');
 
   await assert.rejects(servers.start('frontend'), /already running on port 5173/);
   await assert.rejects(servers.start('rm -rf'), /Unknown app/);
@@ -59,6 +60,8 @@ test('main apps by port, secondary servers by worktree with their ticket, and a 
   assert.deepStrictEqual(calls.started, ['backend']);
   assert.match(servers.log('backend'), /\[backend\] ready/);
   assert.strictEqual(servers.log('widget'), '', 'an app DOCK never started has no log');
+  assert.match(servers.log('wt-qrd-1363-3263'), /listening on 3263/, 'a secondary server started with dev-server.cjs has its log');
+  assert.throws(() => servers.log('../secret'), /No log named/);
 
   await assert.rejects(servers.stop('landing'), /did not stop/);
   assert.strictEqual(await servers.restart('backend'), true);
