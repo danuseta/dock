@@ -266,6 +266,30 @@ export const typeDefs = gql`
     attempt: Int!
   }
 
+  type DevServer {
+    name: String!
+    folder: String!
+    port: Int!
+    running: Boolean!
+    pid: Int
+    ticketKey: String
+    hasLog: Boolean!
+  }
+
+  type DevServerAction {
+    at: String!
+    target: String!
+    action: String!
+    ok: Boolean!
+    output: String!
+  }
+
+  type DevServers {
+    main: [DevServer!]!
+    secondary: [DevServer!]!
+    actions: [DevServerAction!]!
+  }
+
   type ElevenLabsKey {
     name: String!
     masked: String!
@@ -621,6 +645,8 @@ export const typeDefs = gql`
     orchestrations: [Orchestration!]!
     orchestration(key: String!): Orchestration
     ingestTokens: [IngestToken!]!
+    devServers: DevServers!
+    devServerLog(name: String!, bytes: Int): String!
     elevenLabsKeys: [ElevenLabsKey!]!
     chatSessions(source: String, limit: Int): [ChatSession!]!
     chatSession(id: ID!): ChatSession
@@ -672,6 +698,10 @@ export const typeDefs = gql`
     checkMonitors: [MonitorTarget!]!
     createIngestToken(name: String!, machine: String): IngestTokenSecret!
     revokeIngestToken(id: ID!): Boolean!
+    startDevServer(name: String!): Boolean!
+    stopDevServer(name: String!): Boolean!
+    restartDevServer(name: String!): Boolean!
+    stopWorktreeServer(port: Int!): Boolean!
     addElevenLabsKey(name: String!, key: String!): Boolean!
     removeElevenLabsKey(name: String!): Boolean!
     unparkElevenLabsKey(name: String!): Boolean!

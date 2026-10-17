@@ -845,6 +845,22 @@ export const GET_PUSH_PUBLIC_KEY = gql`
   }
 `;
 
+export const GET_DEV_SERVERS = gql`
+  query GetDevServers {
+    devServers {
+      main { name folder port running pid ticketKey hasLog }
+      secondary { name folder port running pid ticketKey hasLog }
+      actions { at target action ok output }
+    }
+  }
+`;
+
+export const GET_DEV_SERVER_LOG = gql`
+  query GetDevServerLog($name: String!, $bytes: Int) {
+    devServerLog(name: $name, bytes: $bytes)
+  }
+`;
+
 export const GET_ELEVENLABS_KEYS = gql`
   query GetElevenLabsKeys {
     elevenLabsKeys {

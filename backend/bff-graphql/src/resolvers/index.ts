@@ -15,6 +15,7 @@ import { CronInputError } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
 import { labelOrder } from '../integrations/orchestrator-cron';
 import { pushService } from '../integrations/push';
+import { DevServerError, devServers } from '../integrations/dev-servers';
 import { elevenLabsKeys } from '../integrations/elevenlabs-keys';
 import { moveToReview } from '../integrations/broadcast-review';
 import type { AnswerInput } from '../integrations/chat-interactions';
@@ -45,6 +46,17 @@ function requireCron(): void {
   if (dockMode() !== 'workspace') {
     throw new GraphQLError('The cron runs on the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });
   }
+}
+
+function requireWorkspace(): void {
+  if (dockMode() !== 'workspace') {
+    throw new GraphQLError('Dev servers run on the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });
+  }
+}
+
+function devServerError(error: unknown): never {
+  if (error instanceof DevServerError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+  throw error;
 }
 
 // A key the laptop DOCK refused, or a peer it could not reach, is a message for the Settings page.
@@ -192,6 +204,11 @@ export const resolvers = {
       return run ?? null;
     },
     ingestTokens: async () => orchestratorService.tokens(),
+    devServers: async () => { requireWorkspace(); return devServers.list(); },
+    devServerLog: async (_: unknown, { name, bytes }: { name: string; bytes?: number | null }) => {
+      requireWorkspace();
+      try { return devServers.log(name, bytes ?? undefined); } catch (error) { return devServerError(error); }
+    },
     elevenLabsKeys: async () => elevenLabsKeys.list().catch(elevenLabsError),
     chatSessions: async (_: unknown, { source, limit }: { source?: string; limit?: number }) => {
       return chatService.sessions(source, limit, CHAT_MACHINE).catch(orchestratorInputError);
@@ -440,6 +457,10 @@ export const resolvers = {
       return orchestratorService.createToken(name, machine).catch(orchestratorInputError);
     },
     revokeIngestToken: async (_: unknown, { id }: { id: string }) => orchestratorService.revokeToken(id),
+    startDevServer: async (_: unknown, { name }: { name: string }) => { requireWorkspace(); return devServers.start(name).catch(devServerError); },
+    stopDevServer: async (_: unknown, { name }: { name: string }) => { requireWorkspace(); return devServers.stop(name).catch(devServerError); },
+    restartDevServer: async (_: unknown, { name }: { name: string }) => { requireWorkspace(); return devServers.restart(name).catch(devServerError); },
+    stopWorktreeServer: async (_: unknown, { port }: { port: number }) => { requireWorkspace(); return devServers.stopWorktree(port).catch(devServerError); },
     addElevenLabsKey: async (_: unknown, { name, key }: { name: string; key: string }) => elevenLabsKeys.add(name, key).then(() => true).catch(elevenLabsError),
     removeElevenLabsKey: async (_: unknown, { name }: { name: string }) => elevenLabsKeys.remove(name).catch(elevenLabsError),
     unparkElevenLabsKey: async (_: unknown, { name }: { name: string }) => elevenLabsKeys.park(name, null).then(() => true).catch(elevenLabsError),
@@ -524,7 +545,7 @@ export const resolvers = {
 
 export const protectedQueries = [
   'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
-  'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys',
+  'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'devServers', 'devServerLog',
   'chatSessions', 'chatSession', 'chatMessages', 'chatActivity', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey',
@@ -553,6 +574,10 @@ export const protectedMutations = [
   'checkMonitors',
   'createIngestToken',
   'revokeIngestToken',
+  'startDevServer',
+  'stopDevServer',
+  'restartDevServer',
+  'stopWorktreeServer',
   'addElevenLabsKey',
   'removeElevenLabsKey',
   'unparkElevenLabsKey',
