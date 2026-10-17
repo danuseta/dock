@@ -68,7 +68,7 @@ const DevServersPage = () => {
         <ul className="flex flex-col">
           {main.map((app) => (
             <li className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 last:border-b-0" key={app.name}>
-              <span className="flex min-w-0 items-center gap-2.5"><StatusDot running={app.running} /><span className="min-w-0"><strong className="block font-display">{app.name}</strong><small className="font-mono text-[0.68rem] text-muted-foreground">{app.folder} · port {app.port} · {app.running ? 'running' : 'stopped'}</small></span></span>
+              <span className="flex min-w-0 items-center gap-2.5"><StatusDot running={app.running} /><span className="min-w-0"><strong className="block font-display">{app.name}</strong><small className="font-mono text-[0.68rem] text-muted-foreground">{app.folder} · port {app.port} · {app.running ? 'running' : 'stopped'}</small>{app.running && !app.hasLog && <small className="block text-pretty text-[0.7rem] text-amber-300">Started outside DOCK, so there is no log. Restart it here to keep one.</small>}</span></span>
               <span className="flex items-center gap-1">
                 {app.running
                   ? <><IconButton variant="ghost" aria-label={`Restart ${app.name}`} title="Restart" disabled={busy === app.name} onClick={() => void act(app.name, () => restartServer({ variables: { name: app.name } }))}><RotateCcw size={15} aria-hidden="true" /></IconButton>
@@ -88,7 +88,10 @@ const DevServersPage = () => {
             {secondary.map((item) => (
               <li className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 last:border-b-0" key={item.port}>
                 <span className="flex min-w-0 items-center gap-2.5"><StatusDot running /><span className="min-w-0"><strong className="block font-display">{item.ticketKey || item.folder}</strong><small className="font-mono text-[0.68rem] text-muted-foreground">{item.folder} · port {item.port}{item.pid ? ` · pid ${item.pid}` : ''}</small></span></span>
+                <span className="flex items-center gap-1">
+                <IconButton variant="ghost" aria-label={`Log of the server on port ${item.port}`} title={item.hasLog ? 'Log' : 'No log: not started with dev-server.cjs'} disabled={!item.hasLog} onClick={() => setLogApp(item.name)}><Terminal size={15} aria-hidden="true" /></IconButton>
                 <IconButton variant="ghost" className="text-status-conflict" aria-label={`Stop the server on port ${item.port}`} title="Stop" disabled={busy === String(item.port)} onClick={() => void act(String(item.port), () => stopWorktree({ variables: { port: item.port } }))}><Square size={15} aria-hidden="true" /></IconButton>
+                </span>
               </li>
             ))}
           </ul>

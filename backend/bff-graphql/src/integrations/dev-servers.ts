@@ -14,6 +14,8 @@ export const MAIN_APPS = [
 ] as const;
 
 const LOG_BYTES = 64 * 1024;
+// The log of a secondary server, written by the kit's dev-server.cjs: <worktree folder>-<port>.
+const SECONDARY_LOG = /^[A-Za-z0-9][A-Za-z0-9._-]*-\d{2,5}$/;
 const ACTIONS_KEPT = 50;
 // A shell, an agent or qonflo-dev that started a server is never stopped with it.
 const STARTERS = new Set(['bash', 'zsh', 'fish', 'sh', 'claude', 'qonflo-dev']);
@@ -141,7 +143,8 @@ export class DevServers {
       .map((item) => {
         const dir = path.posix.join(this.projectsDir, item.folder);
         const ticketKey = ledgers.find((ledger) => ledger.dirs.some((owned) => owned === dir || owned.startsWith(`${dir}/`)))?.key ?? null;
-        return { name: item.folder, folder: item.folder, port: item.port, running: true, pid: item.pid, ticketKey, hasLog: false };
+        const name = `${item.folder}-${item.port}`;
+        return { name, folder: item.folder, port: item.port, running: true, pid: item.pid, ticketKey, hasLog: fs.existsSync(this.logFile(name)) };
       });
     return { main, secondary, actions: [...this.actions] };
   }
@@ -181,8 +184,9 @@ export class DevServers {
     return true;
   }
 
+  /** The end of a log: a main app's, or a secondary server's that dev-server.cjs started. */
   log(name: string, bytes = LOG_BYTES) {
-    this.mainApp(name);
+    if (!MAIN_APPS.some((app) => app.name === name) && !SECONDARY_LOG.test(name)) throw new DevServerError(`No log named ${name}`);
     const file = this.logFile(name);
     if (!fs.existsSync(file)) return '';
     const size = fs.statSync(file).size;
