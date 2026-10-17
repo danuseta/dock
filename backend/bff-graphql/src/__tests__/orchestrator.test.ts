@@ -1010,3 +1010,21 @@ test('a leftover ledger here never brings back a run the peer gives to another m
 
   assert.strictEqual((await push('ZED-441')).ignored, false, 'a ticket the peer does not give away is kept here');
 });
+
+test('a review ledger brings its findings with severities, the lgtm parts and the verdict', async () => {
+  const { storage } = memoryStorage();
+  const service = new OrchestratorService(storage, os.tmpdir());
+  const now = new Date();
+  const run = await service.ingestLedger({
+    ...ledger, key: 'ZED-450', kind: 'review', waiting: '', updatedAt: now.toISOString(),
+    findings: [{ at: now.toISOString(), text: 'written before severities' }, { at: now.toISOString(), severity: 'blocker', text: 'drops the retry' }, { severity: 'major', text: 'unknown severity' }, { severity: 'nit', text: '' }],
+    lgtm: [{ at: now.toISOString(), text: 'the migration' }],
+    verdict: { at: now.toISOString(), value: 'request-change' },
+  }, now, 'laptop');
+  assert.deepStrictEqual(run.findings.map((item: { severity: string; text: string }) => [item.severity, item.text]), [['non-blocking', 'written before severities'], ['blocker', 'drops the retry'], ['non-blocking', 'unknown severity']]);
+  assert.deepStrictEqual(run.lgtm.map((item: { text: string }) => item.text), ['the migration']);
+  assert.deepStrictEqual([run.verdict, run.blockers], ['request-change', 1]);
+
+  const plain = await service.ingestLedger({ ...ledger, key: 'ZED-451', waiting: '', updatedAt: now.toISOString(), verdict: { value: 'maybe' } }, now, 'laptop');
+  assert.deepStrictEqual([plain.findings, plain.lgtm, plain.verdict, plain.blockers], [[], [], null, 0]);
+});

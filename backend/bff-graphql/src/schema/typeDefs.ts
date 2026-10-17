@@ -272,6 +272,17 @@ export const typeDefs = gql`
     replans: Int!
   }
 
+  type OrchestrationFinding {
+    at: String!
+    severity: String!
+    text: String!
+  }
+
+  type OrchestrationLgtm {
+    at: String!
+    text: String!
+  }
+
   type Orchestration {
     key: ID!
     kind: String!
@@ -297,6 +308,10 @@ export const typeDefs = gql`
     assumptions: [OrchestrationAssumption!]!
     failures: [OrchestrationFailure!]!
     closing: OrchestrationClosing
+    findings: [OrchestrationFinding!]!
+    lgtm: [OrchestrationLgtm!]!
+    verdict: String
+    blockers: Int!
     activity: String!
     activityDetail: String
     idleSeconds: Int!
