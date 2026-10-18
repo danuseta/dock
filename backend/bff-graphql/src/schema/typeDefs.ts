@@ -18,6 +18,8 @@ export const typeDefs = gql`
     workOrder: Int
     """"dock" when the number was set in DOCK, "label" when it comes from a Jira label."""
     workOrderSource: String
+    """True when the owner works the ticket by hand: the cron never takes or resumes it."""
+    workManual: Boolean!
     pullRequests: [PullRequest!]
     demoLink: DemoLink
     orchestration: Orchestration
@@ -714,6 +716,7 @@ export const typeDefs = gql`
     clearTicketDependency(ticketKey: String!): TicketRelationGroup!
     setTicketWorkOrder(ticketKey: String!, position: Int!): Boolean!
     clearTicketWorkOrder(ticketKey: String!): Boolean!
+    setTicketManual(ticketKey: String!, manual: Boolean!): Boolean!
     updateSettings(input: SettingsInput!): Boolean
     validateJira(url: String, email: String, token: String): ValidationResult
     validateGitHub(token: String): ValidationResult

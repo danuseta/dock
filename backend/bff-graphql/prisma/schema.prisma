@@ -59,7 +59,9 @@ model TicketDependency {
 /// A work order number set in DOCK; it wins over the ticket's "#N" Jira label. Never written to Jira.
 model TicketOrder {
   ticketKey String   @id
-  position  Int
+  position  Int?
+  /// The owner works this ticket by hand: the cron never picks or resumes it.
+  manual    Boolean  @default(false)
   updatedAt DateTime @updatedAt
 }
 
@@ -137,6 +139,9 @@ model OrchestratorRun {
   handover         String?
   jiraStatus       String?
   jiraStage        String?
+  /// Why the run is stalled although its last turn just ended, e.g. a lead that left subagents running. Cleared when a new turn starts.
+  stalledDetail    String?
+  stalledAt        DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 

@@ -629,6 +629,31 @@ test('SQLite storage counts cron slots per machine and keeps DOCK work orders', 
   await storage.deleteTicketOrder('QRD-8');
   await storage.deleteTicketOrder('QRD-404');
   assert.deepStrictEqual([...(await storage.getTicketOrders()).entries()], [['QRD-7', 1]]);
+
+  await storage.setTicketManual('QRD-7', true);
+  await storage.setTicketManual('QRD-9', true);
+  assert.deepStrictEqual([...(await storage.getManualTicketKeys())].sort(), ['QRD-7', 'QRD-9'], 'a ticket without a number can be manual');
+  assert.deepStrictEqual([...(await storage.getTicketOrders()).entries()], [['QRD-7', 1]], 'a manual ticket without a number has no order');
+  await storage.deleteTicketOrder('QRD-7');
+  assert.deepStrictEqual([[...(await storage.getTicketOrders()).keys()], [...(await storage.getManualTicketKeys())].sort()], [[], ['QRD-7', 'QRD-9']], 'removing the number keeps the manual mark');
+  await storage.setTicketManual('QRD-7', false);
+  await storage.setTicketManual('QRD-9', false);
+  assert.deepStrictEqual([await storage.getManualTicketKeys(), await prisma.ticketOrder.count()], [new Set(), 0], 'an empty row is removed');
+
+  const later = new Date(at.getTime() + 1000);
+  const session = (n: number, ticketKey: string, origin: 'cron' | 'manual', startedAt: Date, source = 'dock') => storage.createChatSession({ id: `cccccccc-0000-4000-8000-0000000000${n}`, source, machine: 'workspace', title: String(n), ticketKey, startedAt, lastMessageAt: startedAt, origin });
+  await session(11, 'QRD-1', 'cron', at); await session(12, 'QRD-1', 'cron', later);
+  await session(13, 'QRD-2', 'cron', at); await session(14, 'QRD-2', 'manual', later);
+  await session(15, 'QRD-3', 'cron', later); await session(16, 'QRD-3', 'manual', at);
+  await session(17, 'QRD-4', 'cron', at);
+  const states = await storage.getCronSessionStates(['QRD-1', 'QRD-2', 'QRD-3', 'QRD-404']);
+  assert.deepStrictEqual([...states.entries()], [
+    ['QRD-1', { id: 'cccccccc-0000-4000-8000-000000000012', status: 'idle', statusDetail: null, otherActive: false }],
+    ['QRD-2', { id: 'cccccccc-0000-4000-8000-000000000013', status: 'idle', statusDetail: null, otherActive: true }],
+    ['QRD-3', { id: 'cccccccc-0000-4000-8000-000000000015', status: 'idle', statusDetail: null, otherActive: false }],
+  ], 'only the asked tickets; a manual session that spoke after the cron one counts as active');
+  await storage.updateChatSession('cccccccc-0000-4000-8000-000000000016', { status: 'running' });
+  assert.strictEqual((await storage.getCronSessionStates(['QRD-3'])).get('QRD-3')?.otherActive, true, 'a running manual session counts');
 });
 
 test('SQLite switches to write-ahead logging and stays there', {

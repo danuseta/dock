@@ -84,6 +84,7 @@ export const MAX_STATUS_SESSIONS = 200;
 // Limits outlive a restart; after the 7 day window has passed they describe nothing.
 const LIMITS_KEEP_SECONDS = 8 * 24 * 60 * 60;
 const STATUS_KEEP_SECONDS = 30 * 24 * 60 * 60;
+const MAX_SUBAGENTS_REPORTED = 100;
 const MANUAL_SESSION_OPTIONS = { model: null, effort: null, permissionMode: 'auto', fast: null };
 const TITLE_FROM_TEXT_CHARS = 80;
 const MAX_UPLOAD_NAME_CHARS = 200;
@@ -211,6 +212,7 @@ export function parseDelta(input: unknown, now = new Date()) {
     done: flag(input.done, 'done'),
     error: text(input.error, MAX_ERROR_CHARS) || null,
     ...(input.stopped === undefined ? {} : { stopped: flag(input.stopped, 'stopped') }),
+    ...(Number.isInteger(input.subagentsRunning) && Number(input.subagentsRunning) > 0 ? { subagentsRunning: Math.min(Number(input.subagentsRunning), MAX_SUBAGENTS_REPORTED) } : {}),
   };
 }
 
@@ -332,6 +334,7 @@ interface SessionRow {
   startedAt: Date;
   lastMessageAt: Date;
   options?: string | null;
+  origin?: string;
 }
 
 interface InteractionRow {
@@ -422,6 +425,8 @@ export class ChatService {
   private readonly openWaits = new Map<number, AbortController>();
   /** "Agents at once" of the orchestrator cron; wired by the cron so this file does not depend on it. null: no limit. */
   cronLimit: () => Promise<number | null> = async () => null;
+  /** Told when a cron turn of a ticket starts, and when it ends cleanly: with the reason its run is stalled, or null. Wired by the cron like cronLimit. */
+  cronTurn: (ticketKey: string, stalledDetail: string | null, ended: boolean) => Promise<unknown> = async () => undefined;
 
   constructor(
     private readonly storage = new StorageService(),
@@ -841,7 +846,7 @@ export class ChatService {
     return newest.flatMap((message) => (message && message.at >= since ? [toMessage(message)] : []));
   }
 
-  async createSession(input: { title?: string | null; ticketKey?: string | null; forkFrom?: string | null; machine?: string | null; origin?: 'cron' | 'manual' }) {
+  async createSession(input: { title?: string | null; ticketKey?: string | null; forkFrom?: string | null; machine?: string | null; origin?: 'cron' | 'manual'; options?: unknown }) {
     const forkFrom = optionalChatId(input.forkFrom, 'forkFrom');
     const source = forkFrom ? await this.storage.getChatSession(forkFrom) : null;
     if (forkFrom && source?.source !== 'cli') {
@@ -852,6 +857,7 @@ export class ChatService {
     if (source && machine !== source.machine) {
       throw new OrchestratorInputError('A fork stays on the machine that holds the transcript');
     }
+    const cronOptions = input.origin === 'cron' ? parseTurnOptions(input.options) : null;
     const now = this.now();
     const row = await this.storage.createChatSession({
       id: randomUUID(),
@@ -863,7 +869,7 @@ export class ChatService {
       startedAt: now,
       lastMessageAt: now,
       origin: input.origin === 'cron' ? 'cron' : 'manual',
-      ...(input.origin === 'cron' ? {} : { options: JSON.stringify(MANUAL_SESSION_OPTIONS) }),
+      ...(input.origin === 'cron' ? (cronOptions ? { options: JSON.stringify(cronOptions) } : {}) : { options: JSON.stringify(MANUAL_SESSION_OPTIONS) }),
     });
     return toSession(row, null);
   }
@@ -1175,6 +1181,7 @@ export class ChatService {
       const takenAt = this.now();
       if (!await this.storage.moveChatMessage(message.id, message.sessionId, 'queued', 'taken', caps ? { takenAt } : {})) continue;
       await this.storage.updateChatSession(session.id, { status: 'running', statusDetail: null, lastDeltaAt: takenAt });
+      if (session.origin === 'cron' && session.ticketKey) await this.cronTurn(session.ticketKey, null, false).catch(() => undefined);
       const taken = {
         id: message.id,
         sessionId: message.sessionId,
@@ -1259,6 +1266,11 @@ export class ChatService {
         }
       }
       const updated = await this.storage.updateChatSession(session.id, update);
+      const running = delta.subagentsRunning ?? 0;
+      if (ended && !delta.error && session.origin === 'cron' && session.ticketKey) {
+        const detail = running > 0 ? `Lead ended its turn while ${running} ${running === 1 ? 'subagent was' : 'subagents were'} still running` : null;
+        await this.cronTurn(session.ticketKey, detail, true).catch(() => undefined);
+      }
       return { id: updated.id, status: updated.status, messageCount };
     } finally {
       if (ended) await this.closeActivity(session.id, replyTo.id);

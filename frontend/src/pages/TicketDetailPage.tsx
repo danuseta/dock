@@ -23,13 +23,13 @@ import {
 } from 'lucide-react';
 import { GET_DASHBOARD, GET_TICKET_DETAIL_CORE, GET_TICKET_DETAIL_ENRICHMENT } from '../graphql/queries';
 import { TicketAgentPanel } from '../components/TicketAgentPanel';
-import { CLEAR_TICKET_DEPENDENCY, CLEAR_TICKET_WORK_ORDER, SAVE_DEMO_LINK, SEND_TO_DISCORD, SET_TICKET_DEPENDENCY, SET_TICKET_WORK_ORDER, CHECK_CONFLICTS } from '../graphql/mutations';
+import { CLEAR_TICKET_DEPENDENCY, CLEAR_TICKET_WORK_ORDER, SAVE_DEMO_LINK, SEND_TO_DISCORD, SET_TICKET_DEPENDENCY, SET_TICKET_MANUAL, SET_TICKET_WORK_ORDER, CHECK_CONFLICTS } from '../graphql/mutations';
 import { PRBadge } from '../components/PRBadge';
 import { ConflictModal } from '../components/ConflictModal';
 import { DiscordPreviewModal } from '../components/DiscordPreviewModal';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Toast } from '../components/Toast';
-import { Badge, Button, Card, Input, Page, Select } from '../components/ui';
+import { Badge, Button, Card, Checkbox, Input, Page, Select } from '../components/ui';
 import { cn } from '../lib/cn';
 import { DETAIL_QUERY_OPTIONS, displayAssignee } from '../lib/queryPolicy';
 import { getApprovalLabels } from '../lib/ticketApprovals';
@@ -68,6 +68,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const [clearTicketDependency, { loading: clearingDependency }] = useMutation(CLEAR_TICKET_DEPENDENCY);
   const [setTicketWorkOrder, { loading: savingOrder }] = useMutation(SET_TICKET_WORK_ORDER);
   const [clearTicketWorkOrder, { loading: clearingOrder }] = useMutation(CLEAR_TICKET_WORK_ORDER);
+  const [setTicketManual, { loading: savingManual }] = useMutation(SET_TICKET_MANUAL);
   const [workOrder, setWorkOrder] = useState('');
   const [checkConflicts] = useMutation(CHECK_CONFLICTS);
   
@@ -104,6 +105,16 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
       setToast({ message: 'The DOCK work order is removed; a #N Jira label applies again.', type: 'success' });
     } catch (err: any) {
       setToast({ message: err.message || 'Failed to remove the work order', type: 'error' });
+    }
+  };
+
+  const handleToggleManual = async (manual: boolean) => {
+    try {
+      await setTicketManual({ variables: { ticketKey, manual } });
+      await refetchAll();
+      setToast({ message: manual ? `${ticketKey} is worked manually: the cron will not take or resume it.` : `${ticketKey} is back in the cron's queue.`, type: 'success' });
+    } catch (err: any) {
+      setToast({ message: err.message || 'Failed to update manual work', type: 'error' });
     }
   };
 
@@ -302,6 +313,10 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
               <Button variant="primary" onClick={handleSaveWorkOrder} disabled={!workOrder || (ticket.workOrderSource === 'dock' && String(ticket.workOrder) === workOrder) || savingOrder || clearingOrder}><Save size={15} aria-hidden="true" />{savingOrder ? 'Saving...' : 'Save order'}</Button>
               {ticket.workOrderSource === 'dock' && <Button variant="danger" onClick={handleClearWorkOrder} disabled={savingOrder || clearingOrder}><Unlink size={15} aria-hidden="true" />{clearingOrder ? 'Removing...' : 'Remove'}</Button>}
             </div>
+            <label htmlFor="work-manual" className="mt-3 flex items-center gap-2 font-mono text-xs text-muted-foreground">
+              <Checkbox id="work-manual" checked={!!ticket.workManual} onChange={(event) => void handleToggleManual(event.target.checked)} disabled={savingManual} />
+              Kerjakan manual
+            </label>
           </Card>
 
           <Card>

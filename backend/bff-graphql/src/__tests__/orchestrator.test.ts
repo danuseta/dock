@@ -205,6 +205,51 @@ test('read model applies the grace window, the owner gate and staleness', () => 
   assert.strictEqual(toOrchestration(base, at(42)).idleSeconds, 42);
 });
 
+test('a run whose lead ended its turn with subagents still running is stalled at once, with that reason', async () => {
+  const base = {
+    key: 'QRD-1456', title: 'Ticket', stage: 'code', waiting: '', payload: JSON.stringify({ ac: [] }),
+    activity: 'IDLE', activityDetail: null, activityEndedAt: null as Date | null,
+    lastEventAt: new Date('2026-10-17T00:00:00.000Z'), ledgerUpdatedAt: new Date('2026-10-17T00:00:00.000Z'),
+    transcriptAt: null, dismissedAt: null, stalledDetail: 'Lead ended its turn while 2 subagents were still running',
+  };
+  const soon = new Date(base.lastEventAt.getTime() + 5000);
+  const run = toOrchestration(base, soon);
+  assert.deepStrictEqual([run.stalled, run.stalledDetail], [true, base.stalledDetail]);
+  assert.deepStrictEqual(attentionItems([run]).map((item) => [item.type, item.message]), [['AGENT_STALLED', base.stalledDetail]]);
+  assert.strictEqual(toOrchestration({ ...base, waiting: 'Which endpoint?' }, soon).stalled, false, 'the owner gate wins');
+  assert.strictEqual(toOrchestration({ ...base, stage: 'done' }, soon).stalled, false);
+  assert.deepStrictEqual([toOrchestration({ ...base, stalledDetail: null }, soon).stalled, toOrchestration({ ...base, stalledDetail: null }, soon).stalledDetail], [false, null]);
+
+  const { storage, events } = memoryStorage();
+  const service = new OrchestratorService(storage, await mkdtemp(path.join(os.tmpdir(), 'dock-transcripts-')));
+  await service.ingestLedger({ ...ledger, waiting: '', pr: {} }, soon, 'laptop');
+  await service.setStalledDetail('QRD-1387', base.stalledDetail);
+  await service.setStalledDetail('QRD-1387', base.stalledDetail);
+  assert.deepStrictEqual((await service.get('QRD-1387', soon))?.stalledDetail, base.stalledDetail);
+  assert.strictEqual(events.filter((event) => event.kind === 'STALLED').length, 1, 'the same reason is logged once');
+  await service.setStalledDetail('QRD-1387', null);
+  assert.strictEqual((await service.get('QRD-1387', soon))?.stalledDetail, null, 'the next turn clears it');
+  await service.setStalledDetail('QRD-404', base.stalledDetail);
+
+  const setAt = new Date('2026-10-17T01:00:00.000Z');
+  const stall = () => service.setStalledDetail('QRD-1387', base.stalledDetail, setAt);
+  const detail = async () => (await storage.getOrchestratorRun('QRD-1387'))?.stalledDetail ?? null;
+  await stall();
+  await service.ingestEventBatch({ key: 'QRD-1387', events: [{ event: 'PreToolUse', tool: 'Bash', at: '2026-10-17T00:59:00.000Z' }] }, setAt, 'laptop');
+  assert.strictEqual(await detail(), base.stalledDetail, 'a late event from the ended turn keeps it');
+  await service.ingestEventBatch({ key: 'QRD-1387', events: [{ event: 'PreToolUse', tool: 'Bash', at: '2026-10-17T01:01:00.000Z' }] }, new Date('2026-10-17T01:05:00.000Z'), 'laptop');
+  assert.strictEqual(await detail(), null, 'an event after the stall clears it');
+  await stall();
+  await service.ingestLedger({ ...ledger, waiting: '', pr: {}, updatedAt: '2026-10-17T00:30:00.000Z' }, setAt, 'laptop');
+  assert.strictEqual(await detail(), base.stalledDetail, 'an older ledger keeps it');
+  await service.ingestLedger({ ...ledger, waiting: '', pr: {}, updatedAt: '2026-10-17T01:02:00.000Z' }, new Date('2026-10-17T01:05:00.000Z'), 'laptop');
+  assert.strictEqual(await detail(), null, 'a ledger written after the stall clears it');
+  await stall();
+  await service.dismiss('QRD-1387', 'laptop');
+  await service.ingestLedger({ ...ledger, waiting: '', pr: {}, updatedAt: '2026-10-17T00:10:00.000Z' }, setAt, 'laptop');
+  assert.strictEqual(await detail(), null, 'a revived run starts unstalled');
+});
+
 test('orchestrator service ingests ledgers, events and builds attention items', async () => {
   const { storage, events } = memoryStorage();
   const transcripts = await mkdtemp(path.join(os.tmpdir(), 'dock-transcripts-'));

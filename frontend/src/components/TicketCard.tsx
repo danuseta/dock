@@ -23,6 +23,7 @@ interface TicketCardProps {
     labels?: string[];
     workOrder?: number | null;
     workOrderSource?: string | null;
+    workManual?: boolean | null;
     pullRequests?: any[];
     demoLink?: { url: string };
     orchestration?: AgentRunSummary | null;
@@ -58,6 +59,15 @@ export const TicketCard: React.FC<TicketCardProps> = ({ ticket, onClick }) => {
               aria-label={`Work order ${ticket.workOrder}`}
             >
               #{ticket.workOrder}
+            </span>
+          )}
+
+          {ticket.workManual && (
+            <span
+              className="rounded-xs border border-sky-300/35 bg-sky-300/10 px-[7px] py-0.5 font-mono text-xs font-extrabold text-sky-200"
+              title="Worked manually: the cron skips it"
+            >
+              Manual
             </span>
           )}
 
