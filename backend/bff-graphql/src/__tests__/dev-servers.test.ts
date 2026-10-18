@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test, { type TestContext } from 'node:test';
-import { DevServers, linuxSystem, parseListeners, type DevSystem } from '../integrations/dev-servers';
+import { DevServers, appEnv, linuxSystem, parseListeners, type DevSystem } from '../integrations/dev-servers';
 
 const PROJECTS = '/home/coder/projects';
 
@@ -232,4 +232,25 @@ test('the real start reports a failed exit', { skip: process.platform === 'win32
   fs.writeFileSync(script, '#!/bin/sh\nexit 3\n', { mode: 0o755 });
   const failure = new Promise<string>((resolve) => { void linuxSystem(PROJECTS, script).start('backend', path.join(dir, 'backend.log'), resolve); });
   assert.match(await failure, /exited with 3/);
+});
+
+test('apps do not get the variables meant for DOCK', () => {
+  const env = appEnv({ PATH: '/usr/bin', HOME: '/home/coder', PORT: '4100', NODE_ENV: 'production', DATABASE_URL: 'file:x', ENCRYPTION_KEY: 'k', TRUST_PROXY: 'true', FRONTEND_DIST_PATH: '/d', DOCK_MODE: 'workspace', DOCK_LEDGER_PEER_TOKEN: 't', JIDIS_DATA_DIR: '/s' });
+  assert.deepStrictEqual(env, { PATH: '/usr/bin', HOME: '/home/coder' });
+});
+
+test('the real start runs qonflo-dev without DOCK port or secrets', { skip: process.platform === 'win32' }, async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dev-bin-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const script = path.join(dir, 'qonflo-dev');
+  const seen = path.join(dir, 'seen');
+  fs.writeFileSync(script, `#!/bin/sh\necho "port=\${PORT:-none} key=\${ENCRYPTION_KEY:-none} path=\${PATH:+set}" > ${seen}\nexit 3\n`, { mode: 0o755 });
+  const saved = { PORT: process.env.PORT, ENCRYPTION_KEY: process.env.ENCRYPTION_KEY };
+  process.env.PORT = '4100';
+  process.env.ENCRYPTION_KEY = 'secret';
+  t.after(() => {
+    for (const [name, value] of Object.entries(saved)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+  });
+  await new Promise<string>((resolve) => { void linuxSystem(PROJECTS, script).start('backend', path.join(dir, 'backend.log'), resolve); });
+  assert.strictEqual(fs.readFileSync(seen, 'utf8').trim(), 'port=none key=none path=set');
 });
