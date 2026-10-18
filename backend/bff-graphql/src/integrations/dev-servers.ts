@@ -48,6 +48,14 @@ export interface DevSystem {
 
 const run = promisify(execFile);
 
+// What the dock unit exports for DOCK itself (claude-config linux/lib.sh); an app reading PORT from it would take DOCK's port.
+const DOCK_ENV = new Set(['PORT', 'NODE_ENV', 'TRUST_PROXY', 'FRONTEND_DIST_PATH', 'DATABASE_URL', 'ENCRYPTION_KEY']);
+
+/** DOCK's environment without the variables meant for DOCK, for the apps qonflo-dev starts. */
+export function appEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !DOCK_ENV.has(name) && !/^(DOCK|JIDIS)_/.test(name)));
+}
+
 /** `ss -ltnpH` lines: the port of the local address and the first pid of its users. */
 export function parseListeners(text: string): Listener[] {
   const seen = new Map<number, number>();
@@ -75,7 +83,7 @@ export function linuxSystem(projectsDir: string, qonfloDev: string): DevSystem {
     start: (app, logFile, onFail) => new Promise((resolve, reject) => {
       const out = fs.openSync(logFile, 'w');
       let child: ReturnType<typeof spawn>;
-      try { child = spawn(qonfloDev, [app], { detached: true, stdio: ['ignore', out, out] }); } finally { fs.closeSync(out); }
+      try { child = spawn(qonfloDev, [app], { detached: true, stdio: ['ignore', out, out], env: appEnv(process.env) }); } finally { fs.closeSync(out); }
       let spawned = false;
       child.on('error', (error) => { if (spawned) onFail(error.message); else reject(error); });
       child.on('spawn', () => { spawned = true; resolve(child.pid ?? null); });
@@ -84,7 +92,7 @@ export function linuxSystem(projectsDir: string, qonfloDev: string): DevSystem {
     }),
     stop: async (app) => {
       try {
-        const { stdout, stderr } = await run(qonfloDev, app ? ['stop', app] : ['stop'], { timeout: 30_000 });
+        const { stdout, stderr } = await run(qonfloDev, app ? ['stop', app] : ['stop'], { timeout: 30_000, env: appEnv(process.env) });
         return { ok: true, output: `${stdout}${stderr}`.trim() };
       } catch (error: any) {
         return { ok: false, output: `${error?.stdout ?? ''}${error?.stderr ?? ''}`.trim() || String(error?.message ?? 'stop failed') };
