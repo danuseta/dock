@@ -376,6 +376,18 @@ export const RESTART_DEV_SERVER = gql`
   }
 `;
 
+export const START_ALL_DEV_SERVERS = gql`
+  mutation StartAllDevServers {
+    startAllDevServers
+  }
+`;
+
+export const STOP_ALL_DEV_SERVERS = gql`
+  mutation StopAllDevServers {
+    stopAllDevServers
+  }
+`;
+
 export const STOP_WORKTREE_SERVER = gql`
   mutation StopWorktreeServer($port: Int!) {
     stopWorktreeServer(port: $port)

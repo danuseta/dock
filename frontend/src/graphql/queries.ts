@@ -857,8 +857,8 @@ export const GET_DEMO_VIDEOS = gql`
 export const GET_DEV_SERVERS = gql`
   query GetDevServers {
     devServers {
-      main { name folder port running pid ticketKey hasLog }
-      secondary { name folder port running pid ticketKey hasLog }
+      main { name folder port running pid state error ticketKey hasLog }
+      secondary { name folder port running pid state error ticketKey hasLog }
       actions { at target action ok output }
     }
   }

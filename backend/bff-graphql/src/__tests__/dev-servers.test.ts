@@ -2,23 +2,34 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
-import { DevServers, parseListeners, type DevSystem } from '../integrations/dev-servers';
+import test, { type TestContext } from 'node:test';
+import { DevServers, linuxSystem, parseListeners, type DevSystem } from '../integrations/dev-servers';
 
 const PROJECTS = '/home/coder/projects';
 
 // pid -> [parent, command, cwd]
-function fakeSystem(processes: Record<number, [number, string, string]>, listeners: Array<{ port: number; pid: number }>) {
-  const calls = { started: [] as string[], stopped: [] as string[], killed: [] as number[] };
+function fakeSystem(processes: Record<number, [number, string, string]>, listeners: Array<{ port: number; pid: number }>, options: { startError?: string; failExit?: string; stubborn?: boolean } = {}) {
+  const calls = { started: [] as string[], stopped: [] as string[], killed: [] as number[], groups: [] as number[], fail: {} as Record<string, (message: string) => void> };
   const system: DevSystem = {
     listeners: async () => listeners,
     cwd: (pid) => processes[pid]?.[2] ?? null,
     parent: (pid) => processes[pid]?.[0] ?? 0,
     command: (pid) => processes[pid]?.[1] ?? '',
     children: (pid) => Object.entries(processes).filter(([, [parent]]) => parent === pid).map(([child]) => Number(child)),
-    kill: (pids) => { calls.killed.push(...pids); },
-    start: (app, logFile) => { calls.started.push(app); fs.writeFileSync(logFile, `[${app}] ready\n`); },
-    stop: async (app) => { calls.stopped.push(app); return app === 'landing' ? { ok: false, output: 'landing: did not stop' } : { ok: true, output: `${app}: stopped` }; },
+    kill: (pids) => {
+      calls.killed.push(...pids);
+      if (!options.stubborn) for (const pid of pids) { const index = listeners.findIndex((item) => item.pid === pid); if (index >= 0) listeners.splice(index, 1); }
+    },
+    killGroup: (pid) => { calls.groups.push(pid); },
+    start: async (app, logFile, onFail) => {
+      if (options.startError) throw new Error(options.startError);
+      calls.fail[app] = onFail;
+      calls.started.push(app);
+      fs.writeFileSync(logFile, `[${app}] ready\n`);
+      if (options.failExit) onFail(options.failExit);
+      return 4242;
+    },
+    stop: async (app) => { calls.stopped.push(app ?? 'all'); return app === 'landing' ? { ok: false, output: 'landing: did not stop' } : { ok: true, output: `${app ?? 'all'}: stopped` }; },
     ledgers: () => [{ key: 'QRD-1363', dirs: [`${PROJECTS}/wt-qrd-1363`] }],
   };
   return { system, calls };
@@ -48,7 +59,7 @@ test('main apps by port, secondary servers by worktree with their ticket, and a 
     40: [1, 'node', '/home/coder/elsewhere'],
   }, [{ port: 3263, pid: 13 }, { port: 5173, pid: 20 }, { port: 5183, pid: 30 }, { port: 9999, pid: 40 }]);
   fs.writeFileSync(path.join(logDir, 'wt-qrd-1363-3263.log'), 'listening on 3263\n');
-  const servers = new DevServers(system, PROJECTS, logDir, () => new Date('2026-10-17T10:00:00.000Z'));
+  const servers = new DevServers(system, PROJECTS, logDir, () => new Date('2026-10-17T10:00:00.000Z'), 0);
 
   const listed = await servers.list();
   assert.deepStrictEqual(listed.main.map((app) => [app.name, app.running]), [['backend', false], ['frontend', true], ['widget', false], ['landing', false], ['wastaging', false]]);
@@ -63,7 +74,7 @@ test('main apps by port, secondary servers by worktree with their ticket, and a 
   assert.match(servers.log('wt-qrd-1363-3263'), /listening on 3263/, 'a secondary server started with dev-server.cjs has its log');
   assert.throws(() => servers.log('../secret'), /No log named/);
 
-  await assert.rejects(servers.stop('landing'), /did not stop/);
+  assert.strictEqual(await servers.stop('landing'), true, 'qonflo-dev failed but nothing listens on the port');
   assert.strictEqual(await servers.restart('backend'), true);
   assert.deepStrictEqual(calls.stopped, ['landing', 'backend']);
 
@@ -73,6 +84,152 @@ test('main apps by port, secondary servers by worktree with their ticket, and a 
   await assert.rejects(servers.stopWorktree(9999), /No worktree server/);
 
   assert.deepStrictEqual((await servers.list()).actions.map((item) => [item.target, item.action, item.ok]), [
-    ['wt-qrd-1363:3263', 'stop', true], ['backend', 'start', true], ['backend', 'stop', true], ['landing', 'stop', false], ['backend', 'start', true],
+    ['wt-qrd-1363:3263', 'stop', true], ['backend', 'start', true], ['backend', 'stop', true], ['landing', 'stop', true], ['backend', 'start', true],
   ]);
+});
+
+function mainSetup(t: TestContext, listeners: Array<{ port: number; pid: number }>, options: Parameters<typeof fakeSystem>[2] = {}) {
+  const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dev-logs-'));
+  t.after(() => fs.rmSync(logDir, { recursive: true, force: true }));
+  const fake = fakeSystem({
+    50: [1, 'node', `${PROJECTS}/ms-landing-page`],
+    51: [50, 'node', `${PROJECTS}/ms-landing-page`],
+    60: [1, 'node', `${PROJECTS}/wastaging`],
+  }, listeners, options);
+  let now = Date.parse('2026-10-17T10:00:00.000Z');
+  const servers = new DevServers(fake.system, PROJECTS, logDir, () => new Date(now), 0);
+  return { ...fake, servers, logDir, advance: (ms: number) => { now += ms; } };
+}
+
+const states = async (servers: DevServers) => Object.fromEntries((await servers.list()).main.map((app) => [app.name, app.state]));
+
+test('an app DOCK started is starting until its port binds, then failed with the log tail after the timeout', async (t) => {
+  const listeners: Array<{ port: number; pid: number }> = [];
+  const { servers, advance } = mainSetup(t, listeners);
+  await servers.start('backend');
+  let listed = (await servers.list()).main.find((app) => app.name === 'backend')!;
+  assert.deepStrictEqual([listed.state, listed.running, listed.pid, listed.error], ['starting', false, 4242, null]);
+  await assert.rejects(servers.start('backend'), /already starting/);
+
+  advance(121_000);
+  listed = (await servers.list()).main.find((app) => app.name === 'backend')!;
+  assert.strictEqual(listed.state, 'failed');
+  assert.match(listed.error!, /Nothing listens on port 3000 after 120s\.\n\[backend\] ready/);
+
+  await servers.start('backend');
+  listeners.push({ port: 3000, pid: 70 });
+  listed = (await servers.list()).main.find((app) => app.name === 'backend')!;
+  assert.deepStrictEqual([listed.state, listed.running, listed.pid], ['running', true, 70]);
+});
+
+test('a spawn error or an early failed exit shows instead of ok', async (t) => {
+  const broken = mainSetup(t, [], { startError: 'spawn qonflo-dev ENOENT' });
+  await assert.rejects(broken.servers.start('backend'), /did not start: spawn qonflo-dev ENOENT/);
+  assert.strictEqual((await states(broken.servers)).backend, 'failed');
+  assert.deepStrictEqual((await broken.servers.list()).actions.map((item) => [item.action, item.ok]), [['start', false]]);
+
+  const exited = mainSetup(t, [], { failExit: 'qonflo-dev exited with 1' });
+  await exited.servers.start('widget');
+  const widget = (await exited.servers.list()).main.find((app) => app.name === 'widget')!;
+  assert.strictEqual(widget.state, 'failed');
+  assert.match(widget.error!, /qonflo-dev exited with 1/);
+});
+
+test('start all starts the apps that are neither running nor starting', async (t) => {
+  const { servers, calls } = mainSetup(t, [{ port: 5173, pid: 80 }]);
+  await servers.start('widget');
+  assert.strictEqual(await servers.startAll(), true);
+  assert.deepStrictEqual(calls.started, ['widget', 'backend', 'landing', 'wastaging']);
+  assert.deepStrictEqual(await states(servers), { backend: 'starting', frontend: 'running', widget: 'starting', landing: 'starting', wastaging: 'starting' });
+});
+
+test('start all reports the apps that did not start and still starts the rest', async (t) => {
+  const { servers } = mainSetup(t, [], { startError: 'spawn qonflo-dev ENOENT' });
+  await assert.rejects(servers.startAll(), /backend did not start[^]*wastaging did not start/);
+});
+
+test('stop falls back to killing the process tree on the port, and restart still starts', async (t) => {
+  const { servers, calls } = mainSetup(t, [{ port: 5000, pid: 51 }]);
+  assert.strictEqual(await servers.stop('landing'), true);
+  assert.deepStrictEqual(calls.killed.sort(), [50, 51]);
+  assert.match((await servers.list()).actions[0].output, /did not stop\nkilled 2 process\(es\) on port 5000/);
+
+  const again = mainSetup(t, [{ port: 3100, pid: 60 }]);
+  assert.strictEqual(await again.servers.restart('wastaging'), true);
+  assert.deepStrictEqual(again.calls.killed, [60], 'qonflo-dev stop worked but the port stayed bound');
+  assert.deepStrictEqual(again.calls.started, ['wastaging']);
+});
+
+test('stop fails when the port stays bound after the kill', async (t) => {
+  const { servers } = mainSetup(t, [{ port: 3100, pid: 60 }], { stubborn: true });
+  await assert.rejects(servers.stop('wastaging'), /still listens on port 3100/);
+  assert.strictEqual((await servers.list()).actions[0].ok, false);
+});
+
+test('stop all runs qonflo-dev stop and clears what stays bound', async (t) => {
+  const { servers, calls } = mainSetup(t, [{ port: 5000, pid: 51 }, { port: 3100, pid: 60 }]);
+  await servers.start('backend');
+  assert.strictEqual(await servers.stopAll(), true);
+  assert.deepStrictEqual(calls.stopped, ['all']);
+  assert.deepStrictEqual(calls.killed.sort(), [50, 51, 60]);
+  assert.deepStrictEqual(await states(servers), { backend: 'stopped', frontend: 'stopped', widget: 'stopped', landing: 'stopped', wastaging: 'stopped' });
+});
+
+test('stop ends the process group of an app still starting and ignores its later exit', async (t) => {
+  const { servers, calls } = mainSetup(t, []);
+  await servers.start('backend');
+  await servers.stop('backend');
+  assert.deepStrictEqual(calls.groups, [4242]);
+  calls.fail.backend('qonflo-dev exited with 143');
+  assert.deepStrictEqual((await servers.list()).actions.map((item) => [item.action, item.ok]), [['stop', true], ['start', true]]);
+  assert.strictEqual((await states(servers)).backend, 'stopped');
+});
+
+test('a start that timed out has its process group ended before the next start', async (t) => {
+  const { servers, calls, advance } = mainSetup(t, []);
+  await servers.start('backend');
+  advance(121_000);
+  await servers.start('backend');
+  assert.deepStrictEqual(calls.groups, [4242]);
+});
+
+test('a listener from another folder is not killed, nor is init or DOCK itself', async (t) => {
+  const foreign = mainSetup(t, [{ port: 5173, pid: 80 }]);
+  await assert.rejects(foreign.servers.stop('frontend'), /port 5173 held by pid 80 outside ms-client-dashboard-frontend/);
+  assert.deepStrictEqual(foreign.calls.killed, []);
+
+  for (const pid of [1, process.pid]) {
+    const setup = mainSetup(t, [{ port: 3100, pid }]);
+    const processes = { [pid]: [0, 'node', `${PROJECTS}/wastaging`] } as Record<number, [number, string, string]>;
+    const { system, calls } = fakeSystem(processes, [{ port: 3100, pid }]);
+    const servers = new DevServers(system, PROJECTS, setup.logDir, () => new Date(), 0);
+    await assert.rejects(servers.stop('wastaging'), /still listens on port 3100/);
+    assert.deepStrictEqual(calls.killed, []);
+  }
+});
+
+test('stop all reads the listeners once per poll for every app', async (t) => {
+  const { servers, system } = mainSetup(t, []);
+  let reads = 0;
+  const read = system.listeners;
+  system.listeners = async () => { reads += 1; return read(); };
+  await servers.stopAll();
+  assert.strictEqual(reads, 1);
+});
+
+test('the real start rejects when the command does not exist', { skip: process.platform === 'win32' }, async (t) => {
+  const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dev-logs-'));
+  t.after(() => fs.rmSync(logDir, { recursive: true, force: true }));
+  const messages: string[] = [];
+  await assert.rejects(linuxSystem(PROJECTS, '/nonexistent/qonflo-dev').start('backend', path.join(logDir, 'backend.log'), (message) => messages.push(message)), /ENOENT/);
+  assert.deepStrictEqual(messages, []);
+});
+
+test('the real start reports a failed exit', { skip: process.platform === 'win32' }, async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dev-bin-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const script = path.join(dir, 'qonflo-dev');
+  fs.writeFileSync(script, '#!/bin/sh\nexit 3\n', { mode: 0o755 });
+  const failure = new Promise<string>((resolve) => { void linuxSystem(PROJECTS, script).start('backend', path.join(dir, 'backend.log'), resolve); });
+  assert.match(await failure, /exited with 3/);
 });

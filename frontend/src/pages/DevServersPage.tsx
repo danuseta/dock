@@ -2,16 +2,18 @@ import { useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { Download, Play, RefreshCw, RotateCcw, Search, Server, Square, Terminal } from 'lucide-react';
 import { GET_DEV_SERVER_LOG, GET_DEV_SERVERS } from '../graphql/queries';
-import { RESTART_DEV_SERVER, START_DEV_SERVER, STOP_DEV_SERVER, STOP_WORKTREE_SERVER } from '../graphql/mutations';
+import { RESTART_DEV_SERVER, START_ALL_DEV_SERVERS, START_DEV_SERVER, STOP_ALL_DEV_SERVERS, STOP_DEV_SERVER, STOP_WORKTREE_SERVER } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Button, Card, IconButton, Input, Page, PageHeader } from '../components/ui';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { cn } from '../lib/cn';
-import { filterLog, type DevServer, type DevServerAction } from '../lib/devServers';
+import { canStop, filterLog, type DevServer, type DevServerAction } from '../lib/devServers';
 
 const POLL_MS = 5000;
 
-const StatusDot = ({ running }: { running: boolean }) => <span className={cn('size-2.5 shrink-0 rounded-full', running ? 'bg-status-merged' : 'bg-muted-foreground/40')} aria-hidden="true" />;
+const DOT_CLASS: Record<DevServer['state'], string> = { running: 'bg-status-merged', starting: 'animate-pulse bg-amber-300 motion-reduce:animate-none', failed: 'bg-status-conflict', stopped: 'bg-muted-foreground/40' };
+
+const StatusDot = ({ state }: { state: DevServer['state'] }) => <span className={cn('size-2.5 shrink-0 rounded-full', DOT_CLASS[state])} aria-hidden="true" />;
 
 const DevServersPage = () => {
   const { data, loading, error, refetch } = useQuery(GET_DEV_SERVERS, { ...CACHED_QUERY_OPTIONS, pollInterval: POLL_MS });
@@ -21,6 +23,8 @@ const DevServersPage = () => {
   const [startServer] = useMutation(START_DEV_SERVER);
   const [stopServer] = useMutation(STOP_DEV_SERVER);
   const [restartServer] = useMutation(RESTART_DEV_SERVER);
+  const [startAll] = useMutation(START_ALL_DEV_SERVERS);
+  const [stopAll] = useMutation(STOP_ALL_DEV_SERVERS);
   const [stopWorktree] = useMutation(STOP_WORKTREE_SERVER);
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState('');
@@ -57,7 +61,11 @@ const DevServersPage = () => {
     <Page width="full">
       <PageHeader>
         <div><h1 className="text-balance font-display text-3xl font-black">Dev servers</h1><p className="mt-1 text-pretty text-secondary-foreground">The apps of this workspace. Main runs from the main clones with qonflo-dev; secondary are the servers agents started in ticket worktrees.</p></div>
-        <Button onClick={() => void refetch()} disabled={loading}><RefreshCw size={16} className={cn(loading && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />Refresh</Button>
+        <span className="flex flex-wrap items-center gap-2">
+          <Button onClick={() => void act('all', () => startAll())} disabled={busy !== null}><Play size={16} aria-hidden="true" />Start all</Button>
+          <Button onClick={() => { if (window.confirm('Stop all dev servers?')) void act('all', () => stopAll()); }} disabled={busy !== null}><Square size={16} aria-hidden="true" />Stop all</Button>
+          <Button onClick={() => void refetch()} disabled={loading}><RefreshCw size={16} className={cn(loading && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />Refresh</Button>
+        </span>
       </PageHeader>
 
       {error && <Card className="mb-4 border-status-conflict text-pretty text-sm text-status-conflict" role="alert">{error.message}</Card>}
@@ -68,12 +76,12 @@ const DevServersPage = () => {
         <ul className="flex flex-col">
           {main.map((app) => (
             <li className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 last:border-b-0" key={app.name}>
-              <span className="flex min-w-0 items-center gap-2.5"><StatusDot running={app.running} /><span className="min-w-0"><strong className="block font-display">{app.name}</strong><small className="font-mono text-[0.68rem] text-muted-foreground">{app.folder} · port {app.port} · {app.running ? 'running' : 'stopped'}</small>{app.running && !app.hasLog && <small className="block text-pretty text-[0.7rem] text-amber-300">Started outside DOCK, so there is no log. Restart it here to keep one.</small>}</span></span>
+              <span className="flex min-w-0 items-center gap-2.5"><StatusDot state={app.state} /><span className="min-w-0"><strong className="block font-display">{app.name}</strong><small className="font-mono text-[0.68rem] text-muted-foreground">{app.folder} · port {app.port} · {app.state}</small>{app.state === 'failed' && app.error && <small className="block max-w-xl whitespace-pre-wrap break-words text-pretty font-mono text-[0.7rem] text-status-conflict">{app.error}</small>}{app.running && !app.hasLog && <small className="block text-pretty text-[0.7rem] text-amber-300">Started outside DOCK, so there is no log. Restart it here to keep one.</small>}</span></span>
               <span className="flex items-center gap-1">
-                {app.running
-                  ? <><IconButton variant="ghost" aria-label={`Restart ${app.name}`} title="Restart" disabled={busy === app.name} onClick={() => void act(app.name, () => restartServer({ variables: { name: app.name } }))}><RotateCcw size={15} aria-hidden="true" /></IconButton>
-                    <IconButton variant="ghost" className="text-status-conflict" aria-label={`Stop ${app.name}`} title="Stop" disabled={busy === app.name} onClick={() => void act(app.name, () => stopServer({ variables: { name: app.name } }))}><Square size={15} aria-hidden="true" /></IconButton></>
-                  : <IconButton variant="ghost" aria-label={`Start ${app.name}`} title="Start" disabled={busy === app.name} onClick={() => void act(app.name, () => startServer({ variables: { name: app.name } }))}><Play size={15} aria-hidden="true" /></IconButton>}
+                {app.state === 'running' && <IconButton variant="ghost" aria-label={`Restart ${app.name}`} title="Restart" disabled={busy === app.name || busy === 'all'} onClick={() => void act(app.name, () => restartServer({ variables: { name: app.name } }))}><RotateCcw size={15} aria-hidden="true" /></IconButton>}
+                {canStop(app.state)
+                  ? <IconButton variant="ghost" className="text-status-conflict" aria-label={`Stop ${app.name}`} title="Stop" disabled={busy === app.name || busy === 'all'} onClick={() => void act(app.name, () => stopServer({ variables: { name: app.name } }))}><Square size={15} aria-hidden="true" /></IconButton>
+                  : <IconButton variant="ghost" aria-label={`Start ${app.name}`} title="Start" disabled={busy === app.name || busy === 'all'} onClick={() => void act(app.name, () => startServer({ variables: { name: app.name } }))}><Play size={15} aria-hidden="true" /></IconButton>}
                 <IconButton variant="ghost" aria-label={`Log of ${app.name}`} title={app.hasLog ? 'Log' : 'No log: DOCK did not start it'} disabled={!app.hasLog} onClick={() => setLogApp(app.name)}><Terminal size={15} aria-hidden="true" /></IconButton>
               </span>
             </li>
@@ -87,7 +95,7 @@ const DevServersPage = () => {
           <ul className="flex flex-col">
             {secondary.map((item) => (
               <li className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 last:border-b-0" key={item.port}>
-                <span className="flex min-w-0 items-center gap-2.5"><StatusDot running /><span className="min-w-0"><strong className="block font-display">{item.ticketKey || item.folder}</strong><small className="font-mono text-[0.68rem] text-muted-foreground">{item.folder} · port {item.port}{item.pid ? ` · pid ${item.pid}` : ''}</small></span></span>
+                <span className="flex min-w-0 items-center gap-2.5"><StatusDot state="running" /><span className="min-w-0"><strong className="block font-display">{item.ticketKey || item.folder}</strong><small className="font-mono text-[0.68rem] text-muted-foreground">{item.folder} · port {item.port}{item.pid ? ` · pid ${item.pid}` : ''}</small></span></span>
                 <span className="flex items-center gap-1">
                 <IconButton variant="ghost" aria-label={`Log of the server on port ${item.port}`} title={item.hasLog ? 'Log' : 'No log: not started with dev-server.cjs'} disabled={!item.hasLog} onClick={() => setLogApp(item.name)}><Terminal size={15} aria-hidden="true" /></IconButton>
                 <IconButton variant="ghost" className="text-status-conflict" aria-label={`Stop the server on port ${item.port}`} title="Stop" disabled={busy === String(item.port)} onClick={() => void act(String(item.port), () => stopWorktree({ variables: { port: item.port } }))}><Square size={15} aria-hidden="true" /></IconButton>

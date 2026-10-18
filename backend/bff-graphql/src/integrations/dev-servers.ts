@@ -17,13 +17,16 @@ const LOG_BYTES = 64 * 1024;
 // The log of a secondary server, written by the kit's dev-server.cjs: <worktree folder>-<port>.
 const SECONDARY_LOG = /^[A-Za-z0-9][A-Za-z0-9._-]*-\d{2,5}$/;
 const ACTIONS_KEPT = 50;
+const STARTING_MS = 120_000;
+const STOP_WAIT_MS = 5000;
+const ERROR_TAIL_BYTES = 2048;
 // A shell, an agent or qonflo-dev that started a server is never stopped with it.
 const STARTERS = new Set(['bash', 'zsh', 'fish', 'sh', 'claude', 'qonflo-dev']);
 
 export class DevServerError extends Error {}
 
 export interface Listener { port: number; pid: number }
-export interface DevServer { name: string; folder: string; port: number; running: boolean; pid: number | null; ticketKey: string | null; hasLog: boolean }
+export interface DevServer { name: string; folder: string; port: number; running: boolean; pid: number | null; state: 'running' | 'starting' | 'stopped' | 'failed'; error: string | null; ticketKey: string | null; hasLog: boolean }
 export interface DevServerAction { at: string; target: string; action: string; ok: boolean; output: string }
 
 /** What the service needs from the machine. The real one reads ss and /proc; a test passes its own. */
@@ -34,10 +37,12 @@ export interface DevSystem {
   command(pid: number): string;
   children(pid: number): number[];
   kill(pids: number[]): void;
-  /** Starts `qonflo-dev <app>` on its own, its output into the log file. */
-  start(app: string, logFile: string): void;
-  /** Runs `qonflo-dev stop <app>` and returns its output. */
-  stop(app: string): Promise<{ ok: boolean; output: string }>;
+  /** Ends the process group a start made, when pid is a real group leader. */
+  killGroup(pid: number): void;
+  /** Starts `qonflo-dev <app>` on its own, its output into the log file. Resolves with its pid once it spawned, rejects when it cannot; `onFail` hears of a later error or a failed exit. */
+  start(app: string, logFile: string, onFail: (message: string) => void): Promise<number | null>;
+  /** Runs `qonflo-dev stop <app>`, or `qonflo-dev stop` for all, and returns its output. */
+  stop(app?: string): Promise<{ ok: boolean; output: string }>;
   ledgers(): Array<{ key: string; dirs: string[] }>;
 }
 
@@ -66,14 +71,20 @@ export function linuxSystem(projectsDir: string, qonfloDev: string): DevSystem {
     command: (pid) => proc(pid, 'comm').trim(),
     children: (pid) => proc(pid, `task/${pid}/children`).trim().split(/\s+/).filter(Boolean).map(Number),
     kill: (pids) => { for (const pid of pids) { try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ } } },
-    start: (app, logFile) => {
+    killGroup: (pid) => { if (pid > 1) { try { process.kill(-pid, 'SIGTERM'); } catch { /* already gone */ } } },
+    start: (app, logFile, onFail) => new Promise((resolve, reject) => {
       const out = fs.openSync(logFile, 'w');
-      spawn(qonfloDev, [app], { detached: true, stdio: ['ignore', out, out] }).unref();
-      fs.closeSync(out);
-    },
+      let child: ReturnType<typeof spawn>;
+      try { child = spawn(qonfloDev, [app], { detached: true, stdio: ['ignore', out, out] }); } finally { fs.closeSync(out); }
+      let spawned = false;
+      child.on('error', (error) => { if (spawned) onFail(error.message); else reject(error); });
+      child.on('spawn', () => { spawned = true; resolve(child.pid ?? null); });
+      child.on('exit', (code, signal) => { if (code !== 0) onFail(`qonflo-dev exited with ${code ?? signal}`); });
+      child.unref();
+    }),
     stop: async (app) => {
       try {
-        const { stdout, stderr } = await run(qonfloDev, ['stop', app], { timeout: 30_000 });
+        const { stdout, stderr } = await run(qonfloDev, app ? ['stop', app] : ['stop'], { timeout: 30_000 });
         return { ok: true, output: `${stdout}${stderr}`.trim() };
       } catch (error: any) {
         return { ok: false, output: `${error?.stdout ?? ''}${error?.stderr ?? ''}`.trim() || String(error?.message ?? 'stop failed') };
@@ -100,12 +111,14 @@ export function linuxSystem(projectsDir: string, qonfloDev: string): DevSystem {
  */
 export class DevServers {
   private readonly actions: DevServerAction[] = [];
+  private readonly started = new Map<string, { pid: number | null; at: number; error: string | null }>();
 
   constructor(
     private readonly system: DevSystem,
     private readonly projectsDir: string,
     private readonly logDir: string,
     private readonly clock: () => Date = () => new Date(),
+    private readonly stopWaitMs = STOP_WAIT_MS,
   ) {}
 
   private logFile(app: string) { return path.join(this.logDir, `${app}.log`); }
@@ -128,12 +141,28 @@ export class DevServers {
     return relative && !relative.startsWith('..') && !relative.startsWith('.') ? relative.split('/')[0] : null;
   }
 
+  // A start DOCK made that has not bound its port yet and has not failed or timed out.
+  private starting(name: string) {
+    const entry = this.started.get(name);
+    return entry && !entry.error && this.clock().getTime() - entry.at < STARTING_MS ? entry : null;
+  }
+
+  private mainState(name: string, port: number, running: boolean) {
+    const entry = this.started.get(name);
+    if (running) this.started.delete(name);
+    if (running || !entry) return { state: running ? 'running' as const : 'stopped' as const, error: null, pid: null };
+    if (this.starting(name)) return { state: 'starting' as const, error: null, pid: entry.pid };
+    const reason = entry.error ?? `Nothing listens on port ${port} after ${STARTING_MS / 1000}s.`;
+    return { state: 'failed' as const, error: [reason, this.log(name, ERROR_TAIL_BYTES).trim()].filter(Boolean).join('\n'), pid: null };
+  }
+
   async list() {
     const listeners = await this.system.listeners();
     const byPort = new Map(listeners.map((item) => [item.port, item.pid]));
-    const main: DevServer[] = MAIN_APPS.map((app) => ({
-      name: app.name, folder: app.folder, port: app.port, running: byPort.has(app.port), pid: byPort.get(app.port) ?? null, ticketKey: null, hasLog: fs.existsSync(this.logFile(app.name)),
-    }));
+    const main: DevServer[] = MAIN_APPS.map((app) => {
+      const { state, error, pid } = this.mainState(app.name, app.port, byPort.has(app.port));
+      return { name: app.name, folder: app.folder, port: app.port, running: state === 'running', pid: byPort.get(app.port) ?? pid, state, error, ticketKey: null, hasLog: fs.existsSync(this.logFile(app.name)) };
+    });
     const mainFolders = new Set<string>(MAIN_APPS.map((app) => app.folder));
     const ledgers = this.system.ledgers();
     const secondary: DevServer[] = listeners
@@ -144,7 +173,7 @@ export class DevServers {
         const dir = path.posix.join(this.projectsDir, item.folder);
         const ticketKey = ledgers.find((ledger) => ledger.dirs.some((owned) => owned === dir || owned.startsWith(`${dir}/`)))?.key ?? null;
         const name = `${item.folder}-${item.port}`;
-        return { name, folder: item.folder, port: item.port, running: true, pid: item.pid, ticketKey, hasLog: fs.existsSync(this.logFile(name)) };
+        return { name, folder: item.folder, port: item.port, running: true, pid: item.pid, state: 'running', error: null, ticketKey, hasLog: fs.existsSync(this.logFile(name)) };
       });
     return { main, secondary, actions: [...this.actions] };
   }
@@ -152,17 +181,96 @@ export class DevServers {
   async start(name: string) {
     const app = this.mainApp(name);
     if ((await this.system.listeners()).some((item) => item.port === app.port)) throw new DevServerError(`${name} is already running on port ${app.port}`);
+    if (this.starting(name)) throw new DevServerError(`${name} is already starting`);
+    this.release(name);
     fs.mkdirSync(this.logDir, { recursive: true });
-    this.system.start(name, this.logFile(name));
+    const entry = { pid: null as number | null, at: this.clock().getTime(), error: null as string | null };
+    this.started.set(name, entry);
+    try {
+      entry.pid = await this.system.start(name, this.logFile(name), (message) => {
+        if (this.started.get(name) !== entry) return;
+        entry.error = message;
+        this.record(name, 'start', false, message);
+      });
+    } catch (error: any) {
+      entry.error = String(error?.message ?? 'start failed');
+      this.record(name, 'start', false, entry.error);
+      throw new DevServerError(`qonflo-dev ${name} did not start: ${entry.error}`);
+    }
     this.record(name, 'start', true, `qonflo-dev ${name}`);
     return true;
   }
 
+  async startAll() {
+    const listeners = await this.system.listeners();
+    const errors: string[] = [];
+    for (const app of MAIN_APPS) {
+      if (listeners.some((item) => item.port === app.port) || this.starting(app.name)) continue;
+      try { await this.start(app.name); } catch (error) {
+        if (!(error instanceof DevServerError)) throw error;
+        errors.push(error.message);
+      }
+    }
+    if (errors.length) throw new DevServerError(errors.join('\n'));
+    return true;
+  }
+
+  private async snapshot(ports: number[], waitMs: number) {
+    const read = async () => new Map((await this.system.listeners()).map((item) => [item.port, item.pid]));
+    let bound = await read();
+    for (const end = Date.now() + waitMs; ports.some((port) => bound.has(port)) && Date.now() < end;) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      bound = await read();
+    }
+    return bound;
+  }
+
+  // Forgets what DOCK started, and ends the process group of a start that is still running.
+  private release(name: string) {
+    const entry = this.started.get(name);
+    this.started.delete(name);
+    if (entry && !entry.error && entry.pid) this.system.killGroup(entry.pid);
+  }
+
+  // Waits for stopped apps to release their ports, kills the process tree that owns a port still bound when it runs from the app's folder, and reports what is left.
+  private async freePorts(apps: ReadonlyArray<(typeof MAIN_APPS)[number]>, stopped: boolean) {
+    let bound = await this.snapshot(apps.map((app) => app.port), stopped ? this.stopWaitMs : 0);
+    const killed = new Map<string, number>();
+    const foreign = new Map<string, string>();
+    for (const app of apps) {
+      const pid = bound.get(app.port);
+      if (pid === undefined) continue;
+      if (this.folderOf(pid) !== app.folder) foreign.set(app.name, `port ${app.port} held by pid ${pid} outside ${app.folder}`);
+      else killed.set(app.name, this.killTree(pid, app.folder));
+    }
+    if (killed.size) bound = await this.snapshot(apps.filter((app) => killed.has(app.name)).map((app) => app.port), this.stopWaitMs);
+    return apps.map((app) => ({
+      app,
+      killed: killed.get(app.name) ?? 0,
+      stuck: foreign.get(app.name) ?? (killed.has(app.name) && bound.has(app.port) ? `still listens on port ${app.port}` : null),
+    }));
+  }
+
   async stop(name: string) {
-    this.mainApp(name);
+    const app = this.mainApp(name);
+    this.release(name);
     const result = await this.system.stop(name);
-    this.record(name, 'stop', result.ok, result.output);
-    if (!result.ok) throw new DevServerError(result.output || `qonflo-dev stop ${name} failed`);
+    const [freed] = await this.freePorts([app], result.ok);
+    const output = [result.output, freed.killed ? `killed ${freed.killed} process(es) on port ${app.port}` : '', freed.stuck ?? ''].filter(Boolean).join('\n');
+    this.record(name, 'stop', !freed.stuck, output);
+    if (freed.stuck) throw new DevServerError(output);
+    return true;
+  }
+
+  async stopAll() {
+    for (const app of MAIN_APPS) this.release(app.name);
+    const result = await this.system.stop();
+    const freed = await this.freePorts(MAIN_APPS, result.ok);
+    const stuck = freed.filter((item) => item.stuck);
+    const killed = freed.reduce((sum, item) => sum + item.killed, 0);
+    const output = [result.output, killed ? `killed ${killed} process(es)` : '', ...stuck.map((item) => `${item.app.name}: ${item.stuck}`)].filter(Boolean).join('\n');
+    this.record('all', 'stop', stuck.length === 0, output);
+    if (stuck.length) throw new DevServerError(output);
     return true;
   }
 
@@ -171,16 +279,25 @@ export class DevServers {
     return this.start(name);
   }
 
+  // The command that owns a server in its folder and everything under it, never the shell or agent above, nor init or DOCK itself.
+  private killTree(pid: number, folder: string) {
+    const spared = new Set([0, 1, process.pid, process.ppid]);
+    if (spared.has(pid)) return 0;
+    let root = pid;
+    for (let parent = this.system.parent(root); parent > 1 && !STARTERS.has(this.system.command(parent)) && this.folderOf(parent) === folder; parent = this.system.parent(parent)) root = parent;
+    const tree = (current: number): number[] => [current, ...this.system.children(current).flatMap(tree)];
+    const pids = tree(root).filter((current) => !spared.has(current));
+    this.system.kill(pids);
+    return pids.length;
+  }
+
   /** Stops a secondary server: the command that started it in its worktree and everything under it, never the shell or agent above. */
   async stopWorktree(port: number) {
     const listener = (await this.system.listeners()).find((item) => item.port === port);
     const folder = listener ? this.folderOf(listener.pid) : null;
     if (!listener || !folder || MAIN_APPS.some((app) => app.folder === folder)) throw new DevServerError(`No worktree server listens on port ${port}`);
-    let root = listener.pid;
-    for (let parent = this.system.parent(root); parent > 1 && !STARTERS.has(this.system.command(parent)) && this.folderOf(parent) === folder; parent = this.system.parent(parent)) root = parent;
-    const tree = (pid: number): number[] => [pid, ...this.system.children(pid).flatMap(tree)];
-    this.system.kill(tree(root));
-    this.record(`${folder}:${port}`, 'stop', true, `stopped ${tree(root).length} process(es)`);
+    const killed = this.killTree(listener.pid, folder);
+    this.record(`${folder}:${port}`, 'stop', true, `stopped ${killed} process(es)`);
     return true;
   }
 
