@@ -299,12 +299,21 @@ export const typeDefs = gql`
     videos: [DemoVideo!]!
   }
 
+  enum DevServerState {
+    running
+    starting
+    stopped
+    failed
+  }
+
   type DevServer {
     name: String!
     folder: String!
     port: Int!
     running: Boolean!
     pid: Int
+    state: DevServerState!
+    error: String
     ticketKey: String
     hasLog: Boolean!
   }
@@ -739,6 +748,8 @@ export const typeDefs = gql`
     startDevServer(name: String!): Boolean!
     stopDevServer(name: String!): Boolean!
     restartDevServer(name: String!): Boolean!
+    startAllDevServers: Boolean!
+    stopAllDevServers: Boolean!
     stopWorktreeServer(port: Int!): Boolean!
     addElevenLabsKey(name: String!, key: String!): Boolean!
     removeElevenLabsKey(name: String!): Boolean!
