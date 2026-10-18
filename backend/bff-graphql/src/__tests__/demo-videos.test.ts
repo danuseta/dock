@@ -43,7 +43,7 @@ function fakeBucket() {
 
 function fakeLinks() {
   const links = new Map<string, string>();
-  return { links, save: async (key: string, url: string) => { links.set(key, url); }, remove: async (key: string, url: string) => { if (links.get(key) === url) links.delete(key); } };
+  return { links, get: async (key: string) => (links.has(key) ? { url: links.get(key)! } : null), save: async (key: string, url: string) => { links.set(key, url); }, remove: async (key: string, url: string) => { if (links.get(key) === url) links.delete(key); } };
 }
 
 test('the storage settings keep the keys out of the view, keep a saved key when the form leaves it empty, and check every field', () => {
@@ -74,9 +74,11 @@ test('one video per ticket in the set folder: the link goes through the public b
   assert.strictEqual(made.length, 1, 'the bucket client is made once while the settings stay the same');
 
   objects.set('demo-qonflo/notes.txt', { body: Buffer.from('x'), contentType: 'text/plain' });
-  assert.deepStrictEqual((await videos.list()).map((item) => [item.ticketKey, item.size]), [['QRD-1363', 9]]);
+  const rows = [{ ticketKey: 'QRD-1363', url: video.url, updatedAt: new Date('2026-10-17T10:00:00.000Z') }, { ticketKey: 'QRD-1400', url: 'https://loom.com/share/abc', updatedAt: new Date('2026-10-16T10:00:00.000Z') }];
+  assert.deepStrictEqual((await videos.list(rows)).videos.map((item) => [item.ticketKey, item.size]), [['QRD-1363', 9], ['QRD-1400', null]], 'a Loom link is listed without a size');
 
   await settings.save({ folder: 'demo-next' });
+  assert.deepStrictEqual((await videos.list(rows)).videos.map((item) => [item.ticketKey, item.size]), [['QRD-1363', 9], ['QRD-1400', null]], 'a link made under the older folder still gets its size');
   await videos.upload('QRD-1255', Buffer.from('mp4'), 'video/mp4', 3);
   assert.ok(objects.has('demo-next/QRD-1255.mp4'), 'a new folder in Settings is used from the next upload');
   assert.strictEqual(made.length, 2);
@@ -85,11 +87,58 @@ test('one video per ticket in the set folder: the link goes through the public b
   await assert.rejects(videos.upload('QRD-1', Buffer.from('x'), 'video/mp4', null), /content length/);
   links.links.set('QRD-1255', 'https://loom.com/share/manual');
   await videos.remove('QRD-1255');
-  assert.strictEqual(links.links.get('QRD-1255'), 'https://loom.com/share/manual', 'a link pasted by hand stays when the S3 video goes');
+  assert.strictEqual(links.links.has('QRD-1255'), false, 'deleting a row removes its link');
+  assert.ok(objects.has('demo-next/QRD-1255.mp4'), 'the S3 object stays when the link was pasted by hand');
+  await videos.upload('QRD-1255', Buffer.from('mp4'), 'video/mp4', 3);
+  await videos.remove('QRD-1255');
+  assert.strictEqual(links.links.has('QRD-1255'), false);
+  assert.strictEqual(objects.has('demo-next/QRD-1255.mp4'), false, 'deleting an S3 row removes the object too');
 
   const unset = new DemoVideos(memorySettings(), links, makeStore);
-  assert.strictEqual(await unset.configured(), false);
-  await assert.rejects(unset.list(), /Settings/);
+  assert.strictEqual((await unset.list(rows)).configured, false);
+  assert.deepStrictEqual((await unset.list(rows)).videos.map((item) => [item.ticketKey, item.size]), [['QRD-1363', null], ['QRD-1400', null]], 'the list shows without storage');
+  links.links.set('QRD-1400', 'https://loom.com/share/abc');
+  await unset.remove('QRD-1400');
+  assert.strictEqual(links.links.has('QRD-1400'), false);
+});
+
+test('the list and a delete survive an unreachable laptop DOCK or bucket, and never touch S3 without a row', async () => {
+  const { objects, makeStore } = fakeBucket();
+  const links = fakeLinks();
+  const settings = memorySettings(KEYS);
+  const videos = new DemoVideos(settings, links, makeStore);
+  const mp4 = await videos.upload('QRD-1363', Buffer.from('mp4'), 'video/mp4', 3);
+  const rows = [{ ticketKey: 'QRD-1363', url: mp4.url, updatedAt: new Date() }, { ticketKey: 'QRD-1400', url: 'https://loom.com/share/abc', updatedAt: new Date() }];
+
+  const warn = console.warn;
+  const warned: unknown[][] = [];
+  console.warn = (...args: unknown[]) => { warned.push(args); };
+  try {
+    const failing = new DemoVideos(settings, links, () => ({ ...makeStore(KEYS as DemoStorageConfig), list: async () => { throw new Error('bucket down'); } }));
+    assert.deepStrictEqual((await failing.list(rows)).videos.map((item) => [item.ticketKey, item.size]), [['QRD-1363', null], ['QRD-1400', null]]);
+    assert.strictEqual(warned.length, 1);
+    assert.match(String(warned[0][1]), /bucket down/);
+  } finally {
+    console.warn = warn;
+  }
+
+  const offline = new DemoVideos({ ...settings, full: async () => { throw new Error('laptop offline'); } }, links, makeStore);
+  const listed = await offline.list(rows);
+  assert.deepStrictEqual([listed.configured, listed.videos.length], [false, 2], 'the rows show while the laptop DOCK is offline');
+  links.links.set('QRD-1400', 'https://loom.com/share/abc');
+  await offline.remove('QRD-1400');
+  assert.strictEqual(links.links.has('QRD-1400'), false, 'a Loom link goes while the laptop DOCK is offline');
+
+  await videos.remove('QRD-9999');
+  assert.ok(objects.has('demo-qonflo/QRD-1363.mp4'));
+  objects.set('demo-qonflo/QRD-9999.mp4', { body: Buffer.from('x'), contentType: 'video/mp4' });
+  await videos.remove('QRD-9999');
+  assert.ok(objects.has('demo-qonflo/QRD-9999.mp4'), 'no row, no S3 delete');
+
+  await settings.save({ folder: 'demo-next' });
+  await videos.remove('QRD-1363');
+  assert.strictEqual(objects.has('demo-qonflo/QRD-1363.mp4'), false, 'a link made under the older folder deletes its object');
+  assert.strictEqual(links.links.has('QRD-1363'), false);
 });
 
 test('the workspace DOCK keeps no S3 key: the settings live on the laptop DOCK, behind a machine token', async (t) => {

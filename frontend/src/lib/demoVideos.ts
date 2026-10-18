@@ -1,4 +1,4 @@
-export interface DemoVideo { ticketKey: string; url: string; size: number; updatedAt?: string | null }
+export interface DemoVideo { ticketKey: string; url: string; size?: number | null; updatedAt?: string | null }
 
 /** A link the ticket page can play in place: an MP4 file, as the S3 demo videos are. */
 export const isPlayableVideo = (url?: string | null) => Boolean(url && /\.mp4(\?|#|$)/i.test(url));

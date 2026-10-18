@@ -5,7 +5,7 @@ import { ledgerPeer } from './ledger-peer';
 import { OrchestratorInputError } from './orchestrator';
 
 export const DEMO_STORAGE_SETTING = 'demoStorage';
-const FOLDER = /^[a-z0-9][a-z0-9_-]{0,62}$/;
+export const FOLDER = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 
 /** Where the demo videos go and the link they get. The keys stay on the laptop DOCK; the workspace DOCK asks for them. */
 export interface DemoStorageConfig { endpoint: string; region: string; bucket: string; folder: string; publicBaseUrl: string; accessKey: string; secretKey: string }

@@ -269,7 +269,7 @@ export const typeDefs = gql`
   type DemoVideo {
     ticketKey: String!
     url: String!
-    size: Float!
+    size: Float
     updatedAt: String
   }
 
