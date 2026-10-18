@@ -34,6 +34,7 @@ const RowHead: React.FC<{ event: ChatActivity; now: number; steps?: number; open
         <span className={cn('block break-words [overflow-wrap:anywhere]', failed ? TONE[event.status] : 'text-foreground')}>
           {event.label || event.name}
           {KIND_TAG[event.kind] && <> <span className="ml-1.5 text-[0.58rem] uppercase text-muted-foreground">{KIND_TAG[event.kind]}</span></>}
+          {event.agent && event.agent !== 'main' && event.kind !== 'agent' && <> <span className="ml-1.5 text-[0.58rem] text-muted-foreground">{event.agent}</span></>}
           {failed ? <> <span className="ml-1.5 text-[0.58rem] font-bold uppercase">{statusText(event.status)}</span></> : <span className="sr-only"> ({statusText(event.status)})</span>}
         </span>
         {event.summary && <span className="block truncate text-muted-foreground">{event.summary}</span>}

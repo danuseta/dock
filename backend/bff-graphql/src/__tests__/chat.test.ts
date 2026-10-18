@@ -825,6 +825,42 @@ test('claim: a cron message waits while every cron slot is in use and runs in th
   assert.strictEqual((await chat.claim({ wait: 0 }, undefined, 'workspace')).message?.sessionId, answered.id, 'the first free slot goes to the answer');
 });
 
+test('a cron session keeps the options the cron sends, so it shows Auto; a manual session keeps its defaults', async () => {
+  const memory = memoryStorage();
+  const chat = new ChatService(memory.storage, () => new Date('2026-10-14T03:00:00.000Z'), async () => undefined);
+  const cron = await chat.createSession({ machine: 'workspace', ticketKey: 'QRD-1', title: 'QRD-1 (cron)', origin: 'cron', options: { permissionMode: 'auto', effort: 'high' } });
+  assert.deepStrictEqual(cron.options, { model: null, effort: 'high', permissionMode: 'auto', fast: null });
+  assert.strictEqual((await chat.createSession({ machine: 'workspace', ticketKey: 'QRD-2', title: 'QRD-2 (cron)', origin: 'cron' })).options, null);
+  assert.deepStrictEqual((await chat.createSession({ machine: 'workspace', title: 'Manual' })).options, { model: null, effort: null, permissionMode: 'auto', fast: null });
+});
+
+test('a cron turn clears the stalled reason when it starts and reports the subagents its lead left running when it ends', async () => {
+  const memory = memoryStorage();
+  const chat = new ChatService(memory.storage, () => new Date('2026-10-14T03:00:00.000Z'), async () => undefined);
+  const told: Array<[string, string | null, boolean]> = [];
+  chat.cronTurn = async (ticketKey, detail, ended) => { told.push([ticketKey, detail, ended]); };
+  const cron = await chat.createSession({ machine: 'workspace', ticketKey: 'QRD-1', title: 'QRD-1 (cron)', origin: 'cron' });
+  const manual = await chat.createSession({ machine: 'workspace', ticketKey: 'QRD-9', title: 'Manual' });
+
+  const turn = async (sessionId: string, end: object) => {
+    await chat.sendMessage(sessionId, 'build', ['workspace']);
+    const claimed = (await chat.claim({ wait: 0 }, undefined, 'workspace')).message!;
+    await chat.delta({ sessionId, replyTo: claimed.id, items: [], ...end }, 'workspace');
+  };
+  await turn(cron.id, { done: true, subagentsRunning: 2 });
+  assert.deepStrictEqual(told, [['QRD-1', null, false], ['QRD-1', 'Lead ended its turn while 2 subagents were still running', true]]);
+  await turn(cron.id, { done: true, subagentsRunning: 1 });
+  assert.deepStrictEqual(told.slice(2), [['QRD-1', null, false], ['QRD-1', 'Lead ended its turn while 1 subagent was still running', true]]);
+  await turn(cron.id, { done: true });
+  assert.deepStrictEqual(told.slice(4), [['QRD-1', null, false], ['QRD-1', null, true]], 'a clean end is reported so the resume count starts again');
+  await turn(cron.id, { done: false, error: 'boom', subagentsRunning: 3 });
+  assert.deepStrictEqual(told.slice(6), [['QRD-1', null, false]], 'a failed turn reports no end');
+  await turn(manual.id, { done: true, subagentsRunning: 2 });
+  assert.strictEqual(told.length, 7, 'a manual session is not a cron run');
+  const running = (value: unknown) => parseDelta({ sessionId: cron.id, replyTo: 1, done: true, subagentsRunning: value }).subagentsRunning;
+  assert.deepStrictEqual([running(2), running(1000), running(0), running('2'), running(undefined)], [2, 100, undefined, undefined, undefined]);
+});
+
 test('a DOCK turn adds its cost to the session total, keeps what a later push leaves out, and survives a restart', async () => {
   const { service, storage, now } = clockedService();
   const dock = await service.createSession({ title: 'Cost' });

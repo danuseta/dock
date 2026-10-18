@@ -107,6 +107,19 @@ export class StorageAPI {
     this.orders = null;
   }
 
+  private manual: { at: number; value: Promise<Set<string>> } | null = null;
+
+  /** Tickets the owner works by hand, read at most once every two seconds like the work order. */
+  manualTickets(): Promise<Set<string>> {
+    if (!this.manual || Date.now() - this.manual.at > 2000) this.manual = { at: Date.now(), value: this.storage.getManualTicketKeys() };
+    return this.manual.value;
+  }
+
+  async setTicketManual(ticketKeyInput: string, manual: boolean) {
+    await this.storage.setTicketManual(normalizeTicketKey(ticketKeyInput), manual);
+    this.manual = null;
+  }
+
   async clearTicketDependency(ticketKeyInput: string) {
     const ticketKey = normalizeTicketKey(ticketKeyInput);
     await this.storage.deleteTicketDependency(ticketKey);

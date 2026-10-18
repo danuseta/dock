@@ -296,6 +296,12 @@ export const CLEAR_TICKET_WORK_ORDER = gql`
   }
 `;
 
+export const SET_TICKET_MANUAL = gql`
+  mutation SetTicketManual($ticketKey: String!, $manual: Boolean!) {
+    setTicketManual(ticketKey: $ticketKey, manual: $manual)
+  }
+`;
+
 export const UPDATE_ORCHESTRATOR_CRON_SETTINGS = gql`
   mutation UpdateOrchestratorCronSettings($config: String!, $webhookUrl: String) {
     updateOrchestratorCronSettings(config: $config, webhookUrl: $webhookUrl)

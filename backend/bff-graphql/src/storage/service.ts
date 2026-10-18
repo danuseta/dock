@@ -4,7 +4,7 @@ import { decrypt, encrypt, hashPin, verifyPin } from './crypto';
 
 const RUN_WITHOUT_LEDGER = {
   key: true, title: true, stage: true, waiting: true, payload: true, activity: true, activityDetail: true, activityEndedAt: true,
-  lastEventAt: true, ledgerUpdatedAt: true, transcriptAt: true, dismissedAt: true, machine: true, handover: true, jiraStatus: true, jiraStage: true, createdAt: true, updatedAt: true,
+  lastEventAt: true, ledgerUpdatedAt: true, transcriptAt: true, dismissedAt: true, machine: true, handover: true, jiraStatus: true, jiraStage: true, stalledDetail: true, stalledAt: true, createdAt: true, updatedAt: true,
 } as const;
 
 const SENSITIVE_KEYS = new Set([
@@ -92,15 +92,26 @@ export class StorageService {
   }
 
   async getTicketOrders(): Promise<Map<string, number>> {
-    return new Map((await this.db.ticketOrder.findMany()).map((row) => [row.ticketKey, row.position]));
+    return new Map((await this.db.ticketOrder.findMany({ where: { position: { not: null } } })).map((row) => [row.ticketKey, row.position!]));
   }
 
   setTicketOrder(ticketKey: string, position: number) {
     return this.db.ticketOrder.upsert({ where: { ticketKey }, update: { position }, create: { ticketKey, position } });
   }
 
-  deleteTicketOrder(ticketKey: string) {
-    return this.db.ticketOrder.delete({ where: { ticketKey } }).catch(() => undefined);
+  /** A ticket marked manual keeps its row without a number. */
+  async deleteTicketOrder(ticketKey: string) {
+    await this.db.ticketOrder.deleteMany({ where: { ticketKey, manual: false } });
+    await this.db.ticketOrder.updateMany({ where: { ticketKey }, data: { position: null } });
+  }
+
+  async getManualTicketKeys(): Promise<Set<string>> {
+    return new Set((await this.db.ticketOrder.findMany({ where: { manual: true }, select: { ticketKey: true } })).map((row) => row.ticketKey));
+  }
+
+  async setTicketManual(ticketKey: string, manual: boolean) {
+    await this.db.ticketOrder.upsert({ where: { ticketKey }, update: { manual }, create: { ticketKey, manual } });
+    await this.db.ticketOrder.deleteMany({ where: { ticketKey, manual: false, position: null } });
   }
 
   deleteTicketDependency(ticketKey: string) {
@@ -244,7 +255,7 @@ export class StorageService {
     return this.db.orchestratorRun.count({ where: { machine, dismissedAt: null } });
   }
 
-  async upsertOrchestratorRun(key: string, data: { title: string; stage: string; waiting: string; payload: string; ledgerUpdatedAt: Date; machine: string; ledgerRaw: string | null }) {
+  async upsertOrchestratorRun(key: string, data: { title: string; stage: string; waiting: string; payload: string; ledgerUpdatedAt: Date; machine: string; ledgerRaw: string | null; stalledDetail?: null; stalledAt?: null }) {
     const { machine, ...fields } = data;
     const updated = await this.db.orchestratorRun.updateMany({ where: { key, machine }, data: { ...fields, dismissedAt: null } });
     if (updated.count === 0) {
@@ -257,8 +268,8 @@ export class StorageService {
     return this.db.orchestratorRun.findUniqueOrThrow({ where: { key } });
   }
 
-  async takeDismissedOrchestratorRun(key: string, data: { title: string; stage: string; waiting: string; payload: string; ledgerUpdatedAt: Date; machine: string; ledgerRaw: string | null }) {
-    await this.db.orchestratorRun.updateMany({ where: { key, dismissedAt: { not: null } }, data: { ...data, handover: null, dismissedAt: null, activity: 'IDLE', activityDetail: null, activityEndedAt: null, lastEventAt: null, transcriptAt: null } });
+  async takeDismissedOrchestratorRun(key: string, data: { title: string; stage: string; waiting: string; payload: string; ledgerUpdatedAt: Date; machine: string; ledgerRaw: string | null; stalledDetail?: null; stalledAt?: null }) {
+    await this.db.orchestratorRun.updateMany({ where: { key, dismissedAt: { not: null } }, data: { ...data, handover: null, dismissedAt: null, activity: 'IDLE', activityDetail: null, activityEndedAt: null, lastEventAt: null, transcriptAt: null, stalledDetail: null, stalledAt: null } });
     return this.db.orchestratorRun.findUniqueOrThrow({ where: { key } });
   }
 
@@ -278,6 +289,8 @@ export class StorageService {
     stage?: string;
     jiraStatus?: string | null;
     jiraStage?: string | null;
+    stalledDetail?: string | null;
+    stalledAt?: Date | null;
   }) {
     return this.db.orchestratorRun.update({ where: { key }, data, select: RUN_WITHOUT_LEDGER });
   }
@@ -657,6 +670,27 @@ export class StorageService {
         AND EXISTS (SELECT 1 FROM "ChatMessage" m WHERE m."sessionId" = s."id" AND m."role" = 'user')
         AND NOT EXISTS (SELECT 1 FROM "ChatMessage" m WHERE m."sessionId" = s."id" AND (m."role" <> 'user' OR m."state" IN ('queued', 'taken')))`);
     return rows.map((row) => row.ticketKey);
+  }
+
+  /**
+   * For each of the given tickets that has a cron session: the newest one, and whether another session of the ticket
+   * (a manual DOCK chat or a terminal session) is working or has spoken since that cron session last did.
+   */
+  async getCronSessionStates(keys: string[]): Promise<Map<string, { id: string; status: string; statusDetail: string | null; otherActive: boolean }>> {
+    const rows = await this.db.chatSession.findMany({
+      where: { ticketKey: { in: keys } },
+      orderBy: { startedAt: 'asc' },
+      select: { id: true, ticketKey: true, source: true, origin: true, status: true, statusDetail: true, lastMessageAt: true },
+    });
+    const states = new Map<string, { id: string; status: string; statusDetail: string | null; otherActive: boolean }>();
+    for (const key of keys) {
+      const mine = rows.filter((row) => row.ticketKey === key);
+      const cron = mine.filter((row) => row.origin === 'cron' && row.source === 'dock').at(-1);
+      if (!cron) continue;
+      const otherActive = mine.some((row) => row.origin !== 'cron' && (row.status !== 'idle' || row.lastMessageAt > cron.lastMessageAt));
+      states.set(key, { id: cron.id, status: cron.status, statusDetail: cron.statusDetail, otherActive });
+    }
+    return states;
   }
 
   /** The state check is part of the write, so two bridges cannot take the same message. */

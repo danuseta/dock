@@ -1,8 +1,8 @@
 import assert from 'node:assert';
 import test from 'node:test';
 import {
-  CronInputError, DEFAULT_CRON_SETTINGS, OrchestratorCron, PARKED_TEXT, START_FAILED_TEXT, candidates, hasAcceptanceCriteria, labelOrder, ticketHasAcceptanceCriteria, outsideWindow, parseCronSettings,
-  confirmedPrompt, startPrompt, wib, type CronDeps, type CronRun, type CronSettings, type CronTicket,
+  CronInputError, DEFAULT_CRON_SETTINGS, MAX_RESUMES, OrchestratorCron, PARKED_TEXT, RESUME_GAVE_UP_TEXT, START_FAILED_TEXT, candidates, hasAcceptanceCriteria, labelOrder, ticketHasAcceptanceCriteria, outsideWindow, parseCronSettings,
+  confirmedPrompt, resumePrompt, startPrompt, wib, type CronDeps, type CronRun, type CronSettings, type CronTicket,
 } from '../integrations/orchestrator-cron';
 
 const AC = 'Context.\n\nAcceptance criteria\n\nReloading the page still shows Disconnected.\n\nA manually disabled channel keeps its status.';
@@ -97,10 +97,11 @@ interface Start {
   dependencies?: Array<{ ticketKey: string; dependsOnKey: string }>;
   pushDevices?: boolean;
   dockOrder?: Map<string, number>;
+  manual?: Set<string>;
   now?: Date;
 }
 
-type SessionState = 'queued' | 'running' | 'idle';
+type SessionState = 'queued' | 'running' | 'idle' | 'error';
 
 /**
  * The cron against fakes. Sessions model the chat side: a message sent to a session queues it, and `claim` is the
@@ -114,7 +115,7 @@ function world(start: Start = {}) {
     tickets: start.tickets ?? [],
     runs: start.runs ?? [] as CronRun[],
     online: start.online ?? true,
-    sessions: [] as Array<{ id: string; ticketKey: string; machine: string; origin: string; state: SessionState; queuedAt: number; replied: boolean }>,
+    sessions: [] as Array<{ id: string; ticketKey: string; machine: string; origin: string; options: Record<string, string>; state: SessionState; queuedAt: number; replied: boolean }>,
     sent: [] as Array<{ sessionId: string; text: string; options: Record<string, string> }>,
     moved: [] as string[],
     movedTo: [] as Array<[string, string]>,
@@ -122,6 +123,9 @@ function world(start: Start = {}) {
     posts: [] as Array<{ url: string; body: unknown }>,
     pushes: [] as Array<{ title: string; body: string; url: string }>,
     clock: 0,
+    ownerStopped: new Set<string>(),
+    otherActive: new Set<string>(),
+    failSend: false,
   };
   if (start.webhook) state.settings.set('orchestratorCronWebhookUrl', start.webhook);
   const parallel = () => JSON.parse(state.settings.get('orchestratorCronConfig') as string).parallel as number;
@@ -131,11 +135,13 @@ function world(start: Start = {}) {
     saveSetting: async (key, value) => { state.settings.set(key, value); },
     cacheGet: async (key) => state.cache.get(key) ?? null,
     cacheSet: async (key, value) => { state.cache.set(key, JSON.parse(JSON.stringify(value))); },
+    cacheDelete: async (key) => { state.cache.delete(key); },
     tickets: async () => state.tickets,
     ticket: async (key) => state.tickets.find((item) => item.key === key) ?? null,
     moveTicket: async (key, statusName) => { state.moved.push(key); state.movedTo.push([key, statusName]); return start.moves ?? true; },
     dependencies: async () => start.dependencies ?? [],
     dockOrder: async () => start.dockOrder ?? new Map(),
+    manualKeys: async () => start.manual ?? new Set(),
     slots: async () => ({ busy: state.sessions.filter((s) => s.state === 'running').length, waiting: state.sessions.filter((s) => s.state === 'queued').length }),
     machines: async () => ['laptop', 'workspace'],
     online: () => state.online,
@@ -150,12 +156,15 @@ function world(start: Start = {}) {
       const run: CronRun = { key: String(ledger.key), machine, title: String(ledger.title), waiting: String(ledger.waiting) || null, activity: 'IDLE' };
       state.runs = [...state.runs.filter((item) => item.key !== run.key), run];
     },
+    park: async (key, waiting) => { state.runs = state.runs.map((run) => (run.key === key ? { ...run, waiting, stalled: false } : run)); },
+    cronSessions: async (keys) => new Map(state.sessions.filter((s) => keys.includes(s.ticketKey)).map((s) => [s.ticketKey, { id: s.id, status: s.state, stopped: state.ownerStopped.has(s.ticketKey), otherActive: state.otherActive.has(s.ticketKey) }])),
     openSession: async (input) => {
       const session = { id: `s-${state.sessions.length + 1}`, ...input, state: 'idle' as SessionState, queuedAt: 0, replied: false };
       state.sessions.push(session);
       return session;
     },
     send: async (sessionId, text, options) => {
+      if (state.failSend) throw new Error('send refused');
       state.sent.push({ sessionId, text, options });
       const session = state.sessions.find((item) => item.id === sessionId)!;
       Object.assign(session, { state: 'queued', queuedAt: ++state.clock });
@@ -392,4 +401,106 @@ test('a cron session that dies before the agent answers frees its quota, waits o
   w.claim();
   await w.step();
   assert.deepStrictEqual((await w.cron.lastFill())!.released, [], 'the old dead session no longer counts once a new one is open');
+});
+
+test('candidates skip a ticket the owner works by hand', () => {
+  const keys = candidates([ticket('QRD-1'), ticket('QRD-2')], new Set(), new Set(), settings(), new Map(), new Set(['QRD-1'])).map((item) => item.key);
+  assert.deepStrictEqual(keys, ['QRD-2']);
+});
+
+test('every cron prompt keeps the lead in its turn while members run and asks for Bahasa Indonesia in chat', () => {
+  for (const prompt of [startPrompt('QRD-1'), confirmedPrompt('QRD-1'), resumePrompt('QRD-1')]) {
+    assert.match(prompt, /Do not end your turn while a subagent you started is still running/);
+    assert.match(prompt, /Bahasa Indonesia; code, comments, commit messages and pull request text stay in English/);
+  }
+  assert.match(resumePrompt('QRD-1'), /^Lanjutkan tiket QRD-1 dari ledger: cek status\.cjs show QRD-1 dan worktree-nya, jangan mulai dari awal\./);
+});
+
+test('a cron session is opened with the options its messages carry', async () => {
+  const { state, cron } = world({ tickets: [ticket('QRD-1')], config: { model: 'opus', mode: 'auto' } });
+  await cron.runFill();
+  assert.deepStrictEqual(state.sessions[0].options, { permissionMode: 'auto', model: 'opus' });
+  assert.deepStrictEqual(state.sessions[0].options, state.sent[0].options);
+});
+
+const LEFT_RUNNING = 'Lead ended its turn while 2 subagents were still running';
+
+/** QRD-1 started by the cron and its turn ended; the run is then marked stalled as given. QRD-2 waits in To Do. */
+async function stalledWorld(run: Partial<CronRun>, manual?: Set<string>) {
+  const w = world({ tickets: [ticket('QRD-1')], config: { parallel: 2, maxPerDay: 10, effort: 'high' }, manual });
+  await w.cron.runFill();
+  w.endTurn('QRD-1');
+  w.state.tickets = [ticket('QRD-2')];
+  w.state.runs = w.state.runs.map((item) => ({ ...item, stalled: true, ...run }));
+  return w;
+}
+
+test('a run whose lead left subagents running is resumed in its own session before any new ticket, at most three times, then waits on the owner', async () => {
+  const w = await stalledWorld({ stalledDetail: LEFT_RUNNING });
+  const sentBefore = w.state.sent.length;
+  for (let round = 1; round <= MAX_RESUMES; round += 1) {
+    const log = await w.cron.runFill();
+    assert.deepStrictEqual([log.resumed, log.started], [['QRD-1'], []], `resume ${round} takes no new ticket`);
+    assert.match(String(log.skipped), /stalled runs are resumed first: QRD-1/);
+    assert.deepStrictEqual(w.state.sent.at(-1), { sessionId: 's-1', text: resumePrompt('QRD-1'), options: { permissionMode: 'auto', effort: 'high' } });
+    assert.strictEqual(w.state.cache.get('resumes:QRD-1'), round, 'the count is kept in the cron cache');
+    w.endTurn('QRD-1');
+  }
+  assert.strictEqual(w.state.sent.length - sentBefore, MAX_RESUMES);
+  assert.strictEqual(w.state.sessions.length, 1, 'no new session was opened for the stalled ticket');
+
+  const log = await w.cron.runFill();
+  assert.deepStrictEqual([log.resumed, log.parked, log.started], [[], ['QRD-1'], ['QRD-2']], 'the fourth stall waits on the owner and the queue moves on');
+  assert.strictEqual(w.state.runs.find((run) => run.key === 'QRD-1')?.waiting, RESUME_GAVE_UP_TEXT);
+});
+
+test('a run whose cron session failed is resumed; a run that only went quiet is not', async () => {
+  const failed = await stalledWorld({});
+  failed.state.sessions[0].state = 'error';
+  assert.deepStrictEqual((await failed.cron.runFill()).resumed, ['QRD-1']);
+
+  const quiet = await stalledWorld({});
+  const log = await quiet.cron.runFill();
+  assert.deepStrictEqual([log.resumed, log.started], [[], ['QRD-2']], 'idle without a reason is left to the owner and does not hold the queue');
+});
+
+test('a stalled run is left alone when the owner stopped it, works it in another session, gates it, marks it manual, or its session is busy', async () => {
+  const stopped = await stalledWorld({ stalledDetail: LEFT_RUNNING });
+  stopped.state.ownerStopped.add('QRD-1');
+  assert.deepStrictEqual((await stopped.cron.runFill()).resumed, [], 'the owner stopped the last turn');
+
+  const elsewhere = await stalledWorld({ stalledDetail: LEFT_RUNNING });
+  elsewhere.state.otherActive.add('QRD-1');
+  assert.deepStrictEqual((await elsewhere.cron.runFill()).resumed, [], 'a manual session of the ticket is active');
+
+  const gated = await stalledWorld({ stalledDetail: LEFT_RUNNING, waiting: 'Which endpoint?' });
+  assert.deepStrictEqual((await gated.cron.runFill()).resumed, []);
+
+  const marked = new Set<string>();
+  const manual = await stalledWorld({ stalledDetail: LEFT_RUNNING }, marked);
+  marked.add('QRD-1');
+  const log = await manual.cron.runFill();
+  assert.deepStrictEqual([log.resumed, log.started], [[], ['QRD-2']], 'a manual ticket is never resumed and does not hold the queue');
+
+  const busy = await stalledWorld({ stalledDetail: LEFT_RUNNING });
+  busy.answer('QRD-1');
+  assert.deepStrictEqual((await busy.cron.runFill()).resumed, [], 'the session is still queued');
+});
+
+test('the resume count grows only after the message is sent, and starts again on a new start or a clean turn end', async () => {
+  const refused = await stalledWorld({ stalledDetail: LEFT_RUNNING });
+  refused.state.failSend = true;
+  const log = await refused.cron.runFill();
+  assert.deepStrictEqual([log.resumed, log.failed[0], refused.state.cache.has('resumes:QRD-1')], [[], 'QRD-1', false]);
+
+  const w = await stalledWorld({ stalledDetail: LEFT_RUNNING });
+  await w.cron.runFill();
+  assert.strictEqual(w.state.cache.get('resumes:QRD-1'), 1);
+  await w.cron.resetResumes('QRD-1');
+  assert.strictEqual(w.state.cache.has('resumes:QRD-1'), false, 'a turn that ended without subagents running');
+
+  const fresh = world({ tickets: [ticket('QRD-5')] });
+  fresh.state.cache.set('resumes:QRD-5', 2);
+  await fresh.cron.runFill();
+  assert.strictEqual(fresh.state.cache.has('resumes:QRD-5'), false, 'a start, a retry or a confirmed ticket starts at zero');
 });

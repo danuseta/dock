@@ -25,6 +25,7 @@ export const GET_DASHBOARD = gql`
         labels
         workOrder
         workOrderSource
+        workManual
         orchestration {
           key
           machine
@@ -57,6 +58,7 @@ export const GET_TICKET_DETAIL = gql`
       labels
       workOrder
       workOrderSource
+      workManual
       pullRequests {
         id
         title
@@ -134,6 +136,7 @@ export const GET_TICKET_DETAIL_CORE = gql`
       labels
       workOrder
       workOrderSource
+      workManual
     }
     ticketRelationGroup(ticketKey: $key) {
       primaryKey

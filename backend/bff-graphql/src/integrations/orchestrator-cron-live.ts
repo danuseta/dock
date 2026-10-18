@@ -1,8 +1,8 @@
 import { JiraAPI } from '../datasources/JiraAPI';
 import { StorageService } from '../storage/service';
-import { chatService } from './chat';
+import { STOPPED_QUEUED_TEXT, STOPPED_TEXT, chatService } from './chat';
 import { ledgerPeer } from './ledger-peer';
-import { orchestratorService } from './orchestrator';
+import { DEFAULT_MACHINE, orchestratorService } from './orchestrator';
 import { CRON_CACHE, OrchestratorCron, postWebhook } from './orchestrator-cron';
 import { pushService } from './push';
 
@@ -18,11 +18,13 @@ export const orchestratorCron = new OrchestratorCron({
   saveSetting: (key, value, description) => storage.upsertSetting(key, value, description),
   cacheGet: (key) => storage.getCache(CRON_CACHE, key),
   cacheSet: (key, value) => storage.upsertCache(CRON_CACHE, key, value, 0),
+  cacheDelete: (key) => storage.deleteCache(CRON_CACHE, key),
   tickets: () => jira.getTickets(),
   ticket: (key) => jira.getTicket(key),
   moveTicket: (key, statusName) => jira.transitionTicket(key, statusName),
   dependencies: () => storage.getTicketDependencies(),
   dockOrder: () => storage.getTicketOrders(),
+  manualKeys: () => storage.getManualTicketKeys(),
   slots: (machine) => storage.countCronSlots(machine),
   machines: () => orchestratorService.machines(),
   online: (machine) => chatService.bridge(machine).online,
@@ -35,6 +37,20 @@ export const orchestratorCron = new OrchestratorCron({
   deadStarts: () => storage.getDeadCronStartKeys(new Date(Date.now() - DEAD_START_LOOKBACK_MS)),
   runs: () => orchestratorService.list(),
   saveRun: (ledger, machine) => orchestratorService.ingestLedger(ledger, new Date(), machine),
+  park: async (key, waiting) => {
+    const row = await storage.getOrchestratorRunWithLedger(key);
+    if (!row) return;
+    let ledger: Record<string, unknown> = {};
+    try { ledger = JSON.parse(row.ledgerRaw || row.payload); } catch { /* an unreadable ledger is parked with the row's own fields */ }
+    const now = new Date();
+    return orchestratorService.ingestLedger({ ...ledger, key, title: ledger.title ?? row.title, stage: ledger.stage ?? row.stage, waiting, updatedAt: now.toISOString() }, now, row.machine ?? DEFAULT_MACHINE);
+  },
+  cronSessions: async (keys) => new Map([...(await storage.getCronSessionStates(keys))].map(([key, session]) => [key, {
+    id: session.id,
+    status: session.status,
+    stopped: session.statusDetail === STOPPED_TEXT || session.statusDetail === STOPPED_QUEUED_TEXT,
+    otherActive: session.otherActive,
+  }])),
   openSession: (input) => chatService.createSession(input),
   send: async (sessionId, text, options) => chatService.sendMessage(sessionId, text, await orchestratorService.machines(), { options }),
   runningSessions: async () => (await chatService.sessions('dock', SESSIONS_LOOKED_AT)).filter((session) => session.status !== 'idle').map((session) => session.id),
@@ -45,3 +61,7 @@ export const orchestratorCron = new OrchestratorCron({
 });
 
 chatService.cronLimit = async () => (await orchestratorCron.settings().catch(() => null))?.parallel ?? null;
+chatService.cronTurn = async (ticketKey, stalledDetail, ended) => {
+  await orchestratorService.setStalledDetail(ticketKey, stalledDetail);
+  if (ended && !stalledDetail) await orchestratorCron.resetResumes(ticketKey);
+};

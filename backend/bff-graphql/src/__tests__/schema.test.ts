@@ -162,6 +162,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'setChatSessionOptions',
       'setMasterPin',
       'setTicketDependency',
+      'setTicketManual',
       'setTicketWorkOrder',
       'startAllDevServers',
       'startDevServer',

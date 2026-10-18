@@ -360,6 +360,8 @@ interface RunRow {
   handover?: string | null;
   jiraStatus?: string | null;
   jiraStage?: string | null;
+  stalledDetail?: string | null;
+  stalledAt?: Date | null;
 }
 
 const TODO_STATUS = 'to do';
@@ -489,7 +491,7 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
   const stalled = !FINISHED_STAGES.has(row.stage)
     && activity !== 'WAITING'
     && review === null
-    && idleMs > (activity === 'ACTIVE' ? STALE_ACTIVE_MS : STALE_IDLE_MS);
+    && (Boolean(row.stalledDetail) || idleMs > (activity === 'ACTIVE' ? STALE_ACTIVE_MS : STALE_IDLE_MS));
 
   return {
     key: row.key,
@@ -528,6 +530,7 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     idleSeconds: Math.floor(idleMs / 1000),
     endedSeconds: endedMs === null ? null : endedMs / 1000,
     stalled,
+    stalledDetail: stalled ? row.stalledDetail ?? null : null,
     hasTranscript: Boolean(row.transcriptAt),
     updatedAt: row.ledgerUpdatedAt.toISOString(),
   };
@@ -559,7 +562,7 @@ export function attentionItems(runs: Orchestration[]) {
       if (failing) items.push({ id: `agent-checks-failing-${run.key}`, type: 'AGENT_CHECKS_FAILING', message: `Checks failing on ${failing}`, ticketKey: run.key });
     }
     if (run.stalled) {
-      items.push({ id: `agent-stalled-${run.key}`, type: 'AGENT_STALLED', message: `No agent activity for ${minutes(run.idleSeconds)} in ${run.stage}`, ticketKey: run.key });
+      items.push({ id: `agent-stalled-${run.key}`, type: 'AGENT_STALLED', message: run.stalledDetail ?? `No agent activity for ${minutes(run.idleSeconds)} in ${run.stage}`, ticketKey: run.key });
     }
     return items;
   });
@@ -656,6 +659,8 @@ export class OrchestratorService {
       ledgerUpdatedAt: new Date(ledger.updatedAt),
       machine,
       ledgerRaw: JSON.stringify(shared),
+      // A new or revived run starts unstalled; a ledger written after the stall shows the agent moved on.
+      ...(!previous || previous.dismissedAt || (previous.stalledAt && new Date(ledger.updatedAt) > previous.stalledAt) ? { stalledDetail: null, stalledAt: null } : {}),
     };
     const taking = dismissedElsewhere;
     const row = taking
@@ -694,7 +699,8 @@ export class OrchestratorService {
       activityEndedAt: row.activityEndedAt,
     };
     const next = reduceHookEvent(current, event, detail, now);
-    const updated = await this.storage.updateOrchestratorRun(key, { ...next, lastEventAt: now });
+    const moved = row.stalledAt && now > row.stalledAt ? { stalledDetail: null, stalledAt: null } : {};
+    const updated = await this.storage.updateOrchestratorRun(key, { ...next, lastEventAt: now, ...moved });
     if (next.activity !== current.activity) {
       await this.storage.addOrchestratorEvent(key, `AGENT_${next.activity}`, next.activityDetail, MAX_EVENTS_KEPT);
     }
@@ -741,13 +747,23 @@ export class OrchestratorService {
       }
     }
 
-    const updated = await this.storage.updateOrchestratorRun(key, { ...state, lastEventAt });
+    const stalledAt = row.stalledAt;
+    const moved = stalledAt && events.some((event) => event.at > stalledAt) ? { stalledDetail: null, stalledAt: null } : {};
+    const updated = await this.storage.updateOrchestratorRun(key, { ...state, lastEventAt, ...moved });
     await this.storage.addOrchestratorToolEvents(key, rows, MAX_TOOL_EVENTS_KEPT);
     if (state.activity !== initial.activity) {
       await this.storage.addOrchestratorEvent(key, `AGENT_${state.activity}`, state.activityDetail, MAX_EVENTS_KEPT);
     }
     void this.peer?.forward('/events', input);
     return { ...toOrchestration(updated, now), ignored: false };
+  }
+
+  /** Set when a cron turn of the ticket ends with the reason the run is stalled, cleared (null) when the next turn starts. */
+  async setStalledDetail(keyInput: string, detail: string | null, now = new Date()) {
+    const row = await this.storage.getOrchestratorRun(normalizeTicketKey(keyInput));
+    if (!row || row.dismissedAt || (row.stalledDetail ?? null) === detail) return;
+    await this.storage.updateOrchestratorRun(row.key, { stalledDetail: detail, stalledAt: detail ? now : null });
+    if (detail) await this.storage.addOrchestratorEvent(row.key, 'STALLED', detail, MAX_EVENTS_KEPT);
   }
 
   /** Only the machine that owns a run hides it: a run of another machine is read-only here. */

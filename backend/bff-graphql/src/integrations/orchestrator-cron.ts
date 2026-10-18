@@ -67,6 +67,8 @@ const BRIDGE_MODE: Record<CronMode, string> = { auto: 'auto', acceptEdits: 'acce
 export const PARKED_TEXT = 'No acceptance criteria on the ticket. Confirm to start anyway, or fill them in.';
 export const START_FAILED_TEXT = 'The cron session ended before the agent answered. Fix the machine, then retry.';
 export const PR_GATE_TEXT = "Ready for review: waiting for the owner";
+export const MAX_RESUMES = 3;
+export const RESUME_GAVE_UP_TEXT = `Stalled again after ${MAX_RESUMES} resumes by the cron. Look at the session and continue it by hand.`;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -172,11 +174,11 @@ export const orderOf = (ticket: CronTicket, dockOrder: Map<string, number>): num
  * The tickets the cron may take: still To Do, in scope, without a run and without an open dependency.
  * Tickets with an order come first, lowest number first; the rest follow by ticket number.
  */
-export function candidates(tickets: CronTicket[], taken: Set<string>, blocked: Set<string>, settings: CronSettings, dockOrder: Map<string, number> = new Map()): CronTicket[] {
+export function candidates(tickets: CronTicket[], taken: Set<string>, blocked: Set<string>, settings: CronSettings, dockOrder: Map<string, number> = new Map(), manual: Set<string> = new Set()): CronTicket[] {
   const rank = (ticket: CronTicket) => orderOf(ticket, dockOrder) ?? Number.POSITIVE_INFINITY;
   return tickets
     .filter((ticket) => settings.todoStatuses.some((status) => sameText(status, ticket.status)))
-    .filter((ticket) => !taken.has(ticket.key) && !blocked.has(ticket.key))
+    .filter((ticket) => !taken.has(ticket.key) && !blocked.has(ticket.key) && !manual.has(ticket.key))
     .filter((ticket) => settings.sprint === 'any' || String(ticket.sprintState || '').toUpperCase() === 'ACTIVE')
     .filter((ticket) => settings.labels.length === 0 || (ticket.labels || []).some((label) => settings.labels.some((wanted) => sameText(wanted, label))))
     .sort((a, b) => (rank(a) - rank(b)) || (ticketNumber(a.key) - ticketNumber(b.key)));
@@ -202,6 +204,8 @@ export function outsideWindow(now: Date, settings: CronSettings): string | null 
 const NO_PR_LINE = 'Do not push and do not open a pull request: the owner asks for it in this chat when the work is OK.';
 const CONTRACT_LINE = 'Follow rules/ticket-contract.md: find and read the Confluence contract for this ticket before writing code; if a contract is found but cannot be read, stop and report why.';
 const VAULT_LINE = 'Before you finish, save a session note with brain.py save.';
+const LANES_LINE = 'Do not end your turn while a subagent you started is still running: run members in the foreground, or wait for the result of every member you started in the background before you end the turn.';
+const LANGUAGE_LINE = 'Write chat replies, reports and summaries in Bahasa Indonesia; code, comments, commit messages and pull request text stay in English.';
 
 /** The prompt for a ticket with acceptance criteria: built without stopping to ask. */
 export const startPrompt = (key: string) => [
@@ -215,6 +219,8 @@ export const startPrompt = (key: string) => [
   NO_PR_LINE,
   'Do not make the demo video until the owner approves in this chat.',
   VAULT_LINE,
+  LANES_LINE,
+  LANGUAGE_LINE,
 ].join(' ');
 
 /** The prompt for a parked ticket the owner confirmed: the AC are missing, so asking stays allowed. */
@@ -225,14 +231,23 @@ export const confirmedPrompt = (key: string) => [
   NO_PR_LINE,
   'Do not make the demo video until the owner approves in this chat.',
   VAULT_LINE,
+  LANES_LINE,
+  LANGUAGE_LINE,
+].join(' ');
+
+/** The message that continues a stalled run in its own session. */
+export const resumePrompt = (key: string) => [
+  `Lanjutkan tiket ${key} dari ledger: cek status.cjs show ${key} dan worktree-nya, jangan mulai dari awal.`,
+  LANES_LINE,
+  LANGUAGE_LINE,
 ].join(' ');
 
 export interface DeferredTicket { key: string; reason: string }
-export interface FillLog { at: string; day: string; skipped: string | null; started: string[]; parked: string[]; deferred: DeferredTicket[]; notMoved: string[]; failed: string[]; released: string[] }
+export interface FillLog { at: string; day: string; skipped: string | null; started: string[]; parked: string[]; deferred: DeferredTicket[]; notMoved: string[]; failed: string[]; released: string[]; resumed?: string[] }
 export interface CronSlots { busy: number; waiting: number }
 export interface CronStatus { enabled: boolean; slots: CronSlots; parallel: number; startedToday: number; maxPerDay: number; lastFill: FillLog | null }
 
-export interface CronRun { key: string; machine: string; title: string; waiting: string | null; activity: string }
+export interface CronRun { key: string; machine: string; title: string; waiting: string | null; activity: string; stalled?: boolean; stalledDetail?: string | null }
 
 export interface CronDeps {
   now(): Date;
@@ -240,12 +255,15 @@ export interface CronDeps {
   saveSetting(key: string, value: string, description: string): Promise<unknown>;
   cacheGet(key: string): Promise<unknown>;
   cacheSet(key: string, value: unknown): Promise<unknown>;
+  cacheDelete(key: string): Promise<unknown>;
   tickets(): Promise<CronTicket[]>;
   ticket(key: string): Promise<CronTicket | null>;
   moveTicket(key: string, statusName: string): Promise<boolean>;
   dependencies(): Promise<Array<{ ticketKey: string; dependsOnKey: string }>>;
   /** Work order numbers set in DOCK, by ticket key. */
   dockOrder(): Promise<Map<string, number>>;
+  /** Tickets the owner works by hand: never picked, never resumed. */
+  manualKeys(): Promise<Set<string>>;
   /** Cron sessions on the machine with a running turn (busy) and with a message waiting for a slot. */
   slots(machine: string): Promise<CronSlots>;
   machines(): Promise<string[]>;
@@ -257,7 +275,11 @@ export interface CronDeps {
   deadStarts(): Promise<string[]>;
   runs(): Promise<CronRun[]>;
   saveRun(ledger: Record<string, unknown>, machine: string): Promise<unknown>;
-  openSession(input: { ticketKey: string; machine: string; title: string; origin: 'cron' }): Promise<{ id: string }>;
+  /** Sets the run's waiting text and keeps the rest of its ledger. */
+  park(key: string, waiting: string): Promise<unknown>;
+  /** The newest cron session of each ticket; `stopped` when the owner stopped its last turn, `otherActive` when another session of the ticket works or spoke after it. */
+  cronSessions(keys: string[]): Promise<Map<string, { id: string; status: string; stopped: boolean; otherActive: boolean }>>;
+  openSession(input: { ticketKey: string; machine: string; title: string; origin: 'cron'; options: Record<string, string> }): Promise<{ id: string }>;
   send(sessionId: string, text: string, options: Record<string, string>): Promise<unknown>;
   runningSessions(): Promise<string[]>;
   stopTurn(sessionId: string): Promise<unknown>;
@@ -330,6 +352,10 @@ export class OrchestratorCron {
     });
     log.skipped = await this.reasonToSkip(settings, now, ignoreWindow);
     if (!log.skipped) {
+      log.resumed = await this.resumeStalled(settings, log);
+      if (log.resumed.length) log.skipped = `stalled runs are resumed first: ${log.resumed.join(', ')}`;
+    }
+    if (!log.skipped) {
       const day = await this.dayCount(date);
       await this.pick(settings, now, log, day);
       await this.deps.cacheSet(`day:${date}`, day);
@@ -355,12 +381,12 @@ export class OrchestratorCron {
    * A slot waited for by a queued message (an owner's answer, a confirmed ticket) is not free: that message goes first.
    */
   private async pick(settings: CronSettings, now: Date, log: FillLog, day: DayCount): Promise<void> {
-    const [tickets, taken, blocked, dockOrder, slots] = await Promise.all([
-      this.deps.tickets(), this.deps.takenKeys(), this.blockedKeys(), this.deps.dockOrder(), this.deps.slots(settings.machine),
+    const [tickets, taken, blocked, dockOrder, slots, manual] = await Promise.all([
+      this.deps.tickets(), this.deps.takenKeys(), this.blockedKeys(), this.deps.dockOrder(), this.deps.slots(settings.machine), this.deps.manualKeys(),
     ]);
     let free = Math.max(0, settings.parallel - slots.busy - slots.waiting);
     const defer = (key: string, reason: string) => { if (log.deferred.length < MAX_DEFERRED_LOGGED) log.deferred.push({ key, reason }); };
-    for (const ticket of candidates(tickets, new Set(taken), blocked, settings, dockOrder)) {
+    for (const ticket of candidates(tickets, new Set(taken), blocked, settings, dockOrder, manual)) {
       try {
         if (!ticketHasAcceptanceCriteria(ticket)) {
           if (day.parked.length >= settings.maxPerDay) { defer(ticket.key, `daily cap reached: ${settings.maxPerDay} parked today`); continue; }
@@ -403,6 +429,49 @@ export class OrchestratorCron {
     return runs.map((run) => run.key);
   }
 
+  /**
+   * A stalled run gets a message to continue in its own cron session, and the fill takes no new ticket: when its lead left
+   * subagents running, or when the session failed. Never when the owner stopped it or works the ticket in another session.
+   * After MAX_RESUMES the run waits on the owner instead. Returns the tickets resumed.
+   */
+  private async resumeStalled(settings: CronSettings, log: FillLog): Promise<string[]> {
+    const [runs, manual] = await Promise.all([this.deps.runs(), this.deps.manualKeys()]);
+    const sessions = await this.deps.cronSessions(runs.filter((run) => run.stalled).map((run) => run.key));
+    const resumed: string[] = [];
+    for (const run of runs) {
+      const session = sessions.get(run.key);
+      if (!run.stalled || run.waiting || manual.has(run.key) || !session || session.stopped || session.otherActive) continue;
+      if (!(session.status === 'error' || (session.status === 'idle' && run.stalledDetail))) continue;
+      try {
+        const count = Number(await this.deps.cacheGet(`resumes:${run.key}`)) || 0;
+        if (count >= MAX_RESUMES) {
+          await this.deps.park(run.key, RESUME_GAVE_UP_TEXT);
+          log.parked.push(run.key);
+          continue;
+        }
+        await this.deps.send(session.id, resumePrompt(run.key), this.turnOptions(settings));
+        await this.deps.cacheSet(`resumes:${run.key}`, count + 1);
+        resumed.push(run.key);
+      } catch (error) {
+        console.error(`[Orchestrator cron] Resume of ${run.key} failed:`, error instanceof Error ? error.message : 'unknown error');
+        log.failed.push(run.key);
+      }
+    }
+    return resumed;
+  }
+
+  /** A cron turn that ended without leaving subagents running starts the count of resumes again. */
+  resetResumes(key: string): Promise<unknown> {
+    return this.deps.cacheDelete(`resumes:${key}`);
+  }
+
+  private turnOptions(settings: CronSettings): Record<string, string> {
+    const options: Record<string, string> = { permissionMode: BRIDGE_MODE[settings.mode] };
+    if (settings.model) options.model = settings.model;
+    if (settings.effort) options.effort = settings.effort;
+    return options;
+  }
+
   /** Tickets whose dependency is not settled yet. */
   private async blockedKeys(): Promise<Set<string>> {
     const blocked = new Set<string>();
@@ -422,10 +491,9 @@ export class OrchestratorCron {
    * Resolves false when Jira would not move the ticket to In Progress.
    */
   private async start(ticket: CronTicket, settings: CronSettings, now: Date, prompt: string): Promise<boolean> {
-    const session = await this.deps.openSession({ ticketKey: ticket.key, machine: settings.machine, title: `${ticket.key} (cron)`, origin: 'cron' });
-    const options: Record<string, string> = { permissionMode: BRIDGE_MODE[settings.mode] };
-    if (settings.model) options.model = settings.model;
-    if (settings.effort) options.effort = settings.effort;
+    const options = this.turnOptions(settings);
+    await this.resetResumes(ticket.key);
+    const session = await this.deps.openSession({ ticketKey: ticket.key, machine: settings.machine, title: `${ticket.key} (cron)`, origin: 'cron', options });
     await this.deps.send(session.id, prompt, options);
     await this.saveRun(ticket, settings.machine, now, '');
     return this.deps.moveTicket(ticket.key, settings.inProgressStatus);

@@ -276,6 +276,7 @@ export const resolvers = {
     labels: (parent: any) => Array.isArray(parent.labels) ? parent.labels : [],
     workOrder: async (parent: any) => (await storageAPI.ticketOrders()).get(parent.key) ?? labelOrder(parent.labels),
     workOrderSource: async (parent: any) => ((await storageAPI.ticketOrders()).has(parent.key) ? 'dock' : labelOrder(parent.labels) === null ? null : 'label'),
+    workManual: async (parent: any) => (await storageAPI.manualTickets()).has(parent.key),
     pullRequests: async (parent: any) => {
       return await githubAPI.getPullRequestsForTicket(parent.key, {
         staleWhileRevalidate: parent.__dashboard === true,
@@ -388,6 +389,12 @@ export const resolvers = {
     },
     clearTicketWorkOrder: async (_: unknown, { ticketKey }: { ticketKey: string }) => {
       await storageAPI.clearTicketOrder(ticketKey);
+      return true;
+    },
+    setTicketManual: async (_: unknown, { ticketKey, manual }: { ticketKey: string; manual: boolean }) => {
+      await storageAPI.setTicketManual(ticketKey, manual).catch((error) => {
+        throw new GraphQLError(error instanceof Error ? error.message : 'Invalid ticket', { extensions: { code: 'BAD_USER_INPUT' } });
+      });
       return true;
     },
     clearTicketDependency: async (_: unknown, { ticketKey }: { ticketKey: string }) => {
@@ -580,6 +587,7 @@ export const protectedMutations = [
   'clearTicketDependency',
   'setTicketWorkOrder',
   'clearTicketWorkOrder',
+  'setTicketManual',
   'updateSettings',
   'validateJira',
   'validateGitHub',
