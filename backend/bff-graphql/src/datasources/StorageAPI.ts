@@ -29,6 +29,10 @@ export class StorageAPI {
     return this.storage.getDemoLink(ticketKey).catch(() => null);
   }
 
+  listDemoLinks() {
+    return this.storage.listDemoLinks();
+  }
+
   async saveDemoLink(ticketKey: string, url: string) {
     try {
       await this.storage.upsertDemoLink(ticketKey, url);

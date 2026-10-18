@@ -219,8 +219,7 @@ export const resolvers = {
     ingestTokens: async () => orchestratorService.tokens(),
     demoVideos: async () => {
       requireDemoVideos();
-      const configured = await demoVideos.configured().catch(demoVideoError);
-      return { configured, videos: configured ? await demoVideos.list().catch(demoVideoError) : [] };
+      return demoVideos.list(await storageAPI.listDemoLinks().catch(demoVideoError)).catch(demoVideoError);
     },
     demoStorage: async () => demoStorage.view().catch(demoVideoError),
     devServers: async () => { requireWorkspace(); return devServers.list(); },

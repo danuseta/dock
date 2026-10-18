@@ -70,6 +70,8 @@ test('SQLite storage preserves settings, PIN, demo-link, and cache behavior', {
 
   await storage.upsertDemoLink('JID-1', 'https://example.test/demo');
   assert.strictEqual((await storage.getDemoLink('JID-1'))?.url, 'https://example.test/demo');
+  await storage.upsertDemoLink('JID-2', 'https://loom.com/share/abc');
+  assert.deepStrictEqual((await storage.listDemoLinks()).map((item) => item.ticketKey).sort(), ['JID-1', 'JID-2']);
 
   await storage.upsertCache('jira', 'assigned', [{ key: 'JID-1' }], 60);
   assert.deepStrictEqual(await storage.getCache('jira', 'assigned'), [{ key: 'JID-1' }]);

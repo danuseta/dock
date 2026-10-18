@@ -76,6 +76,7 @@ export class StorageService {
   upsertDemoLink(ticketKey: string, url: string) {
     return this.db.demoLink.upsert({ where: { ticketKey }, update: { url }, create: { ticketKey, url } });
   }
+  listDemoLinks() { return this.db.demoLink.findMany({ orderBy: { updatedAt: 'desc' } }); }
   deleteDemoLink(ticketKey: string) { return this.db.demoLink.delete({ where: { ticketKey } }); }
 
   getTicketDependencies() {
