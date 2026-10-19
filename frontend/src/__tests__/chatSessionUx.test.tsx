@@ -7,7 +7,7 @@ import { CACHED_MESSAGES, CACHED_SESSIONS, recallMessages, rememberMessages } fr
 import type { ChatMessage, ChatSession } from '../chat/messages';
 import { SessionRow } from '../chat/SessionRow';
 import {
-  appliedOptions, appliedText, defaultLabel, effortChoicesFor, modeChoices, modelChoices, withChoice,
+  appliedOptions, appliedText, defaultLabel, effortChoicesFor, keepChoice, modeChoices, modelChoices, withChoice,
   type SessionMachineOptions,
 } from '../chat/sessionOptions';
 
@@ -53,6 +53,14 @@ test('what applies now marks the values that come from the machine default', () 
   assert.strictEqual(appliedText(rows), 'mode Auto · model Opus 5.5 · effort low');
   assert.deepStrictEqual(appliedOptions(null, undefined), []);
   assert.deepStrictEqual(appliedOptions(null, { ...machine, defaults: null }), []);
+});
+
+test('a value the Default entry names is not listed again, unless the session picked it', () => {
+  const efforts = ['low', 'medium', 'high', 'max'];
+  assert.deepStrictEqual(efforts.filter((level) => keepChoice(level, 'high', null)), ['low', 'medium', 'max']);
+  assert.deepStrictEqual(efforts.filter((level) => keepChoice(level, 'high', 'high')), efforts);
+  assert.deepStrictEqual(efforts.filter((level) => keepChoice(level, null, null)), efforts);
+  assert.deepStrictEqual(['default', 'plan', 'auto'].filter((mode) => keepChoice(mode, 'auto', null)), ['default', 'plan']);
 });
 
 test('picking a value stores it, and a model change drops an effort the model does not list', () => {

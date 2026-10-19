@@ -1,33 +1,43 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { Copy, ExternalLink, RefreshCw, Trash2, Video } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Copy, ExternalLink, RefreshCw, Trash2, Video } from 'lucide-react';
 import { GET_DEMO_VIDEOS } from '../graphql/queries';
 import { DELETE_DEMO_VIDEO } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
-import { Button, Card, IconButton, Page, PageHeader } from '../components/ui';
+import { Button, Card, ConfirmDialog, IconButton, Page, PageHeader } from '../components/ui';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { cn } from '../lib/cn';
 import { formatSize, isPlayableVideo, type DemoVideo } from '../lib/demoVideos';
+import { paginate } from '../lib/pagination';
+
+const PAGE_SIZE = 20;
 
 const DemoVideosPage = ({ onTicketClick }: { onTicketClick: (key: string) => void }) => {
   const { data, loading, error, refetch } = useQuery(GET_DEMO_VIDEOS, CACHED_QUERY_OPTIONS);
   const [deleteVideo] = useMutation(DELETE_DEMO_VIDEO);
   const [preview, setPreview] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
+  const [page, setPage] = useState(1);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   if (isInitialQueryLoading(loading, data)) return <Page width="full"><LoadingSkeleton /></Page>;
 
   const videos: DemoVideo[] = data?.demoVideos?.videos || [];
+  const shown = paginate(videos, page, PAGE_SIZE);
 
   const remove = async (key: string) => {
-    if (!window.confirm(`Delete the demo link of ${key}?`)) return;
     setNotice(null);
+    setDeleting(true);
     try {
       await deleteVideo({ variables: { ticketKey: key } });
       if (preview?.includes(key)) setPreview(null);
       await refetch();
     } catch (removeError: any) {
       setNotice({ text: removeError.message || 'The video could not be removed', error: true });
+    } finally {
+      setDeleting(false);
+      setRemoving(null);
     }
   };
 
@@ -50,7 +60,7 @@ const DemoVideosPage = ({ onTicketClick }: { onTicketClick: (key: string) => voi
       <Card className="overflow-hidden p-0">
         {videos.length === 0 ? <div className="py-12 text-center"><Video className="mx-auto mb-3 size-8 text-muted-foreground" aria-hidden="true" /><p className="text-sm text-muted-foreground">No demo video yet.</p></div> : (
           <ul className="flex flex-col">
-            {videos.map((video) => (
+            {shown.items.map((video) => (
               <li className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 last:border-b-0" key={video.ticketKey}>
                 <span className="min-w-0">
                   <button type="button" className="border-0 bg-transparent p-0 font-mono text-sm font-extrabold text-accent hover:underline" onClick={() => onTicketClick(video.ticketKey)}>{video.ticketKey}</button>
@@ -61,13 +71,32 @@ const DemoVideosPage = ({ onTicketClick }: { onTicketClick: (key: string) => voi
                     ? <IconButton variant="ghost" aria-label={`Play ${video.ticketKey}`} title="Play" onClick={() => setPreview(video.url)}><Video size={15} aria-hidden="true" /></IconButton>
                     : /^https?:\/\//i.test(video.url) && <a className="inline-flex size-8 items-center justify-center text-secondary-foreground hover:text-accent" href={video.url} target="_blank" rel="noreferrer" aria-label={`Open the link of ${video.ticketKey}`} title="Open link"><ExternalLink size={15} aria-hidden="true" /></a>}
                   <IconButton variant="ghost" aria-label={`Copy the link of ${video.ticketKey}`} title="Copy link" onClick={() => void copy(video.url)}><Copy size={15} aria-hidden="true" /></IconButton>
-                  <IconButton variant="ghost" className="text-status-conflict" aria-label={`Delete the demo link of ${video.ticketKey}`} title="Delete" onClick={() => void remove(video.ticketKey)}><Trash2 size={15} aria-hidden="true" /></IconButton>
+                  <IconButton variant="ghost" className="text-status-conflict" aria-label={`Delete the demo link of ${video.ticketKey}`} title="Delete" onClick={() => setRemoving(video.ticketKey)}><Trash2 size={15} aria-hidden="true" /></IconButton>
                 </span>
               </li>
             ))}
           </ul>
         )}
       </Card>
+
+      {shown.pages > 1 && (
+        <nav className="mt-4 flex items-center justify-end gap-2" aria-label="Demo video pages">
+          <span className="font-mono text-xs text-muted-foreground tabular-nums">Page {shown.page} of {shown.pages} · {videos.length} links</span>
+          <IconButton variant="ghost" aria-label="Previous page" disabled={shown.page === 1} onClick={() => setPage(shown.page - 1)}><ChevronLeft size={16} aria-hidden="true" /></IconButton>
+          <IconButton variant="ghost" aria-label="Next page" disabled={shown.page === shown.pages} onClick={() => setPage(shown.page + 1)}><ChevronRight size={16} aria-hidden="true" /></IconButton>
+        </nav>
+      )}
+
+      <ConfirmDialog
+        open={removing !== null}
+        title={`Delete the demo link of ${removing ?? ''}?`}
+        description="The link leaves the ticket page of both DOCKs. When it points to the demo folder in S3, that video is deleted too."
+        confirmLabel="Delete"
+        busyLabel="Deleting..."
+        busy={deleting}
+        onCancel={() => setRemoving(null)}
+        onConfirm={() => removing && void remove(removing)}
+      />
     </Page>
   );
 };

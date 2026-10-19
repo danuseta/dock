@@ -198,8 +198,8 @@ const SettingsPage: React.FC = () => {
     }
   }, [githubToken, fetchRepos]);
 
-  if (isInitialQueryLoading(loading, data)) return <Page width="medium"><LoadingSkeleton /></Page>;
-  if (error && !data) return <Page width="medium"><Card className="border-status-conflict text-status-conflict" role="alert">Error: {error.message}</Card></Page>;
+  if (isInitialQueryLoading(loading, data)) return <Page width="full"><LoadingSkeleton /></Page>;
+  if (error && !data) return <Page width="full"><Card className="border-status-conflict text-status-conflict" role="alert">Error: {error.message}</Card></Page>;
 
   const hasMasterPin = isPinActive || data?.settings?.hasMasterPin || false;
   const serviceHealthRefreshSeconds = Number(serviceHealthRefreshValue)
@@ -410,7 +410,7 @@ const SettingsPage: React.FC = () => {
   };
 
   return (
-    <Page width="wide" className="pb-28">
+    <Page width="full" className="pb-28">
       <header className="mb-7 flex flex-wrap items-end justify-between gap-4">
         <div><p className="mb-1 text-xs font-semibold text-muted-foreground">SYSTEM</p><h1 className="text-balance font-display text-3xl font-bold">Settings</h1><p className="mt-2 max-w-2xl text-pretty text-sm text-secondary-foreground">Manage your DOCK experience, security, and connected services from one place.</p></div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground"><span className={cn('size-2 rounded-full', hasUnsavedChanges ? 'bg-status-conflict' : 'bg-status-merged')} aria-hidden="true" />{hasUnsavedChanges ? 'Unsaved changes' : 'All changes saved'}</div>

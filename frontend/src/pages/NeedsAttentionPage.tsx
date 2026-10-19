@@ -21,8 +21,8 @@ const NeedsAttentionPage: React.FC<NeedsAttentionPageProps> = ({ onTicketClick }
   const [conflictMessage, setConflictMessage] = useState('');
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
 
-  if (isInitialQueryLoading(loading, data)) return <Page><LoadingSkeleton /></Page>;
-  if (error && !data) return <Page><Card className="border-status-conflict text-status-conflict" role="alert">Error: {error.message}</Card></Page>;
+  if (isInitialQueryLoading(loading, data)) return <Page width="full"><LoadingSkeleton /></Page>;
+  if (error && !data) return <Page width="full"><Card className="border-status-conflict text-status-conflict" role="alert">Error: {error.message}</Card></Page>;
 
   const items = data?.needsAttention || [];
   const handleInspectConflict = async (owner: string, repo: string, pullNumber: number) => {
@@ -38,7 +38,7 @@ const NeedsAttentionPage: React.FC<NeedsAttentionPageProps> = ({ onTicketClick }
   };
 
   return (
-    <Page>
+    <Page width="full">
       <Card className="mb-8 border-status-conflict/60 bg-status-conflict-bg shadow-none">
         <div className="flex items-center gap-4">
           <div className="rounded-sm bg-status-conflict-bg p-4 text-status-conflict"><AlertTriangle size={36} aria-hidden="true" /></div>

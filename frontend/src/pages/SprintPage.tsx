@@ -18,10 +18,10 @@ const SprintPage: React.FC = () => {
   const board = useSprintDashboard(selected);
   const { summary, result, refreshState } = board;
 
-  if (board.loading) return <Page width="wide"><LoadingSkeleton /></Page>;
+  if (board.loading) return <Page width="full"><LoadingSkeleton /></Page>;
 
   return (
-    <Page width="wide">
+    <Page width="full">
       <PageHeader>
         <div>
           <h1 className="text-balance font-display text-3xl font-black">Sprint dashboard</h1>

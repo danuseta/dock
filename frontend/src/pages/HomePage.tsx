@@ -10,7 +10,7 @@ import { DockerRuntimeCard } from '../components/DockerRuntimeCard';
 import { AgentRunStrip } from '../components/AgentRunStrip';
 import { isArchived, type AgentRunSummary } from '../agents/runs';
 import { MonthCalendar } from '../components/MonthCalendar';
-import { Button, Card, Dialog, IconButton, Input, Select } from '../components/ui';
+import { Button, Card, Dialog, IconButton, Input, Page, Select } from '../components/ui';
 import { cn } from '../lib/cn';
 import { hasPage, useDockMode } from '../lib/dockMode';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
@@ -87,8 +87,8 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
 
   const refreshHealth = async () => { setHealthCountdown(healthRefreshSeconds); await refetchSecondary(); };
 
-  if (isInitialQueryLoading(coreLoading, coreData)) return <div className="mx-auto w-full max-w-[1500px] p-6"><LoadingSkeleton /></div>;
-  if (coreError && !coreData) return <div className="mx-auto w-full max-w-[1500px] p-6"><div className="rounded-md border border-status-conflict bg-status-conflict-bg p-6 text-pretty text-sm text-status-conflict" role="alert">Home data failed to load: {coreError.message}</div></div>;
+  if (isInitialQueryLoading(coreLoading, coreData)) return <Page width="full"><LoadingSkeleton /></Page>;
+  if (coreError && !coreData) return <Page width="full"><div className="rounded-md border border-status-conflict bg-status-conflict-bg p-6 text-pretty text-sm text-status-conflict" role="alert">Home data failed to load: {coreError.message}</div></Page>;
 
   const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening';
   const monthLabel = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -100,7 +100,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
   ];
 
   return (
-    <div className="mx-auto w-full max-w-[1500px] px-8 pt-6 pb-12 max-[1023px]:px-4 max-[1023px]:pt-4">
+    <Page width="full">
       <header className="mb-6 flex items-start justify-between gap-6 max-[600px]:items-end">
         <div>
           <h1 className="text-balance font-display text-[clamp(2rem,4vw,2.75rem)] leading-[1.05] font-bold max-[600px]:text-[1.65rem]">{greeting}, Danu.</h1>
@@ -180,7 +180,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
           </form>
         </Card>
       </Dialog>
-    </div>
+    </Page>
   );
 };
 
