@@ -225,13 +225,19 @@ test('the real start rejects when the command does not exist', { skip: process.p
   assert.deepStrictEqual(messages, []);
 });
 
+/** The started child is unref'd, so nothing else keeps the event loop alive until its exit arrives. */
+const keepAlive = <T>(promise: Promise<T>) => {
+  const timer = setInterval(() => undefined, 50);
+  return promise.finally(() => clearInterval(timer));
+};
+
 test('the real start reports a failed exit', { skip: process.platform === 'win32' }, async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dev-bin-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const script = path.join(dir, 'qonflo-dev');
   fs.writeFileSync(script, '#!/bin/sh\nexit 3\n', { mode: 0o755 });
   const failure = new Promise<string>((resolve) => { void linuxSystem(PROJECTS, script).start('backend', path.join(dir, 'backend.log'), resolve); });
-  assert.match(await failure, /exited with 3/);
+  assert.match(await keepAlive(failure), /exited with 3/);
 });
 
 test('apps do not get the variables meant for DOCK', () => {
@@ -251,6 +257,6 @@ test('the real start runs qonflo-dev without DOCK port or secrets', { skip: proc
   t.after(() => {
     for (const [name, value] of Object.entries(saved)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
   });
-  await new Promise<string>((resolve) => { void linuxSystem(PROJECTS, script).start('backend', path.join(dir, 'backend.log'), resolve); });
+  await keepAlive(new Promise<string>((resolve) => { void linuxSystem(PROJECTS, script).start('backend', path.join(dir, 'backend.log'), resolve); }));
   assert.strictEqual(fs.readFileSync(seen, 'utf8').trim(), 'port=none key=none path=set');
 });
