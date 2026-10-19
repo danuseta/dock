@@ -1514,3 +1514,24 @@ test('a held message is released when a queued turn is stopped before it started
   assert.strictEqual(ctx.messages().find((message) => message.id === waiting.id).state, 'failed');
   assert.strictEqual(ctx.messages().find((message) => message.id === held.id).state, 'queued');
 });
+
+test('a new request is passed to onAsk for the phone notification, and a throwing hook does not fail it', async () => {
+  const ctx = setup();
+  const seen: unknown[] = [];
+  ctx.service.onAsk = (info) => { seen.push(info); };
+  const turn = await takenTurn(ctx);
+  const asked = await ctx.service.ask(permissionAsk(turn, 'a'), 'laptop');
+  assert.deepStrictEqual(seen, [{ sessionId: turn.sessionId, sessionTitle: 'Chat', id: asked!.id, kind: 'permission', title: 'Run a command', tool: 'Bash', summary: 'npm test' }]);
+  ctx.service.onAsk = () => { throw new Error('push down'); };
+  assert.ok((await ctx.service.ask(permissionAsk(turn, 'b'), 'laptop'))!.id > 0);
+});
+
+test('answerTicket writes to the newest DOCK session of the ticket, after its turn when one runs', async () => {
+  const ctx = setup();
+  await assert.rejects(ctx.service.answerTicket('QRD-9', 'Keep', MACHINES), /No DOCK session works on QRD-9/);
+  const old = await ctx.service.createSession({ title: 'old', ticketKey: 'QRD-9' });
+  const idle = await ctx.service.answerTicket('qrd-9', 'Keep', MACHINES);
+  assert.deepStrictEqual([idle.sessionId, idle.state], [old.id, 'queued']);
+  const busy = await ctx.service.answerTicket('QRD-9', 'Drop', MACHINES);
+  assert.strictEqual(busy.state, 'held', 'a running turn keeps the answer for its end');
+});

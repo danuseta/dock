@@ -515,6 +515,10 @@ export const resolvers = {
     ) => {
       return chatService.sendMessage(sessionId, text, await orchestratorService.machines(), { attachmentIds, options, mode }).catch(orchestratorInputError);
     },
+    answerTicket: async (_: unknown, { ticketKey, text }: { ticketKey: string; text: string }) => {
+      await chatService.answerTicket(ticketKey, text, await orchestratorService.machines()).catch(orchestratorInputError);
+      return true;
+    },
     answerChatInteraction: async (
       _: unknown,
       args: { sessionId: string; id: number; decision: string; answers?: AnswerInput[] | null; note?: string | null },
@@ -621,6 +625,7 @@ export const protectedMutations = [
   'moveOrchestration',
   'createChatSession',
   'sendChatMessage',
+  'answerTicket',
   'answerChatInteraction',
   'stopChatTurn',
   'renameChatSession',

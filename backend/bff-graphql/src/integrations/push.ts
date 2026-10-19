@@ -11,7 +11,10 @@ const MAX_SUBSCRIPTIONS = 20;
 const GONE = new Set([404, 410]);
 
 export interface PushSubscription { endpoint: string; p256dh: string; auth: string }
-export interface PushMessage { title: string; body: string; url: string }
+export interface PushAction { action: string; title: string }
+
+/** What the service worker shows. `actions` become buttons; `data` tells the worker what a button does. */
+export interface PushMessage { title: string; body: string; url: string; tag?: string; actions?: PushAction[]; data?: Record<string, unknown> }
 
 export interface PushDeps {
   settingValue(key: string): Promise<string | null>;

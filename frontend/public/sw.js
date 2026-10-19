@@ -40,13 +40,46 @@ self.addEventListener('fetch', (event) => {
 
 self.addEventListener('push', (event) => {
   const message = event.data.json();
-  event.waitUntil(self.registration.showNotification(message.title, { body: message.body, icon: '/icon-192.png', data: { url: message.url } }));
+  const options = { body: message.body, icon: '/icon-192.png', data: { ...(message.data || {}), url: message.url } };
+  if (message.tag) options.tag = message.tag;
+  if (Array.isArray(message.actions) && message.actions.length > 0) options.actions = message.actions.slice(0, 2);
+  event.waitUntil(self.registration.showNotification(message.title, options));
 });
+
+const ANSWER_TICKET = 'mutation AnswerTicket($ticketKey: String!, $text: String!) { answerTicket(ticketKey: $ticketKey, text: $text) }';
+const ANSWER_ASK = 'mutation AnswerChatInteraction($sessionId: ID!, $id: Int!, $decision: String!) { answerChatInteraction(sessionId: $sessionId, id: $id, decision: $decision) { id } }';
+
+// What a notification button sends: a fixed answer to a waiting ticket, or allow / deny for a request in a chat turn.
+const requestFor = (data, action) => {
+  if (data.kind === 'answer' && action.startsWith('answer:')) {
+    const text = (data.choices || [])[Number(action.slice('answer:'.length))];
+    return text ? { query: ANSWER_TICKET, variables: { ticketKey: data.ticketKey, text }, done: `Sent "${text}" to ${data.ticketKey}.` } : null;
+  }
+  if (data.kind === 'interaction' && (action === 'allow' || action === 'deny')) {
+    return { query: ANSWER_ASK, variables: { sessionId: data.sessionId, id: data.id, decision: action }, done: action === 'allow' ? 'Allowed once.' : 'Denied.' };
+  }
+  return null;
+};
+
+const sendAnswer = async (request) => {
+  const response = await fetch('/graphql', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: request.query, variables: request.variables }) });
+  if (!response.ok) return false;
+  const result = await response.json();
+  return !result.errors || result.errors.length === 0;
+};
+
+const openPage = (url) => self.clients.matchAll({ type: 'window' }).then((windows) => (windows.length > 0 ? windows[0].navigate(url).then((opened) => opened.focus()) : self.clients.openWindow(url)));
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = event.notification.data.url;
-  event.waitUntil(
-    self.clients.matchAll({ type: 'window' }).then((windows) => (windows.length > 0 ? windows[0].navigate(url).then((opened) => opened.focus()) : self.clients.openWindow(url))),
-  );
+  const data = event.notification.data || {};
+  const request = event.action ? requestFor(data, event.action) : null;
+  if (!request) {
+    event.waitUntil(openPage(data.url));
+    return;
+  }
+  // A button answers DOCK directly; when DOCK refuses (locked, signed out, already answered), the page opens instead.
+  event.waitUntil(sendAnswer(request)
+    .then((ok) => (ok ? self.registration.showNotification('DOCK', { body: request.done, icon: '/icon-192.png', tag: 'dock-answered' }) : openPage(data.url)))
+    .catch(() => openPage(data.url)));
 });

@@ -1,4 +1,6 @@
 import axios from 'axios';
+import type { PushMessage } from './push';
+import { waitingNotice } from './push-notices';
 import { isSettledStatus } from './attention';
 
 export class CronInputError extends Error {}
@@ -59,7 +61,6 @@ const CACHE = 'orchestrator-cron';
 const TICK_MS = 60 * 1000;
 const WIB_OFFSET_MS = 7 * 3600 * 1000;
 const MAX_PING_CHARS = 1900;
-const MAX_PUSH_CHARS = 180;
 const MAX_DEFERRED_LOGGED = 30;
 /** The bridge's name for each cron mode. */
 const BRIDGE_MODE: Record<CronMode, string> = { auto: 'auto', acceptEdits: 'acceptEdits', manual: 'default' };
@@ -285,7 +286,7 @@ export interface CronDeps {
   stopTurn(sessionId: string): Promise<unknown>;
   post(webhookUrl: string, body: unknown): Promise<unknown>;
   hasPushDevices(): Promise<boolean>;
-  push(message: { title: string; body: string; url: string }): Promise<unknown>;
+  push(message: PushMessage): Promise<unknown>;
 }
 
 interface DayCount { started: string[]; parked: string[] }
@@ -539,7 +540,7 @@ export class OrchestratorCron {
       const mention = notifyUserId ? `<@${notifyUserId}> ` : '';
       const content = `${mention}**${run.key}** ${run.title}\n${run.waiting}`.slice(0, MAX_PING_CHARS);
       if (webhookUrl) await this.deps.post(webhookUrl, { content, allowed_mentions: { users: notifyUserId ? [notifyUserId] : [] } });
-      await this.deps.push({ title: `${run.key} waits on you`, body: String(run.waiting).slice(0, MAX_PUSH_CHARS), url: '/agents' });
+      await this.deps.push(waitingNotice({ key: run.key, waiting: String(run.waiting) }));
       pinged.push(run.key);
     }
     await this.deps.cacheSet('notified', marks);

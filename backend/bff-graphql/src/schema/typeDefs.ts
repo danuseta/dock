@@ -762,6 +762,7 @@ export const typeDefs = gql`
     createChatSession(title: String, ticketKey: String, forkFrom: ID, machine: String): ChatSession!
     sendChatMessage(sessionId: ID!, text: String!, attachmentIds: [ID!], options: ChatTurnOptionsInput, mode: String): ChatMessage!
     answerChatInteraction(sessionId: ID!, id: Int!, decision: String!, answers: [ChatAnswerInput!], note: String): ChatInteraction!
+    answerTicket(ticketKey: String!, text: String!): Boolean!
     stopChatTurn(sessionId: ID!): ChatSession!
     renameChatSession(id: ID!, title: String!): ChatSession!
     setChatSessionOptions(id: ID!, options: ChatTurnOptionsInput!): ChatSession!

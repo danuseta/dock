@@ -53,6 +53,7 @@ function worker(network: (url: string) => Response | null) {
   const saved = new Map<string, Response>();
   const shown: Array<{ title: string; options: any }> = [];
   const opened: string[] = [];
+  const posted: any[] = [];
   const keyOf = (key: string | Request) => (typeof key === 'string' ? new URL(key, 'https://dock.test').href : key.url);
   const cache = { add: async (path: string) => { saved.set(keyOf(path), new Response('saved page')); }, put: async (key: string | Request, response: Response) => { saved.set(keyOf(key), response); } };
   const scope = {
@@ -65,7 +66,13 @@ function worker(network: (url: string) => Response | null) {
       registration: { showNotification: async (title: string, options: any) => { shown.push({ title, options }); } },
     },
     caches: { open: async () => cache, keys: async () => [], delete: async () => true, match: async (key: string | Request) => saved.get(keyOf(key))?.clone() },
-    fetch: async (request: Request) => { const response = network(request.url); if (!response) throw new TypeError('Failed to fetch'); return response; },
+    fetch: async (request: Request | string, init?: RequestInit) => {
+      const url = typeof request === 'string' ? new URL(request, 'https://dock.test').href : request.url;
+      if (init?.body) posted.push(JSON.parse(String(init.body)));
+      const response = network(url);
+      if (!response) throw new TypeError('Failed to fetch');
+      return response;
+    },
   };
   vm.runInNewContext(fs.readFileSync(fileURLToPath(new URL('../../public/sw.js', import.meta.url)), 'utf8'), scope);
   const run = async (name: string, event: Record<string, unknown>) => {
@@ -76,7 +83,7 @@ function worker(network: (url: string) => Response | null) {
     return answer === null ? null : (await answer as Response | undefined) ?? undefined;
   };
   const get = (path: string, mode = 'no-cors') => run('fetch', { request: { url: `https://dock.test${path}`, method: 'GET', mode } });
-  return { run, get, saved, shown, opened };
+  return { run, get, saved, shown, opened, posted };
 }
 
 test('the worker serves the saved page and saved files when the server cannot be reached, and leaves the API alone', async () => {
@@ -102,4 +109,22 @@ test('a push becomes a notification, and tapping it opens the page it names', as
   assert.deepStrictEqual(JSON.parse(JSON.stringify(sw.shown)), [{ title: 'QRD-7 waits on you', options: { body: 'Which endpoint?', icon: '/icon-192.png', data: { url: '/agents' } } }]);
   await sw.run('notificationclick', { notification: { close: () => undefined, data: { url: '/agents' } } });
   assert.deepStrictEqual(sw.opened, ['/agents']);
+});
+
+test('a notification button answers DOCK, and the page opens when DOCK refuses', async () => {
+  let reply = new Response(JSON.stringify({ data: { answerTicket: true } }), { status: 200 });
+  const sw = worker((url) => (url.endsWith('/graphql') ? reply.clone() : null));
+  await sw.run('push', { data: { json: () => ({ title: 'QRD-7 waits on you', body: 'Keep it?', url: '/detail/QRD-7', tag: 'wait-QRD-7', actions: [{ action: 'answer:0', title: 'Keep' }, { action: 'answer:1', title: 'Drop' }], data: { kind: 'answer', ticketKey: 'QRD-7', choices: ['Keep', 'Drop'] } }) } });
+  const shownData = sw.shown[0].options;
+  assert.deepStrictEqual(JSON.parse(JSON.stringify({ tag: shownData.tag, actions: shownData.actions })), { tag: 'wait-QRD-7', actions: [{ action: 'answer:0', title: 'Keep' }, { action: 'answer:1', title: 'Drop' }] });
+
+  await sw.run('notificationclick', { action: 'answer:1', notification: { close: () => undefined, data: shownData.data } });
+  assert.deepStrictEqual(sw.posted.map((body) => body.variables), [{ ticketKey: 'QRD-7', text: 'Drop' }]);
+  assert.deepStrictEqual(sw.opened, [], 'an accepted answer opens nothing');
+  assert.strictEqual(sw.shown.at(-1)?.options.body, 'Sent "Drop" to QRD-7.');
+
+  reply = new Response(JSON.stringify({ errors: [{ message: 'PIN required' }] }), { status: 200 });
+  await sw.run('notificationclick', { action: 'deny', notification: { close: () => undefined, data: { kind: 'interaction', sessionId: 's1', id: 4, url: '/sessions?session=s1' } } });
+  assert.deepStrictEqual(sw.posted.at(-1)?.variables, { sessionId: 's1', id: 4, decision: 'deny' });
+  assert.deepStrictEqual(sw.opened, ['/sessions?session=s1']);
 });
