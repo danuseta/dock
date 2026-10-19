@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { GET_DASHBOARD, GET_ORCHESTRATION, GET_TICKET_DETAIL_CORE, GET_TICKET_DETAIL_ENRICHMENT } from '../graphql/queries';
 import type { AgentRun } from '../agents/runs';
+import { useAnswerTicket } from '../chat/useAnswerTicket';
 import { useOpenForTicket } from '../chat/useOpenForTicket';
 import { AcceptanceCard, AgentRunCard } from '../components/ticket/AgentRunCards';
 import { NeedsYouCard } from '../components/ticket/NeedsYouCard';
@@ -85,6 +86,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const { data: runData } = useQuery(GET_ORCHESTRATION, { ...CACHED_QUERY_OPTIONS, variables: { key: ticketKey }, pollInterval: 30000 });
   const run: AgentRun | null = runData?.orchestration?.key?.toUpperCase() === ticketKey.toUpperCase() ? runData.orchestration : null;
   const { openForTicket, opening: openingSession, error: sessionError } = useOpenForTicket();
+  const { answer, sending: answering } = useAnswerTicket();
 
   useEffect(() => {
     setDependsOnKey(coreData?.ticketRelationGroup?.dependsOnKey || '');
@@ -312,7 +314,21 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
         />
         {sessionError && <Card className="border-status-conflict text-pretty text-sm text-status-conflict" role="alert">{sessionError}</Card>}
 
-        <NeedsYouCard items={needs} onAction={handleNeed} />
+        <NeedsYouCard
+          items={needs}
+          onAction={handleNeed}
+          answering={answering}
+          answerBlocked={run?.remote ? 'The other DOCK runs this ticket. Answer it there.' : null}
+          onAnswer={async (text) => {
+            try {
+              const where = await answer(ticket.key, text);
+              setToast({ message: `Sent to ${where}.`, type: 'success' });
+            } catch (answerError) {
+              setToast({ message: answerError instanceof Error ? answerError.message : 'The answer could not be sent', type: 'error' });
+              throw answerError;
+            }
+          }}
+        />
 
         <div className="grid grid-cols-[minmax(0,1.65fr)_minmax(340px,1fr)] items-start gap-6 max-[1100px]:grid-cols-1">
           <div className="flex min-w-0 flex-col gap-6">

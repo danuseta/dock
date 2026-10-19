@@ -43,7 +43,18 @@ export interface NeedItem {
   id: string;
   kind: NeedKind;
   text: string;
+  /** For a question: the fixed answers the agent offered, shown as buttons. */
+  choices?: string[];
 }
+
+const CHOICES = /\s*\[([^\][|]+(?:\|[^\][|]+)+)\]\s*$/;
+
+/** "Keep the tag filter? [Keep|Drop]" reads as the question plus its answers; without brackets there are none. */
+export const splitChoices = (waiting: string): { question: string; choices: string[] } => {
+  const match = CHOICES.exec(waiting);
+  if (!match) return { question: waiting, choices: [] };
+  return { question: waiting.slice(0, match.index).trim(), choices: match[1].split('|').map((choice) => choice.trim()).filter(Boolean) };
+};
 
 interface NeedFacts {
   run?: Pick<AgentRun, 'waiting' | 'finished' | 'stage' | 'ac' | 'reviewSignal'> | null;
@@ -59,7 +70,10 @@ const REVIEW_TEXT: Partial<Record<NonNullable<AgentRun['reviewSignal']>, string>
 /** What waits on the owner for this ticket, most urgent first. Empty when nothing does. */
 export function needsYou({ run, pullRequests, demoUrl }: NeedFacts): NeedItem[] {
   const items: NeedItem[] = [];
-  if (run?.waiting && !run.finished) items.push({ id: 'question', kind: 'question', text: run.waiting });
+  if (run?.waiting && !run.finished) {
+    const { question, choices } = splitChoices(run.waiting);
+    items.push({ id: 'question', kind: 'question', text: question, choices });
+  }
   for (const item of run?.ac ?? []) {
     if (item.state === 'FAIL') items.push({ id: `ac-${item.n}`, kind: 'ac', text: item.text || `AC ${item.n}` });
   }
