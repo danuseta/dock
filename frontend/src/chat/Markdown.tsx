@@ -22,7 +22,7 @@ const components: Components = {
   li: ({ children }) => <li className="pl-0.5 marker:text-muted-foreground">{children}</li>,
   blockquote: ({ children }) => <blockquote className="my-1.5 border-l-2 border-border-glow pl-3 text-secondary-foreground">{children}</blockquote>,
   hr: () => <hr className="my-3 border-border" />,
-  pre: ({ children }) => <pre className="my-2 max-w-full overflow-x-auto rounded-sm border border-border bg-surface-0 p-2.5 font-mono text-[0.74rem] leading-snug whitespace-pre">{children}</pre>,
+  pre: ({ children }) => <pre className="my-2 max-w-full min-w-0 overflow-x-auto rounded-sm border border-border bg-surface-0 p-2.5 font-mono text-[0.74rem] leading-snug whitespace-pre">{children}</pre>,
   code: ({ children, className }) => (
     className?.startsWith('language-')
       ? <code className={className}>{children}</code>
