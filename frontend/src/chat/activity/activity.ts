@@ -345,3 +345,28 @@ export function sessionStats(events: ChatActivity[]): SessionStats {
     runningAgents: agents.filter((event) => event.status === 'running').length,
   };
 }
+
+export interface AgentLane { agent: ChatActivity; steps: ChatActivity[] }
+
+/** One lane per subagent still running: its own steps, oldest first, the newest `limit` of them. */
+export function runningLanes(events: ChatActivity[], limit = 12): AgentLane[] {
+  const lanes: AgentLane[] = [];
+  const collect = (node: ActivityNode, into: ChatActivity[]) => {
+    for (const child of node.children) {
+      if (child.event.kind !== 'note') into.push(child.event);
+      collect(child, into);
+    }
+  };
+  const walk = (nodes: ActivityNode[]) => {
+    for (const node of nodes) {
+      if (node.event.kind === 'agent' && node.event.status === 'running') {
+        const steps: ChatActivity[] = [];
+        collect(node, steps);
+        lanes.push({ agent: node.event, steps: steps.sort(compareEvents).slice(-limit) });
+      }
+      walk(node.children);
+    }
+  };
+  walk(buildTree(events));
+  return lanes;
+}

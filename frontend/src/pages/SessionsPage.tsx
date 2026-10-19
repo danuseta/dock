@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowLeft, MessagesSquare, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { ArrowLeft, Info, MessagesSquare, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import { CREATE_CHAT_SESSION, DELETE_CHAT_SESSION, RENAME_CHAT_SESSION } from '../graphql/mutations';
 import { GET_CHAT_SESSION, GET_CHAT_SESSIONS, SEARCH_CHAT } from '../graphql/queries';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
@@ -18,6 +18,7 @@ import { SLOW_POLL_MS, machineOf, machineOnline, sessionTitle as titleOf, type C
 import { ReadOnlyChip, SessionRow, SourceChip, TicketChip } from '../chat/SessionRow';
 import { SessionInfoCard } from '../chat/SessionInfoCard';
 import { filesTouched, sessionStats, type ChatActivity } from '../chat/activity/activity';
+import { AgentLanes } from '../chat/activity/AgentLanes';
 import { chatStore } from '../chat/store';
 import { SESSIONS_PATH, sessionIdFromSearch, sessionUrl } from '../chat/sessionRoute';
 
@@ -44,6 +45,8 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
   const machines = useChatMachines();
   const [gone, setGone] = useState(false);
   const [events, setEvents] = useState<ChatActivity[]>([]);
+  const [lanesOn, setLanesOn] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
   const closeGone = useCallback(() => setGone(false), []);
 
   useEffect(() => {
@@ -93,6 +96,7 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
     setSelectedId(id);
     setTitleDraft(null);
     setActionError('');
+    setInfoOpen(false);
   };
 
   const create = async (variables: { title?: string; ticketKey?: string | null; forkFrom?: string }) => {
@@ -136,6 +140,9 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
 
   useFullViewport(Boolean(selected), '(max-width: 900px)');
   const stats = sessionStats(events);
+  // Lanes earn their room only while two or more subagents run at once.
+  const lanesReady = stats.runningAgents >= 2;
+  const showLanes = lanesOn && lanesReady;
 
   if (isInitialQueryLoading(loading, data)) return <Page width="full"><LoadingSkeleton /></Page>;
 
@@ -238,6 +245,13 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
                 )}
                 {titleDraft === null && (
                   <div className="flex flex-none items-center gap-1 max-[900px]:order-2">
+                    {lanesReady && (
+                      <span className="inline-flex overflow-hidden rounded-xs border border-border-glow font-mono text-[0.66rem] max-[900px]:hidden" role="group" aria-label="View">
+                        <button type="button" aria-pressed={!showLanes} className={cn('px-2 py-1', !showLanes ? 'bg-surface-hover font-bold text-foreground' : 'text-secondary-foreground hover:bg-surface-1')} onClick={() => setLanesOn(false)}>Chat</button>
+                        <button type="button" aria-pressed={showLanes} className={cn('px-2 py-1', showLanes ? 'bg-surface-hover font-bold text-foreground' : 'text-secondary-foreground hover:bg-surface-1')} onClick={() => setLanesOn(true)}>Swimlanes · {stats.runningAgents} running</button>
+                      </span>
+                    )}
+                    <Button size="sm" variant="ghost" className="hidden h-8 px-2 max-[900px]:inline-flex max-[900px]:h-11 max-[900px]:min-w-11" aria-label="About this session" aria-expanded={infoOpen} title="Info" onClick={() => setInfoOpen((open) => !open)}><Info size={13} aria-hidden="true" /></Button>
                     <Button size="sm" variant="ghost" className="h-8 px-2 max-[900px]:h-11 max-[900px]:min-w-11" aria-label="Rename session" title="Rename" onClick={() => setTitleDraft(selected.title)}><Pencil size={13} aria-hidden="true" /></Button>
                     <Button size="sm" variant="ghost" className="h-8 px-2 max-[900px]:h-11 max-[900px]:min-w-11" aria-label="Delete session" title="Delete" onClick={() => { setActionError(''); setDeleteTarget(selected); }}><Trash2 size={13} aria-hidden="true" /></Button>
                   </div>
@@ -251,14 +265,23 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
                 </p>
               )}
               {actionError && !deleteTarget && <p className="flex-none border-b border-border px-3.5 py-1.5 text-pretty text-xs break-words text-status-conflict" role="alert">{actionError}</p>}
-              <ChatThread
-                key={selected.id}
-                sessionId={selected.id}
-                className="min-h-0 flex-1"
-                hideMachine
-                onActivity={setEvents}
-                readOnlyAction={<Button size="sm" variant="primary" disabled={creating} onClick={() => void create({ forkFrom: selected.id, title: selected.title || undefined, ticketKey: selected.ticketKey })}>Continue as a DOCK session</Button>}
-              />
+              <div className="flex min-h-0 flex-1">
+                <ChatThread
+                  key={selected.id}
+                  sessionId={selected.id}
+                  className={cn('min-h-0 min-w-0 flex-1', showLanes && 'max-w-[44%]')}
+                  hideMachine
+                  onActivity={setEvents}
+                  readOnlyAction={<Button size="sm" variant="primary" disabled={creating} onClick={() => void create({ forkFrom: selected.id, title: selected.title || undefined, ticketKey: selected.ticketKey })}>Continue as a DOCK session</Button>}
+                />
+                {showLanes && <AgentLanes events={events} className="min-w-0 flex-1 max-[900px]:hidden" />}
+              </div>
+              {infoOpen && (
+                <div className="fixed inset-x-0 bottom-0 z-[50] max-h-[70dvh] overflow-y-auto rounded-t-lg border-t border-border-glow bg-surface-1 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-card min-[901px]:hidden" role="dialog" aria-label="About this session">
+                  <div className="mb-2 flex items-center justify-between"><span className="mx-auto h-1.5 w-10 rounded-pill bg-border-glow" aria-hidden="true" /><Button size="sm" variant="ghost" className="h-11 min-w-11" aria-label="Close" onClick={() => setInfoOpen(false)}><X size={15} aria-hidden="true" /></Button></div>
+                  <SessionInfoCard session={selected} files={filesTouched(events)} onTicketClick={onTicketClick} />
+                </div>
+              )}
             </>
           )}
         </Card>

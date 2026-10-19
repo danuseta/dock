@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
-import { Loader2, Paperclip, SendHorizontal, Square } from 'lucide-react';
+import { Loader2, Maximize2, Minimize2, Paperclip, SendHorizontal, Square } from 'lucide-react';
 import { Button } from '../../components/ui';
+import { cn } from '../../lib/cn';
 import { machinePlace } from '../messages';
 import { AttachmentTray } from './AttachmentTray';
 import { CommandPicker } from './CommandPicker';
@@ -24,6 +25,7 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
   const [highlight, setHighlight] = useState(0);
   const [hint, setHint] = useState<{ text: string; hint: string } | null>(null);
   const [mode, setMode] = useState<SendMode>('queue');
+  const [full, setFull] = useState(false);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const attachments = useAttachments(sessionId, features.attachments);
@@ -68,6 +70,7 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
     if (optionsOpen) showOptions(false);
     setDraft('');
     setHint(null);
+    setFull(false);
     try {
       await onSend(payload);
       attachments.clear();
@@ -107,14 +110,19 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
   };
 
   return (
-    <div className="flex min-w-0 flex-col gap-1.5">
+    <div className={cn('flex min-w-0 flex-col gap-1.5', full && 'max-[900px]:fixed max-[900px]:inset-0 max-[900px]:z-[60] max-[900px]:bg-background max-[900px]:p-3 max-[900px]:pt-[max(0.75rem,env(safe-area-inset-top))]')}>
+      <div className="flex items-center justify-end min-[901px]:hidden">
+        <Button size="sm" variant="ghost" className="h-11 min-w-11" aria-pressed={full} aria-label={full ? 'Back to the small message box' : 'Write in full screen'} onClick={() => setFull((current) => !current)}>
+          {full ? <Minimize2 size={15} aria-hidden="true" /> : <Maximize2 size={15} aria-hidden="true" />}
+        </Button>
+      </div>
       <OptionsBar features={features} control={control} disabled={sending} open={optionsOpen} onToggle={() => showOptions(!optionsOpen)} />
       {features.attachments && <AttachmentTray items={attachments.items} notice={attachments.notice} limitText={limitText} limitId={limitId} disabled={sending} onRemove={attachments.remove} />}
       {hasRows || (pickerOpen && (loading || commands.length === 0)) ? (
         <CommandPicker id={pickerId} commands={commands} loading={loading} highlight={highlight} onHighlight={setHighlight} onPick={pick} />
       ) : null}
       {hint && hint.text === draft && <p className="font-mono text-[0.68rem] text-muted-foreground">{hint.hint}</p>}
-      <div className="flex items-end gap-2">
+      <div className={cn('flex items-end gap-2', full && 'max-[900px]:min-h-0 max-[900px]:flex-1 max-[900px]:items-stretch')}>
         {features.attachments && (
           <>
             <input ref={fileInput} type="file" multiple hidden accept={acceptAttribute()} onChange={handleFiles} />
@@ -133,7 +141,7 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
         )}
         <textarea
           ref={textarea}
-          className="max-h-[50dvh] min-h-24 min-w-0 max-[900px]:min-h-16 flex-1 resize-y rounded-sm border border-border bg-surface-1 px-3 py-2 font-body text-[0.82rem] text-foreground placeholder:text-muted-foreground focus-visible:border-border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-50"
+          className={cn('max-h-[50dvh] min-h-24 min-w-0 max-[900px]:min-h-16 flex-1 resize-y rounded-sm border border-border bg-surface-1 px-3 py-2 font-body text-[0.82rem] text-foreground placeholder:text-muted-foreground focus-visible:border-border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-50', full && 'max-[900px]:max-h-none max-[900px]:resize-none')}
           rows={4}
           maxLength={MAX_TEXT}
           value={draft}
