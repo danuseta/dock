@@ -5,4 +5,5 @@ export * from './Input';
 export * from './FormControls';
 export * from './Page';
 export * from './Dialog';
+export * from './ConfirmDialog';
 export * from './PhoneCards';

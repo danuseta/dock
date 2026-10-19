@@ -102,7 +102,7 @@ const MonitoringPage: React.FC<MonitoringPageProps> = ({ onNavigate }) => {
     }
   };
 
-  if (isInitialQueryLoading(loading, data)) return <Page width="wide"><LoadingSkeleton /></Page>;
+  if (isInitialQueryLoading(loading, data)) return <Page width="full"><LoadingSkeleton /></Page>;
 
   const monitors: MonitorTarget[] = data?.monitors || [];
   const up = monitors.filter((monitor) => monitor.lastStatus === 'UP').length;
@@ -114,7 +114,7 @@ const MonitoringPage: React.FC<MonitoringPageProps> = ({ onNavigate }) => {
   const isSaving = adding || updating;
 
   return (
-    <Page width="wide">
+    <Page width="full">
       <PageHeader>
         <div>
           <h1 className="text-balance font-display text-3xl font-black">Services</h1>

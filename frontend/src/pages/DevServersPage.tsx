@@ -4,7 +4,7 @@ import { Download, Play, RefreshCw, RotateCcw, Search, Server, Square, Terminal 
 import { GET_DEV_SERVER_LOG, GET_DEV_SERVERS } from '../graphql/queries';
 import { RESTART_DEV_SERVER, START_ALL_DEV_SERVERS, START_DEV_SERVER, STOP_ALL_DEV_SERVERS, STOP_DEV_SERVER, STOP_WORKTREE_SERVER } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
-import { Button, Card, IconButton, Input, Page, PageHeader } from '../components/ui';
+import { Button, Card, ConfirmDialog, IconButton, Input, Page, PageHeader } from '../components/ui';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { cn } from '../lib/cn';
 import { canStop, filterLog, type DevServer, type DevServerAction } from '../lib/devServers';
@@ -28,6 +28,7 @@ const DevServersPage = () => {
   const [stopWorktree] = useMutation(STOP_WORKTREE_SERVER);
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState('');
+  const [confirmStopAll, setConfirmStopAll] = useState(false);
 
   const act = async (target: string, work: () => Promise<unknown>) => {
     setBusy(target);
@@ -63,7 +64,7 @@ const DevServersPage = () => {
         <div><h1 className="text-balance font-display text-3xl font-black">Dev servers</h1><p className="mt-1 text-pretty text-secondary-foreground">The apps of this workspace. Main runs from the main clones with qonflo-dev; secondary are the servers agents started in ticket worktrees.</p></div>
         <span className="flex flex-wrap items-center gap-2">
           <Button onClick={() => void act('all', () => startAll())} disabled={busy !== null}><Play size={16} aria-hidden="true" />Start all</Button>
-          <Button onClick={() => { if (window.confirm('Stop all dev servers?')) void act('all', () => stopAll()); }} disabled={busy !== null}><Square size={16} aria-hidden="true" />Stop all</Button>
+          <Button onClick={() => setConfirmStopAll(true)} disabled={busy !== null}><Square size={16} aria-hidden="true" />Stop all</Button>
           <Button onClick={() => void refetch()} disabled={loading}><RefreshCw size={16} className={cn(loading && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />Refresh</Button>
         </span>
       </PageHeader>
@@ -134,6 +135,17 @@ const DevServersPage = () => {
           </ul>
         )}
       </Card>
+
+      <ConfirmDialog
+        open={confirmStopAll}
+        title="Stop all dev servers?"
+        description="Every main app started with qonflo-dev stops. Servers in ticket worktrees keep running."
+        confirmLabel="Stop all"
+        busyLabel="Stopping..."
+        busy={busy === 'all'}
+        onCancel={() => setConfirmStopAll(false)}
+        onConfirm={() => void act('all', () => stopAll()).then(() => setConfirmStopAll(false))}
+      />
     </Page>
   );
 };

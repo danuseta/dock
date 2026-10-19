@@ -4,7 +4,7 @@ import { cn } from '../../lib/cn';
 import { MODE_LABELS, PERMISSION_MODES, effortChoices, type ComposerFeatures, type MachineOptions, type TurnOptions } from './composerLogic';
 import { hasChangedChoice, optionsSummary } from './optionsSummary';
 import type { TurnOptionsControl } from './useTurnOptions';
-import { defaultLabel, type SessionMachineOptions } from '../sessionOptions';
+import { defaultLabel, keepChoice, type SessionMachineOptions } from '../sessionOptions';
 
 interface OptionsBarProps {
   features: ComposerFeatures;
@@ -62,7 +62,7 @@ export const OptionsBar: React.FC<OptionsBarProps> = ({ features, control, disab
         <Field label="Model">
           <select className={selectClass} value={value('model')} disabled={disabled} onChange={change(control.setModel)}>
             <option value="">{defaultLabel('model', named)}</option>
-            {machine.models.map((model) => <option key={model.value} value={model.value}>{model.label}</option>)}
+            {machine.models.filter((model) => keepChoice(model.value, named.defaults?.model, options.model)).map((model) => <option key={model.value} value={model.value}>{model.label}</option>)}
           </select>
         </Field>
       )}
@@ -70,7 +70,7 @@ export const OptionsBar: React.FC<OptionsBarProps> = ({ features, control, disab
         <Field label="Effort">
           <select className={selectClass} value={value('effort')} disabled={disabled} onChange={change(control.setEffort)}>
             <option value="">{defaultLabel('effort', named)}</option>
-            {efforts.map((level) => <option key={level} value={level}>{level}</option>)}
+            {efforts.filter((level) => keepChoice(level, named.defaults?.effort, options.effort)).map((level) => <option key={level} value={level}>{level}</option>)}
           </select>
         </Field>
       )}
@@ -78,7 +78,7 @@ export const OptionsBar: React.FC<OptionsBarProps> = ({ features, control, disab
         <Field label="Mode">
           <select className={selectClass} value={value('permissionMode')} disabled={disabled} onChange={change(control.setMode)}>
             <option value="">{defaultLabel('permissionMode', named)}</option>
-            {modes.map((mode) => <option key={mode} value={mode}>{MODE_LABELS[mode] ?? mode}</option>)}
+            {modes.filter((mode) => keepChoice(mode, named.defaults?.permissionMode, options.permissionMode)).map((mode) => <option key={mode} value={mode}>{MODE_LABELS[mode] ?? mode}</option>)}
           </select>
         </Field>
       )}

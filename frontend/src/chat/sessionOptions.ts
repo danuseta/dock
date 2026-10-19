@@ -39,6 +39,11 @@ export const defaultLabel = (field: OptionField, machine: SessionMachineOptions 
   return named.length > 0 ? `Default (${named.join(', ')})` : 'Default';
 };
 
+/** A value the Default entry already names is not listed again, unless the session picked it before. */
+export const keepChoice = (value: string, fallback: string | null | undefined, current: string | null | undefined): boolean => (
+  value !== fallback || value === current
+);
+
 export const modelChoices = (machine: SessionMachineOptions): Choice[] => [
   { value: '', label: defaultLabel('model', machine) },
   ...machine.models.map((model) => ({ value: model.value, label: model.label })),
