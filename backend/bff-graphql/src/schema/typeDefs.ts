@@ -760,7 +760,7 @@ export const typeDefs = gql`
     dismissOrchestration(key: String!): Boolean!
     moveOrchestration(key: String!, machine: String!): Orchestration!
     createChatSession(title: String, ticketKey: String, forkFrom: ID, machine: String): ChatSession!
-    sendChatMessage(sessionId: ID!, text: String!, attachmentIds: [ID!], options: ChatTurnOptionsInput): ChatMessage!
+    sendChatMessage(sessionId: ID!, text: String!, attachmentIds: [ID!], options: ChatTurnOptionsInput, mode: String): ChatMessage!
     answerChatInteraction(sessionId: ID!, id: Int!, decision: String!, answers: [ChatAnswerInput!], note: String): ChatInteraction!
     stopChatTurn(sessionId: ID!): ChatSession!
     renameChatSession(id: ID!, title: String!): ChatSession!

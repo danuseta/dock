@@ -250,7 +250,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
     assert.strictEqual(String(query.chatMachineOptions.type), 'ChatMachineOptions');
     assert.deepStrictEqual(
       mutation.sendChatMessage.args.map((arg) => [arg.name, String(arg.type)]),
-      [['sessionId', 'ID!'], ['text', 'String!'], ['attachmentIds', '[ID!]'], ['options', 'ChatTurnOptionsInput']],
+      [['sessionId', 'ID!'], ['text', 'String!'], ['attachmentIds', '[ID!]'], ['options', 'ChatTurnOptionsInput'], ['mode', 'String']],
     );
     assert.deepStrictEqual(
       mutation.answerChatInteraction.args.map((arg) => [arg.name, String(arg.type)]),

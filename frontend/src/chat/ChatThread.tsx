@@ -91,7 +91,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
   const machineUp = machineOnline(data?.chatMachines, machine, data?.chatBridge?.online);
   const machineSeenAt = data?.chatMachines?.find((item) => item.name === machine)?.lastSeenAt ?? data?.chatBridge?.lastSeenAt;
   const machineHasToken = data?.chatMachines && data.chatMachines.length > 0 ? data.chatMachines.some((item) => item.name === machine) : undefined;
-  const blocker = sendBlocker({ source: session?.source, busy, bridgeOnline: machineUp, machine, machineHasToken, lastSeenAt: machineSeenAt });
+  const blocker = sendBlocker({ source: session?.source, busy: false, bridgeOnline: machineUp, machine, machineHasToken, lastSeenAt: machineSeenAt });
   const place = machinePlace(machine);
   const capabilities = machineCapabilities(data?.chatMachines, machine);
   const interactions = useInteractionLog(session?.pending, session?.settled);
@@ -211,6 +211,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
       const variables: Record<string, unknown> = { sessionId, text: payload.text };
       if (payload.attachmentIds.length > 0) variables.attachmentIds = payload.attachmentIds;
       if (payload.options) variables.options = payload.options;
+      if (payload.mode) variables.mode = payload.mode;
       const result = await client.mutate<{ sendChatMessage: ChatMessage }>({ mutation: SEND_CHAT_MESSAGE, variables });
       const confirmed = result.data?.sendChatMessage;
       if (!confirmed) throw new Error('DOCK did not confirm the message');
@@ -282,7 +283,8 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
               {isOptimistic(message) && <span className="mt-0.5 font-mono text-[0.62rem] text-muted-foreground">Sending...</span>}
               {message.stopped && message.state !== 'queued' && message.state !== 'taken' ? (
                 <span className="mt-0.5 font-mono text-[0.62rem] text-muted-foreground">Stopped</span>
-              ) : message.state === 'failed' && <span className="mt-0.5 font-mono text-[0.62rem] text-status-conflict">Not answered</span>}
+              ) : message.state === 'failed' ? <span className="mt-0.5 font-mono text-[0.62rem] text-status-conflict">Not answered</span>
+                : message.state === 'held' && <span className="mt-0.5 font-mono text-[0.62rem] text-muted-foreground">Waiting · sent when Claude finishes this turn</span>}
             </li>
           )))}
         </ol>

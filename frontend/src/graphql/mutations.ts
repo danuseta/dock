@@ -247,8 +247,8 @@ export const CREATE_CHAT_SESSION = gql`
 `;
 
 export const SEND_CHAT_MESSAGE = gql`
-  mutation SendChatMessage($sessionId: ID!, $text: String!, $attachmentIds: [ID!], $options: ChatTurnOptionsInput) {
-    sendChatMessage(sessionId: $sessionId, text: $text, attachmentIds: $attachmentIds, options: $options) {
+  mutation SendChatMessage($sessionId: ID!, $text: String!, $attachmentIds: [ID!], $options: ChatTurnOptionsInput, $mode: String) {
+    sendChatMessage(sessionId: $sessionId, text: $text, attachmentIds: $attachmentIds, options: $options, mode: $mode) {
       ${CHAT_MESSAGE_FIELDS}
     }
   }
