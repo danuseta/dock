@@ -7,7 +7,7 @@ import { CommandPicker } from './CommandPicker';
 import { OptionsBar } from './OptionsBar';
 import {
   MAX_TEXT, acceptAttribute, attachmentLimitText, buildPayload, canSend, composerFeatures, insertCommand, isSendKey, moveHighlight, optionId, slashQuery,
-  type ChatCommand, type ComposerProps,
+  type ChatCommand, type ComposerProps, type SendMode,
 } from './composerLogic';
 import { useAttachments } from './useAttachments';
 import { useCommands } from './useCommands';
@@ -23,6 +23,7 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
   const [optionsOpen, setOptionsOpen] = useState(readOpen);
   const [highlight, setHighlight] = useState(0);
   const [hint, setHint] = useState<{ text: string; hint: string } | null>(null);
+  const [mode, setMode] = useState<SendMode>('queue');
   const textarea = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const attachments = useAttachments(sessionId, features.attachments);
@@ -62,7 +63,7 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
   const send = async () => {
     if (!sendable) return;
     const original = draft;
-    const payload = buildPayload({ text: draft, attachmentIds: attachments.ids, attachments: attachments.sent, options: control.options, features, machineOptions: control.machineOptions });
+    const payload = { ...buildPayload({ text: draft, attachmentIds: attachments.ids, attachments: attachments.sent, options: control.options, features, machineOptions: control.machineOptions }), mode: busy ? mode : null };
     setSending(true);
     if (optionsOpen) showOptions(false);
     setDraft('');
@@ -123,7 +124,7 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
               className="h-10 max-[900px]:size-11"
               aria-label="Attach files"
               aria-describedby={limitText ? limitId : undefined}
-              disabled={sending || limitText !== ''}
+              disabled={sending || busy || limitText !== ''}
               onClick={() => fileInput.current?.click()}
             >
               <Paperclip size={16} aria-hidden="true" />
@@ -147,17 +148,28 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
           onChange={(event) => change(event.target.value)}
           onKeyDown={handleKeyDown}
         />
-        {showStop ? (
-          <Button size="sm" variant="danger" className="h-10 max-[900px]:h-11 max-[900px]:min-w-11" disabled={stopping} aria-label={stopping ? 'Stopping the turn' : 'Stop the turn'} onClick={onStop}>
-            {stopping ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Square size={14} aria-hidden="true" />}
-            {stopping ? 'Stopping...' : 'Stop'}
+        <div className="flex flex-none flex-col items-stretch gap-1.5">
+          {showStop && (
+            <Button size="sm" variant="danger" className="h-10 max-[900px]:h-11 max-[900px]:min-w-11" disabled={stopping} aria-label={stopping ? 'Stopping the turn' : 'Stop the turn'} onClick={onStop}>
+              {stopping ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Square size={14} aria-hidden="true" />}
+              {stopping ? 'Stopping...' : 'Stop'}
+            </Button>
+          )}
+          <Button size="sm" variant="primary" className="h-10 max-[900px]:h-11 max-[900px]:min-w-11" disabled={!sendable} aria-label={busy ? (mode === 'steer' ? 'Steer: stop this turn and send' : 'Queue: send after this turn') : 'Send message'} aria-describedby={blocker ? blockerId : undefined} onClick={() => void send()}>
+            <SendHorizontal size={14} aria-hidden="true" />{busy ? (mode === 'steer' ? 'Steer' : 'Queue') : 'Send'}
           </Button>
-        ) : (
-          <Button size="sm" variant="primary" className="h-10 max-[900px]:h-11 max-[900px]:min-w-11" disabled={!sendable} aria-label="Send message" aria-describedby={blocker ? blockerId : undefined} onClick={() => void send()}>
-            <SendHorizontal size={14} aria-hidden="true" />Send
-          </Button>
-        )}
+        </div>
       </div>
+      {busy && (
+        <div className="flex flex-wrap items-center gap-2 font-mono text-[0.66rem] text-muted-foreground" role="group" aria-label="While Claude works">
+          <span className="inline-flex overflow-hidden rounded-xs border border-border-glow">
+            {(['queue', 'steer'] as const).map((choice) => (
+              <button key={choice} type="button" aria-pressed={mode === choice} className={mode === choice ? 'bg-surface-hover px-2 py-1 font-bold text-foreground max-[900px]:min-h-11' : 'px-2 py-1 text-secondary-foreground hover:bg-surface-1 max-[900px]:min-h-11'} onClick={() => setMode(choice)}>{choice === 'queue' ? 'Queue' : 'Steer'}</button>
+            ))}
+          </span>
+          <span className="text-pretty">{mode === 'queue' ? 'Sent when Claude finishes this turn.' : 'Stops the current step, subagents included, and answers this next in the same session.'}</span>
+        </div>
+      )}
     </div>
   );
 };

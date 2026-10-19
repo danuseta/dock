@@ -12,7 +12,11 @@ export interface SendPayload {
   attachmentIds: string[];
   attachments: ChatAttachment[];
   options: TurnOptions | null;
+  /** Set when Claude is still on the previous turn: queue waits for it, steer stops it and answers this next. */
+  mode?: SendMode | null;
 }
+
+export type SendMode = 'queue' | 'steer';
 
 export interface ComposerProps {
   sessionId: string;

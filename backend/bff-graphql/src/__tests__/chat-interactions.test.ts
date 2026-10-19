@@ -1458,3 +1458,59 @@ test('a file from the agent becomes an assistant message of the turn, and every 
   await chat.syncSession({ session: { id: 'cli-session', title: 'Terminal', startedAt: '2026-10-12T00:00:00Z', lastMessageAt: '2026-10-12T00:00:00Z' }, messages: [] }, 'laptop');
   await refused(await upload({ ...query, sessionId: 'cli-session' }, png, 'image/png'), 400);
 });
+
+test('queue: a message sent while a turn runs waits as held and becomes the next turn when this one ends', async () => {
+  const ctx = setup();
+  const turn = await takenTurn(ctx);
+  await assert.rejects(ctx.service.sendMessage(turn.sessionId, 'no mode', MACHINES), /still working on the previous message/, 'without a mode the old refusal stays');
+  await assert.rejects(ctx.service.sendMessage(turn.sessionId, 'bad', MACHINES, { mode: 'later' }), /mode must be queue or steer/);
+  const held = await ctx.service.sendMessage(turn.sessionId, 'and then the docs', MACHINES, { mode: 'queue' });
+  assert.strictEqual(held.state, 'held');
+  assert.strictEqual(ctx.messages().find((message) => message.id === turn.replyTo).stopRequestedAt ?? null, null, 'queue does not stop the turn');
+  assert.deepStrictEqual((await ctx.service.claim({ wait: 0, caps: CAPS }, undefined, 'laptop')).message, null, 'a held message is not claimed while the turn runs');
+
+  await ctx.service.delta({ ...turn, done: true }, 'laptop');
+  assert.strictEqual(ctx.messages().find((message) => message.id === held.id).state, 'queued');
+  assert.strictEqual(ctx.sessions.get(turn.sessionId).status, 'queued');
+  assert.strictEqual((await ctx.service.claim({ wait: 0, caps: CAPS }, undefined, 'laptop')).message?.id, held.id);
+});
+
+test('steer: the held message stops the running turn and is answered next', async () => {
+  const ctx = setup();
+  const turn = await takenTurn(ctx);
+  const held = await ctx.service.sendMessage(turn.sessionId, 'keep the tag filter', MACHINES, { mode: 'steer' });
+  assert.strictEqual(held.state, 'held');
+  assert.ok(ctx.messages().find((message) => message.id === turn.replyTo).stopRequestedAt, 'the running turn is asked to stop');
+  assert.deepStrictEqual(await ctx.service.wait({ ...turn, wait: 0 }, undefined, 'laptop'), { stop: true, answers: [], closed: false });
+
+  await ctx.service.delta({ ...turn, done: true, stopped: true }, 'laptop');
+  assert.strictEqual(ctx.messages().find((message) => message.id === held.id).state, 'queued');
+  assert.strictEqual((await ctx.service.claim({ wait: 0, caps: CAPS }, undefined, 'laptop')).message?.id, held.id);
+});
+
+test('held messages go one at a time, survive a failed turn, and refuse attachments', async () => {
+  const ctx = setup();
+  const turn = await takenTurn(ctx);
+  const first = await ctx.service.sendMessage(turn.sessionId, 'first', MACHINES, { mode: 'queue' });
+  const second = await ctx.service.sendMessage(turn.sessionId, 'second', MACHINES, { mode: 'queue' });
+  await assert.rejects(ctx.service.sendMessage(turn.sessionId, 'file', MACHINES, { mode: 'queue', attachmentIds: ['a1'] }), /Attachments wait until Claude finishes/);
+
+  await ctx.service.delta({ ...turn, error: 'boom' }, 'laptop');
+  const states = () => [first.id, second.id].map((id) => ctx.messages().find((message) => message.id === id).state);
+  assert.deepStrictEqual(states(), ['queued', 'held']);
+  const next = await ctx.service.claim({ wait: 0, caps: CAPS }, undefined, 'laptop');
+  assert.strictEqual(next.message?.id, first.id);
+  await ctx.service.delta({ sessionId: turn.sessionId, replyTo: first.id, done: true }, 'laptop');
+  assert.deepStrictEqual(states(), ['done', 'queued']);
+});
+
+test('a held message is released when a queued turn is stopped before it started', async () => {
+  const ctx = setup();
+  const dock = await ctx.service.createSession({ title: 'Queued' });
+  const waiting = await ctx.service.sendMessage(dock.id, 'never started', MACHINES);
+  const held = await ctx.service.sendMessage(dock.id, 'instead', MACHINES, { mode: 'queue' });
+  assert.strictEqual(held.state, 'held');
+  await ctx.service.stopTurn(dock.id);
+  assert.strictEqual(ctx.messages().find((message) => message.id === waiting.id).state, 'failed');
+  assert.strictEqual(ctx.messages().find((message) => message.id === held.id).state, 'queued');
+});

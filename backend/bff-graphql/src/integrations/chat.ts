@@ -486,6 +486,7 @@ export class ChatService {
     await this.closeActivity(sessionId, turnId);
     await this.serial(() => this.storage.cancelChatInteractions(sessionId, turnId));
     this.notifier.wake(turnId);
+    await this.releaseHeld(sessionId);
   }
 
   private async giveUp(sessionId: string, detail: string) {
@@ -495,6 +496,7 @@ export class ChatService {
     await this.closeActivity(sessionId, null);
     await this.serial(() => this.storage.cancelChatInteractions(sessionId, null));
     for (const turnId of turns) this.notifier.wake(turnId);
+    await this.releaseHeld(sessionId);
   }
 
   private async discardDraft(id: number) {
@@ -878,9 +880,11 @@ export class ChatService {
     sessionIdInput: string,
     textInput: string,
     machines: string[],
-    extras: { attachmentIds?: string[] | null; options?: unknown } = {},
+    extras: { attachmentIds?: string[] | null; options?: unknown; mode?: unknown } = {},
   ) {
     const sessionId = chatId(sessionIdInput, 'sessionId');
+    if (extras.mode != null && extras.mode !== 'queue' && extras.mode !== 'steer') throw new OrchestratorInputError('mode must be queue or steer');
+    const mode = extras.mode === 'queue' || extras.mode === 'steer' ? extras.mode : null;
     const body = typeof textInput === 'string' ? textInput.trim() : '';
     const attachmentIds = [...new Set(extras.attachmentIds ?? [])];
     if (attachmentIds.length > ATTACHMENT_LIMITS.perMessage) {
@@ -897,9 +901,9 @@ export class ChatService {
     if (!machines.includes(session.machine)) {
       throw new OrchestratorInputError(`No ingest token exists for the machine ${session.machine}, so nothing would answer this message`);
     }
-    if (await this.storage.countChatMessagesInState(sessionId, ['draft', 'queued', 'taken']) > 0) {
-      throw new OrchestratorInputError('This session is still working on the previous message');
-    }
+    const busy = await this.storage.countChatMessagesInState(sessionId, ['draft', 'queued', 'taken']) > 0;
+    if (busy && !mode) throw new OrchestratorInputError('This session is still working on the previous message');
+    if (busy && attachmentIds.length > 0) throw new OrchestratorInputError('Attachments wait until Claude finishes this turn');
     const { caps, catalog } = await this.info(session.machine);
     if (attachmentIds.length > 0 && caps?.features.includes('attachments') !== true) {
       throw new OrchestratorInputError('This machine cannot receive attachments yet');
@@ -908,6 +912,7 @@ export class ChatService {
     const effective = mergeTurnOptions(usableTurnOptions(parseStoredOptions(session.options), caps, catalog), options);
     const now = this.now();
     const optionsJson = effective ? JSON.stringify(effective) : null;
+    if (busy) return this.hold(sessionId, body, optionsJson, now, mode === 'steer');
     let message = await this.storage.createChatMessage({
       sessionId, role: 'user', text: body, state: attachmentIds.length > 0 ? 'draft' : 'queued', at: now, options: optionsJson,
     });
@@ -934,6 +939,33 @@ export class ChatService {
     return { ...toMessage(message), ...(attached.length > 0 ? { attachments: attached } : {}) };
   }
 
+  /**
+   * A message sent while a turn runs waits as `held` and becomes the next turn when this one ends.
+   * Steer also stops the running turn, so the message is answered right away in the same Claude session.
+   */
+  private async hold(sessionId: string, text: string, options: string | null, now: Date, steer: boolean) {
+    const message = await this.storage.createChatMessage({ sessionId, role: 'user', text, state: 'held', at: now, options });
+    const messageCount = await this.storage.trimChatMessages(sessionId, MAX_MESSAGES_KEPT);
+    await this.storage.updateChatSession(sessionId, { messageCount, lastMessageAt: now });
+    const open = await this.storage.getOpenChatMessage(sessionId);
+    if (steer && open?.state === 'taken') {
+      await this.serial(() => this.storage.requestChatStop(open.id, sessionId, this.now()));
+      this.notifier.wake(open.id);
+    }
+    if (!open) await this.releaseHeld(sessionId);
+    return toMessage(message);
+  }
+
+  /** Once no turn is open, the oldest held message is queued for the bridge. */
+  private async releaseHeld(sessionId: string) {
+    if (await this.storage.countChatMessagesInState(sessionId, ['draft', 'queued', 'taken']) > 0) return;
+    const [next] = await this.storage.getChatMessageIdsInState(sessionId, ['held']);
+    if (next === undefined) return;
+    if (await this.storage.moveChatMessage(next, sessionId, 'held', 'queued')) {
+      await this.storage.updateChatSession(sessionId, { status: 'queued', statusDetail: null });
+    }
+  }
+
   private async turnMessage(sessionId: string, id: number) {
     const message = await this.storage.getChatMessage(id);
     if (!message || message.sessionId !== sessionId || message.role !== 'user') {
@@ -951,8 +983,9 @@ export class ChatService {
     let open = await this.storage.getOpenChatMessage(sessionId);
     if (open?.state === 'queued') {
       if (await this.storage.moveChatMessage(open.id, sessionId, 'queued', 'failed')) {
-        const row = await this.storage.updateChatSession(sessionId, { status: 'idle', statusDetail: STOPPED_QUEUED_TEXT });
-        return (await this.present([row]))[0];
+        await this.storage.updateChatSession(sessionId, { status: 'idle', statusDetail: STOPPED_QUEUED_TEXT });
+        await this.releaseHeld(sessionId);
+        return (await this.present([(await this.storage.getChatSession(sessionId))!]))[0];
       }
       open = await this.storage.getOpenChatMessage(sessionId);
     }
@@ -1275,6 +1308,7 @@ export class ChatService {
     } finally {
       if (ended) await this.closeActivity(session.id, replyTo.id);
       if (ended || !open) await this.closeTurn(session.id, replyTo.id);
+      if (ended) await this.releaseHeld(session.id);
     }
   }
 

@@ -511,9 +511,9 @@ export const resolvers = {
     },
     sendChatMessage: async (
       _: unknown,
-      { sessionId, text, attachmentIds, options }: { sessionId: string; text: string; attachmentIds?: string[] | null; options?: unknown },
+      { sessionId, text, attachmentIds, options, mode }: { sessionId: string; text: string; attachmentIds?: string[] | null; options?: unknown; mode?: string | null },
     ) => {
-      return chatService.sendMessage(sessionId, text, await orchestratorService.machines(), { attachmentIds, options }).catch(orchestratorInputError);
+      return chatService.sendMessage(sessionId, text, await orchestratorService.machines(), { attachmentIds, options, mode }).catch(orchestratorInputError);
     },
     answerChatInteraction: async (
       _: unknown,
