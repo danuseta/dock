@@ -431,7 +431,8 @@ export class OrchestratorCron {
 
   /**
    * A stalled run gets a message to continue in its own cron session, and the fill takes no new ticket: when its lead left
-   * subagents running, or when the session failed. Never when the owner stopped it or works the ticket in another session.
+   * subagents running, when the session failed, or when its idle session went quiet without a reason the bridge saw.
+   * Never when the owner stopped it or works the ticket in another session.
    * After MAX_RESUMES the run waits on the owner instead. Returns the tickets resumed.
    */
   private async resumeStalled(settings: CronSettings, log: FillLog): Promise<string[]> {
@@ -441,16 +442,18 @@ export class OrchestratorCron {
     for (const run of runs) {
       const session = sessions.get(run.key);
       if (!run.stalled || run.waiting || manual.has(run.key) || !session || session.stopped || session.otherActive) continue;
-      if (!(session.status === 'error' || (session.status === 'idle' && run.stalledDetail))) continue;
+      if (session.status !== 'error' && session.status !== 'idle') continue;
+      // A quiet run's turns end cleanly, which resets the resumes count: it keeps its own count so it still parks.
+      const counter = session.status === 'idle' && !run.stalledDetail ? `quietResumes:${run.key}` : `resumes:${run.key}`;
       try {
-        const count = Number(await this.deps.cacheGet(`resumes:${run.key}`)) || 0;
+        const count = Number(await this.deps.cacheGet(counter)) || 0;
         if (count >= MAX_RESUMES) {
           await this.deps.park(run.key, RESUME_GAVE_UP_TEXT);
           log.parked.push(run.key);
           continue;
         }
         await this.deps.send(session.id, resumePrompt(run.key), this.turnOptions(settings));
-        await this.deps.cacheSet(`resumes:${run.key}`, count + 1);
+        await this.deps.cacheSet(counter, count + 1);
         resumed.push(run.key);
       } catch (error) {
         console.error(`[Orchestrator cron] Resume of ${run.key} failed:`, error instanceof Error ? error.message : 'unknown error');
@@ -493,6 +496,7 @@ export class OrchestratorCron {
   private async start(ticket: CronTicket, settings: CronSettings, now: Date, prompt: string): Promise<boolean> {
     const options = this.turnOptions(settings);
     await this.resetResumes(ticket.key);
+    await this.deps.cacheDelete(`quietResumes:${ticket.key}`);
     const session = await this.deps.openSession({ ticketKey: ticket.key, machine: settings.machine, title: `${ticket.key} (cron)`, origin: 'cron', options });
     await this.deps.send(session.id, prompt, options);
     await this.saveRun(ticket, settings.machine, now, '');

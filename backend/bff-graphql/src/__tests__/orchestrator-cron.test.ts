@@ -454,14 +454,32 @@ test('a run whose lead left subagents running is resumed in its own session befo
   assert.strictEqual(w.state.runs.find((run) => run.key === 'QRD-1')?.waiting, RESUME_GAVE_UP_TEXT);
 });
 
-test('a run whose cron session failed is resumed; a run that only went quiet is not', async () => {
+test('a run whose cron session failed is resumed', async () => {
   const failed = await stalledWorld({});
   failed.state.sessions[0].state = 'error';
   assert.deepStrictEqual((await failed.cron.runFill()).resumed, ['QRD-1']);
+});
 
-  const quiet = await stalledWorld({});
-  const log = await quiet.cron.runFill();
-  assert.deepStrictEqual([log.resumed, log.started], [[], ['QRD-2']], 'idle without a reason is left to the owner and does not hold the queue');
+test('a run that only went quiet is resumed, at most three times although its turns end cleanly, then waits on the owner', async () => {
+  const w = await stalledWorld({});
+  for (let round = 1; round <= MAX_RESUMES; round += 1) {
+    const log = await w.cron.runFill();
+    assert.deepStrictEqual([log.resumed, log.started], [['QRD-1'], []], `quiet resume ${round} takes no new ticket`);
+    assert.deepStrictEqual(w.state.sent.at(-1)?.text, resumePrompt('QRD-1'));
+    w.endTurn('QRD-1');
+    await w.cron.resetResumes('QRD-1');
+  }
+  assert.strictEqual(w.state.cache.get(`quietResumes:QRD-1`), MAX_RESUMES, 'a clean turn end does not reset the quiet count');
+
+  const log = await w.cron.runFill();
+  assert.deepStrictEqual([log.resumed, log.parked, log.started], [[], ['QRD-1'], ['QRD-2']], 'the fourth quiet stall waits on the owner and the queue moves on');
+  assert.strictEqual(w.state.runs.find((run) => run.key === 'QRD-1')?.waiting, RESUME_GAVE_UP_TEXT);
+});
+
+test('a quiet run whose session still runs a turn is not resumed', async () => {
+  const w = await stalledWorld({});
+  w.state.sessions[0].state = 'running';
+  assert.deepStrictEqual((await w.cron.runFill()).resumed, []);
 });
 
 test('a stalled run is left alone when the owner stopped it, works it in another session, gates it, marks it manual, or its session is busy', async () => {
