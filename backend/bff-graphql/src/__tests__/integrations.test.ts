@@ -892,6 +892,29 @@ test('internal integration behavior', async (t) => {
     assert.deepStrictEqual(writes, [['discordMessageTemplate', '**{{ticketKey}}**']]);
   });
 
+  await t.test('stores the chat agent settings, defaults them to RTK on and caveman full, and rejects invalid values', async () => {
+    const writes: Array<[string, string]> = [];
+    const storage = {
+      getSettings: async () => [],
+      hasMasterPin: async () => false,
+      upsertSetting: async (key: string, value: string) => { writes.push([key, value]); },
+    };
+    const api = new StorageAPI(storage as any);
+
+    const settings = await api.getPublicSettings();
+    assert.deepStrictEqual([settings.chatRtk, settings.chatCaveman, settings.chatDefaultModel], ['on', 'full', null]);
+    assert.strictEqual(await api.updateSettings({ chatCaveman: 'loud' }), false);
+    assert.strictEqual(await api.updateSettings({ chatRtk: 'maybe' }), false);
+    assert.strictEqual(await api.updateSettings({ chatDefaultMode: 'yolo' }), false);
+    assert.strictEqual(await api.updateSettings({ chatDefaultModel: 'm'.repeat(101) }), false);
+    assert.strictEqual(await api.updateSettings({ chatDefaultEffort: 'e'.repeat(101) }), false);
+    assert.deepStrictEqual(writes, []);
+    assert.strictEqual(await api.updateSettings({ chatDefaultMode: '' }), true);
+    writes.length = 0;
+    assert.strictEqual(await api.updateSettings({ chatCaveman: 'lite', chatRtk: 'off', chatDefaultModel: 'sonnet' }), true);
+    assert.deepStrictEqual(writes, [['chatCaveman', 'lite'], ['chatRtk', 'off'], ['chatDefaultModel', 'sonnet']]);
+  });
+
   await t.test('validates bounded credential-free upstream targets', () => {
     assert.throws(() => validateMonitorTarget({ name: 'FTP', url: 'ftp://example.com' }));
     assert.throws(() => validateMonitorTarget({ name: 'Secret', url: 'https://user:pass@example.com' }));

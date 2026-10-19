@@ -3,6 +3,10 @@ import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, normalizeDiscordMessageTemplate } fro
 
 const MIN_SERVICE_HEALTH_REFRESH_SECONDS = 5;
 const MAX_SERVICE_HEALTH_REFRESH_SECONDS = 86_400;
+export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto'] as const;
+export const RTK_SETTINGS = ['on', 'off'] as const;
+export const CAVEMAN_LEVELS = ['off', 'lite', 'full', 'ultra'] as const;
+const MAX_CHAT_DEFAULT_CHARS = 100;
 const JIRA_TICKET_KEY = /^[A-Z][A-Z0-9_]{0,31}-[1-9]\d{0,9}$/;
 
 export const normalizeTicketKey = (value: unknown) => {
@@ -159,6 +163,11 @@ export class StorageAPI {
         ? Number(settings.serviceHealthRefreshSeconds)
         : 60,
       hasMasterPin: Boolean(settings.hasMasterPin),
+      chatDefaultModel: settings.chatDefaultModel || null,
+      chatDefaultEffort: settings.chatDefaultEffort || null,
+      chatDefaultMode: settings.chatDefaultMode || null,
+      chatRtk: settings.chatRtk || 'on',
+      chatCaveman: settings.chatCaveman || 'full',
     };
   }
 
@@ -168,6 +177,12 @@ export class StorageAPI {
         && !isValidServiceHealthRefreshSeconds(input.serviceHealthRefreshSeconds)) {
         throw new Error('Invalid service health refresh interval');
       }
+      for (const key of ['chatDefaultModel', 'chatDefaultEffort'] as const) {
+        if (input[key] != null && String(input[key]).length > MAX_CHAT_DEFAULT_CHARS) throw new Error('Invalid chat default');
+      }
+      if (input.chatDefaultMode != null && input.chatDefaultMode !== '' && !(PERMISSION_MODES as readonly string[]).includes(String(input.chatDefaultMode))) throw new Error('Invalid chat default mode');
+      if (input.chatRtk != null && !(RTK_SETTINGS as readonly string[]).includes(String(input.chatRtk))) throw new Error('Invalid RTK setting');
+      if (input.chatCaveman != null && !(CAVEMAN_LEVELS as readonly string[]).includes(String(input.chatCaveman))) throw new Error('Invalid caveman level');
       if (input.discordMessageTemplate != null) normalizeDiscordMessageTemplate(String(input.discordMessageTemplate));
       await Promise.all(Object.entries(input)
         .filter(([key, value]) => !(this.sensitiveKeys.has(key)

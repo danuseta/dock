@@ -206,6 +206,7 @@ const NO_PR_LINE = 'Do not push and do not open a pull request: the owner asks f
 const CONTRACT_LINE = 'Follow rules/ticket-contract.md: find and read the Confluence contract for this ticket before writing code; if a contract is found but cannot be read, stop and report why.';
 const VAULT_LINE = 'Before you finish, save a session note with brain.py save.';
 const LANES_LINE = 'Do not end your turn while a subagent you started is still running: run members in the foreground, or wait for the result of every member you started in the background before you end the turn.';
+const TEAM_LINE = 'Run the ticket with the oh-my-claudecode:team skill: its members are your workers, and you stay the lead.';
 const LANGUAGE_LINE = 'Write chat replies, reports and summaries in Bahasa Indonesia; code, comments, commit messages and pull request text stay in English.';
 
 /** The prompt for a ticket with acceptance criteria: built without stopping to ask. */
@@ -220,6 +221,7 @@ export const startPrompt = (key: string) => [
   NO_PR_LINE,
   'Do not make the demo video until the owner approves in this chat.',
   VAULT_LINE,
+  TEAM_LINE,
   LANES_LINE,
   LANGUAGE_LINE,
 ].join(' ');
@@ -232,6 +234,7 @@ export const confirmedPrompt = (key: string) => [
   NO_PR_LINE,
   'Do not make the demo video until the owner approves in this chat.',
   VAULT_LINE,
+  TEAM_LINE,
   LANES_LINE,
   LANGUAGE_LINE,
 ].join(' ');
@@ -239,6 +242,7 @@ export const confirmedPrompt = (key: string) => [
 /** The message that continues a stalled run in its own session. */
 export const resumePrompt = (key: string) => [
   `Lanjutkan tiket ${key} dari ledger: cek status.cjs show ${key} dan worktree-nya, jangan mulai dari awal.`,
+  TEAM_LINE,
   LANES_LINE,
   LANGUAGE_LINE,
 ].join(' ');

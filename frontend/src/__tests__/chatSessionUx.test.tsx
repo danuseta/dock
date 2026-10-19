@@ -116,7 +116,7 @@ test('raw HTML in a reply is never rendered', () => {
   assert.doesNotMatch(html, /javascript:/);
 });
 
-test('a search hit row shows the same chips and markers as the session list row', () => {
+test('a search hit row shows the same markers as the session list row', () => {
   const session: ChatSession = {
     id: 's1', source: 'dock', title: 'Fix login', ticketKey: 'QRD-1', machine: 'pc', status: 'running',
     messageCount: 3, startedAt: '2026-10-15T00:00:00Z', lastMessageAt: '2026-10-15T00:00:00Z', lastText: 'last reply', waiting: true,
@@ -126,8 +126,7 @@ test('a search hit row shows the same chips and markers as the session list row'
   const listRow = renderToStaticMarkup(<SessionRow {...common} />);
   const hitRow = renderToStaticMarkup(<SessionRow {...common} snippet="matched text" snippetAt="2026-10-15T00:04:00Z" />);
   for (const html of [listRow, hitRow]) {
-    assert.match(html, />DOCK</);
-    assert.match(html, /\(online\)/);
+    assert.doesNotMatch(html, />DOCK<|\(online\)/);
     assert.match(html, />waiting</);
     assert.match(html, /title="Working"/);
     assert.match(html, />QRD-1</);

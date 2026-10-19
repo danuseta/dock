@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useLazyQuery } from '@apollo/client';
 import {
   Activity, Bot, CalendarDays, CheckCircle2, ChevronRight, Eye, EyeOff, GitBranch,
-  KeyRound, LayoutPanelLeft, Lock, MessageSquare, Save, ShieldCheck, Unplug, Zap,
+  KeyRound, LayoutPanelLeft, Lock, MessageSquare, MessagesSquare, Save, ShieldCheck, Unplug, Zap,
   type LucideIcon,
 } from 'lucide-react';
 import { GET_SETTINGS, GET_GITHUB_REPOS, GET_JIRA_PROJECTS, GET_INGEST_TOKENS } from '../graphql/queries';
@@ -13,6 +13,8 @@ import { IngestTokensSection } from '../components/IngestTokensSection';
 import { ElevenLabsKeysSection } from '../components/ElevenLabsKeysSection';
 import { DemoStorageSection } from '../components/DemoStorageSection';
 import { PushCard } from '../components/PushCard';
+import { ChatDefaultsSection, type ChatDefaultsValue } from '../components/ChatDefaultsSection';
+import { normalizeCaveman, normalizeRtk } from '../chat/chatDefaults';
 import { NAVIGATION_PREFERENCES_EVENT, NavigationMode, NavigationPreferences, readNavigationPreferences, saveNavigationPreferences } from '../lib/navigationPreferences';
 import { Badge, Button, Card, Checkbox, IconButton, Input, Page, Select, Textarea } from '../components/ui';
 import { cn } from '../lib/cn';
@@ -26,7 +28,7 @@ import {
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, getDiscordTemplateError, renderDiscordMessageTemplate } from '../lib/discordTemplate';
 
-type SettingsSection = 'general' | 'security' | 'jira' | 'github' | 'calendar' | 'discord' | 'agents';
+type SettingsSection = 'general' | 'security' | 'jira' | 'github' | 'calendar' | 'discord' | 'agents' | 'chat';
 type RefreshUnit = 'seconds' | 'minutes';
 
 const settingsSections: Array<{
@@ -42,6 +44,7 @@ const settingsSections: Array<{
   { id: 'github', label: 'GitHub', description: 'Repositories', icon: GitBranch, group: 'Connections' },
   { id: 'calendar', label: 'Calendar', description: 'Google OAuth', icon: CalendarDays, group: 'Connections' },
   { id: 'discord', label: 'Discord', description: 'Notifications', icon: MessageSquare, group: 'Connections' },
+  { id: 'chat', label: 'Chat', description: 'Model, RTK & caveman', icon: MessagesSquare, group: 'Preferences' },
   { id: 'agents', label: 'Agents', description: 'Orchestrator ingest', icon: Bot, group: 'Connections' },
 ];
 
@@ -90,7 +93,8 @@ const SettingsHeading = ({ title, description }: { title: string; description: s
 const SettingsPage: React.FC = () => {
   // A connection shows only when its page does: a workspace DOCK has no calendar to connect.
   const mode = useDockMode();
-  const sections = settingsSections.filter((section) => section.id !== 'calendar' || hasPage(mode, '/calendar'));
+  const available = settingsSections.filter((section) => section.id !== 'chat' || hasPage(mode, '/sessions'));
+  const sections = available.filter((section) => section.id !== 'calendar' || hasPage(mode, '/calendar'));
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
   const [navigationPreferences, setNavigationPreferences] = useState(readNavigationPreferences);
   const { data, loading, error, refetch } = useQuery(GET_SETTINGS, CACHED_QUERY_OPTIONS);
@@ -118,6 +122,7 @@ const SettingsPage: React.FC = () => {
   const [googleCalendarId, setGoogleCalendarId] = useState('primary');
   const [serviceHealthRefreshValue, setServiceHealthRefreshValue] = useState('1');
   const [serviceHealthRefreshUnit, setServiceHealthRefreshUnit] = useState<RefreshUnit>('minutes');
+  const [chatDefaults, setChatDefaults] = useState<ChatDefaultsValue>({ model: '', effort: '', mode: '', rtk: 'on', caveman: 'full' });
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   // Password Visibility Toggles
@@ -172,6 +177,7 @@ const SettingsPage: React.FC = () => {
       const useMinutes = refreshSeconds % 60 === 0;
       setServiceHealthRefreshUnit(useMinutes ? 'minutes' : 'seconds');
       setServiceHealthRefreshValue(String(useMinutes ? refreshSeconds / 60 : refreshSeconds));
+      setChatDefaults({ model: data.settings.chatDefaultModel || '', effort: data.settings.chatDefaultEffort || '', mode: data.settings.chatDefaultMode || '', rtk: normalizeRtk(data.settings.chatRtk), caveman: normalizeCaveman(data.settings.chatCaveman) });
       setIsPinActive(!!data.settings.hasMasterPin);
       setHasUnsavedChanges(false);
     }
@@ -242,7 +248,12 @@ const SettingsPage: React.FC = () => {
             googleClientId,
             googleClientSecret,
             googleCalendarId,
-            serviceHealthRefreshSeconds
+            serviceHealthRefreshSeconds,
+            chatDefaultModel: chatDefaults.model,
+            chatDefaultEffort: chatDefaults.effort,
+            chatDefaultMode: chatDefaults.mode,
+            chatRtk: chatDefaults.rtk,
+            chatCaveman: chatDefaults.caveman
           }
         }
       });
@@ -406,6 +417,7 @@ const SettingsPage: React.FC = () => {
     github: Boolean(data?.settings?.hasGithubToken),
     calendar: Boolean(data?.settings?.googleCalendarConnected),
     discord: Boolean(data?.settings?.hasDiscordWebhookUrl),
+    chat: true,
     agents: (ingestTokenData?.ingestTokens?.length || 0) > 0,
   };
 
@@ -541,6 +553,8 @@ const SettingsPage: React.FC = () => {
               </div>
             </Card>
           </section>}
+
+          {activeSection === 'chat' && <section><SettingsHeading title="Chat" description="Defaults for new chat turns, and how the agent runs." /><ChatDefaultsSection value={chatDefaults} onChange={(next) => { setChatDefaults(next); markUnsaved(); }} /></section>}
 
           {activeSection === 'agents' && <><IngestTokensSection /><div className="mt-5"><ElevenLabsKeysSection /></div><div className="mt-5"><DemoStorageSection /></div></>}
         </main>

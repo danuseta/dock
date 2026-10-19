@@ -3,7 +3,7 @@ export type DockMode = typeof DOCK_MODES[number];
 
 /**
  * Which DOCK this server is. The laptop one keeps every page but chat: its bridge only reports the run ledger.
- * The workspace one runs inside a Coder workspace with chat, and without the calendar and Docker pages.
+ * The workspace one runs inside a Coder workspace with chat, connects its own Google account, and has no Docker page.
  */
 export function dockMode(): DockMode {
   const value = process.env.DOCK_MODE || 'laptop';

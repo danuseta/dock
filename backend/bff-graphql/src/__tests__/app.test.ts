@@ -140,7 +140,7 @@ test('each DOCK mode serves only the routes its pages use', async (t) => {
   const laptopGoogle = await fetch(`${laptopRuntime.baseUrl}/auth/google/callback`, { redirect: 'manual' });
   assert.strictEqual(laptopGoogle.status, 302);
   const workspaceGoogle = await fetch(`${workspaceRuntime.baseUrl}/auth/google/callback`, { redirect: 'manual' });
-  assert.strictEqual(workspaceGoogle.status, 404, 'a workspace DOCK has no calendar to connect');
+  assert.strictEqual(workspaceGoogle.status, 302, 'a workspace DOCK connects its own Google account');
 });
 
 test('the build of a page is the hashed name of its entry script', () => {

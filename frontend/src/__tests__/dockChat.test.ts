@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import test from 'node:test';
 import {
-  BRIDGE_OFFLINE, balloonText, isImageAttachment, isStopping, isTurnInProgress, machineCapabilities, machineNames, machineOf, machineOnline, mergeMessages, newestAssistantId, oldestId, pollCursor, pollInterval, relativeTime, sendBlocker, sessionTurnOptions, tabLabel, ticketBalloons,
+  BRIDGE_OFFLINE, balloonText, isImageAttachment, isStopping, isTurnInProgress, machineCapabilities, machineNames, machineOf, machineOnline, mergeMessages, newestAssistantId, oldestId, pollCursor, pollInterval, relativeTime, sendBlocker, sessionTurnOptions, ticketBalloons,
   type ChatMachine, type ChatMessage,
 } from '../chat/messages';
 import {
@@ -72,16 +72,6 @@ test('machines: the first session machine, per-machine online state and the offl
   assert.strictEqual(sendBlocker({ source: 'dock', busy: false, bridgeOnline: false, machine: 'workspace', machineHasToken: true, now }), 'workspace is offline. Start it, then send.', 'a listed machine that is offline keeps the old text');
 });
 
-test('chat tabs: the machine joins the label only when more than one machine exists', () => {
-  const untitled = { title: '', ticketKey: null, machine: 'workspace' };
-  assert.strictEqual(tabLabel(untitled, false), 'New session');
-  assert.strictEqual(tabLabel(untitled, true), 'New session · workspace');
-  assert.strictEqual(tabLabel({ title: '', machine: null }, true), 'New session · laptop');
-  assert.strictEqual(tabLabel({ title: 'Fix login', ticketKey: 'QRD-1', machine: 'laptop' }, true), 'Fix login · laptop');
-  assert.strictEqual(tabLabel({ title: '', ticketKey: 'QRD-1' }, false), 'QRD-1');
-  assert.strictEqual(tabLabel(undefined, true), 'New session', 'a tab whose session is not loaded yet has no machine to show');
-});
-
 test('chat balloons: one short line per ticket from its newest assistant message', () => {
   const long = 'x'.repeat(90);
   assert.strictEqual(balloonText('  two\n\nlines  '), 'two lines');
@@ -106,25 +96,20 @@ test('chat tabs: opening a session adds one tab, activates it and opens the chat
   const opened = openSession(initialChatState, 'a');
   assert.deepStrictEqual([opened.mode, opened.tabs, opened.active], ['float', ['a'], 'a']);
   const second = openSession(opened, 'b');
-  const again = openSession(second, 'a');
-  assert.deepStrictEqual([again.tabs, again.active], [['a', 'b'], 'a'], 'opening a session twice does not duplicate its tab');
+  assert.deepStrictEqual([second.tabs, second.active], [['b'], 'b'], 'only the open session stays a tab');
 
-  const drawer = setMode(again, 'drawer');
+  const drawer = setMode(second, 'drawer');
   const closed = setMode(drawer, 'closed');
   assert.deepStrictEqual([closed.mode, closed.openMode], ['closed', 'drawer']);
   assert.strictEqual(openSession(closed, 'c').mode, 'drawer', 'the chat reopens in the shape it had');
   assert.strictEqual(setMode(drawer, 'drawer'), drawer);
 });
 
-test('chat tabs: closing a tab moves to its neighbour and forgets what was read', () => {
-  let state: ChatState = ['a', 'b', 'c'].reduce(openSession, initialChatState);
-  state = markSeen(setActive(state, 'b'), 'b', 12);
+test('chat tabs: closing the tab forgets what was read', () => {
+  const state: ChatState = markSeen(openSession(initialChatState, 'b'), 'b', 12);
   assert.strictEqual(state.active, 'b');
   const closed = closeTab(state, 'b');
-  assert.deepStrictEqual([closed.tabs, closed.active, closed.lastSeen], [['a', 'c'], 'c', {}]);
-  assert.strictEqual(closeTab(closed, 'c').active, 'a');
-  assert.strictEqual(closeTab(closeTab(closed, 'c'), 'a').active, null);
-  assert.strictEqual(closeTab(state, 'a').active, 'b', 'closing another tab keeps the active one');
+  assert.deepStrictEqual([closed.tabs, closed.active, closed.lastSeen], [[], null, {}]);
   assert.strictEqual(closeTab(state, 'missing'), state);
   assert.strictEqual(setActive(state, 'missing'), state);
 });
@@ -154,6 +139,8 @@ test('chat state survives a reload and ignores a broken or foreign value', () =>
   assert.deepStrictEqual(parseChatState(null), initialChatState);
   const repaired = parseChatState(JSON.stringify({ mode: 'sideways', tabs: ['a', 'a', 7, ''], active: 'gone', drawerHeight: 3, lastSeen: { a: 2, gone: 9, b: 'x' } }));
   assert.deepStrictEqual(repaired, { ...initialChatState, tabs: ['a'], active: 'a', lastSeen: { a: 2 } });
+  const crowded = parseChatState(JSON.stringify({ tabs: ['a', 'b', 'c'], active: 'b', lastSeen: { a: 1, b: 2, c: 3 } }));
+  assert.deepStrictEqual([crowded.tabs, crowded.active, crowded.lastSeen], [['b'], 'b', { b: 2 }], 'only the active tab survives a reload');
 });
 
 test('machine capabilities: an old or unknown machine reports none, so no new control shows', () => {

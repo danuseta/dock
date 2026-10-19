@@ -67,7 +67,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<JidisAp
   if (mode === 'workspace') app.use('/api/demo-videos', createDemoVideoRouter());
   app.use(express.json());
 
-  if (mode === 'laptop') app.use('/auth/google', createGoogleCalendarRouter());
+  app.use('/auth/google', createGoogleCalendarRouter());
   app.use('/api/orchestrator', createOrchestratorApiRouter());
 
   app.use('/graphql', expressMiddleware(apolloServer, {

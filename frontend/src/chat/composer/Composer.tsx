@@ -1,27 +1,24 @@
-import React, { useRef, useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { Loader2, Maximize2, Minimize2, Paperclip, SendHorizontal, Square } from 'lucide-react';
 import { Button } from '../../components/ui';
 import { cn } from '../../lib/cn';
 import { machinePlace } from '../messages';
 import { AttachmentTray } from './AttachmentTray';
 import { CommandPicker } from './CommandPicker';
-import { OptionsBar } from './OptionsBar';
 import {
   MAX_TEXT, acceptAttribute, attachmentLimitText, buildPayload, canSend, composerFeatures, insertCommand, isSendKey, moveHighlight, optionId, slashQuery,
   type ChatCommand, type ComposerProps, type SendMode,
 } from './composerLogic';
+import { readDraft, useDraftSaver } from './composerInput';
 import { useAttachments } from './useAttachments';
 import { useCommands } from './useCommands';
-import { readOpen, writeOpen } from './optionsSummary';
-import { useTurnOptions } from './useTurnOptions';
 import { isPhone } from '../../lib/phone';
 
-const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilities, blocker, busy, stopping, sessionOptions, onSend, onStop }) => {
+const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilities, blocker, busy, stopping, control, onSend, onStop }) => {
   const features = composerFeatures(capabilities);
-  const [draft, setDraft] = useState('');
+  const [draft, setDraft] = useState(() => readDraft(sessionId));
   const [sending, setSending] = useState(false);
   const [dismissed, setDismissed] = useState(false);
-  const [optionsOpen, setOptionsOpen] = useState(readOpen);
   const [highlight, setHighlight] = useState(0);
   const [hint, setHint] = useState<{ text: string; hint: string } | null>(null);
   const [mode, setMode] = useState<SendMode>('queue');
@@ -29,7 +26,13 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
   const textarea = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const attachments = useAttachments(sessionId, features.attachments);
-  const control = useTurnOptions(sessionId, machine, features, sessionOptions);
+  useDraftSaver(sessionId, draft);
+  useLayoutEffect(() => {
+    const box = textarea.current;
+    if (!box) return;
+    box.style.height = 'auto';
+    box.style.height = full ? '' : `${box.scrollHeight}px`;
+  }, [draft, full]);
 
   const query = features.picker ? slashQuery(draft) : null;
   const pickerOpen = query !== null && !dismissed;
@@ -42,11 +45,6 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
   const showStop = features.stop && busy;
   const sendable = canSend({ text: draft, attachments: attachments.items.length, attachmentsEnabled: features.attachments, uploading: attachments.uploading, blocker, sending });
   const hasRows = pickerOpen && commands.length > 0;
-
-  const showOptions = (open: boolean) => {
-    setOptionsOpen(open);
-    writeOpen(open);
-  };
 
   const change = (value: string) => {
     setDraft(value);
@@ -67,7 +65,6 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
     const original = draft;
     const payload = { ...buildPayload({ text: draft, attachmentIds: attachments.ids, attachments: attachments.sent, options: control.options, features, machineOptions: control.machineOptions }), mode: busy ? mode : null };
     setSending(true);
-    if (optionsOpen) showOptions(false);
     setDraft('');
     setHint(null);
     setFull(false);
@@ -104,6 +101,14 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
     void send();
   };
 
+  const handlePaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!features.attachments) return;
+    const files = Array.from(event.clipboardData.files);
+    if (files.length === 0) return;
+    event.preventDefault();
+    attachments.add(files);
+  };
+
   const handleFiles = (event: React.ChangeEvent<HTMLInputElement>) => {
     attachments.add(Array.from(event.target.files ?? []));
     event.target.value = '';
@@ -116,7 +121,6 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
           {full ? <Minimize2 size={15} aria-hidden="true" /> : <Maximize2 size={15} aria-hidden="true" />}
         </Button>
       </div>
-      <OptionsBar features={features} control={control} disabled={sending} open={optionsOpen} onToggle={() => showOptions(!optionsOpen)} />
       {features.attachments && <AttachmentTray items={attachments.items} notice={attachments.notice} limitText={limitText} limitId={limitId} disabled={sending} onRemove={attachments.remove} />}
       {hasRows || (pickerOpen && (loading || commands.length === 0)) ? (
         <CommandPicker id={pickerId} commands={commands} loading={loading} highlight={highlight} onHighlight={setHighlight} onPick={pick} />
@@ -141,8 +145,8 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
         )}
         <textarea
           ref={textarea}
-          className={cn('max-h-[50dvh] min-h-24 min-w-0 max-[900px]:min-h-16 flex-1 resize-y rounded-sm border border-border bg-surface-1 px-3 py-2 font-body text-[0.82rem] text-foreground placeholder:text-muted-foreground focus-visible:border-border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-50', full && 'max-[900px]:max-h-none max-[900px]:resize-none')}
-          rows={4}
+          className={cn('max-h-[50dvh] min-w-0 resize-none flex-1 rounded-sm border border-border bg-surface-1 px-3 py-2 font-body text-[0.82rem] text-foreground placeholder:text-muted-foreground focus-visible:border-border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-50', full && 'max-[900px]:max-h-none')}
+          rows={1}
           maxLength={MAX_TEXT}
           value={draft}
           placeholder={isPhone() ? 'Type your message...' : `Message Claude Code on ${machinePlace(machine)}...`}
@@ -155,6 +159,7 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
           aria-describedby={blocker ? blockerId : undefined}
           onChange={(event) => change(event.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
         />
         <div className="flex flex-none flex-col items-stretch gap-1.5">
           {showStop && (

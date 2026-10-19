@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { MessagesSquare, Minus, PanelBottom, PictureInPicture2, Plus, X } from 'lucide-react';
+import { ArrowLeft, MessagesSquare, Minus, PanelBottom, PictureInPicture2, Plus } from 'lucide-react';
 import { CREATE_CHAT_SESSION } from '../graphql/mutations';
-import { GET_CHAT_MESSAGES, GET_CHAT_SESSION } from '../graphql/queries';
+import { GET_CHAT_MESSAGES, GET_CHAT_SESSION, GET_CHAT_SESSIONS } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import { ChatThread } from './ChatThread';
 import { useFullViewport } from './useFullViewport';
-import { SLOW_POLL_MS, machineOf, newestAssistantId, tabLabel, type ChatMessage, type ChatSession } from './messages';
+import { SLOW_POLL_MS, machineOf, newestAssistantId, sessionTitle, type ChatMessage, type ChatSession } from './messages';
+import { useNow } from './activity/useNow';
+import { SessionRow } from './SessionRow';
 import { LimitsLine } from './StatusLine';
 import { chatStore, useChatState } from './store';
 
@@ -32,46 +34,12 @@ const UnreadProbe: React.FC<{ sessionId: string; lastSeen: number; onChange: (se
   return null;
 };
 
-const ChatTab: React.FC<{ sessionId: string; active: boolean; unread: boolean; multipleMachines: boolean; onMachine: (sessionId: string, machine: string) => void }> = ({ sessionId, active, unread, multipleMachines, onMachine }) => {
-  const { data } = useQuery<{ chatSession: ChatSession | null }>(GET_CHAT_SESSION, { variables: { id: sessionId }, fetchPolicy: 'cache-first' });
-  const session = data?.chatSession;
-  const label = tabLabel(session, multipleMachines);
-  const tabRef = useRef<HTMLDivElement>(null);
-  const machine = session ? machineOf(session) : null;
-  useEffect(() => {
-    if (machine) onMachine(sessionId, machine);
-  }, [sessionId, machine, onMachine]);
-  useEffect(() => {
-    if (active) tabRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
-  }, [active]);
-  const working = session?.status === 'queued' || session?.status === 'running';
-  return (
-    <div ref={tabRef} className={cn('flex h-7 max-w-[180px] flex-none items-center max-[699px]:h-[46px] rounded-xs border border-transparent text-secondary-foreground', active ? 'border-border-glow bg-surface-2 text-foreground' : 'hover:bg-surface-1')}>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={active}
-        className="flex h-full min-w-0 items-center gap-1.5 border-0 bg-transparent pr-1 pl-2 font-display text-xs font-semibold"
-        title={label}
-        onClick={() => chatStore.setActive(sessionId)}
-      >
-        {(unread || working) && <i className={cn('size-1.5 flex-none rounded-full', unread ? 'bg-status-conflict' : 'animate-pulse bg-status-merged')} aria-hidden="true" />}
-        <span className="truncate">{label}</span>
-        {unread && <span className="sr-only"> (new reply)</span>}
-      </button>
-      <button type="button" className="grid size-6 flex-none place-items-center max-[699px]:size-11 rounded-xs border-0 bg-transparent text-muted-foreground hover:text-foreground" aria-label={`Close ${label}`} onClick={() => chatStore.closeTab(sessionId)}>
-        <X size={12} aria-hidden="true" />
-      </button>
-    </div>
-  );
-};
-
 export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
   const state = useChatState();
   const { data: activeData } = useQuery<{ chatSession: ChatSession | null }>(GET_CHAT_SESSION, { variables: { id: state.active }, skip: !state.active, fetchPolicy: 'cache-first' });
   const [createSession, { loading: creating }] = useMutation<{ createChatSession: ChatSession }>(CREATE_CHAT_SESSION);
   const [unread, setUnread] = useState<Record<string, boolean>>({});
-  const [tabMachines, setTabMachines] = useState<Record<string, string>>({});
+  const [showList, setShowList] = useState(true);
   const [error, setError] = useState('');
   const panelRef = useRef<HTMLElement>(null);
   const launcherRef = useRef<HTMLButtonElement>(null);
@@ -80,14 +48,20 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
   const drawer = state.mode === 'drawer';
   useFullViewport(open, '(max-width: 699px)');
   const anyUnread = state.tabs.some((id) => unread[id]);
+  const listing = showList || !state.active;
+  const now = useNow(open && listing);
+  const { data: listData } = useQuery<{ chatSessions: ChatSession[] }>(GET_CHAT_SESSIONS, { variables: { limit: 300 }, skip: !open || !listing, pollInterval: SLOW_POLL_MS });
+  const sessions = listData?.chatSessions ?? [];
 
   const reportUnread = useCallback((sessionId: string, value: boolean) => {
     setUnread((current) => (Boolean(current[sessionId]) === value ? current : { ...current, [sessionId]: value }));
   }, []);
 
-  const reportMachine = useCallback((sessionId: string, value: string) => {
-    setTabMachines((current) => (current[sessionId] === value ? current : { ...current, [sessionId]: value }));
-  }, []);
+  const previousActive = useRef(state.active);
+  useEffect(() => {
+    if (state.active && state.active !== previousActive.current) setShowList(false);
+    previousActive.current = state.active;
+  }, [state.active]);
 
   useEffect(() => {
     if (open || !refocusLauncher.current) return;
@@ -180,10 +154,8 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
             />
           )}
           <header className="flex flex-none items-center gap-1 border-b border-border bg-surface-0 px-2 py-1.5 max-[699px]:pt-[max(0.375rem,env(safe-area-inset-top))]">
-            <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none]" role="tablist" aria-label="Open sessions">
-              {state.tabs.length === 0 && <span className="px-1.5 font-display text-xs font-bold">Chat</span>}
-              {state.tabs.map((id) => <ChatTab key={id} sessionId={id} active={id === state.active} multipleMachines={new Set(state.tabs.flatMap((tab) => tabMachines[tab] ?? [])).size > 1} unread={Boolean(unread[id]) && id !== state.active} onMachine={reportMachine} />)}
-            </div>
+            {!listing && <button type="button" className={control} aria-label="Back to sessions" title="Back to sessions" onClick={() => setShowList(true)}><ArrowLeft size={14} aria-hidden="true" /></button>}
+            <span className="min-w-0 flex-1 truncate px-1.5 font-display text-xs font-bold">{listing || !activeData?.chatSession ? 'Sessions' : sessionTitle(activeData.chatSession)}</span>
             <button type="button" className={control} aria-label="New session" title="New session" disabled={creating} onClick={() => void newSession()}><Plus size={14} aria-hidden="true" /></button>
             <button type="button" className={cn(control, 'max-[699px]:hidden')} aria-label={drawer ? 'Pop out' : 'Dock to bottom'} title={drawer ? 'Pop out' : 'Dock to bottom'} onClick={() => chatStore.setMode(drawer ? 'float' : 'drawer')}>
               {drawer ? <PictureInPicture2 size={14} aria-hidden="true" /> : <PanelBottom size={14} aria-hidden="true" />}
@@ -192,18 +164,33 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
           </header>
           <LimitsLine machine={activeData?.chatSession ? machineOf(activeData.chatSession) : undefined} className="flex-none border-b border-border bg-surface-0 px-3.5 py-1.5" />
           {error && <p className="flex-none border-b border-border px-3.5 py-1.5 text-pretty text-xs break-words text-status-conflict" role="alert">A new session could not be started: {error}</p>}
-          {state.active
+          {!listing && state.active
             ? <ChatThread key={state.active} sessionId={state.active} className="min-h-0 flex-1" />
-            : (
-              <div className="grid min-h-0 flex-1 place-items-center p-6 text-center">
-                <div>
-                  <MessagesSquare size={26} className="mx-auto mb-2 text-muted-foreground" aria-hidden="true" />
-                  <p className="font-display text-sm font-bold">No session open</p>
-                  <p className="mt-1 text-pretty text-xs text-muted-foreground">Start a new one here, or pick one on the Sessions page.</p>
-                  <button type="button" className="mt-3 inline-flex h-8 max-[699px]:h-11 items-center gap-1.5 rounded-sm border border-accent bg-accent px-3 font-display text-xs font-semibold text-black hover:bg-accent-hover disabled:opacity-50" disabled={creating} onClick={() => void newSession()}><Plus size={14} aria-hidden="true" />New session</button>
+            : sessions.length > 0
+              ? (
+                <div className="min-h-0 flex-1 overflow-y-auto p-2" role="list" aria-label="Sessions">
+                  {sessions.map((session) => (
+                    <div key={session.id} role="listitem">
+                      <SessionRow
+                        session={session}
+                        selected={session.id === state.active}
+                        now={now}
+                        onSelect={() => { chatStore.openSession(session.id); setShowList(false); }}
+                      />
+                    </div>
+                  ))}
                 </div>
-              </div>
-            )}
+              )
+              : (
+                <div className="grid min-h-0 flex-1 place-items-center p-6 text-center">
+                  <div>
+                    <MessagesSquare size={26} className="mx-auto mb-2 text-muted-foreground" aria-hidden="true" />
+                    <p className="font-display text-sm font-bold">No session open</p>
+                    <p className="mt-1 text-pretty text-xs text-muted-foreground">Start a new one here, or pick one on the Sessions page.</p>
+                    <button type="button" className="mt-3 inline-flex h-8 max-[699px]:h-11 items-center gap-1.5 rounded-sm border border-accent bg-accent px-3 font-display text-xs font-semibold text-black hover:bg-accent-hover disabled:opacity-50" disabled={creating} onClick={() => void newSession()}><Plus size={14} aria-hidden="true" />New session</button>
+                  </div>
+                </div>
+              )}
         </section>
       )}
 

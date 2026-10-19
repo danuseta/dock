@@ -222,6 +222,38 @@ test('SQLite storage takes a dismissed ticket only for its own machine or a mach
   await service.revokeToken(workspace.record.id);
 });
 
+test('SQLite storage counts the agent rows of many sessions in one query and lists a session workers by seq', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }] = await Promise.all([
+    import('../storage/service'),
+    import('../storage/client'),
+  ]);
+  const storage = new StorageService(prisma);
+  t.after(() => prisma.$disconnect());
+
+  const at = new Date('2026-10-11T03:00:00.000Z');
+  const team = 'aaaaaaaa-0000-4000-8000-000000000021';
+  const alone = 'aaaaaaaa-0000-4000-8000-000000000022';
+  for (const id of [team, alone]) await storage.createChatSession({ id, source: 'dock', title: id, ticketKey: null, startedAt: at, lastMessageAt: at });
+  const turn = await storage.createChatMessage({ sessionId: team, role: 'user', text: 'go', state: 'taken', at });
+  const alonTurn = await storage.createChatMessage({ sessionId: alone, role: 'user', text: 'go', state: 'taken', at });
+  const row = (eventId: string, kind: string, name: string, extra: object = {}) => ({
+    eventId, parentId: null, kind, agent: 'main', name, label: `${name} label`, summary: '', detail: null, status: 'running', startedAt: at, endedAt: null, ...extra,
+  });
+  await storage.upsertChatActivity(team, turn.id, [row('a1', 'agent', 'executor'), row('t1', 'tool', 'Bash'), row('a2', 'agent', 'verifier', { status: 'ok', endedAt: at })], 400, 'dropped-server', at);
+  await storage.upsertChatActivity(alone, alonTurn.id, [row('t1', 'tool', 'Bash')], 400, 'dropped-server', at);
+
+  assert.deepStrictEqual([...(await storage.getChatWorkerCounts([team, alone]))], [[team, 2]]);
+  assert.deepStrictEqual(await storage.getChatWorkers(team), [
+    { eventId: 'a1', name: 'executor', label: 'executor label', status: 'running' },
+    { eventId: 'a2', name: 'verifier', label: 'verifier label', status: 'ok' },
+  ]);
+  assert.deepStrictEqual(await storage.getChatWorkers(alone), []);
+  await storage.deleteChatSession(team);
+  await storage.deleteChatSession(alone);
+});
+
 test('SQLite storage keeps chat activity per turn with its own seq and removes it with the session or the trimmed turn', {
   skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
 }, async (t) => {
@@ -717,7 +749,7 @@ test('SQLite keeps session options, an auto title, saved status lines and an age
   const caps = { v: 2, kit: '1.0.0', claude: '2.1.296', features: ['interactive', 'model', 'effort'], modes: ['default', 'auto'], catalogHash: 'ux1' };
 
   const dock = await chat.createSession({ machine: 'laptop' });
-  assert.deepStrictEqual((await storage.getChatSession(dock.id))?.options, JSON.stringify({ model: null, effort: null, permissionMode: 'auto', fast: null }), 'a new DOCK session starts in auto mode');
+  assert.strictEqual((await storage.getChatSession(dock.id))?.options, null, 'a new DOCK session pins no mode, so Settings and the catalog decide');
   const cron = await chat.createSession({ machine: 'laptop', title: 'QRD-1', origin: 'cron' });
   assert.strictEqual((await storage.getChatSession(cron.id))?.options, null, 'a cron session sends its mode with each message');
 

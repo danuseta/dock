@@ -14,6 +14,7 @@ import {
   cutMessageText,
   parseClaim,
   parseDelta,
+  parseStatus,
   parseSessionSync,
   searchSnippet,
 } from '../integrations/chat';
@@ -29,8 +30,10 @@ function memoryStorage() {
   const tokens: any[] = [];
   let sequence = 0;
   const cache = new Map<string, string>();
+  const workerRows: Array<{ sessionId: string; eventId: string; name: string; label: string; status: string }> = [];
   const ofSession = (sessionId: string) => messages.filter((message) => message.sessionId === sessionId);
   const storage = {
+    getSettingValues: async () => [] as Array<{ key: string; value: string }>,
     getCache: async (namespace: string, key: string) => JSON.parse(cache.get(`${namespace}:${key}`) ?? 'null'),
     upsertCache: async (namespace: string, key: string, value: unknown) => { cache.set(`${namespace}:${key}`, JSON.stringify(value)); },
     getChatSessions: async (source: string | null, take: number, machine: string | null = null) => [...sessions.values()]
@@ -111,6 +114,8 @@ function memoryStorage() {
       .filter((message) => !machine || sessions.get(message.sessionId)?.machine === machine)
       .sort((a, b) => b.at.getTime() - a.at.getTime() || b.id - a.id)
       .slice(0, take),
+    getChatWorkerCounts: async (sessionIds: string[]) => new Map(sessionIds.map((id): [string, number] => [id, workerRows.filter((row) => row.sessionId === id).length])),
+    getChatWorkers: async (sessionId: string) => workerRows.filter((row) => row.sessionId === sessionId),
     getChatLastTexts: async (sessionIds: string[], length: number) => new Map(sessionIds.flatMap((id): Array<[string, string]> => {
       const last = ofSession(id).filter((message) => message.role !== 'tool').at(-1);
       return last ? [[id, last.text.slice(0, length)]] : [];
@@ -136,7 +141,7 @@ function memoryStorage() {
     findIngestToken: async (tokenHash: string) => tokens.find((token) => token.tokenHash === tokenHash) ?? null,
     touchIngestToken: async () => undefined,
   };
-  return { storage: storage as unknown as StorageService, sessions, messages: () => messages };
+  return { storage: storage as unknown as StorageService, sessions, messages: () => messages, workerRows };
 }
 
 function clockedService() {
@@ -556,7 +561,7 @@ test('status keeps the latest line per session and the latest account limits, an
   assert.deepStrictEqual(fresh.sessions.map((status) => [status.sessionId, status.stale]), [[CLI_ID, false], ['other-session', false]]);
   assert.deepStrictEqual(
     { ...fresh.sessions[0], receivedAt: undefined },
-    { sessionId: CLI_ID, machine: 'laptop', model: 'Opus 4.7 (1M context)', effort: 'high', fastMode: false, contextPercentage: 40, contextTokens: 395000, contextSize: 1000000, costUsd: 12.5, cacheWarm: true, cacheHitRatio: 0.93, receivedAt: undefined, stale: false },
+    { sessionId: CLI_ID, machine: 'laptop', model: 'Opus 4.7 (1M context)', effort: 'high', fastMode: false, contextPercentage: 40, contextTokens: 395000, contextSize: 1000000, costUsd: 12.5, cacheWarm: true, cacheHitRatio: 0.93, files: [], receivedAt: undefined, stale: false },
   );
 
   advance(5 * 60 * 1000);
@@ -570,8 +575,39 @@ test('status keeps the latest line per session and the latest account limits, an
   await service.ingestStatus({ sessionId: 'bare' }, 'laptop');
   assert.deepStrictEqual(service.statusSnapshot().sessions.at(-1), {
     sessionId: 'bare', machine: 'laptop', model: null, effort: null, fastMode: null, contextPercentage: null, contextTokens: null, contextSize: null,
-    costUsd: null, cacheWarm: null, cacheHitRatio: null, receivedAt: '2026-10-08T00:05:00.001Z', stale: false,
+    costUsd: null, cacheWarm: null, cacheHitRatio: null, files: [], receivedAt: '2026-10-08T00:05:00.001Z', stale: false,
   });
+});
+
+test('status keeps the valid file changes, drops the bad ones, merges a push by path, and keeps the list when a push leaves it out', async () => {
+  const { service } = clockedService();
+  const files = [
+    { path: 'src/a.ts', added: 3, removed: 1 },
+    { path: '', added: 1, removed: 1 },
+    { path: 'src/b.ts', added: -1, removed: 0 },
+    { path: 'src/c.ts', added: 1.5, removed: 0 },
+    { path: 7, added: 1, removed: 0 },
+    'src/d.ts',
+    { path: 'src/e.ts', added: 0, removed: 4 },
+  ];
+  assert.deepStrictEqual(parseStatus(statusBody({ files })).files, [{ path: 'src/a.ts', added: 3, removed: 1 }, { path: 'src/e.ts', added: 0, removed: 4 }]);
+  assert.strictEqual(parseStatus(statusBody()).files, null);
+  assert.strictEqual(parseStatus(statusBody({ files: 'x' })).files, null);
+
+  const dock = await service.createSession({ title: 'Dock' });
+  await service.ingestStatus(statusBody({ sessionId: dock.id, files }), 'laptop');
+  const kept = [{ path: 'src/a.ts', added: 3, removed: 1 }, { path: 'src/e.ts', added: 0, removed: 4 }];
+  assert.deepStrictEqual(service.statusSnapshot().sessions[0].files, kept);
+  await service.ingestStatus(statusBody({ sessionId: dock.id }), 'laptop');
+  assert.deepStrictEqual(service.statusSnapshot().sessions[0].files, kept);
+  await service.ingestStatus(statusBody({ sessionId: dock.id, files: [] }), 'laptop');
+  assert.deepStrictEqual(service.statusSnapshot().sessions[0].files, kept, 'an empty push changes nothing');
+  await service.ingestStatus(statusBody({ sessionId: dock.id, files: [{ path: 'src/a.ts', added: 9, removed: 0 }, { path: 'wt-1/src/f.ts', added: 2, removed: 2 }] }), 'laptop');
+  assert.deepStrictEqual(service.statusSnapshot().sessions[0].files, [
+    { path: 'src/e.ts', added: 0, removed: 4 },
+    { path: 'src/a.ts', added: 9, removed: 0 },
+    { path: 'wt-1/src/f.ts', added: 2, removed: 2 },
+  ], 'a pushed path overwrites its numbers and the other paths stay');
 });
 
 test('status rejects what is not a status', async () => {
@@ -831,7 +867,7 @@ test('a cron session keeps the options the cron sends, so it shows Auto; a manua
   const cron = await chat.createSession({ machine: 'workspace', ticketKey: 'QRD-1', title: 'QRD-1 (cron)', origin: 'cron', options: { permissionMode: 'auto', effort: 'high' } });
   assert.deepStrictEqual(cron.options, { model: null, effort: 'high', permissionMode: 'auto', fast: null });
   assert.strictEqual((await chat.createSession({ machine: 'workspace', ticketKey: 'QRD-2', title: 'QRD-2 (cron)', origin: 'cron' })).options, null);
-  assert.deepStrictEqual((await chat.createSession({ machine: 'workspace', title: 'Manual' })).options, { model: null, effort: null, permissionMode: 'auto', fast: null });
+  assert.deepStrictEqual((await chat.createSession({ machine: 'workspace', title: 'Manual' })).options, null);
 });
 
 test('a cron turn clears the stalled reason when it starts and reports the subagents its lead left running when it ends', async () => {
@@ -906,4 +942,23 @@ test('saved session lines are bounded per machine and a damaged save is ignored'
   const damaged = new ChatService(storage, now);
   await damaged.restoreLimits();
   assert.deepStrictEqual(damaged.statusSnapshot().sessions, []);
+});
+
+test('a session counts its agent rows, and its workers come back in order with their fields', async () => {
+  const { service, workerRows } = clockedService();
+  const none = await service.createSession({ title: 'Alone' });
+  const team = await service.createSession({ title: 'Team' });
+  workerRows.push(
+    { sessionId: team.id, eventId: 'toolu_1', name: 'executor', label: 'Build the form', status: 'done' },
+    { sessionId: team.id, eventId: 'toolu_2', name: 'test-engineer', label: 'Cover it', status: 'running' },
+  );
+  const listed = await service.sessions('dock', null, 'laptop');
+  assert.deepStrictEqual(listed.map((session) => [session.id, session.workerCount]).sort(), [[none.id, 0], [team.id, 2]].sort());
+  assert.strictEqual((await service.session(team.id))?.workerCount, 2);
+  assert.deepStrictEqual(await service.workers(team.id), [
+    { id: 'toolu_1', name: 'executor', label: 'Build the form', status: 'done' },
+    { id: 'toolu_2', name: 'test-engineer', label: 'Cover it', status: 'running' },
+  ]);
+  assert.deepStrictEqual(await service.workers(none.id), []);
+  assert.deepStrictEqual(await service.workers('not an id!'), []);
 });

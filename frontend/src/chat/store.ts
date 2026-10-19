@@ -22,7 +22,8 @@ export function openSession(state: ChatState, id: string): ChatState {
   return {
     ...state,
     mode: state.mode === 'closed' ? state.openMode : state.mode,
-    tabs: state.tabs.includes(id) ? state.tabs : [...state.tabs, id],
+    tabs: [id],
+    lastSeen: id in state.lastSeen ? { [id]: state.lastSeen[id] } : {},
     active: id,
   };
 }
@@ -63,7 +64,9 @@ export function setDrawerHeight(state: ChatState, height: number, viewportHeight
 export function parseChatState(raw: string | null): ChatState {
   try {
     const saved = JSON.parse(raw || '{}');
-    const tabs = Array.isArray(saved.tabs) ? [...new Set(saved.tabs.filter((tab: unknown): tab is string => typeof tab === 'string' && tab !== ''))] as string[] : [];
+    const savedTabs = Array.isArray(saved.tabs) ? [...new Set(saved.tabs.filter((tab: unknown): tab is string => typeof tab === 'string' && tab !== ''))] as string[] : [];
+    const open = typeof saved.active === 'string' && savedTabs.includes(saved.active) ? saved.active : savedTabs[0];
+    const tabs = open ? [open] : [];
     const lastSeen: Record<string, number> = {};
     if (saved.lastSeen && typeof saved.lastSeen === 'object') {
       for (const [id, value] of Object.entries(saved.lastSeen)) if (typeof value === 'number' && tabs.includes(id)) lastSeen[id] = value;
