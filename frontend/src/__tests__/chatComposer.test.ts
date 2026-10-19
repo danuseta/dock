@@ -15,11 +15,11 @@ const machineOptions: MachineOptions = {
   modes: ['default', 'acceptEdits', 'plan'],
   fastAvailable: true,
 };
-const all = ['interactive', 'questions', 'plan', 'stop', 'attachments', 'commands', 'model', 'effort', 'fast'];
+const all = ['interactive', 'questions', 'plan', 'stop', 'attachments', 'commands', 'model', 'effort', 'fast', 'steer'];
 
 test('an old bridge reports nothing, so every control is hidden', () => {
   const features = composerFeatures([]);
-  assert.deepStrictEqual(Object.values(features), [false, false, false, false, false, false, false]);
+  assert.deepStrictEqual(Object.values(features), [false, false, false, false, false, false, false, false]);
 });
 
 test('each control follows its own capability', () => {
@@ -31,6 +31,7 @@ test('each control follows its own capability', () => {
   assert.strictEqual(composerFeatures(['effort']).effort, true);
   assert.strictEqual(composerFeatures(['fast']).fast, true);
   assert.strictEqual(composerFeatures(['interactive']).mode, true);
+  assert.strictEqual(composerFeatures(['steer']).steer, true);
   assert.strictEqual(composerFeatures(['questions', 'plan']).mode, false, 'the mode selector needs the interactive feature');
   assert.strictEqual(Object.values(composerFeatures(all)).every(Boolean), true);
 });

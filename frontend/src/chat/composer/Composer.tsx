@@ -163,7 +163,7 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
               {stopping ? 'Stopping...' : 'Stop'}
             </Button>
           )}
-          <Button size="sm" variant="primary" className="h-10 max-[900px]:h-11 max-[900px]:min-w-11" disabled={!sendable} aria-label={busy ? (mode === 'steer' ? 'Steer: stop this turn and send' : 'Queue: send after this turn') : 'Send message'} aria-describedby={blocker ? blockerId : undefined} onClick={() => void send()}>
+          <Button size="sm" variant="primary" className="h-10 max-[900px]:h-11 max-[900px]:min-w-11" disabled={!sendable} aria-label={busy ? (mode === 'steer' ? (features.steer ? 'Steer: add to this turn' : 'Steer: stop this turn and send') : 'Queue: send after this turn') : 'Send message'} aria-describedby={blocker ? blockerId : undefined} onClick={() => void send()}>
             <SendHorizontal size={14} aria-hidden="true" />{busy ? (mode === 'steer' ? 'Steer' : 'Queue') : 'Send'}
           </Button>
         </div>
@@ -175,7 +175,7 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
               <button key={choice} type="button" aria-pressed={mode === choice} className={mode === choice ? 'bg-surface-hover px-2 py-1 font-bold text-foreground max-[900px]:min-h-11' : 'px-2 py-1 text-secondary-foreground hover:bg-surface-1 max-[900px]:min-h-11'} onClick={() => setMode(choice)}>{choice === 'queue' ? 'Queue' : 'Steer'}</button>
             ))}
           </span>
-          <span className="text-pretty">{mode === 'queue' ? 'Sent when Claude finishes this turn.' : 'Stops the current step, subagents included, and answers this next in the same session.'}</span>
+          <span className="text-pretty">{mode === 'queue' ? 'Sent when Claude finishes this turn.' : features.steer ? 'Added to this turn; Claude reads it after the current step, and subagents keep running.' : 'Stops the current step, subagents included, and answers this next in the same session.'}</span>
         </div>
       )}
     </div>
