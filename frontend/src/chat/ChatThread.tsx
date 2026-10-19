@@ -266,7 +266,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
         {loaded && !missing && messages.length === 0 && (
           <p className="py-6 text-center text-pretty text-sm text-muted-foreground">{readOnly ? 'This session has no messages.' : session?.forkFrom ? 'Continued from a terminal session. Claude Code keeps that conversation; what you send from here is added below.' : `Nothing here yet. Your first message starts a Claude Code session on ${place}.`}</p>
         )}
-        <ol className="flex flex-col gap-2">
+        <ol className="flex min-w-0 flex-col gap-2">
           {shownItems.map((message) => (isThreadGroup(message) ? (
             <ActivityGroup key={message.key} group={message} live={message.last && message.turnId === activity.liveTurnId} turnRunning={message.turnId === activity.liveTurnId} store={activity.store} stickRef={stickRef} />
           ) : message.role === 'tool' ? (
@@ -288,7 +288,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
                 </p>
               ) : (
                 <div
-                  className="max-w-full break-words rounded-[10px] rounded-bl-xs border border-border bg-surface-1 px-3 py-2 text-[0.82rem] leading-relaxed [overflow-wrap:anywhere]"
+                  className="min-w-0 max-w-full break-words rounded-[10px] rounded-bl-xs border border-border bg-surface-1 px-3 py-2 text-[0.82rem] leading-relaxed [overflow-wrap:anywhere]"
                   title={timeOf(message.at)}
                 >
                   <span className="sr-only">Claude: </span><Markdown text={message.text} />
