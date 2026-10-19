@@ -12,7 +12,7 @@ export interface SendPayload {
   attachmentIds: string[];
   attachments: ChatAttachment[];
   options: TurnOptions | null;
-  /** Set when Claude is still on the previous turn: queue waits for it, steer stops it and answers this next. */
+  /** Set when Claude is still on the previous turn: queue waits for it, steer adds to it (or stops it on a bridge without steer). */
   mode?: SendMode | null;
 }
 
@@ -58,6 +58,7 @@ export interface ComposerFeatures {
   effort: boolean;
   fast: boolean;
   mode: boolean;
+  steer: boolean;
 }
 
 export const MAX_TEXT = 8000;
@@ -80,6 +81,7 @@ export const composerFeatures = (capabilities: readonly string[]): ComposerFeatu
   effort: capabilities.includes('effort'),
   fast: capabilities.includes('fast'),
   mode: capabilities.includes('interactive'),
+  steer: capabilities.includes('steer'),
 });
 
 export const slashQuery = (text: string): string | null => (/^\/\S*$/.test(text) ? text.slice(1) : null);

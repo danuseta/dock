@@ -284,7 +284,8 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
               {message.stopped && message.state !== 'queued' && message.state !== 'taken' ? (
                 <span className="mt-0.5 font-mono text-[0.62rem] text-muted-foreground">Stopped</span>
               ) : message.state === 'failed' ? <span className="mt-0.5 font-mono text-[0.62rem] text-status-conflict">Not answered</span>
-                : message.state === 'held' && <span className="mt-0.5 font-mono text-[0.62rem] text-muted-foreground">Waiting · sent when Claude finishes this turn</span>}
+                : message.state === 'held' ? <span className="mt-0.5 font-mono text-[0.62rem] text-muted-foreground">Waiting · sent when Claude finishes this turn</span>
+                : message.state === 'steer' && <span className="mt-0.5 font-mono text-[0.62rem] text-muted-foreground">Steering · added to this turn</span>}
             </li>
           )))}
         </ol>

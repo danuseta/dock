@@ -95,6 +95,8 @@ function memoryStorage() {
       return { count: rows.length };
     },
     getChatMessageIdsInState: async (sessionId: string, states: string[]) => ofSession(sessionId).filter((message) => states.includes(message.state)).map((message) => message.id),
+    getSteerChatMessages: async (sessionId: string, afterId: number, take: number) => ofSession(sessionId)
+      .filter((message) => message.state === 'steer' && message.id > afterId).slice(0, take).map((message) => ({ id: message.id, text: message.text })),
     getOpenChatMessage: async (sessionId: string) => ofSession(sessionId).find((message) => message.role === 'user' && ['queued', 'taken'].includes(message.state)) ?? null,
     getOverdueChatSessions: async (before: Date) => [...new Set(messages.filter((message) => message.state === 'taken' && message.takenAt && message.takenAt < before).map((message) => message.sessionId))].map((id) => ({ id })),
     getQuietChatTurns: async (silentBefore: Date, stopBefore: Date) => {
@@ -281,6 +283,11 @@ test('wait and ask bodies are validated, masked and capped', () => {
   assert.throws(() => parseWait({ sessionId: 's1', replyTo: 4, cancelled: ['ok', 7] }), OrchestratorInputError);
   assert.throws(() => parseWait({ sessionId: 's1', replyTo: 4, cancelled: ['has space'] }), OrchestratorInputError);
   assert.throws(() => parseWait({ sessionId: 's1', replyTo: 4, cancelled: 'req-1' }), OrchestratorInputError);
+  assert.deepStrictEqual([parseWait({ sessionId: 's1', replyTo: 4 }).steerSeen, parseWait({ sessionId: 's1', replyTo: 4 }).steerAck], [0, []]);
+  assert.deepStrictEqual([parseWait({ sessionId: 's1', replyTo: 4, steerSeen: 9, steerAck: [7, 9] }).steerSeen, parseWait({ sessionId: 's1', replyTo: 4, steerAck: [7, 9] }).steerAck], [9, [7, 9]]);
+  assert.throws(() => parseWait({ sessionId: 's1', replyTo: 4, steerSeen: -1 }), OrchestratorInputError);
+  assert.throws(() => parseWait({ sessionId: 's1', replyTo: 4, steerAck: ['7'] }), OrchestratorInputError);
+  assert.throws(() => parseWait({ sessionId: 's1', replyTo: 4, steerAck: Array.from({ length: 21 }, (_, i) => i + 1) }), OrchestratorInputError);
   assert.throws(() => parseWait({ sessionId: '../x', replyTo: 4 }), OrchestratorInputError);
   assert.throws(() => parseWait({ sessionId: 's1', replyTo: 0 }), OrchestratorInputError);
 
@@ -1475,7 +1482,62 @@ test('queue: a message sent while a turn runs waits as held and becomes the next
   assert.strictEqual((await ctx.service.claim({ wait: 0, caps: CAPS }, undefined, 'laptop')).message?.id, held.id);
 });
 
-test('steer: the held message stops the running turn and is answered next', async () => {
+const STEER_CAPS = { ...CAPS, features: [...CAPS.features, 'steer'] };
+
+test('steer on a bridge that can steer: the message joins the running turn without stopping it', async () => {
+  const ctx = setup();
+  const turn = await takenTurn(ctx, STEER_CAPS);
+  const first = await ctx.service.sendMessage(turn.sessionId, 'keep the tag filter', MACHINES, { mode: 'steer' });
+  const second = await ctx.service.sendMessage(turn.sessionId, 'and the date filter', MACHINES, { mode: 'steer' });
+  assert.deepStrictEqual([first.state, second.state], ['steer', 'steer']);
+  assert.strictEqual(ctx.messages().find((message) => message.id === turn.replyTo).stopRequestedAt ?? null, null, 'the running turn is not stopped');
+  assert.deepStrictEqual((await ctx.service.claim({ wait: 0, caps: STEER_CAPS }, undefined, 'laptop')).message, null, 'a steer is not claimed as a turn');
+
+  assert.deepStrictEqual(await ctx.service.wait({ ...turn, wait: 0 }, undefined, 'laptop'), {
+    stop: false, answers: [], closed: false, steer: [{ id: first.id, text: 'keep the tag filter' }, { id: second.id, text: 'and the date filter' }],
+  });
+  assert.deepStrictEqual(await ctx.service.wait({ ...turn, wait: 0, steerSeen: second.id }, undefined, 'laptop'), { stop: false, answers: [], closed: false }, 'a steer already written is not sent again');
+  const sleeps = ctx.sleeps.length;
+  await ctx.service.wait({ ...turn, wait: 5, steerSeen: second.id }, undefined, 'laptop');
+  assert.strictEqual(ctx.sleeps.length, sleeps + 1, 'a steer waiting for its echo does not wake the long poll');
+
+  await ctx.service.wait({ ...turn, wait: 0, steerSeen: second.id, steerAck: [first.id] }, undefined, 'laptop');
+  assert.strictEqual(ctx.messages().find((message) => message.id === first.id).state, 'done', 'an acked steer is done');
+
+  await ctx.service.delta({ ...turn, done: true }, 'laptop');
+  assert.strictEqual(ctx.messages().find((message) => message.id === first.id).state, 'done');
+  assert.strictEqual(ctx.messages().find((message) => message.id === second.id).state, 'queued', 'a steer the turn never read becomes the next turn');
+  assert.strictEqual((await ctx.service.claim({ wait: 0, caps: STEER_CAPS }, undefined, 'laptop')).message?.id, second.id);
+});
+
+test('steer waits as held when the turn is still queued or ends while the message is stored', async () => {
+  const queued = setup();
+  await queued.service.claim({ wait: 0, caps: STEER_CAPS }, undefined, 'laptop');
+  const dock = await queued.service.createSession({ title: 'Queued' });
+  await queued.service.sendMessage(dock.id, 'not taken yet', MACHINES);
+  assert.strictEqual((await queued.service.sendMessage(dock.id, 'steer early', MACHINES, { mode: 'steer' })).state, 'held');
+
+  const ctx = setup();
+  const turn = await takenTurn(ctx, STEER_CAPS);
+  let reads = 0;
+  wrap(ctx.storage, 'getOpenChatMessage', (original, args) => {
+    reads += 1;
+    return reads === 2 ? null : original(...args);
+  });
+  const late = await ctx.service.sendMessage(turn.sessionId, 'too late', MACHINES, { mode: 'steer' });
+  assert.strictEqual(late.state, 'held');
+  assert.strictEqual(ctx.messages().find((message) => message.id === late.id).state, 'held', 'a steer is never left behind a turn that ended');
+});
+
+test('a steer is demoted to held when the turn is given up', async () => {
+  const ctx = setup();
+  const turn = await takenTurn(ctx, STEER_CAPS);
+  const steer = await ctx.service.sendMessage(turn.sessionId, 'keep going', MACHINES, { mode: 'steer' });
+  await ctx.service.delta({ ...turn, error: 'boom' }, 'laptop');
+  assert.strictEqual(ctx.messages().find((message) => message.id === steer.id).state, 'queued');
+});
+
+test('steer on a bridge without steer: the held message stops the running turn and is answered next', async () => {
   const ctx = setup();
   const turn = await takenTurn(ctx);
   const held = await ctx.service.sendMessage(turn.sessionId, 'keep the tag filter', MACHINES, { mode: 'steer' });

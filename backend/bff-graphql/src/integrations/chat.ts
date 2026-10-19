@@ -28,6 +28,7 @@ import {
   MAX_ASKS_PER_TURN,
   MAX_INTERACTION_ROWS,
   MAX_PENDING_ASKS,
+  MAX_WAIT_ACKS,
   PENDING_LIST_LIMIT,
   TAKEN_HARD_MS,
   TAKEN_HARD_TEXT,
@@ -914,7 +915,7 @@ export class ChatService {
     const effective = mergeTurnOptions(usableTurnOptions(parseStoredOptions(session.options), caps, catalog), options);
     const now = this.now();
     const optionsJson = effective ? JSON.stringify(effective) : null;
-    if (busy) return this.hold(sessionId, body, optionsJson, now, mode === 'steer');
+    if (busy) return this.hold(sessionId, body, optionsJson, now, mode === 'steer', caps?.features.includes('steer') === true);
     let message = await this.storage.createChatMessage({
       sessionId, role: 'user', text: body, state: attachmentIds.length > 0 ? 'draft' : 'queued', at: now, options: optionsJson,
     });
@@ -943,14 +944,23 @@ export class ChatService {
 
   /**
    * A message sent while a turn runs waits as `held` and becomes the next turn when this one ends.
-   * Steer also stops the running turn, so the message is answered right away in the same Claude session.
+   * Steer on a bridge that can steer adds the message to the running turn as `steer`; on an older bridge it stops the turn,
+   * so the message is answered right away in the same Claude session.
    */
-  private async hold(sessionId: string, text: string, options: string | null, now: Date, steer: boolean) {
-    const message = await this.storage.createChatMessage({ sessionId, role: 'user', text, state: 'held', at: now, options });
+  private async hold(sessionId: string, text: string, options: string | null, now: Date, steer: boolean, canSteer: boolean) {
+    const running = await this.storage.getOpenChatMessage(sessionId);
+    const into = steer && canSteer && running?.state === 'taken';
+    let message = await this.storage.createChatMessage({ sessionId, role: 'user', text, state: into ? 'steer' : 'held', at: now, options });
     const messageCount = await this.storage.trimChatMessages(sessionId, MAX_MESSAGES_KEPT);
     await this.storage.updateChatSession(sessionId, { messageCount, lastMessageAt: now });
     const open = await this.storage.getOpenChatMessage(sessionId);
-    if (steer && open?.state === 'taken') {
+    if (into && (open?.id !== running!.id || open.state !== 'taken')) {
+      // The turn ended before the message was stored, so nothing will demote it: it waits for the next turn instead.
+      await this.storage.moveChatMessage(message.id, sessionId, 'steer', 'held');
+      message = { ...message, state: 'held' };
+    } else if (into) {
+      this.notifier.wake(running!.id);
+    } else if (steer && open?.state === 'taken') {
       await this.serial(() => this.storage.requestChatStop(open.id, sessionId, this.now()));
       this.notifier.wake(open.id);
     }
@@ -958,9 +968,10 @@ export class ChatService {
     return toMessage(message);
   }
 
-  /** Once no turn is open, the oldest held message is queued for the bridge. */
+  /** Once no turn is open, a steer the bridge never read becomes held, and the oldest held message is queued for the bridge. */
   private async releaseHeld(sessionId: string) {
     if (await this.storage.countChatMessagesInState(sessionId, ['draft', 'queued', 'taken']) > 0) return;
+    await this.storage.moveChatMessages(sessionId, 'steer', 'held');
     const [next] = await this.storage.getChatMessageIdsInState(sessionId, ['held']);
     if (next === undefined) return;
     if (await this.storage.moveChatMessage(next, sessionId, 'held', 'queued')) {
@@ -1042,7 +1053,7 @@ export class ChatService {
     return { id: created.row!.id, expiresAt: created.row!.expiresAt.toISOString(), closed: false };
   }
 
-  private async turnState(sessionId: string, turnId: number, interactive: boolean) {
+  private async turnState(sessionId: string, turnId: number, interactive: boolean, steerSeen: number) {
     const message = await this.storage.getChatMessage(turnId);
     if (interactive) await this.expireOverdue(sessionId, this.now());
     const rows = await this.storage.getUndeliveredChatInteractions(sessionId, turnId);
@@ -1054,7 +1065,8 @@ export class ChatService {
     }));
     const stop = Boolean(message?.stopRequestedAt);
     const closed = message?.state !== 'taken';
-    return { ready: stop || closed || answers.length > 0, result: { stop, answers, closed } };
+    const steer = closed ? [] : await this.storage.getSteerChatMessages(sessionId, steerSeen, MAX_WAIT_ACKS);
+    return { ready: stop || closed || answers.length > 0 || steer.length > 0, result: { stop, answers, closed, ...(steer.length > 0 ? { steer } : {}) } };
   }
 
   async wait(input: unknown, signal: AbortSignal | undefined, machine: string) {
@@ -1072,6 +1084,7 @@ export class ChatService {
     if (request.cancelled.length > 0) {
       await this.serial(() => this.storage.cancelChatInteractionsByRequest(session.id, replyTo.id, request.cancelled));
     }
+    for (const id of request.steerAck) await this.storage.moveChatMessage(id, session.id, 'steer', 'done');
     if (replyTo.state === 'taken') {
       if (replyTo.takenAt && now.getTime() - replyTo.takenAt.getTime() >= TAKEN_HARD_MS) {
         await this.giveUp(session.id, TAKEN_HARD_TEXT);
@@ -1090,10 +1103,10 @@ export class ChatService {
     const woken = this.notifier.wait(replyTo.id, local.signal);
     try {
       const interactive = await this.isInteractive(machine);
-      let state = await this.turnState(session.id, replyTo.id, interactive);
+      let state = await this.turnState(session.id, replyTo.id, interactive, request.steerSeen);
       if (!state.ready && request.wait > 0 && !local.signal.aborted) {
         await Promise.race([woken, this.sleep(request.wait * 1000, local.signal)]);
-        state = await this.turnState(session.id, replyTo.id, interactive);
+        state = await this.turnState(session.id, replyTo.id, interactive, request.steerSeen);
       }
       return state.result;
     } finally {

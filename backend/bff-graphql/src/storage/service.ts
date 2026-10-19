@@ -704,6 +704,12 @@ export class StorageService {
       .map((row) => row.id);
   }
 
+  getSteerChatMessages(sessionId: string, afterId: number, take: number) {
+    return this.db.chatMessage.findMany({
+      where: { sessionId, state: 'steer', id: { gt: afterId } }, select: { id: true, text: true }, orderBy: { id: 'asc' }, take,
+    });
+  }
+
   getOpenChatMessage(sessionId: string) {
     return this.db.chatMessage.findFirst({ where: { sessionId, role: 'user', state: { in: ['queued', 'taken'] } }, orderBy: { id: 'asc' } });
   }

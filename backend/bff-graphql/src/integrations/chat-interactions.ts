@@ -2,7 +2,7 @@ import { ACTIVITY_ID, SERVER_DROPPED_ID, activityText, maskActivityText } from '
 import { OrchestratorInputError } from './orchestrator';
 
 export const CAPS_VERSION = 2;
-export const CAPS_FEATURES = ['interactive', 'questions', 'plan', 'stop', 'attachments', 'commands', 'model', 'effort', 'fast'] as const;
+export const CAPS_FEATURES = ['interactive', 'questions', 'plan', 'stop', 'attachments', 'commands', 'model', 'effort', 'fast', 'steer'] as const;
 export type CapsFeature = typeof CAPS_FEATURES[number];
 export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto'] as const;
 export type PermissionMode = typeof PERMISSION_MODES[number];
@@ -141,12 +141,19 @@ export function parseWait(input: unknown) {
   const cancelled = input.cancelled === undefined || input.cancelled === null ? [] : input.cancelled;
   if (!Array.isArray(cancelled)) throw new OrchestratorInputError('cancelled must be a list of request ids');
   if (cancelled.length > MAX_WAIT_ACKS) throw new OrchestratorInputError(`A maximum of ${MAX_WAIT_ACKS} cancelled ids per request is supported`);
+  const steerSeen = input.steerSeen === undefined || input.steerSeen === null ? 0 : input.steerSeen;
+  if (!Number.isInteger(steerSeen) || Number(steerSeen) < 0) throw new OrchestratorInputError('steerSeen must be a message id or 0');
+  const steerAck = input.steerAck === undefined || input.steerAck === null ? [] : input.steerAck;
+  if (!Array.isArray(steerAck)) throw new OrchestratorInputError('steerAck must be a list of message ids');
+  if (steerAck.length > MAX_WAIT_ACKS) throw new OrchestratorInputError(`A maximum of ${MAX_WAIT_ACKS} steer acks per request is supported`);
   return {
     sessionId: chatId(input.sessionId, 'sessionId'),
     replyTo: messageId(input.replyTo, 'replyTo'),
     wait,
     ack: ack.map(requestId),
     cancelled: cancelled.map(requestId),
+    steerSeen: Number(steerSeen),
+    steerAck: steerAck.map((id) => messageId(id, 'steerAck')),
     caps: parseCaps(input.caps),
   };
 }
