@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { agentTask, agentType, filesTouched, sessionStats, turnHighlights, type ChatActivity } from '../chat/activity/activity';
+import { agentTask, agentType, filesTouched, runningLanes, sessionStats, turnHighlights, type ChatActivity } from '../chat/activity/activity';
 
 let nextId = 1;
 const at = (seconds: number) => new Date(Date.UTC(2026, 9, 19, 8, 0, seconds)).toISOString();
@@ -59,4 +59,15 @@ test('session stats count steps, distinct skills, subagents and the ones still r
     row({ kind: 'agent', name: 'executor', status: 'running', endedAt: null }), row({ kind: 'agent', name: 'explore' }),
   ];
   assert.deepStrictEqual(sessionStats(events), { steps: 5, skills: 1, agents: 2, runningAgents: 1 });
+});
+
+test('lanes hold each running subagent with its own newest steps; finished ones get none', () => {
+  const lead = row({ kind: 'agent', name: 'executor', label: 'Agent executor: build', status: 'running', endedAt: null });
+  const done = row({ kind: 'agent', name: 'explore', status: 'ok' });
+  const events = [lead, done, row({ parentId: done.eventId, name: 'Grep' })];
+  for (let index = 0; index < 14; index += 1) events.push(row({ parentId: lead.eventId, name: 'Bash', label: `step ${index}` }));
+  const lanes = runningLanes(events);
+  assert.deepStrictEqual(lanes.map((lane) => lane.agent.eventId), [lead.eventId]);
+  assert.strictEqual(lanes[0].steps.length, 12);
+  assert.strictEqual(lanes[0].steps.at(-1)?.label, 'step 13');
 });
