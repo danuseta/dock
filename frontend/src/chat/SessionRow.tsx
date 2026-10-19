@@ -6,13 +6,13 @@ import { relativeTime, sessionTitle, type ChatSession } from './messages';
 const chip = 'inline-flex flex-none items-center rounded-xs border px-1.5 py-px font-mono text-[0.62rem] font-bold';
 
 export const SourceChip: React.FC<{ source: string }> = ({ source }) => (
-  <span className={cn(chip, source === 'dock' ? 'border-accent/30 bg-accent-dim text-accent' : 'border-border-glow text-secondary-foreground')}>{source === 'dock' ? 'DOCK' : 'CLI'}</span>
+  <span className={cn(chip, source === 'dock' ? 'border-border-glow text-foreground' : 'border-border-glow text-secondary-foreground')}>{source === 'dock' ? 'DOCK' : 'CLI'}</span>
 );
 
 export const ReadOnlyChip: React.FC = () => <span className={cn(chip, 'border-border text-muted-foreground')}>READ-ONLY</span>;
 
 export const TicketChip: React.FC<{ ticketKey: string }> = ({ ticketKey }) => (
-  <span className={cn(chip, 'border-accent/30 bg-accent-dim text-accent')}>{ticketKey}</span>
+  <span className={cn(chip, 'border-border-glow text-secondary-foreground')}>{ticketKey}</span>
 );
 
 interface SessionRowProps {

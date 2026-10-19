@@ -106,7 +106,7 @@ function App() {
       case '/': return <HomePage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;
       case '/dashboard': return <DashboardPage onTicketClick={navigateToTicket} />;
       case '/agents': return <Suspense fallback={<Page width="full"><LoadingSkeleton /></Page>}><AgentsPage onTicketClick={navigateToTicket} onNavigate={handleNavigate} /></Suspense>;
-      case '/sessions': return <SessionsPage />;
+      case '/sessions': return <SessionsPage onTicketClick={navigateToTicket} />;
       case '/calendar': return <CalendarPage onNavigate={handleNavigate} />;
       case '/sprint': return <SprintPage />;
       case '/monitoring': return <MonitoringPage onNavigate={handleNavigate} />;

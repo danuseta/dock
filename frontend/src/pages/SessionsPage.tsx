@@ -16,6 +16,8 @@ import { MachineChip } from '../chat/MachineControls';
 import { useChatMachines } from '../chat/useChatMachines';
 import { SLOW_POLL_MS, machineOf, machineOnline, sessionTitle as titleOf, type ChatSession } from '../chat/messages';
 import { ReadOnlyChip, SessionRow, SourceChip, TicketChip } from '../chat/SessionRow';
+import { SessionInfoCard } from '../chat/SessionInfoCard';
+import { filesTouched, sessionStats, type ChatActivity } from '../chat/activity/activity';
 import { chatStore } from '../chat/store';
 import { SESSIONS_PATH, sessionIdFromSearch, sessionUrl } from '../chat/sessionRoute';
 
@@ -27,7 +29,7 @@ const TITLE_MAX = 120;
 
 const errorText = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
 
-const SessionsPage: React.FC = () => {
+const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onTicketClick }) => {
   const { data, loading, error, refetch } = useQuery<{ chatSessions: ChatSession[] }>(GET_CHAT_SESSIONS, { ...CACHED_QUERY_OPTIONS, variables: { limit: 300 }, pollInterval: SLOW_POLL_MS });
   const [createSession, { loading: creating }] = useMutation<{ createChatSession: ChatSession }>(CREATE_CHAT_SESSION);
   const [renameSession, { loading: renaming }] = useMutation(RENAME_CHAT_SESSION);
@@ -41,6 +43,7 @@ const SessionsPage: React.FC = () => {
   const { status: liveStatus, now: statusNow } = useChatStatus();
   const machines = useChatMachines();
   const [gone, setGone] = useState(false);
+  const [events, setEvents] = useState<ChatActivity[]>([]);
   const closeGone = useCallback(() => setGone(false), []);
 
   useEffect(() => {
@@ -132,6 +135,7 @@ const SessionsPage: React.FC = () => {
   };
 
   useFullViewport(Boolean(selected), '(max-width: 900px)');
+  const stats = sessionStats(events);
 
   if (isInitialQueryLoading(loading, data)) return <Page width="full"><LoadingSkeleton /></Page>;
 
@@ -151,7 +155,8 @@ const SessionsPage: React.FC = () => {
       {error && !data && <Card className="mb-4 border-status-conflict text-status-conflict" role="alert">Sessions failed to load: {error.message}</Card>}
 
       <div className="grid grid-cols-[360px_minmax(0,1fr)] items-start gap-4 max-[900px]:grid-cols-1">
-        <Card className={cn('flex h-[calc(100dvh-196px)] min-h-[420px] max-[900px]:h-[calc(100dvh-320px)] flex-col bg-surface-0 p-0', selected && 'max-[900px]:hidden')}>
+        <div className={cn('flex h-[calc(100dvh-196px)] min-h-[420px] max-[900px]:h-[calc(100dvh-320px)] min-w-0 flex-col gap-3', selected && 'max-[900px]:hidden')}>
+        <Card className="flex min-h-0 flex-1 flex-col bg-surface-0 p-0">
           <div className="relative flex-none border-b border-border p-3">
             <Search size={14} className="pointer-events-none absolute top-1/2 left-6 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <Input className="h-9 pl-9 text-[0.82rem] max-[900px]:h-11" type="search" value={searchText} placeholder="Search every message..." aria-label="Search messages" onChange={(event) => setSearchText(event.target.value)} />
@@ -201,6 +206,8 @@ const SessionsPage: React.FC = () => {
             )}
           </div>
         </Card>
+        {selected && <SessionInfoCard session={selected} files={filesTouched(events)} onTicketClick={onTicketClick} />}
+        </div>
 
         <Card className={cn('flex h-[calc(100dvh-196px)] min-h-[420px] max-[900px]:h-[calc(100dvh-320px)] flex-col bg-surface-0 p-0', !selected && 'max-[900px]:hidden', selected && 'max-[900px]:fixed max-[900px]:inset-x-0 max-[900px]:top-[var(--vv-top,0px)] max-[900px]:z-[45] max-[900px]:h-[var(--vv-h,100dvh)] max-[900px]:min-h-0 max-[900px]:rounded-none max-[900px]:border-0')}>
           {!selected ? (
@@ -236,12 +243,20 @@ const SessionsPage: React.FC = () => {
                   </div>
                 )}
               </div>
+              {stats.steps > 0 && (
+                <p className="flex flex-none flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-border px-3.5 py-1.5 font-mono text-[0.66rem] text-muted-foreground" aria-label="Session activity">
+                  <span><b className="font-semibold text-secondary-foreground">{stats.steps}</b> steps</span>
+                  <span><b className="font-semibold text-secondary-foreground">{stats.skills}</b> {stats.skills === 1 ? 'skill' : 'skills'}</span>
+                  <span><b className="font-semibold text-secondary-foreground">{stats.agents}</b> {stats.agents === 1 ? 'agent' : 'agents'}{stats.runningAgents > 0 ? ` (${stats.runningAgents} running)` : ''}</span>
+                </p>
+              )}
               {actionError && !deleteTarget && <p className="flex-none border-b border-border px-3.5 py-1.5 text-pretty text-xs break-words text-status-conflict" role="alert">{actionError}</p>}
               <ChatThread
                 key={selected.id}
                 sessionId={selected.id}
                 className="min-h-0 flex-1"
                 hideMachine
+                onActivity={setEvents}
                 readOnlyAction={<Button size="sm" variant="primary" disabled={creating} onClick={() => void create({ forkFrom: selected.id, title: selected.title || undefined, ticketKey: selected.ticketKey })}>Continue as a DOCK session</Button>}
               />
             </>
