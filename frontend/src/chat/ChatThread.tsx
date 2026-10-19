@@ -15,7 +15,7 @@ import { SessionStatusLine } from './StatusLine';
 import { Markdown } from './Markdown';
 import { recallMessages, rememberMessages } from './messageCache';
 import { ActivityGroup } from './activity/ActivityGroup';
-import { isThreadGroup } from './activity/activity';
+import { isThreadGroup, type ChatActivity } from './activity/activity';
 import { useTurnActivity } from './activity/useTurnActivity';
 import { Composer } from './composer/Composer';
 import type { SendPayload } from './composer/composerLogic';
@@ -31,6 +31,8 @@ interface ChatThreadProps {
   readOnlyAction?: React.ReactNode;
   /** The Sessions page names the machine in its own header, so it leaves this thread's "Runs on" line out. */
   hideMachine?: boolean;
+  /** Receives every activity row of the session whenever they change, for summaries outside the thread. */
+  onActivity?: (events: ChatActivity[]) => void;
 }
 
 const NEWEST_PAGE = 200;
@@ -40,7 +42,7 @@ const NEAR_BOTTOM_PX = 80;
 const messageOf = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
 const timeOf = (at: string) => new Date(at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 
-export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, readOnlyAction, hideMachine }) => {
+export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, readOnlyAction, hideMachine, onActivity }) => {
   const client = useApolloClient();
   const [recalled] = useState(() => recallMessages(sessionId));
   const [messages, setMessages] = useState<ChatMessage[]>(() => recalled?.messages ?? []);
@@ -76,6 +78,13 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     statusRef.current = status;
   }, [status]);
   const activity = useTurnActivity(sessionId, status, messages, scrollRef);
+  const onActivityRef = useRef(onActivity);
+  useLayoutEffect(() => {
+    onActivityRef.current = onActivity;
+  }, [onActivity]);
+  useEffect(() => {
+    onActivityRef.current?.([...activity.byTurn.values()].flat());
+  }, [activity.byTurn]);
   const busy = isTurnInProgress(status, messages);
   const pollMs = pollInterval(busy);
   const machine = machineOf(session);

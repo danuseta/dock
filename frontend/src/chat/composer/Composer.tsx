@@ -132,8 +132,8 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
         )}
         <textarea
           ref={textarea}
-          className="max-h-40 min-h-[40px] min-w-0 max-[900px]:min-h-11 flex-1 resize-none rounded-sm border border-border bg-surface-1 px-3 py-2 font-body text-[0.82rem] text-foreground placeholder:text-muted-foreground focus-visible:border-border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-50"
-          rows={2}
+          className="max-h-[50dvh] min-h-24 min-w-0 max-[900px]:min-h-16 flex-1 resize-y rounded-sm border border-border bg-surface-1 px-3 py-2 font-body text-[0.82rem] text-foreground placeholder:text-muted-foreground focus-visible:border-border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-50"
+          rows={4}
           maxLength={MAX_TEXT}
           value={draft}
           placeholder={isPhone() ? 'Type your message...' : `Message Claude Code on ${machinePlace(machine)}...`}

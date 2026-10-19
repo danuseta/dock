@@ -292,3 +292,56 @@ export function hasRunning(node: ActivityNode): boolean {
 export function sameTree(a: ActivityNode, b: ActivityNode): boolean {
   return a.event === b.event && a.children.length === b.children.length && a.children.every((child, position) => sameTree(child, b.children[position]));
 }
+
+export interface AgentHighlight { node: ActivityNode; steps: number }
+
+export interface TurnHighlights { skills: string[]; agents: AgentHighlight[] }
+
+const stepsUnder = (node: ActivityNode): number => node.children.reduce((total, child) => total + (child.event.kind === 'note' ? 0 : 1) + stepsUnder(child), 0);
+
+/** The skills a turn called and the subagents it spawned, so they show without opening the step list. */
+export function turnHighlights(events: ChatActivity[]): TurnHighlights {
+  const skills = [...new Set(events.filter((event) => event.kind === 'skill').map((event) => event.name || event.label).filter(Boolean))];
+  const agents: AgentHighlight[] = [];
+  const walk = (nodes: ActivityNode[]) => {
+    for (const node of nodes) {
+      if (node.event.kind === 'agent') agents.push({ node, steps: stepsUnder(node) });
+      walk(node.children);
+    }
+  };
+  if (events.some((event) => event.kind === 'agent')) walk(buildTree(events));
+  return { skills, agents };
+}
+
+/** "oh-my-claudecode:executor" reads as "executor". */
+export const agentType = (name: string) => name.split(':').pop() || name;
+
+/** "Agent executor: add the tags filter" reads as "add the tags filter". */
+export const agentTask = (event: Pick<ChatActivity, 'label' | 'name'>) => event.label.replace(/^Agent [^:]*:\s*/, '') || agentType(event.name);
+
+const FILE_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit']);
+
+/** The files a session changed, newest first, from its Edit and Write steps. */
+export function filesTouched(events: ChatActivity[]): string[] {
+  const seen = new Set<string>();
+  const files: string[] = [];
+  for (const event of [...events].sort((a, b) => compareEvents(b, a))) {
+    if (!FILE_TOOLS.has(event.name) || event.status !== 'ok' || !event.summary || event.summary === HIDDEN_EVENT || seen.has(event.summary)) continue;
+    seen.add(event.summary);
+    files.push(event.summary);
+  }
+  return files;
+}
+
+export interface SessionStats { steps: number; skills: number; agents: number; runningAgents: number }
+
+/** Counts for the session header: steps, distinct skills, subagents and how many of them still run. */
+export function sessionStats(events: ChatActivity[]): SessionStats {
+  const agents = events.filter((event) => event.kind === 'agent');
+  return {
+    steps: events.filter((event) => event.kind !== 'note').length,
+    skills: new Set(events.filter((event) => event.kind === 'skill').map((event) => event.name)).size,
+    agents: agents.length,
+    runningAgents: agents.filter((event) => event.status === 'running').length,
+  };
+}

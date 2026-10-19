@@ -3,6 +3,7 @@ import { ChevronRight, Loader2 } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import { ANNOUNCE_MS, announcement, buildTree, countsText, formatDuration, groupSummary, liveLine, sameEvents, summaryText, type ThreadGroup } from './activity';
 import { NodeList, StatusIcon } from './ActivityRow';
+import { TurnHighlights } from './TurnHighlights';
 import type { DetailStore } from './detailStore';
 import { useNow } from './useNow';
 import { useThrottledText } from './useThrottledText';
@@ -59,6 +60,7 @@ export const ActivityGroup = memo(function ActivityGroup({ group, live, turnRunn
 
   return (
     <li aria-live="off" className={cn('min-w-0 overflow-hidden rounded-sm border bg-surface-0 font-mono text-[0.68rem]', status === 'error' ? 'border-status-conflict/50' : status === 'denied' ? 'border-amber-300/50' : 'border-border')} onKeyDown={handleKeyDown}>
+      <TurnHighlights events={events} store={store} now={now} />
       <button
         ref={buttonRef}
         type="button"
