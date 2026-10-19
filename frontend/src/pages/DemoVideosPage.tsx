@@ -80,7 +80,7 @@ const DemoVideosPage = ({ onTicketClick }: { onTicketClick: (key: string) => voi
       </Card>
 
       {shown.pages > 1 && (
-        <nav className="mt-4 flex items-center justify-end gap-2" aria-label="Demo video pages">
+        <nav className="mt-4 flex items-center justify-center gap-2" aria-label="Demo video pages">
           <span className="font-mono text-xs text-muted-foreground tabular-nums">Page {shown.page} of {shown.pages} · {videos.length} links</span>
           <IconButton variant="ghost" aria-label="Previous page" disabled={shown.page === 1} onClick={() => setPage(shown.page - 1)}><ChevronLeft size={16} aria-hidden="true" /></IconButton>
           <IconButton variant="ghost" aria-label="Next page" disabled={shown.page === shown.pages} onClick={() => setPage(shown.page + 1)}><ChevronRight size={16} aria-hidden="true" /></IconButton>

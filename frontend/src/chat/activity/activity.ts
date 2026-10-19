@@ -319,20 +319,6 @@ export const agentType = (name: string) => name.split(':').pop() || name;
 /** "Agent executor: add the tags filter" reads as "add the tags filter". */
 export const agentTask = (event: Pick<ChatActivity, 'label' | 'name'>) => event.label.replace(/^Agent [^:]*:\s*/, '') || agentType(event.name);
 
-const FILE_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit']);
-
-/** The files a session changed, newest first, from its Edit and Write steps. */
-export function filesTouched(events: ChatActivity[]): string[] {
-  const seen = new Set<string>();
-  const files: string[] = [];
-  for (const event of [...events].sort((a, b) => compareEvents(b, a))) {
-    if (!FILE_TOOLS.has(event.name) || event.status !== 'ok' || !event.summary || event.summary === HIDDEN_EVENT || seen.has(event.summary)) continue;
-    seen.add(event.summary);
-    files.push(event.summary);
-  }
-  return files;
-}
-
 export interface SessionStats { steps: number; skills: number; agents: number; runningAgents: number }
 
 /** Counts for the session header: steps, distinct skills, subagents and how many of them still run. */

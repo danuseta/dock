@@ -1,4 +1,5 @@
 import type { ChatAttachment } from '../messages';
+import type { TurnOptionsControl } from './useTurnOptions';
 
 export interface TurnOptions {
   model: string | null;
@@ -25,7 +26,7 @@ export interface ComposerProps {
   blocker: string | null;
   busy: boolean;
   stopping: boolean;
-  sessionOptions: TurnOptions | null;
+  control: TurnOptionsControl;
   onSend: (payload: SendPayload) => Promise<void>;
   onStop: () => void;
 }

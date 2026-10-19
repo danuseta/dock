@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
+import { CAVEMAN_LEVELS } from '../datasources/StorageAPI';
 import { StorageService } from '../storage/service';
 import {
   ACTIVITY_DETAIL_KEEP_MS,
@@ -53,6 +54,7 @@ import {
   type BridgeCaps,
   type Catalog,
   type InteractionKind,
+  type PermissionMode,
   type WaitAnswer,
 } from './chat-interactions';
 import { DEFAULT_MACHINE, OrchestratorInputError, normalizeMachine, normalizeTicketKey } from './orchestrator';
@@ -86,7 +88,6 @@ export const MAX_STATUS_SESSIONS = 200;
 const LIMITS_KEEP_SECONDS = 8 * 24 * 60 * 60;
 const STATUS_KEEP_SECONDS = 30 * 24 * 60 * 60;
 const MAX_SUBAGENTS_REPORTED = 100;
-const MANUAL_SESSION_OPTIONS = { model: null, effort: null, permissionMode: 'auto', fast: null };
 const TITLE_FROM_TEXT_CHARS = 80;
 const MAX_UPLOAD_NAME_CHARS = 200;
 export const STOPPED_TEXT = 'Stopped';
@@ -97,6 +98,9 @@ const MAX_DELTA_ITEMS = 200;
 const MAX_DETAIL_CHARS = 200;
 const MAX_ERROR_CHARS = 500;
 const MAX_STATUS_TEXT_CHARS = 60;
+const MAX_STATUS_FILES = 200;
+const CHAT_SETTING_KEYS = ['chatDefaultModel', 'chatDefaultEffort', 'chatDefaultMode', 'chatRtk', 'chatCaveman'];
+const MAX_FILE_PATH_CHARS = 500;
 const MAX_QUERY_CHARS = 200;
 const MIN_QUERY_CHARS = 2;
 const LAST_TEXT_CHARS = 160;
@@ -283,6 +287,24 @@ function limitWindow(value: unknown, name: string) {
   return { usedPercentage, resetsAt: resetsAt === null ? null : new Date(resetsAt * 1000) };
 }
 
+function mergeFiles(previous: FileChange[], pushed: FileChange[]) {
+  const byPath = new Map(previous.map((file) => [file.path, file]));
+  for (const file of pushed) {
+    byPath.delete(file.path);
+    byPath.set(file.path, file);
+  }
+  return [...byPath.values()].slice(-MAX_STATUS_FILES);
+}
+
+function fileChanges(value: unknown) {
+  if (!Array.isArray(value)) return null;
+  return value.slice(0, MAX_STATUS_FILES).flatMap((item) => {
+    if (!isRecord(item) || typeof item.path !== 'string' || !item.path || item.path.length > MAX_FILE_PATH_CHARS) return [];
+    if (!Number.isInteger(item.added) || !Number.isInteger(item.removed) || Number(item.added) < 0 || Number(item.removed) < 0) return [];
+    return [{ path: item.path, added: Number(item.added), removed: Number(item.removed) }];
+  });
+}
+
 export function parseStatus(input: unknown) {
   if (!isRecord(input)) throw new OrchestratorInputError('A status object is required');
   return {
@@ -299,9 +321,11 @@ export function parseStatus(input: unknown) {
     cacheHitRatio: optionalNumber(input.cacheHitRatio, 'cacheHitRatio'),
     fiveHour: limitWindow(input.fiveHour, 'fiveHour'),
     sevenDay: limitWindow(input.sevenDay, 'sevenDay'),
+    files: fileChanges(input.files),
   };
 }
 
+type FileChange = { path: string; added: number; removed: number };
 type ParsedStatus = Omit<ReturnType<typeof parseStatus>, 'turnCostUsd'>;
 type SavedStatus = ParsedStatus & { receivedAt: Date };
 type LimitWindow = NonNullable<ReturnType<typeof limitWindow>>;
@@ -374,7 +398,7 @@ function toInteraction(row: InteractionRow) {
   };
 }
 
-function toSession(row: SessionRow, lastText: string | null, waiting = false) {
+function toSession(row: SessionRow, lastText: string | null, waiting = false, workerCount = 0) {
   return {
     id: row.id,
     source: row.source,
@@ -389,6 +413,7 @@ function toSession(row: SessionRow, lastText: string | null, waiting = false) {
     lastMessageAt: row.lastMessageAt.toISOString(),
     lastText,
     waiting,
+    workerCount,
     options: parseStoredOptions(row.options),
   };
 }
@@ -451,7 +476,8 @@ export class ChatService {
   private async present(rows: SessionRow[]) {
     const lastTexts = await this.storage.getChatLastTexts(rows.map((row) => row.id), LAST_TEXT_CHARS);
     const waiting = await this.storage.getWaitingChatSessionIds(rows.filter((row) => row.status === 'running').map((row) => row.id), this.now());
-    return rows.map((row) => toSession(row, lastTexts.get(row.id) ?? null, waiting.has(row.id)));
+    const workers = await this.storage.getChatWorkerCounts(rows.map((row) => row.id));
+    return rows.map((row) => toSession(row, lastTexts.get(row.id) ?? null, waiting.has(row.id), workers.get(row.id) ?? 0));
   }
 
   /** A turn the bridge took and then went silent on is given up, so the session can be used again. */
@@ -572,12 +598,39 @@ export class ChatService {
     knownMachine(machine, machines);
     const { caps, catalog } = await this.info(machine);
     if (!caps && !catalog) return null;
+    const chosen = await this.settingsOptions(caps, catalog);
+    const base = catalog?.defaults ?? NO_DEFAULTS;
     return {
       models: catalog?.models ?? [],
       modes: caps?.modes ?? [],
       fastAvailable: caps?.features.includes('fast') === true && catalog?.fast.available === true,
-      defaults: catalog?.defaults ?? NO_DEFAULTS,
+      defaults: {
+        model: chosen?.model ?? base.model,
+        effort: chosen?.effort ?? base.effort,
+        permissionMode: chosen?.permissionMode ?? base.permissionMode,
+      },
     };
+  }
+
+  private async chatSettings() {
+    const values = new Map((await this.storage.getSettingValues(CHAT_SETTING_KEYS)).map((setting) => [setting.key, setting.value.trim()]));
+    return (key: string) => values.get(key) || null;
+  }
+
+  private async settingsOptions(caps: BridgeCaps | null, catalog: Catalog | null) {
+    const setting = await this.chatSettings();
+    return usableTurnOptions({
+      model: setting('chatDefaultModel'),
+      effort: setting('chatDefaultEffort'),
+      permissionMode: setting('chatDefaultMode') as PermissionMode | null,
+      fast: null,
+    }, caps, catalog);
+  }
+
+  private async agentSettings() {
+    const setting = await this.chatSettings();
+    const caveman = setting('chatCaveman');
+    return { rtk: setting('chatRtk') !== 'off', caveman: CAVEMAN_LEVELS.find((level) => level === caveman) ?? 'full' };
   }
 
   async machinesWithInfo(names: string[]) {
@@ -706,6 +759,11 @@ export class ChatService {
     return rows.map(toActivity);
   }
 
+  async workers(sessionId: string) {
+    if (!CHAT_ID.test(String(sessionId))) return [];
+    return (await this.storage.getChatWorkers(sessionId)).map((row) => ({ id: row.eventId, name: row.name, label: row.label, status: row.status }));
+  }
+
   async activityDetail(sessionId: string, id: number) {
     if (!CHAT_ID.test(String(sessionId)) || !Number.isInteger(id)) return null;
     return this.storage.getChatActivityDetail(sessionId, id);
@@ -754,6 +812,7 @@ export class ChatService {
         .filter(([name]) => machine === undefined || name === machine)
         .flatMap(([name, byId]) => [...byId.values()].map(({ fiveHour, sevenDay, receivedAt, ...status }) => ({
           ...status,
+          files: status.files ?? [],
           machine: name,
           receivedAt: receivedAt.toISOString(),
           stale: stale(receivedAt),
@@ -793,6 +852,7 @@ export class ChatService {
       costUsd: turnCostUsd === null ? status.costUsd ?? previous?.costUsd ?? null : (previous?.costUsd ?? 0) + turnCostUsd,
       cacheWarm: status.cacheWarm ?? previous?.cacheWarm ?? null,
       cacheHitRatio: status.cacheHitRatio ?? previous?.cacheHitRatio ?? null,
+      files: status.files === null ? previous?.files ?? null : mergeFiles(previous?.files ?? [], status.files),
     };
   }
 
@@ -874,7 +934,7 @@ export class ChatService {
       startedAt: now,
       lastMessageAt: now,
       origin: input.origin === 'cron' ? 'cron' : 'manual',
-      ...(input.origin === 'cron' ? (cronOptions ? { options: JSON.stringify(cronOptions) } : {}) : { options: JSON.stringify(MANUAL_SESSION_OPTIONS) }),
+      ...(cronOptions ? { options: JSON.stringify(cronOptions) } : {}),
     });
     return toSession(row, null);
   }
@@ -912,7 +972,8 @@ export class ChatService {
       throw new OrchestratorInputError('This machine cannot receive attachments yet');
     }
     if (options) checkTurnOptions(options, caps, catalog);
-    const effective = mergeTurnOptions(usableTurnOptions(parseStoredOptions(session.options), caps, catalog), options);
+    const stored = mergeTurnOptions(await this.settingsOptions(caps, catalog), usableTurnOptions(parseStoredOptions(session.options), caps, catalog));
+    const effective = usableTurnOptions(mergeTurnOptions(stored, options), caps, catalog);
     const now = this.now();
     const optionsJson = effective ? JSON.stringify(effective) : null;
     if (busy) return this.hold(sessionId, body, optionsJson, now, mode === 'steer', caps?.features.includes('steer') === true);
@@ -1259,6 +1320,7 @@ export class ChatService {
         ...taken,
         attachments: caps.features.includes('attachments') ? await this.attachments.forClaim(message.id) : [],
         options: parseStoredOptions(message.options),
+        agent: await this.agentSettings(),
       };
     }
     return null;

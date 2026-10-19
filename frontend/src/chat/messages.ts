@@ -28,6 +28,7 @@ export interface ChatSession {
   lastMessageAt: string;
   lastText?: string | null;
   waiting?: boolean;
+  workerCount?: number;
   pending?: ChatInteraction[] | null;
   settled?: SettledInteraction[] | null;
   options?: { model?: string | null; effort?: string | null; permissionMode?: string | null; fast?: boolean | null } | null;
@@ -120,12 +121,6 @@ export const machineOf = (session?: { machine?: string | null } | null) => sessi
 
 /** Where a machine's work happens, in a sentence: the laptop reads as "your laptop", any other machine by name. */
 export const machinePlace = (machine: string) => (machine === DEFAULT_MACHINE ? 'your laptop' : machine);
-
-/** A tab's name; with more than one machine the machine joins it, so two untitled sessions stay apart. */
-export const tabLabel = (session: { title?: string | null; ticketKey?: string | null; machine?: string | null } | null | undefined, multipleMachines: boolean): string => {
-  const label = session?.title || session?.ticketKey || 'New session';
-  return multipleMachines && session ? `${label} · ${machineOf(session)}` : label;
-};
 
 /** The machines a session can be started on; a missing or empty list means only the laptop. */
 export const machineNames = (machines?: ChatMachine[] | null): string[] => (machines && machines.length > 0 ? machines.map((machine) => machine.name) : [DEFAULT_MACHINE]);

@@ -1,13 +1,8 @@
 import React from 'react';
 import { cn } from '../lib/cn';
-import { MachineChip } from './MachineControls';
 import { relativeTime, sessionTitle, type ChatSession } from './messages';
 
 const chip = 'inline-flex flex-none items-center rounded-xs border px-1.5 py-px font-mono text-[0.62rem] font-bold';
-
-export const SourceChip: React.FC<{ source: string }> = ({ source }) => (
-  <span className={cn(chip, source === 'dock' ? 'border-border-glow text-foreground' : 'border-border-glow text-secondary-foreground')}>{source === 'dock' ? 'DOCK' : 'CLI'}</span>
-);
 
 export const ReadOnlyChip: React.FC = () => <span className={cn(chip, 'border-border text-muted-foreground')}>READ-ONLY</span>;
 
@@ -17,8 +12,6 @@ export const TicketChip: React.FC<{ ticketKey: string }> = ({ ticketKey }) => (
 
 interface SessionRowProps {
   session: ChatSession;
-  machine: string;
-  online: boolean | undefined;
   selected: boolean;
   now: number;
   onSelect: () => void;
@@ -29,14 +22,12 @@ interface SessionRowProps {
   children?: React.ReactNode;
 }
 
-export const SessionRow: React.FC<SessionRowProps> = ({ session, machine, online, selected, now, onSelect, snippet, snippetAt, children }) => {
+export const SessionRow: React.FC<SessionRowProps> = ({ session, selected, now, onSelect, snippet, snippetAt, children }) => {
   const working = session.status === 'queued' || session.status === 'running';
   const preview = snippet ?? session.lastText;
   return (
     <button type="button" className={cn('mb-1 block w-full rounded-xs border border-transparent px-2.5 py-2 text-left hover:bg-surface-1', selected && 'border-border-glow bg-surface-1')} aria-current={selected ? 'true' : undefined} onClick={onSelect}>
       <span className="flex items-center gap-1.5">
-        <SourceChip source={session.source} />
-        <MachineChip name={machine} online={online} />
         <span className="min-w-0 flex-1 truncate font-display text-[0.8rem] font-semibold">{sessionTitle(session)}</span>
         {session.waiting && <span className="flex-none rounded-xs border border-amber-300/50 bg-amber-300/10 px-1.5 py-px font-mono text-[0.62rem] font-bold text-amber-200">waiting</span>}
         {working && <i className="size-1.5 flex-none animate-pulse rounded-full bg-status-merged" title="Working" aria-hidden="true" />}

@@ -55,6 +55,7 @@ test('forgetStatus drops one machine from the saved status lines and keeps the o
     workspace: [{ sessionId: 'kept', receivedAt: '2026-10-08T00:00:00.000Z' }],
   }]]);
   const storage = {
+    getSettingValues: async () => [] as Array<{ key: string; value: string }>,
     getCache: async (namespace: string, key: string) => cache.get(`${namespace}:${key}`) ?? null,
     upsertCache: async (namespace: string, key: string, value: unknown) => { cache.set(`${namespace}:${key}`, JSON.parse(JSON.stringify(value))); },
   } as unknown as StorageService;

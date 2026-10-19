@@ -118,6 +118,10 @@ export class StorageService {
     return this.db.ticketDependency.delete({ where: { ticketKey } }).catch(() => undefined);
   }
 
+  getSettingValues(keys: string[]) {
+    return this.db.appSettings.findMany({ where: { key: { in: keys } }, select: { key: true, value: true } });
+  }
+
   async getSettings() {
     const settings = await this.db.appSettings.findMany();
     return settings.map((setting) => SENSITIVE_KEYS.has(setting.key)
@@ -867,6 +871,22 @@ export class StorageService {
     const ids = found.map((row) => Number(row.id));
     const rows = await this.db.chatMessage.findMany({ where: { id: { in: ids } } });
     return rows.sort((first, second) => ids.indexOf(first.id) - ids.indexOf(second.id));
+  }
+
+  async getChatWorkerCounts(sessionIds: string[]) {
+    if (sessionIds.length === 0) return new Map<string, number>();
+    const rows = await this.db.chatActivity.groupBy({
+      by: ['sessionId'], where: { sessionId: { in: sessionIds }, kind: 'agent' }, _count: { _all: true },
+    });
+    return new Map(rows.map((row) => [row.sessionId, row._count._all]));
+  }
+
+  getChatWorkers(sessionId: string) {
+    return this.db.chatActivity.findMany({
+      where: { sessionId, kind: 'agent' },
+      select: { eventId: true, name: true, label: true, status: true },
+      orderBy: [{ seq: 'asc' }, { id: 'asc' }],
+    });
   }
 
   /** One query for the whole list: the start of each session's newest user or assistant message. */

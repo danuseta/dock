@@ -239,6 +239,7 @@ export const resolvers = {
     chatActivity: async (_: unknown, args: { sessionId: string; afterSeq?: number; fromTurnId?: number; beforeTurnId?: number; limit?: number }) => {
       return chatService.activityRows(args.sessionId, args).catch(orchestratorInputError);
     },
+    chatSessionWorkers: async (_: unknown, { sessionId }: { sessionId: string }) => chatService.workers(sessionId),
     chatActivityDetail: async (_: unknown, { sessionId, id }: { sessionId: string; id: number }) => chatService.activityDetail(sessionId, id),
     chatSearch: async (_: unknown, { query, limit }: { query: string; limit?: number }) => chatService.search(query, limit, CHAT_MACHINE),
     chatBridge: async () => chatService.bridge(),
@@ -580,7 +581,7 @@ export const resolvers = {
 export const protectedQueries = [
   'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
-  'chatSessions', 'chatSession', 'chatMessages', 'chatActivity', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
+  'chatSessions', 'chatSession', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey',
 ] as const;

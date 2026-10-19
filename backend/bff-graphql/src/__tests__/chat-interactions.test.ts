@@ -38,8 +38,10 @@ function memoryStorage() {
   let sequence = 0;
   let interactionSequence = 0;
   const writes: string[] = [];
+  const settings: Array<{ key: string; value: string }> = [];
   const ofSession = (sessionId: string) => messages.filter((message) => message.sessionId === sessionId);
   const storage = {
+    getSettingValues: async () => settings,
     getChatSessions: async (source: string | null, take: number) => [...sessions.values()].filter((session) => !source || session.source === source).slice(0, take),
     getChatSession: async (id: string) => sessions.get(id) ?? null,
     getChatSessionsByIds: async (ids: string[]) => ids.flatMap((id) => (sessions.has(id) ? [sessions.get(id)] : [])),
@@ -112,6 +114,7 @@ function memoryStorage() {
       if (row) row.stopRequestedAt = at;
       return Boolean(row);
     },
+    getChatWorkerCounts: async () => new Map<string, number>(),
     getChatLastTexts: async () => new Map<string, string>(),
     closeRunningChatActivity: async () => 0,
     upsertChatActivity: async () => ({ accepted: 0, dropped: 0, seq: 0 }),
@@ -177,7 +180,7 @@ function memoryStorage() {
     findIngestToken: async (tokenHash: string) => tokens.find((token) => token.tokenHash === tokenHash) ?? null,
     touchIngestToken: async () => undefined,
   };
-  return { storage: storage as unknown as StorageService, sessions, messages: () => messages, interactions: () => interactions, machineInfo, writes };
+  return { storage: storage as unknown as StorageService, sessions, messages: () => messages, interactions: () => interactions, machineInfo, writes, settings };
 }
 
 const attachmentsStub = (calls: string[] = [], overrides: Partial<Pick<ChatAttachmentService, 'openForBridge'>> = {}) => ({
@@ -383,9 +386,9 @@ test('turn options are parsed and checked against the machine capabilities and c
   assert.strictEqual(JSON.parse(ctx.messages().find((message) => message.id === auto.id).options).permissionMode, 'auto', 'the cron starts tickets in auto mode');
   const sent = await ctx.service.sendMessage(second.id, 'hi', MACHINES, { options: { model: 'sonnet', effort: 'high', permissionMode: 'plan' } });
   assert.deepStrictEqual(JSON.parse(ctx.messages().find((message) => message.id === sent.id).options), { model: 'sonnet', effort: 'high', permissionMode: 'plan', fast: null });
-  assert.deepStrictEqual(JSON.parse(ctx.sessions.get(second.id).options), { model: null, effort: null, permissionMode: 'auto', fast: null }, 'a choice sent with one message is not written to the session');
-  assert.deepStrictEqual((await ctx.service.session(second.id))?.options, { model: null, effort: null, permissionMode: 'auto', fast: null });
-  assert.deepStrictEqual((await ctx.service.session(dock.id))?.options, { model: null, effort: null, permissionMode: 'auto', fast: null }, 'a new DOCK session starts in auto mode');
+  assert.strictEqual(ctx.sessions.get(second.id).options ?? null, null, 'a choice sent with one message is not written to the session');
+  assert.deepStrictEqual((await ctx.service.session(second.id))?.options, null);
+  assert.deepStrictEqual((await ctx.service.session(dock.id))?.options, null, 'a new DOCK session pins no mode');
 
   const noCaps = setup();
   const lone = await noCaps.service.createSession({ title: 'Old bridge', machine: 'workspace' });
@@ -429,6 +432,7 @@ test('the claim carries attachments and options only to a bridge that sent capab
   assert.deepStrictEqual(first.message, {
     id: sent.id, sessionId: dock.id, text: 'Hello', claudeSessionId: null, forkFrom: null,
     attachments: [{ id: 'a1', name: 'a1.png', mime: 'image/png', size: 10, sha256: 'f'.repeat(64) }], options: null,
+    agent: { rtk: true, caveman: 'full' },
   });
   assert.strictEqual((first as { wantCatalog?: boolean }).wantCatalog, true, 'the server holds no catalogue yet');
   assert.ok(ctx.calls.includes('prune'), 'attachment retention runs lazily from a claim');
@@ -1346,7 +1350,7 @@ test('a session keeps its own options, and a message overlays them field by fiel
 test('stored session options a machine cannot honour are left out instead of refusing the message', async () => {
   const old = setup();
   const lone = await old.service.createSession({ title: 'Old bridge' });
-  assert.strictEqual((await old.service.session(lone.id))?.options?.permissionMode, 'auto');
+  assert.strictEqual((await old.service.session(lone.id))?.options, null);
   const sent = await old.service.sendMessage(lone.id, 'hi', MACHINES);
   assert.strictEqual(old.messages().find((message) => message.id === sent.id).options, null, 'a bridge without capabilities gets nothing');
   const claim = await old.service.claim({ wait: 0 }, undefined, 'laptop');
@@ -1596,4 +1600,60 @@ test('answerTicket writes to the newest DOCK session of the ticket, after its tu
   assert.deepStrictEqual([idle.sessionId, idle.state], [old.id, 'queued']);
   const busy = await ctx.service.answerTicket('QRD-9', 'Drop', MACHINES);
   assert.strictEqual(busy.state, 'held', 'a running turn keeps the answer for its end');
+});
+
+test('the Settings defaults fill an unset turn option, lose to the turn and the session, and skip what the machine does not offer', async () => {
+  const ctx = setup();
+  await ctx.service.claim({ wait: 0, caps: CAPS }, undefined, 'laptop');
+  await ctx.service.ingestCatalog(CATALOG, 'laptop');
+  ctx.settings.push(
+    { key: 'chatDefaultModel', value: 'sonnet' },
+    { key: 'chatDefaultEffort', value: 'high' },
+    { key: 'chatDefaultMode', value: 'plan' },
+  );
+  const optionsOf = async (sessionId: string, options?: object) => {
+    const sent = await ctx.service.sendMessage(sessionId, 'go', MACHINES, options ? { options } : {});
+    return JSON.parse(ctx.messages().find((message) => message.id === sent.id).options);
+  };
+
+  const plain = await ctx.service.createSession({ title: 'Plain' });
+  assert.deepStrictEqual(await optionsOf(plain.id), { model: 'sonnet', effort: 'high', permissionMode: 'plan', fast: null });
+  const turn = await ctx.service.createSession({ title: 'Turn' });
+  assert.deepStrictEqual(await optionsOf(turn.id, { model: 'haiku' }), { model: 'haiku', effort: null, permissionMode: 'plan', fast: null }, 'the turn wins and a default effort the model lacks is dropped');
+  const session = await ctx.service.createSession({ title: 'Session', origin: 'cron', options: { permissionMode: 'acceptEdits' } });
+  assert.strictEqual((await optionsOf(session.id)).permissionMode, 'acceptEdits', 'the session wins over the default');
+
+  const defaults = (await ctx.service.machineOptions('laptop', MACHINES))?.defaults;
+  assert.deepStrictEqual(defaults, { model: 'sonnet', effort: 'high', permissionMode: 'plan' });
+
+  ctx.settings.splice(0, ctx.settings.length, { key: 'chatDefaultModel', value: 'opus' }, { key: 'chatDefaultMode', value: 'auto' });
+  const other = await ctx.service.createSession({ title: 'Other' });
+  const sent = await ctx.service.sendMessage(other.id, 'go', MACHINES);
+  assert.strictEqual(ctx.messages().find((message) => message.id === sent.id).options, null, 'a model and mode the machine does not offer are ignored');
+  assert.deepStrictEqual((await ctx.service.machineOptions('laptop', MACHINES))?.defaults, { model: null, effort: null, permissionMode: null });
+
+  const unset = await ctx.service.createSession({ title: 'Manual unset' });
+  ctx.settings.length = 0;
+  const bare = await ctx.service.sendMessage(unset.id, 'go', MACHINES);
+  assert.strictEqual(ctx.messages().find((message) => message.id === bare.id).options, null, 'a manual session with no default sends no mode');
+  ctx.settings.push({ key: 'chatDefaultMode', value: 'acceptEdits' });
+  const manual = await ctx.service.createSession({ title: 'Manual set' });
+  assert.strictEqual((await optionsOf(manual.id)).permissionMode, 'acceptEdits', 'a manual session sends the Settings mode');
+});
+
+test('the claim carries the RTK and caveman settings, on and full when unset or unknown', async () => {
+  const ctx = setup();
+  const dock = await ctx.service.createSession({ title: 'Agent' });
+  await ctx.service.sendMessage(dock.id, 'one', MACHINES);
+  assert.deepStrictEqual(((await ctx.service.claim({ wait: 0, caps: CAPS }, undefined, 'laptop')).message as { agent?: unknown } | null)?.agent, { rtk: true, caveman: 'full' });
+
+  ctx.settings.push({ key: 'chatRtk', value: 'off' }, { key: 'chatCaveman', value: 'ultra' });
+  const next = await ctx.service.createSession({ title: 'Agent two' });
+  await ctx.service.sendMessage(next.id, 'two', MACHINES);
+  assert.deepStrictEqual(((await ctx.service.claim({ wait: 0, caps: CAPS }, undefined, 'laptop')).message as { agent?: unknown } | null)?.agent, { rtk: false, caveman: 'ultra' });
+
+  ctx.settings.splice(0, 2, { key: 'chatCaveman', value: 'loud' });
+  const last = await ctx.service.createSession({ title: 'Agent three' });
+  await ctx.service.sendMessage(last.id, 'three', MACHINES);
+  assert.deepStrictEqual(((await ctx.service.claim({ wait: 0, caps: CAPS }, undefined, 'laptop')).message as { agent?: unknown } | null)?.agent, { rtk: true, caveman: 'full' });
 });

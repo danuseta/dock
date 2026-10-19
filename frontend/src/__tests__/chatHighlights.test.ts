@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { agentTask, agentType, filesTouched, runningLanes, sessionStats, turnHighlights, type ChatActivity } from '../chat/activity/activity';
+import { agentTask, agentType, runningLanes, sessionStats, turnHighlights, type ChatActivity } from '../chat/activity/activity';
 
 let nextId = 1;
 const at = (seconds: number) => new Date(Date.UTC(2026, 9, 19, 8, 0, seconds)).toISOString();
@@ -39,17 +39,6 @@ test('a subagent reads as its type and its task', () => {
   assert.strictEqual(agentType('Explore'), 'Explore');
   assert.strictEqual(agentTask({ label: 'Agent executor: add the tags filter', name: 'executor' }), 'add the tags filter');
   assert.strictEqual(agentTask({ label: 'Agent executor', name: 'oh-my-claudecode:executor' }), 'Agent executor');
-});
-
-test('files touched are the edited and written paths, newest first, each once, failed steps left out', () => {
-  const events = [
-    row({ name: 'Edit', summary: 'src/a.ts' }),
-    row({ name: 'Write', summary: 'src/b.ts' }),
-    row({ name: 'Edit', summary: 'src/a.ts' }),
-    row({ name: 'Edit', summary: 'src/c.ts', status: 'error' }),
-    row({ name: 'Read', summary: 'src/d.ts' }),
-  ];
-  assert.deepStrictEqual(filesTouched(events), ['src/a.ts', 'src/b.ts']);
 });
 
 test('session stats count steps, distinct skills, subagents and the ones still running', () => {

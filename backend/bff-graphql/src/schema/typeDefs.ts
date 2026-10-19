@@ -159,6 +159,11 @@ export const typeDefs = gql`
     googleCalendarError: String
     serviceHealthRefreshSeconds: Int!
     hasMasterPin: Boolean
+    chatDefaultModel: String
+    chatDefaultEffort: String
+    chatDefaultMode: String
+    chatRtk: String!
+    chatCaveman: String!
   }
 
   type ValidationResult {
@@ -432,9 +437,17 @@ export const typeDefs = gql`
     lastMessageAt: String!
     lastText: String
     waiting: Boolean!
+    workerCount: Int!
     pending: [ChatInteraction!]!
     settled: [ChatSettled!]!
     options: ChatTurnOptions
+  }
+
+  type ChatWorker {
+    id: String!
+    name: String!
+    label: String!
+    status: String!
   }
 
   type ChatMessage {
@@ -565,6 +578,12 @@ export const typeDefs = gql`
     stale: Boolean!
   }
 
+  type ChatFileChange {
+    path: String!
+    added: Int!
+    removed: Int!
+  }
+
   type ChatSessionStatus {
     sessionId: ID!
     machine: String
@@ -577,6 +596,7 @@ export const typeDefs = gql`
     costUsd: Float
     cacheWarm: Boolean
     cacheHitRatio: Float
+    files: [ChatFileChange!]!
     receivedAt: String!
     stale: Boolean!
   }
@@ -621,6 +641,11 @@ export const typeDefs = gql`
     googleClientSecret: String
     googleCalendarId: String
     serviceHealthRefreshSeconds: Int
+    chatDefaultModel: String
+    chatDefaultEffort: String
+    chatDefaultMode: String
+    chatRtk: String
+    chatCaveman: String
   }
 
   input QuickLinkInput {
@@ -698,6 +723,7 @@ export const typeDefs = gql`
     chatSession(id: ID!): ChatSession
     chatMessages(sessionId: ID!, afterId: Int, beforeId: Int, limit: Int): [ChatMessage!]!
     chatActivity(sessionId: ID!, afterSeq: Int, fromTurnId: Int, beforeTurnId: Int, limit: Int): [ChatActivity!]!
+    chatSessionWorkers(sessionId: ID!): [ChatWorker!]!
     chatActivityDetail(sessionId: ID!, id: Int!): String
     chatSearch(query: String!, limit: Int): [ChatSearchHit!]!
     chatBridge: ChatBridge!

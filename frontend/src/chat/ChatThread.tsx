@@ -11,13 +11,18 @@ import {
 } from './messages';
 import { MachineChip } from './MachineControls';
 import { SessionHeader } from './SessionHeader';
-import { SessionStatusLine } from './StatusLine';
+import { CopyButton } from './CopyButton';
 import { Markdown } from './Markdown';
 import { recallMessages, rememberMessages } from './messageCache';
 import { ActivityGroup } from './activity/ActivityGroup';
 import { isThreadGroup, type ChatActivity } from './activity/activity';
 import { useTurnActivity } from './activity/useTurnActivity';
 import { Composer } from './composer/Composer';
+import { composerFeatures } from './composer/composerLogic';
+import { useTurnOptions, type TurnOptionsControl } from './composer/useTurnOptions';
+import { delayedMinutes, delayedText, dotState, workerGroups, type DotState } from './headerState';
+import { useChatStatus } from './useChatStatus';
+import type { ChatSessionStatus } from './status';
 import type { SendPayload } from './composer/composerLogic';
 import { InteractionCards } from './interactions/InteractionCards';
 import { MessageAttachments } from './interactions/MessageAttachments';
@@ -33,7 +38,11 @@ interface ChatThreadProps {
   hideMachine?: boolean;
   /** Receives every activity row of the session whenever they change, for summaries outside the thread. */
   onActivity?: (events: ChatActivity[]) => void;
+  renderHeader?: (context: HeaderContext) => React.ReactNode;
+  workerId?: string | null;
 }
+
+export interface HeaderContext { control: TurnOptionsControl; dot: DotState; delayed: boolean; status: ChatSessionStatus | undefined }
 
 const NEWEST_PAGE = 200;
 const OLDER_PAGE = 100;
@@ -42,7 +51,7 @@ const NEAR_BOTTOM_PX = 80;
 const messageOf = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
 const timeOf = (at: string) => new Date(at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 
-export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, readOnlyAction, hideMachine, onActivity }) => {
+export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, readOnlyAction, hideMachine, onActivity, renderHeader, workerId }) => {
   const client = useApolloClient();
   const [recalled] = useState(() => recallMessages(sessionId));
   const [messages, setMessages] = useState<ChatMessage[]>(() => recalled?.messages ?? []);
@@ -97,6 +106,12 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
   const interactions = useInteractionLog(session?.pending, session?.settled);
   const stopping = isStopping(stopRequested, status);
   const readOnly = session?.source === 'cli';
+  const control = useTurnOptions(sessionId, machine, composerFeatures(capabilities), sessionTurnOptions(session));
+  const { status: liveStatus, now: statusNow, refetch: recheckStatus } = useChatStatus(machine);
+  const ownStatus = liveStatus?.sessions.find((item) => item.sessionId === sessionId);
+  const delayed = Boolean(ownStatus?.stale) && busy;
+  const dot = dotState({ bridgeUp: machineUp, waiting: interactions.cards.length > 0 || Boolean(session?.waiting), busy, delayed });
+  const shownItems = workerId ? workerGroups(activity.byTurn, workerId) : activity.items;
 
   useEffect(() => {
     if (status !== 'queued' && status !== 'running') setStopRequested(false);
@@ -243,7 +258,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     <div className={cn('flex min-h-0 flex-col', className)}>
       {session && !hideMachine && <div className="flex flex-none items-center gap-2 border-b border-border bg-surface-0 px-3.5 py-1.5 font-mono text-[0.66rem] text-muted-foreground"><span>Runs on</span><MachineChip name={machine} online={machineUp} /></div>}
       {session && <SessionHeader session={session} showTitle={!hideMachine} />}
-      <SessionStatusLine sessionId={sessionId} machine={machine} className="flex-none bg-surface-0" />
+      {session && renderHeader?.({ control, dot, delayed, status: ownStatus })}
       <div ref={scrollRef} onScroll={handleScroll} className="min-h-[6.5rem] flex-1 overflow-y-auto overscroll-contain px-3.5 py-3" role="log" aria-label="Conversation">
         {loadingOlder && <p className="pb-2 text-center font-mono text-[0.66rem] text-muted-foreground" role="status">Loading older messages...</p>}
         {!loaded && !loadError && !missing && <p className="py-6 text-center text-sm text-muted-foreground" role="status">Loading the conversation...</p>}
@@ -252,7 +267,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
           <p className="py-6 text-center text-pretty text-sm text-muted-foreground">{readOnly ? 'This session has no messages.' : session?.forkFrom ? 'Continued from a terminal session. Claude Code keeps that conversation; what you send from here is added below.' : `Nothing here yet. Your first message starts a Claude Code session on ${place}.`}</p>
         )}
         <ol className="flex flex-col gap-2">
-          {activity.items.map((message) => (isThreadGroup(message) ? (
+          {shownItems.map((message) => (isThreadGroup(message) ? (
             <ActivityGroup key={message.key} group={message} live={message.last && message.turnId === activity.liveTurnId} turnRunning={message.turnId === activity.liveTurnId} store={activity.store} stickRef={stickRef} />
           ) : message.role === 'tool' ? (
             <li key={message.id} className="flex min-w-0 items-baseline gap-1.5 font-mono text-[0.68rem] text-muted-foreground" title={timeOf(message.at)}>
@@ -279,6 +294,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
                   <span className="sr-only">Claude: </span><Markdown text={message.text} />
                 </div>
               ))}
+              {message.role !== 'user' && message.text && <CopyButton text={message.text} />}
               {message.attachments && <MessageAttachments attachments={message.attachments} />}
               {isOptimistic(message) && <span className="mt-0.5 font-mono text-[0.62rem] text-muted-foreground">Sending...</span>}
               {message.stopped && message.state !== 'queued' && message.state !== 'taken' ? (
@@ -294,6 +310,12 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
       {!missing && <InteractionCards sessionId={sessionId} cards={interactions.cards} lines={interactions.lines} messages={messages} onSettled={interactions.record} />}
 
       <div className="flex flex-col gap-1.5 border-t border-border bg-surface-0 px-3.5 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))]">
+        {delayed && ownStatus && (
+          <p className="rounded-xs border border-amber-300/50 bg-amber-300/10 px-2.5 py-1.5 text-pretty text-xs text-amber-200" role="status">
+            {delayedText(delayedMinutes(ownStatus.receivedAt, statusNow))}{' '}
+            <button type="button" className="inline rounded-xs border border-amber-300/50 px-1.5 py-px font-mono text-[0.68rem] font-bold hover:bg-amber-300/10" onClick={recheckStatus}>Check again</button>
+          </p>
+        )}
         {status === 'queued' && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-secondary-foreground" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" />Queued · waiting for the {machine} bridge to pick it up</p>}
         {status === 'running' && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-status-merged" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">Running{interactions.cards.length > 0 ? ' · waiting for your answer' : session?.statusDetail ? ` · ${session.statusDetail}` : ''}</span></p>}
         {status === 'error' && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The last turn failed{session?.statusDetail ? `: ${session.statusDetail}` : '.'}</p>}
@@ -332,7 +354,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
             blocker={blocker}
             busy={busy}
             stopping={stopping}
-            sessionOptions={sessionTurnOptions(session)}
+            control={control}
             onSend={send}
             onStop={() => void stop()}
           />

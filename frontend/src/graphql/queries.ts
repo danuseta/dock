@@ -245,6 +245,11 @@ export const GET_SETTINGS = gql`
       googleCalendarError
       serviceHealthRefreshSeconds
       hasMasterPin
+      chatDefaultModel
+      chatDefaultEffort
+      chatDefaultMode
+      chatRtk
+      chatCaveman
     }
   }
 `;
@@ -643,6 +648,7 @@ export const CHAT_SESSION_FIELDS = `
   lastMessageAt
   lastText
   waiting
+  workerCount
 `;
 
 export const CHAT_INTERACTION_FIELDS = `
@@ -679,6 +685,17 @@ export const GET_CHAT_SESSIONS = gql`
   query GetChatSessions($source: String, $limit: Int) {
     chatSessions(source: $source, limit: $limit) {
       ${CHAT_SESSION_FIELDS}
+    }
+  }
+`;
+
+export const GET_CHAT_SESSION_WORKERS = gql`
+  query GetChatSessionWorkers($sessionId: ID!) {
+    chatSessionWorkers(sessionId: $sessionId) {
+      id
+      name
+      label
+      status
     }
   }
 `;
@@ -807,6 +824,7 @@ export const GET_CHAT_STATUS = gql`
         costUsd
         cacheWarm
         cacheHitRatio
+        files { path added removed }
         receivedAt
         stale
       }

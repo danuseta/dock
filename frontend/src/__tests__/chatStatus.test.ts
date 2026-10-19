@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { contextText, formatTokens, limitTone, resetsIn, sessionStatusParts, type ChatSessionStatus } from '../chat/status';
+import { contextText, formatTokens, limitTone, resetsIn, type ChatSessionStatus } from '../chat/status';
 
 const status = (overrides: Partial<ChatSessionStatus> = {}): ChatSessionStatus => ({
   sessionId: 's1', model: 'Opus 4.7 (1M context)', effort: 'high', fastMode: false, contextPercentage: 39.6, contextTokens: 395000, contextSize: 1000000,
@@ -24,9 +24,6 @@ test('reset times count down from now', () => {
   assert.strictEqual(resetsIn('nonsense', now), '');
 });
 
-test('a session status lists model, effort, context, cost and cache, and skips what is missing', () => {
+test('the context text shows the share and the token count', () => {
   assert.strictEqual(contextText(status()), 'ctx 40% 395k/1M');
-  assert.deepStrictEqual(sessionStatusParts(status({ fastMode: true })), ['Opus 4.7 (1M context)', 'effort high fast', 'ctx 40% 395k/1M', '$12.50', 'cache warm']);
-  assert.deepStrictEqual(sessionStatusParts(status({ model: null, effort: null, contextTokens: null, cacheWarm: false })), ['ctx 40%', '$12.50', 'cache cold']);
-  assert.deepStrictEqual(sessionStatusParts({ sessionId: 'bare', receivedAt: '2026-10-08T10:00:00.000Z', stale: false }), [], 'no data shows nothing rather than zeros');
 });

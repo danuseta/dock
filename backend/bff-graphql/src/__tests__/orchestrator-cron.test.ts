@@ -410,6 +410,7 @@ test('candidates skip a ticket the owner works by hand', () => {
 
 test('every cron prompt keeps the lead in its turn while members run and asks for Bahasa Indonesia in chat', () => {
   for (const prompt of [startPrompt('QRD-1'), confirmedPrompt('QRD-1'), resumePrompt('QRD-1')]) {
+    assert.match(prompt, /oh-my-claudecode:team skill/);
     assert.match(prompt, /Do not end your turn while a subagent you started is still running/);
     assert.match(prompt, /Bahasa Indonesia; code, comments, commit messages and pull request text stay in English/);
   }

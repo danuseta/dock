@@ -7,6 +7,8 @@ export interface ChatLimits {
   stale: boolean;
 }
 
+export interface ChatFileChange { path: string; added: number; removed: number }
+
 export interface ChatSessionStatus {
   sessionId: string;
   model?: string | null;
@@ -18,6 +20,7 @@ export interface ChatSessionStatus {
   costUsd?: number | null;
   cacheWarm?: boolean | null;
   cacheHitRatio?: number | null;
+  files?: ChatFileChange[];
   receivedAt: string;
   stale: boolean;
 }
@@ -56,12 +59,3 @@ export function contextText(status: ChatSessionStatus): string | null {
   return `ctx ${Math.round(status.contextPercentage)}%${detail}`;
 }
 
-export function sessionStatusParts(status: ChatSessionStatus): string[] {
-  return [
-    status.model || null,
-    status.effort ? `effort ${status.effort}${status.fastMode ? ' fast' : ''}` : null,
-    contextText(status),
-    status.costUsd != null ? `$${status.costUsd.toFixed(2)}` : null,
-    status.cacheWarm != null ? `cache ${status.cacheWarm ? 'warm' : 'cold'}` : null,
-  ].filter((part): part is string => part !== null);
-}

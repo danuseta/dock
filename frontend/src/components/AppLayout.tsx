@@ -8,7 +8,7 @@ import { cn } from '../lib/cn';
 import { PHONE_PRIMARY_PATHS, phoneMore } from '../lib/phoneNavigation';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 import { ChatDock } from '../chat/ChatDock';
-import { hasPage, useDockMode } from '../lib/dockMode';
+import { hasPage, showsChatDock, useDockMode } from '../lib/dockMode';
 import { version as appVersion } from '../../package.json';
 
 // A phone tab: icon over a short label, 44 px tall.
@@ -221,7 +221,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
         )}
         {children}
       </main>
-      {hasPage(mode, '/sessions') && <ChatDock inset={chatInset} />}
+      {showsChatDock(mode, currentPath) && <ChatDock inset={chatInset} />}
     </div>
   );
 };
