@@ -2,13 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { isPlayableVideo } from '../lib/demoVideos';
 import { useQuery, useMutation } from '@apollo/client';
 import { 
-  MessageSquare, 
   GitPullRequest, 
   Video, 
   ExternalLink, 
   Save, 
   AlertTriangle, 
-  User, 
   ArrowLeft, 
   RefreshCw, 
   GitCommit, 
@@ -19,10 +17,13 @@ import {
   Link2,
   ListOrdered,
   Unlink,
-  CheckCircle2,
 } from 'lucide-react';
-import { GET_DASHBOARD, GET_TICKET_DETAIL_CORE, GET_TICKET_DETAIL_ENRICHMENT } from '../graphql/queries';
-import { TicketAgentPanel } from '../components/TicketAgentPanel';
+import { GET_DASHBOARD, GET_ORCHESTRATION, GET_TICKET_DETAIL_CORE, GET_TICKET_DETAIL_ENRICHMENT } from '../graphql/queries';
+import type { AgentRun } from '../agents/runs';
+import { useOpenForTicket } from '../chat/useOpenForTicket';
+import { AcceptanceCard, AgentRunCard } from '../components/ticket/AgentRunCards';
+import { NeedsYouCard } from '../components/ticket/NeedsYouCard';
+import { TicketHeader } from '../components/ticket/TicketHeader';
 import { CLEAR_TICKET_DEPENDENCY, CLEAR_TICKET_WORK_ORDER, SAVE_DEMO_LINK, SEND_TO_DISCORD, SET_TICKET_DEPENDENCY, SET_TICKET_MANUAL, SET_TICKET_WORK_ORDER, CHECK_CONFLICTS } from '../graphql/mutations';
 import { PRBadge } from '../components/PRBadge';
 import { ConflictModal } from '../components/ConflictModal';
@@ -31,7 +32,8 @@ import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Toast } from '../components/Toast';
 import { Badge, Button, Card, Checkbox, Input, Page, Select } from '../components/ui';
 import { cn } from '../lib/cn';
-import { DETAIL_QUERY_OPTIONS, displayAssignee } from '../lib/queryPolicy';
+import { CACHED_QUERY_OPTIONS, DETAIL_QUERY_OPTIONS, displayAssignee } from '../lib/queryPolicy';
+import { isLongDescription, needsYou, type NeedItem } from '../lib/ticketDetail';
 import { getApprovalLabels } from '../lib/ticketApprovals';
 
 interface TicketDetailPageProps {
@@ -79,6 +81,10 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const [dependsOnKey, setDependsOnKey] = useState('');
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
   const [activePRTab, setActivePRTab] = useState<Record<string, 'commits' | 'files' | 'none'>>({});
+  const [descriptionOpen, setDescriptionOpen] = useState(false);
+  const { data: runData } = useQuery(GET_ORCHESTRATION, { ...CACHED_QUERY_OPTIONS, variables: { key: ticketKey }, pollInterval: 30000 });
+  const run: AgentRun | null = runData?.orchestration?.key?.toUpperCase() === ticketKey.toUpperCase() ? runData.orchestration : null;
+  const { openForTicket, opening: openingSession, error: sessionError } = useOpenForTicket();
 
   useEffect(() => {
     setDependsOnKey(coreData?.ticketRelationGroup?.dependsOnKey || '');
@@ -248,6 +254,21 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
     }
   };
 
+  const needs = needsYou({ run, pullRequests: ticket.pullRequests, demoUrl: ticket.demoLink?.url });
+  const handleNeed = (item: NeedItem) => {
+    if (item.kind === 'question') void openForTicket(ticket.key);
+    else if (item.kind === 'ac') document.getElementById('acceptance-criteria')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    else if (item.kind === 'demo') document.getElementById('demo-video')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    else {
+      const pr = item.kind === 'conflict'
+        ? ticket.pullRequests?.find((candidate: any) => `conflict-${candidate.id ?? candidate.repo}` === item.id)
+        : ticket.pullRequests?.[0];
+      if (item.kind === 'conflict' && pr) void handleInspect(pr.owner, pr.repo, pr.pullNumber || pr.number);
+      else if (pr?.url) window.open(pr.url, '_blank', 'noreferrer');
+    }
+  };
+  const longDescription = isLongDescription(ticket.description);
+
   const isOldSprint = ticket.sprintState === 'CLOSED';
   const approvalLabels = getApprovalLabels(ticket.labels);
   const assignee = displayAssignee(ticket.assignee);
@@ -276,56 +297,66 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   return (
     <Page width="full">
       {renderBackButton()}
-      <div className="flex flex-wrap items-start gap-7">
-        <div className="flex min-w-0 flex-[1_1_640px] flex-col gap-6">
-          <Card>
-            <div className="mb-3 flex flex-wrap items-center gap-3"><Badge variant="accent" className="px-3 py-1 font-bold text-base">{ticket.key}</Badge>{ticket.storyPoints != null && <Badge className="border-orange-300/35 bg-orange-300/10 text-orange-200">{ticket.storyPoints} SP</Badge>}<PRBadge status={ticket.status} />{approvalLabels.map((label) => <Badge key={label} variant="success" className="gap-1"><CheckCircle2 size={12} aria-hidden="true" />{label}</Badge>)}</div>
-            <h1 className="text-balance font-display text-[1.65rem] leading-snug font-bold">{ticket.title}</h1>
-            <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-border pt-3 font-mono text-sm text-muted-foreground">
-              {assignee && <span className="flex items-center gap-1.5"><User size={15} className="text-secondary-foreground" aria-hidden="true" />Assignee: <strong className="text-foreground">{assignee}</strong></span>}
-              {ticket.sprintName && ticket.sprintName !== 'No Sprint' && <span className={cn('text-[0.78rem] font-semibold', isOldSprint ? 'text-muted-foreground' : 'text-status-merged')}>{ticket.sprintName}</span>}
-              {ticket.url && <a href={ticket.url} target="_blank" rel="noreferrer" className="flex min-h-6 max-[760px]:min-h-11 items-center gap-1.5 font-bold text-accent hover:underline"><ExternalLink size={15} aria-hidden="true" />Open in Jira</a>}
+      <div className="flex flex-col gap-6">
+        <TicketHeader
+          ticket={ticket}
+          run={run}
+          approvalLabels={approvalLabels}
+          assignee={assignee}
+          oldSprint={isOldSprint}
+          broadcastLabel={isCombinedAnnouncement ? `Broadcast ${relationTickets.length}` : 'Broadcast'}
+          broadcastTitle={isCombinedAnnouncement ? `One combined Discord announcement for ${relationTickets.map((item: any) => item.key).join(' + ')}` : 'Send status, PR checks and the demo link to Discord'}
+          sessionOpening={openingSession}
+          onBroadcast={handleDiscordBroadcast}
+          onSession={() => void openForTicket(ticket.key)}
+        />
+        {sessionError && <Card className="border-status-conflict text-pretty text-sm text-status-conflict" role="alert">{sessionError}</Card>}
+
+        <NeedsYouCard items={needs} onAction={handleNeed} />
+
+        <div className="grid grid-cols-[minmax(0,1.65fr)_minmax(340px,1fr)] items-start gap-6 max-[1100px]:grid-cols-1">
+          <div className="flex min-w-0 flex-col gap-6">
+            <AcceptanceCard run={run} />
+
+            <Card>
+              <div className="mb-4 flex items-center justify-between gap-2 border-b border-border pb-3">
+                <h2 className="flex items-center gap-2 font-display text-lg font-bold"><FileText size={19} className="text-accent" aria-hidden="true" />Description</h2>
+                {longDescription && <Button size="sm" variant="ghost" aria-expanded={descriptionOpen} onClick={() => setDescriptionOpen((open) => !open)}>{descriptionOpen ? 'Show less' : 'Show all'}</Button>}
+              </div>
+              <div className="rounded-sm border border-border bg-surface-0 px-6 py-5 text-sm leading-7 text-secondary-foreground"><div className={cn('whitespace-pre-wrap break-words', longDescription && !descriptionOpen && 'line-clamp-8')}>{ticket.description || 'No detailed description provided in this Jira issue.'}</div></div>
+            </Card>
+
+            <div className="grid grid-cols-2 items-start gap-6 max-[1300px]:grid-cols-1">
+            <Card>
+              <div className="mb-3 flex items-center gap-2 border-b border-border pb-3"><ListOrdered size={19} className="text-accent" aria-hidden="true" /><h2 className="text-balance font-display text-lg font-bold">Work order</h2></div>
+              <p className="mb-3 text-pretty text-xs leading-5 text-muted-foreground">
+                The cron takes To Do tickets lowest number first. {ticket.workOrderSource === 'label' ? `Now #${ticket.workOrder} from the Jira label.` : ticket.workOrderSource === 'dock' ? 'Set in DOCK; it wins over a Jira label.' : 'No number: taken after the numbered tickets.'} Never written to Jira.
+              </p>
+              <label htmlFor="work-order" className="mb-1.5 block font-mono text-xs text-muted-foreground">Order of {ticket.key}</label>
+              <div className="flex flex-wrap gap-2">
+                <Input id="work-order" className="w-24 font-mono" inputMode="numeric" value={workOrder} onChange={(event) => setWorkOrder(event.target.value.replace(/[^0-9]/g, ''))} placeholder="#" disabled={savingOrder || clearingOrder} />
+                <Button variant="primary" onClick={handleSaveWorkOrder} disabled={!workOrder || (ticket.workOrderSource === 'dock' && String(ticket.workOrder) === workOrder) || savingOrder || clearingOrder}><Save size={15} aria-hidden="true" />{savingOrder ? 'Saving...' : 'Save order'}</Button>
+                {ticket.workOrderSource === 'dock' && <Button variant="danger" onClick={handleClearWorkOrder} disabled={savingOrder || clearingOrder}><Unlink size={15} aria-hidden="true" />{clearingOrder ? 'Removing...' : 'Remove'}</Button>}
+              </div>
+              <label htmlFor="work-manual" className="mt-3 flex items-center gap-2 font-mono text-xs text-muted-foreground">
+                <Checkbox id="work-manual" checked={!!ticket.workManual} onChange={(event) => void handleToggleManual(event.target.checked)} disabled={savingManual} />
+                Work by hand (the cron skips it)
+              </label>
+            </Card>
+  
+            <Card>
+              <div className="mb-3 flex items-center gap-2 border-b border-border pb-3"><Link2 size={19} className="text-accent" aria-hidden="true" /><h2 className="text-balance font-display text-lg font-bold">Ticket Dependency</h2></div>
+              <p className="mb-3 text-pretty text-xs leading-5 text-muted-foreground">Link this ticket to its primary work item. Every ticket in the group will share one Discord announcement.</p>
+              <label><span className="mb-1.5 block font-mono text-xs text-muted-foreground">{ticket.key} depends on</span><Select value={dependsOnKey || 'NONE'} onValueChange={(value) => setDependsOnKey(value === 'NONE' ? '' : value)} disabled={savingDependency || clearingDependency} aria-label={`${ticket.key} depends on ticket`} options={[{ value: 'NONE', label: 'No dependency' }, ...ticketChoices.map((item: any) => ({ value: item.key, label: `${item.key} — ${item.title}` }))]} /></label>
+              <div className="mt-3 flex flex-wrap gap-2"><Button variant="primary" onClick={handleSaveDependency} disabled={!dependsOnKey || dependsOnKey === relation?.dependsOnKey || savingDependency || clearingDependency}><Save size={15} aria-hidden="true" />{savingDependency ? 'Saving...' : 'Save Dependency'}</Button>{relation?.dependsOnKey && <Button variant="danger" onClick={handleClearDependency} disabled={savingDependency || clearingDependency}><Unlink size={15} aria-hidden="true" />{clearingDependency ? 'Removing...' : 'Remove Dependency'}</Button>}</div>
+              {relation?.ticketKeys?.length > 1 && <div className="mt-4 rounded-sm border border-border bg-surface-0 p-3"><p className="mb-2 font-mono text-[0.68rem] font-bold text-muted-foreground uppercase">Announcement group</p><div className="flex flex-wrap gap-1.5">{relation.ticketKeys.map((key: string) => <Badge key={key} variant={key === relation.primaryKey ? 'accent' : 'neutral'}>{key}{key === relation.primaryKey ? ' · PRIMARY' : ''}</Badge>)}</div></div>}
+            </Card>
+  
             </div>
-          </Card>
+          </div>
 
-          <Card>
-            <div className="mb-4 flex items-center gap-2 border-b border-border pb-3"><FileText size={20} className="text-accent" aria-hidden="true" /><h2 className="font-display text-xl font-bold">Issue Description</h2></div>
-            <div className="max-h-[62dvh] overflow-y-auto whitespace-pre-wrap break-words rounded-sm border border-border bg-surface-0 px-6 py-5 text-sm leading-7 text-secondary-foreground">{ticket.description || 'No detailed description provided in this Jira issue.'}</div>
-          </Card>
-        </div>
-
-        <div className="flex min-w-0 flex-[1_1_400px] flex-col gap-6">
-          <Card className="border-status-discord/40 bg-status-discord/15">
-            <Button className="h-12 w-full border-status-discord bg-status-discord text-base text-white hover:bg-status-discord/80" onClick={handleDiscordBroadcast}><MessageSquare size={20} aria-hidden="true" />{isCombinedAnnouncement ? `Broadcast ${relationTickets.length} Tickets to Discord` : 'Broadcast Summary to Discord'}</Button>
-            <p className="mt-2.5 text-center font-mono text-xs text-muted-foreground">{isCombinedAnnouncement ? `One combined announcement for ${relationTickets.map((item: any) => item.key).join(' + ')}.` : 'Sends status, PR merge checks, and demo recordings to team channels.'}</p>
-          </Card>
-
-          <TicketAgentPanel ticketKey={ticket.key} />
-
-          <Card>
-            <div className="mb-3 flex items-center gap-2 border-b border-border pb-3"><ListOrdered size={19} className="text-accent" aria-hidden="true" /><h2 className="text-balance font-display text-lg font-bold">Work order</h2></div>
-            <p className="mb-3 text-pretty text-xs leading-5 text-muted-foreground">
-              The cron takes To Do tickets lowest number first. {ticket.workOrderSource === 'label' ? `Now #${ticket.workOrder} from the Jira label.` : ticket.workOrderSource === 'dock' ? 'Set in DOCK; it wins over a Jira label.' : 'No number: taken after the numbered tickets.'} Never written to Jira.
-            </p>
-            <label htmlFor="work-order" className="mb-1.5 block font-mono text-xs text-muted-foreground">Order of {ticket.key}</label>
-            <div className="flex flex-wrap gap-2">
-              <Input id="work-order" className="w-24 font-mono" inputMode="numeric" value={workOrder} onChange={(event) => setWorkOrder(event.target.value.replace(/[^0-9]/g, ''))} placeholder="#" disabled={savingOrder || clearingOrder} />
-              <Button variant="primary" onClick={handleSaveWorkOrder} disabled={!workOrder || (ticket.workOrderSource === 'dock' && String(ticket.workOrder) === workOrder) || savingOrder || clearingOrder}><Save size={15} aria-hidden="true" />{savingOrder ? 'Saving...' : 'Save order'}</Button>
-              {ticket.workOrderSource === 'dock' && <Button variant="danger" onClick={handleClearWorkOrder} disabled={savingOrder || clearingOrder}><Unlink size={15} aria-hidden="true" />{clearingOrder ? 'Removing...' : 'Remove'}</Button>}
-            </div>
-            <label htmlFor="work-manual" className="mt-3 flex items-center gap-2 font-mono text-xs text-muted-foreground">
-              <Checkbox id="work-manual" checked={!!ticket.workManual} onChange={(event) => void handleToggleManual(event.target.checked)} disabled={savingManual} />
-              Kerjakan manual
-            </label>
-          </Card>
-
-          <Card>
-            <div className="mb-3 flex items-center gap-2 border-b border-border pb-3"><Link2 size={19} className="text-accent" aria-hidden="true" /><h2 className="text-balance font-display text-lg font-bold">Ticket Dependency</h2></div>
-            <p className="mb-3 text-pretty text-xs leading-5 text-muted-foreground">Link this ticket to its primary work item. Every ticket in the group will share one Discord announcement.</p>
-            <label><span className="mb-1.5 block font-mono text-xs text-muted-foreground">{ticket.key} depends on</span><Select value={dependsOnKey || 'NONE'} onValueChange={(value) => setDependsOnKey(value === 'NONE' ? '' : value)} disabled={savingDependency || clearingDependency} aria-label={`${ticket.key} depends on ticket`} options={[{ value: 'NONE', label: 'No dependency' }, ...ticketChoices.map((item: any) => ({ value: item.key, label: `${item.key} — ${item.title}` }))]} /></label>
-            <div className="mt-3 flex flex-wrap gap-2"><Button variant="primary" onClick={handleSaveDependency} disabled={!dependsOnKey || dependsOnKey === relation?.dependsOnKey || savingDependency || clearingDependency}><Save size={15} aria-hidden="true" />{savingDependency ? 'Saving...' : 'Save Dependency'}</Button>{relation?.dependsOnKey && <Button variant="danger" onClick={handleClearDependency} disabled={savingDependency || clearingDependency}><Unlink size={15} aria-hidden="true" />{clearingDependency ? 'Removing...' : 'Remove Dependency'}</Button>}</div>
-            {relation?.ticketKeys?.length > 1 && <div className="mt-4 rounded-sm border border-border bg-surface-0 p-3"><p className="mb-2 font-mono text-[0.68rem] font-bold text-muted-foreground uppercase">Announcement group</p><div className="flex flex-wrap gap-1.5">{relation.ticketKeys.map((key: string) => <Badge key={key} variant={key === relation.primaryKey ? 'accent' : 'neutral'}>{key}{key === relation.primaryKey ? ' · PRIMARY' : ''}</Badge>)}</div></div>}
-          </Card>
+          <div className="flex min-w-0 flex-col gap-6 min-[1101px]:sticky min-[1101px]:top-6">
+            <AgentRunCard run={run} opening={openingSession} onSession={() => void openForTicket(ticket.key)} />
 
           <Card>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
@@ -373,9 +404,10 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
             </div>
           </Card>
 
-          <Card className="h-fit"><div className="mb-3 flex items-center border-b border-border pb-3"><h2 className="flex items-center gap-2 font-display text-lg font-bold"><Video size={19} className="text-status-merged" aria-hidden="true" />Demo Video Link</h2></div><p className="mb-3 text-pretty text-xs leading-5 text-muted-foreground">Attach a Loom or Google Drive video demo recording. It will be included in the Discord broadcast.</p><div className="flex flex-col gap-2.5"><Input aria-label="Demo recording URL" className="font-mono" placeholder="https://loom.com/share/..." value={demoUrl} onChange={(e) => setDemoUrl(e.target.value)} /><Button variant="primary" onClick={handleSaveDemo}><Save size={16} aria-hidden="true" />Save Demo Recording</Button></div>
+          <Card id="demo-video" className="h-fit scroll-mt-6"><div className="mb-3 flex items-center border-b border-border pb-3"><h2 className="flex items-center gap-2 font-display text-lg font-bold"><Video size={19} className="text-status-merged" aria-hidden="true" />Demo Video Link</h2></div><p className="mb-3 text-pretty text-xs leading-5 text-muted-foreground">Attach a Loom or Google Drive video demo recording. It will be included in the Discord broadcast.</p><div className="flex flex-col gap-2.5"><Input aria-label="Demo recording URL" className="font-mono" placeholder="https://loom.com/share/..." value={demoUrl} onChange={(e) => setDemoUrl(e.target.value)} /><Button variant="primary" onClick={handleSaveDemo}><Save size={16} aria-hidden="true" />Save Demo Recording</Button></div>
             {ticket.demoLink?.url && <div className="mt-4 rounded-sm border border-status-merged/30 bg-status-merged-bg p-3"><div className="mb-1 font-mono text-[0.68rem] font-extrabold text-muted-foreground uppercase">Active Demo Recording:</div><a href={ticket.demoLink.url} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 break-all font-mono text-[0.8rem] font-bold text-status-merged hover:underline"><ExternalLink size={13} className="shrink-0" aria-hidden="true" /><span>{ticket.demoLink.url}</span></a>{isPlayableVideo(ticket.demoLink.url) && <video className="mt-2 w-full rounded-sm" src={ticket.demoLink.url} controls preload="metadata" />}</div>}
           </Card>
+          </div>
         </div>
       </div>
 
