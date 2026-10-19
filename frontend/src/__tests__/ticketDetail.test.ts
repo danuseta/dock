@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { isLongDescription, needsYou, runState, stepIndex } from '../lib/ticketDetail';
+import { isLongDescription, needsYou, runState, splitChoices, stepIndex } from '../lib/ticketDetail';
 
 const run = { waiting: null, stalled: false, finished: false, stage: 'code', ac: [], reviewSignal: null };
 
@@ -46,4 +46,12 @@ test('a description folds when it runs past eight lines', () => {
   assert.strictEqual(isLongDescription(Array.from({ length: 9 }, () => 'line').join('\n')), true);
   assert.strictEqual(isLongDescription('x'.repeat(2000)), true);
   assert.strictEqual(isLongDescription(null), false);
+});
+
+test('answers in brackets at the end of the question become buttons', () => {
+  assert.deepStrictEqual(splitChoices('Keep the tag filter? [Keep|Drop]'), { question: 'Keep the tag filter?', choices: ['Keep', 'Drop'] });
+  assert.deepStrictEqual(splitChoices('Which base? [ develop | feat/V1-Playbook | main ]'), { question: 'Which base?', choices: ['develop', 'feat/V1-Playbook', 'main'] });
+  assert.deepStrictEqual(splitChoices('Approve the plan?'), { question: 'Approve the plan?', choices: [] });
+  assert.deepStrictEqual(splitChoices('See [this link] first'), { question: 'See [this link] first', choices: [] });
+  assert.deepStrictEqual(needsYou({ run: { ...run, waiting: 'Keep it? [Keep|Drop]' } })[0], { id: 'question', kind: 'question', text: 'Keep it?', choices: ['Keep', 'Drop'] });
 });
