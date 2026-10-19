@@ -429,3 +429,9 @@ export const CLEAR_DEMO_STORAGE = gql`
     clearDemoStorage
   }
 `;
+
+export const ANSWER_TICKET = gql`
+  mutation AnswerTicket($ticketKey: String!, $text: String!) {
+    answerTicket(ticketKey: $ticketKey, text: $text)
+  }
+`;

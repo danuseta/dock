@@ -349,7 +349,7 @@ test('each run that waits on the owner pings Discord once; the first look after 
   await phone.cron.notifyWaiting();
   phone.state.runs = [waiting];
   assert.deepStrictEqual(await phone.cron.notifyWaiting(), ['QRD-7']);
-  assert.deepStrictEqual([phone.state.posts.length, phone.state.pushes], [0, [{ title: 'QRD-7 waits on you', body: 'Which endpoint?', url: '/agents' }]], 'a phone alone gets the push, with no Discord post');
+  assert.deepStrictEqual([phone.state.posts.length, phone.state.pushes], [0, [{ title: 'QRD-7 waits on you', body: 'Which endpoint?', url: '/detail/QRD-7', tag: 'wait-QRD-7' }]], 'a phone alone gets the push, with no Discord post');
 });
 
 test('settings are saved after validation; the webhook is kept, replaced or cleared; every tick fills while enabled', async () => {

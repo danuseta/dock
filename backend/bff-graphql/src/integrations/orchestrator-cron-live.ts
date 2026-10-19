@@ -5,6 +5,7 @@ import { ledgerPeer } from './ledger-peer';
 import { DEFAULT_MACHINE, orchestratorService } from './orchestrator';
 import { CRON_CACHE, OrchestratorCron, postWebhook } from './orchestrator-cron';
 import { pushService } from './push';
+import { askNotice } from './push-notices';
 
 const storage = new StorageService();
 const jira = new JiraAPI();
@@ -60,6 +61,7 @@ export const orchestratorCron = new OrchestratorCron({
   push: (message) => pushService.send(message),
 });
 
+chatService.onAsk = (ask) => { void pushService.send(askNotice(ask)).catch(() => undefined); };
 chatService.cronLimit = async () => (await orchestratorCron.settings().catch(() => null))?.parallel ?? null;
 chatService.cronTurn = async (ticketKey, stalledDetail, ended) => {
   await orchestratorService.setStalledDetail(ticketKey, stalledDetail);

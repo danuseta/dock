@@ -427,6 +427,8 @@ export class ChatService {
   cronLimit: () => Promise<number | null> = async () => null;
   /** Told when a cron turn of a ticket starts, and when it ends cleanly: with the reason its run is stalled, or null. Wired by the cron like cronLimit. */
   cronTurn: (ticketKey: string, stalledDetail: string | null, ended: boolean) => Promise<unknown> = async () => undefined;
+  /** Hears of every new request in a turn, for the phone notification. It must not throw. */
+  onAsk: (ask: { sessionId: string; sessionTitle: string; id: number; kind: string; title: string; tool: string | null; summary: string | null }) => void = () => undefined;
 
   constructor(
     private readonly storage = new StorageService(),
@@ -966,6 +968,15 @@ export class ChatService {
     }
   }
 
+  /** Answers the agent on a ticket: the text goes to the newest DOCK session of that ticket, after its turn if one runs. */
+  async answerTicket(ticketKeyInput: string, textInput: string, machines: string[]) {
+    const ticketKey = typeof ticketKeyInput === 'string' ? ticketKeyInput.trim().toUpperCase() : '';
+    if (!ticketKey) throw new OrchestratorInputError('ticketKey is required');
+    const session = (await this.storage.getChatSessions('dock', SESSIONS_LIMIT.max)).find((row) => row.ticketKey?.toUpperCase() === ticketKey);
+    if (!session) throw new OrchestratorInputError(`No DOCK session works on ${ticketKey}`);
+    return this.sendMessage(session.id, textInput, machines, { mode: 'queue' });
+  }
+
   private async turnMessage(sessionId: string, id: number) {
     const message = await this.storage.getChatMessage(id);
     if (!message || message.sessionId !== sessionId || message.role !== 'user') {
@@ -1020,6 +1031,14 @@ export class ChatService {
     if (!session.lastDeltaAt || now.getTime() - session.lastDeltaAt.getTime() >= WAIT_TOUCH_MS) {
       await this.serial(() => this.storage.updateChatSession(session.id, { lastDeltaAt: now }));
     }
+    let body: { tool?: unknown; summary?: unknown } = {};
+    try { body = typeof request.body === 'string' ? JSON.parse(request.body) : (request.body ?? {}); } catch { /* not JSON: no tool or summary */ }
+    try {
+      this.onAsk({
+        sessionId: session.id, sessionTitle: session.title, id: created.row!.id, kind: request.kind, title: request.title,
+        tool: typeof body.tool === 'string' ? body.tool : null, summary: typeof body.summary === 'string' ? body.summary : null,
+      });
+    } catch { /* a notification never fails the request */ }
     return { id: created.row!.id, expiresAt: created.row!.expiresAt.toISOString(), closed: false };
   }
 
