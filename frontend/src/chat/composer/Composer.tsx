@@ -1,5 +1,5 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
-import { Loader2, Maximize2, Minimize2, Paperclip, SendHorizontal, Square } from 'lucide-react';
+import { ArrowUp, CornerDownRight, ListPlus, Loader2, Maximize2, Minimize2, Paperclip, Square } from 'lucide-react';
 import { Button } from '../../components/ui';
 import { cn } from '../../lib/cn';
 import { machinePlace } from '../messages';
@@ -114,6 +114,9 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
     event.target.value = '';
   };
 
+  const sendLabel = busy ? (mode === 'steer' ? (features.steer ? 'Steer: add to this turn' : 'Steer: stop this turn and send') : 'Queue: send after this turn') : 'Send message';
+  const iconButton = 'inline-flex size-8 flex-none items-center justify-center rounded-[10px] border disabled:cursor-not-allowed disabled:opacity-40 max-[900px]:size-11';
+
   return (
     <div className={cn('flex min-w-0 flex-col gap-1.5', full && 'max-[900px]:fixed max-[900px]:inset-0 max-[900px]:z-[60] max-[900px]:bg-background max-[900px]:p-3 max-[900px]:pt-[max(0.75rem,env(safe-area-inset-top))]')}>
       <div className="flex items-center justify-end min-[901px]:hidden">
@@ -121,31 +124,15 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
           {full ? <Minimize2 size={15} aria-hidden="true" /> : <Maximize2 size={15} aria-hidden="true" />}
         </Button>
       </div>
-      {features.attachments && <AttachmentTray items={attachments.items} notice={attachments.notice} limitText={limitText} limitId={limitId} disabled={sending} onRemove={attachments.remove} />}
       {hasRows || (pickerOpen && (loading || commands.length === 0)) ? (
         <CommandPicker id={pickerId} commands={commands} loading={loading} highlight={highlight} onHighlight={setHighlight} onPick={pick} />
       ) : null}
       {hint && hint.text === draft && <p className="font-mono text-[0.68rem] text-muted-foreground">{hint.hint}</p>}
-      <div className={cn('flex items-end gap-2', full && 'max-[900px]:min-h-0 max-[900px]:flex-1 max-[900px]:items-stretch')}>
-        {features.attachments && (
-          <>
-            <input ref={fileInput} type="file" multiple hidden accept={acceptAttribute()} onChange={handleFiles} />
-            <Button
-              size="icon"
-              variant="default"
-              className="h-10 max-[900px]:size-11"
-              aria-label="Attach files"
-              aria-describedby={limitText ? limitId : undefined}
-              disabled={sending || busy || limitText !== ''}
-              onClick={() => fileInput.current?.click()}
-            >
-              <Paperclip size={16} aria-hidden="true" />
-            </Button>
-          </>
-        )}
+      <div className={cn('flex min-w-0 flex-col gap-1.5 rounded-[14px] border border-border-glow bg-surface-1 px-2.5 pt-2 pb-2 focus-within:border-border-accent', full && 'max-[900px]:min-h-0 max-[900px]:flex-1')}>
+        {features.attachments && <AttachmentTray items={attachments.items} notice={attachments.notice} limitText={limitText} limitId={limitId} disabled={sending} onRemove={attachments.remove} />}
         <textarea
           ref={textarea}
-          className={cn('max-h-[50dvh] min-w-0 resize-none flex-1 rounded-sm border border-border bg-surface-1 px-3 py-2 font-body text-[0.82rem] text-foreground placeholder:text-muted-foreground focus-visible:border-border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-50', full && 'max-[900px]:max-h-none')}
+          className={cn('max-h-[50dvh] min-w-0 resize-none bg-transparent px-1 py-0.5 font-body text-[0.82rem] text-foreground placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50', full && 'max-[900px]:max-h-none max-[900px]:flex-1')}
           rows={1}
           maxLength={MAX_TEXT}
           value={draft}
@@ -161,28 +148,60 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
         />
-        <div className="flex flex-none flex-col items-stretch gap-1.5">
-          {showStop && (
-            <Button size="sm" variant="danger" className="h-10 max-[900px]:h-11 max-[900px]:min-w-11" disabled={stopping} aria-label={stopping ? 'Stopping the turn' : 'Stop the turn'} onClick={onStop}>
-              {stopping ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Square size={14} aria-hidden="true" />}
-              {stopping ? 'Stopping...' : 'Stop'}
-            </Button>
+        <div className="flex items-center gap-1.5">
+          {features.attachments && (
+            <>
+              <input ref={fileInput} type="file" multiple hidden accept={acceptAttribute()} onChange={handleFiles} />
+              <button
+                type="button"
+                className={cn(iconButton, 'border-border text-secondary-foreground hover:bg-surface-hover hover:text-foreground')}
+                aria-label="Attach files"
+                title="Attach files"
+                aria-describedby={limitText ? limitId : undefined}
+                disabled={sending || busy || limitText !== ''}
+                onClick={() => fileInput.current?.click()}
+              >
+                <Paperclip size={15} aria-hidden="true" />
+              </button>
+            </>
           )}
-          <Button size="sm" variant="primary" className="h-10 max-[900px]:h-11 max-[900px]:min-w-11" disabled={!sendable} aria-label={busy ? (mode === 'steer' ? (features.steer ? 'Steer: add to this turn' : 'Steer: stop this turn and send') : 'Queue: send after this turn') : 'Send message'} aria-describedby={blocker ? blockerId : undefined} onClick={() => void send()}>
-            <SendHorizontal size={14} aria-hidden="true" />{busy ? (mode === 'steer' ? 'Steer' : 'Queue') : 'Send'}
-          </Button>
+          <span className="flex-1" />
+          {busy && (
+            <span className="inline-flex flex-none overflow-hidden rounded-[10px] border border-border-glow" role="radiogroup" aria-label="How a message is sent while Claude works">
+              {(['queue', 'steer'] as const).map((choice) => (
+                <button
+                  key={choice}
+                  type="button"
+                  role="radio"
+                  aria-checked={mode === choice}
+                  aria-label={choice === 'queue' ? 'Queue: send after this turn' : features.steer ? 'Steer: add to this turn' : 'Steer: stop this turn and send'}
+                  title={choice === 'queue' ? 'Queue: sent when Claude finishes this turn' : features.steer ? 'Steer: added to this turn; Claude reads it after the current step' : 'Steer: stops the current step and answers this next'}
+                  className={cn('inline-flex size-8 items-center justify-center max-[900px]:size-11', mode === choice ? 'bg-surface-hover text-foreground' : 'text-muted-foreground hover:bg-surface-2')}
+                  onClick={() => setMode(choice)}
+                >
+                  {choice === 'queue' ? <ListPlus size={15} aria-hidden="true" /> : <CornerDownRight size={15} aria-hidden="true" />}
+                </button>
+              ))}
+            </span>
+          )}
+          <button
+            type="button"
+            className={cn(iconButton, 'border-transparent bg-accent text-black hover:bg-accent-hover')}
+            disabled={!sendable}
+            aria-label={sendLabel}
+            title={sendLabel}
+            aria-describedby={blocker ? blockerId : undefined}
+            onClick={() => void send()}
+          >
+            <ArrowUp size={15} aria-hidden="true" />
+          </button>
+          {showStop && (
+            <button type="button" className={cn(iconButton, 'border-status-conflict text-status-conflict hover:bg-status-conflict/10')} disabled={stopping} aria-label={stopping ? 'Stopping the turn' : 'Stop the turn'} title={stopping ? 'Stopping...' : 'Stop the turn'} onClick={onStop}>
+              {stopping ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <Square size={14} aria-hidden="true" />}
+            </button>
+          )}
         </div>
       </div>
-      {busy && (
-        <div className="flex flex-wrap items-center gap-2 font-mono text-[0.66rem] text-muted-foreground" role="group" aria-label="While Claude works">
-          <span className="inline-flex overflow-hidden rounded-xs border border-border-glow">
-            {(['queue', 'steer'] as const).map((choice) => (
-              <button key={choice} type="button" aria-pressed={mode === choice} className={mode === choice ? 'bg-surface-hover px-2 py-1 font-bold text-foreground max-[900px]:min-h-11' : 'px-2 py-1 text-secondary-foreground hover:bg-surface-1 max-[900px]:min-h-11'} onClick={() => setMode(choice)}>{choice === 'queue' ? 'Queue' : 'Steer'}</button>
-            ))}
-          </span>
-          <span className="text-pretty">{mode === 'queue' ? 'Sent when Claude finishes this turn.' : features.steer ? 'Added to this turn; Claude reads it after the current step, and subagents keep running.' : 'Stops the current step, subagents included, and answers this next in the same session.'}</span>
-        </div>
-      )}
     </div>
   );
 };

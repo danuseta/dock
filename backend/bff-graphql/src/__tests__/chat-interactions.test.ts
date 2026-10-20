@@ -13,6 +13,8 @@ import {
   TAKEN_HARD_MS,
   TAKEN_HARD_TEXT,
   TurnNotifier,
+  chatMode,
+  chatOptions,
   checkAnswer,
   parseAsk,
   parseCaps,
@@ -448,7 +450,7 @@ test('the claim carries attachments and options only to a bridge that sent capab
   assert.deepStrictEqual(machines.map((machine) => [machine.name, machine.capabilities.length > 0, machine.claudeVersion]), [['laptop', true, '2.1.296'], ['workspace', false, null]]);
   assert.deepStrictEqual((await ctx.service.machineOptions('workspace', MACHINES)), null);
   const options = await ctx.service.machineOptions('laptop', MACHINES);
-  assert.deepStrictEqual([options?.models.map((model) => model.value), options?.modes, options?.fastAvailable], [['sonnet', 'haiku'], ['default', 'acceptEdits', 'plan'], false]);
+  assert.deepStrictEqual([options?.models.map((model) => model.value), options?.modes, options?.fastAvailable], [['sonnet', 'haiku'], ['acceptEdits', 'plan'], false], 'a chat is not offered the default mode');
   assert.deepStrictEqual((await ctx.service.commands('laptop', 'review', null, MACHINES)).map((command) => command.name), ['review', 'init']);
   assert.deepStrictEqual(await ctx.service.commands('workspace', 'review', null, MACHINES), []);
 
@@ -1307,7 +1309,7 @@ test('the catalogue carries the machine defaults, and a catalogue without them r
   assert.strictEqual(await ctx.service.machineOptions('laptop', MACHINES), null);
   await ctx.service.claim({ wait: 0, caps: { ...CAPS, catalogHash: 'abc123' } }, undefined, 'laptop');
   await ctx.service.ingestCatalog({ ...CATALOG, defaults: { model: 'sonnet', effort: 'high', permissionMode: 'default' } }, 'laptop');
-  assert.deepStrictEqual((await ctx.service.machineOptions('laptop', MACHINES))?.defaults, { model: 'sonnet', effort: 'high', permissionMode: 'default' });
+  assert.deepStrictEqual((await ctx.service.machineOptions('laptop', MACHINES))?.defaults, { model: 'sonnet', effort: 'high', permissionMode: 'auto' }, 'a machine default of "default" reads as Auto in a chat');
   await ctx.service.ingestCatalog(CATALOG, 'laptop');
   assert.deepStrictEqual((await ctx.service.machineOptions('laptop', MACHINES))?.defaults, none);
 });
@@ -1656,4 +1658,13 @@ test('the claim carries the RTK and caveman settings, on and full when unset or 
   const last = await ctx.service.createSession({ title: 'Agent three' });
   await ctx.service.sendMessage(last.id, 'three', MACHINES);
   assert.deepStrictEqual(((await ctx.service.claim({ wait: 0, caps: CAPS }, undefined, 'laptop')).message as { agent?: unknown } | null)?.agent, { rtk: true, caveman: 'full' });
+});
+
+test('a chat reads the old default mode as Auto, and only the cron keeps it', async () => {
+  assert.strictEqual(chatMode('default'), 'auto');
+  assert.strictEqual(chatMode('plan'), 'plan');
+  assert.strictEqual(chatMode(null), null);
+  assert.deepStrictEqual(chatOptions({ model: null, effort: 'high', permissionMode: 'default', fast: null }), { model: null, effort: 'high', permissionMode: 'auto', fast: null });
+  assert.strictEqual(chatOptions(null), null);
+  assert.deepStrictEqual(parseCatalog({ ...CATALOG, models: [{ value: 'a', label: 'A', efforts: [], auto: false }, { value: 'b', label: 'B', efforts: [] }] }).models.map((model) => model.auto), [false, true], 'a bridge that does not say keeps Auto offered');
 });

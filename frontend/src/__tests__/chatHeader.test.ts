@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import test from 'node:test';
 import { chooseModel, EMPTY_OPTIONS } from '../chat/composer/composerLogic';
-import { choiceToSave, delayedMinutes, delayedText, changedFiles, dotState, filesTotal, popoverRows, stageLabel, workerGroups, workerSteps } from '../chat/headerState';
+import { choiceToSave, defaultsToSave, delayedMinutes, delayedText, changedFiles, dotState, filesTotal, popoverRows, stageLabel, workerGroups, workerSteps } from '../chat/headerState';
 import type { SessionMachineOptions } from '../chat/sessionOptions';
 import type { ChatActivity } from '../chat/activity/activity';
 
@@ -10,9 +10,9 @@ const machine: SessionMachineOptions = {
     { value: 'opus', label: 'Opus 4.7', efforts: ['low', 'high', 'max'], fast: true },
     { value: 'haiku', label: 'Haiku 4.5', efforts: ['low'], fast: false },
   ],
-  modes: ['default', 'plan', 'auto'],
+  modes: ['plan', 'auto', 'acceptEdits'],
   fastAvailable: true,
-  defaults: { model: 'opus', effort: 'high', permissionMode: 'default' },
+  defaults: { model: 'opus', effort: 'high', permissionMode: 'auto' },
 };
 
 test('files changed add up to one total for the label', () => {
@@ -50,7 +50,8 @@ test('the popover marks the values that equal the defaults', () => {
   const marked = (field: string) => rows.find((row) => row.field === field)?.options.filter((option) => option.isDefault).map((option) => option.value);
   assert.deepStrictEqual(marked('model'), ['opus']);
   assert.deepStrictEqual(marked('effort'), ['high']);
-  assert.deepStrictEqual(marked('permissionMode'), ['default']);
+  assert.deepStrictEqual(marked('permissionMode'), ['auto']);
+  assert.deepStrictEqual(rows.find((row) => row.field === 'permissionMode')?.options.map((option) => option.label), ['Auto', 'Plan', 'Accept edits']);
   assert.ok(rows.every((row) => row.isDefault));
 });
 
@@ -65,9 +66,15 @@ test('changing the effort changes the options of the next turn', () => {
 
 test('picking a model keeps only the efforts that model offers', () => {
   const picked = chooseModel({ ...EMPTY_OPTIONS, effort: 'max' }, 'haiku', machine.models);
-  assert.strictEqual(picked.effort, null);
+  assert.strictEqual(picked.effort, 'low', 'max steps down to the highest level Haiku lists');
   const rows = popoverRows(picked, machine);
   assert.deepStrictEqual(rows.find((row) => row.field === 'effort')?.options.map((option) => option.value), ['low']);
+});
+
+test('Make default saves only the rows that differ from the default', () => {
+  assert.deepStrictEqual(defaultsToSave(popoverRows(EMPTY_OPTIONS, machine)), {});
+  const rows = popoverRows({ ...EMPTY_OPTIONS, effort: 'max', permissionMode: 'plan' }, machine);
+  assert.deepStrictEqual(defaultsToSave(rows), { chatDefaultEffort: 'max', chatDefaultMode: 'plan' });
 });
 
 const row = (eventId: string, parentId: string | null, kind: string, turnId = 1): ChatActivity => ({

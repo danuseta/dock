@@ -60,7 +60,7 @@ export type InteractionAnswer = PermissionAnswer | QuestionAnswer | PlanAnswer;
 export interface WaitAnswer { requestId: string; kind: InteractionKind; state: 'answered' | 'expired'; answer: InteractionAnswer | null }
 
 export interface CatalogCommand { name: string; description: string; argumentHint: string; kind: 'builtin' | 'skill' }
-export interface CatalogModel { value: string; label: string; efforts: string[]; fast: boolean }
+export interface CatalogModel { value: string; label: string; efforts: string[]; fast: boolean; auto: boolean }
 export interface CatalogDefaults { model: string | null; effort: string | null; permissionMode: string | null }
 export interface Catalog {
   hash: string;
@@ -266,7 +266,7 @@ export function parseCatalog(input: unknown): Catalog {
     if (!isRecord(item)) return [];
     const value = short(item.value, CATALOG_LIMITS.value);
     if (!value) return [];
-    return [{ value, label: short(item.label, CATALOG_LIMITS.label) || value, efforts: parseEfforts(item.efforts), fast: item.fast === true }];
+    return [{ value, label: short(item.label, CATALOG_LIMITS.label) || value, efforts: parseEfforts(item.efforts), fast: item.fast === true, auto: item.auto !== false }];
   });
   const fast = isRecord(input.fast)
     ? { available: input.fast.available === true, reason: short(input.fast.reason, CATALOG_LIMITS.reason) || null }
@@ -330,6 +330,13 @@ export function parseTurnOptions(input: unknown): TurnOptions | null {
     fast: typeof input.fast === 'boolean' ? input.fast : null,
   };
   return options.model === null && options.effort === null && options.permissionMode === null && options.fast === null ? null : options;
+}
+
+/** A chat reads the old "default" mode as Auto; only the cron still runs it. */
+export const chatMode = (mode: string | null): PermissionMode | null => (mode === 'default' ? 'auto' : (mode as PermissionMode | null));
+
+export function chatOptions(options: TurnOptions | null): TurnOptions | null {
+  return options && options.permissionMode === 'default' ? { ...options, permissionMode: 'auto' } : options;
 }
 
 export function parseStoredOptions(value: string | null | undefined): TurnOptions | null {

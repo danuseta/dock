@@ -12,7 +12,7 @@ const machineOptions: MachineOptions = {
     { value: 'opus', label: 'Opus', efforts: ['low', 'medium', 'high', 'max'], fast: true },
     { value: 'haiku', label: 'Haiku', efforts: ['low', 'medium'], fast: false },
   ],
-  modes: ['default', 'acceptEdits', 'plan'],
+  modes: ['acceptEdits', 'plan'],
   fastAvailable: true,
 };
 const all = ['interactive', 'questions', 'plan', 'stop', 'attachments', 'commands', 'model', 'effort', 'fast', 'steer'];
@@ -69,10 +69,11 @@ test('the effort list follows the model; with no model only levels every model h
   assert.deepStrictEqual(effortChoices([], null), []);
 });
 
-test('changing the model drops an effort the new model does not list', () => {
+test('changing the model steps an effort the new model does not list down to the highest one it does', () => {
   const high: TurnOptions = { ...none, model: 'opus', effort: 'high' };
-  assert.deepStrictEqual(chooseModel(high, 'haiku', machineOptions.models), { ...none, model: 'haiku', effort: null });
-  assert.deepStrictEqual(chooseModel(high, null, machineOptions.models), { ...none, effort: null });
+  assert.deepStrictEqual(chooseModel(high, 'haiku', machineOptions.models), { ...none, model: 'haiku', effort: 'medium' });
+  assert.deepStrictEqual(chooseModel(high, null, machineOptions.models), { ...none, effort: 'medium' }, 'without a model only the levels every model lists remain');
+  assert.deepStrictEqual(chooseModel({ ...none, model: 'opus' }, 'haiku', machineOptions.models), { ...none, model: 'haiku' }, 'an unset effort stays unset');
   assert.deepStrictEqual(chooseModel({ ...none, model: 'opus', effort: 'low' }, 'haiku', machineOptions.models), { ...none, model: 'haiku', effort: 'low' });
 });
 

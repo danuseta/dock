@@ -4,6 +4,8 @@ import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, normalizeDiscordMessageTemplate } fro
 const MIN_SERVICE_HEALTH_REFRESH_SECONDS = 5;
 const MAX_SERVICE_HEALTH_REFRESH_SECONDS = 86_400;
 export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto'] as const;
+/** What a chat offers; "default" (ask before each tool) stays for the cron's manual mode only. */
+export const CHAT_MODES = ['auto', 'plan', 'acceptEdits'] as const;
 export const RTK_SETTINGS = ['on', 'off'] as const;
 export const CAVEMAN_LEVELS = ['off', 'lite', 'full', 'ultra'] as const;
 const MAX_CHAT_DEFAULT_CHARS = 100;
@@ -180,7 +182,7 @@ export class StorageAPI {
       for (const key of ['chatDefaultModel', 'chatDefaultEffort'] as const) {
         if (input[key] != null && String(input[key]).length > MAX_CHAT_DEFAULT_CHARS) throw new Error('Invalid chat default');
       }
-      if (input.chatDefaultMode != null && input.chatDefaultMode !== '' && !(PERMISSION_MODES as readonly string[]).includes(String(input.chatDefaultMode))) throw new Error('Invalid chat default mode');
+      if (input.chatDefaultMode != null && input.chatDefaultMode !== '' && !(CHAT_MODES as readonly string[]).includes(String(input.chatDefaultMode))) throw new Error('Invalid chat default mode');
       if (input.chatRtk != null && !(RTK_SETTINGS as readonly string[]).includes(String(input.chatRtk))) throw new Error('Invalid RTK setting');
       if (input.chatCaveman != null && !(CAVEMAN_LEVELS as readonly string[]).includes(String(input.chatCaveman))) throw new Error('Invalid caveman level');
       if (input.discordMessageTemplate != null) normalizeDiscordMessageTemplate(String(input.discordMessageTemplate));
