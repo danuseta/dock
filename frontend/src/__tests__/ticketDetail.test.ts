@@ -21,24 +21,22 @@ test('the run label reads none, waiting, stalled, running or finished', () => {
 });
 
 test('needs you is empty when nothing waits on the owner', () => {
-  assert.deepStrictEqual(needsYou({ run: null, pullRequests: [], demoUrl: null }), []);
-  assert.deepStrictEqual(needsYou({ run, pullRequests: [{ id: '1', repo: 'web', number: 3, status: 'OPEN' }], demoUrl: null }), []);
+  assert.deepStrictEqual(needsYou({ run: null, pullRequests: [] }), []);
+  assert.deepStrictEqual(needsYou({ run, pullRequests: [{ id: '1', repo: 'web', number: 3, status: 'OPEN' }] }), []);
 });
 
-test('needs you lists the question first, then failing AC, review, conflicts and the missing demo', () => {
+test('needs you lists the question first, then failing AC, review and conflicts', () => {
   const items = needsYou({
     run: { ...run, stage: 'pr', waiting: 'Keep the tag filter?', reviewSignal: 'checks_failing', ac: [{ n: 1, state: 'PASS', text: 'Folder' }, { n: 2, state: 'FAIL', text: 'Tags filter' }] },
     pullRequests: [{ id: 'p1', repo: 'web', pullNumber: 12, status: 'CONFLICT' }],
-    demoUrl: '',
   });
-  assert.deepStrictEqual(items.map((item) => item.kind), ['question', 'ac', 'review', 'conflict', 'demo']);
+  assert.deepStrictEqual(items.map((item) => item.kind), ['question', 'ac', 'review', 'conflict']);
   assert.strictEqual(items[1].text, 'Tags filter');
   assert.strictEqual(items[3].text, 'web#12 has a merge conflict');
 });
 
-test('the missing demo only counts once the run reached the pull request, and a finished run asks nothing', () => {
-  assert.deepStrictEqual(needsYou({ run: { ...run, stage: 'test' }, demoUrl: null }), []);
-  assert.deepStrictEqual(needsYou({ run: { ...run, stage: 'done', finished: true, waiting: 'old' }, demoUrl: 'https://x/QRD-1.mp4' }), []);
+test('a finished run asks nothing', () => {
+  assert.deepStrictEqual(needsYou({ run: { ...run, stage: 'done', finished: true, waiting: 'old' } }), []);
 });
 
 test('a description folds when it runs past eight lines', () => {

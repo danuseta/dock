@@ -1,12 +1,9 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useQuery, useMutation } from '@apollo/client';
 import { 
   AlertTriangle, 
   Search, 
   RefreshCw, 
-  Calendar, 
-  Filter, 
-  Kanban,
   CheckCircle2,
   CircleDot,
   Clock,
@@ -20,6 +17,10 @@ import { GET_DASHBOARD } from '../graphql/queries';
 import { REFRESH_DATA } from '../graphql/mutations';
 import { useTicketStore } from '../stores/useTicketStore';
 import { TicketCard } from '../components/TicketCard';
+import { TicketMenu, type TicketMenuTarget } from '../components/ticket/TicketMenu';
+import { Toast } from '../components/Toast';
+import { useOpenForTicket } from '../chat/useOpenForTicket';
+import { nextWorkOrder } from '../lib/workOrder';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { EmptyState } from '../components/EmptyState';
 import { KanbanScene } from '../components/empty/scenes/KanbanScene';
@@ -35,6 +36,13 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
   const { activeFilter, setActiveFilter } = useTicketStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [sprintFilter, setSprintFilter] = useState<string>('CURRENT');
+  const [menu, setMenu] = useState<TicketMenuTarget | null>(null);
+  const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const { openForTicket, error: sessionError } = useOpenForTicket();
+  useEffect(() => {
+    if (sessionError) setToast({ message: sessionError, type: 'error' });
+  }, [sessionError]);
   
   const { data, loading, error } = useQuery(GET_DASHBOARD, { 
     ...CACHED_QUERY_OPTIONS,
@@ -65,7 +73,6 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
   const rawTickets = Array.isArray(data?.dashboard)
     ? data.dashboard.flatMap((group: any) => group.tickets || [])
     : data?.dashboard?.tickets || [];
-  const totalTickets = rawTickets.length;
 
   // Extract unique sprint names for Dropdown Selection in alphabetical order
   const availableSprints = (Array.from(new Set(
@@ -141,25 +148,19 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
     return matchesFilter && matchesSearch;
   }).length;
 
+  const menuTicket = menu ? rawTickets.find((ticket: any) => ticket.key === menu.key) : undefined;
+
   const columnsToRender = activeFilter === 'ALL' 
     ? canonicalColumns 
     : canonicalColumns.filter(c => c.id === activeFilter);
 
   return (
     <Page width="full">
-      <PageHeader className="mb-5">
-        <div className="flex items-center gap-3">
-          <div className="rounded-md border border-accent/30 bg-accent-dim p-2.5 text-accent">
-            <Kanban size={26} aria-hidden="true" />
-          </div>
-          <div>
-            <h1 className="text-balance font-display text-3xl font-black">Jira Kanban Board</h1>
-            <p className="mt-0.5 text-pretty text-[0.9rem] text-muted-foreground">Unified development workload &amp; pull request pipeline tracking</p>
-          </div>
-        </div>
+      <PageHeader className="mb-4">
+        <h1 className="text-balance font-display text-2xl font-black">Board</h1>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative w-80 max-w-full">
+        <div className="flex flex-1 flex-wrap items-center justify-end gap-3">
+          <div className="relative min-w-60 max-w-md flex-1">
             <Input
               aria-label="Search Jira tickets"
               type="text" 
@@ -173,42 +174,28 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
             </span>
           </div>
 
-          <Button
-            variant="primary"
-            onClick={() => refreshData()} 
-            disabled={refreshing}
-          >
-            <RefreshCw size={16} className={cn(refreshing && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />
-            <span>{refreshing ? 'Syncing Jira...' : 'Sync Jira Board'}</span>
-          </Button>
-        </div>
-      </PageHeader>
-
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-md border border-border bg-surface-1 px-[18px] py-3 shadow-sm">
-        <div className="flex items-center gap-2.5 font-display text-[0.95rem] font-bold">
-          <Filter size={18} className="text-accent" aria-hidden="true" />
-          <span>Select Sprint Workload:</span>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-2.5 rounded-sm border border-border bg-surface-0 px-4 py-2">
-            <Calendar size={17} className="text-accent" aria-hidden="true" />
+          <div className="w-56 shrink-0 max-[600px]:w-full">
             <Select
               aria-label="Select sprint workload"
-              className="min-w-60 border-0 bg-transparent px-0 font-display text-[0.925rem] font-bold focus-visible:ring-0"
+              className="bg-surface-1 font-display font-bold"
               value={effectiveSprintFilter}
               onValueChange={setSprintFilter}
               options={sprintOptions}
             />
           </div>
 
-          <span className="font-mono text-[0.825rem] text-muted-foreground">
-            Showing <strong className="font-extrabold text-accent">{sprintFilteredTickets.length}</strong> of {totalTickets} tickets
-          </span>
+          <Button
+            variant="primary"
+            onClick={() => refreshData()} 
+            disabled={refreshing}
+          >
+            <RefreshCw size={16} className={cn(refreshing && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />
+            <span>{refreshing ? 'Syncing Jira...' : 'Sync Jira'}</span>
+          </Button>
         </div>
-      </div>
+      </PageHeader>
 
-      <div className="mb-6 flex gap-2 overflow-x-auto pb-1">
+      <div className="mb-5 flex gap-2 overflow-x-auto pb-1">
         {filterTabs.map((filter) => {
           const isActive = activeFilter.toUpperCase() === filter.toUpperCase();
           const count = getTabCount(filter);
@@ -253,7 +240,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
                 className={cn(
                   'flex max-h-[calc(100dvh-220px)] shrink-0 flex-col rounded-md border border-border bg-surface-1 shadow-md',
                   'max-[760px]:max-h-none max-[760px]:w-full max-[760px]:min-w-0',
-                  isSingleColumnMode ? 'w-full min-w-full' : 'w-[350px] min-w-[350px]',
+                  isSingleColumnMode ? 'w-full min-w-full' : 'w-[280px] min-w-[280px]',
                   !isSingleColumnMode && columnTickets.length === 0 && 'max-[760px]:hidden',
                 )}
               >
@@ -269,7 +256,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
                   </span>
                 </div>
 
-                <div className={cn('grid grow content-start gap-4 overflow-y-auto px-3.5 py-4', isSingleColumnMode ? 'grid-cols-[repeat(auto-fill,minmax(350px,1fr))]' : 'grid-cols-1')}>
+                <div className={cn('grid grow content-start gap-4 overflow-y-auto px-3.5 py-4', isSingleColumnMode ? 'grid-cols-[repeat(auto-fill,minmax(280px,1fr))]' : 'grid-cols-1')}>
                   {columnTickets.length === 0 ? (
                     <div className="rounded-sm border border-dashed border-border bg-white/[0.01] px-4 py-7 text-center font-mono text-[0.8rem] text-muted-foreground">
                       No tickets in {column.label.toLowerCase()}
@@ -279,7 +266,9 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
                       <TicketCard 
                         key={ticket.key} 
                         ticket={ticket} 
+                        menuOpen={menu?.key === ticket.key}
                         onClick={() => onTicketClick(ticket.key)} 
+                        onMenu={(x, y, sheet) => setMenu({ key: ticket.key, x, y, sheet })}
                       />
                     ))
                   )}
@@ -289,6 +278,20 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
           })}
         </div>
       )}
+
+      {menuTicket && menu && (
+        <TicketMenu
+          target={menu}
+          ticket={menuTicket}
+          nextOrder={nextWorkOrder(rawTickets, menuTicket.key)}
+          refetchQueries={['GetDashboard']}
+          onOpen={() => onTicketClick(menuTicket.key)}
+          onSession={() => void openForTicket(menuTicket.key)}
+          onDone={(message, type) => setToast({ message, type })}
+          onClose={closeMenu}
+        />
+      )}
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </Page>
   );
 };

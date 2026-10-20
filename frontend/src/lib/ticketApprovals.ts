@@ -1,7 +1,4 @@
-export const getApprovalLabels = (labels: string[] = []) => [...new Set(labels
-  .filter((label) => /pass$/i.test(label.trim()))
-  .map((label) => {
-    const approver = label.trim().replace(/pass$/i, '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[-_]+/g, ' ').trim();
-    return `${approver.toUpperCase()} APPROVED`;
-  })
-  .filter((label) => label !== ' APPROVED'))];
+/** Jira labels ending in Pass name who approved the ticket, such as alvinPass; they show as written. */
+export const getPassLabels = (labels: string[] = []) => [...new Set(labels
+  .map((label) => label.trim())
+  .filter((label) => label.length > 4 && /pass$/i.test(label)))];

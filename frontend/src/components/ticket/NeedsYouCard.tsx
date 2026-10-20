@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
 import { SendHorizontal } from 'lucide-react';
 import type { NeedItem, NeedKind } from '../../lib/ticketDetail';
-import { Badge, Button, Card, Input, type BadgeVariant } from '../ui';
+import { Button, Input } from '../ui';
 
-const KIND: Record<NeedKind, { label: string; variant: BadgeVariant; action: string }> = {
-  question: { label: 'Question', variant: 'warn', action: 'Open session' },
-  ac: { label: 'AC fail', variant: 'danger', action: 'Show' },
-  review: { label: 'Review', variant: 'danger', action: 'Open PR' },
-  conflict: { label: 'Conflict', variant: 'danger', action: 'Inspect' },
-  demo: { label: 'Demo', variant: 'neutral', action: 'Add link' },
+const KIND: Record<NeedKind, { label: string; action: string }> = {
+  question: { label: 'Question', action: 'Open session' },
+  ac: { label: 'AC fail', action: 'Show' },
+  review: { label: 'Review', action: 'Open PR' },
+  conflict: { label: 'Conflict', action: 'Inspect' },
 };
 
 interface NeedsYouCardProps {
@@ -29,7 +28,7 @@ const Answer: React.FC<Pick<NeedsYouCardProps, 'onAnswer' | 'answering' | 'answe
     void onAnswer(text.trim()).then(() => setDraft(''), () => undefined);
   };
   return (
-    <div className="flex basis-full flex-wrap items-center gap-2">
+    <div className="flex basis-full flex-wrap items-center gap-2 pt-1">
       {choices.map((choice, index) => <Button key={choice} size="sm" variant={index === 0 ? 'primary' : 'default'} className="max-[760px]:h-11" disabled={answering} onClick={() => send(choice)}>{choice}</Button>)}
       <form className="flex min-w-[220px] flex-1 items-center gap-2" onSubmit={(event) => { event.preventDefault(); send(draft); }}>
         <Input className="h-8 min-w-0 flex-1 text-sm max-[760px]:h-11" value={draft} placeholder={choices.length ? 'Or write your own answer...' : 'Answer the agent...'} aria-label="Answer to the agent" disabled={answering} onChange={(event) => setDraft(event.target.value)} />
@@ -39,27 +38,22 @@ const Answer: React.FC<Pick<NeedsYouCardProps, 'onAnswer' | 'answering' | 'answe
   );
 };
 
-/** What waits on the owner for this ticket. Renders nothing when nothing does. */
+/** What waits on the owner for this ticket, as one strip. Renders nothing when nothing does. */
 export const NeedsYouCard: React.FC<NeedsYouCardProps> = ({ items, onAction, onAnswer, answering, answerBlocked }) => {
   if (items.length === 0) return null;
   return (
-    <Card className="border-status-warn/45 bg-[linear-gradient(var(--color-status-warn-bg),transparent_70%)]" role="region" aria-label="Needs you">
-      <div className="mb-1 flex items-center justify-between gap-2 border-b border-status-warn/25 pb-2.5">
-        <h2 className="font-display text-lg font-bold">Needs you</h2>
-        <Badge variant="warn">{items.length}</Badge>
-      </div>
+    <section className="rounded-r-sm border-l-[3px] border-status-warn bg-status-warn-bg px-3.5 py-2.5" aria-label="Needs you">
+      <h2 className="font-mono text-[0.68rem] font-bold uppercase tracking-[0.08em] text-status-warn">Needs you</h2>
       <ul className="flex flex-col">
-        {items.map((item) => {
-          const kind = KIND[item.kind];
-          return (
-            <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-border py-2.5 last:border-b-0 last:pb-0">
-              <span className="flex min-w-0 items-center gap-2 text-sm"><Badge variant={kind.variant} className="flex-none uppercase">{kind.label}</Badge><span className="min-w-0 text-pretty">{item.text}</span></span>
-              <Button size="sm" variant={item.kind === 'question' ? 'ghost' : 'default'} className="max-[760px]:h-11" onClick={() => onAction(item)}>{kind.action}</Button>
-              {item.kind === 'question' && <Answer choices={item.choices ?? []} onAnswer={onAnswer} answering={answering} answerBlocked={answerBlocked} />}
-            </li>
-          );
-        })}
+        {items.map((item) => (
+          <li key={item.id} className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 py-1 text-sm">
+            <span className="font-mono text-[0.68rem] font-bold uppercase text-muted-foreground">{KIND[item.kind].label}</span>
+            <span className="min-w-0 text-pretty text-foreground">{item.text}</span>
+            <button type="button" className="text-sm font-semibold text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 max-[760px]:min-h-11" onClick={() => onAction(item)}>{KIND[item.kind].action}</button>
+            {item.kind === 'question' && <Answer choices={item.choices ?? []} onAnswer={onAnswer} answering={answering} answerBlocked={answerBlocked} />}
+          </li>
+        ))}
       </ul>
-    </Card>
+    </section>
   );
 };
