@@ -1,7 +1,11 @@
 import { describeDiscordError, DiscordService } from '../integrations/discord';
+import { StorageAPI } from './StorageAPI';
 
 export class DiscordAPI {
-  constructor(private readonly discordService = new DiscordService()) {}
+  constructor(
+    private readonly discordService: Pick<DiscordService, 'sendSummary' | 'validateWebhook'> = new DiscordService(),
+    private readonly storageAPI: Pick<StorageAPI, 'getSettings'> = new StorageAPI(),
+  ) {}
 
   async sendSummary(payload: any) {
     try {
@@ -18,9 +22,11 @@ export class DiscordAPI {
     }
   }
 
+  /** Without a URL the saved webhook is tested, as Jira and GitHub test their saved credentials. */
   async validateDiscord(webhookUrl?: string) {
     try {
-      if (!webhookUrl || !await this.discordService.validateWebhook(webhookUrl)) {
+      const candidate = webhookUrl || (await this.storageAPI.getSettings()).discordWebhookUrl;
+      if (!candidate || !await this.discordService.validateWebhook(candidate)) {
         return { success: false, message: 'Discord webhook validation failed' };
       }
       return { success: true, message: 'Discord webhook valid' };

@@ -867,6 +867,7 @@ export const typeDefs = gql`
     cancelDecision(ticketKey: String!, n: Int!, note: String!): Boolean!
     approveReview(ticketKey: String!): [ApprovalStep!]!
     stopChatTurn(sessionId: ID!): ChatSession!
+    requestDoctorRun(machine: String!): Boolean!
     renameChatSession(id: ID!, title: String!): ChatSession!
     setChatSessionOptions(id: ID!, options: ChatTurnOptionsInput!): ChatSession!
     deleteChatSession(id: ID!): Boolean!

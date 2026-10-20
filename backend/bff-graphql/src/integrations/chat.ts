@@ -442,6 +442,7 @@ function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 export class ChatService {
   private readonly bridgeSeenAt = new Map<string, Date>();
+  private readonly doctorWanted = new Set<string>();
   private activityWrites: Promise<unknown> = Promise.resolve();
   private readonly sessionStatus = new Map<string, Map<string, SavedStatus>>();
   private readonly limitsSeen = new Map<string, LimitsSeen>();
@@ -593,6 +594,13 @@ export class ChatService {
   async commands(machine: string, query: string | null | undefined, limitInput: number | null | undefined, machines: string[]) {
     knownMachine(machine, machines);
     return searchCommands((await this.info(machine)).catalog?.commands ?? [], query, limitInput);
+  }
+
+  /** The machine's bridge runs `doctor.cjs --push` when it next claims; the Health page waits for the new report. */
+  async requestDoctor(machine: string, machines: string[]) {
+    knownMachine(machine, machines);
+    this.doctorWanted.add(machine);
+    return true;
   }
 
   async machineOptions(machine: string, machines: string[]) {
@@ -1353,7 +1361,8 @@ export class ChatService {
       if (signal?.aborted) return { message: null, ...extra };
       this.bridgeSeenAt.set(machine, this.now());
       const message = await this.takeNext(machine, caps);
-      if (message) return { message, ...extra };
+      const wantDoctor = this.doctorWanted.delete(machine);
+      if (message || wantDoctor) return { message, ...extra, ...(wantDoctor ? { wantDoctor } : {}) };
       const left = deadline - this.now().getTime();
       if (left <= 0) return { message: null, ...extra };
       await this.sleep(Math.min(CLAIM_POLL_MS, left), signal);

@@ -518,6 +518,9 @@ export const resolvers = {
       return chatService.answerInteraction(args.sessionId, args.id, args.decision, args.answers, args.note).catch(orchestratorInputError);
     },
     stopChatTurn: async (_: unknown, { sessionId }: { sessionId: string }) => chatService.stopTurn(sessionId).catch(orchestratorInputError),
+    requestDoctorRun: async (_: unknown, { machine }: { machine: string }) => {
+      return chatService.requestDoctor(machine, await orchestratorService.machines()).catch(orchestratorInputError);
+    },
     renameChatSession: async (_: unknown, { id, title }: { id: string; title: string }) => {
       return chatService.renameSession(id, title).catch(orchestratorInputError);
     },
@@ -623,6 +626,7 @@ export const protectedMutations = [
   'answerChatInteraction',
   'stopChatTurn',
   'renameChatSession',
+  'requestDoctorRun',
   'setChatSessionOptions',
   'deleteChatSession',
   'refreshSprintDashboard',

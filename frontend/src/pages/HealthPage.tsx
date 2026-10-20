@@ -1,6 +1,8 @@
-import { useQuery } from '@apollo/client';
+import { useEffect, useState } from 'react';
+import { useMutation, useQuery } from '@apollo/client';
 import { RefreshCw } from 'lucide-react';
 import { GET_DOCTOR_REPORTS } from '../graphql/queries';
+import { REQUEST_DOCTOR_RUN } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { EmptyState } from '../components/EmptyState';
 import { RackScene } from '../components/empty/scenes/RackScene';
@@ -11,14 +13,41 @@ import { reportAge } from '../lib/sousReport';
 import { STALE_HOURS, groupChecks, isStale, workspaceReport, type DoctorReport } from '../lib/doctorReport';
 
 const PUSH_COMMAND = 'node doctor.cjs --push';
+const RUN_POLL_MS = 3000;
+const RUN_TIMEOUT_MS = 90000;
 
 /** The latest doctor report of the workspace: what the kit needs on it, and whether it is there. */
 const HealthPage = () => {
   const { data, loading, error, refetch } = useQuery(GET_DOCTOR_REPORTS, { ...CACHED_QUERY_OPTIONS, pollInterval: 60000 });
+  const [requestRun] = useMutation(REQUEST_DOCTOR_RUN);
+  // Refresh asks the workspace bridge to run the doctor; it is done when a report with a new receivedAt arrives.
+  const [running, setRunning] = useState<{ before: string | null } | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+  const report = workspaceReport((data?.doctorReports || []) as DoctorReport[]);
+  const receivedAt = report?.receivedAt ?? null;
+
+  useEffect(() => {
+    if (running && receivedAt !== running.before) setRunning(null);
+  }, [running, receivedAt]);
+
+  useEffect(() => {
+    if (!running) return undefined;
+    const poll = setInterval(() => void refetch(), RUN_POLL_MS);
+    const giveUp = setTimeout(() => {
+      setRunning(null);
+      setRunError(`The workspace sent no new report within ${RUN_TIMEOUT_MS / 1000} seconds. Is its DOCK chat bridge running?`);
+    }, RUN_TIMEOUT_MS);
+    return () => { clearInterval(poll); clearTimeout(giveUp); };
+  }, [running, refetch]);
+
+  const runDoctor = () => {
+    setRunError(null);
+    setRunning({ before: receivedAt });
+    requestRun({ variables: { machine: 'workspace' } }).catch((e: Error) => { setRunning(null); setRunError(e.message); });
+  };
 
   if (isInitialQueryLoading(loading, data)) return <Page width="full"><LoadingSkeleton /></Page>;
 
-  const report = workspaceReport((data?.doctorReports || []) as DoctorReport[]);
   const failing = report ? report.checks.filter((check) => !check.ok).length : 0;
   const stale = report ? isStale(report.at) : false;
 
@@ -26,10 +55,11 @@ const HealthPage = () => {
     <Page width="full">
       <PageHeader>
         <div><h1 className="text-balance font-display text-3xl font-black">Health</h1><p className="mt-1 text-pretty text-secondary-foreground">What the workspace doctor found the last time it ran: rtk, ffmpeg, the DOCK config, hooks, Playwright and the demo bucket.</p></div>
-        <Button onClick={() => void refetch()} disabled={loading}><RefreshCw size={16} className={cn(loading && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />Refresh</Button>
+        <Button onClick={runDoctor} disabled={Boolean(running)}><RefreshCw size={16} className={cn(running && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />{running ? 'Running doctor' : 'Refresh'}</Button>
       </PageHeader>
 
       {error && <Card className="mb-4 border-status-conflict text-pretty text-sm text-status-conflict" role="alert">{error.message}</Card>}
+      {runError && <Card className="mb-4 border-status-conflict text-pretty text-sm text-status-conflict" role="alert">{runError}</Card>}
 
       {!report ? (
         <Card><EmptyState scene={<RackScene />} title="No report yet" description={<>Run <code className="font-mono">{PUSH_COMMAND}</code> from the kit on the workspace; its report shows here.</>} /></Card>

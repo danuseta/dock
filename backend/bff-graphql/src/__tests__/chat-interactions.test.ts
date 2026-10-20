@@ -459,6 +459,15 @@ test('the claim carries attachments and options only to a bridge that sent capab
   assert.deepStrictEqual((await ctx.service.commands('laptop', null, null, MACHINES)).map((command) => command.name), ['context'], 'the cache follows the new hash');
 });
 
+test('a doctor request reaches the next claim of its own machine once', async () => {
+  const ctx = setup();
+  await assert.rejects(ctx.service.requestDoctor('desktop', MACHINES), /Unknown machine/);
+  assert.strictEqual(await ctx.service.requestDoctor('workspace', MACHINES), true);
+  assert.deepStrictEqual(await ctx.service.claim({ wait: 0 }, undefined, 'laptop'), { message: null }, 'another machine is not asked');
+  assert.deepStrictEqual(await ctx.service.claim({ wait: 25 }, undefined, 'workspace'), { message: null, wantDoctor: true }, 'the request ends the long poll at once');
+  assert.deepStrictEqual(await ctx.service.claim({ wait: 0 }, undefined, 'workspace'), { message: null }, 'the request is taken once');
+});
+
 test('an ask is stored once, capped at 4 pending and 100 per turn, and refused after the turn closed', async () => {
   const ctx = setup();
   const turn = await takenTurn(ctx);
