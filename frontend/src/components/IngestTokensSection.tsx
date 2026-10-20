@@ -6,7 +6,7 @@ import { CREATE_INGEST_TOKEN, REVOKE_INGEST_TOKEN } from '../graphql/mutations';
 import { DEFAULT_MACHINE } from '../chat/messages';
 import { apiOrigin } from '../lib/apollo';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
-import { Badge, Button, Card, IconButton, Input } from './ui';
+import { Badge, Button, Card, ConfirmDialog, IconButton, Input } from './ui';
 
 interface IngestToken { id: string; name: string; prefix: string; machine?: string | null; createdAt: string; lastUsedAt?: string | null }
 
@@ -21,6 +21,8 @@ export const IngestTokensSection: React.FC = () => {
   const [secret, setSecret] = useState('');
   const [copied, setCopied] = useState(false);
   const [actionError, setActionError] = useState('');
+  const [revokeTarget, setRevokeTarget] = useState<IngestToken | null>(null);
+  const [setupCopied, setSetupCopied] = useState(false);
   const tokens: IngestToken[] = data?.ingestTokens || [];
   const machineNames = [...new Set(tokens.map((token) => token.machine || DEFAULT_MACHINE))];
   const endpoint = `${apiOrigin}/ingest/orchestrator`;
@@ -59,9 +61,19 @@ export const IngestTokensSection: React.FC = () => {
     }
   };
 
+  const setup = `{\n  "url": "${endpoint}",\n  "token": "${secret || 'dock_ing_...'}"\n}`;
+
+  const handleCopySetup = async () => {
+    try {
+      await navigator.clipboard.writeText(setup);
+      setSetupCopied(true);
+    } catch {
+      setActionError('Copy failed. Select the text and copy it by hand.');
+    }
+  };
+
   return (
     <section>
-      <header className="mb-5"><h2 className="text-balance font-display text-2xl font-bold">Agents</h2><p className="mt-1 text-pretty text-sm text-secondary-foreground">Let the orchestrator on your laptop report ticket progress to DOCK.</p></header>
       <div className="flex flex-col gap-5">
         <Card>
           <h3 className="mb-4 flex items-center gap-2 border-b border-border pb-2 font-display text-lg font-bold"><KeyRound size={20} aria-hidden="true" />Ingest tokens</h3>
@@ -76,7 +88,7 @@ export const IngestTokensSection: React.FC = () => {
                     <strong className="block truncate font-display text-sm">{token.name}</strong>
                     <span className="font-mono text-xs text-muted-foreground">{token.machine || DEFAULT_MACHINE} · {token.prefix}… · created {formatDate(token.createdAt)} · last used {formatDate(token.lastUsedAt)}</span>
                   </div>
-                  <IconButton variant="ghost" className="text-status-conflict" aria-label={`Revoke ${token.name}`} title="Revoke token" disabled={revoking} onClick={() => handleRevoke(token.id)}><Trash2 size={15} aria-hidden="true" /></IconButton>
+                  <IconButton variant="ghost" className="text-status-conflict" aria-label={`Revoke ${token.name}`} title="Revoke token" disabled={revoking} onClick={() => setRevokeTarget(token)}><Trash2 size={15} aria-hidden="true" /></IconButton>
                 </li>
               ))}
             </ul>
@@ -102,11 +114,12 @@ export const IngestTokensSection: React.FC = () => {
         </Card>
 
         <Card>
-          <h3 className="mb-4 flex items-center gap-2 border-b border-border pb-2 font-display text-lg font-bold"><Bot size={20} aria-hidden="true" />Laptop setup</h3>
-          <p className="mb-3 text-pretty text-sm text-secondary-foreground">Put the address and the token in the orchestrator kit's <span className="font-mono">dock.json</span>. Every ledger update is then pushed here.</p>
-          <pre className="overflow-x-auto rounded-sm border border-border bg-surface-0 px-4 py-3 font-mono text-xs leading-6 text-secondary-foreground">{`{\n  "url": "${endpoint}",\n  "token": "dock_ing_..."\n}`}</pre>
+          <div className="mb-4 flex items-center justify-between gap-2 border-b border-border pb-2"><h3 className="flex items-center gap-2 font-display text-lg font-bold"><Bot size={20} aria-hidden="true" />Kit setup</h3><Button size="sm" onClick={handleCopySetup}>{setupCopied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}{setupCopied ? 'Copied' : 'Copy'}</Button></div>
+          <p className="mb-3 text-pretty text-sm text-secondary-foreground">Put the address and the token in the kit's <span className="font-mono">dock.json</span> on that machine. Every ledger update is then pushed here.</p>
+          <pre className="overflow-x-auto rounded-sm border border-border bg-surface-0 px-4 py-3 font-mono text-xs leading-6 text-secondary-foreground">{setup}</pre>
         </Card>
       </div>
+      <ConfirmDialog open={Boolean(revokeTarget)} busy={revoking} title={`Revoke ${revokeTarget?.name ?? 'the token'}?`} description={`The ${revokeTarget?.machine || DEFAULT_MACHINE} kit that uses it stops reporting to DOCK until it gets a new token.`} confirmLabel="Revoke" busyLabel="Revoking…" onConfirm={async () => { if (revokeTarget) await handleRevoke(revokeTarget.id); setRevokeTarget(null); }} onCancel={() => setRevokeTarget(null)} />
     </section>
   );
 };

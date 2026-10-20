@@ -5,7 +5,7 @@ import { GET_ELEVENLABS_KEYS } from '../graphql/queries';
 import { ADD_ELEVENLABS_KEY, REMOVE_ELEVENLABS_KEY, UNPARK_ELEVENLABS_KEY } from '../graphql/mutations';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 import { keyState, type ElevenLabsKeyRow } from '../lib/elevenLabsKeys';
-import { Badge, Button, Card, IconButton, Input } from './ui';
+import { Badge, Button, Card, ConfirmDialog, IconButton, Input } from './ui';
 
 export const ElevenLabsKeysSection: React.FC = () => {
   const { data, error, refetch } = useQuery(GET_ELEVENLABS_KEYS, CACHED_QUERY_OPTIONS);
@@ -15,6 +15,7 @@ export const ElevenLabsKeysSection: React.FC = () => {
   const [name, setName] = useState('');
   const [key, setKey] = useState('');
   const [actionError, setActionError] = useState('');
+  const [removeTarget, setRemoveTarget] = useState<string | null>(null);
   const keys: ElevenLabsKeyRow[] = data?.elevenLabsKeys || [];
 
   const run = async (work: () => Promise<unknown>, failure: string) => {
@@ -52,7 +53,7 @@ export const ElevenLabsKeysSection: React.FC = () => {
               </div>
               <span className="flex items-center gap-1">
                 {item.parkedUntil && <IconButton variant="ghost" aria-label={`Use ${item.name} again`} title="Use again now" onClick={() => void run(() => unparkKey({ variables: { name: item.name } }), 'Failed to use the key again')}><RotateCcw size={15} aria-hidden="true" /></IconButton>}
-                <IconButton variant="ghost" className="text-status-conflict" aria-label={`Remove ${item.name}`} title="Remove key" disabled={removing} onClick={() => void run(() => removeKey({ variables: { name: item.name } }), 'Failed to remove the key')}><Trash2 size={15} aria-hidden="true" /></IconButton>
+                <IconButton variant="ghost" className="text-status-conflict" aria-label={`Remove ${item.name}`} title="Remove key" disabled={removing} onClick={() => setRemoveTarget(item.name)}><Trash2 size={15} aria-hidden="true" /></IconButton>
               </span>
             </li>
           ))}
@@ -65,6 +66,7 @@ export const ElevenLabsKeysSection: React.FC = () => {
         <Button type="submit" variant="primary" disabled={adding || !name.trim() || !key.trim()}>{adding ? 'Adding...' : 'Add key'}</Button>
       </form>
       {actionError && <p className="mt-3 text-pretty text-sm text-status-conflict" role="alert">{actionError}</p>}
+      <ConfirmDialog open={Boolean(removeTarget)} busy={removing} title={`Remove ${removeTarget ?? 'the key'}?`} description="Demo videos stop using this key on both DOCKs." confirmLabel="Remove" busyLabel="Removing…" onConfirm={async () => { if (removeTarget) await run(() => removeKey({ variables: { name: removeTarget } }), 'Failed to remove the key'); setRemoveTarget(null); }} onCancel={() => setRemoveTarget(null)} />
     </Card>
   );
 };

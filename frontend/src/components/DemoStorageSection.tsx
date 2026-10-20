@@ -5,7 +5,7 @@ import { GET_DEMO_STORAGE } from '../graphql/queries';
 import { CLEAR_DEMO_STORAGE, SAVE_DEMO_STORAGE } from '../graphql/mutations';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 import { demoLinkExample, type DemoStorageView } from '../lib/demoVideos';
-import { Badge, Button, Card, Input } from './ui';
+import { Badge, Button, Card, ConfirmDialog, Input } from './ui';
 
 const FIELDS = [
   { name: 'endpoint', label: 'S3 endpoint', placeholder: 'https://s3.example.com' },
@@ -26,6 +26,7 @@ export const DemoStorageSection: React.FC = () => {
   const [accessKey, setAccessKey] = useState('');
   const [secretKey, setSecretKey] = useState('');
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
 
   useEffect(() => {
     if (storage) setForm({ endpoint: storage.endpoint, region: storage.region, bucket: storage.bucket, folder: storage.folder, publicBaseUrl: storage.publicBaseUrl });
@@ -70,10 +71,11 @@ export const DemoStorageSection: React.FC = () => {
         <label><span className="mb-1 block text-sm font-medium">Secret key</span><Input type="password" autoComplete="off" value={secretKey} onChange={(event) => setSecretKey(event.target.value)} placeholder={storage?.secretSet ? '••••••••' : 'Secret access key'} required={!storage?.secretSet} /><span className="mt-1 block text-xs text-muted-foreground">{storage?.secretSet ? 'Leave empty to keep the saved one.' : 'Not set yet.'}</span></label>
         <div className="col-span-full flex flex-wrap gap-2">
           <Button type="submit" variant="primary" disabled={saving}>{saving ? 'Saving...' : 'Save storage'}</Button>
-          {storage?.configured && <Button type="button" className="text-status-conflict" disabled={clearing} onClick={() => void handleClear()}><Trash2 size={15} aria-hidden="true" />Remove</Button>}
+          {storage?.configured && <Button type="button" className="text-status-conflict" disabled={clearing} onClick={() => setConfirmClear(true)}><Trash2 size={15} aria-hidden="true" />Remove</Button>}
         </div>
       </form>
       {notice && <p className={notice.error ? 'mt-3 text-pretty text-sm text-status-conflict' : 'mt-3 text-pretty text-sm text-status-merged'} role={notice.error ? 'alert' : 'status'}>{notice.text}</p>}
+      <ConfirmDialog open={confirmClear} busy={clearing} title="Remove the demo storage?" description="Demo uploads stop on both DOCKs until it is set again." confirmLabel="Remove" busyLabel="Removing…" onConfirm={async () => { await handleClear(); setConfirmClear(false); }} onCancel={() => setConfirmClear(false)} />
     </Card>
   );
 };
