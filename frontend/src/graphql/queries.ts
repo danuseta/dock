@@ -581,6 +581,7 @@ export const ORCHESTRATION_FIELDS = `
   verdict
   engine
   rounds { used max }
+  stackedOn { key be { pr branch base retargetedAt } fe { pr branch base retargetedAt } }
   productionData
   draft
   issues { n at type text level status resolvedBy resolvedAt options }

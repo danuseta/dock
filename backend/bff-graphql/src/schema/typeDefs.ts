@@ -274,6 +274,19 @@ export const typeDefs = gql`
     options: [String!]!
   }
 
+  type OrchestrationStackRepo {
+    pr: String!
+    branch: String
+    base: String
+    retargetedAt: String
+  }
+
+  type OrchestrationStack {
+    key: String!
+    be: OrchestrationStackRepo
+    fe: OrchestrationStackRepo
+  }
+
   type OrchestrationRounds {
     used: Int!
     max: Int!
@@ -437,6 +450,7 @@ export const typeDefs = gql`
     verdict: String
     engine: String
     rounds: OrchestrationRounds
+    stackedOn: OrchestrationStack
     productionData: Boolean
     draft: Boolean
     issues: [OrchestrationIssue!]!

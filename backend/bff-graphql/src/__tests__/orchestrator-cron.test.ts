@@ -2,7 +2,7 @@ import assert from 'node:assert';
 import test from 'node:test';
 import {
   CronInputError, DEFAULT_CRON_SETTINGS, MAX_RESUMES, OrchestratorCron, PARKED_TEXT, RESUME_GAVE_UP_TEXT, START_FAILED_TEXT, candidates, hasAcceptanceCriteria, labelOrder, ticketHasAcceptanceCriteria, outsideWindow, parseCronSettings,
-  OWNER_BUSY_TEXT, confirmedPrompt, ownerReplyPrompt, resumePrompt, sousConfirmedPrompt, sousStartPrompt, startPrompt, wib, type CronDeps, type CronRun, type CronSettings, type CronTicket,
+  OWNER_BUSY_TEXT, confirmedPrompt, isStackable, stackLine, ownerReplyPrompt, resumePrompt, sousConfirmedPrompt, sousStartPrompt, startPrompt, wib, type CronDeps, type CronRun, type CronSettings, type CronTicket,
 } from '../integrations/orchestrator-cron';
 
 const AC = 'Context.\n\nAcceptance criteria\n\nReloading the page still shows Disconnected.\n\nA manually disabled channel keeps its status.';
@@ -630,4 +630,40 @@ test('an owner session uses only the options its machine takes and leaves no emp
   failing.state.failSend = false;
   await failing.cron.cancelDecision('QRD-9', 2, 'no');
   assert.strictEqual(failing.state.sessions.length, 1, 'the owner can try again');
+});
+
+test('on engine sous a ticket whose dependency has an open PR is stacked on it; a blocking or settled dependency behaves as before', async () => {
+  const parentRun = (key: string, overrides: Partial<CronRun> = {}): CronRun => ({ key, machine: 'workspace', title: key, waiting: null, activity: 'IDLE', ...overrides });
+  const w = world({
+    config: { engine: 'sous', parallel: 5 },
+    tickets: [
+      ticket('QRD-1346'), ticket('QRD-1345', { status: 'PR Review' }),
+      ticket('QRD-21'), ticket('QRD-20', { status: 'In Progress' }),
+      ticket('QRD-31'), ticket('QRD-30', { status: 'In Progress' }),
+      ticket('QRD-41'), ticket('QRD-40', { status: 'UAT CHECK' }),
+    ],
+    dependencies: [
+      { ticketKey: 'QRD-1346', dependsOnKey: 'QRD-1345' },
+      { ticketKey: 'QRD-21', dependsOnKey: 'QRD-20' },
+      { ticketKey: 'QRD-31', dependsOnKey: 'QRD-30' },
+      { ticketKey: 'QRD-41', dependsOnKey: 'QRD-40' },
+    ],
+    runs: [parentRun('QRD-20', { prBe: 'https://github.com/o/be/pull/7' }), parentRun('QRD-30')],
+  });
+  const log = await w.cron.runFill();
+  assert.deepStrictEqual(log.started.sort(), ['QRD-1346', 'QRD-21', 'QRD-41'], 'PR Review and an open ledger PR stack; no PR blocks; settled runs normally');
+  const prompt = (key: string) => w.state.sent[w.state.sessions.findIndex((session) => session.ticketKey === key)].text;
+  assert.match(prompt('QRD-1346'), /Stack on QRD-1345: base each repo on that ticket's open PR head branch \(status\.cjs set QRD-1346 stackedOn=QRD-1345\), open this PR against it, and say in the PR body that QRD-1345's PR merges first\./);
+  assert.ok(prompt('QRD-21').includes(stackLine('QRD-21', 'QRD-20')));
+  assert.doesNotMatch(prompt('QRD-41'), /Stack on/, 'only a stacked child gets the line');
+
+  const omc = world({ tickets: [ticket('QRD-1346'), ticket('QRD-1345', { status: 'PR Review' })], dependencies: [{ ticketKey: 'QRD-1346', dependsOnKey: 'QRD-1345' }] });
+  assert.deepStrictEqual((await omc.cron.runFill()).started, [], 'the older flow cannot stack, so it still waits');
+});
+
+test('a parent is stackable while its PR is open or it is in PR Review, not once the PR is merged', () => {
+  assert.strictEqual(isStackable('pr review', null), true);
+  assert.strictEqual(isStackable('In Progress', { prFe: 'https://github.com/o/fe/pull/2', review: 'open' }), true);
+  assert.strictEqual(isStackable('In Progress', { prFe: 'https://github.com/o/fe/pull/2', review: 'merged' }), false);
+  assert.strictEqual(isStackable('In Progress', {}), false);
 });
