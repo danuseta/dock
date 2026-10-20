@@ -21,6 +21,10 @@ export interface AgentDecision { n?: number | null; at: string; text: string; st
 /** An issue raised during the run, I-n; level owner means it waits on the owner. */
 export interface AgentIssue { n: number; at: string; type: string; text: string; level: string; status: string; resolvedBy?: number | null; resolvedAt?: string | null; options: string[] }
 
+export interface AgentStackRepo { pr: string; branch?: string | null; base?: string | null; retargetedAt?: string | null }
+/** The parent ticket this run's pull requests are stacked on, per repo. */
+export interface AgentStack { key: string; be?: AgentStackRepo | null; fe?: AgentStackRepo | null }
+
 export interface AgentPullRequest { url: string; number: number; repo: string; status: string; reviewDecision?: string | null; checks?: string | null }
 
 export interface AgentRun {
@@ -53,6 +57,7 @@ export interface AgentRun {
   verdict?: 'approve' | 'request-change' | null;
   engine?: string | null;
   rounds?: { used: number; max: number } | null;
+  stackedOn?: AgentStack | null;
   productionData?: boolean | null;
   draft?: boolean | null;
   issues?: AgentIssue[];

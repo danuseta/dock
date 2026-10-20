@@ -21,6 +21,7 @@ import { useOpenForTicket } from '../chat/useOpenForTicket';
 import { DependencyDialog } from '../components/ticket/DependencyDialog';
 import { NeedsYouCard } from '../components/ticket/NeedsYouCard';
 import { SousReport } from '../components/ticket/SousReport';
+import { StackedOnBadge } from '../components/ticket/StackedOnBadge';
 import { MENU_WIDTH, TicketMenu, type TicketMenuTarget } from '../components/ticket/TicketMenu';
 import { useTicketWork } from '../components/ticket/useTicketWork';
 import { APPROVE_REVIEW, CANCEL_DECISION, SAVE_DEMO_LINK, SEND_TO_DISCORD, CHECK_CONFLICTS } from '../graphql/mutations';
@@ -374,6 +375,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
               <span className="rounded-xs border border-accent/30 bg-accent-dim px-2 py-0.5 text-sm font-extrabold text-accent">{ticket.key}</span>
               {ticket.status && <PRBadge status={ticket.status} />}
               {ticket.sprintName && ticket.sprintName !== 'No Sprint' && <span className={cn(ticket.sprintState !== 'CLOSED' && 'text-status-merged')}>{ticket.sprintName}</span>}
+              {run?.stackedOn && <StackedOnBadge stack={run.stackedOn} />}
             </div>
             <h1 className="mt-2 text-balance font-display text-[1.6rem] leading-snug font-bold">{ticket.title}</h1>
           </div>

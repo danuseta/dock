@@ -68,6 +68,9 @@ export interface LedgerIssue {
   resolvedBy: number | null; resolvedAt: string | null; options: string[];
 }
 export interface LedgerRounds { used: number; max: number }
+export interface LedgerStackRepo { pr: string; branch: string | null; base: string | null; retargetedAt: string | null }
+/** The parent ticket whose open pull requests this ticket's pull requests are based on, per repo. */
+export interface LedgerStack { key: string; be: LedgerStackRepo | null; fe: LedgerStackRepo | null }
 export const ASSUMPTION_STATES = ['open', 'confirmed', 'refuted'] as const;
 export type AssumptionState = typeof ASSUMPTION_STATES[number];
 export interface LedgerAssumption { n: number; text: string; falsifier: string; state: AssumptionState; evidence: string | null }
@@ -111,6 +114,7 @@ export interface Ledger {
   reviewTicket: string | null;
   reviewPrs: string[];
   rounds: LedgerRounds | null;
+  stackedOn: LedgerStack | null;
   productionData: boolean;
   draft: boolean;
   issues: LedgerIssue[];
@@ -212,6 +216,22 @@ function rounds(input: unknown): LedgerRounds | null {
   if (!isRecord(input)) return null;
   const used = Number.isInteger(input.used) && Number(input.used) >= 0 ? Number(input.used) : 0;
   return { used, max: positive(input.max) ?? 4 };
+}
+
+function stackedOn(input: unknown): LedgerStack | null {
+  if (!isRecord(input)) return null;
+  let key: string;
+  try { key = normalizeTicketKey(input.key); } catch { return null; }
+  const retargeted = isRecord(input.retargeted) ? input.retargeted : {};
+  const repo = (name: 'be' | 'fe'): LedgerStackRepo | null => {
+    const value = input[name];
+    const pr = isRecord(value) ? httpUrl(value.pr) : null;
+    if (!isRecord(value) || !pr) return null;
+    const branch = text(value.branch, 200);
+    const base = text(value.base, 200);
+    return { pr, branch: isBranchName(branch) ? branch : null, base: isBranchName(base) ? base : null, retargetedAt: optionalText(retargeted[name], 40) };
+  };
+  return { key, be: repo('be'), fe: repo('fe') };
 }
 
 function runKind(kind: unknown, key: string): RunKind {
@@ -331,6 +351,7 @@ export function parseLedger(input: unknown, now = new Date()): Ledger {
     reviewTicket,
     reviewPrs,
     rounds: rounds(input.rounds),
+    stackedOn: stackedOn(input.stackedOn),
     productionData: input.productionData === true,
     draft: input.draft === true,
     issues: normalizeIssues(input.issues),
@@ -622,6 +643,7 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     reviewTicket: ledger.reviewTicket ?? null,
     reviewPrs: Array.isArray(ledger.reviewPrs) ? ledger.reviewPrs : [],
     rounds: ledger.rounds ?? null,
+    stackedOn: ledger.stackedOn ?? null,
     productionData: ledger.productionData === true,
     draft: ledger.draft === true,
     issues: normalizeIssues(ledger.issues),

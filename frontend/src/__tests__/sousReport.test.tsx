@@ -8,6 +8,7 @@ import { SousReport } from '../components/ticket/SousReport';
 import { canCancel, openIssues, reportAge, reportDecisions, showsSousReport } from '../lib/sousReport';
 import { needsYou } from '../lib/ticketDetail';
 import { NeedsYouCard } from '../components/ticket/NeedsYouCard';
+import { StackedOnBadge } from '../components/ticket/StackedOnBadge';
 
 const issue = (n: number, level: string, status = 'open') => ({ n, at: '', type: 'QUESTION', text: `Issue ${n}`, level, status, options: [] as string[] });
 
@@ -86,4 +87,12 @@ test('while an owner reply or cancel is in flight the Laporan sous buttons are d
   const html = renderToStaticMarkup(<SousReport run={run} onAnswer={async () => undefined} onCancel={async () => undefined} busy />);
   assert.strictEqual(html.match(/disabled=""[^>]*>Batalkan</g)?.length, 2);
   assert.match(html, /<button[^>]*disabled=""[^>]*>Keep</);
+});
+
+test('a stacked ticket shows the parent and a link to each of its pull requests', () => {
+  const html = renderToStaticMarkup(<StackedOnBadge stack={{ key: 'QRD-1345', be: { pr: 'https://github.com/qonekid/ms-admin-worker-backend/pull/1281', branch: 'feat/QRD-1345-flows' }, fe: null }} />);
+  assert.match(html, /Stacked on QRD-1345/);
+  assert.match(html, /href="https:\/\/github.com\/qonekid\/ms-admin-worker-backend\/pull\/1281"/);
+  assert.match(html, /BE #1281/);
+  assert.doesNotMatch(html, /FE #/);
 });

@@ -238,6 +238,20 @@ test('sous ledger fields: engine, card kind, rounds, draft, numbered decisions a
   assert.deepStrictEqual([review.verdict, review.reviewTicket, review.reviewPrs], ['approve', 'QRD-77', ['https://github.com/o/be/pull/4']]);
   const old = parseLedger(ledger);
   assert.deepStrictEqual([old.reviewTicket, old.reviewPrs], [null, []]);
+  assert.strictEqual(old.stackedOn, null, 'a ledger without stackedOn is unchanged');
+  const stacked = parseLedger({ ...ledger, stackedOn: {
+    key: 'qrd-1345',
+    be: { pr: 'https://github.com/qonekid/ms-admin-worker-backend/pull/1281', branch: 'feat/QRD-1345-flows', base: 'develop' },
+    fe: { pr: 'javascript:alert(1)', branch: 'x' },
+    retargeted: { be: '2026-10-21T01:00:00.000Z' },
+  } });
+  assert.deepStrictEqual(stacked.stackedOn, {
+    key: 'QRD-1345',
+    be: { pr: 'https://github.com/qonekid/ms-admin-worker-backend/pull/1281', branch: 'feat/QRD-1345-flows', base: 'develop', retargetedAt: '2026-10-21T01:00:00.000Z' },
+    fe: null,
+  }, 'a repo without a real PR link gets no entry');
+  assert.strictEqual(parseLedger({ ...ledger, stackedOn: { key: 'not a key' } }).stackedOn, null);
+  assert.strictEqual(parseLedger({ ...ledger, stackedOn: { key: 'QRD-1', be: { pr: 'https://github.com/o/be/pull/1', branch: '-rf ..' } } }).stackedOn?.be?.branch, null, 'an unsafe branch name is dropped');
   assert.deepStrictEqual([old.engine, old.rounds, old.productionData, old.draft, old.issues], [null, null, false, false, []]);
 
   assert.strictEqual(parseLedger({ ...ledger, key: 'card-Fix-Login', kind: 'card' }).key, 'CARD-fix-login', 'a card keeps its slug lower case');

@@ -2,6 +2,7 @@ import axios from 'axios';
 import type { PushMessage } from './push';
 import { waitingNotice } from './push-notices';
 import { isSettledStatus } from './attention';
+import { REVIEW_STATUS } from './broadcast-review';
 
 export class CronInputError extends Error {}
 
@@ -175,6 +176,14 @@ export function ticketHasAcceptanceCriteria(ticket: Pick<CronTicket, 'descriptio
 const sameText = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 const ticketNumber = (key: string) => Number(key.split('-')[1]) || 0;
 
+/**
+ * A dependency that is not settled can still carry a stacked child: when its Jira status is PR Review, or its ledger
+ * names a pull request that is not merged yet.
+ */
+export function isStackable(status: string, run?: Pick<CronRun, 'prBe' | 'prFe' | 'review'> | null): boolean {
+  return sameText(status, REVIEW_STATUS) || Boolean(run && (run.prBe || run.prFe) && run.review !== 'merged');
+}
+
 /** The smallest Jira label of the form "#N", or null. */
 export function labelOrder(labels: string[] | undefined): number | null {
   const numbers = (labels || []).map((label) => /^#(\d{1,4})$/.exec(label.trim())).filter(Boolean).map((match) => Number(match![1]));
@@ -266,10 +275,14 @@ export const resumePrompt = (key: string, engine: CronEngine = 'omc') => (engine
 
 const SOUS_CRON_LINE = 'Cron run: no GATE 1; work through to an opened pull request (draft when the ledger has draft=true) and make the demo video before the pull request.';
 
+/** The line a ticket gets when its dependency is stackable: its pull requests stack on the parent's open ones. */
+export const stackLine = (key: string, parent: string) => `Stack on ${parent}: base each repo on that ticket's open PR head branch (status.cjs set ${key} stackedOn=${parent}), open this PR against it, and say in the PR body that ${parent}'s PR merges first.`;
+
 /** The cron start on engine sous: no GATE 1, the run goes as far as an opened pull request. */
-export const sousStartPrompt = (key: string) => [
+export const sousStartPrompt = (key: string, stackOn: string | null = null) => [
   `Pakai skill sous: kerjakan ${key}.`,
   SOUS_CRON_LINE,
+  ...(stackOn ? [stackLine(key, stackOn)] : []),
   CONTRACT_LINE,
   VAULT_LINE,
   LANES_LINE,
@@ -277,8 +290,9 @@ export const sousStartPrompt = (key: string) => [
 ].join(' ');
 
 /** A parked ticket the owner confirmed, on engine sous: the AC are missing, so GATE 1 stays. */
-export const sousConfirmedPrompt = (key: string) => [
+export const sousConfirmedPrompt = (key: string, stackOn: string | null = null) => [
   `Pakai skill sous: kerjakan ${key}.`,
+  ...(stackOn ? [stackLine(key, stackOn)] : []),
   CONTRACT_LINE,
   VAULT_LINE,
   LANES_LINE,
@@ -299,6 +313,9 @@ export interface CronStatus { enabled: boolean; slots: CronSlots; parallel: numb
 export interface CronRun {
   key: string; machine: string; title: string; waiting: string | null; activity: string; stalled?: boolean; stalledDetail?: string | null;
   engine?: string | null;
+  prBe?: string | null;
+  prFe?: string | null;
+  review?: string | null;
   issues?: Array<{ n: number; level: string; status: string }>;
   decisions?: Array<{ n: number; status: string }>;
 }
@@ -446,8 +463,8 @@ export class OrchestratorCron {
    * A slot waited for by a queued message (an owner's answer, a confirmed ticket) is not free: that message goes first.
    */
   private async pick(settings: CronSettings, now: Date, log: FillLog, day: DayCount): Promise<void> {
-    const [tickets, taken, blocked, dockOrder, slots, manual] = await Promise.all([
-      this.deps.tickets(), this.deps.takenKeys(), this.blockedKeys(), this.deps.dockOrder(), this.deps.slots(settings.machine), this.deps.manualKeys(),
+    const [tickets, taken, { blocked, stacked }, dockOrder, slots, manual] = await Promise.all([
+      this.deps.tickets(), this.deps.takenKeys(), this.dependencyState(settings), this.deps.dockOrder(), this.deps.slots(settings.machine), this.deps.manualKeys(),
     ]);
     let free = Math.max(0, settings.parallel - slots.busy - slots.waiting);
     const defer = (key: string, reason: string) => { if (log.deferred.length < MAX_DEFERRED_LOGGED) log.deferred.push({ key, reason }); };
@@ -466,7 +483,7 @@ export class OrchestratorCron {
           free -= 1;
           day.started.push(ticket.key);
           log.started.push(ticket.key);
-          if (!(await this.start(ticket, settings, now, this.startPromptOf(settings, ticket.key)))) log.notMoved.push(ticket.key);
+          if (!(await this.start(ticket, settings, now, this.startPromptOf(settings, ticket.key, stacked.get(ticket.key))))) log.notMoved.push(ticket.key);
         }
       } catch (error) {
         console.error(`[Orchestrator cron] ${ticket.key} failed:`, error instanceof Error ? error.message : 'unknown error');
@@ -540,22 +557,30 @@ export class OrchestratorCron {
     return options;
   }
 
-  /** Tickets whose dependency is not settled yet. */
-  private async blockedKeys(): Promise<Set<string>> {
+  /**
+   * Tickets whose dependency is not settled yet are blocked, unless the dependency is stackable on engine sous:
+   * then the ticket runs stacked on its parent, and `stacked` names that parent.
+   */
+  private async dependencyState(settings: CronSettings): Promise<{ blocked: Set<string>; stacked: Map<string, string> }> {
     const blocked = new Set<string>();
-    for (const { ticketKey, dependsOnKey } of await this.deps.dependencies()) {
+    const stacked = new Map<string, string>();
+    const dependencies = await this.deps.dependencies();
+    const runs = settings.engine === 'sous' && dependencies.length ? await this.deps.runs() : [];
+    for (const { ticketKey, dependsOnKey } of dependencies) {
       const dependency = await this.deps.ticket(dependsOnKey).catch(() => null);
-      if (!dependency || !isSettledStatus(dependency.status)) blocked.add(ticketKey);
+      if (dependency && isSettledStatus(dependency.status)) continue;
+      if (dependency && settings.engine === 'sous' && isStackable(dependency.status, runs.find((run) => run.key === dependsOnKey))) stacked.set(ticketKey, dependsOnKey);
+      else blocked.add(ticketKey);
     }
-    return blocked;
+    return { blocked, stacked };
   }
 
   private saveRun(ticket: Pick<CronTicket, 'key' | 'title'>, machine: string, now: Date, waiting: string, engine?: CronEngine) {
     return this.deps.saveRun({ key: ticket.key, kind: 'build', title: ticket.title, stage: 'gate', waiting, note: 'Started by the orchestrator cron', ...(engine === 'sous' ? { engine } : {}), createdAt: now.toISOString(), updatedAt: now.toISOString() }, machine);
   }
 
-  private startPromptOf(settings: CronSettings, key: string) {
-    return settings.engine === 'sous' ? sousStartPrompt(key) : startPrompt(key);
+  private startPromptOf(settings: CronSettings, key: string, stackOn: string | null = null) {
+    return settings.engine === 'sous' ? sousStartPrompt(key, stackOn) : startPrompt(key);
   }
 
   /**
@@ -582,8 +607,9 @@ export class OrchestratorCron {
     const ticket = await this.deps.ticket(key);
     if (!ticket) throw new CronInputError('The ticket was not found in Jira');
     const settings = { ...(await this.settings()), machine: run.machine };
-    const confirmed = settings.engine === 'sous' ? sousConfirmedPrompt(ticket.key) : confirmedPrompt(ticket.key);
-    await this.start(ticket, settings, this.deps.now(), run.waiting === PARKED_TEXT ? confirmed : this.startPromptOf(settings, ticket.key));
+    const stackOn = (await this.dependencyState(settings)).stacked.get(ticket.key) ?? null;
+    const confirmed = settings.engine === 'sous' ? sousConfirmedPrompt(ticket.key, stackOn) : confirmedPrompt(ticket.key);
+    await this.start(ticket, settings, this.deps.now(), run.waiting === PARKED_TEXT ? confirmed : this.startPromptOf(settings, ticket.key, stackOn));
   }
 
   /** The run of a ticket the sous engine works, or null when the ticket runs the older flow. */
