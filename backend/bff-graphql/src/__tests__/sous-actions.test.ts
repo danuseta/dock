@@ -3,7 +3,7 @@ import test from 'node:test';
 import { AutoBroadcast, sendBroadcast, type AutoBroadcastDeps, type BroadcastDeps } from '../integrations/broadcast';
 import { DoctorReports, parseDoctorReport } from '../integrations/doctor';
 import { OrchestratorInputError } from '../integrations/orchestrator';
-import { approveReview, type ApprovalDeps } from '../integrations/review-approval';
+import { ApprovalRecords, approveReview, type ApprovalDeps } from '../integrations/review-approval';
 
 function autoWorld(overrides: Partial<AutoBroadcastDeps> = {}) {
   const state = { posted: new Set<string>(), sent: [] as string[], events: [] as Array<[string, string, string | null]>, demo: true, open: true, accept: true };
@@ -142,4 +142,19 @@ test('a doctor report keeps the latest report per machine with its checks', asyn
   await reports.ingest({ ...report, checks: [{ name: 'rtk', ok: true }] }, 'workspace', now);
   const list = await reports.list();
   assert.deepStrictEqual(list.map((item) => [item.machine, item.checks.length]), [['laptop', 2], ['workspace', 1]], 'the newest report replaces the older one of that machine');
+});
+
+test('an approval is remembered as done only when every step succeeded, so a reload shows it', async () => {
+  const cache = new Map<string, unknown>();
+  const records = new ApprovalRecords({
+    getCache: async (namespace: string, key: string) => cache.get(`${namespace}:${key}`) ?? null,
+    upsertCache: async (namespace: string, key: string, value: unknown) => { cache.set(`${namespace}:${key}`, value); },
+  });
+  assert.strictEqual(await records.approved('QRD-7'), false, 'never approved');
+  await records.save('QRD-7', [{ name: 'Jira label pass', ok: true, detail: '' }, { name: 'GitHub approve o/be#1', ok: false, detail: '422' }]);
+  assert.strictEqual(await records.approved('QRD-7'), false, 'a failed step leaves Approve open for a retry');
+  await records.save('QRD-7', [{ name: 'Jira label pass', ok: true, detail: '' }, { name: 'GitHub approve o/be#1', ok: true, detail: '' }]);
+  assert.strictEqual(await records.approved('QRD-7'), true);
+  await records.save('QRD-8', []);
+  assert.strictEqual(await records.approved('QRD-8'), false, 'nothing done is not done');
 });

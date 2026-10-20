@@ -53,7 +53,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
     { path: '/docker', label: 'Docker Services', icon: Box, badge: 0 },
     { path: '/demo-videos', label: 'Demo Videos', icon: Clapperboard, badge: 0 },
     { path: '/dev-servers', label: 'Dev Servers', icon: Server, badge: 0 },
-    { path: '/health', label: 'Health', icon: Stethoscope, badge: 0 },
+    // Not /health: the server answers that path itself for its health check.
+    { path: '/machines', label: 'Health', icon: Stethoscope, badge: 0 },
     { path: '/attention', label: 'Needs Attention', icon: AlertTriangle, badge: conflictCount },
     { path: '/settings', label: 'System Settings', icon: SettingsIcon, badge: 0 },
   ].filter((item) => hasPage(mode, item.path));

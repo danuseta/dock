@@ -37,7 +37,7 @@ const HealthPage = () => {
       {error && <Card className="mb-4 border-status-conflict text-pretty text-sm text-status-conflict" role="alert">{error.message}</Card>}
 
       {reports.length === 0 ? (
-        <Card><EmptyState scene={<RackScene />} title="No report yet" description={<>Run <code className="font-mono">node doctor.cjs</code> from the kit on a machine; its report shows here.</>} /></Card>
+        <Card><EmptyState scene={<RackScene />} title="No report yet" description={<>Run <code className="font-mono">node doctor.cjs --push</code> from the kit on a machine; its report shows here.</>} /></Card>
       ) : (
         <div className="grid grid-cols-2 gap-4 max-[1000px]:grid-cols-1">
           {reports.map((report) => {

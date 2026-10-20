@@ -245,6 +245,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const needs = needsYou({ run, pullRequests: ticket.pullRequests });
   const handleNeed = (item: NeedItem) => {
     if (item.kind === 'question') void openForTicket(ticket.key);
+    else if (item.kind === 'sous') document.getElementById('laporan-sous')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     else if (item.kind === 'ac') {
       setAcOpen(true);
       document.getElementById('acceptance-criteria')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -326,7 +327,9 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
         {renderBackButton()}
         <div className="flex flex-wrap items-center gap-2">
           {ticket.url && <a href={ticket.url} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-border bg-surface-2 px-3 text-sm font-semibold hover:border-border-glow max-[760px]:h-11"><ExternalLink size={15} aria-hidden="true" />Jira</a>}
-          {run?.kind === 'review' && !run.remote && <Button variant="primary" className="max-[760px]:h-11" onClick={() => setConfirmApprove(true)} disabled={approving} title="Adds the Jira label pass and approves the open pull requests on GitHub"><Check size={15} aria-hidden="true" />{approving ? 'Approving...' : 'Approve'}</Button>}
+          {run?.kind === 'review' && !run.remote && (run.approved
+            ? <Button className="max-[760px]:h-11" disabled title="The Jira label pass is on the ticket and its pull requests are approved"><Check size={15} aria-hidden="true" />Sudah di-approve</Button>
+            : <Button variant="primary" className="max-[760px]:h-11" onClick={() => setConfirmApprove(true)} disabled={approving} title="Adds the Jira label pass and approves the open pull requests on GitHub"><Check size={15} aria-hidden="true" />{approving ? 'Approving...' : 'Approve'}</Button>)}
           <Button className="max-[760px]:h-11" onClick={() => void openForTicket(ticket.key)} disabled={openingSession}><MessagesSquare size={15} aria-hidden="true" />{openingSession ? 'Opening...' : 'Session'}</Button>
           <Button
             className="border-status-discord bg-status-discord text-white hover:bg-status-discord/80 max-[760px]:h-11"

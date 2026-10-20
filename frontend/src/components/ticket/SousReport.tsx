@@ -48,7 +48,7 @@ export const SousReport: React.FC<SousReportProps> = ({ run, onAnswer, onCancel,
   const { owner, others } = openIssues(run);
   const decisions = reportDecisions(run);
   return (
-    <section aria-label="Laporan sous">
+    <section id="laporan-sous" className="scroll-mt-6" aria-label="Laporan sous">
       <h2 className="mb-1.5 flex flex-wrap items-baseline gap-2 font-display text-sm font-bold">
         Laporan sous
         {run.rounds && <span className="font-body text-xs font-medium text-muted-foreground">Round {run.rounds.used} of {run.rounds.max}</span>}
@@ -80,7 +80,7 @@ export const SousReport: React.FC<SousReportProps> = ({ run, onAnswer, onCancel,
             <span className="min-w-0 text-pretty text-foreground">{decision.text}</span>
             {decision.status === 'CANCELLED' && decision.cancelNote && <span className="basis-full text-pretty text-xs text-status-conflict">Cancelled: {decision.cancelNote}</span>}
             {!blocked && canCancel(decision) && cancelling !== decision.n && (
-              <button type="button" className="text-sm font-semibold text-status-conflict hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 max-[760px]:min-h-11" onClick={() => setCancelling(decision.n)}>Batalkan</button>
+              <button type="button" className="text-sm font-semibold text-status-conflict hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-50 max-[760px]:min-h-11" disabled={busy} onClick={() => setCancelling(decision.n)}>Batalkan</button>
             )}
             {cancelling === decision.n && <CancelForm n={decision.n} busy={busy} onCancel={onCancel} onClose={() => setCancelling(null)} />}
           </li>

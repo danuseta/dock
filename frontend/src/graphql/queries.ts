@@ -625,6 +625,7 @@ export const GET_ORCHESTRATION = gql`
   query GetOrchestration($key: String!) {
     orchestration(key: $key) {
       ${ORCHESTRATION_FIELDS}
+      approved
       events { id kind detail at }
       timeline {
         stageIndex

@@ -56,6 +56,8 @@ export interface AgentRun {
   productionData?: boolean | null;
   draft?: boolean | null;
   issues?: AgentIssue[];
+  /** Every step of the owner's last review approval succeeded. */
+  approved?: boolean;
   blockers?: number;
   activity: string;
   activityDetail?: string | null;
