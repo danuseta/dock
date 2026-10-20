@@ -6,6 +6,7 @@ import {
   Check,
   Circle,
   ExternalLink,
+  Figma,
   GitBranch,
   Link2,
   MessagesSquare,
@@ -33,7 +34,7 @@ import { Toast } from '../components/Toast';
 import { Button, Card, ConfirmDialog, Input, Page } from '../components/ui';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, DETAIL_QUERY_OPTIONS, displayAssignee } from '../lib/queryPolicy';
-import { RUN_STATE_LABEL, isLongDescription, needsYou, runState, type NeedItem } from '../lib/ticketDetail';
+import { NO_DESCRIPTION, RUN_STATE_LABEL, isLongDescription, jiraAcLines, needsYou, runState, type NeedItem } from '../lib/ticketDetail';
 import { getPassLabels } from '../lib/ticketApprovals';
 import { showsSousReport } from '../lib/sousReport';
 import { nextWorkOrder } from '../lib/workOrder';
@@ -57,6 +58,22 @@ const AC_FOLD = 3;
 const AC_ICON = {
   PASS: <Check size={14} className="mt-0.5 text-status-merged" aria-hidden="true" />,
   FAIL: <X size={14} className="mt-0.5 text-status-conflict" aria-hidden="true" />,
+};
+const AC_TODO = <Circle size={10} className="mx-auto mt-1.5 text-muted-foreground" aria-hidden="true" />;
+
+/** One text field of the Jira ticket, folded to three lines when it is long. */
+const JiraField: React.FC<{ title: string; text: string }> = ({ title, text }) => {
+  const [open, setOpen] = useState(false);
+  const fold = isLongDescription(text, 3);
+  return (
+    <section className="min-w-0">
+      <h2 className="mb-1.5 flex items-center gap-3 font-display text-sm font-bold">
+        {title}
+        {fold && <button type="button" className="text-xs font-semibold text-accent hover:underline" aria-expanded={open} onClick={() => setOpen((value) => !value)}>{open ? 'Show less' : 'Show all'}</button>}
+      </h2>
+      <div className={cn('whitespace-pre-wrap break-words text-sm leading-relaxed text-secondary-foreground', fold && !open && 'line-clamp-3')}>{text}</div>
+    </section>
+  );
 };
 
 /** One label and value in the ticket's property list. */
@@ -111,8 +128,8 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const [workOrder, setWorkOrder] = useState('');
   const [menu, setMenu] = useState<TicketMenuTarget | null>(null);
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
-  const [descriptionOpen, setDescriptionOpen] = useState(false);
   const [acOpen, setAcOpen] = useState(false);
+  const [jiraAcOpen, setJiraAcOpen] = useState(false);
   const { data: runData } = useQuery(GET_ORCHESTRATION, { ...CACHED_QUERY_OPTIONS, variables: { key: ticketKey }, pollInterval: 30000 });
   const run: AgentRun | null = runData?.orchestration?.key?.toUpperCase() === ticketKey.toUpperCase() ? runData.orchestration : null;
   const { openForTicket, opening: openingSession, error: sessionError } = useOpenForTicket();
@@ -259,7 +276,8 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
       else if (pr?.url) window.open(pr.url, '_blank', 'noreferrer');
     }
   };
-  const foldDescription = isLongDescription(ticket.description, 3);
+  const description = ticket.description && ticket.description !== NO_DESCRIPTION ? ticket.description : null;
+  const jiraAc = jiraAcLines(ticket.acceptanceCriteria);
   const blockedHere = run?.remote ? 'The other DOCK runs this ticket. Answer it there.' : null;
 
   const handleIssueAnswer = async (issue: number, text: string) => {
@@ -328,6 +346,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
         {renderBackButton()}
         <div className="flex flex-wrap items-center gap-2">
           {ticket.url && <a href={ticket.url} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-border bg-surface-2 px-3 text-sm font-semibold hover:border-border-glow max-[760px]:h-11"><ExternalLink size={15} aria-hidden="true" />Jira</a>}
+          {ticket.figmaUrl && <a href={ticket.figmaUrl} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-border bg-surface-2 px-3 text-sm font-semibold hover:border-border-glow max-[760px]:h-11"><Figma size={15} aria-hidden="true" />Figma</a>}
           {run?.kind === 'review' && !run.remote && (run.approved
             ? <Button className="max-[760px]:h-11" disabled title="The Jira label pass is on the ticket and its pull requests are approved"><Check size={15} aria-hidden="true" />Sudah di-approve</Button>
             : <Button variant="primary" className="max-[760px]:h-11" onClick={() => setConfirmApprove(true)} disabled={approving} title="Adds the Jira label pass and approves the open pull requests on GitHub"><Check size={15} aria-hidden="true" />{approving ? 'Approving...' : 'Approve'}</Button>)}
@@ -401,37 +420,52 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
           )}
 
           <div className="grid grid-cols-2 items-start gap-8 max-[1280px]:grid-cols-1 max-[1280px]:gap-4">
-            <section className="min-w-0">
-              <h2 className="mb-1.5 flex items-center gap-3 font-display text-sm font-bold">
-                Description
-                {foldDescription && <button type="button" className="text-xs font-semibold text-accent hover:underline" aria-expanded={descriptionOpen} onClick={() => setDescriptionOpen((open) => !open)}>{descriptionOpen ? 'Show less' : 'Show all'}</button>}
-              </h2>
-              <div className={cn('whitespace-pre-wrap break-words text-sm leading-relaxed text-secondary-foreground', foldDescription && !descriptionOpen && 'line-clamp-3')}>
-                {ticket.description || 'No detailed description provided in this Jira issue.'}
-              </div>
-            </section>
+            <div className="flex min-w-0 flex-col gap-4">
+              {ticket.userStory && <JiraField title="User Story" text={ticket.userStory} />}
+              {ticket.problemDefinition && <JiraField title="Problem Definition" text={ticket.problemDefinition} />}
+              {(description || (!ticket.userStory && !ticket.problemDefinition)) && <JiraField title="Description" text={description || NO_DESCRIPTION} />}
+            </div>
 
             <section id="acceptance-criteria" className="min-w-0 scroll-mt-6">
-              <h2 className="mb-1.5 flex items-baseline gap-2 font-display text-sm font-bold">
+              <h2 className="mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-1 font-display text-sm font-bold">
                 Acceptance criteria
-                {run && <span className="font-body text-xs font-medium text-muted-foreground">{run.acPassed} of {run.acTotal} passing</span>}
-                {acItems.length > AC_FOLD && <button type="button" className="text-xs font-semibold text-accent hover:underline" aria-expanded={acOpen} onClick={() => setAcOpen((open) => !open)}>{acOpen ? 'Show less' : `Show all ${acItems.length}`}</button>}
+                {run
+                  ? <span className="font-body text-xs font-medium text-muted-foreground">{run.acPassed} of {run.acTotal} passing</span>
+                  : jiraAc.length > 0 && <span className="font-body text-xs font-medium text-muted-foreground">{jiraAc.length} from Jira</span>}
+                {(run ? acItems.length : jiraAc.length) > AC_FOLD && <button type="button" className="text-xs font-semibold text-accent hover:underline" aria-expanded={acOpen} onClick={() => setAcOpen((open) => !open)}>{acOpen ? 'Show less' : `Show all ${run ? acItems.length : jiraAc.length}`}</button>}
+                {run && ticket.acceptanceCriteria && <button type="button" className="text-xs font-semibold text-accent hover:underline" aria-expanded={jiraAcOpen} onClick={() => setJiraAcOpen((open) => !open)}>{jiraAcOpen ? 'Hide Jira original' : 'Jira original'}</button>}
               </h2>
-              {acItems.length === 0 ? (
-                <p className="text-pretty text-sm text-muted-foreground">{run ? 'No acceptance criteria recorded yet.' : 'They show here once an agent run starts on this ticket.'}</p>
+              {run ? (
+                acItems.length === 0 ? (
+                  <p className="text-pretty text-sm text-muted-foreground">No acceptance criteria recorded yet.</p>
+                ) : (
+                  <ol className="flex flex-col">
+                    {(acOpen ? acItems : acItems.slice(0, AC_FOLD)).map((item) => (
+                      <li key={item.n} className="grid grid-cols-[20px_minmax(0,1fr)] items-start gap-2 py-1 text-sm" title={item.evidence || undefined}>
+                        {AC_ICON[item.state as keyof typeof AC_ICON] ?? AC_TODO}
+                        <span className="text-pretty">
+                          <span className="sr-only">{item.state}: </span>
+                          {item.text || `AC ${item.n}`}
+                          {item.state === 'FAIL' && item.evidence && <span className="ml-2 font-mono text-[0.7rem] text-status-conflict">{item.evidence}</span>}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                )
+              ) : jiraAc.length === 0 ? (
+                <p className="text-pretty text-sm text-muted-foreground">Not filled in Jira.</p>
               ) : (
                 <ol className="flex flex-col">
-                  {(acOpen ? acItems : acItems.slice(0, AC_FOLD)).map((item) => (
-                    <li key={item.n} className="grid grid-cols-[20px_minmax(0,1fr)] items-start gap-2 py-1 text-sm" title={item.evidence || undefined}>
-                      {AC_ICON[item.state as keyof typeof AC_ICON] ?? <Circle size={10} className="mx-auto mt-1.5 text-muted-foreground" aria-hidden="true" />}
-                      <span className="text-pretty">
-                        <span className="sr-only">{item.state}: </span>
-                        {item.text || `AC ${item.n}`}
-                        {item.state === 'FAIL' && item.evidence && <span className="ml-2 font-mono text-[0.7rem] text-status-conflict">{item.evidence}</span>}
-                      </span>
+                  {(acOpen ? jiraAc : jiraAc.slice(0, AC_FOLD)).map((line, index) => (
+                    <li key={index} className="grid grid-cols-[20px_minmax(0,1fr)] items-start gap-2 py-1 text-sm">
+                      {AC_TODO}
+                      <span className="text-pretty text-secondary-foreground">{line}</span>
                     </li>
                   ))}
                 </ol>
+              )}
+              {run && jiraAcOpen && ticket.acceptanceCriteria && (
+                <div className="mt-2 whitespace-pre-wrap break-words rounded-sm border border-border bg-surface-1 p-3 text-xs leading-relaxed text-secondary-foreground">{ticket.acceptanceCriteria}</div>
               )}
             </section>
           </div>

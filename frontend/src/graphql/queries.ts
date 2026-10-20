@@ -128,6 +128,10 @@ export const GET_TICKET_DETAIL_CORE = gql`
       key
       title
       description
+      acceptanceCriteria
+      userStory
+      problemDefinition
+      figmaUrl
       status
       assignee
       url

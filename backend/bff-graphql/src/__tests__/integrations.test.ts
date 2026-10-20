@@ -61,6 +61,43 @@ test('internal integration behavior', async (t) => {
     assert.strictEqual(blank?.acceptanceCriteria, null);
   });
 
+  await t.test('keeps each Acceptance Criteria checklist item on its own line', () => {
+    const service = new JiraService({} as any, {} as any);
+    const task = (text: string) => ({ type: 'taskItem', attrs: { state: 'TODO' }, content: [{ type: 'text', text }] });
+    const ticket = service.formatTicket({
+      key: 'QRD-1402',
+      fields: {
+        customfield_10332: { type: 'doc', content: [{ type: 'taskList', content: [task('User can rename a folder'), task('Rename is saved after refresh')] }] },
+        description: { type: 'doc', content: [
+          { type: 'paragraph', content: [{ type: 'text', text: 'Line one' }, { type: 'hardBreak' }, { type: 'text', text: 'line two' }] },
+          { type: 'paragraph', content: [{ type: 'text', text: 'Spec: ' }, { type: 'inlineCard', attrs: { url: 'https://example.com/spec' } }] },
+        ] },
+      },
+    }, 'company.atlassian.net');
+    assert.strictEqual(ticket?.acceptanceCriteria, '- User can rename a folder\n- Rename is saved after refresh');
+    assert.strictEqual(ticket?.description, 'Line one\nline two\n\nSpec: https://example.com/spec');
+  });
+
+  await t.test('reads User Story, Problem Definition and the Figma link from the QRD custom fields', () => {
+    const service = new JiraService({} as any, {} as any);
+    const doc = (text: string) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] });
+    const ticket = service.formatTicket({
+      key: 'QRD-1402',
+      fields: {
+        customfield_10341: doc('As an admin I filter by tag'),
+        customfield_10331: doc('Lists are too long'),
+        customfield_10329: 'https://www.figma.com/design/abc/File?node-id=1-2',
+      },
+    }, 'company.atlassian.net');
+    assert.strictEqual(ticket?.userStory, 'As an admin I filter by tag');
+    assert.strictEqual(ticket?.problemDefinition, 'Lists are too long');
+    assert.strictEqual(ticket?.figmaUrl, 'https://www.figma.com/design/abc/File?node-id=1-2');
+    const old = service.formatTicket({ key: 'QRD-9', fields: { customfield_10330: 'Old story field', customfield_10329: 'see Figma' } }, 'company.atlassian.net');
+    assert.strictEqual(old?.userStory, 'Old story field');
+    assert.strictEqual(old?.figmaUrl, null);
+    assert.strictEqual(old?.problemDefinition, null);
+  });
+
   await t.test('includes Jira, PR, and demo links in Discord summary', () => {
     const message = formatDiscordMessage({
       ticket: { key: 'QRD-205', title: 'Monolith', url: 'https://jira.example/browse/QRD-205' },

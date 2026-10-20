@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { isLongDescription, needsYou, runState, splitChoices, stepIndex } from '../lib/ticketDetail';
+import { isLongDescription, jiraAcLines, needsYou, runState, splitChoices, stepIndex } from '../lib/ticketDetail';
 
 const run = { waiting: null, stalled: false, finished: false, stage: 'code', ac: [], reviewSignal: null };
 
@@ -52,4 +52,12 @@ test('answers in brackets at the end of the question become buttons', () => {
   assert.deepStrictEqual(splitChoices('Approve the plan?'), { question: 'Approve the plan?', choices: [] });
   assert.deepStrictEqual(splitChoices('See [this link] first'), { question: 'See [this link] first', choices: [] });
   assert.deepStrictEqual(needsYou({ run: { ...run, waiting: 'Keep it? [Keep|Drop]' } })[0], { id: 'question', kind: 'question', text: 'Keep it?', choices: ['Keep', 'Drop'] });
+});
+
+test('the Jira Acceptance Criteria field reads as one criterion per line without its marker', () => {
+  assert.deepStrictEqual(jiraAcLines('- User can rename a folder\n\n* Rename is saved\n[ ] Empty name shows an error\n2) Works with search'), [
+    'User can rename a folder', 'Rename is saved', 'Empty name shows an error', 'Works with search',
+  ]);
+  assert.deepStrictEqual(jiraAcLines(null), []);
+  assert.deepStrictEqual(jiraAcLines('  \n '), []);
 });

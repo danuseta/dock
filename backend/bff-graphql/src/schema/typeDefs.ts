@@ -5,6 +5,11 @@ export const typeDefs = gql`
     key: ID!
     title: String!
     description: String
+    """The Jira Acceptance Criteria field as text, one line per item."""
+    acceptanceCriteria: String
+    userStory: String
+    problemDefinition: String
+    figmaUrl: String
     status: String!
     assignee: String
     url: String!
