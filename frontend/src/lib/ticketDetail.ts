@@ -101,3 +101,19 @@ export const jiraAcLines = (text?: string | null): string[] => (text || '')
   .split('\n')
   .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)]|\[[ xX]?\])\s*/, '').trim())
   .filter(Boolean);
+
+export interface DependencyChoice { key: string; title: string; sprintState?: string | null }
+
+const keyNumber = (key: string) => Number(/-(\d+)$/.exec(key)?.[1] ?? 0);
+
+/** The tickets a ticket can depend on: each once, itself left out, the active sprint first and the newest key first within each part. */
+export function dependencyChoices(tickets: DependencyChoice[], ticketKey: string): DependencyChoice[] {
+  const unique = [...new Map(tickets.filter((item) => item.key !== ticketKey).map((item) => [item.key, item])).values()];
+  const active = (item: DependencyChoice) => (item.sprintState === 'ACTIVE' ? 0 : 1);
+  return unique.sort((first, second) => active(first) - active(second) || keyNumber(second.key) - keyNumber(first.key));
+}
+
+export const matchesChoice = (choice: DependencyChoice, query: string) => {
+  const needle = query.trim().toLowerCase();
+  return !needle || `${choice.key} ${choice.title}`.toLowerCase().includes(needle);
+};

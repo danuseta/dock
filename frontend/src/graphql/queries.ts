@@ -149,7 +149,7 @@ export const GET_TICKET_DETAIL_CORE = gql`
       ticketKeys
     }
     dashboard {
-      tickets { key title status }
+      tickets { key title status sprintState }
     }
     settings {
       discordMessageTemplate

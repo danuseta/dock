@@ -34,7 +34,7 @@ import { Toast } from '../components/Toast';
 import { Button, Card, ConfirmDialog, Input, Page } from '../components/ui';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, DETAIL_QUERY_OPTIONS, displayAssignee } from '../lib/queryPolicy';
-import { NO_DESCRIPTION, RUN_STATE_LABEL, isLongDescription, jiraAcLines, needsYou, runState, type NeedItem } from '../lib/ticketDetail';
+import { NO_DESCRIPTION, RUN_STATE_LABEL, dependencyChoices, isLongDescription, jiraAcLines, needsYou, runState, type NeedItem } from '../lib/ticketDetail';
 import { getPassLabels } from '../lib/ticketApprovals';
 import { showsSousReport } from '../lib/sousReport';
 import { nextWorkOrder } from '../lib/workOrder';
@@ -334,11 +334,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const announcementDemoUrl = uniqueDemoUrls.length === 1
     ? `- **${relationTickets.map((item: any) => item.key).join(' + ')}:** ${uniqueDemoUrls[0]}`
     : demoEntries.map((entry: any) => `- **${entry.key}:** ${entry.url}`).join('\n');
-  const ticketChoices = [...new Map((coreData?.dashboard || [])
-    .flatMap((group: any) => group.tickets || [])
-    .filter((item: any) => item.key !== ticket.key)
-    .map((item: any) => [item.key, item])).values()]
-    .sort((first: any, second: any) => first.key.localeCompare(second.key)) as Array<{ key: string; title: string }>;
+  const ticketChoices = dependencyChoices((coreData?.dashboard || []).flatMap((group: any) => group.tickets || []), ticket.key);
 
   return (
     <Page width="full">
