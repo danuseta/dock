@@ -300,8 +300,8 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
       </div>
       {sessionError && <Card className="mb-4 border-status-conflict text-pretty text-sm text-status-conflict" role="alert">{sessionError}</Card>}
 
-      <div className="grid grid-cols-[minmax(0,1fr)_300px] items-start gap-10 max-[1000px]:grid-cols-1 max-[1000px]:gap-6">
-        <main className="flex min-w-0 max-w-[760px] flex-col gap-4">
+      <div className="grid grid-cols-[minmax(0,2fr)_minmax(320px,1fr)] items-start gap-8 max-[1000px]:grid-cols-1 max-[1000px]:gap-6">
+        <main className="flex min-w-0 flex-col gap-4">
           <div>
             <div className="flex flex-wrap items-center gap-2.5 font-mono text-xs text-muted-foreground">
               <span className="rounded-xs border border-accent/30 bg-accent-dim px-2 py-0.5 text-sm font-extrabold text-accent">{ticket.key}</span>
@@ -332,7 +332,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
               Description
               {foldDescription && <button type="button" className="text-xs font-semibold text-accent hover:underline" aria-expanded={descriptionOpen} onClick={() => setDescriptionOpen((open) => !open)}>{descriptionOpen ? 'Show less' : 'Show all'}</button>}
             </h2>
-            <div className={cn('max-w-[70ch] whitespace-pre-wrap break-words text-sm leading-relaxed text-secondary-foreground', foldDescription && !descriptionOpen && 'line-clamp-3')}>
+            <div className={cn('whitespace-pre-wrap break-words text-sm leading-relaxed text-secondary-foreground', foldDescription && !descriptionOpen && 'line-clamp-3')}>
               {ticket.description || 'No detailed description provided in this Jira issue.'}
             </div>
           </section>
