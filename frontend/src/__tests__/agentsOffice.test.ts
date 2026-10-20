@@ -200,7 +200,7 @@ test('the sample flow puts a coordinator between the lead and its team', () => {
   assert.ok(sampleTimeline(6).agents.filter((agent) => agent.state === 'done').length >= 3, 'members finish before the stage ends');
 
   const gated = sampleTimeline(29);
-  assert.deepStrictEqual([gated.stageIndex, gated.agents[0].state], [4, 'waiting']);
+  assert.deepStrictEqual([gated.stageIndex, gated.agents[0].state], [3, 'waiting']);
   assert.deepStrictEqual(gated.gates.map((gate) => gate.state), ['passed', 'waiting']);
   assert.ok(gated.buckets.some((bucket) => bucket.gate));
   assert.deepStrictEqual(sampleTimeline(-3).stageIndex, sampleTimeline(0).stageIndex);

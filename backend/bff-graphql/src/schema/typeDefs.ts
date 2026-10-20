@@ -241,6 +241,8 @@ export const typeDefs = gql`
     round: Int!
     loopFrom: Int
     loopTo: Int
+    """The run stopped at GATE 1 (a manual run), so the rail starts with a Gate stop."""
+    hasGate: Boolean!
     gates: [TimelineGate!]!
     agents: [TimelineAgent!]!
     buckets: [TimelineBucket!]!

@@ -637,6 +637,7 @@ export const GET_ORCHESTRATION = gql`
         round
         loopFrom
         loopTo
+        hasGate
         gates { id stageIndex text state at }
         agents { id parentId name detail state tool tools }
         buckets { n gate }
