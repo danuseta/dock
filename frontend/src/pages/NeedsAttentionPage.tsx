@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation } from '@apollo/client';
-import { AlertTriangle, Bot, CheckCircle2, ExternalLink, GitMerge, Hand } from 'lucide-react';
+import { AlertTriangle, Bot, ExternalLink, GitMerge, Hand } from 'lucide-react';
 import { GET_NEEDS_ATTENTION } from '../graphql/queries';
 import { CHECK_CONFLICTS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
+import { EmptyState } from '../components/EmptyState';
+import { AllClearScene } from '../components/empty/scenes/AllClearScene';
 import { ConflictModal } from '../components/ConflictModal';
 import { Toast } from '../components/Toast';
 import { Badge, Button, Card, Page } from '../components/ui';
@@ -47,7 +49,7 @@ const NeedsAttentionPage: React.FC<NeedsAttentionPageProps> = ({ onTicketClick }
       </Card>
 
       {items.length === 0 ? (
-        <Card className="py-12 text-center"><CheckCircle2 size={48} className="mx-auto mb-4 text-status-merged" aria-hidden="true" /><h2 className="text-balance font-display text-xl font-bold text-status-merged">All Clear!</h2><p className="mt-2 text-pretty text-muted-foreground">No merge conflicts, and no agent is waiting on you.</p></Card>
+        <Card><EmptyState scene={<AllClearScene />} title={<span className="text-status-merged">All clear</span>} description="No merge conflicts, and no agent is waiting on you." /></Card>
       ) : (
         <div className="flex flex-col gap-4">
           {items.map((item: any) => agentLabel[item.type] ? (

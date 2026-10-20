@@ -1,9 +1,12 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowDown, ArrowUp, Bot, Building2, ChevronLeft, ChevronRight, Clock, ExternalLink, EyeOff, GitPullRequest, Hand, MessagesSquare, Moon, Octagon, Play, Square, Table2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Building2, ChevronLeft, ChevronRight, Clock, ExternalLink, EyeOff, GitPullRequest, Hand, MessagesSquare, Moon, Octagon, Play, Square, Table2, X } from 'lucide-react';
 import { GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
 import { CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
+import { EmptyState } from '../components/EmptyState';
+import { DeskScene } from '../components/empty/scenes/DeskScene';
+import { RobotScene } from '../components/empty/scenes/RobotScene';
 import { Badge, Button, Card, Dialog, Page, PageHeader, PhoneCards } from '../components/ui';
 import { isPhone } from '../lib/phone';
 import { apiOrigin } from '../lib/apollo';
@@ -358,20 +361,25 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                 <span className="max-[900px]:hidden">drag to orbit · scroll to zoom</span>
               </div>
               {empty && (
-                <div className="absolute inset-x-0 top-1/2 mx-auto w-[min(440px,calc(100%-2rem))] -translate-y-1/2 rounded-md border border-border bg-[rgb(12_12_12/0.9)] p-5 text-center">
-                  <Bot size={28} className="mx-auto mb-2 text-muted-foreground" aria-hidden="true" />
-                  <p className="font-display font-bold">The office is empty</p>
-                  <p className="mt-1 text-pretty text-sm text-muted-foreground">No ticket has reported in yet. Create an ingest token, then let the orchestrator on your laptop push its ticket status here.</p>
-                  <div className="mt-4 flex flex-wrap justify-center gap-2">
-                    <Button size="sm" variant="primary" onClick={() => onNavigate('/settings')}>Open System Settings</Button>
-                    <Button size="sm" onClick={() => { setSampleStartedAt(Date.now() / 1000); setSelectedKey('SAMPLE-2'); }}><Play size={14} aria-hidden="true" />Run a sample</Button>
-                  </div>
+                <div className="absolute inset-x-0 top-1/2 mx-auto w-[min(440px,calc(100%-2rem))] -translate-y-1/2 rounded-md border border-border bg-[rgb(12_12_12/0.9)] p-5">
+                  <EmptyState
+                    className="p-0"
+                    scene={<DeskScene />}
+                    title="The office is empty"
+                    description="No ticket has reported in yet. Create an ingest token, then let the orchestrator on your laptop push its ticket status here."
+                    action={(
+                      <>
+                        <Button size="sm" variant="primary" onClick={() => onNavigate('/settings')}>Open System Settings</Button>
+                        <Button size="sm" onClick={() => { setSampleStartedAt(Date.now() / 1000); setSelectedKey('SAMPLE-2'); }}><Play size={14} aria-hidden="true" />Run a sample</Button>
+                      </>
+                    )}
+                  />
                 </div>
               )}
             </div>
             </>
           ) : empty ? (
-            <div className="py-12 text-center"><Bot size={34} className="mx-auto mb-2.5 text-muted-foreground" aria-hidden="true" /><p className="text-pretty text-muted-foreground">No ticket has reported in yet.</p></div>
+            <EmptyState scene={<RobotScene />} description="No ticket has reported in yet." action={<Button size="sm" variant="primary" onClick={() => onNavigate('/settings')}>Open System Settings</Button>} />
           ) : (
             <div>
               <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">

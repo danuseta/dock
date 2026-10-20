@@ -4,6 +4,8 @@ import { Download, Play, RefreshCw, RotateCcw, Search, Server, Square, Terminal 
 import { GET_DEV_SERVER_LOG, GET_DEV_SERVERS } from '../graphql/queries';
 import { RESTART_DEV_SERVER, START_ALL_DEV_SERVERS, START_DEV_SERVER, STOP_ALL_DEV_SERVERS, STOP_DEV_SERVER, STOP_WORKTREE_SERVER } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
+import { EmptyState } from '../components/EmptyState';
+import { RackScene } from '../components/empty/scenes/RackScene';
 import { Button, Card, ConfirmDialog, IconButton, Input, Page, PageHeader } from '../components/ui';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { cn } from '../lib/cn';
@@ -92,7 +94,7 @@ const DevServersPage = () => {
 
       <h2 className="mb-2 font-display text-lg font-bold">Secondary</h2>
       <Card className="mb-6 overflow-hidden p-0">
-        {secondary.length === 0 ? <p className="px-4 py-6 text-center text-sm text-muted-foreground">No server runs in a ticket worktree.</p> : (
+        {secondary.length === 0 ? <EmptyState size="panel" scene={<RackScene />} description="No server runs in a ticket worktree." /> : (
           <ul className="flex flex-col">
             {secondary.map((item) => (
               <li className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 last:border-b-0" key={item.port}>

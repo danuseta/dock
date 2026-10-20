@@ -1,0 +1,123 @@
+/* Animated empty states. Only transform and opacity move (the check in the
+   all-clear scene draws its stroke). Each element's base style is its still
+   frame, so reduced motion shows a complete picture instead of the last
+   keyframe of a fade-out. */
+
+.dock-empty-scene * {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* Terminal: the prompt types itself, the cursor blinks */
+.dock-empty-type { transform: translateX(99px); animation: dock-empty-type 5s infinite; }
+@keyframes dock-empty-type {
+  0%, 10% { transform: translateX(0); animation-timing-function: steps(11, end); }
+  50%, 100% { transform: translateX(99px); }
+}
+.dock-empty-typed { animation: dock-empty-typed 5s infinite; }
+@keyframes dock-empty-typed { 0%, 86% { opacity: 1; } 94%, 100% { opacity: 0; } }
+.dock-empty-blink { animation: dock-empty-blink 1s steps(1) infinite; }
+@keyframes dock-empty-blink { 50% { opacity: 0; } }
+
+/* Bubbles appear in turn, then fade */
+.dock-empty-bubble { animation: dock-empty-bubble 6s infinite both; }
+@keyframes dock-empty-bubble {
+  0% { opacity: 0; transform: translateY(8px); }
+  8%, 78% { opacity: 1; transform: none; }
+  90%, 100% { opacity: 0; transform: translateY(-4px); }
+}
+
+/* Skeleton rows fill from the left */
+.dock-empty-row { transform-origin: 0 50%; animation: dock-empty-row 4.5s infinite both; }
+@keyframes dock-empty-row {
+  0% { transform: scaleX(0); opacity: 0.3; }
+  18%, 80% { transform: scaleX(1); opacity: 1; }
+  95%, 100% { transform: scaleX(1); opacity: 0.25; }
+}
+
+/* Magnifier sweeps the empty lines */
+.dock-empty-sweep { animation: dock-empty-sweep 3.2s ease-in-out infinite alternate; }
+@keyframes dock-empty-sweep { from { transform: translateX(-50px); } to { transform: translateX(50px); } }
+
+/* Floating bubble with its shadow and typing dots */
+.dock-empty-float { animation: dock-empty-float 3s ease-in-out infinite alternate; }
+@keyframes dock-empty-float { from { transform: translateY(3px); } to { transform: translateY(-5px); } }
+.dock-empty-shadow { animation: dock-empty-shadow 3s ease-in-out infinite alternate; }
+@keyframes dock-empty-shadow { from { transform: scaleX(1); opacity: 0.9; } to { transform: scaleX(0.8); opacity: 0.5; } }
+.dock-empty-dot { animation: dock-empty-dot 1.4s infinite; }
+@keyframes dock-empty-dot { 0%, 60%, 100% { opacity: 0.3; } 30% { opacity: 1; } }
+
+/* A ring pulses around an action button */
+.dock-empty-pulse { position: relative; }
+.dock-empty-pulse::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 8px;
+  border: 2px solid var(--color-accent);
+  opacity: 0;
+  pointer-events: none;
+  animation: dock-empty-pulse 2.4s ease-out infinite;
+}
+@keyframes dock-empty-pulse { 0% { opacity: 0.55; transform: scale(1); } 70%, 100% { opacity: 0; transform: scale(1.18); } }
+
+/* Kanban card drops into a column */
+.dock-empty-drop { animation: dock-empty-drop 4.5s infinite both; }
+@keyframes dock-empty-drop {
+  0% { opacity: 0; transform: translateY(-34px); animation-timing-function: cubic-bezier(0.5, 0, 1, 1); }
+  22% { opacity: 1; transform: translateY(0); }
+  28% { transform: translateY(-3px); }
+  34%, 78% { opacity: 1; transform: translateY(0); }
+  92%, 100% { opacity: 0; transform: translateY(0); }
+}
+
+/* Office monitor glows while it waits */
+.dock-empty-screen { opacity: 0.18; animation: dock-empty-screen 4s ease-in-out infinite; }
+@keyframes dock-empty-screen { 0%, 100% { opacity: 0.08; } 50% { opacity: 0.3; } }
+
+/* Robot blinks and waves */
+.dock-empty-eye { animation: dock-empty-eye 4s infinite; }
+@keyframes dock-empty-eye { 0%, 90%, 100% { transform: scaleY(1); } 94% { transform: scaleY(0.1); } }
+.dock-empty-wave { transform-origin: 50% 100%; animation: dock-empty-wave 4s ease-in-out infinite; }
+@keyframes dock-empty-wave {
+  0%, 45%, 100% { transform: rotate(0); }
+  10%, 30% { transform: rotate(-22deg); }
+  20%, 40% { transform: rotate(14deg); }
+}
+
+/* Check draws itself, confetti bursts once */
+.dock-empty-draw { stroke-dasharray: 1; stroke-dashoffset: 0; animation: dock-empty-draw 0.7s ease-out both; }
+.dock-empty-draw-late { animation-duration: 0.45s; animation-delay: 0.55s; }
+@keyframes dock-empty-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+.dock-empty-confetti { opacity: 0; animation: dock-empty-confetti 1.1s 0.9s ease-out both; }
+@keyframes dock-empty-confetti {
+  0% { opacity: 0; transform: translate(0, 0) rotate(0); }
+  10% { opacity: 1; }
+  100% { opacity: 0; transform: translate(calc(var(--dx) * 1px), calc(var(--dy) * 1px)) rotate(var(--r)); }
+}
+
+/* Film strip rolls */
+.dock-empty-film { animation: dock-empty-film 2.4s linear infinite; }
+@keyframes dock-empty-film { from { transform: translateX(-40px); } to { transform: translateX(0); } }
+
+/* Server LEDs blink in turn */
+.dock-empty-led { opacity: 0.6; animation: dock-empty-led 2.4s infinite; }
+@keyframes dock-empty-led { 0%, 100% { opacity: 0.2; } 50% { opacity: 1; } }
+
+/* Chart bars grow from zero */
+.dock-empty-bar { transform-origin: 50% 100%; animation: dock-empty-bar 4.5s infinite both; }
+@keyframes dock-empty-bar { 0% { transform: scaleY(0); } 25%, 80% { transform: scaleY(1); } 95%, 100% { transform: scaleY(0); } }
+
+/* Calendar sheet flips up */
+.dock-empty-flip { transform-origin: 50% 0%; animation: dock-empty-flip 4s infinite; }
+@keyframes dock-empty-flip {
+  0%, 55% { transform: scaleY(1); opacity: 1; }
+  80% { transform: scaleY(0); opacity: 0.4; }
+  81%, 100% { transform: scaleY(0); opacity: 0; }
+}
+
+/* The global rule in index.css only shortens animations, which would leave
+   fades on their last keyframe. Stop them so the base style shows. */
+@media (prefers-reduced-motion: reduce) {
+  .dock-empty-scene *, .dock-empty-pulse::after { animation: none !important; }
+}

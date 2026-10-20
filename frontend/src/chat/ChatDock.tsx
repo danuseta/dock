@@ -4,6 +4,8 @@ import { ArrowLeft, MessagesSquare, Minus, PanelBottom, PictureInPicture2, Plus 
 import { CREATE_CHAT_SESSION } from '../graphql/mutations';
 import { GET_CHAT_MESSAGES, GET_CHAT_SESSION, GET_CHAT_SESSIONS } from '../graphql/queries';
 import { cn } from '../lib/cn';
+import { EmptyState } from '../components/EmptyState';
+import { FloatingScene } from '../components/empty/scenes/FloatingScene';
 import { ChatThread } from './ChatThread';
 import { useFullViewport } from './useFullViewport';
 import { SLOW_POLL_MS, machineOf, newestAssistantId, sessionTitle, type ChatMessage, type ChatSession } from './messages';
@@ -182,13 +184,14 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
                 </div>
               )
               : (
-                <div className="grid min-h-0 flex-1 place-items-center p-6 text-center">
-                  <div>
-                    <MessagesSquare size={26} className="mx-auto mb-2 text-muted-foreground" aria-hidden="true" />
-                    <p className="font-display text-sm font-bold">No session open</p>
-                    <p className="mt-1 text-pretty text-xs text-muted-foreground">Start a new one here, or pick one on the Sessions page.</p>
-                    <button type="button" className="mt-3 inline-flex h-8 max-[699px]:h-11 items-center gap-1.5 rounded-sm border border-accent bg-accent px-3 font-display text-xs font-semibold text-black hover:bg-accent-hover disabled:opacity-50" disabled={creating} onClick={() => void newSession()}><Plus size={14} aria-hidden="true" />New session</button>
-                  </div>
+                <div className="grid min-h-0 flex-1 place-items-center p-6">
+                  <EmptyState
+                    size="panel"
+                    scene={<FloatingScene />}
+                    title="No session open"
+                    description="Start a new one here, or pick one on the Sessions page."
+                    action={<button type="button" className="dock-empty-pulse inline-flex h-8 max-[699px]:h-11 items-center gap-1.5 rounded-sm border border-accent bg-accent px-3 font-display text-xs font-semibold text-black hover:bg-accent-hover disabled:opacity-50" disabled={creating} onClick={() => void newSession()}><Plus size={14} aria-hidden="true" />New session</button>}
+                  />
                 </div>
               )}
         </section>

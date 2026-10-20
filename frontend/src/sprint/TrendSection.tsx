@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Card } from '../components/ui';
+import { EmptyState } from '../components/EmptyState';
+import { ChartScene } from '../components/empty/scenes/ChartScene';
 import { PALETTE, nearestIndex, trendPath, trendX, trendY, type TrendGeometry } from './format';
 import type { SprintTrend } from './types';
 
@@ -35,7 +37,7 @@ export const TrendSection = ({ trend }: { trend: SprintTrend | null }) => {
         Dev velocity across the stored sprints. Developers with no load in the two most recent sprints are left out, and a line that ends mid-chart means no load after it. This chart does not change with the sprint selector.
       </p>
       <Card className="p-4">
-        {!hasData ? <p className="text-sm text-muted-foreground">No sprint history yet. Load the last sprints to fill it.</p> : (
+        {!hasData ? <EmptyState size="panel" scene={<ChartScene />} description="No sprint history yet. Load the last sprints to fill it." /> : (
           <>
             {labels.length < 2 && <p className="mb-3 text-sm text-muted-foreground">Only one sprint is stored, so each line is a single point.</p>}
             <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs">

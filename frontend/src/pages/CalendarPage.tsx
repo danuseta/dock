@@ -3,6 +3,8 @@ import { useQuery } from '@apollo/client';
 import { CalendarDays, ChevronLeft, ChevronRight, ExternalLink, List } from 'lucide-react';
 import { GET_CALENDAR, GET_SETTINGS } from '../graphql/queries';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
+import { EmptyState } from '../components/EmptyState';
+import { CalendarScene } from '../components/empty/scenes/CalendarScene';
 import { MonthCalendar } from '../components/MonthCalendar';
 import { Button, Card, IconButton, Page, PageHeader, PhoneCards } from '../components/ui';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
@@ -97,7 +99,7 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onNavigate }) => {
         </Card>
 
         {view === 'calendar' ? (
-          <Card className="overflow-visible"><MonthCalendar month={month} events={events} variant="full" />{events.length === 0 && <p className="mt-4 border-t border-border pt-4 text-center text-pretty text-sm text-muted-foreground">No events in {monthLabel}. Refresh the agenda after adding an event in Google Calendar.</p>}</Card>
+          <Card className="overflow-visible"><MonthCalendar month={month} events={events} variant="full" />{events.length === 0 && <EmptyState size="panel" className="mt-4 border-t border-border" scene={<CalendarScene />} description={`No events in ${monthLabel}. Refresh the agenda after adding an event in Google Calendar.`} />}</Card>
         ) : (
           <Card className="overflow-hidden p-0">
             <PhoneCards>
@@ -114,7 +116,7 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onNavigate }) => {
                 </tbody>
               </table>
             </PhoneCards>
-            {events.length === 0 && <div className="py-12 text-center"><CalendarDays className="mx-auto mb-3 size-8 text-muted-foreground" aria-hidden="true" /><p className="text-pretty text-sm text-muted-foreground">No events in {monthLabel}.</p><Button className="mt-4" onClick={() => void refetch()}>Refresh agenda</Button></div>}
+            {events.length === 0 && <EmptyState scene={<CalendarScene />} description={`No events in ${monthLabel}.`} action={<Button onClick={() => void refetch()}>Refresh agenda</Button>} />}
           </Card>
         )}
       </>}
