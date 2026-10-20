@@ -8,21 +8,21 @@ const machine: SessionMachineOptions = {
     { value: 'opus', label: 'Opus', efforts: ['low', 'medium', 'high'], fast: true },
     { value: 'haiku', label: 'Haiku', efforts: ['low', 'medium'], fast: false },
   ],
-  modes: ['default', 'plan', 'bypassPermissions'],
+  modes: ['plan', 'auto', 'bypassPermissions'],
   fastAvailable: true,
   defaults: { model: 'opus', effort: 'high', permissionMode: 'plan' },
 };
 
-test('the empty choice is labelled Default without naming a value', () => {
-  assert.deepStrictEqual(settingModelChoices(machine, '')[0], { value: '', label: 'Default' });
-  assert.deepStrictEqual(settingEffortChoices(machine, '', '')[0], { value: '', label: 'Default' });
-  assert.deepStrictEqual(settingModeChoices(machine, '')[0], { value: '', label: 'Default' });
+test('no choice is called Default; a value nobody named shows as Not set', () => {
+  assert.deepStrictEqual(settingModelChoices(machine, 'opus').map((c) => c.label), ['Opus', 'Haiku']);
+  assert.deepStrictEqual(settingModelChoices(machine, '')[0], { value: '', label: 'Not set' });
+  assert.ok([...settingModelChoices(machine, 'opus'), ...settingEffortChoices(machine, 'opus', 'high'), ...settingModeChoices(machine, 'auto')].every((c) => !/default/i.test(c.label)));
 });
 
-test('without a catalog only the empty choice is offered', () => {
-  assert.deepStrictEqual(settingModelChoices(undefined, ''), [{ value: '', label: 'Default' }]);
-  assert.deepStrictEqual(settingEffortChoices(undefined, '', ''), [{ value: '', label: 'Default' }]);
-  assert.deepStrictEqual(settingModeChoices(undefined, ''), [{ value: '', label: 'Default' }]);
+test('without a catalog only Not set is offered', () => {
+  assert.deepStrictEqual(settingModelChoices(undefined, ''), [{ value: '', label: 'Not set' }]);
+  assert.deepStrictEqual(settingEffortChoices(undefined, '', ''), [{ value: '', label: 'Not set' }]);
+  assert.deepStrictEqual(settingModeChoices(undefined, ''), [{ value: '', label: 'Not set' }]);
 });
 
 test('effort follows the chosen model, else the catalog default model', () => {
@@ -31,13 +31,13 @@ test('effort follows the chosen model, else the catalog default model', () => {
 });
 
 test('modes the picker does not know are not offered', () => {
-  assert.deepStrictEqual(settingModeChoices(machine, '').slice(1).map((c) => c.value), ['default', 'plan']);
+  assert.deepStrictEqual(settingModeChoices(machine, 'auto').map((c) => c.value), ['auto', 'plan']);
 });
 
 test('a saved value the catalog lacks stays selectable', () => {
   const choices = settingModelChoices(machine, 'gone');
   assert.deepStrictEqual(choices[choices.length - 1], { value: 'gone', label: 'gone (not offered)' });
-  assert.strictEqual(settingModelChoices(machine, 'haiku').length, 3);
+  assert.strictEqual(settingModelChoices(machine, 'haiku').length, 2);
 });
 
 test('caveman offers only the four levels and falls back to full', () => {

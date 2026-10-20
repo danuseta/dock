@@ -4,7 +4,7 @@ export type DockMode = 'laptop' | 'workspace';
 
 const MISSING_PAGES: Record<DockMode, string[]> = {
   laptop: ['/sessions', '/demo-videos', '/dev-servers'],
-  workspace: ['/monitoring', '/docker'],
+  workspace: ['/monitoring', '/docker', '/calendar'],
 };
 
 export const hasPage = (mode: DockMode, path: string) => !MISSING_PAGES[mode].includes(path);

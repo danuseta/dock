@@ -43,6 +43,8 @@ export interface ChatModel {
   label: string;
   efforts: string[];
   fast: boolean;
+  /** Claude Code's supportsAutoMode; a bridge that does not say leaves it unset. */
+  auto?: boolean;
 }
 
 export interface MachineOptions {
@@ -70,8 +72,8 @@ export const IMAGE_EDGE_PX = 2000;
 export const COMMAND_LIMIT = 30;
 export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 export const TEXT_EXTENSIONS = ['md', 'txt', 'log', 'csv', 'json', 'yaml', 'yml', 'xml', 'html', 'css', 'js', 'jsx', 'ts', 'tsx', 'py', 'go', 'rs', 'java', 'kt', 'sh', 'sql', 'diff', 'patch'];
-export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto'];
-export const MODE_LABELS: Record<string, string> = { default: 'Default', acceptEdits: 'Accept edits', plan: 'Plan', auto: 'Auto' };
+export const PERMISSION_MODES = ['auto', 'plan', 'acceptEdits'];
+export const MODE_LABELS: Record<string, string> = { auto: 'Auto', plan: 'Plan', acceptEdits: 'Accept edits' };
 export const EMPTY_OPTIONS: TurnOptions = { model: null, effort: null, permissionMode: null, fast: null };
 
 export const composerFeatures = (capabilities: readonly string[]): ComposerFeatures => ({
@@ -103,9 +105,15 @@ export const effortChoices = (models: readonly ChatModel[], model: string | null
   return models[0].efforts.filter((level) => models.every((item) => item.efforts.includes(level)));
 };
 
+/** An effort the new model does not offer steps down to the highest level it does offer below it. */
 export const chooseModel = (options: TurnOptions, model: string | null, models: readonly ChatModel[]): TurnOptions => {
-  const effort = options.effort !== null && effortChoices(models, model).includes(options.effort) ? options.effort : null;
-  return { ...options, model, effort };
+  if (options.effort === null) return { ...options, model };
+  const levels = effortChoices(models, model);
+  if (levels.includes(options.effort)) return { ...options, model };
+  const ladder = [...new Set(models.flatMap((item) => item.efforts))];
+  const at = ladder.indexOf(options.effort);
+  const below = levels.filter((level) => ladder.indexOf(level) <= at);
+  return { ...options, model, effort: below.length > 0 ? below[below.length - 1] : null };
 };
 
 export const sanitizeOptions = (options: TurnOptions | null, features: ComposerFeatures, machine: MachineOptions | undefined): TurnOptions | null => {

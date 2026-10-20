@@ -19,6 +19,7 @@ export const CHAT_MACHINE_OPTIONS = gql`
         label
         efforts
         fast
+        auto
       }
       modes
       fastAvailable

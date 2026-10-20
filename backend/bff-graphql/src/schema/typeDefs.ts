@@ -506,7 +506,7 @@ export const typeDefs = gql`
     value: String!
     label: String!
     efforts: [String!]!
-    fast: Boolean!
+    fast: Boolean!    auto: Boolean!
   }
 
   type ChatMachineDefaults {

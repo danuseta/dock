@@ -16,16 +16,16 @@ const machine: SessionMachineOptions = {
     { value: 'claude-opus-5-5', label: 'Opus 5.5', efforts: ['low', 'medium', 'high', 'max'], fast: false },
     { value: 'haiku', label: 'Haiku', efforts: ['low', 'medium'], fast: false },
   ],
-  modes: ['default', 'acceptEdits', 'plan', 'auto'],
+  modes: ['acceptEdits', 'plan', 'auto'],
   fastAvailable: false,
-  defaults: { model: 'claude-opus-5-5', effort: 'high', permissionMode: 'default' },
+  defaults: { model: 'claude-opus-5-5', effort: 'high', permissionMode: 'auto' },
 };
 const none = { model: null, effort: null, permissionMode: null, fast: null };
 
 test('the Default entries name the machine default, and fall back to a plain Default', () => {
   assert.strictEqual(defaultLabel('model', machine), 'Default (Opus 5.5, high)');
   assert.strictEqual(defaultLabel('effort', machine), 'Default (high)');
-  assert.strictEqual(defaultLabel('permissionMode', machine), 'Default (Default)');
+  assert.strictEqual(defaultLabel('permissionMode', machine), 'Default (Auto)');
   assert.strictEqual(defaultLabel('model', { ...machine, defaults: { model: 'haiku', effort: null, permissionMode: null } }), 'Default (Haiku)');
   assert.strictEqual(defaultLabel('model', { ...machine, defaults: { model: null, effort: 'high' } }), 'Default');
   for (const field of ['model', 'effort', 'permissionMode'] as const) {
@@ -34,7 +34,7 @@ test('the Default entries name the machine default, and fall back to a plain Def
     assert.strictEqual(defaultLabel(field, undefined), 'Default');
   }
   assert.deepStrictEqual(modelChoices(machine).map((choice) => choice.label), ['Default (Opus 5.5, high)', 'Opus 5.5', 'Haiku']);
-  assert.deepStrictEqual(modeChoices({ ...machine, modes: ['plan', 'auto'] }).map((choice) => choice.value), ['', 'plan', 'auto']);
+  assert.deepStrictEqual(modeChoices({ ...machine, modes: ['plan', 'auto'] }).map((choice) => choice.value), ['', 'auto', 'plan']);
 });
 
 test('the effort list follows the chosen model, or the machine default model', () => {

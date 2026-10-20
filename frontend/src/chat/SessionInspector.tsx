@@ -1,10 +1,9 @@
-import React, { useState } from 'react';
-import { useMutation, useQuery } from '@apollo/client';
-import { ArrowRight, Trash2 } from 'lucide-react';
+import React from 'react';
+import { useQuery } from '@apollo/client';
+import { ArrowRight, FileCode } from 'lucide-react';
 import type { AgentRun } from '../agents/runs';
-import { RENAME_CHAT_SESSION } from '../graphql/mutations';
 import { GET_CHAT_SESSION, GET_ORCHESTRATION } from '../graphql/queries';
-import { Badge, Button, Input } from '../components/ui';
+import { Badge, Button } from '../components/ui';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 import { TICKET_STEPS, stepIndex } from '../lib/ticketDetail';
@@ -19,61 +18,42 @@ const SHOWN_FILES = 12;
 const label = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
 const baseName = (path: string) => path.split(/[\\/]/).pop() || path;
 
-const TITLE_MAX = 120;
-
-const PhoneActions: React.FC<{ session: Pick<ChatSession, 'id' | 'title'>; costUsd: number | null | undefined; onDelete: () => void }> = ({ session, costUsd, onDelete }) => {
-  const [rename, { loading }] = useMutation(RENAME_CHAT_SESSION);
-  const [title, setTitle] = useState(session.title);
-  const [error, setError] = useState('');
-  const save = async () => {
-    setError('');
-    try {
-      await rename({ variables: { id: session.id, title: title.trim() } });
-    } catch (renameError) {
-      setError(renameError instanceof Error && renameError.message ? renameError.message : 'The session could not be renamed');
-    }
-  };
-  return (
-    <section className="flex flex-col gap-2 min-[761px]:hidden" aria-label="Actions">
-      <h3 className={label}>Actions</h3>
-      {costUsd != null && <p className="font-mono text-[0.72rem] text-secondary-foreground">Cost <span className="tabular-nums">${costUsd.toFixed(2)}</span></p>}
-      <form className="flex items-center gap-1.5" onSubmit={(event) => { event.preventDefault(); if (title.trim()) void save(); }}>
-        <Input className="h-11 min-w-0 flex-1 px-2.5 text-[0.82rem]" value={title} maxLength={TITLE_MAX} aria-label="Session title" onChange={(event) => setTitle(event.target.value)} />
-        <Button size="sm" type="submit" className="h-11" disabled={loading || !title.trim() || title.trim() === session.title}>Rename</Button>
-      </form>
-      {error && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">{error}</p>}
-      <Button size="sm" variant="danger" className="h-11" onClick={onDelete}><Trash2 size={13} aria-hidden="true" />Delete session</Button>
-    </section>
-  );
-};
+const SESSION_ROWS = ['effort', 'permissionMode'] as const;
 
 interface SessionInspectorProps {
   session: Pick<ChatSession, 'id' | 'title' | 'ticketKey' | 'machine'>;
-  phoneActions?: { costUsd: number | null | undefined; onDelete: () => void };
+  /** The phone header has no room for the cost chip, so the sheet shows it. */
+  costUsd?: number | null;
   files: readonly ChatFileChange[];
   onTicketClick?: (key: string) => void;
   className?: string;
 }
 
-export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, phoneActions, files, onTicketClick, className }) => {
+export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, costUsd, files, onTicketClick, className }) => {
   const ticketKey = session.ticketKey || '';
   const { data: sessionData } = useQuery<{ chatSession: ChatSession | null }>(GET_CHAT_SESSION, { variables: { id: session.id } });
   const { data: machineData } = useQuery<{ chatMachineOptions: SessionMachineOptions | null }>(CHAT_MACHINE_OPTIONS, { variables: { machine: machineOf(session) } });
   const { data } = useQuery(GET_ORCHESTRATION, { ...CACHED_QUERY_OPTIONS, variables: { key: ticketKey }, skip: !ticketKey, pollInterval: 30000 });
   const run: AgentRun | null = ticketKey && data?.orchestration?.key?.toUpperCase() === ticketKey.toUpperCase() ? data.orchestration : null;
   const current = stepIndex(run?.stage);
-  const applied = appliedOptions(sessionTurnOptions(sessionData?.chatSession) ?? EMPTY_OPTIONS, machineData?.chatMachineOptions ?? undefined);
+  const machine = machineData?.chatMachineOptions ?? undefined;
+  const options = sessionTurnOptions(sessionData?.chatSession) ?? EMPTY_OPTIONS;
+  // A default the session's model cannot take (no effort levels, no Auto) is not shown as if it applied.
+  const model = machine?.models.find((item) => item.value === (options.model ?? machine.defaults?.model));
+  const autoBlocked = model?.auto === false && (options.permissionMode ?? machine?.defaults?.permissionMode) === 'auto';
+  const applied = appliedOptions(options, machine).filter((row) => (row.field === 'effort' ? !model || model.efforts.length > 0 : !(row.field === 'permissionMode' && autoBlocked)));
+  const sessionRows = SESSION_ROWS.flatMap((field) => applied.filter((row) => row.field === field));
   const changed = changedFiles(files);
   const total = filesTotal(changed);
   return (
     <aside className={cn('flex min-h-0 flex-col gap-4 overflow-y-auto bg-surface-0 p-3.5', className)} aria-label="Session details">
-      {phoneActions && <PhoneActions session={session} costUsd={phoneActions.costUsd} onDelete={phoneActions.onDelete} />}
-      <section className="flex flex-col gap-1.5" aria-label="Session">
+      <section className={cn('flex flex-col gap-1.5', sessionRows.length === 0 && (costUsd != null ? 'min-[761px]:hidden' : 'hidden'))} aria-label="Session">
         <h3 className={label}>Session</h3>
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-[0.72rem]">
-          {applied.filter((row) => row.field !== 'model').map((row) => (
+          {sessionRows.map((row) => (
             <React.Fragment key={row.field}><dt className="text-muted-foreground">{row.label}</dt><dd className="min-w-0 truncate text-right text-secondary-foreground">{row.value}</dd></React.Fragment>
           ))}
+          {costUsd != null && <><dt className="text-muted-foreground min-[761px]:hidden">Cost</dt><dd className="text-right tabular-nums text-secondary-foreground min-[761px]:hidden">${costUsd.toFixed(2)}</dd></>}
         </dl>
       </section>
       <section className="flex flex-col gap-2.5" aria-label="Ticket">
@@ -106,6 +86,7 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, pho
             <ul className="flex flex-col gap-0.5 font-mono text-[0.7rem] text-secondary-foreground">
               {changed.slice(0, SHOWN_FILES).map((file) => (
                 <li key={file.path} className="flex min-w-0 items-center gap-2" title={file.path}>
+                  <FileCode size={12} aria-hidden="true" className="flex-none text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">{baseName(file.path)}</span>
                   <span className="flex-none tabular-nums text-status-merged">+{file.added}</span>
                   <span className="flex-none tabular-nums text-status-conflict">−{file.removed}</span>
@@ -115,8 +96,10 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, pho
             </ul>
           )}
         </div>
-        {ticketKey && onTicketClick && <Button size="sm" className="w-full max-[900px]:h-11" onClick={() => onTicketClick(ticketKey)}>Open ticket<ArrowRight size={13} aria-hidden="true" /></Button>}
       </section>
+      <div className="mt-auto flex flex-col gap-4">
+        {ticketKey && onTicketClick && <Button size="sm" className="w-full max-[900px]:h-11" onClick={() => onTicketClick(ticketKey)}>Open ticket<ArrowRight size={13} aria-hidden="true" /></Button>}
+      </div>
     </aside>
   );
 };

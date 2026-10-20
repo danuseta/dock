@@ -11,14 +11,15 @@ export const normalizeRtk = (value: unknown): RtkSetting => (value === 'off' ? '
 
 export const cavemanChoices = (): Choice[] => CAVEMAN_LEVELS.map((level) => ({ value: level, label: level }));
 
-const defaultChoice: Choice = { value: '', label: 'Default' };
+// Shown only while neither Settings nor Claude Code on the machine names a value.
+const notSet = (saved: string): Choice[] => (saved === '' ? [{ value: '', label: 'Not set' }] : []);
 
 const withSaved = (choices: Choice[], saved: string): Choice[] => (
   saved === '' || choices.some((choice) => choice.value === saved) ? choices : [...choices, { value: saved, label: `${saved} (not offered)` }]
 );
 
 export const settingModelChoices = (machine: SessionMachineOptions | undefined, saved: string): Choice[] => withSaved([
-  defaultChoice,
+  ...notSet(saved),
   ...(machine?.models ?? []).map((model) => ({ value: model.value, label: model.label })),
 ], saved);
 
@@ -27,14 +28,14 @@ export const settingEffortChoices = (machine: SessionMachineOptions | undefined,
   const wanted = model || machine?.defaults?.model || null;
   const known = wanted !== null && models.some((item) => item.value === wanted) ? wanted : null;
   return withSaved([
-    defaultChoice,
+    ...notSet(saved),
     ...effortChoices(models, known).map((level) => ({ value: level, label: level })),
   ], saved);
 };
 
 export const settingModeChoices = (machine: MachineOptions & SessionMachineOptions | undefined, saved: string): Choice[] => {
   return withSaved([
-    defaultChoice,
+    ...notSet(saved),
     ...PERMISSION_MODES.filter((mode) => machine?.modes.includes(mode)).map((mode) => ({ value: mode, label: MODE_LABELS[mode] ?? mode })),
   ], saved);
 };

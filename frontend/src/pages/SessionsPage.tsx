@@ -1,18 +1,18 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { MessagesSquare, Search, X } from 'lucide-react';
-import { CREATE_CHAT_SESSION, DELETE_CHAT_SESSION } from '../graphql/mutations';
-import { GET_CHAT_SESSION, GET_CHAT_SESSIONS, SEARCH_CHAT } from '../graphql/queries';
+import { MessagesSquare, X } from 'lucide-react';
+import { CREATE_CHAT_SESSION, DELETE_CHAT_SESSION, RENAME_CHAT_SESSION } from '../graphql/mutations';
+import { GET_CHAT_MACHINES, GET_CHAT_SESSION, GET_CHAT_SESSIONS, SEARCH_CHAT } from '../graphql/queries';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Toast } from '../components/Toast';
 import { Button, Card, Dialog, Input, Page } from '../components/ui';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { ChatThread } from '../chat/ChatThread';
-import { LimitsLine } from '../chat/StatusLine';
+import { LimitMeters } from '../chat/StatusLine';
 import { useChatStatus } from '../chat/useChatStatus';
 import { useFullViewport } from '../chat/useFullViewport';
-import { SLOW_POLL_MS, machineOf, sessionTitle as titleOf, type ChatSession } from '../chat/messages';
+import { SLOW_POLL_MS, machineOf, sessionTitle as titleOf, type ChatMachine, type ChatSession } from '../chat/messages';
 import { SessionSidebar } from '../chat/SessionSidebar';
 import { SessionRow } from '../chat/SessionRow';
 import { useNow } from '../chat/activity/useNow';
@@ -27,6 +27,7 @@ interface SearchHit { session: ChatSession; messageId: number; snippet: string; 
 
 const WIDE_QUERY = '(min-width: 901px)';
 const SEARCH_MIN = 2;
+const TITLE_MAX = 120;
 
 const errorText = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
 
@@ -34,13 +35,19 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
   const { data, loading, error, refetch } = useQuery<{ chatSessions: ChatSession[] }>(GET_CHAT_SESSIONS, { ...CACHED_QUERY_OPTIONS, variables: { limit: 300 }, pollInterval: SLOW_POLL_MS });
   const [createSession, { loading: creating }] = useMutation<{ createChatSession: ChatSession }>(CREATE_CHAT_SESSION);
   const [deleteSession, { loading: deleting }] = useMutation(DELETE_CHAT_SESSION);
+  const [renameSession, { loading: renaming }] = useMutation(RENAME_CHAT_SESSION);
   const [selectedId, setSelectedId] = useState<string | null>(() => sessionIdFromSearch(window.location.search));
   const [searchText, setSearchText] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [actionError, setActionError] = useState('');
   const [workerId, setWorkerId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ChatSession | null>(null);
+  const [renameTarget, setRenameTarget] = useState<ChatSession | null>(null);
+  const [titleDraft, setTitleDraft] = useState('');
+  const [renameError, setRenameError] = useState('');
   const { status: liveStatus } = useChatStatus();
+  const { data: machinesData } = useQuery<{ chatMachines: ChatMachine[] | null }>(GET_CHAT_MACHINES, { pollInterval: SLOW_POLL_MS });
   const [gone, setGone] = useState(false);
   const [events, setEvents] = useState<ChatActivity[]>([]);
   const [lanesOn, setLanesOn] = useState(false);
@@ -116,10 +123,28 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
       await deleteSession({ variables: { id: deleteTarget.id } });
       chatStore.closeTab(deleteTarget.id);
       setDeleteTarget(null);
-      select(null);
+      if (deleteTarget.id === selectedId) select(null);
       await refetch();
     } catch (deleteError) {
       setActionError(errorText(deleteError, 'The session could not be deleted'));
+    }
+  };
+
+  const openRename = (session: ChatSession) => {
+    setRenameError('');
+    setTitleDraft(session.title);
+    setRenameTarget(session);
+  };
+
+  const handleRename = async () => {
+    const title = titleDraft.trim();
+    if (!renameTarget || !title) return;
+    setRenameError('');
+    try {
+      await renameSession({ variables: { id: renameTarget.id, title } });
+      setRenameTarget(null);
+    } catch (error) {
+      setRenameError(errorText(error, 'The session could not be renamed'));
     }
   };
 
@@ -135,9 +160,9 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
   if (isInitialQueryLoading(loading, data)) return <Page width="full"><LoadingSkeleton /></Page>;
 
   const lanesToggle = lanesReady ? (
-    <span className="inline-flex overflow-hidden rounded-xs border border-border-glow font-mono text-[0.66rem] max-[900px]:hidden" role="group" aria-label="View">
+    <span className="inline-flex flex-none overflow-hidden whitespace-nowrap rounded-xs border border-border-glow font-mono text-[0.66rem] max-[900px]:hidden" role="group" aria-label="View">
       <button type="button" aria-pressed={!showLanes} className={cn('px-2 py-1', !showLanes ? 'bg-surface-hover font-bold text-foreground' : 'text-secondary-foreground hover:bg-surface-1')} onClick={() => setLanesOn(false)}>Chat</button>
-      <button type="button" aria-pressed={showLanes} className={cn('px-2 py-1', showLanes ? 'bg-surface-hover font-bold text-foreground' : 'text-secondary-foreground hover:bg-surface-1')} onClick={() => setLanesOn(true)}>Swimlanes · {stats.runningAgents} running</button>
+      <button type="button" aria-pressed={showLanes} className={cn('px-2 py-1', showLanes ? 'bg-surface-hover font-bold text-foreground' : 'text-secondary-foreground hover:bg-surface-1')} onClick={() => setLanesOn(true)}>Swimlanes<span className="max-[1500px]:hidden"> · {stats.runningAgents} running</span></button>
     </span>
   ) : null;
 
@@ -161,22 +186,29 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
     <Page width="full">
       {error && !data && <Card className="mb-4 border-status-conflict text-status-conflict" role="alert">Sessions failed to load: {error.message}</Card>}
 
-      <div className="grid h-[calc(100dvh-112px)] min-h-[420px] grid-cols-[280px_minmax(0,1fr)] items-stretch gap-4 max-[760px]:h-[calc(100dvh-96px-env(safe-area-inset-bottom))] max-[900px]:grid-cols-1">
+      <div className="grid h-[calc(100dvh-112px)] min-h-[420px] grid-cols-[290px_minmax(0,1fr)] items-stretch gap-4 max-[760px]:h-[calc(100dvh-96px-env(safe-area-inset-bottom))] max-[900px]:grid-cols-1">
         <Card className={cn('flex min-h-0 min-w-0 flex-col overflow-hidden bg-surface-0 p-0', selected && 'max-[900px]:hidden')}>
-          <div className="relative flex-none border-b border-border p-3">
-            <Search size={14} className="pointer-events-none absolute top-1/2 left-6 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-            <Input className="h-9 pl-9 text-[0.82rem] max-[900px]:h-11" type="search" value={searchText} placeholder="Search every message..." aria-label="Search messages" onChange={(event) => setSearchText(event.target.value)} />
-          </div>
-          {searchText.trim().length === 1 && <p className="px-3 pt-2 text-xs text-muted-foreground">Type at least {SEARCH_MIN} characters to search.</p>}
           <div className="min-h-0 flex-1">
             <SessionSidebar
               sessions={sessions}
+              live={liveStatus?.sessions ?? []}
+              machines={machinesData?.chatMachines}
               activeId={selectedId}
               activeWorkerId={workerId}
               onSelect={select}
               onSelectWorker={selectWorker}
               onNew={() => void create({})}
-              limits={<LimitsLine machine={selected ? machineOf(selected) : undefined} />}
+              onRename={openRename}
+              onDelete={(session) => { setActionError(''); setDeleteTarget(session); }}
+              searchOpen={searchOpen}
+              onToggleSearch={() => { if (searchOpen) setSearchText(''); setSearchOpen(!searchOpen); }}
+              search={(
+                <>
+                  <Input className="h-9 text-[0.82rem] max-[900px]:h-11" type="search" value={searchText} placeholder="Search every message..." aria-label="Search messages" autoFocus onChange={(event) => setSearchText(event.target.value)} />
+                  {searchText.trim().length === 1 && <p className="px-1 pt-2 text-xs text-muted-foreground">Type at least {SEARCH_MIN} characters to search.</p>}
+                </>
+              )}
+              limits={<LimitMeters machine={selected ? machineOf(selected) : undefined} />}
               results={results}
             />
           </div>
@@ -209,21 +241,20 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
                       delayed={delayed}
                       control={control}
                       inspectorOpen={inspectorOpen}
-                      lanes={lanesToggle}
+                      lanes={inspectorOpen ? null : lanesToggle}
                       onBack={() => select(null)}
-                      onDelete={() => { setActionError(''); setDeleteTarget(selected); }}
                       onToggleInspector={() => setInspectorOpen((open) => !open)}
                     />
                   )}
                   readOnlyAction={<Button size="sm" variant="primary" disabled={creating} onClick={() => void create({ forkFrom: selected.id, title: selected.title || undefined, ticketKey: selected.ticketKey })}>Continue as a DOCK session</Button>}
                 />
                 {showLanes && <AgentLanes events={events} className="min-w-0 flex-1 max-[900px]:hidden" />}
-                {inspectorOpen && <SessionInspector session={selected} files={files} onTicketClick={onTicketClick} className="w-[280px] flex-none border-l border-border max-[900px]:hidden" />}
+                {inspectorOpen && <SessionInspector session={selected} files={files} onTicketClick={onTicketClick} className="w-[260px] flex-none border-l border-border max-[900px]:hidden" />}
               </div>
               {inspectorOpen && (
                 <div className="fixed inset-x-0 bottom-0 z-[50] max-h-[70dvh] overflow-y-auto rounded-t-lg border-t border-border-glow bg-surface-1 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-card min-[901px]:hidden" role="dialog" aria-label="About this session">
                   <div className="mb-2 flex items-center justify-between"><span className="mx-auto h-1.5 w-10 rounded-pill bg-border-glow" aria-hidden="true" /><Button size="sm" variant="ghost" className="h-11 min-w-11" aria-label="Close" onClick={() => setInspectorOpen(false)}><X size={15} aria-hidden="true" /></Button></div>
-                  <SessionInspector session={selected} files={files} phoneActions={{ costUsd: liveSession?.costUsd, onDelete: () => { setActionError(''); setDeleteTarget(selected); } }} onTicketClick={onTicketClick} className="bg-transparent p-0" />
+                  <SessionInspector session={selected} files={files} costUsd={liveSession?.costUsd} onTicketClick={onTicketClick} className="bg-transparent p-0" />
                 </div>
               )}
             </>
@@ -239,6 +270,18 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
           <p id="delete-session-description" className="mt-2 text-pretty text-sm text-muted-foreground">{deleteTarget ? titleOf(deleteTarget) : ''} and its messages are removed from DOCK. {deleteTarget?.source === 'cli' ? 'The session on the workspace is not touched.' : 'This cannot be undone.'}</p>
           {actionError && <p className="mt-3 text-pretty text-sm text-status-conflict" role="alert">{actionError}</p>}
           <div className="mt-6 flex justify-end gap-2"><Button onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button><Button variant="danger" onClick={handleDelete} disabled={deleting}>{deleting ? 'Deleting...' : 'Delete session'}</Button></div>
+        </Card>
+      </Dialog>
+
+      <Dialog open={Boolean(renameTarget)} onClose={() => !renaming && setRenameTarget(null)} dismissible={!renaming} labelledBy="rename-session-title">
+        <Card className="w-[min(440px,calc(100vw-2rem))] shadow-card">
+          <form onSubmit={(event) => { event.preventDefault(); void handleRename(); }}>
+            <h2 id="rename-session-title" className="text-balance font-display text-xl font-bold">Rename session</h2>
+            <p className="mt-2 text-pretty text-sm text-muted-foreground">Shown in the sidebar and the header.</p>
+            <Input className="mt-4 h-10 max-[900px]:h-11" value={titleDraft} maxLength={TITLE_MAX} aria-label="Session title" autoFocus onChange={(event) => setTitleDraft(event.target.value)} />
+            {renameError && <p className="mt-3 text-pretty text-sm text-status-conflict" role="alert">{renameError}</p>}
+            <div className="mt-6 flex justify-end gap-2"><Button type="button" onClick={() => setRenameTarget(null)} disabled={renaming}>Cancel</Button><Button type="submit" variant="primary" disabled={renaming || !titleDraft.trim()}>{renaming ? 'Saving...' : 'Save'}</Button></div>
+          </form>
         </Card>
       </Dialog>
     </Page>

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
-import { CAVEMAN_LEVELS } from '../datasources/StorageAPI';
+import { CAVEMAN_LEVELS, CHAT_MODES } from '../datasources/StorageAPI';
 import { StorageService } from '../storage/service';
 import {
   ACTIVITY_DETAIL_KEEP_MS,
@@ -35,6 +35,8 @@ import {
   TAKEN_HARD_TEXT,
   TurnNotifier,
   WAIT_TOUCH_MS,
+  chatMode,
+  chatOptions,
   checkAnswer,
   NO_DEFAULTS,
   checkTurnOptions,
@@ -54,7 +56,6 @@ import {
   type BridgeCaps,
   type Catalog,
   type InteractionKind,
-  type PermissionMode,
   type WaitAnswer,
 } from './chat-interactions';
 import { DEFAULT_MACHINE, OrchestratorInputError, normalizeMachine, normalizeTicketKey } from './orchestrator';
@@ -414,7 +415,7 @@ function toSession(row: SessionRow, lastText: string | null, waiting = false, wo
     lastText,
     waiting,
     workerCount,
-    options: parseStoredOptions(row.options),
+    options: row.origin === 'cron' ? parseStoredOptions(row.options) : chatOptions(parseStoredOptions(row.options)),
   };
 }
 
@@ -602,12 +603,12 @@ export class ChatService {
     const base = catalog?.defaults ?? NO_DEFAULTS;
     return {
       models: catalog?.models ?? [],
-      modes: caps?.modes ?? [],
+      modes: (caps?.modes ?? []).filter((mode) => (CHAT_MODES as readonly string[]).includes(mode)),
       fastAvailable: caps?.features.includes('fast') === true && catalog?.fast.available === true,
       defaults: {
         model: chosen?.model ?? base.model,
         effort: chosen?.effort ?? base.effort,
-        permissionMode: chosen?.permissionMode ?? base.permissionMode,
+        permissionMode: chatMode(chosen?.permissionMode ?? base.permissionMode),
       },
     };
   }
@@ -622,7 +623,7 @@ export class ChatService {
     return usableTurnOptions({
       model: setting('chatDefaultModel'),
       effort: setting('chatDefaultEffort'),
-      permissionMode: setting('chatDefaultMode') as PermissionMode | null,
+      permissionMode: chatMode(setting('chatDefaultMode')),
       fast: null,
     }, caps, catalog);
   }
@@ -972,7 +973,7 @@ export class ChatService {
       throw new OrchestratorInputError('This machine cannot receive attachments yet');
     }
     if (options) checkTurnOptions(options, caps, catalog);
-    const stored = mergeTurnOptions(await this.settingsOptions(caps, catalog), usableTurnOptions(parseStoredOptions(session.options), caps, catalog));
+    const stored = mergeTurnOptions(await this.settingsOptions(caps, catalog), usableTurnOptions(session.origin === 'cron' ? parseStoredOptions(session.options) : chatOptions(parseStoredOptions(session.options)), caps, catalog));
     const effective = usableTurnOptions(mergeTurnOptions(stored, options), caps, catalog);
     const now = this.now();
     const optionsJson = effective ? JSON.stringify(effective) : null;

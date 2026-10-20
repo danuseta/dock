@@ -64,7 +64,8 @@ export function popoverRows(options: TurnOptions, machine: SessionMachineOptions
   if (machine.models.length > 0) rows.push(row('model', 'Model', machine.models.map((item) => ({ value: item.value, label: item.label }))));
   const efforts = effortChoices(machine.models, known);
   if (efforts.length > 0) rows.push(row('effort', 'Effort', efforts.map((level) => ({ value: level, label: level }))));
-  const modes = PERMISSION_MODES.filter((mode) => machine.modes.includes(mode));
+  const autoOffered = machine.models.find((item) => item.value === model)?.auto !== false;
+  const modes = PERMISSION_MODES.filter((mode) => machine.modes.includes(mode) && (mode !== 'auto' || autoOffered));
   if (modes.length > 0) rows.push(row('permissionMode', 'Mode', modes.map((mode) => ({ value: mode, label: MODE_LABELS[mode] ?? mode }))));
   return rows;
 }
@@ -78,6 +79,10 @@ export const SETTING_KEY: Record<OptionField, 'chatDefaultModel' | 'chatDefaultE
   effort: 'chatDefaultEffort',
   permissionMode: 'chatDefaultMode',
 };
+
+export const defaultsToSave = (rows: readonly PopoverRow[]): Partial<Record<(typeof SETTING_KEY)[OptionField], string>> => (
+  Object.fromEntries(rows.filter((row) => row.value && !row.isDefault).map((row) => [SETTING_KEY[row.field], row.value]))
+);
 
 export function workerSteps(events: readonly ChatActivity[], workerId: string): ChatActivity[] {
   const keep = new Set<string>([workerId]);

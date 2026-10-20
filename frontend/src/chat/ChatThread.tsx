@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useApolloClient, useQuery } from '@apollo/client';
-import { Loader2, SendHorizontal } from 'lucide-react';
+import { Clock, Loader2, RefreshCw, SendHorizontal } from 'lucide-react';
 import { SEND_CHAT_MESSAGE, STOP_CHAT_TURN } from '../graphql/mutations';
 import { GET_CHAT_MESSAGES, GET_CHAT_SESSION } from '../graphql/queries';
 import { Button } from '../components/ui';
@@ -311,13 +311,14 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
 
       <div className="flex flex-col gap-1.5 border-t border-border bg-surface-0 px-3.5 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))]">
         {delayed && ownStatus && (
-          <p className="rounded-xs border border-amber-300/50 bg-amber-300/10 px-2.5 py-1.5 text-pretty text-xs text-amber-200" role="status">
-            {delayedText(delayedMinutes(ownStatus.receivedAt, statusNow))}{' '}
-            <button type="button" className="inline rounded-xs border border-amber-300/50 px-1.5 py-px font-mono text-[0.68rem] font-bold hover:bg-amber-300/10" onClick={recheckStatus}>Check again</button>
-          </p>
+          <div className="flex items-center gap-2 rounded-xs border border-amber-300/50 bg-amber-300/10 px-2.5 py-1.5 text-xs text-amber-200" role="status">
+            <Clock size={13} aria-hidden="true" className="flex-none" />
+            <span className="min-w-0 flex-1 text-pretty">{delayedText(delayedMinutes(ownStatus.receivedAt, statusNow))}</span>
+            <button type="button" className="inline-flex flex-none items-center gap-1 whitespace-nowrap rounded-xs border border-amber-300/50 px-2 py-0.5 font-body text-[0.72rem] font-semibold hover:bg-amber-300/10 max-[900px]:min-h-11" onClick={recheckStatus}><RefreshCw size={12} aria-hidden="true" />Check again</button>
+          </div>
         )}
-        {status === 'queued' && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-secondary-foreground" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" />Queued · waiting for the {machine} bridge to pick it up</p>}
-        {status === 'running' && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-status-merged" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">Running{interactions.cards.length > 0 ? ' · waiting for your answer' : session?.statusDetail ? ` · ${session.statusDetail}` : ''}</span></p>}
+        {status === 'queued' && !renderHeader && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-secondary-foreground" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" />Queued · waiting for the {machine} bridge to pick it up</p>}
+        {status === 'running' && !renderHeader && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-status-merged" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">Running{interactions.cards.length > 0 ? ' · waiting for your answer' : session?.statusDetail ? ` · ${session.statusDetail}` : ''}</span></p>}
         {status === 'error' && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The last turn failed{session?.statusDetail ? `: ${session.statusDetail}` : '.'}</p>}
         {sendError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">Not sent: {sendError}</p>}
         {loadError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">{loadError}</p>}
