@@ -37,7 +37,7 @@ export const RUN_STATE_LABEL: Record<RunState, string> = {
   finished: 'Run finished',
 };
 
-export type NeedKind = 'question' | 'ac' | 'review' | 'conflict' | 'demo';
+export type NeedKind = 'question' | 'ac' | 'review' | 'conflict';
 
 export interface NeedItem {
   id: string;
@@ -59,7 +59,6 @@ export const splitChoices = (waiting: string): { question: string; choices: stri
 interface NeedFacts {
   run?: Pick<AgentRun, 'waiting' | 'finished' | 'stage' | 'ac' | 'reviewSignal'> | null;
   pullRequests?: Array<{ id?: string | null; repo?: string | null; number?: number | null; pullNumber?: number | null; status?: string | null }> | null;
-  demoUrl?: string | null;
 }
 
 const REVIEW_TEXT: Partial<Record<NonNullable<AgentRun['reviewSignal']>, string>> = {
@@ -68,7 +67,7 @@ const REVIEW_TEXT: Partial<Record<NonNullable<AgentRun['reviewSignal']>, string>
 };
 
 /** What waits on the owner for this ticket, most urgent first. Empty when nothing does. */
-export function needsYou({ run, pullRequests, demoUrl }: NeedFacts): NeedItem[] {
+export function needsYou({ run, pullRequests }: NeedFacts): NeedItem[] {
   const items: NeedItem[] = [];
   if (run?.waiting && !run.finished) {
     const { question, choices } = splitChoices(run.waiting);
@@ -82,8 +81,6 @@ export function needsYou({ run, pullRequests, demoUrl }: NeedFacts): NeedItem[] 
   for (const pr of pullRequests ?? []) {
     if (pr.status?.toUpperCase() === 'CONFLICT') items.push({ id: `conflict-${pr.id ?? pr.repo}`, kind: 'conflict', text: `${pr.repo}#${pr.pullNumber ?? pr.number} has a merge conflict` });
   }
-  const pastPr = run ? stepIndex(run.stage) >= stepIndex('pr') : false;
-  if (pastPr && !demoUrl) items.push({ id: 'demo', kind: 'demo', text: 'No demo video yet' });
   return items;
 }
 

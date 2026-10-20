@@ -1,10 +1,10 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { getApprovalLabels } from '../lib/ticketApprovals';
+import { getPassLabels } from '../lib/ticketApprovals';
 
-test('shows Jira labels ending in Pass as readable approval markers', () => {
+test('shows Jira labels ending in Pass as written, once each', () => {
   assert.deepStrictEqual(
-    getApprovalLabels(['alvinPass', 'kenPass', 'needs-review', 'passive', 'uat_pass']),
-    ['ALVIN APPROVED', 'KEN APPROVED', 'UAT APPROVED'],
+    getPassLabels(['alvinPass', 'kenPass', 'needs-review', 'passive', 'uat_pass', ' alvinPass ', 'pass']),
+    ['alvinPass', 'kenPass', 'uat_pass'],
   );
 });

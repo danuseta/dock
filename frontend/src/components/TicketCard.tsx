@@ -1,122 +1,130 @@
-import React from 'react';
-import { 
-  User, 
-  AlertTriangle,
-  CheckCircle2,
-} from 'lucide-react';
-import { PRBadge } from './PRBadge';
+import React, { useRef } from 'react';
+import { AlertTriangle, Hand, MoreVertical, User } from 'lucide-react';
 import { cn } from '../lib/cn';
-import { getApprovalLabels } from '../lib/ticketApprovals';
+import { getPassLabels } from '../lib/ticketApprovals';
 import { displayAssignee } from '../lib/queryPolicy';
-import { AgentRunStrip } from './AgentRunStrip';
-import type { AgentRunSummary } from '../agents/runs';
+import { MENU_WIDTH } from './ticket/TicketMenu';
+
+const LONG_PRESS_MS = 500;
 
 interface TicketCardProps {
   ticket: {
     key: string;
     title: string;
-    status: string;
     assignee?: string;
-    sprintName?: string;
-    sprintState?: string;
     storyPoints?: number | null;
     labels?: string[];
     workOrder?: number | null;
     workOrderSource?: string | null;
     workManual?: boolean | null;
     pullRequests?: any[];
-    demoLink?: { url: string };
-    orchestration?: AgentRunSummary | null;
   };
+  menuOpen: boolean;
   onClick: () => void;
+  /** Opens the ticket menu at a point, or as a bottom sheet after a long press. */
+  onMenu: (x: number, y: number, sheet: boolean) => void;
 }
 
-export const TicketCard: React.FC<TicketCardProps> = ({ ticket, onClick }) => {
+export const TicketCard: React.FC<TicketCardProps> = ({ ticket, menuOpen, onClick, onMenu }) => {
   const hasConflict = ticket.pullRequests?.some(pr => pr.status?.toUpperCase() === 'CONFLICT') ?? false;
-  const isOldSprint = ticket.sprintState === 'CLOSED';
-  const approvalLabels = getApprovalLabels(ticket.labels);
+  const passLabels = getPassLabels(ticket.labels);
   const assignee = displayAssignee(ticket.assignee);
+  const press = useRef<{ timer: number; fired: boolean } | null>(null);
+  const endPress = () => {
+    if (press.current) window.clearTimeout(press.current.timer);
+  };
+  // The click that ends a long press must not also open the ticket.
+  const pressed = () => {
+    const fired = press.current?.fired === true;
+    press.current = null;
+    return fired;
+  };
 
   return (
-    <button
-      type="button"
+    <article
       className={cn(
-        'flex w-full flex-col justify-between gap-3 rounded-md border border-border bg-surface-1 px-4 py-3.5 text-left shadow-card transition-colors duration-150 ease-out hover:border-border-glow',
-        hasConflict && 'border-status-conflict/60 shadow-conflict',
+        'group relative rounded-md border border-border bg-surface-1 shadow-card transition-colors duration-150 ease-out hover:border-border-glow',
+        menuOpen && 'border-border-glow ring-2 ring-accent/60',
       )}
-      onClick={onClick}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        // A phone fires contextmenu for its own long press; that one opens the sheet too.
+        if (press.current) {
+          endPress();
+          press.current.fired = true;
+          onMenu(0, 0, true);
+          return;
+        }
+        onMenu(event.clientX, event.clientY, false);
+      }}
+      onTouchStart={() => {
+        endPress();
+        const current = { timer: 0, fired: false };
+        current.timer = window.setTimeout(() => {
+          current.fired = true;
+          onMenu(0, 0, true);
+        }, LONG_PRESS_MS);
+        press.current = current;
+      }}
+      onTouchMove={endPress}
+      onTouchEnd={endPress}
     >
-      <div className="flex flex-wrap items-center justify-between gap-1.5">
-        <div className="flex items-center gap-1.5">
-          <span className="rounded-xs border border-accent/30 bg-accent-dim px-[9px] py-[3px] font-mono text-sm font-extrabold text-accent">
-            {ticket.key}
-          </span>
-
+      <button
+        type="button"
+        className="flex w-full flex-col gap-2 rounded-md px-4 py-3 pr-10 text-left max-[900px]:pr-14 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+        onClick={() => { if (!pressed()) onClick(); }}
+        onKeyDown={(event) => {
+          if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
+          event.preventDefault();
+          const box = event.currentTarget.getBoundingClientRect();
+          onMenu(box.left + 24, box.bottom, false);
+        }}
+      >
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="font-mono text-sm font-extrabold text-accent">{ticket.key}</span>
           {ticket.workOrder != null && (
             <span
-              className="rounded-xs border border-sky-300/35 bg-sky-300/10 px-[7px] py-0.5 font-mono text-xs font-extrabold text-sky-200 tabular-nums"
+              className="font-mono text-xs font-semibold text-secondary-foreground tabular-nums"
               title={ticket.workOrderSource === 'dock' ? 'Work order set in DOCK' : 'Work order from the Jira label'}
-              aria-label={`Work order ${ticket.workOrder}`}
             >
               #{ticket.workOrder}
             </span>
           )}
+          {ticket.workManual && <span className="text-sky-200" title="Worked manually: the cron skips it"><Hand size={13} aria-hidden="true" /><span className="sr-only">Manual</span></span>}
+          {hasConflict && <span className="flex items-center gap-1 text-xs font-semibold text-status-conflict"><AlertTriangle size={12} aria-hidden="true" />Conflict</span>}
+        </span>
 
-          {ticket.workManual && (
-            <span
-              className="rounded-xs border border-sky-300/35 bg-sky-300/10 px-[7px] py-0.5 font-mono text-xs font-extrabold text-sky-200"
-              title="Worked manually: the cron skips it"
-            >
-              Manual
-            </span>
-          )}
+        <span className="text-pretty text-[0.92rem] leading-[1.4] font-bold text-foreground">{ticket.title}</span>
 
-          {ticket.storyPoints != null && (
-            <span className="rounded-xs border border-amber-300/35 bg-amber-300/10 px-[7px] py-0.5 font-mono text-xs font-extrabold text-amber-200 tabular-nums">
-              {ticket.storyPoints}
-            </span>
-          )}
+        {passLabels.length > 0 && (
+          <span className="flex flex-wrap gap-1" aria-label="Approved by">
+            {passLabels.map((label) => <span key={label} className="rounded-xs bg-status-merged-bg px-1.5 py-0.5 font-mono text-[0.68rem] font-semibold text-status-merged">{label}</span>)}
+          </span>
+        )}
 
-          {hasConflict && (
-            <span className="flex items-center gap-1 rounded-xs border border-status-conflict bg-status-conflict-bg px-[7px] py-0.5 font-mono text-[0.72rem] font-bold text-status-conflict">
-              <AlertTriangle size={12} aria-hidden="true" /> CONFLICT
-            </span>
-          )}
-        </div>
+        {(assignee || ticket.storyPoints != null) && (
+          <span className="mt-auto flex items-center gap-1.5 border-t border-border pt-2 font-mono text-xs text-secondary-foreground">
+            {assignee && <><User size={12} className="text-muted-foreground" aria-hidden="true" /><span className="font-semibold text-foreground">{assignee}</span></>}
+            {ticket.storyPoints != null && <span className="ml-auto font-bold tabular-nums">{ticket.storyPoints} SP</span>}
+          </span>
+        )}
+      </button>
 
-        <PRBadge status={ticket.status} />
-      </div>
-
-      {ticket.sprintName && ticket.sprintName !== 'No Sprint' && (
-        <div className={cn('font-mono text-[0.72rem] font-semibold text-green-300', isOldSprint && 'text-muted-foreground')}>
-          {ticket.sprintName}
-        </div>
-      )}
-
-      <h3 className="text-pretty text-[0.95rem] leading-[1.45] font-bold text-foreground">
-        {ticket.title}
-      </h3>
-
-      {approvalLabels.length > 0 && (
-        <div className="flex flex-wrap gap-1.5" aria-label="Approved checks">
-          {approvalLabels.map((label) => (
-            <span className="inline-flex items-center gap-1 rounded-xs border border-status-merged/40 bg-status-merged/10 px-2 py-1 font-mono text-[0.68rem] font-bold text-status-merged" key={label}>
-              <CheckCircle2 size={12} aria-hidden="true" /> {label}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {ticket.orchestration && <AgentRunStrip run={ticket.orchestration} />}
-
-      {assignee && (
-        <div className="mt-auto flex items-center border-t border-border pt-2">
-          <div className="flex items-center gap-1.5 font-mono text-xs text-secondary-foreground">
-            <User size={12} className="text-muted-foreground" aria-hidden="true" />
-            <span className="font-semibold text-foreground">{assignee}</span>
-          </div>
-        </div>
-      )}
-    </button>
+      <button
+        type="button"
+        aria-label={`Actions for ${ticket.key}`}
+        aria-haspopup="menu"
+        className={cn(
+          'absolute top-2 right-2 grid size-7 place-items-center rounded-xs text-muted-foreground opacity-0 transition-opacity duration-150 hover:bg-surface-2 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 group-hover:opacity-100 [@media(hover:none)]:opacity-100 max-[900px]:size-11',
+          menuOpen && 'opacity-100',
+        )}
+        onClick={(event) => {
+          const box = event.currentTarget.getBoundingClientRect();
+          onMenu(box.right - MENU_WIDTH, box.bottom + 4, false);
+        }}
+      >
+        <MoreVertical size={15} aria-hidden="true" />
+      </button>
+    </article>
   );
 };

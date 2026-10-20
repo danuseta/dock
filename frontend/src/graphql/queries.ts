@@ -19,6 +19,7 @@ export const GET_DASHBOARD = gql`
         title
         status
         assignee
+        url
         sprintName
         sprintState
         storyPoints
