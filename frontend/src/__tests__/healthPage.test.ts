@@ -43,3 +43,10 @@ test('a report older than 24 hours is stale', () => {
   assert.strictEqual(isStale('2026-10-19T23:00:00Z', now), true);
   assert.strictEqual(isStale('2026-10-20T01:00:00Z', now), false);
 });
+
+test('Refresh asks the workspace to run the doctor instead of reading the old report again', () => {
+  const page = read('pages/HealthPage.tsx');
+  assert.match(page, /requestRun\(\{ variables: \{ machine: 'workspace' \} \}\)/);
+  assert.match(page, /<Button onClick=\{runDoctor\}/);
+  assert.match(read('graphql/mutations.ts'), /requestDoctorRun\(machine: \$machine\)/);
+});

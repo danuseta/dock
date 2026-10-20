@@ -447,3 +447,9 @@ export const APPROVE_REVIEW = gql`
     approveReview(ticketKey: $ticketKey) { name ok detail }
   }
 `;
+
+export const REQUEST_DOCTOR_RUN = gql`
+  mutation RequestDoctorRun($machine: String!) {
+    requestDoctorRun(machine: $machine)
+  }
+`;

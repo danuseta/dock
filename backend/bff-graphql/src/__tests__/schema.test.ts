@@ -156,6 +156,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'removeMonitor',
       'removeQuickLink',
       'renameChatSession',
+      'requestDoctorRun',
       'restartDevServer',
       'revokeIngestToken',
       'runOrchestratorCronNow',
