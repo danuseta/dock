@@ -755,9 +755,9 @@ test('SQLite keeps session options, an auto title, saved status lines and an age
 
   await chat.claim({ wait: 0, caps }, undefined, 'laptop');
   await chat.ingestCatalog({ hash: 'ux1', commands: [], models: [{ value: 'sonnet', label: 'Sonnet', efforts: ['low', 'high'], fast: false }], fast: { available: false, reason: null }, defaults: { model: 'sonnet', effort: 'high', permissionMode: 'default' } }, 'laptop');
-  assert.deepStrictEqual((await chat.machineOptions('laptop', ['laptop']))?.defaults, { model: 'sonnet', effort: 'high', permissionMode: 'default' });
+  assert.deepStrictEqual((await chat.machineOptions('laptop', ['laptop']))?.defaults, { model: 'sonnet', effort: 'high', permissionMode: 'auto' }, 'a chat reads the default mode as Auto');
   const restartedChat = new ChatService(storage);
-  assert.deepStrictEqual((await restartedChat.machineOptions('laptop', ['laptop']))?.defaults, { model: 'sonnet', effort: 'high', permissionMode: 'default' }, 'the defaults are stored with the catalogue');
+  assert.deepStrictEqual((await restartedChat.machineOptions('laptop', ['laptop']))?.defaults, { model: 'sonnet', effort: 'high', permissionMode: 'auto' }, 'the defaults are stored with the catalogue');
 
   await chat.setSessionOptions(dock.id, { model: 'sonnet', effort: 'low', permissionMode: 'auto' });
   const sent = await chat.sendMessage(dock.id, '  Check <b>this</b> PR  ', ['laptop'], { options: { effort: 'high' } });
