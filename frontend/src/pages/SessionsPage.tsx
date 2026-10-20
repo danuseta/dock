@@ -1,9 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { MessagesSquare, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import { CREATE_CHAT_SESSION, DELETE_CHAT_SESSION, RENAME_CHAT_SESSION } from '../graphql/mutations';
 import { GET_CHAT_MACHINES, GET_CHAT_SESSION, GET_CHAT_SESSIONS, SEARCH_CHAT } from '../graphql/queries';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
+import { EmptyState } from '../components/EmptyState';
+import { BubblesScene } from '../components/empty/scenes/BubblesScene';
+import { SearchScene } from '../components/empty/scenes/SearchScene';
+import { SkeletonScene } from '../components/empty/scenes/SkeletonScene';
 import { Toast } from '../components/Toast';
 import { Button, Card, Dialog, Input, Page } from '../components/ui';
 import { cn } from '../lib/cn';
@@ -169,7 +173,7 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
   const message = (text: React.ReactNode, props: React.HTMLAttributes<HTMLParagraphElement> = {}) => <p className="px-3 py-6 text-center text-pretty text-sm text-muted-foreground" {...props}>{text}</p>;
   let results: React.ReactNode;
   if (searching && searchError) results = <p className="px-3 py-2 text-pretty text-xs text-status-conflict" role="alert">The search failed: {searchError.message}</p>;
-  else if (searching && hits.length === 0) results = searchLoading ? message('Searching...', { role: 'status' }) : message(`No message contains "${query}".`);
+  else if (searching && hits.length === 0) results = searchLoading ? message('Searching...', { role: 'status' }) : <EmptyState size="panel" scene={<SearchScene />} description={`No message contains "${query}".`} />;
   else if (searching) {
     results = (
       <div className="p-2" role="list" aria-label="Search results">
@@ -180,7 +184,7 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
         ))}
       </div>
     );
-  } else if (sessions.length === 0) results = message(<>No session yet. Start one here, or run <span className="font-mono text-xs">node dock-push.cjs sessions</span> on the workspace to bring in the history.</>);
+  } else if (sessions.length === 0) results = <EmptyState size="panel" scene={<SkeletonScene />} description={<>No session yet. Start one here, or run <span className="font-mono text-xs">node dock-push.cjs sessions</span> on the workspace to bring in the history.</>} />;
 
   return (
     <Page width="full">
@@ -216,11 +220,13 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
 
         <Card className={cn('flex min-h-0 min-w-0 flex-col bg-surface-0 p-0', !selected && 'max-[900px]:hidden', selected && 'max-[900px]:fixed max-[900px]:inset-x-0 max-[900px]:top-[var(--vv-top,0px)] max-[900px]:z-[45] max-[900px]:h-[var(--vv-h,100dvh)] max-[900px]:min-h-0 max-[900px]:rounded-none max-[900px]:border-0')}>
           {!selected ? (
-            <div className="grid flex-1 place-items-center p-6 text-center">
-              <div>
-                <MessagesSquare size={28} className="mx-auto mb-2 text-muted-foreground" aria-hidden="true" />
-                <p className="text-pretty text-sm text-muted-foreground">Select a session to read it.</p>
-              </div>
+            <div className="grid flex-1 place-items-center p-6">
+              <EmptyState
+                scene={<BubblesScene />}
+                title="Pick a session on the left"
+                description="Select a session to read it."
+                action={<Button size="sm" variant="primary" disabled={creating} onClick={() => void create({})}><Plus size={14} aria-hidden="true" />New session</Button>}
+              />
             </div>
           ) : (
             <>

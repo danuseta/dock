@@ -4,6 +4,8 @@ import { Clock, Loader2, RefreshCw, SendHorizontal } from 'lucide-react';
 import { SEND_CHAT_MESSAGE, STOP_CHAT_TURN } from '../graphql/mutations';
 import { GET_CHAT_MESSAGES, GET_CHAT_SESSION } from '../graphql/queries';
 import { Button } from '../components/ui';
+import { EmptyState } from '../components/EmptyState';
+import { TerminalScene } from '../components/empty/scenes/TerminalScene';
 import { cn } from '../lib/cn';
 import {
   isOptimistic, isStopping, isTurnInProgress, machineCapabilities, machineOf, machineOnline, machinePlace, mergeMessages, newestAssistantId, oldestId, optimisticMessage, pollCursor, pollInterval, sendBlocker, sessionTurnOptions,
@@ -47,6 +49,11 @@ export interface HeaderContext { control: TurnOptionsControl; dot: DotState; del
 const NEWEST_PAGE = 200;
 const OLDER_PAGE = 100;
 const NEAR_BOTTOM_PX = 80;
+const PROMPT_EXAMPLES = [
+  { label: 'Build QRD-…', text: 'Build QRD-' },
+  { label: 'Review PR …', text: 'Review PR ' },
+  { label: 'Explain this repo', text: 'Explain this repo' },
+];
 
 const messageOf = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
 const timeOf = (at: string) => new Date(at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -61,6 +68,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
   const [loadError, setLoadError] = useState('');
   const [sendError, setSendError] = useState('');
   const [stopRequested, setStopRequested] = useState(false);
+  const [seed, setSeed] = useState<{ text: string } | null>(null);
   const messagesRef = useRef(messages);
   const statusRef = useRef<string | undefined>(undefined);
   const sessionRef = useRef(sessionId);
@@ -263,9 +271,19 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
         {loadingOlder && <p className="pb-2 text-center font-mono text-[0.66rem] text-muted-foreground" role="status">Loading older messages...</p>}
         {!loaded && !loadError && !missing && <p className="py-6 text-center text-sm text-muted-foreground" role="status">Loading the conversation...</p>}
         {missing && <p className="py-6 text-center text-pretty text-sm text-muted-foreground">This session no longer exists. Close this tab or pick another session.</p>}
-        {loaded && !missing && messages.length === 0 && (
-          <p className="py-6 text-center text-pretty text-sm text-muted-foreground">{readOnly ? 'This session has no messages.' : session?.forkFrom ? 'Continued from a terminal session. Claude Code keeps that conversation; what you send from here is added below.' : `Nothing here yet. Your first message starts a Claude Code session on ${place}.`}</p>
-        )}
+        {loaded && !missing && messages.length === 0 && (readOnly || session?.forkFrom ? (
+          <p className="py-6 text-center text-pretty text-sm text-muted-foreground">{readOnly ? 'This session has no messages.' : 'Continued from a terminal session. Claude Code keeps that conversation; what you send from here is added below.'}</p>
+        ) : (
+          <EmptyState
+            size="panel"
+            scene={<TerminalScene />}
+            title="Start the conversation"
+            description={`Nothing here yet. Your first message starts a Claude Code session on ${place}.`}
+            action={PROMPT_EXAMPLES.map((example) => (
+              <button key={example.label} type="button" className="h-8 rounded-pill border border-border bg-surface-1 px-3 font-mono text-xs text-secondary-foreground hover:border-accent hover:text-accent max-[900px]:h-11" onClick={() => setSeed({ text: example.text })}>{example.label}</button>
+            ))}
+          />
+        ))}
         <ol className="flex min-w-0 flex-col gap-2">
           {shownItems.map((message) => (isThreadGroup(message) ? (
             <ActivityGroup key={message.key} group={message} live={message.last && message.turnId === activity.liveTurnId} turnRunning={message.turnId === activity.liveTurnId} store={activity.store} stickRef={stickRef} />
@@ -358,6 +376,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
             control={control}
             onSend={send}
             onStop={() => void stop()}
+            seed={seed}
           />
         )}
       </div>

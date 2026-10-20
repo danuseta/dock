@@ -21,7 +21,8 @@ import { REFRESH_DATA } from '../graphql/mutations';
 import { useTicketStore } from '../stores/useTicketStore';
 import { TicketCard } from '../components/TicketCard';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
-import { EmptyStateIllustration } from '../components/EmptyStateIllustration';
+import { EmptyState } from '../components/EmptyState';
+import { KanbanScene } from '../components/empty/scenes/KanbanScene';
 import { Button, Input, Page, PageHeader, Select } from '../components/ui';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
@@ -229,12 +230,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
       </div>
 
       {totalMatchingTickets === 0 ? (
-        <div className="flex min-h-[380px] flex-col items-center justify-center rounded-md border border-border bg-surface-1 px-6 py-12 text-center">
-          <EmptyStateIllustration />
-          <h2 className="mb-1.5 font-display text-xl font-bold">No tickets found</h2>
-          <p className="max-w-[400px] text-pretty font-mono text-sm text-muted-foreground">
-            Try adjusting your search query or sprint workload selection.
-          </p>
+        <div className="flex min-h-[380px] flex-col items-center justify-center rounded-md border border-border bg-surface-1 px-6 py-12">
+          <EmptyState scene={<KanbanScene />} title="No tickets found" description={<span className="font-mono">Try adjusting your search query or sprint workload selection.</span>} />
         </div>
       ) : (
         <div className="flex min-h-[650px] w-full items-start gap-5 overflow-x-auto pb-6 max-[760px]:min-h-0 max-[760px]:flex-col max-[760px]:overflow-x-visible">

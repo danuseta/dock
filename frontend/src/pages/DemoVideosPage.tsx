@@ -4,6 +4,8 @@ import { ChevronLeft, ChevronRight, Copy, ExternalLink, RefreshCw, Trash2, Video
 import { GET_DEMO_VIDEOS } from '../graphql/queries';
 import { DELETE_DEMO_VIDEO } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
+import { EmptyState } from '../components/EmptyState';
+import { FilmScene } from '../components/empty/scenes/FilmScene';
 import { Button, Card, ConfirmDialog, IconButton, Page, PageHeader } from '../components/ui';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { cn } from '../lib/cn';
@@ -58,7 +60,7 @@ const DemoVideosPage = ({ onTicketClick }: { onTicketClick: (key: string) => voi
       {preview && <Card className="mb-6 p-0"><video className="w-full rounded-sm" src={preview} controls preload="metadata" /></Card>}
 
       <Card className="overflow-hidden p-0">
-        {videos.length === 0 ? <div className="py-12 text-center"><Video className="mx-auto mb-3 size-8 text-muted-foreground" aria-hidden="true" /><p className="text-sm text-muted-foreground">No demo video yet.</p></div> : (
+        {videos.length === 0 ? <EmptyState scene={<FilmScene />} description="No demo video yet." /> : (
           <ul className="flex flex-col">
             {shown.items.map((video) => (
               <li className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 last:border-b-0" key={video.ticketKey}>

@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { BarChart3, DatabaseZap, RefreshCw, Settings as SettingsIcon } from 'lucide-react';
+import { DatabaseZap, RefreshCw, Settings as SettingsIcon } from 'lucide-react';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
+import { EmptyState } from '../components/EmptyState';
+import { ChartScene } from '../components/empty/scenes/ChartScene';
 import { Button, Card, Page, PageHeader, Select } from '../components/ui';
 import { cn } from '../lib/cn';
 import { formatUpdated, sprintOptionLabel } from '../sprint/format';
@@ -66,14 +68,16 @@ const SprintPage: React.FC = () => {
       {showSettings && <SprintSettingsPanel />}
 
       {!result ? (
-        <Card className="py-10 text-center">
-          <BarChart3 size={34} className="mx-auto mb-2.5 text-muted-foreground" aria-hidden="true" />
-          <p className="text-pretty text-muted-foreground">
-            No sprint data yet. The board and the team are read from Jira, so just load the last {board.backfillCount} sprints.
-          </p>
-          <Button variant="primary" className="mt-4" onClick={() => void board.backfill()} disabled={board.busy}>
-            <DatabaseZap size={16} aria-hidden="true" />Load last {board.backfillCount} sprints
-          </Button>
+        <Card>
+          <EmptyState
+            scene={<ChartScene />}
+            description={`No sprint data yet. The board and the team are read from Jira, so just load the last ${board.backfillCount} sprints.`}
+            action={(
+              <Button variant="primary" onClick={() => void board.backfill()} disabled={board.busy}>
+                <DatabaseZap size={16} aria-hidden="true" />Load last {board.backfillCount} sprints
+              </Button>
+            )}
+          />
         </Card>
       ) : (
         <>

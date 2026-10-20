@@ -29,6 +29,7 @@ export interface ComposerProps {
   control: TurnOptionsControl;
   onSend: (payload: SendPayload) => Promise<void>;
   onStop: () => void;
+  seed?: { text: string } | null;
 }
 
 export interface ChatCommand {

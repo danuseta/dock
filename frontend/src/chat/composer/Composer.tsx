@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowUp, CornerDownRight, ListPlus, Loader2, Maximize2, Minimize2, Paperclip, Square } from 'lucide-react';
 import { Button } from '../../components/ui';
 import { cn } from '../../lib/cn';
@@ -14,7 +14,7 @@ import { useAttachments } from './useAttachments';
 import { useCommands } from './useCommands';
 import { isPhone } from '../../lib/phone';
 
-const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilities, blocker, busy, stopping, control, onSend, onStop }) => {
+const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilities, blocker, busy, stopping, control, onSend, onStop, seed }) => {
   const features = composerFeatures(capabilities);
   const [draft, setDraft] = useState(() => readDraft(sessionId));
   const [sending, setSending] = useState(false);
@@ -27,6 +27,11 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
   const fileInput = useRef<HTMLInputElement>(null);
   const attachments = useAttachments(sessionId, features.attachments);
   useDraftSaver(sessionId, draft);
+  useEffect(() => {
+    if (!seed) return;
+    setDraft(seed.text);
+    textarea.current?.focus();
+  }, [seed]);
   useLayoutEffect(() => {
     const box = textarea.current;
     if (!box) return;
