@@ -572,13 +572,18 @@ export const ORCHESTRATION_FIELDS = `
   finished
   note
   brief
-  decisions { at text }
+  decisions { n at text status by issue cancelNote }
   assumptions { n text falsifier state evidence }
   failures { at type what evidence attempt }
   closing { hours fixRounds replans }
   findings { at severity text }
   lgtm { at text }
   verdict
+  engine
+  rounds { used max }
+  productionData
+  draft
+  issues { n at type text level status resolvedBy resolvedAt options }
   blockers
   activity
   activityDetail
@@ -591,6 +596,20 @@ export const ORCHESTRATION_FIELDS = `
   handoverTo
   handoverAt
   updatedAt
+`;
+
+export const GET_DOCTOR_REPORTS = gql`
+  query GetDoctorReports {
+    doctorReports {
+      machine
+      host
+      os
+      at
+      receivedAt
+      kitVersion
+      checks { name ok detail }
+    }
+  }
 `;
 
 export const GET_ORCHESTRATIONS = gql`

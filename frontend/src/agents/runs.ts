@@ -14,7 +14,12 @@ export interface TimelineAgent {
   tools: number;
 }
 
-export type RunKind = 'build' | 'review';
+export type RunKind = 'build' | 'review' | 'card';
+
+/** A decision in the ledger, D-n; entries from before sous have no n, status or by. */
+export interface AgentDecision { n?: number | null; at: string; text: string; status?: string | null; by?: string | null; issue?: number | null; cancelNote?: string | null }
+/** An issue raised during the run, I-n; level owner means it waits on the owner. */
+export interface AgentIssue { n: number; at: string; type: string; text: string; level: string; status: string; resolvedBy?: number | null; resolvedAt?: string | null; options: string[] }
 
 export interface AgentPullRequest { url: string; number: number; repo: string; status: string; reviewDecision?: string | null; checks?: string | null }
 
@@ -39,13 +44,18 @@ export interface AgentRun {
   finished?: boolean;
   note?: string | null;
   brief?: string | null;
-  decisions?: { at: string; text: string }[];
+  decisions?: AgentDecision[];
   assumptions?: { n: number; text: string; falsifier: string; state: string; evidence?: string | null }[];
   failures?: { at: string; type: string; what?: string | null; evidence: string; attempt: number }[];
   closing?: { hours?: number | null; fixRounds: number; replans: number } | null;
   findings?: { at: string; severity: string; text: string }[];
   lgtm?: { at: string; text: string }[];
   verdict?: 'approve' | 'request-change' | null;
+  engine?: string | null;
+  rounds?: { used: number; max: number } | null;
+  productionData?: boolean | null;
+  draft?: boolean | null;
+  issues?: AgentIssue[];
   blockers?: number;
   activity: string;
   activityDetail?: string | null;
@@ -87,11 +97,11 @@ export const FLOW_RAIL = [
 
 export type AgentRunSummary = Pick<AgentRun, 'key' | 'stage' | 'waiting' | 'acPassed' | 'acFailed' | 'acTotal' | 'activity' | 'stalled' | 'finished' | 'machine' | 'kind'>;
 
-/** A review run reads as Review; a build run, or one that does not say, is a Task. */
-export const kindLabel = (kind?: string | null) => (kind === 'review' ? 'Review' : 'Task');
+/** A review run reads as Review, a free form card as Card; a build run, or one that does not say, is a Task. */
+export const kindLabel = (kind?: string | null) => (kind === 'review' ? 'Review' : kind === 'card' ? 'Card' : 'Task');
 
 export const FILTER_MACHINES = ['laptop', 'workspace'] as const;
-export const FILTER_KINDS = ['review', 'task'] as const;
+export const FILTER_KINDS = ['review', 'task', 'card'] as const;
 export interface RunFilter { machine: typeof FILTER_MACHINES[number] | null; kind: typeof FILTER_KINDS[number] | null }
 
 const pick = <T extends string>(value: string | null, allowed: readonly T[]): T | null => (allowed.includes(value as T) ? value as T : null);
@@ -115,7 +125,7 @@ export function runFilterSearch(search: string, filter: RunFilter): string {
 
 export const matchesRunFilter = (run: Pick<AgentRun, 'machine' | 'kind'>, filter: RunFilter) => (
   (!filter.machine || machineOf(run) === filter.machine)
-  && (!filter.kind || (filter.kind === 'review') === (run.kind === 'review'))
+  && (!filter.kind || filter.kind === (run.kind === 'review' || run.kind === 'card' ? run.kind : 'task'))
 );
 
 export const STAGE_LABEL: Record<string, string> = {

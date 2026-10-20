@@ -66,6 +66,13 @@ export class JiraAPI {
     }
   }
 
+  /** Throws with Jira's answer, so the caller can show why the label was not added. */
+  async addLabel(key: string, label: string): Promise<void> {
+    const { credentials } = await this.getConfiguration();
+    if (!credentials.domain || !credentials.email || !credentials.apiToken) throw new Error('Jira is not configured in Settings');
+    await this.jiraService.addLabel(credentials, key, label);
+  }
+
   async refreshTickets() {
     try {
       const { credentials, projectKeys } = await this.getConfiguration();

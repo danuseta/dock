@@ -431,7 +431,19 @@ export const CLEAR_DEMO_STORAGE = gql`
 `;
 
 export const ANSWER_TICKET = gql`
-  mutation AnswerTicket($ticketKey: String!, $text: String!) {
-    answerTicket(ticketKey: $ticketKey, text: $text)
+  mutation AnswerTicket($ticketKey: String!, $text: String!, $issue: Int) {
+    answerTicket(ticketKey: $ticketKey, text: $text, issue: $issue)
+  }
+`;
+
+export const CANCEL_DECISION = gql`
+  mutation CancelDecision($ticketKey: String!, $n: Int!, $note: String!) {
+    cancelDecision(ticketKey: $ticketKey, n: $n, note: $note)
+  }
+`;
+
+export const APPROVE_REVIEW = gql`
+  mutation ApproveReview($ticketKey: String!) {
+    approveReview(ticketKey: $ticketKey) { name ok detail }
   }
 `;

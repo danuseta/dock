@@ -150,6 +150,10 @@ export class GitHubClient {
     return response.data?.items || [];
   }
 
+  async approvePullRequest(owner: string, repo: string, pullNumber: number) {
+    await this.client.post(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, { event: 'APPROVE' });
+  }
+
   async validateCredentials() {
     const response = await this.client.get('/user');
     return response.data;

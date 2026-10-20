@@ -1,5 +1,5 @@
 import { StorageAPI } from './StorageAPI';
-import { GitHubService, SearchPRsOptions } from '../integrations/github';
+import { GitHubClient, GitHubService, SearchPRsOptions } from '../integrations/github';
 import type { PullRequestProblem } from '../integrations/attention';
 
 const PROBLEM_LABEL: Record<PullRequestProblem, string> = { CONFLICT: 'Merge conflict', PR_CHANGES_REQUESTED: 'Changes requested', PR_CHECKS_FAILING: 'Checks failing' };
@@ -108,6 +108,13 @@ export class GitHubAPI {
       console.error('[BFF GitHubAPI] Error checking conflicts:', error.response?.status, error.response?.data || error.message);
       return { hasConflict: false, message: `Could not inspect conflict: ${error.response?.data?.error || error.message}` };
     }
+  }
+
+  /** Submits an APPROVE review; throws when there is no token or GitHub refuses. */
+  async approvePullRequest(owner: string, repo: string, pullNumber: number) {
+    const auth = await this.getAuth();
+    if (!auth.hasToken) throw new Error('GitHub token is not configured in Settings');
+    await new GitHubClient(auth.headers.Authorization.replace('Bearer ', '')).approvePullRequest(owner, repo, pullNumber);
   }
 
   async getNeedsAttention() {

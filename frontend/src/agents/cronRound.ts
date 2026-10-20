@@ -53,6 +53,16 @@ export const MODE_OPTIONS = [
   { value: 'manual', label: 'Manual' },
 ];
 
+export const ENGINE_OPTIONS = [
+  { value: 'sous', label: 'sous' },
+  { value: 'omc', label: 'build-ticket (older)' },
+];
+
+export const ENGINE_HINT: Record<string, string> = {
+  sous: 'The sous skill runs the ticket without GATE 1 up to an opened pull request, demo video included.',
+  omc: 'The build-ticket skill stops before the pull request and waits for the owner.',
+};
+
 export const MODE_HINT: Record<string, string> = {
   auto: 'Claude decides; a risky action is refused and the agent finds another way.',
   acceptEdits: 'File edits go through; commands still ask you.',
@@ -79,6 +89,7 @@ export interface CronForm {
   effort: string;
   usageBrakePercent: string;
   notifyUserId: string;
+  engine: string;
 }
 
 const list = (text: string) => text.split(',').map((item) => item.trim()).filter(Boolean);
@@ -104,6 +115,7 @@ export function formFromConfig(configJson: string): CronForm {
     effort: config.effort || '',
     usageBrakePercent: String(config.usageBrakePercent),
     notifyUserId: config.notifyUserId,
+    engine: config.engine || 'sous',
   };
 }
 
@@ -129,5 +141,6 @@ export function configFromForm(form: CronForm): string {
     effort: form.effort.trim() || null,
     usageBrakePercent: number(form.usageBrakePercent),
     notifyUserId: form.notifyUserId.trim(),
+    engine: form.engine,
   });
 }

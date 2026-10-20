@@ -61,6 +61,10 @@ export class JiraClient {
     return true;
   }
 
+  async addLabel(credentials: JiraCredentials, ticketKey: string, label: string): Promise<void> {
+    await this.getClient(credentials).put(`/rest/api/3/issue/${encodeURIComponent(ticketKey)}`, { update: { labels: [{ add: label }] } });
+  }
+
   async listProjects(credentials: JiraCredentials): Promise<JiraProject[]> {
     const response = await this.getClient(credentials).get('/rest/api/3/project/search', {
       params: { orderBy: 'name', maxResults: 100 },
@@ -168,6 +172,7 @@ export class JiraService {
   listProjects(credentials: JiraCredentials) { return this.client.listProjects(credentials); }
   transitionTo(credentials: JiraCredentials, ticketKey: string, statusName: string) { return this.client.transitionTo(credentials, ticketKey, statusName); }
   validateCredentials(credentials: JiraCredentials) { return this.client.validateCredentials(credentials); }
+  addLabel(credentials: JiraCredentials, ticketKey: string, label: string) { return this.client.addLabel(credentials, ticketKey, label); }
 
   formatTicket(issue: any, domain: string) {
     if (!issue) return null;

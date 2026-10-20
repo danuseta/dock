@@ -10,10 +10,10 @@ export function useAnswerTicket() {
   const client = useApolloClient();
   const [sending, setSending] = useState(false);
 
-  const answer = useCallback(async (ticketKey: string, text: string) => {
+  const answer = useCallback(async (ticketKey: string, text: string, issue?: number) => {
     setSending(true);
     try {
-      await client.mutate({ mutation: ANSWER_TICKET, variables: { ticketKey, text } });
+      await client.mutate({ mutation: ANSWER_TICKET, variables: { ticketKey, text, issue } });
       return `the ${ticketKey} session`;
     } finally {
       setSending(false);

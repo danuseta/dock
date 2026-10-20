@@ -10,11 +10,12 @@ export interface DemoVideoRouterOptions {
 }
 
 /** An upload, streamed to the bucket as it arrives. Shared by the browser route and the machine-token route. */
-export async function receiveDemoVideo(videos: DemoVideos, key: unknown, request: Request, response: Response) {
+export async function receiveDemoVideo(videos: DemoVideos, key: unknown, request: Request, response: Response, onUploaded?: (ticketKey: string) => void) {
   const declared = Number(request.get('content-length'));
   try {
     const video = await videos.upload(String(key ?? ''), request, request.get('content-type') ?? '', Number.isFinite(declared) ? declared : null);
     response.status(200).json({ ok: true, result: video });
+    onUploaded?.(video.ticketKey);
   } catch (error) {
     if (error instanceof OrchestratorInputError) {
       response.status(400).set('connection', 'close').json({ error: error.message });
