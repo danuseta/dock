@@ -205,11 +205,16 @@ export class JiraService {
     const extractText = (node: any): string => {
       if (!node) return '';
       if (node.type === 'text' && node.text) return node.text;
-      const text = Array.isArray(node.content)
-        ? node.content.map(extractText).join(node.type === 'listItem' ? ' ' : '')
-        : '';
+      if (node.type === 'hardBreak') return '\n';
+      if (node.type === 'inlineCard') return node.attrs?.url || '';
+      if (node.type === 'mention') return node.attrs?.text || '';
+      const text = Array.isArray(node.content) ? node.content.map(extractText).join('') : '';
+      // One line per list or checklist item, so the items of an Acceptance Criteria checklist do not run together.
+      if (node.type === 'listItem' || node.type === 'taskItem') return `- ${text.trim()}\n`;
+      if (['bulletList', 'orderedList', 'taskList'].includes(node.type)) return `${text}\n`;
       return ['paragraph', 'heading', 'codeBlock'].includes(node.type) ? `${text}\n\n` : text;
     };
+    const fieldText = (value: unknown) => (typeof value === 'string' ? value : value && typeof value === 'object' ? extractText(value) : '').trim() || null;
 
     let description = 'No detailed description provided in this Jira issue.';
     if (typeof issue.fields?.description === 'string') description = issue.fields.description;
@@ -219,10 +224,8 @@ export class JiraService {
     }
 
     const fields = issue.fields || {};
-    const acceptanceCriteriaValue = fields.customfield_10332;
-    const acceptanceCriteria = (typeof acceptanceCriteriaValue === 'string'
-      ? acceptanceCriteriaValue
-      : acceptanceCriteriaValue && typeof acceptanceCriteriaValue === 'object' ? extractText(acceptanceCriteriaValue) : '').trim() || null;
+    const acceptanceCriteria = fieldText(fields.customfield_10332);
+    const figmaLink = fieldText(fields.customfield_10329);
     const storyPointValue = fields.story_points
       ?? fields.customfield_10016
       ?? fields.customfield_10028
@@ -233,6 +236,10 @@ export class JiraService {
       title: fields.summary || 'Untitled Ticket',
       description,
       acceptanceCriteria,
+      // QRD keeps the ticket body in custom fields; the old User Story field still holds it on older tickets.
+      userStory: fieldText(fields.customfield_10341) ?? fieldText(fields.customfield_10330),
+      problemDefinition: fieldText(fields.customfield_10331),
+      figmaUrl: figmaLink && /^https?:\/\/\S+$/i.test(figmaLink) ? figmaLink : null,
       status: fields.status?.name || 'Unknown Status',
       assignee: fields.assignee?.displayName || fields.assignee?.emailAddress || 'Assignee unavailable',
       url: `https://${domain}/browse/${key}`,

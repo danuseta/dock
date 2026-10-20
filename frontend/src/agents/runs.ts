@@ -85,6 +85,8 @@ export interface AgentTimeline {
   round: number;
   loopFrom?: number | null;
   loopTo?: number | null;
+  /** The run stopped at GATE 1 (a manual run); a cron run has no gate stop. */
+  hasGate?: boolean;
   gates: Array<{ id: string; stageIndex: number; text: string; state: string; at: string }>;
   agents: TimelineAgent[];
   buckets: Array<{ n: number; gate: boolean }>;
@@ -92,14 +94,17 @@ export interface AgentTimeline {
   log: Array<{ at: string; kind: string; head: string; text: string }>;
 }
 
-/** The six stops of the flow graph's rail; evidence and commit share Verify. */
+/**
+ * The stops of the flow graph's rail, the steps of a sous run: code and test are one task's Work, verify is the
+ * FINAL review, commit shares PR. Gate is drawn only when the run stopped at GATE 1. `review` names the stop on a review run.
+ */
 export const FLOW_RAIL = [
-  { id: 'gate', name: 'Gate', color: '#9aa0aa' },
-  { id: 'plan', name: 'Plan', color: '#8c9bf0' },
-  { id: 'code', name: 'Code', color: '#e8c56c' },
-  { id: 'test', name: 'Test', color: '#62cf9f' },
-  { id: 'verify', name: 'Verify', color: '#5cc0e0' },
-  { id: 'pr', name: 'PR', color: '#62cf9f' },
+  { id: 'gate', name: 'Gate', review: 'Brief', color: '#9aa0aa' },
+  { id: 'plan', name: 'Plan', review: 'Plan', color: '#8c9bf0' },
+  { id: 'work', name: 'Work', review: 'Work', color: '#e8c56c' },
+  { id: 'final', name: 'Final review', review: 'Review', color: '#5cc0e0' },
+  { id: 'evidence', name: 'Evidence', review: 'Evidence', color: '#5cc0e0' },
+  { id: 'pr', name: 'PR', review: 'Verdict', color: '#62cf9f' },
 ] as const;
 
 export type AgentRunSummary = Pick<AgentRun, 'key' | 'stage' | 'waiting' | 'acPassed' | 'acFailed' | 'acTotal' | 'activity' | 'stalled' | 'finished' | 'machine' | 'kind'>;

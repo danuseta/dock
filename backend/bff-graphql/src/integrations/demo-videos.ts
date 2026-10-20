@@ -12,6 +12,12 @@ export interface DemoObject { key: string; size: number; lastModified: Date | nu
 export interface DemoVideo { ticketKey: string; url: string; size: number | null; updatedAt: string | null }
 export interface DemoLinkRow { ticketKey: string; url: string; updatedAt: Date }
 
+/** Each video with its ticket's title, from the Jira tickets already fetched; a ticket not among them gets null. */
+export function withTitles<T extends { ticketKey: string }>(videos: T[], tickets: Array<{ key: string; title: string }>): Array<T & { title: string | null }> {
+  const titles = new Map(tickets.map((ticket) => [ticket.key, ticket.title]));
+  return videos.map((video) => ({ ...video, title: titles.get(video.ticketKey) ?? null }));
+}
+
 /** The bucket the demo videos live in. Keys are full object keys, folder included. */
 export interface DemoStore {
   list(prefix: string): Promise<DemoObject[]>;

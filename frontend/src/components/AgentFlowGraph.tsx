@@ -1,9 +1,8 @@
 import React from 'react';
-import { FLOW_RAIL, stageName, type AgentRun, type AgentTimeline, type TimelineAgent } from '../agents/runs';
+import { FLOW_RAIL, type AgentRun, type AgentTimeline, type TimelineAgent } from '../agents/runs';
 import { cn } from '../lib/cn';
 import '../agents/flow/flow.css';
 
-const stageX = (index: number) => 90 + Math.min(index, FLOW_RAIL.length - 1) * 164;
 const RAIL_Y = 92;
 const ROOT_Y = 196;
 const CHILD_Y = 296;
@@ -30,8 +29,18 @@ interface AgentFlowGraphProps { run: AgentRun; timeline: AgentTimeline }
  * events the laptop already reports. No session content is involved.
  */
 export const AgentFlowGraph: React.FC<AgentFlowGraphProps> = ({ run, timeline }) => {
+  // A cron run never stops at GATE 1, so its rail starts at Plan.
+  const skip = timeline.hasGate ? 0 : 1;
+  const stops = FLOW_RAIL.slice(skip);
+  const stageX = (index: number) => 90 + Math.min(Math.max(0, index - skip), stops.length - 1) * (820 / (stops.length - 1));
+  const stopName = (stop: (typeof FLOW_RAIL)[number]) => (run.kind === 'review' ? stop.review : stop.name);
   const current = timeline.stageIndex;
   const finished = current >= FLOW_RAIL.length;
+  const stopNote: Partial<Record<(typeof FLOW_RAIL)[number]['id'], string | null>> = {
+    work: current === 2 ? run.note : null,
+    final: run.rounds ? `round ${run.rounds.used}/${run.rounds.max}` : null,
+    pr: run.draft ? 'draft' : null,
+  };
   const root = timeline.agents.find((agent) => !agent.parentId) || timeline.agents[0];
   const rootX = Math.max(110, Math.min(890, stageX(current)));
   // Two rows under the lead: whoever it spawned, then whoever they spawned.
@@ -63,10 +72,10 @@ export const AgentFlowGraph: React.FC<AgentFlowGraphProps> = ({ run, timeline })
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_300px] max-[1120px]:grid-cols-1">
       <div className="dock-flow-wrap">
-        <div className="dock-flow" style={{ height }} role="img" aria-label={`Flow of ${run.key}: stage ${stageName(FLOW_RAIL[Math.min(current, FLOW_RAIL.length - 1)].id, run.kind)}, ${timeline.agents.length} agents, ${timeline.totalTools} tool calls`}>
+        <div className="dock-flow" style={{ height }} role="img" aria-label={`Flow of ${run.key}: stage ${stopName(FLOW_RAIL[Math.min(current, FLOW_RAIL.length - 1)])}, ${timeline.agents.length} agents, ${timeline.totalTools} tool calls`}>
           <svg viewBox={`0 0 1000 ${height}`} preserveAspectRatio="none" aria-hidden="true">
-            <line x1={stageX(0)} y1={RAIL_Y} x2={stageX(5)} y2={RAIL_Y} stroke="oklch(0.30 0 0)" strokeWidth="2" />
-            {current > 0 && <line x1={stageX(0)} y1={RAIL_Y} x2={stageX(current)} y2={RAIL_Y} stroke="oklch(0.72 0.12 150)" strokeWidth="2" />}
+            <line x1={stageX(skip)} y1={RAIL_Y} x2={stageX(FLOW_RAIL.length - 1)} y2={RAIL_Y} stroke="oklch(0.30 0 0)" strokeWidth="2" />
+            {current > skip && <line x1={stageX(skip)} y1={RAIL_Y} x2={stageX(current)} y2={RAIL_Y} stroke="oklch(0.72 0.12 150)" strokeWidth="2" />}
             {hasLoop && <path className="dock-flow-dash" d={`M ${loopStart} ${RAIL_Y - 16} C ${loopStart} ${RAIL_Y - 58}, ${loopEnd} ${RAIL_Y - 58}, ${loopEnd} ${RAIL_Y - 16}`} fill="none" stroke="oklch(0.80 0.12 85)" strokeWidth="1.5" />}
             {root && <line x1={stageX(current)} y1={RAIL_Y + 14} x2={rootX} y2={ROOT_Y - 34} stroke="oklch(0.36 0 0)" strokeWidth="1.5" />}
             {children.map((child, index) => (
@@ -99,15 +108,19 @@ export const AgentFlowGraph: React.FC<AgentFlowGraphProps> = ({ run, timeline })
 
           {hasLoop && <div className="dock-flow-node dock-flow-loop" style={{ left: `${(loopStart + loopEnd) / 20}%`, top: RAIL_Y - 60 }}>sent back · round {timeline.round}</div>}
 
-          {FLOW_RAIL.map((stage, index) => (
-            <div
-              key={stage.id}
-              className={cn('dock-flow-node dock-flow-stage', index < current && 'is-done', index === current && 'is-now')}
-              style={{ left: `${stageX(index) / 10}%`, top: RAIL_Y + 11, '--stage': stage.color } as React.CSSProperties}
-            >
-              <b>{index < current ? '✓' : index + 1}</b><span>{stageName(stage.id, run.kind)}</span>
-            </div>
-          ))}
+          {stops.map((stage, position) => {
+            const index = position + skip;
+            const note = stopNote[stage.id];
+            return (
+              <div
+                key={stage.id}
+                className={cn('dock-flow-node dock-flow-stage', index < current && 'is-done', index === current && 'is-now')}
+                style={{ left: `${stageX(index) / 10}%`, top: RAIL_Y + 11, '--stage': stage.color } as React.CSSProperties}
+              >
+                <b>{index < current ? '✓' : position + 1}</b><span>{stopName(stage)}</span>{note && <small title={note}>{note}</small>}
+              </div>
+            );
+          })}
 
           {timeline.gates.map((gate) => {
             const slot = gatesAt.get(gate.stageIndex) || 0;

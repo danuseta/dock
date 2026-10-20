@@ -128,6 +128,10 @@ export const GET_TICKET_DETAIL_CORE = gql`
       key
       title
       description
+      acceptanceCriteria
+      userStory
+      problemDefinition
+      figmaUrl
       status
       assignee
       url
@@ -334,7 +338,7 @@ export const GET_HOME_CORE = gql`
 `;
 
 export const GET_HOME_SECONDARY = gql`
-  query GetHomeSecondary($calendar: Boolean = true, $docker: Boolean = true) {
+  query GetHomeSecondary($calendar: Boolean = true, $docker: Boolean = true, $monitors: Boolean = true) {
     needsAttention {
       id
       message
@@ -366,7 +370,7 @@ export const GET_HOME_SECONDARY = gql`
       url
       calendarId
     }
-    monitors(refresh: true) {
+    monitors(refresh: true) @include(if: $monitors) {
       id
       name
       url
@@ -633,6 +637,7 @@ export const GET_ORCHESTRATION = gql`
         round
         loopFrom
         loopTo
+        hasGate
         gates { id stageIndex text state at }
         agents { id parentId name detail state tool tools }
         buckets { n gate }
@@ -891,7 +896,7 @@ export const GET_PUSH_PUBLIC_KEY = gql`
 export const GET_DEMO_VIDEOS = gql`
   query GetDemoVideos {
     demoVideos {
-      videos { ticketKey url size updatedAt }
+      videos { ticketKey url size updatedAt title }
     }
   }
 `;

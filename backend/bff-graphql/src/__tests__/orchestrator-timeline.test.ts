@@ -13,8 +13,8 @@ const toolEvent = (seconds: number, kind: string, name: string, agentId = 'main'
   { kind, name, agentId, agentType, detail, at: at(seconds) }
 );
 
-test('ledger stages map onto the six-stop rail', () => {
-  assert.deepStrictEqual(['gate', 'plan', 'code', 'test', 'verify', 'evidence', 'commit', 'pr', 'done'].map((stage) => railIndex(stage)), [0, 1, 2, 3, 4, 4, 4, 5, 6]);
+test('ledger stages map onto the sous steps: code and test are Work, verify is the FINAL review', () => {
+  assert.deepStrictEqual(['gate', 'plan', 'code', 'test', 'verify', 'evidence', 'commit', 'pr', 'done'].map((stage) => railIndex(stage)), [0, 1, 2, 2, 3, 4, 5, 5, 6]);
   assert.strictEqual(railIndex('blocked', 3), 3, 'a blocked ticket stays where it was');
 });
 
@@ -37,7 +37,7 @@ test('timeline draws subagents, attributes their tools and closes them on stop',
     at(112),
   );
 
-  assert.strictEqual(timeline.stageIndex, 3);
+  assert.strictEqual(timeline.stageIndex, 2);
   assert.deepStrictEqual(timeline.agents.map((agent) => [agent.name, agent.detail, agent.state, agent.tool, agent.tools]), [
     ['lead', null, 'active', 'Agent', 3],
     ['general-purpose', 'left over from the code stage', 'active', null, 0],
@@ -51,16 +51,30 @@ test('timeline draws subagents, attributes their tools and closes them on stop',
   assert.deepStrictEqual([timeline.log[0].head, timeline.log[0].text], ['test-runner', 'finished']);
 });
 
-test('a ticket sent back shows the round and the loop until it passes that stage again', () => {
+test('tasks taking turns between code and test are not rounds; the ledger rounds are', () => {
+  const tasks = [
+    stageEvent('STAGE', 'plan', 0), stageEvent('STAGE', 'code', 30), stageEvent('STAGE', 'test', 60),
+    stageEvent('STAGE', 'code', 90), stageEvent('STAGE', 'test', 120), stageEvent('STAGE', 'code', 150),
+  ];
+  const clean = buildTimeline({ stage: 'code', waiting: null, activity: 'ACTIVE' }, tasks, [toolEvent(40, 'spawn', 'sous-ticket-worker'), toolEvent(70, 'stop', 'sous-ticket-worker', 'w1', 'sous-ticket-worker')], at(160));
+  assert.deepStrictEqual([clean.round, clean.loopFrom, clean.loopTo, clean.stageIndex, clean.hasGate], [1, null, null, 2, false], 'a cron run has no gate and three tasks in a row are one round');
+  assert.strictEqual(clean.agents.length, 2, 'the first task\'s finished worker stays drawn while the run is on Work');
+
+  const sentBack = buildTimeline({ stage: 'code', waiting: null, activity: 'IDLE', rounds: { used: 1, max: 4 } }, [...tasks, stageEvent('STAGE', 'verify', 200), stageEvent('STAGE', 'code', 260)], [], at(270));
+  assert.deepStrictEqual([sentBack.round, sentBack.loopFrom, sentBack.loopTo, sentBack.stageIndex], [2, 3, 2, 2]);
+  assert.strictEqual(sentBack.agents[0].state, 'idle');
+  const passed = buildTimeline({ stage: 'evidence', waiting: null, activity: 'ACTIVE', rounds: { used: 1, max: 4 } }, [...tasks, stageEvent('STAGE', 'evidence', 300)], [], at(310));
+  assert.deepStrictEqual([passed.round, passed.loopFrom, passed.stageIndex], [2, null, 4], 'the round stays, the loop goes once the run is past Work');
+});
+
+test('a manual run that stopped at GATE 1 gets the Gate stop, and the last gate waits while the run does', () => {
   const events = [
-    stageEvent('STAGE', 'code', 0), stageEvent('STAGE', 'verify', 60),
-    stageEvent('WAITING', 'Approve the plan', 20), stageEvent('RESUMED', null, 30), stageEvent('AGENT_WAITING', 'permission', 40),
-    stageEvent('STAGE', 'code', 120),
+    stageEvent('STAGE', 'plan', 0), stageEvent('WAITING', 'GATE 1: plan in BOARD/prompts/S1.md', 20), stageEvent('RESUMED', null, 30),
+    stageEvent('AGENT_WAITING', 'permission', 40), stageEvent('STAGE', 'code', 120),
   ];
   const back = buildTimeline({ stage: 'code', waiting: null, activity: 'IDLE' }, events, [], at(130));
-  assert.deepStrictEqual([back.round, back.loopFrom, back.loopTo, back.stageIndex], [2, 4, 2, 2]);
-  assert.deepStrictEqual(back.gates.map((gate) => [gate.text, gate.state, gate.stageIndex]), [['Approve the plan', 'passed', 2]]);
-  assert.strictEqual(back.agents[0].state, 'idle');
+  assert.strictEqual(back.hasGate, true);
+  assert.deepStrictEqual(back.gates.map((gate) => [gate.text, gate.state, gate.stageIndex]), [['GATE 1: plan in BOARD/prompts/S1.md', 'passed', 1]]);
 
   const again = buildTimeline(
     { stage: 'pr', waiting: 'Go commit', activity: 'WAITING' },
@@ -68,7 +82,7 @@ test('a ticket sent back shows the round and the loop until it passes that stage
     [toolEvent(100, 'spawn', 'oh-my-claudecode:executor')],
     at(262),
   );
-  assert.deepStrictEqual([again.round, again.loopFrom, again.stageIndex], [2, null, 5]);
+  assert.deepStrictEqual([again.round, again.loopFrom, again.stageIndex], [1, null, 5]);
   assert.deepStrictEqual(again.gates.map((gate) => gate.state), ['passed', 'waiting']);
   assert.strictEqual(again.buckets[BUCKET_COUNT - 1].gate, true);
 });
@@ -128,8 +142,8 @@ test('event batches update state once and keep every tool call', async () => {
 
 test('a sub-coordinator and the members it spawns form a tree', () => {
   const timeline = buildTimeline(
-    { stage: 'test', waiting: null, activity: 'ACTIVE' },
-    [stageEvent('STAGE', 'code', 0), stageEvent('STAGE', 'test', 100)],
+    { stage: 'code', waiting: null, activity: 'ACTIVE' },
+    [stageEvent('STAGE', 'plan', 0), stageEvent('STAGE', 'code', 100)],
     [
       toolEvent(5, 'spawn', 'oh-my-claudecode:executor', 'main', 'coord-1406', 'QRD-1406 coordinator'),
       toolEvent(6, 'tool', 'Read', 'c1', 'oh-my-claudecode:executor'),

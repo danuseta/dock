@@ -21,6 +21,7 @@
 .dock-flow-stage.is-done span { color: var(--color-secondary-foreground); }
 .dock-flow-stage.is-now b { border-color: var(--stage); color: var(--stage); box-shadow: 0 0 0 5px color-mix(in oklch, var(--stage) 18%, transparent); animation: dock-flow-pulse 1.6s ease-in-out infinite; }
 .dock-flow-stage.is-now span { color: var(--stage); }
+.dock-flow-stage small { max-width: 150px; margin-top: -3px; overflow: hidden; color: var(--color-muted-foreground); font: 400 0.6rem var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 
 .dock-flow-gate { width: 18px; height: 18px; border: 2px solid var(--color-status-merged); border-radius: 3px; background: var(--color-status-merged-bg); transform: translate(-50%, -50%) rotate(45deg); }
 .dock-flow-gate.is-waiting { border-color: oklch(0.80 0.12 85); background: oklch(0.80 0.12 85); box-shadow: 0 0 0 6px oklch(0.80 0.12 85 / 0.12); animation: dock-flow-pulse 0.9s ease-in-out infinite; }

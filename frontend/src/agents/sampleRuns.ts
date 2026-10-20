@@ -51,7 +51,7 @@ export function sampleRuns(elapsed: number): AgentRun[] {
   ];
 }
 
-const SAMPLE_RAIL: Record<string, number> = { code: 2, test: 3, verify: 4 };
+const SAMPLE_RAIL: Record<string, number> = { code: 2, test: 2, verify: 3 };
 
 /** The flow graph for SAMPLE-2, in step with sampleRuns: a team fans out, then waits at a gate. */
 export function sampleTimeline(elapsed: number): AgentTimeline {
@@ -86,9 +86,10 @@ export function sampleTimeline(elapsed: number): AgentTimeline {
     round: 1,
     loopFrom: null,
     loopTo: null,
+    hasGate: true,
     gates: [
       { id: 'g1', stageIndex: 1, text: 'Gate 1: approve the plan', state: 'passed', at: new Date(now - 60000).toISOString() },
-      ...(waiting ? [{ id: 'g2', stageIndex: 4, text: run.waiting || '', state: 'waiting', at: new Date(now - sinceStep * 1000).toISOString() }] : []),
+      ...(waiting ? [{ id: 'g2', stageIndex: 3, text: run.waiting || '', state: 'waiting', at: new Date(now - sinceStep * 1000).toISOString() }] : []),
     ],
     agents: [
       { id: 'main', parentId: null, name: 'lead', detail: 'sample team', state: waiting ? 'waiting' : 'active', tool: null, tools: 2 },

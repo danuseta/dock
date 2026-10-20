@@ -92,3 +92,12 @@ export const DESCRIPTION_LINES = 8;
 export const isLongDescription = (text?: string | null, lines = DESCRIPTION_LINES): boolean => (
   Boolean(text) && ((text as string).split('\n').length > lines || (text as string).length > lines * 110)
 );
+
+/** What the BFF sends when the Jira description is empty. */
+export const NO_DESCRIPTION = 'No detailed description provided in this Jira issue.';
+
+/** The Jira Acceptance Criteria field as one criterion per line, without the list or checkbox marker. */
+export const jiraAcLines = (text?: string | null): string[] => (text || '')
+  .split('\n')
+  .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)]|\[[ xX]?\])\s*/, '').trim())
+  .filter(Boolean);

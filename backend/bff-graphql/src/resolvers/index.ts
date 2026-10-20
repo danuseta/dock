@@ -15,7 +15,7 @@ import { CronInputError } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
 import { labelOrder } from '../integrations/orchestrator-cron';
 import { pushService } from '../integrations/push';
-import { demoVideos } from '../integrations/demo-videos';
+import { demoVideos, withTitles } from '../integrations/demo-videos';
 import { demoStorage, type DemoStorageInput } from '../integrations/demo-storage';
 import { DevServerError, devServers } from '../integrations/dev-servers';
 import { elevenLabsKeys } from '../integrations/elevenlabs-keys';
@@ -224,7 +224,11 @@ export const resolvers = {
     doctorReports: async () => doctorReports.list(),
     demoVideos: async () => {
       requireDemoVideos();
-      return demoVideos.list(await storageAPI.listDemoLinks().catch(demoVideoError)).catch(demoVideoError);
+      const [result, tickets] = await Promise.all([
+        demoVideos.list(await storageAPI.listDemoLinks().catch(demoVideoError)).catch(demoVideoError),
+        jiraAPI.getTickets().catch(() => []),
+      ]);
+      return { ...result, videos: withTitles(result.videos, tickets) };
     },
     demoStorage: async () => demoStorage.view().catch(demoVideoError),
     devServers: async () => { requireWorkspace(); return devServers.list(); },

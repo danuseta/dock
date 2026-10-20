@@ -1,7 +1,11 @@
 // Turns what the laptop reports (stage changes, gates, tool calls) into the
 // live flow graph on the Agents page. Pure: no storage, no clock of its own.
 
-export const RAIL = ['gate', 'plan', 'code', 'test', 'verify', 'pr'] as const;
+// The steps a sous run takes. Gate is drawn only for a run that stopped at GATE 1 (a manual run).
+export const RAIL = ['gate', 'plan', 'work', 'final', 'evidence', 'pr'] as const;
+// The ledger keeps the older stage names: code and test are one task's work and verify, verify is the FINAL review.
+const STAGE_STOP: Record<string, number> = { gate: 0, plan: 1, code: 2, test: 2, verify: 3, evidence: 4, commit: 5, pr: 5 };
+const GATE_ONE = /gate\s*1/i;
 export const BUCKET_SECONDS = 5;
 export const BUCKET_COUNT = 48;
 
@@ -20,7 +24,7 @@ export interface ToolEvent {
   detail: string | null;
   at: Date;
 }
-export interface TimelineRun { stage: string; waiting: string | null; activity: string }
+export interface TimelineRun { stage: string; waiting: string | null; activity: string; rounds?: { used: number; max: number } | null }
 
 export interface TimelineAgent {
   id: string;
@@ -34,9 +38,7 @@ export interface TimelineAgent {
 
 export function railIndex(stage: string, fallback = 0): number {
   if (stage === 'done') return RAIL.length;
-  if (stage === 'evidence' || stage === 'commit') return RAIL.indexOf('verify');
-  const index = (RAIL as readonly string[]).indexOf(stage);
-  return index === -1 ? fallback : index;
+  return STAGE_STOP[stage] ?? fallback;
 }
 
 const shortType = (type: string | null) => (type || 'agent').replace(/^[^:]+:/, '');
@@ -45,28 +47,27 @@ export function buildTimeline(run: TimelineRun, stageEventsDesc: StageEvent[], t
   const stageEvents = [...stageEventsDesc].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   const tools = [...toolEvents].sort((a, b) => a.at.getTime() - b.at.getTime());
 
-  // Rail: where the ticket is, how often it was sent back, and the gates it met on the way.
+  // Rail: where the ticket is and the gates it met on the way.
   let position = 0;
-  let round = 1;
-  let loop: { from: number; to: number } | null = null;
   let stageSince = new Date(0);
   const gates: Array<{ id: string; stageIndex: number; text: string; state: 'waiting' | 'passed'; at: string }> = [];
   for (const event of stageEvents) {
     if (event.kind === 'STAGE') {
       const next = railIndex(event.detail || '', position);
-      if (next < position) {
-        round += 1;
-        loop = { from: position, to: next };
-      }
+      // The next task going back from test to code stays on Work, so its finished agents stay drawn.
+      if (next !== position) stageSince = event.createdAt;
       position = next;
-      stageSince = event.createdAt;
     } else if (event.kind === 'WAITING') {
       gates.push({ id: event.id, stageIndex: Math.min(position, RAIL.length - 1), text: event.detail || '', state: 'passed', at: event.createdAt.toISOString() });
     }
   }
   const current = railIndex(run.stage, position);
-  if (loop && current > loop.from) loop = null;
   if (run.waiting && gates.length > 0) gates[gates.length - 1].state = 'waiting';
+  // A round is a FINAL review that sent findings back; the ledger counts them, a stage going back does not.
+  const used = run.rounds?.used ?? 0;
+  const round = used + 1;
+  const loop = used > 0 && current === RAIL.indexOf('work') ? { from: RAIL.indexOf('final'), to: current } : null;
+  const hasGate = gates.some((gate) => GATE_ONE.test(gate.text));
 
   // Agents: the main session, the sub-coordinators it spawned, and whoever they spawned.
   // An agent stays for as long as it works; a finished one stays until the ticket changes stage.
@@ -187,6 +188,7 @@ export function buildTimeline(run: TimelineRun, stageEventsDesc: StageEvent[], t
     round,
     loopFrom: loop ? loop.from : null,
     loopTo: loop ? loop.to : null,
+    hasGate,
     gates: gates.slice(-MAX_GATES),
     agents,
     buckets,

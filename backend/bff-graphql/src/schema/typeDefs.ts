@@ -5,6 +5,11 @@ export const typeDefs = gql`
     key: ID!
     title: String!
     description: String
+    """The Jira Acceptance Criteria field as text, one line per item."""
+    acceptanceCriteria: String
+    userStory: String
+    problemDefinition: String
+    figmaUrl: String
     status: String!
     assignee: String
     url: String!
@@ -236,6 +241,8 @@ export const typeDefs = gql`
     round: Int!
     loopFrom: Int
     loopTo: Int
+    """The run stopped at GATE 1 (a manual run), so the rail starts with a Gate stop."""
+    hasGate: Boolean!
     gates: [TimelineGate!]!
     agents: [TimelineAgent!]!
     buckets: [TimelineBucket!]!
@@ -335,6 +342,8 @@ export const typeDefs = gql`
     url: String!
     size: Float
     updatedAt: String
+    """The ticket's Jira title when it is among the assigned tickets DOCK already fetched."""
+    title: String
   }
 
   type DemoStorage {
