@@ -342,6 +342,8 @@ export const typeDefs = gql`
     url: String!
     size: Float
     updatedAt: String
+    """The ticket's Jira title when it is among the assigned tickets DOCK already fetched."""
+    title: String
   }
 
   type DemoStorage {

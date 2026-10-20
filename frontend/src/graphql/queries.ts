@@ -896,7 +896,7 @@ export const GET_PUSH_PUBLIC_KEY = gql`
 export const GET_DEMO_VIDEOS = gql`
   query GetDemoVideos {
     demoVideos {
-      videos { ticketKey url size updatedAt }
+      videos { ticketKey url size updatedAt title }
     }
   }
 `;

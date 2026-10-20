@@ -6,7 +6,7 @@ import test from 'node:test';
 import express from 'express';
 import { PinRateLimiter } from '../auth/session';
 import { DEMO_STORAGE_DEFAULTS, PeerDemoStorage, mergeDemoStorage, viewOf, type DemoStorage, type DemoStorageConfig } from '../integrations/demo-storage';
-import { DemoVideos, ingestDemoLink, type DemoStore } from '../integrations/demo-videos';
+import { DemoVideos, ingestDemoLink, withTitles, type DemoStore } from '../integrations/demo-videos';
 import { LedgerPeer } from '../integrations/ledger-peer';
 import { OrchestratorService } from '../integrations/orchestrator';
 import { createDemoVideoRouter } from '../routes/demo-videos';
@@ -205,4 +205,11 @@ test('the laptop DOCK keeps the link the workspace sent, and removes only the on
   assert.strictEqual(await ingestDemoLink({ key: 'QRD-1363', remove: link }, storage), true);
   assert.strictEqual(links.has('QRD-1363'), false);
   assert.strictEqual(await ingestDemoLink({ key: 'QRD-1', url: 'javascript:alert(1)' }, storage), false);
+});
+test('a demo video takes its title from the fetched Jira tickets, and null when the ticket is not among them', () => {
+  const videos = [{ ticketKey: 'QRD-1', url: 'u1' }, { ticketKey: 'CARD-notes', url: 'u2' }];
+  assert.deepStrictEqual(withTitles(videos, [{ key: 'QRD-1', title: 'Folder tag filter' }]), [
+    { ticketKey: 'QRD-1', url: 'u1', title: 'Folder tag filter' },
+    { ticketKey: 'CARD-notes', url: 'u2', title: null },
+  ]);
 });
