@@ -334,7 +334,7 @@ export const GET_HOME_CORE = gql`
 `;
 
 export const GET_HOME_SECONDARY = gql`
-  query GetHomeSecondary($calendar: Boolean = true, $docker: Boolean = true) {
+  query GetHomeSecondary($calendar: Boolean = true, $docker: Boolean = true, $monitors: Boolean = true) {
     needsAttention {
       id
       message
@@ -366,7 +366,7 @@ export const GET_HOME_SECONDARY = gql`
       url
       calendarId
     }
-    monitors(refresh: true) {
+    monitors(refresh: true) @include(if: $monitors) {
       id
       name
       url

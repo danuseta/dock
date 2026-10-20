@@ -35,11 +35,12 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
   const mode = useDockMode();
   const showCalendar = hasPage(mode, '/calendar');
   const showDocker = hasPage(mode, '/docker');
+  const showMonitors = hasPage(mode, '/monitoring');
   const [healthRefreshSeconds, setHealthRefreshSeconds] = useState(DEFAULT_SERVICE_HEALTH_REFRESH_SECONDS);
   const { data: coreData, loading: coreLoading, error: coreError } = useQuery(GET_HOME_CORE, CACHED_QUERY_OPTIONS);
   const { data: secondaryData, loading: secondaryLoading, error: secondaryError, refetch: refetchSecondary } = useQuery(
     GET_HOME_SECONDARY,
-    { ...CACHED_QUERY_OPTIONS, variables: { calendar: showCalendar, docker: showDocker }, pollInterval: healthRefreshSeconds * 1000 },
+    { ...CACHED_QUERY_OPTIONS, variables: { calendar: showCalendar, docker: showDocker, monitors: showMonitors }, pollInterval: healthRefreshSeconds * 1000 },
   );
   const [addQuickLink, { loading: adding }] = useMutation(ADD_QUICK_LINK, { refetchQueries: [{ query: GET_HOME_CORE }] });
   const [removeQuickLink] = useMutation(REMOVE_QUICK_LINK, { refetchQueries: [{ query: GET_HOME_CORE }] });
@@ -96,8 +97,11 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
     { label: 'Active tickets', value: activeTickets.length },
     { label: 'Story points', value: storyPoints },
     { label: 'Needs attention', value: secondaryData?.needsAttention?.length || 0, className: 'text-status-conflict' },
-    { label: 'Services healthy', value: `${healthyServices}/${monitors.length}`, className: 'text-status-merged' },
+    showMonitors
+      ? { label: 'Services healthy', value: `${healthyServices}/${monitors.length}`, className: 'text-status-merged' }
+      : { label: 'Agents running', value: agentRuns.filter((run) => run.activity === 'ACTIVE').length },
   ];
+  const showSide = showCalendar || showMonitors;
 
   return (
     <Page width="full">
@@ -123,7 +127,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
         ))}
       </section>
 
-      <div className="grid grid-cols-[minmax(0,1fr)_minmax(340px,380px)] items-stretch gap-3.5 max-[900px]:grid-cols-1">
+      <div className={cn('grid items-stretch gap-3.5 max-[900px]:grid-cols-1', showSide ? 'grid-cols-[minmax(0,1fr)_minmax(340px,380px)]' : 'grid-cols-1')}>
         <div className={cn('grid gap-3.5', agentRuns.length > 0 ? 'grid-rows-[auto_minmax(0,1fr)_auto_auto]' : 'grid-rows-[auto_minmax(0,1fr)_auto]')}>
           <section className="min-w-0" aria-labelledby="quick-links-title">
             <div className="mb-2 flex items-center justify-between">
@@ -154,18 +158,18 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
           {showDocker && <DockerRuntimeCard runtime={secondaryData?.dockerRuntime} onNavigate={onNavigate} compact loading={secondaryLoading && !secondaryData} />}
         </div>
 
-        <div className="grid w-full max-w-[380px] justify-self-end gap-3.5 max-[900px]:justify-self-center max-[600px]:max-w-[360px]">
+        {showSide && <div className="grid w-full max-w-[380px] justify-self-end gap-3.5 max-[900px]:justify-self-center max-[600px]:max-w-[360px]">
           {showCalendar && <article className={cn(panelClass, 'relative z-10 overflow-visible')}>
             <header className={panelHeaderClass}><h2 className={panelTitleClass}>{monthLabel}</h2><Button variant="ghost" size="sm" className={textActionClass} onClick={() => onNavigate('/calendar')}>Google Calendar →</Button></header>
             <div className="px-2.5 pt-2 pb-2.5"><MonthCalendar month={now} events={calendarEvents} /></div>
           </article>}
 
-          <article className={panelClass}>
+          {showMonitors && <article className={panelClass}>
             <header className={panelHeaderClass}><h2 className={panelTitleClass}>Service health</h2><div className="flex items-center gap-[7px]"><span className="font-mono text-[0.63rem] text-muted-foreground tabular-nums">Refresh {healthCountdown}s</span><IconButton variant="ghost" className="size-[26px] rounded-sm border-border" onClick={refreshHealth} aria-label="Refresh service health now"><RefreshCw size={13} aria-hidden="true" /></IconButton></div></header>
             {secondaryError && !secondaryData ? <div className="p-4 text-sm text-status-conflict" role="alert">Service health unavailable. <button type="button" className="underline" onClick={() => void refetchSecondary()}>Retry</button></div> : secondaryLoading && !secondaryData ? <div className="p-4 text-sm text-muted-foreground" role="status">Checking services...</div> : monitors.map((monitor: any) => <div className="flex items-center gap-[11px] border-b border-border px-[15px] py-3 last:border-b-0" key={monitor.id}><span className={cn('size-2 flex-none rounded-full bg-muted-foreground', monitor.lastStatus === 'UP' ? 'bg-status-merged' : 'bg-status-conflict')} /><span className="min-w-0 flex-1"><strong className="block truncate text-[0.75rem]">{monitor.name}</strong><small className="text-[0.68rem] text-muted-foreground">{monitor.lastStatusCode ? `HTTP ${monitor.lastStatusCode}` : monitor.lastStatus || 'Not checked'}</small></span><span className="font-mono text-[0.68rem] text-muted-foreground tabular-nums">{monitor.lastLatencyMs == null ? '—' : `${monitor.lastLatencyMs} ms`}</span></div>)}
             {!secondaryLoading && !secondaryError && monitors.length === 0 && <button type="button" className="w-full border-0 bg-transparent p-4 text-accent" onClick={() => onNavigate('/monitoring')}>Add a service monitor</button>}
-          </article>
-        </div>
+          </article>}
+        </div>}
       </div>
 
       <Dialog open={showForm} onClose={() => !adding && setShowForm(false)} dismissible={!adding} labelledBy="quick-link-dialog-title" describedBy="quick-link-dialog-description">
