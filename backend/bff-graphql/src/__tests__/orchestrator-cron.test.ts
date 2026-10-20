@@ -2,7 +2,7 @@ import assert from 'node:assert';
 import test from 'node:test';
 import {
   CronInputError, DEFAULT_CRON_SETTINGS, MAX_RESUMES, OrchestratorCron, PARKED_TEXT, RESUME_GAVE_UP_TEXT, START_FAILED_TEXT, candidates, hasAcceptanceCriteria, labelOrder, ticketHasAcceptanceCriteria, outsideWindow, parseCronSettings,
-  confirmedPrompt, resumePrompt, startPrompt, wib, type CronDeps, type CronRun, type CronSettings, type CronTicket,
+  confirmedPrompt, ownerReplyPrompt, resumePrompt, sousConfirmedPrompt, sousStartPrompt, startPrompt, wib, type CronDeps, type CronRun, type CronSettings, type CronTicket,
 } from '../integrations/orchestrator-cron';
 
 const AC = 'Context.\n\nAcceptance criteria\n\nReloading the page still shows Disconnected.\n\nA manually disabled channel keeps its status.';
@@ -24,7 +24,7 @@ test('settings: defaults when nothing is saved, saved fields win, v1 keys are ig
     '{', '[]', '{"parallel":0}', '{"workStart":17,"workEnd":9}', '{"workEnd":25}', '{"workDays":[]}', '{"workDays":[8]}', '{"maxPerDay":0}',
     '{"activeFrom":"2026-10-20","activeUntil":"2026-10-01"}', '{"activeFrom":"14-10-2026"}', '{"mode":"bypassPermissions"}',
     '{"sprint":"next"}', '{"todoStatuses":[]}', '{"usageBrakePercent":101}',
-    '{"notifyUserId":"danu"}', '{"enabled":"yes"}', '{"machine":""}',
+    '{"notifyUserId":"danu"}', '{"enabled":"yes"}', '{"machine":""}', '{"engine":"codex"}',
   ]) {
     assert.throws(() => parseCronSettings(bad), CronInputError, bad);
   }
@@ -110,7 +110,8 @@ type SessionState = 'queued' | 'running' | 'idle' | 'error';
 function world(start: Start = {}) {
   const state = {
     now: start.now ?? WED_0905,
-    settings: new Map<string, string>([['orchestratorCronConfig', JSON.stringify({ ...DEFAULT_CRON_SETTINGS, enabled: true, ...start.config })]]),
+    // The older build-ticket flow unless a test picks the sous engine, the default.
+    settings: new Map<string, string>([['orchestratorCronConfig', JSON.stringify({ ...DEFAULT_CRON_SETTINGS, enabled: true, engine: 'omc', ...start.config })]]),
     cache: new Map<string, unknown>(),
     tickets: start.tickets ?? [],
     runs: start.runs ?? [] as CronRun[],
@@ -522,4 +523,67 @@ test('the resume count grows only after the message is sent, and starts again on
   fresh.state.cache.set('resumes:QRD-5', 2);
   await fresh.cron.runFill();
   assert.strictEqual(fresh.state.cache.has('resumes:QRD-5'), false, 'a start, a retry or a confirmed ticket starts at zero');
+});
+
+test('the sous engine is the default; its start prompt runs the sous skill to a pull request and keeps the contract, vault, lanes and language lines', async () => {
+  assert.strictEqual(DEFAULT_CRON_SETTINGS.engine, 'sous');
+  assert.strictEqual(parseCronSettings(JSON.stringify({ enabled: true })).engine, 'sous', 'a config saved before engines existed runs sous');
+  assert.strictEqual(parseCronSettings(JSON.stringify({ engine: 'omc' })).engine, 'omc', 'the older flow can be switched back on');
+  const prompt = sousStartPrompt('QRD-7');
+  assert.match(prompt, /^Pakai skill sous: kerjakan QRD-7\./);
+  assert.match(prompt, /no GATE 1/);
+  assert.match(prompt, /opened pull request \(draft when the ledger has draft=true\)/);
+  assert.match(prompt, /demo video before the pull request/);
+  for (const line of [/rules\/ticket-contract\.md/, /brain\.py save/, /Do not end your turn while a subagent/, /Bahasa Indonesia/]) assert.match(prompt, line);
+  assert.doesNotMatch(prompt, /Do not push and do not open a pull request|Do not make the demo video until/);
+  assert.doesNotMatch(sousConfirmedPrompt('QRD-7'), /no GATE 1/, 'a ticket without AC keeps GATE 1');
+
+  const w = world({ tickets: [ticket('QRD-7')], config: { engine: 'sous' } });
+  await w.cron.runFill();
+  assert.strictEqual(w.state.sent[0].text, prompt);
+  assert.match(resumePrompt('QRD-7', 'sous'), /^Pakai skill sous\. Lanjutkan tiket QRD-7 dari blackboard dan ledger \(node \$K\/status\.cjs show QRD-7\)/);
+});
+
+test('a stalled sous run is resumed with the sous prompt even when the cron is switched back to the older flow', async () => {
+  const w = await stalledWorld({ stalledDetail: LEFT_RUNNING, engine: 'sous' });
+  await w.cron.runFill();
+  assert.strictEqual(w.state.sent.at(-1)?.text, resumePrompt('QRD-1', 'sous'));
+});
+
+const sousRun = (overrides: Partial<CronRun> = {}): CronRun => ({
+  key: 'QRD-9', machine: 'laptop', title: 'Sous ticket', waiting: 'I-2: Keep the old export? [Keep|Drop]', activity: 'IDLE', engine: 'sous',
+  issues: [{ n: 1, level: 'arbiter', status: 'resolved' }, { n: 2, level: 'owner', status: 'open' }, { n: 3, level: 'owner', status: 'open' }],
+  decisions: [{ n: 1, status: 'DECIDED' }, { n: 2, status: 'SHOV' }, { n: 3, status: 'CANCELLED' }, { n: 4, status: 'USULAN' }],
+  ...overrides,
+});
+
+test('an owner answer on a sous ticket opens a new cron session on the ticket machine with the contract prompt; the old session is not resumed', async () => {
+  const w = world({ runs: [sousRun()] });
+  assert.strictEqual(await w.cron.answer('QRD-9', 'Drop'), 2, 'the I-n the ledger waits on');
+  assert.strictEqual(w.state.sessions.length, 1);
+  assert.deepStrictEqual([w.state.sessions[0].ticketKey, w.state.sessions[0].machine, w.state.sessions[0].origin], ['QRD-9', 'laptop', 'cron']);
+  assert.strictEqual(w.state.sent[0].text, ownerReplyPrompt('QRD-9', 'Jawaban owner untuk I-2: Drop'));
+  assert.strictEqual(w.state.sent[0].text, 'Pakai skill sous. Lanjutkan tiket QRD-9 dari blackboard dan ledger (node $K/status.cjs show QRD-9), jangan mulai dari awal.\nJawaban owner untuk I-2: Drop');
+
+  assert.strictEqual(await w.cron.answer('QRD-9', 'Use the new table', 3), 3, 'a chosen open issue');
+  assert.strictEqual(w.state.sessions.length, 2, 'every answer opens its own session');
+  await assert.rejects(w.cron.answer('QRD-9', 'x', 1), CronInputError, 'a resolved issue is not answered');
+  await assert.rejects(w.cron.answer('QRD-9', '   '), CronInputError);
+
+  const free = world({ runs: [sousRun({ waiting: 'Ready for review: waiting for the owner', issues: [] })] });
+  assert.strictEqual(await free.cron.answer('QRD-9', 'Go'), null);
+  assert.match(free.state.sent[0].text, /\nJawaban owner: Go$/);
+
+  const old = world({ runs: [sousRun({ engine: null })] });
+  assert.strictEqual(await old.cron.sousRun('QRD-9'), null, 'a ticket on the older flow keeps answering its own session');
+  await assert.rejects(old.cron.answer('QRD-9', 'Drop'), CronInputError);
+});
+
+test('the owner cancels a SHOV or USULAN decision in a new session; a decided or cancelled one cannot be cancelled', async () => {
+  const w = world({ runs: [sousRun()] });
+  await w.cron.cancelDecision('QRD-9', 2, 'keep the old export');
+  assert.strictEqual(w.state.sent[0].text, ownerReplyPrompt('QRD-9', 'Owner membatalkan D-2: keep the old export'));
+  await w.cron.cancelDecision('QRD-9', 4, 'not now');
+  assert.strictEqual(w.state.sessions.length, 2);
+  for (const n of [1, 3, 9]) await assert.rejects(w.cron.cancelDecision('QRD-9', n, 'no'), CronInputError, `D-${n}`);
 });

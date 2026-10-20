@@ -253,8 +253,52 @@ export const typeDefs = gql`
   }
 
   type OrchestrationDecision {
+    n: Int
     at: String!
     text: String!
+    status: String
+    by: String
+    issue: Int
+    cancelNote: String
+  }
+
+  type OrchestrationIssue {
+    n: Int!
+    at: String!
+    type: String!
+    text: String!
+    level: String!
+    status: String!
+    resolvedBy: Int
+    resolvedAt: String
+    options: [String!]!
+  }
+
+  type OrchestrationRounds {
+    used: Int!
+    max: Int!
+  }
+
+  type ApprovalStep {
+    name: String!
+    ok: Boolean!
+    detail: String!
+  }
+
+  type DoctorCheck {
+    name: String!
+    ok: Boolean!
+    detail: String
+  }
+
+  type DoctorReport {
+    machine: String!
+    host: String!
+    os: String!
+    at: String!
+    receivedAt: String!
+    kitVersion: String
+    checks: [DoctorCheck!]!
   }
 
   type OrchestrationAssumption {
@@ -391,6 +435,11 @@ export const typeDefs = gql`
     findings: [OrchestrationFinding!]!
     lgtm: [OrchestrationLgtm!]!
     verdict: String
+    engine: String
+    rounds: OrchestrationRounds
+    productionData: Boolean
+    draft: Boolean
+    issues: [OrchestrationIssue!]!
     blockers: Int!
     activity: String!
     activityDetail: String
@@ -714,6 +763,7 @@ export const typeDefs = gql`
     orchestrations: [Orchestration!]!
     orchestration(key: String!): Orchestration
     ingestTokens: [IngestToken!]!
+    doctorReports: [DoctorReport!]!
     demoVideos: DemoVideoList!
     demoStorage: DemoStorage!
     devServers: DevServers!
@@ -788,7 +838,9 @@ export const typeDefs = gql`
     createChatSession(title: String, ticketKey: String, forkFrom: ID, machine: String): ChatSession!
     sendChatMessage(sessionId: ID!, text: String!, attachmentIds: [ID!], options: ChatTurnOptionsInput, mode: String): ChatMessage!
     answerChatInteraction(sessionId: ID!, id: Int!, decision: String!, answers: [ChatAnswerInput!], note: String): ChatInteraction!
-    answerTicket(ticketKey: String!, text: String!): Boolean!
+    answerTicket(ticketKey: String!, text: String!, issue: Int): Boolean!
+    cancelDecision(ticketKey: String!, n: Int!, note: String!): Boolean!
+    approveReview(ticketKey: String!): [ApprovalStep!]!
     stopChatTurn(sessionId: ID!): ChatSession!
     renameChatSession(id: ID!, title: String!): ChatSession!
     setChatSessionOptions(id: ID!, options: ChatTurnOptionsInput!): ChatSession!

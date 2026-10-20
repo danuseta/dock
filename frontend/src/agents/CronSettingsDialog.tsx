@@ -5,7 +5,7 @@ import { GET_CHAT_MACHINES, GET_ORCHESTRATIONS, GET_ORCHESTRATOR_CRON_SETTINGS, 
 import { RUN_ORCHESTRATOR_CRON_NOW, UPDATE_ORCHESTRATOR_CRON_SETTINGS } from '../graphql/mutations';
 import { Button, Card, Checkbox, Dialog, Input, Select } from '../components/ui';
 import { cn } from '../lib/cn';
-import { MODE_HINT, MODE_OPTIONS, WEEK_DAYS, configFromForm, fillSummary, formFromConfig, type CronForm } from './cronRound';
+import { ENGINE_HINT, ENGINE_OPTIONS, MODE_HINT, MODE_OPTIONS, WEEK_DAYS, configFromForm, fillSummary, formFromConfig, type CronForm } from './cronRound';
 
 const SPRINT_OPTIONS = [{ value: 'active', label: 'Active sprint only' }, { value: 'any', label: 'Any sprint' }];
 
@@ -44,7 +44,7 @@ export const CronSettingsDialog = ({ open, onClose }: { open: boolean; onClose: 
   }, [open]);
 
   const set = <K extends keyof CronForm>(key: K, value: CronForm[K]) => form && setForm({ ...form, [key]: value });
-  const text = (key: Exclude<keyof CronForm, 'enabled' | 'workDays'>) => ({ id: `cron-${key}`, value: form ? form[key] : '', onChange: (event: React.ChangeEvent<HTMLInputElement>) => set(key, event.target.value) });
+  const text = (key: Exclude<keyof CronForm, 'enabled' | 'workDays' | 'engine'>) => ({ id: `cron-${key}`, value: form ? form[key] : '', onChange: (event: React.ChangeEvent<HTMLInputElement>) => set(key, event.target.value) });
   const machines = (machineData?.chatMachines || []).map((machine) => ({ value: machine.name, label: machine.online ? machine.name : `${machine.name} (offline)` }));
   const machineOptions = form && !machines.some((machine) => machine.value === form.machine) ? [...machines, { value: form.machine, label: form.machine }] : machines;
   const toggleDay = (day: number) => form && set('workDays', form.workDays.includes(day) ? form.workDays.filter((item) => item !== day) : [...form.workDays, day]);
@@ -150,6 +150,9 @@ export const CronSettingsDialog = ({ open, onClose }: { open: boolean; onClose: 
 
                 <Section title="How the agent works">
                   <div className="grid grid-cols-3 gap-4 max-[640px]:grid-cols-1">
+                    <Field id="cron-engine" label="Engine" hint={ENGINE_HINT[form.engine]}>
+                      <Select id="cron-engine" aria-label="Engine" value={form.engine} onValueChange={(value) => set('engine', value)} options={ENGINE_OPTIONS} container={portal} />
+                    </Field>
                     <Field id="cron-mode" label="Permission mode" hint={MODE_HINT[form.mode]}>
                       <Select id="cron-mode" aria-label="Permission mode" value={form.mode} onValueChange={(value) => set('mode', value)} options={MODE_OPTIONS} container={portal} />
                     </Field>

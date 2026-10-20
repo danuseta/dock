@@ -7,6 +7,9 @@ export class CronInputError extends Error {}
 
 export const CRON_MODES = ['auto', 'acceptEdits', 'manual'] as const;
 export type CronMode = typeof CRON_MODES[number];
+/** sous: the session runs the sous skill to a pull request; omc: the older build-ticket prompt that stops before the PR. */
+export const CRON_ENGINES = ['sous', 'omc'] as const;
+export type CronEngine = typeof CRON_ENGINES[number];
 
 export interface CronSettings {
   enabled: boolean;
@@ -32,6 +35,7 @@ export interface CronSettings {
   effort: string | null;
   usageBrakePercent: number;
   notifyUserId: string;
+  engine: CronEngine;
 }
 
 export const DEFAULT_CRON_SETTINGS: CronSettings = {
@@ -53,6 +57,7 @@ export const DEFAULT_CRON_SETTINGS: CronSettings = {
   effort: null,
   usageBrakePercent: 70,
   notifyUserId: '',
+  engine: 'sous',
 };
 
 const CONFIG_KEY = 'orchestratorCronConfig';
@@ -70,6 +75,12 @@ export const START_FAILED_TEXT = 'The cron session ended before the agent answer
 export const PR_GATE_TEXT = "Ready for review: waiting for the owner";
 export const MAX_RESUMES = 3;
 export const RESUME_GAVE_UP_TEXT = `Stalled again after ${MAX_RESUMES} resumes by the cron. Look at the session and continue it by hand.`;
+
+function ownerText(value: unknown): string {
+  const text = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
+  if (!text || text.length > MAX_OWNER_TEXT) throw new CronInputError(`The text needs between 1 and ${MAX_OWNER_TEXT} characters`);
+  return text;
+}
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -121,6 +132,7 @@ export function parseCronSettings(raw: string | null | undefined): CronSettings 
   if (!inProgressStatus) throw new CronInputError('inProgressStatus is required');
   const notifyUserId = typeof merged.notifyUserId === 'string' ? merged.notifyUserId.trim() : '';
   if (notifyUserId && !/^\d{5,25}$/.test(notifyUserId)) throw new CronInputError('notifyUserId must be a Discord user id (digits only)');
+  if (!CRON_ENGINES.includes(merged.engine as CronEngine)) throw new CronInputError(`engine must be one of ${CRON_ENGINES.join(', ')}`);
   return {
     enabled: merged.enabled,
     machine,
@@ -140,6 +152,7 @@ export function parseCronSettings(raw: string | null | undefined): CronSettings 
     effort: optionalWord(merged.effort, 'effort'),
     usageBrakePercent: integer(merged.usageBrakePercent, 'usageBrakePercent', 0, 100),
     notifyUserId,
+    engine: merged.engine as CronEngine,
   };
 }
 
@@ -240,19 +253,58 @@ export const confirmedPrompt = (key: string) => [
 ].join(' ');
 
 /** The message that continues a stalled run in its own session. */
-export const resumePrompt = (key: string) => [
+export const resumePrompt = (key: string, engine: CronEngine = 'omc') => (engine === 'sous' ? [
+  `Pakai skill sous. Lanjutkan tiket ${key} dari blackboard dan ledger (node $K/status.cjs show ${key}), jangan mulai dari awal.`,
+  LANES_LINE,
+  LANGUAGE_LINE,
+] : [
   `Lanjutkan tiket ${key} dari ledger: cek status.cjs show ${key} dan worktree-nya, jangan mulai dari awal.`,
   TEAM_LINE,
   LANES_LINE,
   LANGUAGE_LINE,
+]).join(' ');
+
+const SOUS_CRON_LINE = 'Cron run: no GATE 1; work through to an opened pull request (draft when the ledger has draft=true) and make the demo video before the pull request.';
+
+/** The cron start on engine sous: no GATE 1, the run goes as far as an opened pull request. */
+export const sousStartPrompt = (key: string) => [
+  `Pakai skill sous: kerjakan ${key}.`,
+  SOUS_CRON_LINE,
+  CONTRACT_LINE,
+  VAULT_LINE,
+  LANES_LINE,
+  LANGUAGE_LINE,
 ].join(' ');
+
+/** A parked ticket the owner confirmed, on engine sous: the AC are missing, so GATE 1 stays. */
+export const sousConfirmedPrompt = (key: string) => [
+  `Pakai skill sous: kerjakan ${key}.`,
+  CONTRACT_LINE,
+  VAULT_LINE,
+  LANES_LINE,
+  LANGUAGE_LINE,
+].join(' ');
+
+/** The first message of the new session an owner action on a sous ticket opens; `line` is the answer or the cancel. */
+export const ownerReplyPrompt = (key: string, line: string) => [
+  `Pakai skill sous. Lanjutkan tiket ${key} dari blackboard dan ledger (node $K/status.cjs show ${key}), jangan mulai dari awal.`,
+  line,
+].join('\n');
 
 export interface DeferredTicket { key: string; reason: string }
 export interface FillLog { at: string; day: string; skipped: string | null; started: string[]; parked: string[]; deferred: DeferredTicket[]; notMoved: string[]; failed: string[]; released: string[]; resumed?: string[] }
 export interface CronSlots { busy: number; waiting: number }
 export interface CronStatus { enabled: boolean; slots: CronSlots; parallel: number; startedToday: number; maxPerDay: number; lastFill: FillLog | null }
 
-export interface CronRun { key: string; machine: string; title: string; waiting: string | null; activity: string; stalled?: boolean; stalledDetail?: string | null }
+export interface CronRun {
+  key: string; machine: string; title: string; waiting: string | null; activity: string; stalled?: boolean; stalledDetail?: string | null;
+  engine?: string | null;
+  issues?: Array<{ n: number; level: string; status: string }>;
+  decisions?: Array<{ n: number; status: string }>;
+}
+
+const CANCELLABLE = new Set(['SHOV', 'USULAN']);
+const MAX_OWNER_TEXT = 4000;
 
 export interface CronDeps {
   now(): Date;
@@ -406,7 +458,7 @@ export class OrchestratorCron {
           free -= 1;
           day.started.push(ticket.key);
           log.started.push(ticket.key);
-          if (!(await this.start(ticket, settings, now, startPrompt(ticket.key)))) log.notMoved.push(ticket.key);
+          if (!(await this.start(ticket, settings, now, this.startPromptOf(settings, ticket.key)))) log.notMoved.push(ticket.key);
         }
       } catch (error) {
         console.error(`[Orchestrator cron] ${ticket.key} failed:`, error instanceof Error ? error.message : 'unknown error');
@@ -457,7 +509,7 @@ export class OrchestratorCron {
           log.parked.push(run.key);
           continue;
         }
-        await this.deps.send(session.id, resumePrompt(run.key), this.turnOptions(settings));
+        await this.deps.send(session.id, resumePrompt(run.key, run.engine === 'sous' ? 'sous' : settings.engine), this.turnOptions(settings));
         await this.deps.cacheSet(counter, count + 1);
         resumed.push(run.key);
       } catch (error) {
@@ -490,8 +542,12 @@ export class OrchestratorCron {
     return blocked;
   }
 
-  private saveRun(ticket: Pick<CronTicket, 'key' | 'title'>, machine: string, now: Date, waiting: string) {
-    return this.deps.saveRun({ key: ticket.key, kind: 'build', title: ticket.title, stage: 'gate', waiting, note: 'Started by the orchestrator cron', createdAt: now.toISOString(), updatedAt: now.toISOString() }, machine);
+  private saveRun(ticket: Pick<CronTicket, 'key' | 'title'>, machine: string, now: Date, waiting: string, engine?: CronEngine) {
+    return this.deps.saveRun({ key: ticket.key, kind: 'build', title: ticket.title, stage: 'gate', waiting, note: 'Started by the orchestrator cron', ...(engine === 'sous' ? { engine } : {}), createdAt: now.toISOString(), updatedAt: now.toISOString() }, machine);
+  }
+
+  private startPromptOf(settings: CronSettings, key: string) {
+    return settings.engine === 'sous' ? sousStartPrompt(key) : startPrompt(key);
   }
 
   /**
@@ -504,7 +560,7 @@ export class OrchestratorCron {
     await this.deps.cacheDelete(`quietResumes:${ticket.key}`);
     const session = await this.deps.openSession({ ticketKey: ticket.key, machine: settings.machine, title: `${ticket.key} (cron)`, origin: 'cron', options });
     await this.deps.send(session.id, prompt, options);
-    await this.saveRun(ticket, settings.machine, now, '');
+    await this.saveRun(ticket, settings.machine, now, '', settings.engine);
     return this.deps.moveTicket(ticket.key, settings.inProgressStatus);
   }
 
@@ -518,7 +574,45 @@ export class OrchestratorCron {
     const ticket = await this.deps.ticket(key);
     if (!ticket) throw new CronInputError('The ticket was not found in Jira');
     const settings = { ...(await this.settings()), machine: run.machine };
-    await this.start(ticket, settings, this.deps.now(), run.waiting === PARKED_TEXT ? confirmedPrompt(ticket.key) : startPrompt(ticket.key));
+    const confirmed = settings.engine === 'sous' ? sousConfirmedPrompt(ticket.key) : confirmedPrompt(ticket.key);
+    await this.start(ticket, settings, this.deps.now(), run.waiting === PARKED_TEXT ? confirmed : this.startPromptOf(settings, ticket.key));
+  }
+
+  /** The run of a ticket the sous engine works, or null when the ticket runs the older flow. */
+  async sousRun(key: string): Promise<CronRun | null> {
+    const run = (await this.deps.runs()).find((item) => item.key === key);
+    return run?.engine === 'sous' ? run : null;
+  }
+
+  /**
+   * The owner's answer on a sous ticket opens a new session on the ticket's machine; the old one is never resumed.
+   * It answers `issue`, else the I-n the ledger waits on, else the oldest open owner issue. Returns the issue answered.
+   */
+  async answer(key: string, textInput: string, issue?: number | null): Promise<number | null> {
+    const run = await this.sousRun(key);
+    if (!run) throw new CronInputError(`${key} does not run on the sous engine`);
+    const answer = ownerText(textInput);
+    const open = (run.issues ?? []).filter((item) => item.status === 'open');
+    if (issue != null && !open.some((item) => item.n === issue)) throw new CronInputError(`I-${issue} is not an open issue of ${key}`);
+    const waited = Number(/^I-(\d+):/.exec(run.waiting ?? '')?.[1]) || null;
+    const n = issue ?? waited ?? open.find((item) => item.level === 'owner')?.n ?? null;
+    await this.ownerSession(run, ownerReplyPrompt(key, n ? `Jawaban owner untuk I-${n}: ${answer}` : `Jawaban owner: ${answer}`));
+    return n;
+  }
+
+  /** The owner cancels a decision the arbiter or sous took (SHOV or USULAN): a new session records it. */
+  async cancelDecision(key: string, n: number, noteInput: string): Promise<void> {
+    const run = await this.sousRun(key);
+    if (!run) throw new CronInputError(`${key} does not run on the sous engine`);
+    const decision = (run.decisions ?? []).find((item) => item.n === n);
+    if (!decision || !CANCELLABLE.has(decision.status)) throw new CronInputError(`D-${n} cannot be cancelled`);
+    await this.ownerSession(run, ownerReplyPrompt(key, `Owner membatalkan D-${n}: ${ownerText(noteInput)}`));
+  }
+
+  private async ownerSession(run: CronRun, prompt: string) {
+    const options = this.turnOptions(await this.settings());
+    const session = await this.deps.openSession({ ticketKey: run.key, machine: run.machine, title: `${run.key} (owner)`, origin: 'cron', options });
+    await this.deps.send(session.id, prompt, options);
   }
 
   async stopAll(): Promise<number> {

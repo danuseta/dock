@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, AlertTriangle, BarChart3, Bot, Box, CalendarDays, ChevronLeft, ChevronRight, History, Home as HomeIcon, LayoutDashboard, MoreHorizontal, Settings as SettingsIcon, Clapperboard, Server } from 'lucide-react';
+import { Activity, AlertTriangle, BarChart3, Bot, Box, CalendarDays, ChevronLeft, ChevronRight, History, Home as HomeIcon, LayoutDashboard, MoreHorizontal, Settings as SettingsIcon, Clapperboard, Server, Stethoscope } from 'lucide-react';
 import { useQuery } from '@apollo/client';
 import { GET_NEEDS_ATTENTION } from '../graphql/queries';
 import { NAVIGATION_PREFERENCES_EVENT, NavigationPreferences, readNavigationPreferences, saveNavigationPreferences } from '../lib/navigationPreferences';
@@ -53,6 +53,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
     { path: '/docker', label: 'Docker Services', icon: Box, badge: 0 },
     { path: '/demo-videos', label: 'Demo Videos', icon: Clapperboard, badge: 0 },
     { path: '/dev-servers', label: 'Dev Servers', icon: Server, badge: 0 },
+    { path: '/health', label: 'Health', icon: Stethoscope, badge: 0 },
     { path: '/attention', label: 'Needs Attention', icon: AlertTriangle, badge: conflictCount },
     { path: '/settings', label: 'System Settings', icon: SettingsIcon, badge: 0 },
   ].filter((item) => hasPage(mode, item.path));

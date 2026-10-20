@@ -8,9 +8,14 @@ import { AttachmentRefusal } from '../integrations/chat-attachments';
 import { demoVideos, ingestDemoLink, type DemoVideos } from '../integrations/demo-videos';
 import { DEMO_STORAGE_ROUTES, demoStorage, demoStorageRoute, type DemoStorage } from '../integrations/demo-storage';
 import { receiveDemoVideo } from './demo-videos';
+import { autoBroadcast, type AutoBroadcast } from '../integrations/broadcast';
+import { doctorReports, type DoctorReports } from '../integrations/doctor';
+import { dockMode } from '../mode';
 import { ELEVENLABS_ROUTES, elevenLabsKeys, elevenLabsRoute, type ElevenLabsKeys } from '../integrations/elevenlabs-keys';
 import { MAX_TRANSCRIPT_BYTES, OrchestratorInputError, OrchestratorService, orchestratorService } from '../integrations/orchestrator';
 import { StorageService } from '../storage/service';
+
+const broadcastFailed = (error: unknown) => console.error('[Broadcast] automatic broadcast failed:', error instanceof Error ? error.message : 'unknown error');
 
 const clientKey = (request: Request) => request.ip || request.socket.remoteAddress || 'unknown';
 
@@ -48,6 +53,9 @@ export function createOrchestratorIngestRouter(
   keys: ElevenLabsKeys = elevenLabsKeys,
   videos: DemoVideos = demoVideos,
   storageSettings: DemoStorage = demoStorage,
+  doctor: DoctorReports = doctorReports,
+  // Only the workspace DOCK keeps the demo videos, so only it posts the broadcast that carries them.
+  broadcast: Pick<AutoBroadcast, 'afterDemoVideo' | 'afterLedger'> | null = dockMode() === 'workspace' ? autoBroadcast : null,
 ): Router {
   const router = Router();
 
@@ -78,6 +86,7 @@ export function createOrchestratorIngestRouter(
   const small = express.json({ limit: '256kb' });
   router.post('/', small, handle(async (body, _signal, machine) => {
     const run = await service.ingestLedger(body, new Date(), machine);
+    if (!run.ignored && broadcast) void broadcast.afterLedger(run).catch(broadcastFailed);
     return run.ignored ? { key: run.key, ignored: true, owner: run.machine } : { key: run.key, stage: run.stage };
   }));
   router.post('/ledger/list', small, handle((_body, _signal, machine) => service.ledgerList(machine)));
@@ -97,7 +106,8 @@ export function createOrchestratorIngestRouter(
   router.post('/runs/get', small, handle((body) => service.getWithEvents(String((body as { key?: unknown })?.key ?? ''))));
   for (const route of DEMO_STORAGE_ROUTES) router.post(`/demo-storage/${route}`, small, handle((body) => demoStorageRoute(storageSettings, route, (body ?? {}) as Record<string, unknown>)));
   router.post('/demo-link', small, handle((body) => ingestDemoLink(body)));
-  router.post('/demo-video', (request: Request, response: Response) => receiveDemoVideo(videos, request.query.key, request, response));
+  router.post('/demo-video', (request: Request, response: Response) => receiveDemoVideo(videos, request.query.key, request, response, broadcast ? (key) => { void broadcast.afterDemoVideo(key).catch(broadcastFailed); } : undefined));
+  router.post('/doctor', small, handle((body, _signal, machine) => doctor.ingest(body, machine)));
   for (const route of ELEVENLABS_ROUTES) router.post(`/elevenlabs/${route}`, small, handle((body) => elevenLabsRoute(keys, route, (body ?? {}) as Record<string, unknown>)));
   router.post('/jira', small, handle((body, _signal, machine) => service.ingestJiraStatus(body, machine)));
   router.post('/dismiss', small,handle((body, _signal, machine) => service.dismiss(String((body as { key?: unknown })?.key ?? ''), machine)));

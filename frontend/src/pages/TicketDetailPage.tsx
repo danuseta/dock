@@ -20,19 +20,21 @@ import { useAnswerTicket } from '../chat/useAnswerTicket';
 import { useOpenForTicket } from '../chat/useOpenForTicket';
 import { DependencyDialog } from '../components/ticket/DependencyDialog';
 import { NeedsYouCard } from '../components/ticket/NeedsYouCard';
+import { SousReport } from '../components/ticket/SousReport';
 import { MENU_WIDTH, TicketMenu, type TicketMenuTarget } from '../components/ticket/TicketMenu';
 import { useTicketWork } from '../components/ticket/useTicketWork';
-import { SAVE_DEMO_LINK, SEND_TO_DISCORD, CHECK_CONFLICTS } from '../graphql/mutations';
+import { APPROVE_REVIEW, CANCEL_DECISION, SAVE_DEMO_LINK, SEND_TO_DISCORD, CHECK_CONFLICTS } from '../graphql/mutations';
 import { PRBadge } from '../components/PRBadge';
 import { ConflictModal } from '../components/ConflictModal';
 import { DiscordPreviewModal } from '../components/DiscordPreviewModal';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Toast } from '../components/Toast';
-import { Button, Card, Input, Page } from '../components/ui';
+import { Button, Card, ConfirmDialog, Input, Page } from '../components/ui';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, DETAIL_QUERY_OPTIONS, displayAssignee } from '../lib/queryPolicy';
 import { RUN_STATE_LABEL, isLongDescription, needsYou, runState, type NeedItem } from '../lib/ticketDetail';
 import { getPassLabels } from '../lib/ticketApprovals';
+import { showsSousReport } from '../lib/sousReport';
 import { nextWorkOrder } from '../lib/workOrder';
 
 interface TicketDetailPageProps {
@@ -89,6 +91,10 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const [saveDemoLink] = useMutation(SAVE_DEMO_LINK);
   const [sendToDiscord, { loading: sendingDiscord }] = useMutation(SEND_TO_DISCORD);
   const [checkConflicts] = useMutation(CHECK_CONFLICTS);
+  const [cancelDecision, { loading: cancelling }] = useMutation(CANCEL_DECISION, { refetchQueries: ['GetOrchestration'] });
+  const [approveReview, { loading: approving }] = useMutation(APPROVE_REVIEW, { refetchQueries: ['GetOrchestration', 'GetTicketDetailCore'] });
+  const [confirmApprove, setConfirmApprove] = useState(false);
+  const [approval, setApproval] = useState<Array<{ name: string; ok: boolean; detail: string }> | null>(null);
   const work = useTicketWork(['GetTicketDetailCore']);
 
   const [showConflictModal, setShowConflictModal] = useState(false);
@@ -120,9 +126,10 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const enrichedTicket = enrichmentData?.ticketDetail?.key?.toUpperCase() === ticketKey.toUpperCase()
     ? enrichmentData.ticketDetail
     : undefined;
+  // A free form card has no Jira issue: its page is built from the run alone.
   const ticket = coreTicket
     ? { ...coreTicket, ...(enrichedTicket || {}) }
-    : undefined;
+    : run?.kind === 'card' ? { key: run.key, title: run.title, labels: [], pullRequests: [] as any[] } as any : undefined;
 
   if (coreLoading && !ticket) return (
     <Page width="full">
@@ -244,6 +251,41 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
     }
   };
   const foldDescription = isLongDescription(ticket.description, 3);
+  const blockedHere = run?.remote ? 'The other DOCK runs this ticket. Answer it there.' : null;
+
+  const handleIssueAnswer = async (issue: number, text: string) => {
+    try {
+      await answer(ticket.key, text, issue);
+      setToast({ message: `I-${issue} answered: a new sous session picks it up.`, type: 'success' });
+    } catch (answerError) {
+      setToast({ message: answerError instanceof Error ? answerError.message : 'The answer could not be sent', type: 'error' });
+      throw answerError;
+    }
+  };
+
+  const handleCancelDecision = async (n: number, note: string) => {
+    try {
+      await cancelDecision({ variables: { ticketKey: ticket.key, n, note } });
+      setToast({ message: `D-${n} cancel sent: a new sous session records it.`, type: 'success' });
+    } catch (cancelError) {
+      setToast({ message: cancelError instanceof Error ? cancelError.message : 'The cancel could not be sent', type: 'error' });
+      throw cancelError;
+    }
+  };
+
+  const handleApprove = async () => {
+    try {
+      const res = await approveReview({ variables: { ticketKey: ticket.key } });
+      const steps = res.data?.approveReview ?? [];
+      setApproval(steps);
+      const failed = steps.filter((step: { ok: boolean }) => !step.ok).length;
+      setToast({ message: failed ? `${failed} of ${steps.length} approval steps failed. See the list on the page.` : 'Approved: Jira label pass added and the pull requests approved.', type: failed ? 'error' : 'success' });
+    } catch (approveError) {
+      setToast({ message: approveError instanceof Error ? approveError.message : 'The approval could not be sent', type: 'error' });
+    } finally {
+      setConfirmApprove(false);
+    }
+  };
 
   const state = runState(run);
   const acItems = run?.ac ?? [];
@@ -277,6 +319,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
         {renderBackButton()}
         <div className="flex flex-wrap items-center gap-2">
           {ticket.url && <a href={ticket.url} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-border bg-surface-2 px-3 text-sm font-semibold hover:border-border-glow max-[760px]:h-11"><ExternalLink size={15} aria-hidden="true" />Jira</a>}
+          {run?.kind === 'review' && !run.remote && <Button variant="primary" className="max-[760px]:h-11" onClick={() => setConfirmApprove(true)} disabled={approving} title="Adds the Jira label pass and approves the open pull requests on GitHub"><Check size={15} aria-hidden="true" />{approving ? 'Approving...' : 'Approve'}</Button>}
           <Button className="max-[760px]:h-11" onClick={() => void openForTicket(ticket.key)} disabled={openingSession}><MessagesSquare size={15} aria-hidden="true" />{openingSession ? 'Opening...' : 'Session'}</Button>
           <Button
             className="border-status-discord bg-status-discord text-white hover:bg-status-discord/80 max-[760px]:h-11"
@@ -299,6 +342,20 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
         </div>
       </div>
       {sessionError && <Card className="mb-4 border-status-conflict text-pretty text-sm text-status-conflict" role="alert">{sessionError}</Card>}
+      {approval && (
+        <Card className="mb-4" role="status">
+          <h2 className="mb-1 font-display text-sm font-bold">Approval</h2>
+          <ul className="flex flex-col gap-0.5">
+            {approval.map((step) => (
+              <li key={step.name} className="flex flex-wrap items-baseline gap-2 text-sm">
+                {step.ok ? <Check size={14} className="shrink-0 text-status-merged" aria-hidden="true" /> : <X size={14} className="shrink-0 text-status-conflict" aria-hidden="true" />}
+                <span className="font-semibold">{step.name}</span>
+                <span className={cn('min-w-0 break-words text-xs', step.ok ? 'text-muted-foreground' : 'text-status-conflict')}>{step.ok ? '' : 'Failed: '}{step.detail}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <div className="grid grid-cols-[minmax(0,2fr)_minmax(320px,1fr)] items-start gap-8 max-[1000px]:grid-cols-1 max-[1000px]:gap-6">
         <main className="flex min-w-0 flex-col gap-4">
@@ -315,7 +372,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
             items={needs}
             onAction={handleNeed}
             answering={answering}
-            answerBlocked={run?.remote ? 'The other DOCK runs this ticket. Answer it there.' : null}
+            answerBlocked={blockedHere}
             onAnswer={async (text) => {
               try {
                 const where = await answer(ticket.key, text);
@@ -326,6 +383,10 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
               }
             }}
           />
+
+          {run && showsSousReport(run) && (
+            <SousReport run={run} onAnswer={handleIssueAnswer} onCancel={handleCancelDecision} busy={answering || cancelling} blocked={blockedHere} />
+          )}
 
           <section>
             <h2 className="mb-1.5 flex items-center gap-3 font-display text-sm font-bold">
@@ -495,6 +556,17 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
         choices={ticketChoices}
         onClose={() => setShowDependency(false)}
         onDone={report}
+      />
+
+      <ConfirmDialog
+        open={confirmApprove}
+        title={`Approve ${ticket.key}?`}
+        description="DOCK adds the Jira label pass to the reviewed ticket and submits an Approve review on each of its open pull requests on GitHub."
+        confirmLabel="Approve"
+        busyLabel="Approving..."
+        busy={approving}
+        onConfirm={() => void handleApprove()}
+        onCancel={() => setConfirmApprove(false)}
       />
 
       <ConflictModal

@@ -31,8 +31,11 @@ const BRANCH_NAME = /^[A-Za-z0-9._/-]{1,200}$/;
 const MAX_LIVE_RUNS_PER_MACHINE = 300;
 
 const TICKET_KEY = /^[A-Z][A-Z0-9_]{0,31}-[1-9]\d{0,9}$/;
+// A free form card from the sous kit: CARD-<slug>, the slug kept lower case.
+const CARD_KEY = /^CARD-[a-z0-9][a-z0-9-]{0,63}$/;
 const MAX_AC = 50;
 const MAX_DECISIONS = 100;
+const MAX_ISSUES = 100;
 const MAX_ASSUMPTIONS = 50;
 const MAX_FAILURES = 100;
 const MAX_EVENTS_KEPT = 60;
@@ -51,7 +54,20 @@ const TRANSCRIPT_PATH = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+){0,3}$/;
 export class OrchestratorInputError extends Error {}
 
 export interface LedgerAc { n: number; state: AcState; text: string; evidence: string | null }
-export interface LedgerDecision { at: string; text: string }
+export const DECISION_STATUSES = ['DECIDED', 'SHOV', 'USULAN', 'SUPERSEDED', 'CANCELLED'] as const;
+export type DecisionStatus = typeof DECISION_STATUSES[number];
+export const DECISION_BY = ['owner', 'arbiter', 'sous', 'agent'] as const;
+export type DecisionBy = typeof DECISION_BY[number];
+export interface LedgerDecision { n: number; at: string; text: string; status: DecisionStatus; by: DecisionBy; issue: number | null; cancelNote: string | null }
+export const ISSUE_TYPES = ['BLOCKER', 'QUESTION', 'RISK', 'DISPUTE'] as const;
+export type IssueType = typeof ISSUE_TYPES[number];
+export const ISSUE_LEVELS = ['arbiter', 'sous', 'owner'] as const;
+export type IssueLevel = typeof ISSUE_LEVELS[number];
+export interface LedgerIssue {
+  n: number; at: string; type: IssueType; text: string; level: IssueLevel; status: 'open' | 'resolved';
+  resolvedBy: number | null; resolvedAt: string | null; options: string[];
+}
+export interface LedgerRounds { used: number; max: number }
 export const ASSUMPTION_STATES = ['open', 'confirmed', 'refuted'] as const;
 export type AssumptionState = typeof ASSUMPTION_STATES[number];
 export interface LedgerAssumption { n: number; text: string; falsifier: string; state: AssumptionState; evidence: string | null }
@@ -59,7 +75,7 @@ export const FAILURE_TYPES = ['transient', 'defect', 'spec', 'env', 'permission'
 export type FailureType = typeof FAILURE_TYPES[number];
 export interface LedgerFailure { at: string; type: FailureType; what: string | null; evidence: string; attempt: number }
 export interface LedgerClosing { hours: number | null; fixRounds: number; replans: number }
-export const RUN_KINDS = ['build', 'review'] as const;
+export const RUN_KINDS = ['build', 'review', 'card'] as const;
 export type RunKind = typeof RUN_KINDS[number];
 export const FINDING_SEVERITIES = ['blocker', 'non-blocking', 'nit'] as const;
 export type FindingSeverity = typeof FINDING_SEVERITIES[number];
@@ -72,6 +88,7 @@ const MAX_FINDINGS = 50;
 export interface Ledger {
   key: string;
   kind: RunKind;
+  engine: string | null;
   title: string;
   stage: OrchestratorStage;
   waiting: string;
@@ -90,6 +107,13 @@ export interface Ledger {
   findings: LedgerFinding[];
   lgtm: LedgerLgtm[];
   verdict: ReviewVerdict | null;
+  /** The ticket a review run approves and its pull requests, from the verdict; null and empty mean the ledger key and a lookup. */
+  reviewTicket: string | null;
+  reviewPrs: string[];
+  rounds: LedgerRounds | null;
+  productionData: boolean;
+  draft: boolean;
+  issues: LedgerIssue[];
   updatedAt: string;
 }
 
@@ -127,9 +151,72 @@ export function normalizeMachine(value: unknown): string {
 }
 
 export function normalizeTicketKey(value: unknown): string {
-  const key = String(value ?? '').trim().toUpperCase();
+  const raw = String(value ?? '').trim();
+  if (/^card-/i.test(raw)) {
+    const card = `CARD-${raw.slice(5).toLowerCase()}`;
+    if (CARD_KEY.test(card)) return card;
+  }
+  const key = raw.toUpperCase();
   if (!TICKET_KEY.test(key)) throw new OrchestratorInputError('A valid ticket key is required');
   return key;
+}
+
+export const isCardKey = (key: string) => key.startsWith('CARD-');
+
+const positive = (value: unknown): number | null => (Number.isInteger(value) && Number(value) > 0 ? Number(value) : null);
+
+/** Decisions from the ledger; an entry written before D-n existed is D-<its place>, decided by the owner. */
+export function normalizeDecisions(input: unknown): LedgerDecision[] {
+  return (Array.isArray(input) ? input : [])
+    .filter(isRecord)
+    .map((item, index): LedgerDecision => {
+      const status = text(item.status, 12).toUpperCase() as DecisionStatus;
+      const by = text(item.by, 12).toLowerCase() as DecisionBy;
+      return {
+        n: positive(item.n) ?? index + 1,
+        at: text(item.at, 40),
+        text: text(item.text, 1000),
+        status: DECISION_STATUSES.includes(status) ? status : 'DECIDED',
+        by: DECISION_BY.includes(by) ? by : 'owner',
+        issue: positive(item.issue),
+        cancelNote: optionalText(item.cancelNote, 500),
+      };
+    })
+    .filter((item) => item.text)
+    .slice(-MAX_DECISIONS);
+}
+
+export function normalizeIssues(input: unknown): LedgerIssue[] {
+  return (Array.isArray(input) ? input : [])
+    .filter(isRecord)
+    .map((item, index): LedgerIssue => {
+      const type = text(item.type, 12).toUpperCase() as IssueType;
+      const level = text(item.level, 12).toLowerCase() as IssueLevel;
+      return {
+        n: positive(item.n) ?? index + 1,
+        at: text(item.at, 40),
+        type: ISSUE_TYPES.includes(type) ? type : 'QUESTION',
+        text: text(item.text, 1000),
+        level: ISSUE_LEVELS.includes(level) ? level : 'arbiter',
+        status: text(item.status, 12).toLowerCase() === 'resolved' ? 'resolved' : 'open',
+        resolvedBy: positive(item.resolvedBy),
+        resolvedAt: optionalText(item.resolvedAt, 40),
+        options: (Array.isArray(item.options) ? item.options : []).map((option) => text(option, 200)).filter(Boolean).slice(0, 10),
+      };
+    })
+    .filter((item) => item.text)
+    .slice(-MAX_ISSUES);
+}
+
+function rounds(input: unknown): LedgerRounds | null {
+  if (!isRecord(input)) return null;
+  const used = Number.isInteger(input.used) && Number(input.used) >= 0 ? Number(input.used) : 0;
+  return { used, max: positive(input.max) ?? 4 };
+}
+
+function runKind(kind: unknown, key: string): RunKind {
+  if (kind === 'review') return 'review';
+  return kind === 'card' || isCardKey(key) ? 'card' : 'build';
 }
 
 /**
@@ -156,11 +243,7 @@ export function parseLedger(input: unknown, now = new Date()): Ledger {
     };
   });
 
-  const decisions = (Array.isArray(input.decisions) ? input.decisions : [])
-    .filter(isRecord)
-    .map((item): LedgerDecision => ({ at: text(item.at, 40), text: text(item.text, 1000) }))
-    .filter((item) => item.text)
-    .slice(-MAX_DECISIONS);
+  const decisions = normalizeDecisions(input.decisions);
 
   const assumptions = (Array.isArray(input.assumptions) ? input.assumptions : [])
     .filter(isRecord)
@@ -214,6 +297,10 @@ export function parseLedger(input: unknown, now = new Date()): Ledger {
     .slice(-MAX_FINDINGS);
   const verdictValue = isRecord(input.verdict) ? text(input.verdict.value, 20) as ReviewVerdict : null;
   const verdict = verdictValue && REVIEW_VERDICTS.includes(verdictValue) ? verdictValue : null;
+  let reviewTicket: string | null = null;
+  try { reviewTicket = isRecord(input.verdict) && input.verdict.ticket ? normalizeTicketKey(input.verdict.ticket) : null; } catch { reviewTicket = null; }
+  const reviewPrs = (isRecord(input.verdict) && Array.isArray(input.verdict.prs) ? input.verdict.prs : [])
+    .map(httpUrl).filter((url): url is string => Boolean(url)).slice(0, 10);
 
   const tests = isRecord(input.tests) ? input.tests : {};
   const pr = isRecord(input.pr) ? input.pr : {};
@@ -221,7 +308,8 @@ export function parseLedger(input: unknown, now = new Date()): Ledger {
 
   return {
     key,
-    kind: text(input.kind, 20) === 'review' ? 'review' : 'build',
+    kind: runKind(text(input.kind, 20), key),
+    engine: optionalText(input.engine, 20),
     title: text(input.title, 300),
     stage,
     waiting: text(input.waiting, 500),
@@ -240,6 +328,12 @@ export function parseLedger(input: unknown, now = new Date()): Ledger {
     findings,
     lgtm,
     verdict,
+    reviewTicket,
+    reviewPrs,
+    rounds: rounds(input.rounds),
+    productionData: input.productionData === true,
+    draft: input.draft === true,
+    issues: normalizeIssues(input.issues),
     updatedAt: (Number.isNaN(updatedAt.getTime()) || updatedAt > now ? now : updatedAt).toISOString(),
   };
 }
@@ -498,7 +592,8 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     machine: row.machine ?? DEFAULT_MACHINE,
     handoverTo: handover?.to ?? null,
     handoverAt: handover?.at ?? null,
-    kind: ledger.kind === 'review' ? 'review' : 'build',
+    kind: runKind(ledger.kind, row.key),
+    engine: ledger.engine ?? null,
     title: row.title,
     stage: row.stage,
     waiting: row.waiting || null,
@@ -517,13 +612,19 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     finished: row.stage === 'done' || review === 'merged',
     note: ledger.note ?? null,
     brief: ledger.brief ?? null,
-    decisions: Array.isArray(ledger.decisions) ? ledger.decisions : [],
+    decisions: normalizeDecisions(ledger.decisions),
     assumptions: Array.isArray(ledger.assumptions) ? ledger.assumptions : [],
     failures: Array.isArray(ledger.failures) ? ledger.failures : [],
     closing: ledger.closing ?? null,
     findings: Array.isArray(ledger.findings) ? ledger.findings : [],
     lgtm: Array.isArray(ledger.lgtm) ? ledger.lgtm : [],
     verdict: ledger.verdict ?? null,
+    reviewTicket: ledger.reviewTicket ?? null,
+    reviewPrs: Array.isArray(ledger.reviewPrs) ? ledger.reviewPrs : [],
+    rounds: ledger.rounds ?? null,
+    productionData: ledger.productionData === true,
+    draft: ledger.draft === true,
+    issues: normalizeIssues(ledger.issues),
     blockers: Array.isArray(ledger.findings) ? ledger.findings.filter((item) => item.severity === 'blocker').length : 0,
     activity,
     activityDetail,
@@ -549,6 +650,11 @@ export function attentionItems(runs: Orchestration[]) {
     if (run.review === 'merged') return items;
     if (run.waiting) {
       items.push({ id: `agent-waiting-${run.key}`, type: 'AGENT_WAITING', message: `Waiting on you: ${run.waiting}`, ticketKey: run.key });
+    }
+    // An owner level I-n the ledger's waiting does not already name.
+    for (const issue of run.issues.filter((item) => item.level === 'owner' && item.status === 'open')) {
+      if (run.waiting?.startsWith(`I-${issue.n}:`)) continue;
+      items.push({ id: `agent-issue-${run.key}-${issue.n}`, type: 'AGENT_ISSUE', message: `Waiting on you: I-${issue.n}: ${issue.text}`, ticketKey: run.key });
     }
     if (run.acFailed > 0) {
       const failed = run.ac.filter((item) => item.state === 'FAIL').map((item) => `AC${item.n}`).join(', ');
@@ -619,6 +725,11 @@ export class OrchestratorService {
   async members(keyInput: string, now = new Date()) {
     const timeline = await this.timeline(keyInput, now);
     return timeline ? timeline.agents.filter((agent) => agent.parentId) : [];
+  }
+
+  /** An entry in the ticket's event log, for outward actions DOCK takes on the ticket (broadcast, approval, owner replies). */
+  async recordEvent(keyInput: string, kind: string, detail: string | null) {
+    await this.storage.addOrchestratorEvent(normalizeTicketKey(keyInput), kind, detail ? detail.slice(0, 500) : null, MAX_EVENTS_KEPT);
   }
 
   async needsAttention(now = new Date()) {

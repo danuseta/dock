@@ -22,6 +22,7 @@ import {
 import type { ChatService } from '../integrations/chat';
 import { LedgerPeer, type PeerRun } from '../integrations/ledger-peer';
 import { createOrchestratorIngestRouter } from '../routes/orchestrator';
+import { DoctorReports } from '../integrations/doctor';
 import type { StorageService } from '../storage/service';
 
 const withoutLedger = (row: any) => {
@@ -136,7 +137,7 @@ test('orchestrator ledger parsing keeps only what DOCK shows', () => {
   assert.deepStrictEqual(parsed.decisions, []);
   const withBrief = parseLedger({ ...ledger, brief: 'line 1\nline 2', decisions: [{ at: '2026-10-04T08:00:00.000Z', text: 'use X' }, 'bad', { at: 'x' }, null] });
   assert.strictEqual(withBrief.brief, 'line 1\nline 2');
-  assert.deepStrictEqual(withBrief.decisions, [{ at: '2026-10-04T08:00:00.000Z', text: 'use X' }]);
+  assert.deepStrictEqual(withBrief.decisions, [{ n: 1, at: '2026-10-04T08:00:00.000Z', text: 'use X', status: 'DECIDED', by: 'owner', issue: null, cancelNote: null }], 'an old decision reads as D-1 decided by the owner');
   assert.deepStrictEqual(parsed.assumptions, []);
   assert.deepStrictEqual(parsed.failures, []);
   assert.strictEqual(parsed.closing, null);
@@ -203,6 +204,61 @@ test('read model applies the grace window, the owner gate and staleness', () => 
   assert.strictEqual(toOrchestration({ ...base, activity: 'IDLE' }, at(31 * 60)).stalled, true, 'an idle agent is stale after 30 minutes');
   assert.strictEqual(toOrchestration({ ...base, stage: 'done' }, at(99 * 60)).stalled, false);
   assert.strictEqual(toOrchestration(base, at(42)).idleSeconds, 42);
+});
+
+test('sous ledger fields: engine, card kind, rounds, draft, numbered decisions and issues; old ledgers keep working', () => {
+  const sous = parseLedger({
+    ...ledger,
+    engine: 'sous',
+    rounds: { used: 2, max: 4 },
+    productionData: true,
+    draft: true,
+    blackboard: 'E:/qonflo/.evidence/blackboard/QRD-1387',
+    decisions: [
+      { n: 3, at: '2026-10-20T01:00:00.000Z', text: 'Keep the old export', status: 'shov', by: 'arbiter', issue: 2 },
+      { n: 4, at: '2026-10-20T02:00:00.000Z', text: 'Drop the cache', status: 'CANCELLED', by: 'sous', cancelNote: 'needed by QRD-9' },
+      { n: 5, text: 'Odd one', status: 'MAYBE', by: 'robot' },
+    ],
+    issues: [
+      { n: 2, at: '2026-10-20T00:30:00.000Z', type: 'DISPUTE', text: 'BE and FE disagree on the field', level: 'owner', status: 'open', options: ['A', 'B', ''] },
+      { n: 1, type: 'weird', text: 'Old question', status: 'resolved', resolvedBy: 3, resolvedAt: '2026-10-20T01:00:00.000Z' },
+      { n: 6, text: '' },
+    ],
+  }, new Date('2026-10-21T00:00:00.000Z'));
+  assert.deepStrictEqual([sous.engine, sous.rounds, sous.productionData, sous.draft], ['sous', { used: 2, max: 4 }, true, true]);
+  assert.ok(!('blackboard' in sous), 'the local blackboard path stays on the machine');
+  assert.deepStrictEqual(sous.decisions.map((item) => [item.n, item.status, item.by, item.issue, item.cancelNote]), [
+    [3, 'SHOV', 'arbiter', 2, null], [4, 'CANCELLED', 'sous', null, 'needed by QRD-9'], [5, 'DECIDED', 'owner', null, null],
+  ]);
+  assert.deepStrictEqual(sous.issues, [
+    { n: 2, at: '2026-10-20T00:30:00.000Z', type: 'DISPUTE', text: 'BE and FE disagree on the field', level: 'owner', status: 'open', resolvedBy: null, resolvedAt: null, options: ['A', 'B'] },
+    { n: 1, at: '', type: 'QUESTION', text: 'Old question', level: 'arbiter', status: 'resolved', resolvedBy: 3, resolvedAt: '2026-10-20T01:00:00.000Z', options: [] },
+  ]);
+  const review = parseLedger({ ...ledger, kind: 'review', verdict: { value: 'approve', ticket: 'qrd-77', prs: ['https://github.com/o/be/pull/4', 'javascript:x'] } });
+  assert.deepStrictEqual([review.verdict, review.reviewTicket, review.reviewPrs], ['approve', 'QRD-77', ['https://github.com/o/be/pull/4']]);
+  const old = parseLedger(ledger);
+  assert.deepStrictEqual([old.reviewTicket, old.reviewPrs], [null, []]);
+  assert.deepStrictEqual([old.engine, old.rounds, old.productionData, old.draft, old.issues], [null, null, false, false, []]);
+
+  assert.strictEqual(parseLedger({ ...ledger, key: 'card-Fix-Login', kind: 'card' }).key, 'CARD-fix-login', 'a card keeps its slug lower case');
+  assert.strictEqual(parseLedger({ ...ledger, key: 'CARD-weekly-report' }).kind, 'card', 'a CARD key is a card without a kind');
+  assert.strictEqual(parseLedger({ ...ledger, kind: 'ticket' }).kind, 'build');
+  assert.throws(() => parseLedger({ ...ledger, key: 'CARD-' }), OrchestratorInputError);
+  assert.throws(() => parseLedger({ ...ledger, key: 'CARD-bad slug' }), OrchestratorInputError);
+
+  const row = {
+    key: 'QRD-1387', title: 'Ticket', stage: 'code', waiting: 'I-2: BE and FE disagree on the field [A|B]', activity: 'IDLE', activityDetail: null, activityEndedAt: null,
+    lastEventAt: null, ledgerUpdatedAt: new Date('2026-10-20T03:00:00.000Z'), transcriptAt: null, dismissedAt: null,
+    payload: JSON.stringify({ ...sous, issues: [...sous.issues, { ...sous.issues[0], n: 7, text: 'Production data is touched' }] }),
+  };
+  const run = toOrchestration(row, new Date('2026-10-20T03:01:00.000Z'));
+  assert.deepStrictEqual([run.engine, run.kind, run.draft, run.issues.length], ['sous', 'build', true, 3]);
+  assert.deepStrictEqual(attentionItems([run]).filter((item) => item.type !== 'AGENT_AC_FAILED').map((item) => [item.type, item.message]), [
+    ['AGENT_WAITING', 'Waiting on you: I-2: BE and FE disagree on the field [A|B]'],
+    ['AGENT_ISSUE', 'Waiting on you: I-7: Production data is touched'],
+  ], 'an owner issue the waiting text does not name gets its own item');
+  const stored = toOrchestration({ ...row, waiting: '', payload: JSON.stringify({ decisions: [{ at: 'x', text: 'old' }] }) }, new Date('2026-10-20T03:01:00.000Z'));
+  assert.deepStrictEqual([stored.decisions[0].n, stored.decisions[0].status, stored.issues, stored.engine], [1, 'DECIDED', [], null], 'a payload stored before the sous fields still reads');
 });
 
 test('a run whose lead ended its turn with subagents still running is stalled at once, with that reason', async () => {
@@ -1133,4 +1189,38 @@ test('a review ledger brings its findings with severities, the lgtm parts and th
 
   const plain = await service.ingestLedger({ ...ledger, key: 'ZED-451', waiting: '', updatedAt: now.toISOString(), verdict: { value: 'maybe' } }, now, 'laptop');
   assert.deepStrictEqual([plain.findings, plain.lgtm, plain.verdict, plain.blockers], [[], [], null, 0]);
+});
+
+test('the doctor route keeps the report under the machine of its token; a ledger with a pull request asks for the automatic broadcast', async (t) => {
+  const { storage } = memoryStorage();
+  const service = new OrchestratorService(storage, os.tmpdir());
+  const { token } = await service.createToken('laptop', 'workspace');
+  const cache = new Map<string, unknown>();
+  const doctor = new DoctorReports({
+    getCache: async (namespace: string, key: string) => cache.get(`${namespace}:${key}`) ?? null,
+    upsertCache: async (namespace: string, key: string, value: unknown) => { cache.set(`${namespace}:${key}`, value); },
+  });
+  const asked: string[] = [];
+  const broadcast = { afterDemoVideo: async () => 'waiting' as const, afterLedger: async (run: { key: string; prBe?: string | null }) => { asked.push(`${run.key} ${run.prBe}`); return 'waiting' as const; } };
+  const app = express();
+  app.use('/ingest/orchestrator', createOrchestratorIngestRouter(service, new PinRateLimiter(5, 60_000), undefined, undefined, undefined, undefined, doctor, broadcast));
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const post = (route: string, body: unknown, bearer?: string) => fetch(`http://127.0.0.1:${address.port}/ingest/orchestrator${route}`, {
+    method: 'POST', headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) }, body: JSON.stringify(body),
+  });
+
+  const report = { machine: 'coder-ws', os: 'linux', at: '2026-10-20T02:00:00.000Z', checks: [{ name: 'ffmpeg', ok: true, detail: '6.1' }] };
+  assert.strictEqual((await post('/doctor', report)).status, 401, 'same token auth as every ingest route');
+  const accepted = await post('/doctor', report, token);
+  assert.deepStrictEqual(await accepted.json(), { ok: true, result: { machine: 'workspace', checks: 1, failing: 0 } });
+  assert.strictEqual((await post('/doctor', { checks: 'none' }, token)).status, 400);
+  assert.deepStrictEqual((await doctor.list()).map((item) => [item.machine, item.host]), [['workspace', 'coder-ws']]);
+
+  assert.strictEqual((await post('', ledger, token)).status, 200);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepStrictEqual(asked, ['QRD-1387 https://github.com/example/be/pull/1']);
 });

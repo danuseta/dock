@@ -12,9 +12,12 @@ import { Badge, Button, Card, Page } from '../components/ui';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { cn } from '../lib/cn';
 
+// An open owner level I-n waits on the owner just as the ledger's waiting text does.
+const WAITS = new Set(['AGENT_WAITING', 'AGENT_ISSUE']);
+
 interface NeedsAttentionPageProps { onTicketClick: (key: string) => void }
 
-const agentLabel: Record<string, string> = { AGENT_WAITING: 'WAITING', AGENT_AC_FAILED: 'AC FAILED', AGENT_STALLED: 'STALLED', AGENT_CHANGES_REQUESTED: 'CHANGES REQUESTED', AGENT_CHECKS_FAILING: 'CI FAILING' };
+const agentLabel: Record<string, string> = { AGENT_WAITING: 'WAITING', AGENT_ISSUE: 'WAITING', AGENT_AC_FAILED: 'AC FAILED', AGENT_STALLED: 'STALLED', AGENT_CHANGES_REQUESTED: 'CHANGES REQUESTED', AGENT_CHECKS_FAILING: 'CI FAILING' };
 
 const NeedsAttentionPage: React.FC<NeedsAttentionPageProps> = ({ onTicketClick }) => {
   const { data, loading, error } = useQuery(GET_NEEDS_ATTENTION, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
@@ -53,9 +56,9 @@ const NeedsAttentionPage: React.FC<NeedsAttentionPageProps> = ({ onTicketClick }
       ) : (
         <div className="flex flex-col gap-4">
           {items.map((item: any) => agentLabel[item.type] ? (
-            <Card key={item.id} className={cn('flex flex-wrap items-center justify-between gap-4', item.type === 'AGENT_WAITING' ? 'border-amber-300/45' : 'border-status-conflict/40')}>
+            <Card key={item.id} className={cn('flex flex-wrap items-center justify-between gap-4', WAITS.has(item.type) ? 'border-amber-300/45' : 'border-status-conflict/40')}>
               <div className="flex min-w-0 items-center gap-4">
-                <Badge variant={item.type === 'AGENT_WAITING' ? 'neutral' : 'danger'} className={cn('shrink-0 gap-1.5 px-3.5 py-2.5 text-sm', item.type === 'AGENT_WAITING' && 'border-amber-300/45 bg-amber-300/10 text-amber-200')}>{item.type === 'AGENT_WAITING' ? <Hand size={16} aria-hidden="true" /> : <Bot size={16} aria-hidden="true" />}<span>{item.ticketKey}</span></Badge>
+                <Badge variant={WAITS.has(item.type) ? 'neutral' : 'danger'} className={cn('shrink-0 gap-1.5 px-3.5 py-2.5 text-sm', WAITS.has(item.type) && 'border-amber-300/45 bg-amber-300/10 text-amber-200')}>{WAITS.has(item.type) ? <Hand size={16} aria-hidden="true" /> : <Bot size={16} aria-hidden="true" />}<span>{item.ticketKey}</span></Badge>
                 <div className="min-w-0"><p className="font-mono text-[0.68rem] font-extrabold text-muted-foreground">AGENT · {agentLabel[item.type]}</p><h3 className="text-pretty text-lg font-medium">{item.message}</h3></div>
               </div>
               {item.ticketKey && <Button size="sm" variant="primary" onClick={() => onTicketClick(item.ticketKey)}>Inspect Ticket</Button>}

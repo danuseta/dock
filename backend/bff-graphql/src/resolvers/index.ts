@@ -7,7 +7,7 @@ import { shouldRequirePin, type AuthContext } from '../auth/session';
 import { CalendarUnavailableError, googleCalendarService } from '../integrations/google-calendar';
 import { upstreamMonitorService } from '../integrations/upstream-monitor';
 import { dockerRuntimeService } from '../integrations/docker-runtime';
-import { OrchestratorInputError, orchestratorService } from '../integrations/orchestrator';
+import { OrchestratorInputError, normalizeTicketKey, orchestratorService } from '../integrations/orchestrator';
 import { CHAT_MACHINE, chatService } from '../integrations/chat';
 import { ledgerPeer, withPeerRuns } from '../integrations/ledger-peer';
 import { mergeAttention, withoutSettledTickets } from '../integrations/attention';
@@ -19,7 +19,9 @@ import { demoVideos } from '../integrations/demo-videos';
 import { demoStorage, type DemoStorageInput } from '../integrations/demo-storage';
 import { DevServerError, devServers } from '../integrations/dev-servers';
 import { elevenLabsKeys } from '../integrations/elevenlabs-keys';
-import { moveToReview } from '../integrations/broadcast-review';
+import { broadcastDeps, sendBroadcast } from '../integrations/broadcast';
+import { approveReview, liveApprovalDeps } from '../integrations/review-approval';
+import { doctorReports } from '../integrations/doctor';
 import type { AnswerInput } from '../integrations/chat-interactions';
 import { SprintBusyError, SprintInputError, sprintDashboardService } from '../integrations/sprint-dashboard';
 import { dockMode } from '../mode';
@@ -149,6 +151,8 @@ export const resolvers = {
         }));
     },
     ticketDetail: async (_: any, { key }: { key: string }) => {
+      // A free form card lives only in the ledger: Jira has nothing to show.
+      if (/^card-/i.test(String(key).trim())) return null;
       try {
         return await jiraAPI.getTicket(key);
       } catch (error) {
@@ -217,6 +221,7 @@ export const resolvers = {
       return run ?? null;
     },
     ingestTokens: async () => orchestratorService.tokens(),
+    doctorReports: async () => doctorReports.list(),
     demoVideos: async () => {
       requireDemoVideos();
       return demoVideos.list(await storageAPI.listDemoLinks().catch(demoVideoError)).catch(demoVideoError);
@@ -296,6 +301,8 @@ export const resolvers = {
   // A run read from the peer DOCK brings its own events; its tool events and transcript stay on that DOCK.
   Orchestration: {
     remote: (parent: { machine: string }) => parent.machine !== dockMode(),
+    // A run from a peer DOCK that predates the sous fields has no issue list.
+    issues: (parent: { issues?: unknown[] }) => parent.issues ?? [],
     events: async (parent: { key: string; peer?: boolean; events?: unknown[] }) => (parent.peer ? parent.events ?? [] : orchestratorService.events(parent.key)),
     timeline: async (parent: { key: string; peer?: boolean }) => (parent.peer ? null : orchestratorService.timeline(parent.key)),
     members: async (parent: { key: string; peer?: boolean }) => (parent.peer ? [] : orchestratorService.members(parent.key).catch(() => [])),
@@ -324,52 +331,8 @@ export const resolvers = {
     saveDemoLink: async (_: any, { ticketKey, url }: { ticketKey: string, url: string }) => {
       return await storageAPI.saveDemoLink(ticketKey, url);
     },
-    sendToDiscord: async (_: any, { ticketKey, customMessage, threadId, threadName }: { ticketKey: string, customMessage?: string, threadId?: string, threadName?: string }) => {
-      const relation = await storageAPI.getTicketRelationGroup(ticketKey);
-      const tickets = (await Promise.all(relation.ticketKeys.map((key) => jiraAPI.getTicket(key)))).filter(isPresent);
-      if (tickets.length === 0) return false;
-
-      const [pullRequestGroups, demoLinks] = await Promise.all([
-        Promise.all(tickets.map((ticket) => githubAPI.getPullRequestsForTicket(ticket.key))),
-        Promise.all(tickets.map((ticket) => storageAPI.getDemoLink(ticket.key))),
-      ]);
-      const prs = [...new Map(pullRequestGroups.flat().map((pr: any) => [pr.url || pr.id, pr])).values()];
-      const primaryTicket = tickets.find((ticket) => ticket.key === relation.primaryKey) || tickets[0];
-      if (!primaryTicket) return false;
-      const settings = await storageAPI.getSettings();
-      const demoEntries = demoLinks
-        .map((demoLink, index) => ({ key: tickets[index]?.key, url: demoLink?.url }))
-        .filter((entry): entry is { key: string; url: string } => Boolean(entry.key && entry.url));
-      const uniqueDemoUrls = [...new Set(demoEntries.map((entry) => entry.url))];
-
-      const payload = {
-        ticket: {
-          key: primaryTicket.key,
-          title: primaryTicket.title,
-          url: primaryTicket.url || `https://jira.example.com/browse/${primaryTicket.key}`
-        },
-        relatedTickets: tickets.map((ticket) => ({
-          key: ticket.key,
-          title: ticket.title,
-          url: ticket.url || `https://jira.example.com/browse/${ticket.key}`,
-        })),
-        prs,
-        demoUrl: (uniqueDemoUrls.length === 1
-          ? `- **${tickets.map((ticket) => ticket.key).join(' + ')}:** ${uniqueDemoUrls[0]}`
-          : demoEntries.map((entry) => `- **${entry.key}:** ${entry.url}`).join('\n')) || undefined,
-        webhookUrl: settings.discordWebhookUrl,
-        messageTemplate: settings.discordMessageTemplate,
-        customMessage,
-        threadId,
-        threadName
-      };
-
-      const sent = await discordAPI.sendSummary(payload);
-      if (sent) {
-        const notMoved = await moveToReview(tickets, (key, status) => jiraAPI.transitionTicket(key, status));
-        if (notMoved.length) console.warn(`[Broadcast] Jira did not move ${notMoved.join(', ')} to PR Review`);
-      }
-      return sent;
+    sendToDiscord: async (_: any, args: { ticketKey: string, customMessage?: string, threadId?: string, threadName?: string }) => {
+      return sendBroadcast(broadcastDeps, args);
     },
     setTicketDependency: async (_: unknown, { ticketKey, dependsOnKey }: { ticketKey: string; dependsOnKey: string }) => {
       const [ticket, dependency] = await Promise.all([jiraAPI.getTicket(ticketKey), jiraAPI.getTicket(dependsOnKey)]);
@@ -516,9 +479,31 @@ export const resolvers = {
     ) => {
       return chatService.sendMessage(sessionId, text, await orchestratorService.machines(), { attachmentIds, options, mode }).catch(orchestratorInputError);
     },
-    answerTicket: async (_: unknown, { ticketKey, text }: { ticketKey: string; text: string }) => {
+    answerTicket: async (_: unknown, { ticketKey, text, issue }: { ticketKey: string; text: string; issue?: number | null }) => {
+      // A sous ticket gets a new session on its machine; a ticket on the older flow keeps the answer in its own session.
+      const sous = await Promise.resolve().then(() => orchestratorCron.sousRun(normalizeTicketKey(ticketKey))).catch(() => null);
+      if (sous) {
+        const answered = await orchestratorCron.answer(sous.key, text, issue).catch(cronError);
+        await orchestratorService.recordEvent(sous.key, 'OWNER_REPLY', answered ? `I-${answered}: new session` : 'new session');
+        return true;
+      }
       await chatService.answerTicket(ticketKey, text, await orchestratorService.machines()).catch(orchestratorInputError);
       return true;
+    },
+    cancelDecision: async (_: unknown, { ticketKey, n, note }: { ticketKey: string; n: number; note: string }) => {
+      const key = await Promise.resolve().then(() => normalizeTicketKey(ticketKey)).catch(cronError);
+      await orchestratorCron.cancelDecision(key, n, note).catch(cronError);
+      await orchestratorService.recordEvent(key, 'OWNER_CANCEL', `D-${n}: new session`);
+      return true;
+    },
+    approveReview: async (_: unknown, { ticketKey }: { ticketKey: string }) => {
+      const run = await orchestratorService.get(ticketKey);
+      if (!run || run.kind !== 'review') throw new GraphQLError('Only a review run can be approved here', { extensions: { code: 'BAD_USER_INPUT' } });
+      // The verdict names the reviewed ticket and its pull requests; an older ledger falls back to its own key.
+      const target = run.reviewTicket ?? run.key;
+      const steps = await approveReview(target, liveApprovalDeps, run.reviewPrs);
+      if (target !== run.key) await Promise.all(steps.map((step) => orchestratorService.recordEvent(run.key, step.ok ? 'APPROVED' : 'APPROVE_FAILED', `${target} ${step.name}: ${step.detail}`)));
+      return steps;
     },
     answerChatInteraction: async (
       _: unknown,
@@ -582,7 +567,7 @@ export const protectedQueries = [
   'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
-  'chatCommands', 'chatMachineOptions',
+  'chatCommands', 'chatMachineOptions', 'doctorReports',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey',
 ] as const;
 export const protectedMutations = [
@@ -627,6 +612,8 @@ export const protectedMutations = [
   'createChatSession',
   'sendChatMessage',
   'answerTicket',
+  'cancelDecision',
+  'approveReview',
   'answerChatInteraction',
   'stopChatTurn',
   'renameChatSession',
