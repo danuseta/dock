@@ -50,6 +50,9 @@ const RUN_TONE: Record<ReturnType<typeof runState>, string> = {
   finished: 'text-status-merged',
 };
 
+/** Acceptance criteria past this many start folded, like the description. */
+const AC_FOLD = 3;
+
 const AC_ICON = {
   PASS: <Check size={14} className="text-status-merged" aria-hidden="true" />,
   FAIL: <X size={14} className="text-status-conflict" aria-hidden="true" />,
@@ -108,6 +111,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const [menu, setMenu] = useState<TicketMenuTarget | null>(null);
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
   const [descriptionOpen, setDescriptionOpen] = useState(false);
+  const [acOpen, setAcOpen] = useState(false);
   const { data: runData } = useQuery(GET_ORCHESTRATION, { ...CACHED_QUERY_OPTIONS, variables: { key: ticketKey }, pollInterval: 30000 });
   const run: AgentRun | null = runData?.orchestration?.key?.toUpperCase() === ticketKey.toUpperCase() ? runData.orchestration : null;
   const { openForTicket, opening: openingSession, error: sessionError } = useOpenForTicket();
@@ -241,7 +245,10 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const needs = needsYou({ run, pullRequests: ticket.pullRequests });
   const handleNeed = (item: NeedItem) => {
     if (item.kind === 'question') void openForTicket(ticket.key);
-    else if (item.kind === 'ac') document.getElementById('acceptance-criteria')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    else if (item.kind === 'ac') {
+      setAcOpen(true);
+      document.getElementById('acceptance-criteria')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
     else {
       const pr = item.kind === 'conflict'
         ? ticket.pullRequests?.find((candidate: any) => `conflict-${candidate.id ?? candidate.repo}` === item.id)
@@ -402,12 +409,13 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
             <h2 className="mb-1.5 flex items-baseline gap-2 font-display text-sm font-bold">
               Acceptance criteria
               {run && <span className="font-body text-xs font-medium text-muted-foreground">{run.acPassed} of {run.acTotal} passing</span>}
+              {acItems.length > AC_FOLD && <button type="button" className="text-xs font-semibold text-accent hover:underline" aria-expanded={acOpen} onClick={() => setAcOpen((open) => !open)}>{acOpen ? 'Show less' : `Show all ${acItems.length}`}</button>}
             </h2>
             {acItems.length === 0 ? (
               <p className="text-pretty text-sm text-muted-foreground">{run ? 'No acceptance criteria recorded yet.' : 'They show here once an agent run starts on this ticket.'}</p>
             ) : (
               <ol className="flex flex-col">
-                {acItems.map((item) => (
+                {(acOpen ? acItems : acItems.slice(0, AC_FOLD)).map((item) => (
                   <li key={item.n} className="grid grid-cols-[20px_minmax(0,1fr)] items-center gap-2 py-1 text-sm" title={item.evidence || undefined}>
                     {AC_ICON[item.state as keyof typeof AC_ICON] ?? <Circle size={10} className="mx-auto text-muted-foreground" aria-hidden="true" />}
                     <span className="truncate">
