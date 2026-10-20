@@ -2,7 +2,7 @@ import assert from 'node:assert';
 import test from 'node:test';
 import {
   CronInputError, DEFAULT_CRON_SETTINGS, MAX_RESUMES, OrchestratorCron, PARKED_TEXT, RESUME_GAVE_UP_TEXT, START_FAILED_TEXT, candidates, hasAcceptanceCriteria, labelOrder, ticketHasAcceptanceCriteria, outsideWindow, parseCronSettings,
-  confirmedPrompt, ownerReplyPrompt, resumePrompt, sousConfirmedPrompt, sousStartPrompt, startPrompt, wib, type CronDeps, type CronRun, type CronSettings, type CronTicket,
+  OWNER_BUSY_TEXT, confirmedPrompt, ownerReplyPrompt, resumePrompt, sousConfirmedPrompt, sousStartPrompt, startPrompt, wib, type CronDeps, type CronRun, type CronSettings, type CronTicket,
 } from '../integrations/orchestrator-cron';
 
 const AC = 'Context.\n\nAcceptance criteria\n\nReloading the page still shows Disconnected.\n\nA manually disabled channel keeps its status.';
@@ -116,7 +116,7 @@ function world(start: Start = {}) {
     tickets: start.tickets ?? [],
     runs: start.runs ?? [] as CronRun[],
     online: start.online ?? true,
-    sessions: [] as Array<{ id: string; ticketKey: string; machine: string; origin: string; options: Record<string, string>; state: SessionState; queuedAt: number; replied: boolean }>,
+    sessions: [] as Array<{ id: string; ticketKey: string; machine: string; title?: string; origin: string; options: Record<string, string>; state: SessionState; queuedAt: number; replied: boolean }>,
     sent: [] as Array<{ sessionId: string; text: string; options: Record<string, string> }>,
     moved: [] as string[],
     movedTo: [] as Array<[string, string]>,
@@ -127,6 +127,8 @@ function world(start: Start = {}) {
     ownerStopped: new Set<string>(),
     otherActive: new Set<string>(),
     failSend: false,
+    // What the machine's reported capabilities make of the cron options; a throw is a refusal.
+    machineOptions: (options: Record<string, string>): Record<string, string> => options,
   };
   if (start.webhook) state.settings.set('orchestratorCronWebhookUrl', start.webhook);
   const parallel = () => JSON.parse(state.settings.get('orchestratorCronConfig') as string).parallel as number;
@@ -170,6 +172,9 @@ function world(start: Start = {}) {
       const session = state.sessions.find((item) => item.id === sessionId)!;
       Object.assign(session, { state: 'queued', queuedAt: ++state.clock });
     },
+    machineOptions: async (_machine, options) => state.machineOptions(options),
+    deleteSession: async (sessionId) => { state.sessions = state.sessions.filter((session) => session.id !== sessionId); },
+    ownerSessionBusy: async (key) => state.sessions.some((s) => s.ticketKey === key && s.title === `${key} (owner)` && (s.state === 'queued' || s.state === 'running')),
     runningSessions: async () => ['s-1', 's-2'],
     stopTurn: async (sessionId) => { state.stopped.push(sessionId); },
     post: async (url, body) => { state.posts.push({ url, body }); },
@@ -565,6 +570,7 @@ test('an owner answer on a sous ticket opens a new cron session on the ticket ma
   assert.strictEqual(w.state.sent[0].text, ownerReplyPrompt('QRD-9', 'Jawaban owner untuk I-2: Drop'));
   assert.strictEqual(w.state.sent[0].text, 'Pakai skill sous. Lanjutkan tiket QRD-9 dari blackboard dan ledger (node $K/status.cjs show QRD-9), jangan mulai dari awal.\nJawaban owner untuk I-2: Drop');
 
+  w.endTurn('QRD-9');
   assert.strictEqual(await w.cron.answer('QRD-9', 'Use the new table', 3), 3, 'a chosen open issue');
   assert.strictEqual(w.state.sessions.length, 2, 'every answer opens its own session');
   await assert.rejects(w.cron.answer('QRD-9', 'x', 1), CronInputError, 'a resolved issue is not answered');
@@ -583,7 +589,45 @@ test('the owner cancels a SHOV or USULAN decision in a new session; a decided or
   const w = world({ runs: [sousRun()] });
   await w.cron.cancelDecision('QRD-9', 2, 'keep the old export');
   assert.strictEqual(w.state.sent[0].text, ownerReplyPrompt('QRD-9', 'Owner membatalkan D-2: keep the old export'));
+  w.endTurn('QRD-9');
   await w.cron.cancelDecision('QRD-9', 4, 'not now');
   assert.strictEqual(w.state.sessions.length, 2);
   for (const n of [1, 3, 9]) await assert.rejects(w.cron.cancelDecision('QRD-9', n, 'no'), CronInputError, `D-${n}`);
+});
+
+test('an owner reply waits for the previous owner session of the ticket to finish its first turn', async () => {
+  const w = world({ runs: [sousRun()] });
+  await w.cron.answer('QRD-9', 'Drop');
+  await assert.rejects(w.cron.answer('QRD-9', 'Drop'), (error: Error) => error instanceof CronInputError && error.message === OWNER_BUSY_TEXT, 'a second click while the first is queued');
+  await assert.rejects(w.cron.cancelDecision('QRD-9', 2, 'no'), CronInputError, 'a cancel waits too');
+  w.claim();
+  await assert.rejects(w.cron.answer('QRD-9', 'Drop'), CronInputError, 'and while it runs');
+  w.endTurn('QRD-9');
+  assert.strictEqual(await w.cron.answer('QRD-9', 'Keep', 3), 3, 'after its first turn a new reply goes through');
+  assert.strictEqual(w.state.sessions.length, 2);
+
+  const racing = world({ runs: [sousRun()] });
+  const both = await Promise.allSettled([racing.cron.answer('QRD-9', 'A'), racing.cron.answer('QRD-9', 'B')]);
+  assert.deepStrictEqual(both.map((result) => result.status).sort(), ['fulfilled', 'rejected'], 'two clicks at once open one session');
+  assert.strictEqual(racing.state.sessions.length, 1);
+});
+
+test('an owner session uses only the options its machine takes and leaves no empty session when the message is refused', async () => {
+  const unknown = world({ runs: [sousRun()] });
+  unknown.state.machineOptions = () => ({});
+  await unknown.cron.answer('QRD-9', 'Drop');
+  assert.deepStrictEqual([unknown.state.sessions[0].options, unknown.state.sent[0].options], [{}, {}], 'a machine without reported capabilities gets no permission mode');
+
+  const refused = world({ runs: [sousRun()] });
+  refused.state.machineOptions = () => { throw new Error('This machine does not offer that permission mode'); };
+  await assert.rejects(refused.cron.answer('QRD-9', 'Drop'), /does not offer that permission mode/);
+  assert.strictEqual(refused.state.sessions.length, 0, 'refused before any session is opened');
+
+  const failing = world({ runs: [sousRun()] });
+  failing.state.failSend = true;
+  await assert.rejects(failing.cron.cancelDecision('QRD-9', 2, 'no'), /send refused/);
+  assert.strictEqual(failing.state.sessions.length, 0, 'the session whose first message failed is removed');
+  failing.state.failSend = false;
+  await failing.cron.cancelDecision('QRD-9', 2, 'no');
+  assert.strictEqual(failing.state.sessions.length, 1, 'the owner can try again');
 });

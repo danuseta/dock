@@ -37,7 +37,7 @@ export const RUN_STATE_LABEL: Record<RunState, string> = {
   finished: 'Run finished',
 };
 
-export type NeedKind = 'question' | 'ac' | 'review' | 'conflict';
+export type NeedKind = 'question' | 'sous' | 'ac' | 'review' | 'conflict';
 
 export interface NeedItem {
   id: string;
@@ -57,7 +57,7 @@ export const splitChoices = (waiting: string): { question: string; choices: stri
 };
 
 interface NeedFacts {
-  run?: Pick<AgentRun, 'waiting' | 'finished' | 'stage' | 'ac' | 'reviewSignal'> | null;
+  run?: Pick<AgentRun, 'waiting' | 'finished' | 'stage' | 'ac' | 'reviewSignal' | 'engine'> | null;
   pullRequests?: Array<{ id?: string | null; repo?: string | null; number?: number | null; pullNumber?: number | null; status?: string | null }> | null;
 }
 
@@ -71,7 +71,9 @@ export function needsYou({ run, pullRequests }: NeedFacts): NeedItem[] {
   const items: NeedItem[] = [];
   if (run?.waiting && !run.finished) {
     const { question, choices } = splitChoices(run.waiting);
-    items.push({ id: 'question', kind: 'question', text: question, choices });
+    // A sous issue is answered in Laporan sous, so it shows here without answers of its own.
+    if (run.engine === 'sous' && /^I-\d+:/.test(question)) items.push({ id: 'question', kind: 'sous', text: question });
+    else items.push({ id: 'question', kind: 'question', text: question, choices });
   }
   for (const item of run?.ac ?? []) {
     if (item.state === 'FAIL') items.push({ id: `ac-${item.n}`, kind: 'ac', text: item.text || `AC ${item.n}` });

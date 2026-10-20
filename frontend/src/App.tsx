@@ -51,7 +51,7 @@ function App() {
       const key = decodeURIComponent(path.split('/').pop() || '');
       return { path: '/ticket', key: key || null };
     }
-    if (path === '/dashboard' || path === '/agents' || path === '/sessions' || path === '/calendar' || path === '/sprint' || path === '/monitoring' || path === '/docker' || path === '/demo-videos' || path === '/dev-servers' || path === '/health' || path === '/attention' || path === '/settings') {
+    if (path === '/dashboard' || path === '/agents' || path === '/sessions' || path === '/calendar' || path === '/sprint' || path === '/monitoring' || path === '/docker' || path === '/demo-videos' || path === '/dev-servers' || path === '/machines' || path === '/attention' || path === '/settings') {
       return { path, key: null };
     }
     return { path: '/', key: null };
@@ -114,7 +114,7 @@ function App() {
       case '/docker': return <DockerServicesPage />;
       case '/demo-videos': return <DemoVideosPage onTicketClick={navigateToTicket} />;
       case '/dev-servers': return <DevServersPage />;
-      case '/health': return <HealthPage />;
+      case '/machines': return <HealthPage />;
       case '/attention': return <NeedsAttentionPage onTicketClick={navigateToTicket} />;
       case '/settings': return <SettingsPage />;
       case '/ticket': return selectedTicketKey ? <TicketDetailPage ticketKey={selectedTicketKey} onBack={() => handleNavigate('/dashboard')} /> : <DashboardPage onTicketClick={navigateToTicket} />;

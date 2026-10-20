@@ -940,6 +940,15 @@ export class ChatService {
     return toSession(row, null);
   }
 
+  /** The cron options a new session on the machine can carry: none on a machine that never reported what it offers, else checked. */
+  async machineTurnOptions(machineInput: string, options: Record<string, string>): Promise<Record<string, string>> {
+    const { caps, catalog } = await this.info(normalizeMachine(machineInput));
+    if (!caps) return {};
+    const parsed = parseTurnOptions(options);
+    if (parsed) checkTurnOptions(parsed, caps, catalog);
+    return options;
+  }
+
   async sendMessage(
     sessionIdInput: string,
     textInput: string,

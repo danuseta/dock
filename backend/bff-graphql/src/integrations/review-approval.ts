@@ -1,5 +1,6 @@
 import { GitHubAPI } from '../datasources/GitHubAPI';
 import { JiraAPI } from '../datasources/JiraAPI';
+import { StorageService } from '../storage/service';
 import { orchestratorService } from './orchestrator';
 
 export const PASS_LABEL = 'pass';
@@ -59,6 +60,28 @@ export async function approveReview(key: string, deps: ApprovalDeps, prUrls: str
   }
   return steps;
 }
+
+const APPROVAL_CACHE = 'review-approval';
+
+/** The outcome of the last approval of each review run, kept so a reload still shows it done. */
+export class ApprovalRecords {
+  constructor(private readonly storage: {
+    getCache(namespace: string, key: string): Promise<unknown>;
+    upsertCache(namespace: string, key: string, value: unknown, ttlSeconds?: number): PromiseLike<unknown>;
+  } = new StorageService()) {}
+
+  async save(key: string, steps: ApprovalStep[], at = new Date()) {
+    await this.storage.upsertCache(APPROVAL_CACHE, key, { at: at.toISOString(), ok: steps.length > 0 && steps.every((step) => step.ok) }, 0);
+  }
+
+  /** True when every step of the last approval succeeded. */
+  async approved(key: string): Promise<boolean> {
+    const saved = await this.storage.getCache(APPROVAL_CACHE, key);
+    return typeof saved === 'object' && saved !== null && (saved as { ok?: unknown }).ok === true;
+  }
+}
+
+export const approvalRecords = new ApprovalRecords();
 
 const jiraAPI = new JiraAPI();
 const githubAPI = new GitHubAPI();

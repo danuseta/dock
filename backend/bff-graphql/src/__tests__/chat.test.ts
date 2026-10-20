@@ -18,6 +18,7 @@ import {
   parseSessionSync,
   searchSnippet,
 } from '../integrations/chat';
+import { CAPS_VERSION } from '../integrations/chat-interactions';
 import { OrchestratorInputError, OrchestratorService } from '../integrations/orchestrator';
 import { createOrchestratorIngestRouter } from '../routes/orchestrator';
 import type { StorageService } from '../storage/service';
@@ -961,4 +962,17 @@ test('a session counts its agent rows, and its workers come back in order with t
   ]);
   assert.deepStrictEqual(await service.workers(none.id), []);
   assert.deepStrictEqual(await service.workers('not an id!'), []);
+});
+
+test('a cron owner session carries only the options its machine reported it can take', async () => {
+  const { storage, service } = clockedService();
+  const options = { permissionMode: 'default', effort: 'high' };
+  assert.deepStrictEqual(await service.machineTurnOptions('workspace', options), {}, 'a machine that never reported its capabilities gets no options');
+
+  (storage as unknown as { getChatMachineInfo: () => Promise<unknown> }).getChatMachineInfo = async () => ({
+    machine: 'laptop', caps: JSON.stringify({ v: CAPS_VERSION, features: ['effort'], modes: ['auto'] }), catalog: '', catalogHash: '',
+  });
+  const reported = new ChatService(storage);
+  await assert.rejects(reported.machineTurnOptions('laptop', { permissionMode: 'default' }), /does not offer that permission mode/);
+  assert.deepStrictEqual(await reported.machineTurnOptions('laptop', { permissionMode: 'auto' }), { permissionMode: 'auto' });
 });

@@ -6,6 +6,8 @@ import { KindBadge } from '../agents/KindBadge';
 import { kindLabel, matchesRunFilter, runFilterFromSearch, type AgentRun } from '../agents/runs';
 import { SousReport } from '../components/ticket/SousReport';
 import { canCancel, openIssues, reportAge, reportDecisions, showsSousReport } from '../lib/sousReport';
+import { needsYou } from '../lib/ticketDetail';
+import { NeedsYouCard } from '../components/ticket/NeedsYouCard';
 
 const issue = (n: number, level: string, status = 'open') => ({ n, at: '', type: 'QUESTION', text: `Issue ${n}`, level, status, options: [] as string[] });
 
@@ -64,4 +66,24 @@ test('a doctor report age reads like people say it', () => {
     ['2026-10-20T12:00:20.000Z', '2026-10-20T11:55:00.000Z', '2026-10-20T09:00:00.000Z', '2026-10-17T12:00:00.000Z'].map((at) => reportAge(at, now)),
     ['just now', '5 min ago', '3 h ago', '3 days ago'],
   );
+});
+
+test('on a sous ticket the I-n question is answered only in Laporan sous; other tickets keep their answer buttons', () => {
+  const facts = { stage: 'code', finished: false, ac: [], reviewSignal: null, waiting: 'I-4: Keep the export? [Keep|Drop]' };
+  const sous = needsYou({ run: { ...facts, engine: 'sous' } });
+  assert.deepStrictEqual(sous, [{ id: 'question', kind: 'sous', text: 'I-4: Keep the export?' }]);
+  const card = renderToStaticMarkup(<NeedsYouCard items={sous} onAction={() => undefined} onAnswer={async () => undefined} answering={false} />);
+  assert.match(card, /Answer in Laporan sous/);
+  assert.doesNotMatch(card, />Keep<|Answer the agent|Send the answer/);
+
+  const old = needsYou({ run: { ...facts, engine: null } });
+  assert.deepStrictEqual(old[0].kind, 'question');
+  assert.match(renderToStaticMarkup(<NeedsYouCard items={old} onAction={() => undefined} onAnswer={async () => undefined} answering={false} />), />Keep<.*>Drop</);
+  assert.strictEqual(needsYou({ run: { ...facts, engine: 'sous', waiting: 'Confirm the base branch' } })[0].kind, 'question', 'a sous wait that is not an I-n keeps its answer box');
+});
+
+test('while an owner reply or cancel is in flight the Laporan sous buttons are disabled', () => {
+  const html = renderToStaticMarkup(<SousReport run={run} onAnswer={async () => undefined} onCancel={async () => undefined} busy />);
+  assert.strictEqual(html.match(/disabled=""[^>]*>Batalkan</g)?.length, 2);
+  assert.match(html, /<button[^>]*disabled=""[^>]*>Keep</);
 });

@@ -305,6 +305,8 @@ export interface CronRun {
 
 const CANCELLABLE = new Set(['SHOV', 'USULAN']);
 const MAX_OWNER_TEXT = 4000;
+export const OWNER_BUSY_TEXT = 'The previous owner reply on this ticket has not finished its first turn yet. Wait for it, then send again.';
+export const ownerSessionTitle = (key: string) => `${key} (owner)`;
 
 export interface CronDeps {
   now(): Date;
@@ -337,6 +339,11 @@ export interface CronDeps {
   /** The newest cron session of each ticket; `stopped` when the owner stopped its last turn, `otherActive` when another session of the ticket works or spoke after it. */
   cronSessions(keys: string[]): Promise<Map<string, { id: string; status: string; stopped: boolean; otherActive: boolean }>>;
   openSession(input: { ticketKey: string; machine: string; title: string; origin: 'cron'; options: Record<string, string> }): Promise<{ id: string }>;
+  /** The turn options the machine takes: none when it never reported what it offers; throws when it refuses them. */
+  machineOptions(machine: string, options: Record<string, string>): Promise<Record<string, string>>;
+  deleteSession(sessionId: string): Promise<unknown>;
+  /** True while an owner session of the ticket still has its first turn queued or running. */
+  ownerSessionBusy(key: string): Promise<boolean>;
   send(sessionId: string, text: string, options: Record<string, string>): Promise<unknown>;
   runningSessions(): Promise<string[]>;
   stopTurn(sessionId: string): Promise<unknown>;
@@ -349,6 +356,7 @@ interface DayCount { started: string[]; parked: string[] }
 
 export class OrchestratorCron {
   private running: Promise<FillLog> | null = null;
+  private readonly ownerOpening = new Set<string>();
 
   constructor(private readonly deps: CronDeps) {}
 
@@ -609,10 +617,26 @@ export class OrchestratorCron {
     await this.ownerSession(run, ownerReplyPrompt(key, `Owner membatalkan D-${n}: ${ownerText(noteInput)}`));
   }
 
+  /**
+   * One owner session at a time per ticket, opened only with options its machine takes. A session whose first message
+   * is refused is removed again, so no empty session is left behind.
+   */
   private async ownerSession(run: CronRun, prompt: string) {
-    const options = this.turnOptions(await this.settings());
-    const session = await this.deps.openSession({ ticketKey: run.key, machine: run.machine, title: `${run.key} (owner)`, origin: 'cron', options });
-    await this.deps.send(session.id, prompt, options);
+    if (this.ownerOpening.has(run.key)) throw new CronInputError(OWNER_BUSY_TEXT);
+    this.ownerOpening.add(run.key);
+    try {
+      if (await this.deps.ownerSessionBusy(run.key)) throw new CronInputError(OWNER_BUSY_TEXT);
+      const options = await this.deps.machineOptions(run.machine, this.turnOptions(await this.settings()));
+      const session = await this.deps.openSession({ ticketKey: run.key, machine: run.machine, title: ownerSessionTitle(run.key), origin: 'cron', options });
+      try {
+        await this.deps.send(session.id, prompt, options);
+      } catch (error) {
+        await this.deps.deleteSession(session.id).catch(() => undefined);
+        throw error;
+      }
+    } finally {
+      this.ownerOpening.delete(run.key);
+    }
   }
 
   async stopAll(): Promise<number> {

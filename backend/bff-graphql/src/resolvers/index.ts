@@ -20,7 +20,7 @@ import { demoStorage, type DemoStorageInput } from '../integrations/demo-storage
 import { DevServerError, devServers } from '../integrations/dev-servers';
 import { elevenLabsKeys } from '../integrations/elevenlabs-keys';
 import { broadcastDeps, sendBroadcast } from '../integrations/broadcast';
-import { approveReview, liveApprovalDeps } from '../integrations/review-approval';
+import { approvalRecords, approveReview, liveApprovalDeps } from '../integrations/review-approval';
 import { doctorReports } from '../integrations/doctor';
 import type { AnswerInput } from '../integrations/chat-interactions';
 import { SprintBusyError, SprintInputError, sprintDashboardService } from '../integrations/sprint-dashboard';
@@ -303,6 +303,7 @@ export const resolvers = {
     remote: (parent: { machine: string }) => parent.machine !== dockMode(),
     // A run from a peer DOCK that predates the sous fields has no issue list.
     issues: (parent: { issues?: unknown[] }) => parent.issues ?? [],
+    approved: async (parent: { key: string; peer?: boolean }) => (parent.peer ? false : approvalRecords.approved(parent.key).catch(() => false)),
     events: async (parent: { key: string; peer?: boolean; events?: unknown[] }) => (parent.peer ? parent.events ?? [] : orchestratorService.events(parent.key)),
     timeline: async (parent: { key: string; peer?: boolean }) => (parent.peer ? null : orchestratorService.timeline(parent.key)),
     members: async (parent: { key: string; peer?: boolean }) => (parent.peer ? [] : orchestratorService.members(parent.key).catch(() => [])),
@@ -502,6 +503,7 @@ export const resolvers = {
       // The verdict names the reviewed ticket and its pull requests; an older ledger falls back to its own key.
       const target = run.reviewTicket ?? run.key;
       const steps = await approveReview(target, liveApprovalDeps, run.reviewPrs);
+      await approvalRecords.save(run.key, steps);
       if (target !== run.key) await Promise.all(steps.map((step) => orchestratorService.recordEvent(run.key, step.ok ? 'APPROVED' : 'APPROVE_FAILED', `${target} ${step.name}: ${step.detail}`)));
       return steps;
     },

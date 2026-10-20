@@ -5,6 +5,7 @@ import { Button, Input } from '../ui';
 
 const KIND: Record<NeedKind, { label: string; action: string }> = {
   question: { label: 'Question', action: 'Open session' },
+  sous: { label: 'Question', action: 'Answer in Laporan sous' },
   ac: { label: 'AC fail', action: 'Show' },
   review: { label: 'Review', action: 'Open PR' },
   conflict: { label: 'Conflict', action: 'Inspect' },
