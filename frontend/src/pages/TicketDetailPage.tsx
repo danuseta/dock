@@ -54,15 +54,15 @@ const RUN_TONE: Record<ReturnType<typeof runState>, string> = {
 const AC_FOLD = 3;
 
 const AC_ICON = {
-  PASS: <Check size={14} className="text-status-merged" aria-hidden="true" />,
-  FAIL: <X size={14} className="text-status-conflict" aria-hidden="true" />,
+  PASS: <Check size={14} className="mt-0.5 text-status-merged" aria-hidden="true" />,
+  FAIL: <X size={14} className="mt-0.5 text-status-conflict" aria-hidden="true" />,
 };
 
 /** One label and value in the ticket's property list. */
 const Property: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <>
     <dt className="py-1.5 text-xs text-muted-foreground">{label}</dt>
-    <dd className="flex min-w-0 items-center gap-2 py-1 text-sm">{children}</dd>
+    <dd className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 py-1 text-sm">{children}</dd>
   </>
 );
 
@@ -395,39 +395,41 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
             <SousReport run={run} onAnswer={handleIssueAnswer} onCancel={handleCancelDecision} busy={answering || cancelling} blocked={blockedHere} />
           )}
 
-          <section>
-            <h2 className="mb-1.5 flex items-center gap-3 font-display text-sm font-bold">
-              Description
-              {foldDescription && <button type="button" className="text-xs font-semibold text-accent hover:underline" aria-expanded={descriptionOpen} onClick={() => setDescriptionOpen((open) => !open)}>{descriptionOpen ? 'Show less' : 'Show all'}</button>}
-            </h2>
-            <div className={cn('whitespace-pre-wrap break-words text-sm leading-relaxed text-secondary-foreground', foldDescription && !descriptionOpen && 'line-clamp-3')}>
-              {ticket.description || 'No detailed description provided in this Jira issue.'}
-            </div>
-          </section>
+          <div className="grid grid-cols-2 items-start gap-8 max-[1280px]:grid-cols-1 max-[1280px]:gap-4">
+            <section className="min-w-0">
+              <h2 className="mb-1.5 flex items-center gap-3 font-display text-sm font-bold">
+                Description
+                {foldDescription && <button type="button" className="text-xs font-semibold text-accent hover:underline" aria-expanded={descriptionOpen} onClick={() => setDescriptionOpen((open) => !open)}>{descriptionOpen ? 'Show less' : 'Show all'}</button>}
+              </h2>
+              <div className={cn('whitespace-pre-wrap break-words text-sm leading-relaxed text-secondary-foreground', foldDescription && !descriptionOpen && 'line-clamp-3')}>
+                {ticket.description || 'No detailed description provided in this Jira issue.'}
+              </div>
+            </section>
 
-          <section id="acceptance-criteria" className="scroll-mt-6">
-            <h2 className="mb-1.5 flex items-baseline gap-2 font-display text-sm font-bold">
-              Acceptance criteria
-              {run && <span className="font-body text-xs font-medium text-muted-foreground">{run.acPassed} of {run.acTotal} passing</span>}
-              {acItems.length > AC_FOLD && <button type="button" className="text-xs font-semibold text-accent hover:underline" aria-expanded={acOpen} onClick={() => setAcOpen((open) => !open)}>{acOpen ? 'Show less' : `Show all ${acItems.length}`}</button>}
-            </h2>
-            {acItems.length === 0 ? (
-              <p className="text-pretty text-sm text-muted-foreground">{run ? 'No acceptance criteria recorded yet.' : 'They show here once an agent run starts on this ticket.'}</p>
-            ) : (
-              <ol className="flex flex-col">
-                {(acOpen ? acItems : acItems.slice(0, AC_FOLD)).map((item) => (
-                  <li key={item.n} className="grid grid-cols-[20px_minmax(0,1fr)] items-center gap-2 py-1 text-sm" title={item.evidence || undefined}>
-                    {AC_ICON[item.state as keyof typeof AC_ICON] ?? <Circle size={10} className="mx-auto text-muted-foreground" aria-hidden="true" />}
-                    <span className="truncate">
-                      <span className="sr-only">{item.state}: </span>
-                      {item.text || `AC ${item.n}`}
-                      {item.state === 'FAIL' && item.evidence && <span className="ml-2 font-mono text-[0.7rem] text-status-conflict">{item.evidence}</span>}
-                    </span>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </section>
+            <section id="acceptance-criteria" className="min-w-0 scroll-mt-6">
+              <h2 className="mb-1.5 flex items-baseline gap-2 font-display text-sm font-bold">
+                Acceptance criteria
+                {run && <span className="font-body text-xs font-medium text-muted-foreground">{run.acPassed} of {run.acTotal} passing</span>}
+                {acItems.length > AC_FOLD && <button type="button" className="text-xs font-semibold text-accent hover:underline" aria-expanded={acOpen} onClick={() => setAcOpen((open) => !open)}>{acOpen ? 'Show less' : `Show all ${acItems.length}`}</button>}
+              </h2>
+              {acItems.length === 0 ? (
+                <p className="text-pretty text-sm text-muted-foreground">{run ? 'No acceptance criteria recorded yet.' : 'They show here once an agent run starts on this ticket.'}</p>
+              ) : (
+                <ol className="flex flex-col">
+                  {(acOpen ? acItems : acItems.slice(0, AC_FOLD)).map((item) => (
+                    <li key={item.n} className="grid grid-cols-[20px_minmax(0,1fr)] items-start gap-2 py-1 text-sm" title={item.evidence || undefined}>
+                      {AC_ICON[item.state as keyof typeof AC_ICON] ?? <Circle size={10} className="mx-auto mt-1.5 text-muted-foreground" aria-hidden="true" />}
+                      <span className="text-pretty">
+                        <span className="sr-only">{item.state}: </span>
+                        {item.text || `AC ${item.n}`}
+                        {item.state === 'FAIL' && item.evidence && <span className="ml-2 font-mono text-[0.7rem] text-status-conflict">{item.evidence}</span>}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </section>
+          </div>
         </main>
 
         <aside className="min-w-0 border-l border-border pl-6 max-[1000px]:border-l-0 max-[1000px]:border-t max-[1000px]:pl-0 max-[1000px]:pt-4">
@@ -437,7 +439,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
                 <i className={cn('size-1.5 rounded-full bg-current', state === 'running' && 'animate-pulse motion-reduce:animate-none')} aria-hidden="true" />
                 {RUN_STATE_LABEL[state]}{run ? ` · ${stageLabel(run.stage)}` : ''}
               </span>
-              {run && <span className="truncate font-mono text-[0.7rem] text-muted-foreground">{machineOf(run)}</span>}
+              {run && <span className="font-mono text-[0.7rem] text-muted-foreground">{machineOf(run)}</span>}
             </Property>
             {run?.stage === 'blocked' && <><dt className="sr-only">Blocked</dt><dd className="col-span-2 pb-1 text-pretty text-xs text-status-conflict">Blocked: {run.note || run.waiting || 'see the session for the reason'}.</dd></>}
             <Property label="Order">
