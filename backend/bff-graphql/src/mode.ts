@@ -10,3 +10,6 @@ export function dockMode(): DockMode {
   if (!DOCK_MODES.includes(value as DockMode)) throw new Error(`DOCK_MODE must be one of ${DOCK_MODES.join(', ')}`);
   return value as DockMode;
 }
+
+/** The runs this DOCK's own machine reported; a run of the other machine never shows here. */
+export const ownRuns = <T extends { machine: string }>(runs: T[]): T[] => runs.filter((run) => run.machine === dockMode());

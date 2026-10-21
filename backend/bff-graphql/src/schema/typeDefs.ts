@@ -494,10 +494,6 @@ export const typeDefs = gql`
     stalled: Boolean!
     hasTranscript: Boolean!
     machine: String!
-    """The run belongs to another DOCK's machine: shown here, changed only there."""
-    remote: Boolean!
-    handoverTo: String
-    handoverAt: String
     updatedAt: String!
     events: [OrchestrationEvent!]!
     timeline: OrchestrationTimeline
@@ -885,7 +881,6 @@ export const typeDefs = gql`
     removeElevenLabsKey(name: String!): Boolean!
     unparkElevenLabsKey(name: String!): Boolean!
     dismissOrchestration(key: String!): Boolean!
-    moveOrchestration(key: String!, machine: String!): Orchestration!
     createChatSession(title: String, ticketKey: String, forkFrom: ID, machine: String): ChatSession!
     sendChatMessage(sessionId: ID!, text: String!, attachmentIds: [ID!], options: ChatTurnOptionsInput, mode: String): ChatMessage!
     answerChatInteraction(sessionId: ID!, id: Int!, decision: String!, answers: [ChatAnswerInput!], note: String): ChatInteraction!

@@ -4,7 +4,7 @@ import { decrypt, encrypt, hashPin, verifyPin } from './crypto';
 
 const RUN_WITHOUT_LEDGER = {
   key: true, title: true, stage: true, waiting: true, payload: true, activity: true, activityDetail: true, activityEndedAt: true,
-  lastEventAt: true, ledgerUpdatedAt: true, transcriptAt: true, dismissedAt: true, machine: true, handover: true, jiraStatus: true, jiraStage: true, stalledDetail: true, stalledAt: true, createdAt: true, updatedAt: true,
+  lastEventAt: true, ledgerUpdatedAt: true, transcriptAt: true, dismissedAt: true, machine: true, jiraStatus: true, jiraStage: true, stalledDetail: true, stalledAt: true, createdAt: true, updatedAt: true,
 } as const;
 const KEPT_EVENT_KINDS = ['STAGE', 'WAITING'];
 
@@ -274,13 +274,8 @@ export class StorageService {
   }
 
   async takeDismissedOrchestratorRun(key: string, data: { title: string; stage: string; waiting: string; payload: string; ledgerUpdatedAt: Date; machine: string; ledgerRaw: string | null; stalledDetail?: null; stalledAt?: null }) {
-    await this.db.orchestratorRun.updateMany({ where: { key, dismissedAt: { not: null } }, data: { ...data, handover: null, dismissedAt: null, activity: 'IDLE', activityDetail: null, activityEndedAt: null, lastEventAt: null, transcriptAt: null, stalledDetail: null, stalledAt: null } });
+    await this.db.orchestratorRun.updateMany({ where: { key, dismissedAt: { not: null } }, data: { ...data, dismissedAt: null, activity: 'IDLE', activityDetail: null, activityEndedAt: null, lastEventAt: null, transcriptAt: null, stalledDetail: null, stalledAt: null } });
     return this.db.orchestratorRun.findUniqueOrThrow({ where: { key } });
-  }
-
-  async changeOrchestratorRunOwner(key: string, expected: { machine: string; handover: string | null }, machine: string) {
-    const moved = await this.db.orchestratorRun.updateMany({ where: { key, ...expected }, data: { machine, handover: null } });
-    return moved.count === 1;
   }
 
   updateOrchestratorRun(key: string, data: {
@@ -290,7 +285,6 @@ export class StorageService {
     lastEventAt?: Date;
     transcriptAt?: Date;
     dismissedAt?: Date | null;
-    handover?: string | null;
     stage?: string;
     jiraStatus?: string | null;
     jiraStage?: string | null;
