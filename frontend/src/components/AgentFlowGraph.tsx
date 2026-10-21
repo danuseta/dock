@@ -1,24 +1,36 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { FLOW_RAIL, type AgentRun, type AgentTimeline, type TimelineAgent } from '../agents/runs';
+import { SHOWN_ROUNDS, inVisit, railVisits, shortDuration, visitLength, type RailVisit } from '../agents/rail';
+import { formatDuration } from '../chat/activity/activity';
+import { useNow } from '../chat/activity/useNow';
 import { cn } from '../lib/cn';
 import '../agents/flow/flow.css';
 
-const RAIL_Y = 92;
-const ROOT_Y = 196;
-const CHILD_Y = 296;
-const LEAF_Y = 396;
+const NAMES_Y = 50;
+const FIRST_ROW_Y = 90;
+const ROW_HEIGHT = 76;
 const LEAF_ROW = 5;
 const LEAF_ROW_HEIGHT = 86;
 const MAX_AC_CHIPS = 8;
+const DONE_STROKE = 'oklch(0.72 0.12 150)';
+const AHEAD_STROKE = 'oklch(0.30 0 0)';
+const BACK_STROKE = 'oklch(0.65 0.16 25)';
 
 const stateLabel: Record<string, string> = { active: 'working', waiting: 'waiting on you', idle: 'idle', done: 'done' };
 const logTone: Record<string, string> = { stage: 'text-accent', gate: 'text-amber-200', ok: 'text-status-merged', tool: 'text-[oklch(0.75_0.11_220)]' };
+
+const footerText = (agent: TimelineAgent, supervising?: boolean) => {
+  if (agent.tool) return agent.tool;
+  if (supervising && agent.state === 'active') return 'supervising';
+  if (agent.state === 'done' && agent.since && agent.until) return formatDuration(new Date(agent.until).getTime() - new Date(agent.since).getTime());
+  return stateLabel[agent.state] || agent.state;
+};
 
 const AgentBox: React.FC<{ agent: TimelineAgent; x: number; y: number; small: boolean; supervising?: boolean }> = ({ agent, x, y, small, supervising }) => (
   <div className={cn('dock-flow-node dock-flow-agent', `is-${agent.state}`, small && 'is-small')} style={{ left: `${x / 10}%`, top: y }}>
     <header><i aria-hidden="true" /><span>{agent.name}</span></header>
     <p>{agent.detail || (agent.parentId ? 'team member' : 'main session')}</p>
-    <footer><span>{agent.tool || (supervising && agent.state === 'active' ? 'supervising' : stateLabel[agent.state] || agent.state)}</span><span>{agent.tools} {agent.tools === 1 ? 'tool' : 'tools'}</span></footer>
+    <footer><span>{footerText(agent, supervising)}</span><span>{agent.tools} {agent.tools === 1 ? 'tool' : 'tools'}</span></footer>
   </div>
 );
 
@@ -27,25 +39,59 @@ interface AgentFlowGraphProps { run: AgentRun; timeline: AgentTimeline }
 /**
  * A live picture of one ticket's run, drawn from the stage, gate and tool-call
  * events the laptop already reports. No session content is involved.
+ * The rail has one row per round; a stop the run visited can be picked to show the team that worked there.
  */
 export const AgentFlowGraph: React.FC<AgentFlowGraphProps> = ({ run, timeline }) => {
+  const [picked, setPicked] = useState<number | null>(null);
+  const [allRounds, setAllRounds] = useState(false);
   // A cron run never stops at GATE 1, so its rail starts at Plan.
   const skip = timeline.hasGate ? 0 : 1;
   const stops = FLOW_RAIL.slice(skip);
   const stageX = (index: number) => 90 + Math.min(Math.max(0, index - skip), stops.length - 1) * (820 / (stops.length - 1));
-  const stopName = (stop: (typeof FLOW_RAIL)[number]) => (run.kind === 'review' ? stop.review : stop.name);
+  const stopName = (index: number) => {
+    const stop = FLOW_RAIL[Math.min(index, FLOW_RAIL.length - 1)];
+    return run.kind === 'review' ? stop.review : stop.name;
+  };
   const current = timeline.stageIndex;
   const finished = current >= FLOW_RAIL.length;
+  const visits = railVisits(timeline, finished);
+  const last = visits[visits.length - 1];
+
+  // Another ticket, or the run reaching a new stop, brings the graph back to where the run is now.
+  useEffect(() => setPicked(null), [run.key, visits.length]);
+
+  const shown = picked != null && visits[picked] ? visits[picked] : last;
+  const looking = shown !== last;
+  const now = useNow(!finished);
+
+  const firstRound = allRounds ? 1 : Math.max(1, last.round - SHOWN_ROUNDS + 1);
+  const rounds = Array.from({ length: last.round - firstRound + 1 }, (_, index) => firstRound + index);
+  const rowY = (round: number) => FIRST_ROW_Y + (round - firstRound) * ROW_HEIGHT;
+  const rowVisits = visits.filter((visit) => visit.round >= firstRound);
+  const lastY = rowY(last.round);
+  const ahead = finished ? [] : FLOW_RAIL.map((_, index) => index).filter((index) => index > last.stageIndex && index >= skip);
   const stopNote: Partial<Record<(typeof FLOW_RAIL)[number]['id'], string | null>> = {
     work: current === 2 ? run.note : null,
     final: run.rounds ? `round ${run.rounds.used}/${run.rounds.max}` : null,
     pr: run.draft ? 'draft' : null,
   };
-  const root = timeline.agents.find((agent) => !agent.parentId) || timeline.agents[0];
-  const rootX = Math.max(110, Math.min(890, stageX(current)));
+  const noteAt = (index: number) => stopNote[FLOW_RAIL[Math.min(index, FLOW_RAIL.length - 1)].id] || null;
+  const metaOf = (visit: RailVisit) => {
+    const length = visitLength(visit, now);
+    const team = visit.agents.length - 1;
+    return [length != null ? shortDuration(length) : null, team > 0 ? `${team} ${team === 1 ? 'agent' : 'agents'}` : null].filter(Boolean).join(' · ');
+  };
+
+  // The graph under the rail: the team of the picked visit, hanging from it.
+  const agents = shown.agents;
+  const rootY = lastY + 132;
+  const childY = rootY + 100;
+  const leafTop = childY + 100;
+  const root = agents.find((agent) => !agent.parentId) || agents[0];
+  const rootX = Math.max(110, Math.min(890, stageX(shown.stageIndex)));
   // Two rows under the lead: whoever it spawned, then whoever they spawned.
-  const children = timeline.agents.filter((agent) => agent.parentId && agent.parentId === root?.id);
-  const leaves = children.flatMap((child) => timeline.agents.filter((agent) => agent.parentId === child.id));
+  const children = agents.filter((agent) => agent.parentId && agent.parentId === root?.id);
+  const leaves = children.flatMap((child) => agents.filter((agent) => agent.parentId === child.id));
   const spread = (count: number, centre: number) => {
     const span = count > 3 ? Math.min(172, 810 / Math.max(1, count - 1)) : 190;
     const first = Math.max(95, Math.min(905 - (count - 1) * span, centre - ((count - 1) * span) / 2));
@@ -58,31 +104,40 @@ export const AgentFlowGraph: React.FC<AgentFlowGraphProps> = ({ run, timeline })
     const row = Math.floor(index / LEAF_ROW);
     return spread(Math.min(LEAF_ROW, leaves.length - row * LEAF_ROW), leafCentre)(index % LEAF_ROW);
   };
-  const leafY = (index: number) => LEAF_Y + Math.floor(index / LEAF_ROW) * LEAF_ROW_HEIGHT;
+  const leafY = (index: number) => leafTop + Math.floor(index / LEAF_ROW) * LEAF_ROW_HEIGHT;
   const leafRows = Math.max(1, Math.ceil(leaves.length / LEAF_ROW));
-  const height = 540 + (leafRows - 1) * LEAF_ROW_HEIGHT;
+  const height = leafTop + 144 + (leafRows - 1) * LEAF_ROW_HEIGHT;
   const parentX = (agent: TimelineAgent) => childX(Math.max(0, children.findIndex((child) => child.id === agent.parentId)));
-  const gatesAt = new Map<number, number>();
   const maxBucket = Math.max(3, ...timeline.buckets.map((bucket) => bucket.n));
-  const busy = root?.state === 'active';
-  const hasLoop = timeline.loopFrom != null && timeline.loopTo != null && !finished;
-  const loopStart = hasLoop ? stageX(timeline.loopFrom as number) - 16 : 0;
-  const loopEnd = hasLoop ? stageX(timeline.loopTo as number) + 16 : 0;
+  const busy = root?.state === 'active' && !looking;
+  const log = looking ? timeline.log.filter((entry) => inVisit(entry.at, shown)) : timeline.log;
+  const shownWhen = [shown.from, shown.to].every(Boolean)
+    ? `${new Date(shown.from as string).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}–${new Date(shown.to as string).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`
+    : null;
 
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_300px] max-[1120px]:grid-cols-1">
       <div className="dock-flow-wrap">
-        <div className="dock-flow" style={{ height }} role="img" aria-label={`Flow of ${run.key}: stage ${stopName(FLOW_RAIL[Math.min(current, FLOW_RAIL.length - 1)])}, ${timeline.agents.length} agents, ${timeline.totalTools} tool calls`}>
+        <div className="dock-flow" style={{ height }} role="group" aria-label={`Flow of ${run.key}: stage ${stopName(current)}, round ${last.round}, ${timeline.agents.length} agents, ${timeline.totalTools} tool calls`}>
           <svg viewBox={`0 0 1000 ${height}`} preserveAspectRatio="none" aria-hidden="true">
-            <line x1={stageX(skip)} y1={RAIL_Y} x2={stageX(FLOW_RAIL.length - 1)} y2={RAIL_Y} stroke="oklch(0.30 0 0)" strokeWidth="2" />
-            {current > skip && <line x1={stageX(skip)} y1={RAIL_Y} x2={stageX(current)} y2={RAIL_Y} stroke="oklch(0.72 0.12 150)" strokeWidth="2" />}
-            {hasLoop && <path className="dock-flow-dash" d={`M ${loopStart} ${RAIL_Y - 16} C ${loopStart} ${RAIL_Y - 58}, ${loopEnd} ${RAIL_Y - 58}, ${loopEnd} ${RAIL_Y - 16}`} fill="none" stroke="oklch(0.80 0.12 85)" strokeWidth="1.5" />}
-            {root && <line x1={stageX(current)} y1={RAIL_Y + 14} x2={rootX} y2={ROOT_Y - 34} stroke="oklch(0.36 0 0)" strokeWidth="1.5" />}
+            {rounds.map((round) => {
+              const row = rowVisits.filter((visit) => visit.round === round);
+              if (row.length === 0) return null;
+              const y = rowY(round);
+              return <line key={round} x1={stageX(row[0].stageIndex)} y1={y} x2={stageX(row[row.length - 1].stageIndex)} y2={y} stroke={DONE_STROKE} strokeWidth="2" />;
+            })}
+            {ahead.length > 0 && <line x1={stageX(last.stageIndex)} y1={lastY} x2={stageX(ahead[ahead.length - 1])} y2={lastY} stroke={AHEAD_STROKE} strokeWidth="2" />}
+            {rowVisits.filter((visit) => visit.state === 'returned').map((visit) => {
+              const next = visits[visit.index + 1];
+              const [x1, y1, x2, y2] = [stageX(visit.stageIndex), rowY(visit.round), stageX(next.stageIndex), rowY(next.round)];
+              return <path key={visit.index} d={`M ${x1} ${y1 + 14} C ${x1} ${y1 + 46}, ${x2} ${y2 - 46}, ${x2} ${y2 - 14}`} fill="none" stroke={BACK_STROKE} strokeWidth="1.5" strokeDasharray="5 4" />;
+            })}
+            {root && <line x1={stageX(shown.stageIndex)} y1={lastY + 34} x2={rootX} y2={rootY - 34} stroke="oklch(0.36 0 0)" strokeWidth="1.5" />}
             {children.map((child, index) => (
               <path
                 key={child.id}
                 className={child.state === 'active' ? 'dock-flow-dash' : undefined}
-                d={`M ${rootX} ${ROOT_Y + 34} C ${rootX} ${ROOT_Y + 62}, ${childX(index)} ${CHILD_Y - 62}, ${childX(index)} ${CHILD_Y - 34}`}
+                d={`M ${rootX} ${rootY + 34} C ${rootX} ${rootY + 62}, ${childX(index)} ${childY - 62}, ${childX(index)} ${childY - 34}`}
                 fill="none"
                 stroke={child.state === 'active' ? 'oklch(0.75 0.11 220)' : 'oklch(0.36 0 0)'}
                 strokeWidth="1.5"
@@ -92,7 +147,7 @@ export const AgentFlowGraph: React.FC<AgentFlowGraphProps> = ({ run, timeline })
               <path
                 key={leaf.id}
                 className={leaf.state === 'active' ? 'dock-flow-dash' : undefined}
-                d={`M ${parentX(leaf)} ${CHILD_Y + 34} C ${parentX(leaf)} ${CHILD_Y + 62}, ${leafX(index)} ${leafY(index) - 62}, ${leafX(index)} ${leafY(index) - 34}`}
+                d={`M ${parentX(leaf)} ${childY + 34} C ${parentX(leaf)} ${childY + 62}, ${leafX(index)} ${leafY(index) - 62}, ${leafX(index)} ${leafY(index) - 34}`}
                 fill="none"
                 stroke={leaf.state === 'active' ? 'oklch(0.75 0.11 220)' : 'oklch(0.36 0 0)'}
                 strokeWidth="1.5"
@@ -102,35 +157,68 @@ export const AgentFlowGraph: React.FC<AgentFlowGraphProps> = ({ run, timeline })
 
           <div className="dock-flow-head">
             <span className="rounded-xs border border-accent/30 bg-accent-dim px-[9px] py-0.5 font-mono text-[0.8rem] font-extrabold text-accent">{run.key}</span>
-            <span className={cn('dock-flow-live', !busy && 'is-quiet')}><i aria-hidden="true" />{busy ? 'LIVE' : finished ? 'DONE' : 'QUIET'}</span>
-            {timeline.round > 1 && <span className="dock-flow-round">ROUND {timeline.round}</span>}
+            <span className={cn('dock-flow-live', !busy && 'is-quiet')}><i aria-hidden="true" />{looking ? 'HISTORY' : busy ? 'LIVE' : finished ? 'DONE' : 'QUIET'}</span>
+            {looking && (
+              <span className="dock-flow-viewing">
+                Showing <b>{stopName(shown.stageIndex)} · R{shown.round}</b>{shownWhen && ` ${shownWhen}`}
+                <button type="button" onClick={() => setPicked(null)}>Back to now</button>
+              </span>
+            )}
           </div>
 
-          {hasLoop && <div className="dock-flow-node dock-flow-loop" style={{ left: `${(loopStart + loopEnd) / 20}%`, top: RAIL_Y - 60 }}>sent back · round {timeline.round}</div>}
-
-          {stops.map((stage, position) => {
+          {stops.map((_, position) => {
             const index = position + skip;
-            const note = stopNote[stage.id];
+            return <span key={index} className="dock-flow-node dock-flow-name" style={{ left: `${stageX(index) / 10}%`, top: NAMES_Y }}>{stopName(index)}</span>;
+          })}
+
+          {(rounds.length > 1 || firstRound > 1) && rounds.map((round) => (
+            <span key={round} className="dock-flow-node dock-flow-rowname" style={{ left: '3%', top: rowY(round) }}>R{round}</span>
+          ))}
+          {last.round > SHOWN_ROUNDS && (
+            <button type="button" className="dock-flow-node dock-flow-fold" style={{ left: '3%', top: NAMES_Y }} aria-expanded={allRounds} aria-label={allRounds ? 'Fold the older rounds' : 'Show the older rounds'} onClick={() => setAllRounds((all) => !all)}>
+              {allRounds ? 'Fold' : firstRound > 2 ? `R1–R${firstRound - 1}` : 'R1'}
+            </button>
+          )}
+
+          {rowVisits.map((visit) => {
+            const isLast = visit === last;
+            const meta = metaOf(visit);
+            const note = isLast ? noteAt(visit.stageIndex) : null;
             return (
-              <div
-                key={stage.id}
-                className={cn('dock-flow-node dock-flow-stage', index < current && 'is-done', index === current && 'is-now')}
-                style={{ left: `${stageX(index) / 10}%`, top: RAIL_Y + 11, '--stage': stage.color } as React.CSSProperties}
+              <button
+                key={visit.index}
+                type="button"
+                className={cn('dock-flow-node dock-flow-visit', `is-${visit.state}`, visit === shown && 'is-picked')}
+                style={{ left: `${stageX(visit.stageIndex) / 10}%`, top: rowY(visit.round) }}
+                aria-pressed={visit === shown}
+                aria-label={`${stopName(visit.stageIndex)}, round ${visit.round}${meta ? `, ${meta}` : ''}. Show the team that worked there.`}
+                onClick={() => setPicked(isLast ? null : visit.index)}
               >
-                <b>{index < current ? '✓' : position + 1}</b><span>{stopName(stage)}</span>{note && <small title={note}>{note}</small>}
-              </div>
+                <b>{visit.state === 'done' ? '✓' : visit.state === 'returned' ? '↩' : visit.stageIndex - skip + 1}</b>
+                {meta && <small>{meta}</small>}
+                {note && <small className="is-note" title={note}>{note}</small>}
+              </button>
+            );
+          })}
+
+          {ahead.map((index) => {
+            const note = noteAt(index);
+            return (
+              <span key={index} className="dock-flow-node dock-flow-visit is-ahead" style={{ left: `${stageX(index) / 10}%`, top: lastY }}>
+                <b>{index - skip + 1}</b>
+                {note && <small className="is-note" title={note}>{note}</small>}
+              </span>
             );
           })}
 
           {timeline.gates.map((gate) => {
-            const slot = gatesAt.get(gate.stageIndex) || 0;
-            gatesAt.set(gate.stageIndex, slot + 1);
-            const x = stageX(gate.stageIndex) + 46 + slot * 30;
-            return <div key={gate.id} className={cn('dock-flow-node dock-flow-gate', gate.state === 'waiting' && 'is-waiting')} style={{ left: `${x / 10}%`, top: RAIL_Y }} title={`${gate.state === 'waiting' ? 'Waiting on you' : 'Gate opened'}: ${gate.text}`} />;
+            const visit = rowVisits.find((item) => item.stageIndex === gate.stageIndex && inVisit(gate.at, item));
+            if (!visit) return null;
+            return <span key={gate.id} className={cn('dock-flow-node dock-flow-gate', gate.state === 'waiting' && 'is-waiting')} style={{ left: `${stageX(visit.stageIndex) / 10}%`, top: rowY(visit.round) }} title={`${gate.state === 'waiting' ? 'Waiting on you' : 'Gate opened'}: ${gate.text}`} />;
           })}
 
           {run.ac.length > 0 && (
-            <div className="dock-flow-node dock-flow-ac" style={{ left: `${stageX(4) / 10}%`, top: RAIL_Y - 52 }}>
+            <div className="dock-flow-node dock-flow-ac" style={{ left: `${stageX(4) / 10}%`, top: lastY + 44 }}>
               <small>AC {run.acPassed}/{run.acTotal}</small>
               <div>
                 {run.ac.slice(0, MAX_AC_CHIPS).map((item) => <span key={item.n} className={item.state === 'PASS' ? 'is-pass' : item.state === 'FAIL' ? 'is-fail' : undefined}>{item.n}</span>)}
@@ -139,8 +227,8 @@ export const AgentFlowGraph: React.FC<AgentFlowGraphProps> = ({ run, timeline })
             </div>
           )}
 
-          {root && <AgentBox agent={root} x={rootX} y={ROOT_Y} small={false} />}
-          {children.map((child, index) => <AgentBox key={child.id} agent={child} x={childX(index)} y={CHILD_Y} small={small} supervising={leaves.some((leaf) => leaf.parentId === child.id && leaf.state === 'active')} />)}
+          {root && <AgentBox agent={root} x={rootX} y={rootY} small={false} />}
+          {children.map((child, index) => <AgentBox key={child.id} agent={child} x={childX(index)} y={childY} small={small} supervising={leaves.some((leaf) => leaf.parentId === child.id && leaf.state === 'active')} />)}
           {leaves.map((leaf, index) => <AgentBox key={leaf.id} agent={leaf} x={leafX(index)} y={leafY(index)} small={small} />)}
 
           <div className="dock-flow-strip">
@@ -155,10 +243,14 @@ export const AgentFlowGraph: React.FC<AgentFlowGraphProps> = ({ run, timeline })
       </div>
 
       <div style={{ maxHeight: height }} className="overflow-y-auto border-l border-border bg-surface-0 p-4 max-[1120px]:max-h-none max-[1120px]:border-t max-[1120px]:border-l-0">
-        <p className="mb-1 font-mono text-[0.66rem] font-bold uppercase tracking-[0.1em] text-muted-foreground">Latest events</p>
-        {timeline.log.length === 0 && <p className="text-pretty text-sm text-muted-foreground">Nothing reported yet. Tool calls appear here once the hook on your laptop is running for this ticket.</p>}
+        <p className="mb-1 font-mono text-[0.66rem] font-bold uppercase tracking-[0.1em] text-muted-foreground">{looking ? `Events in ${stopName(shown.stageIndex)} · R${shown.round}` : 'Latest events'}</p>
+        {log.length === 0 && (
+          <p className="text-pretty text-sm text-muted-foreground">
+            {looking ? 'The log keeps only the newest events, so none from this stop are left. The team is still shown on the left.' : 'Nothing reported yet. Tool calls appear here once the hook on your laptop is running for this ticket.'}
+          </p>
+        )}
         <ol className="flex flex-col">
-          {timeline.log.map((entry, index) => (
+          {log.map((entry, index) => (
             <li className="grid grid-cols-[58px_1fr] gap-2 border-b border-border py-[5px] text-[0.78rem] last:border-b-0" key={`${entry.at}-${index}`}>
               <time className="pt-px font-mono text-[0.68rem] text-muted-foreground tabular-nums" dateTime={entry.at}>{new Date(entry.at).toLocaleTimeString('en-GB')}</time>
               <span className="min-w-0 break-words"><b className={cn('font-mono text-[0.72rem] font-bold', logTone[entry.kind])}>{entry.head}</b> {entry.text}</span>

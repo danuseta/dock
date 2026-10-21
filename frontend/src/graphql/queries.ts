@@ -634,12 +634,10 @@ export const GET_ORCHESTRATION = gql`
       events { id kind detail at }
       timeline {
         stageIndex
-        round
-        loopFrom
-        loopTo
         hasGate
         gates { id stageIndex text state at }
         agents { id parentId name detail state tool tools }
+        visits { stageIndex round from to agents { id parentId name detail state tool tools since until } }
         buckets { n gate }
         totalTools
         log { at kind head text }

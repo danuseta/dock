@@ -67,6 +67,47 @@ test('tasks taking turns between code and test are not rounds; the ledger rounds
   assert.deepStrictEqual([passed.round, passed.loopFrom, passed.stageIndex], [2, null, 4], 'the round stays, the loop goes once the run is past Work');
 });
 
+test('each stop the run visited keeps its own team, and going back starts the next round', () => {
+  const events = [
+    stageEvent('STAGE', 'plan', 0), stageEvent('STAGE', 'code', 100), stageEvent('STAGE', 'test', 150),
+    stageEvent('STAGE', 'verify', 300), stageEvent('STAGE', 'code', 400),
+  ];
+  const tools = [
+    toolEvent(10, 'tool', 'Read'),
+    toolEvent(20, 'spawn', 'explore', 'main', null, 'Map the inbox'),
+    toolEvent(25, 'tool', 'Grep', 'e1', 'explore'),
+    toolEvent(30, 'stop', 'explore', 'e1', 'explore'),
+    toolEvent(110, 'spawn', 'sous-executor', 'main', null, 'Build the filter'),
+    toolEvent(120, 'tool', 'Edit', 'x1', 'sous-executor'),
+    toolEvent(280, 'stop', 'sous-executor', 'x1', 'sous-executor'),
+    toolEvent(310, 'spawn', 'sous-verifier', 'main', null, 'Final review'),
+    toolEvent(320, 'tool', 'Bash', 'v1', 'sous-verifier'),
+    toolEvent(390, 'stop', 'sous-verifier', 'v1', 'sous-verifier'),
+    toolEvent(410, 'spawn', 'sous-executor', 'main', null, 'Fix AC 3'),
+    toolEvent(420, 'tool', 'Edit', 'x2', 'sous-executor'),
+  ];
+  const timeline = buildTimeline({ stage: 'code', waiting: null, activity: 'ACTIVE', rounds: { used: 1, max: 3 } }, events, tools, at(430));
+
+  assert.deepStrictEqual(timeline.visits.map((visit) => [visit.stageIndex, visit.round]), [[1, 1], [2, 1], [3, 1], [2, 2]], 'code and test are one visit; verify back to code is round 2');
+  assert.deepStrictEqual(timeline.visits.map((visit) => visit.agents.slice(1).map((agent) => agent.detail)), [
+    ['Map the inbox'], ['Build the filter'], ['Final review'], ['Fix AC 3'],
+  ]);
+  assert.deepStrictEqual([timeline.visits[0].from, timeline.visits[0].to], [at(0).toISOString(), at(100).toISOString()]);
+  assert.deepStrictEqual(timeline.visits[0].agents[0], { ...timeline.agents[0], state: 'done', tool: null, tools: 1 }, 'a past visit shows the lead finished, with the tools it called there');
+  assert.deepStrictEqual([timeline.visits[1].agents[1].since, timeline.visits[1].agents[1].until], [at(110).toISOString(), at(280).toISOString()]);
+  assert.deepStrictEqual(timeline.visits[3].agents, timeline.agents, 'the current visit is the team the graph already draws');
+});
+
+test('a member still at work shows on every visit it spans', () => {
+  const timeline = buildTimeline(
+    { stage: 'verify', waiting: null, activity: 'ACTIVE' },
+    [stageEvent('STAGE', 'code', 0), stageEvent('STAGE', 'verify', 100)],
+    [toolEvent(10, 'spawn', 'sous-executor', 'main', null, 'Long build'), toolEvent(120, 'tool', 'Edit', 'x1', 'sous-executor')],
+    at(130),
+  );
+  assert.deepStrictEqual(timeline.visits.map((visit) => visit.agents.slice(1).map((agent) => agent.detail)), [['Long build'], ['Long build']]);
+});
+
 test('a manual run that stopped at GATE 1 gets the Gate stop, and the last gate waits while the run does', () => {
   const events = [
     stageEvent('STAGE', 'plan', 0), stageEvent('WAITING', 'GATE 1: plan in BOARD/prompts/S1.md', 20), stageEvent('RESUMED', null, 30),

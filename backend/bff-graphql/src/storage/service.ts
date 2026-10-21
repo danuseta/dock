@@ -6,6 +6,7 @@ const RUN_WITHOUT_LEDGER = {
   key: true, title: true, stage: true, waiting: true, payload: true, activity: true, activityDetail: true, activityEndedAt: true,
   lastEventAt: true, ledgerUpdatedAt: true, transcriptAt: true, dismissedAt: true, machine: true, handover: true, jiraStatus: true, jiraStage: true, stalledDetail: true, stalledAt: true, createdAt: true, updatedAt: true,
 } as const;
+const KEPT_EVENT_KINDS = ['STAGE', 'WAITING'];
 
 const SENSITIVE_KEYS = new Set([
   'jiraApiToken',
@@ -317,14 +318,15 @@ export class StorageService {
     return this.db.orchestratorReset.findMany({ where: { machine } });
   }
 
-  getOrchestratorEvents(ticketKey: string, take: number) {
-    return this.db.orchestratorEvent.findMany({ where: { ticketKey }, orderBy: { createdAt: 'desc' }, take });
+  getOrchestratorEvents(ticketKey: string, take?: number, kinds?: string[]) {
+    return this.db.orchestratorEvent.findMany({ where: { ticketKey, ...(kinds ? { kind: { in: kinds } } : {}) }, orderBy: { createdAt: 'desc' }, take });
   }
 
+  /** Stage changes and gates are the run's history and are never trimmed; the activity flips around them are. */
   async addOrchestratorEvent(ticketKey: string, kind: string, detail: string | null, keep: number) {
     const event = await this.db.orchestratorEvent.create({ data: { ticketKey, kind, detail } });
     const stale = await this.db.orchestratorEvent.findMany({
-      where: { ticketKey }, orderBy: { createdAt: 'desc' }, skip: keep, select: { id: true },
+      where: { ticketKey, kind: { notIn: KEPT_EVENT_KINDS } }, orderBy: { createdAt: 'desc' }, skip: keep, select: { id: true },
     });
     if (stale.length > 0) {
       await this.db.orchestratorEvent.deleteMany({ where: { id: { in: stale.map((item) => item.id) } } });
@@ -332,8 +334,13 @@ export class StorageService {
     return event;
   }
 
-  getOrchestratorToolEvents(ticketKey: string, take: number) {
-    return this.db.orchestratorToolEvent.findMany({ where: { ticketKey }, orderBy: { id: 'desc' }, take });
+  /** The newest `take` tool calls, and every spawn and stop: who worked on which stage outlives the tool calls. */
+  async getOrchestratorToolEvents(ticketKey: string, take: number) {
+    const [tools, members] = await Promise.all([
+      this.db.orchestratorToolEvent.findMany({ where: { ticketKey, kind: 'tool' }, orderBy: { id: 'desc' }, take }),
+      this.db.orchestratorToolEvent.findMany({ where: { ticketKey, kind: { not: 'tool' } }, orderBy: { id: 'desc' } }),
+    ]);
+    return [...tools, ...members].sort((a, b) => b.id - a.id);
   }
 
   async addOrchestratorToolEvents(
@@ -344,10 +351,10 @@ export class StorageService {
     if (events.length === 0) return;
     await this.db.orchestratorToolEvent.createMany({ data: events.map((event) => ({ ticketKey, ...event })) });
     const oldestKept = await this.db.orchestratorToolEvent.findFirst({
-      where: { ticketKey }, orderBy: { id: 'desc' }, skip: keep - 1, select: { id: true },
+      where: { ticketKey, kind: 'tool' }, orderBy: { id: 'desc' }, skip: keep - 1, select: { id: true },
     });
     if (oldestKept) {
-      await this.db.orchestratorToolEvent.deleteMany({ where: { ticketKey, id: { lt: oldestKept.id } } });
+      await this.db.orchestratorToolEvent.deleteMany({ where: { ticketKey, kind: 'tool', id: { lt: oldestKept.id } } });
     }
   }
 
