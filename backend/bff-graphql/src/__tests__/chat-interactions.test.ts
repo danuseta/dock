@@ -468,6 +468,14 @@ test('a doctor request reaches the next claim of its own machine once', async ()
   assert.deepStrictEqual(await ctx.service.claim({ wait: 0 }, undefined, 'workspace'), { message: null }, 'the request is taken once');
 });
 
+test('agent jobs end the long poll of their machine', async () => {
+  const ctx = setup();
+  const jobs: Record<string, Array<{ id: string; op: string; input: unknown }>> = { workspace: [{ id: 'job-1', op: 'list', input: {} }] };
+  ctx.service.agentJobs = (machine) => jobs[machine]?.splice(0) ?? [];
+  assert.deepStrictEqual(await ctx.service.claim({ wait: 0 }, undefined, 'laptop'), { message: null });
+  assert.deepStrictEqual(await ctx.service.claim({ wait: 25 }, undefined, 'workspace'), { message: null, agentJobs: [{ id: 'job-1', op: 'list', input: {} }] });
+});
+
 test('an ask is stored once, capped at 4 pending and 100 per turn, and refused after the turn closed', async () => {
   const ctx = setup();
   const turn = await takenTurn(ctx);

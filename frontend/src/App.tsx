@@ -22,6 +22,7 @@ import { PinLockModal } from './components/PinLockModal';
 import { LoadingSkeleton } from './components/LoadingSkeleton';
 import { Button, Page } from './components/ui';
 import { DockModeContext, hasPage, type DockMode } from './lib/dockMode';
+import { AgentLooksLoader } from './agents/library/AgentLooksLoader';
 
 const AgentsPage = lazy(() => import('./pages/AgentsPage'));
 
@@ -151,6 +152,7 @@ function App() {
   return (
     <DockModeContext.Provider value={mode}>
       <AppLayout currentPath={path === '/ticket' ? '/dashboard' : path} onNavigate={handleNavigate} unreachable={unreachable} onRetry={() => void refetch()}>
+        {!isLocked && <AgentLooksLoader />}
         {!isLocked && <PageBoundary key={path}>{renderPage()}</PageBoundary>}
         <PinLockModal
           isOpen={isLocked}

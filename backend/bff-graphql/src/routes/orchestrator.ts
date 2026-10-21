@@ -5,6 +5,8 @@ import { bearerToken } from '../auth/ingest-token';
 import { PinRateLimiter, sessionManager, shouldRequirePin } from '../auth/session';
 import { CHAT_MACHINE, ChatService, chatService } from '../integrations/chat';
 import { AttachmentRefusal } from '../integrations/chat-attachments';
+import { agentBridge } from '../integrations/agents-live';
+import type { AgentBridge } from '../integrations/agents';
 import { demoVideos, ingestDemoLink, type DemoVideos } from '../integrations/demo-videos';
 import { DEMO_STORAGE_ROUTES, demoStorage, demoStorageRoute, type DemoStorage } from '../integrations/demo-storage';
 import { receiveDemoVideo } from './demo-videos';
@@ -56,6 +58,7 @@ export function createOrchestratorIngestRouter(
   doctor: DoctorReports = doctorReports,
   // Only the workspace DOCK keeps the demo videos, so only it posts the broadcast that carries them.
   broadcast: Pick<AutoBroadcast, 'afterDemoVideo' | 'afterLedger'> | null = dockMode() === 'workspace' ? autoBroadcast : null,
+  agents: Pick<AgentBridge, 'receive'> = agentBridge,
 ): Router {
   const router = Router();
 
@@ -120,6 +123,7 @@ export function createOrchestratorIngestRouter(
   router.post('/chat/delta', small, handle((body, _signal, machine) => chat.delta(body, machine)));
   router.post('/chat/activity', small, handle((body, _signal, machine) => chat.activity(body, machine)));
   router.post('/chat/status', small, handle(async (body, _signal, machine) => chat.ingestStatus(body, machine)));
+  router.post('/chat/agents/result', express.json({ limit: '1mb' }), handle(async (body, _signal, machine) => agents.receive(body, machine)));
   router.post('/chat/wait', small, handle((body, signal, machine) => chat.wait(body, signal, machine)));
   router.post('/chat/ask', small, handle((body, _signal, machine) => chat.ask(body, machine)));
   router.post('/chat/catalog', express.json({ limit: '512kb' }), handle((body, _signal, machine) => chat.ingestCatalog(body, machine)));

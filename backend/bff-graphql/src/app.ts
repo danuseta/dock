@@ -13,6 +13,7 @@ import {
   sessionManager,
 } from './auth/session';
 import { createGoogleCalendarRouter } from './auth/google-calendar-router';
+import { createAgentLookRouter } from './routes/agent-looks';
 import { createBrainProxyRouter } from './routes/brain';
 import { createChatAttachmentRouter } from './routes/chat-attachments';
 import { createDemoVideoRouter } from './routes/demo-videos';
@@ -65,6 +66,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<JidisAp
   app.use('/ingest/brain', createBrainProxyRouter());
   if (mode === 'workspace') app.use('/api/chat/attachments', createChatAttachmentRouter());
   if (mode === 'workspace') app.use('/api/demo-videos', createDemoVideoRouter());
+  if (mode === 'workspace') app.use('/api/agent-looks', createAgentLookRouter());
   app.use(express.json());
 
   app.use('/auth/google', createGoogleCalendarRouter());
