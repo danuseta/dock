@@ -7,7 +7,7 @@ const heading = (size: string) => ({ children }: { children?: React.ReactNode })
 );
 
 const components: Components = {
-  p: ({ children }) => <p className="my-1.5 first:mt-0 last:mb-0">{children}</p>,
+  p: ({ children }) => <p className="my-2 first:mt-0 last:mb-0">{children}</p>,
   h1: heading('text-base'),
   h2: heading('text-[0.95rem]'),
   h3: heading('text-sm'),
