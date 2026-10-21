@@ -38,7 +38,7 @@ test('the peer reads with the bearer token, keeps its last runs through a failed
   const address = server.address();
   assert.ok(address && typeof address !== 'string');
   t.after(() => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }));
-  const peer = new LedgerPeer(`http://127.0.0.1:${address.port}/ingest/orchestrator`, 'dock_token', 300, undefined, 300);
+  const peer = new LedgerPeer(`http://127.0.0.1:${address.port}/ingest/orchestrator`, 'dock_token', 5000, undefined, 5000);
 
   assert.deepStrictEqual(await peer.runs(), [run('ZED-5', 'laptop')]);
   assert.deepStrictEqual(seen[0], { url: '/ingest/orchestrator/runs', authorization: 'Bearer dock_token', body: '{}' });

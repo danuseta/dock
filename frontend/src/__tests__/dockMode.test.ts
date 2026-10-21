@@ -2,10 +2,10 @@ import assert from 'node:assert';
 import test from 'node:test';
 import { hasPage, showsChatDock } from '../lib/dockMode';
 
-const pages = ['/', '/dashboard', '/agents', '/sessions', '/calendar', '/sprint', '/monitoring', '/docker', '/attention', '/settings'];
+const pages = ['/', '/dashboard', '/agents', '/sessions', '/calendar', '/sprint', '/monitoring', '/docker', '/health', '/attention', '/settings'];
 
-test('the laptop DOCK leaves only Sessions out', () => {
-  assert.deepStrictEqual(pages.filter((path) => !hasPage('laptop', path)), ['/sessions']);
+test('the laptop DOCK leaves Sessions and the workspace Health page out', () => {
+  assert.deepStrictEqual(pages.filter((path) => !hasPage('laptop', path)), ['/sessions', '/health']);
 });
 
 test('the workspace DOCK leaves Monitoring, Docker Services and Calendar out', () => {

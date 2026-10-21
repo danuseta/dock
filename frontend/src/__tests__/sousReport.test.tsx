@@ -56,7 +56,9 @@ test('decisions read in plain English, fold at three, and only an agent ruling o
   assert.match(html, /by arbiter · answers I-1/);
   assert.doesNotMatch(html, /D-1</, 'the fourth decision is folded');
   assert.match(html, /Show all 4 · 1 cancelled/);
-  assert.doesNotMatch(renderToStaticMarkup(<RunDecisions run={{ ...run, decisions: [{ at: '', text: 'old' }] }} onCancel={async () => undefined} busy={false} />), /by owner/, 'an entry without by names nobody');
+  const old = renderToStaticMarkup(<RunDecisions run={{ ...run, decisions: [{ at: '', text: 'old' }] }} onCancel={async () => undefined} busy={false} />);
+  assert.doesNotMatch(old, /by owner|Your decision/, 'an entry without by names nobody');
+  assert.match(old, />Recorded</);
 
   const remote = renderToStaticMarkup(<RunDecisions run={run} onCancel={async () => undefined} busy={false} readOnly="Answer it there." />);
   assert.doesNotMatch(remote, />Cancel</);
