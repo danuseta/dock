@@ -42,7 +42,7 @@ export const MessageTime: React.FC<{ at: string }> = ({ at }) => {
 /** A chat message from an agent: a header with avatar, who is speaking and when, then what it said or did from the left edge. */
 export const MessageShell: React.FC<{ name: string; title?: React.ReactNode; at: string; className?: string; children: React.ReactNode }> = ({ name, title, at, className, children }) => (
   <li className={cn('min-w-0', className)}>
-    <p className="mb-1 flex flex-wrap items-center gap-x-1.5 text-[0.8rem] font-bold text-foreground"><AgentAvatar name={name} small />{title ?? name}<MessageTime at={at} /></p>
+    <p className="mb-1.5 flex flex-wrap items-center gap-x-2 text-[0.8rem] font-bold text-foreground"><AgentAvatar name={name} />{title ?? name}<MessageTime at={at} /></p>
     {children}
   </li>
 );

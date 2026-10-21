@@ -60,8 +60,10 @@ export const AgentCall: React.FC<CallProps> = ({ event, rows, store, now, open, 
   const shown = onOpen ? open : inline;
   return (
     <MessageShell name="lead" at={event.startedAt} title={<>lead → <AgentName name={event.name} /></>} className={cn(onOpen && open && '-ml-3 rounded-r-sm border-l-[3px] border-accent bg-gradient-to-r from-accent-dim to-transparent pl-2')}>
-      <p className="line-clamp-2 text-[0.8rem] text-secondary-foreground [overflow-wrap:anywhere]">{agentTask(event)}</p>
-      <ThreadBar event={event} rows={rows} now={now} open={shown} label={shown ? 'Thread open' : 'Open thread'} onClick={() => (onOpen ? onOpen(event.eventId) : setInline((current) => !current))} />
+      <div className="rounded-sm border border-border bg-surface-1 px-2.5 pt-2 pb-1">
+        <p className="line-clamp-2 text-[0.8rem] text-secondary-foreground [overflow-wrap:anywhere]">{agentTask(event)}</p>
+        <ThreadBar event={event} rows={rows} now={now} open={shown} label={shown ? 'Thread open' : 'Open thread'} onClick={() => (onOpen ? onOpen(event.eventId) : setInline((current) => !current))} />
+      </div>
       {event.status === 'running' && <LiveStep rows={rows} now={now} />}
       {!onOpen && inline && <ul className="mt-2 flex min-w-0 flex-col gap-3 border-l border-border pl-3"><AgentThreadBody agent={event} rows={rows} parentName="lead" store={store} now={now} /></ul>}
     </MessageShell>

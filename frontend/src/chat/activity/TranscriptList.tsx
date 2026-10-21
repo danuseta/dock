@@ -45,11 +45,11 @@ const LeadText: React.FC<{ message: ChatMessage }> = ({ message }) => {
     return <li className="flex min-w-0 items-baseline gap-1.5 text-muted-foreground" title={timeOf(message.at)}><span aria-hidden="true">›</span><span className="min-w-0 break-words">{message.text}</span></li>;
   }
   return (
-    <li className="group/text min-w-0 font-body text-[0.84rem] leading-relaxed text-foreground">
+    <li className="group/text my-2 min-w-0 font-body text-[0.84rem] leading-relaxed text-foreground first:mt-0 last:mb-0">
       <div className="min-w-0 break-words [overflow-wrap:anywhere]">
         <span className="sr-only">Claude: </span>
         {message.text && <Markdown text={message.text} />}
-        {message.attachments && <MessageAttachments attachments={message.attachments} />}
+        {message.attachments && <div className="mt-1.5"><MessageAttachments attachments={message.attachments} /></div>}
         {message.text && <CopyButton text={message.text} />}
       </div>
     </li>
@@ -73,7 +73,7 @@ export const TranscriptList: React.FC<ListProps> = ({ items, store, threadId, on
     ? <LeadText key={`m${part.message.id}`} message={part.message} />
     : <TranscriptRow key={part.event.eventId} event={part.event} store={store} now={now} />);
   return (
-    <ol className="flex min-w-0 flex-col gap-3.5">
+    <ol className="flex min-w-0 flex-col gap-6">
       {items.map((item) => {
         if (item.kind === 'user') return <UserBubble key={item.key} message={item.message} />;
         if (item.kind === 'call') {

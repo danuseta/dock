@@ -7,7 +7,7 @@ import { attachmentHref } from './attachmentUrl';
 export const MessageAttachments: React.FC<{ attachments: ChatAttachment[] }> = ({ attachments }) => {
   if (attachments.length === 0) return null;
   return (
-    <ul className="mt-1 flex max-w-full flex-wrap justify-end gap-1.5" aria-label="Attachments">
+    <ul className="mt-1 flex max-w-full flex-wrap justify-end gap-2" aria-label="Attachments">
       {attachments.map((attachment) => (
         <li key={attachment.id} className="min-w-0 max-w-full">
           {isImageAttachment(attachment) ? (
