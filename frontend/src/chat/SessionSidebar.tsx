@@ -1,10 +1,12 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { useQuery } from '@apollo/client';
-import { Bot, ChevronDown, ChevronUp, Compass, Hammer, Plus, Search, ShieldCheck, type LucideIcon } from 'lucide-react';
+import { ChevronDown, ChevronUp, Plus, Search } from 'lucide-react';
 import { GET_CHAT_SESSION_WORKERS } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import { IconButton } from '../components/ui';
-import { agentType } from './activity/activity';
+import { agentTask } from './activity/activity';
+import { AgentAvatar } from './activity/TranscriptParts';
+import { shortAgent, threadRoot } from './activity/transcript';
 import { useNow } from './activity/useNow';
 import { delayedMinutes } from './headerState';
 import { SLOW_POLL_MS, machineOf, machineOnline, relativeTime, sessionTitle, type ChatMachine, type ChatSession } from './messages';
@@ -13,11 +15,9 @@ import type { ChatSessionStatus } from './status';
 import { SessionMenu, type SessionMenuTarget } from './SessionMenu';
 import { StatusDot } from './StatusDot';
 
-export type SidebarWorker = { id: string; name: string; label: string; status: string };
+export type SidebarWorker = { id: string; parentId: string | null; turnId: number; name: string; label: string; status: string; startedAt: string; endedAt: string | null };
 
 const LONG_PRESS_MS = 500;
-
-const ROLE_ICON: Record<string, LucideIcon> = { planner: Compass, executor: Hammer, verifier: ShieldCheck };
 
 const ENDED: Record<string, { text: string; className: string }> = {
   ok: { text: 'done', className: 'border-status-merged/40 text-status-merged' },
@@ -30,36 +30,44 @@ const Pill: React.FC<{ className: string; children: React.ReactNode }> = ({ clas
   <span className={cn('flex-none rounded-pill border px-1.5 font-mono text-[0.6rem] leading-4', className)}>{children}</span>
 );
 
-interface SessionWorkersProps {
+const clock = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+interface SessionThreadsProps {
   sessionId: string;
-  activeWorkerId: string | null;
-  onSelectWorker: (sessionId: string, workerId: string | null) => void;
+  activeThreadId: string | null;
+  onOpenThread: (sessionId: string, threadId: string | null) => void;
 }
 
-const SessionWorkers: React.FC<SessionWorkersProps> = ({ sessionId, activeWorkerId, onSelectWorker }) => {
+/** One line per agent the lead called, newest first; the open one lists the workers it called. */
+const SessionThreads: React.FC<SessionThreadsProps> = ({ sessionId, activeThreadId, onOpenThread }) => {
   const { data } = useQuery<{ chatSessionWorkers: SidebarWorker[] }>(GET_CHAT_SESSION_WORKERS, { variables: { sessionId }, pollInterval: SLOW_POLL_MS });
   const workers = data?.chatSessionWorkers ?? [];
+  const known = new Set(workers.map((worker) => worker.id));
+  const threads = workers.filter((worker) => !worker.parentId || !known.has(worker.parentId)).reverse();
+  const root = activeThreadId ? threadRoot(workers, activeThreadId) : null;
+  const under = (id: string): SidebarWorker[] => workers.filter((worker) => worker.parentId === id).flatMap((worker) => [worker, ...under(worker.id)]);
+  const line = (worker: SidebarWorker, nested: boolean) => {
+    const ended = ENDED[worker.status];
+    const workerCount = nested ? 0 : under(worker.id).length;
+    return (
+      <li key={worker.id}>
+        <button type="button" className={cn('flex w-full items-center gap-2 rounded-xs border border-transparent px-2 py-1.5 text-left hover:bg-surface-1 max-[900px]:min-h-11', nested && 'pl-5', activeThreadId === worker.id && 'border-border-glow bg-surface-1')} aria-current={activeThreadId === worker.id ? 'true' : undefined} title={worker.label} onClick={() => onOpenThread(sessionId, worker.id)}>
+          <AgentAvatar name={worker.name} small />
+          <span className="min-w-0 flex-1 truncate text-[0.76rem]">{nested ? agentTask({ label: worker.label, name: worker.name }) : shortAgent(worker.name)}</span>
+          {!nested && <span className="flex-none font-mono text-[0.62rem] text-muted-foreground tabular-nums">{clock(worker.startedAt)}{workerCount > 0 ? ` · ${workerCount}` : ''}</span>}
+          {ended ? <Pill className={ended.className}>{ended.text}</Pill> : <StatusDot state="running" className="size-2" />}
+        </button>
+      </li>
+    );
+  };
   return (
-    <ul className="m-0 mb-1 ml-3.5 list-none border-l border-border p-0 pl-1.5">
-      {workers.map((worker) => {
-        const role = agentType(worker.name);
-        const Icon = ROLE_ICON[role] ?? Bot;
-        const ended = ENDED[worker.status];
-        return (
-          <li key={worker.id}>
-            <button type="button" className={cn('flex w-full items-center gap-2 rounded-xs border border-transparent px-2 py-1.5 text-left hover:bg-surface-1 max-[900px]:min-h-11', activeWorkerId === worker.id && 'border-border-glow bg-surface-1')} aria-current={activeWorkerId === worker.id ? 'true' : undefined} onClick={() => onSelectWorker(sessionId, worker.id)}>
-              <Icon size={13} aria-hidden="true" className="flex-none text-muted-foreground" />
-              <span className="min-w-0 flex-1 truncate text-[0.76rem]">{role}</span>
-              {ended ? <Pill className={ended.className}>{ended.text}</Pill> : (
-                <>
-                  <span className="max-w-[45%] flex-none truncate font-mono text-[0.64rem] text-muted-foreground">{worker.label}</span>
-                  <StatusDot state={worker.status === 'running' ? 'running' : 'done'} className="size-2" />
-                </>
-              )}
-            </button>
-          </li>
-        );
-      })}
+    <ul className="m-0 mb-1 ml-3.5 list-none border-l border-border p-0 pl-1.5" aria-label="Threads">
+      {threads.map((thread) => (
+        <React.Fragment key={thread.id}>
+          {line(thread, false)}
+          {root === thread.id && under(thread.id).map((worker) => line(worker, true))}
+        </React.Fragment>
+      ))}
     </ul>
   );
 };
@@ -69,9 +77,9 @@ interface SessionSidebarProps {
   live: readonly ChatSessionStatus[];
   machines: ChatMachine[] | null | undefined;
   activeId: string | null;
-  activeWorkerId: string | null;
+  activeThreadId: string | null;
   onSelect: (sessionId: string) => void;
-  onSelectWorker: (sessionId: string, workerId: string | null) => void;
+  onOpenThread: (sessionId: string, threadId: string | null) => void;
   onNew: () => void;
   onRename: (session: ChatSession) => void;
   onDelete: (session: ChatSession) => void;
@@ -82,7 +90,7 @@ interface SessionSidebarProps {
   results?: React.ReactNode;
 }
 
-export const SessionSidebar: React.FC<SessionSidebarProps> = ({ sessions, live, machines, activeId, activeWorkerId, onSelect, onSelectWorker, onNew, onRename, onDelete, searchOpen, onToggleSearch, search, limits, results }) => {
+export const SessionSidebar: React.FC<SessionSidebarProps> = ({ sessions, live, machines, activeId, activeThreadId, onSelect, onOpenThread, onNew, onRename, onDelete, searchOpen, onToggleSearch, search, limits, results }) => {
   const [openOverride, setOpenOverride] = useState<ReadonlyMap<string, boolean>>(new Map());
   const now = useNow(true);
   const liveById = new Map(live.map((item) => [item.sessionId, item]));
@@ -152,19 +160,19 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({ sessions, live, 
               else if (group.key === 'running' && workers > 0) meta = <span className="flex-none font-mono text-[0.64rem] text-muted-foreground tabular-nums">team {workers}</span>;
               return (
                 <div key={session.id}>
-                  <div className={cn('flex items-center rounded-xs border border-transparent hover:bg-surface-1', active && activeWorkerId === null && 'border-border-glow bg-surface-1')}>
-                    <button type="button" className="flex min-w-0 flex-1 items-center gap-2 py-2 pl-2.5 pr-1.5 text-left max-[900px]:min-h-11" aria-current={active ? 'true' : undefined} title={dot === 'delayed' ? 'The workspace has not sent a status for a while' : undefined} {...rowHandlers(session)} onClick={() => { if (pressed()) return; if (active) onSelectWorker(session.id, null); else onSelect(session.id); }}>
+                  <div className={cn('flex items-center rounded-xs border border-transparent hover:bg-surface-1', active && activeThreadId === null && 'border-border-glow bg-surface-1')}>
+                    <button type="button" className="flex min-w-0 flex-1 items-center gap-2 py-2 pl-2.5 pr-1.5 text-left max-[900px]:min-h-11" aria-current={active ? 'true' : undefined} title={dot === 'delayed' ? 'The workspace has not sent a status for a while' : undefined} {...rowHandlers(session)} onClick={() => { if (pressed()) return; if (active) onOpenThread(session.id, null); else onSelect(session.id); }}>
                       <StatusDot state={dot} className="size-2" />
                       <span className="min-w-0 flex-1 truncate font-display text-[0.8rem] font-semibold">{sessionTitle(session)}</span>
                       {meta}
                     </button>
                     {workers > 0 && (
-                      <button type="button" className="mr-1 flex size-7 flex-none items-center justify-center rounded-xs text-muted-foreground hover:text-foreground max-[900px]:size-11" aria-expanded={open} aria-label={open ? 'Hide workers' : 'Show workers'} title={open ? 'Hide workers' : 'Show workers'} onClick={() => setOpenOverride((current) => new Map(current).set(session.id, !open))}>
+                      <button type="button" className="mr-1 flex size-7 flex-none items-center justify-center rounded-xs text-muted-foreground hover:text-foreground max-[900px]:size-11" aria-expanded={open} aria-label={open ? 'Hide threads' : 'Show threads'} title={open ? 'Hide threads' : 'Show threads'} onClick={() => setOpenOverride((current) => new Map(current).set(session.id, !open))}>
                         {open ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
                       </button>
                     )}
                   </div>
-                  {open && <SessionWorkers sessionId={session.id} activeWorkerId={active ? activeWorkerId : null} onSelectWorker={onSelectWorker} />}
+                  {open && <SessionThreads sessionId={session.id} activeThreadId={active ? activeThreadId : null} onOpenThread={onOpenThread} />}
                 </div>
               );
             })}

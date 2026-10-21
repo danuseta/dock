@@ -25,7 +25,8 @@ import { SessionInspector } from '../chat/SessionInspector';
 import { sessionStats, type ChatActivity } from '../chat/activity/activity';
 import { AgentLanes } from '../chat/activity/AgentLanes';
 import { chatStore } from '../chat/store';
-import { SESSIONS_PATH, sessionIdFromSearch, sessionUrl } from '../chat/sessionRoute';
+import { SESSIONS_PATH, sessionIdFromSearch, sessionUrl, threadIdFromSearch } from '../chat/sessionRoute';
+import { AgentThreadPane } from '../chat/AgentThreadPane';
 
 interface SearchHit { session: ChatSession; messageId: number; snippet: string; at: string }
 
@@ -45,7 +46,7 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [actionError, setActionError] = useState('');
-  const [workerId, setWorkerId] = useState<string | null>(null);
+  const [threadId, setThreadId] = useState<string | null>(() => threadIdFromSearch(window.location.search));
   const [deleteTarget, setDeleteTarget] = useState<ChatSession | null>(null);
   const [renameTarget, setRenameTarget] = useState<ChatSession | null>(null);
   const [titleDraft, setTitleDraft] = useState('');
@@ -88,7 +89,9 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
   }, [selectedId, listed, lookup]);
   useEffect(() => {
     const handlePopState = () => {
-      if (window.location.pathname === SESSIONS_PATH) setSelectedId(sessionIdFromSearch(window.location.search));
+      if (window.location.pathname !== SESSIONS_PATH) return;
+      setSelectedId(sessionIdFromSearch(window.location.search));
+      setThreadId(threadIdFromSearch(window.location.search));
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
@@ -97,14 +100,15 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
   const select = (id: string | null) => {
     if (id !== sessionIdFromSearch(window.location.search)) window.history.pushState({}, '', sessionUrl(id));
     setSelectedId(id);
-    setWorkerId(null);
+    setThreadId(null);
     setActionError('');
     if (!window.matchMedia(WIDE_QUERY).matches) setInspectorOpen(false);
   };
 
-  const selectWorker = (sessionId: string, id: string | null) => {
+  const openThread = (sessionId: string, id: string | null) => {
     if (sessionId !== selectedId) select(sessionId);
-    setWorkerId(id);
+    setThreadId(id);
+    window.history.replaceState({}, '', sessionUrl(sessionId, id));
   };
 
   const create = async (variables: { title?: string; ticketKey?: string | null; forkFrom?: string }) => {
@@ -198,9 +202,9 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
               live={liveStatus?.sessions ?? []}
               machines={machinesData?.chatMachines}
               activeId={selectedId}
-              activeWorkerId={workerId}
+              activeThreadId={threadId}
               onSelect={select}
-              onSelectWorker={selectWorker}
+              onOpenThread={openThread}
               onNew={() => void create({})}
               onRename={openRename}
               onDelete={(session) => { setActionError(''); setDeleteTarget(session); }}
@@ -235,10 +239,10 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
                 <ChatThread
                   key={selected.id}
                   sessionId={selected.id}
-                  className={cn('min-h-0 min-w-0 flex-1', showLanes && 'max-w-[44%]')}
+                  className={cn('min-h-0 min-w-0 flex-1 overflow-hidden', showLanes && !threadId && 'max-w-[44%]')}
                   hideMachine
-                  workerId={workerId}
-                  onSelectWorker={setWorkerId}
+                  threadId={threadId}
+                  onOpenThread={(id) => openThread(selected.id, id)}
                   onActivity={setEvents}
                   renderHeader={({ control, dot, delayed, status }) => (
                     <SessionHeaderBar
@@ -255,10 +259,18 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
                   )}
                   readOnlyAction={<Button size="sm" variant="primary" disabled={creating} onClick={() => void create({ forkFrom: selected.id, title: selected.title || undefined, ticketKey: selected.ticketKey })}>Continue as a DOCK session</Button>}
                 />
-                {showLanes && <AgentLanes events={events} className="min-w-0 flex-1 max-[900px]:hidden" />}
-                {inspectorOpen && <SessionInspector session={selected} files={files} onTicketClick={onTicketClick} className="w-[260px] flex-none border-l border-border max-[900px]:hidden" />}
+                {showLanes && !threadId && <AgentLanes events={events} className="min-w-0 flex-1 max-[900px]:hidden" />}
+                {threadId ? (
+                  <AgentThreadPane
+                    sessionId={selected.id}
+                    threadId={threadId}
+                    onOpen={(id) => openThread(selected.id, id)}
+                    onClose={() => openThread(selected.id, null)}
+                    className="w-[440px] flex-none border-l border-border max-[1180px]:w-[380px] max-[900px]:fixed max-[900px]:inset-x-0 max-[900px]:top-[var(--vv-top,0px)] max-[900px]:z-[55] max-[900px]:h-[var(--vv-h,100dvh)] max-[900px]:w-auto max-[900px]:border-l-0"
+                  />
+                ) : inspectorOpen && <SessionInspector session={selected} files={files} onTicketClick={onTicketClick} className="w-[260px] flex-none border-l border-border max-[900px]:hidden" />}
               </div>
-              {inspectorOpen && (
+              {inspectorOpen && !threadId && (
                 <div className="fixed inset-x-0 bottom-0 z-[50] max-h-[70dvh] overflow-y-auto rounded-t-lg border-t border-border-glow bg-surface-1 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-card min-[901px]:hidden" role="dialog" aria-label="About this session">
                   <div className="mb-2 flex items-center justify-between"><span className="mx-auto h-1.5 w-10 rounded-pill bg-border-glow" aria-hidden="true" /><Button size="sm" variant="ghost" className="h-11 min-w-11" aria-label="Close" onClick={() => setInspectorOpen(false)}><X size={15} aria-hidden="true" /></Button></div>
                   <SessionInspector session={selected} files={files} costUsd={liveSession?.costUsd} onTicketClick={onTicketClick} className="bg-transparent p-0" />

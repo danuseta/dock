@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { agentTask, agentType, runningLanes, sessionStats, trayWorkers, turnHighlights, type ChatActivity } from '../chat/activity/activity';
+import { agentTask, agentType, runningLanes, sessionStats, trayWorkers, type ChatActivity } from '../chat/activity/activity';
 
 let nextId = 1;
 const at = (seconds: number) => new Date(Date.UTC(2026, 9, 19, 8, 0, seconds)).toISOString();
@@ -11,28 +11,6 @@ const row = (overrides: Partial<ChatActivity> = {}): ChatActivity => {
     status: 'ok', hasDetail: false, seq: id, startedAt: at(id), endedAt: at(id + 1), ...overrides,
   };
 };
-
-test('a turn lists each skill once and every subagent with the steps it ran', () => {
-  const executor = row({ kind: 'agent', name: 'oh-my-claudecode:executor', label: 'Agent executor: add the tags filter', status: 'running', endedAt: null });
-  const events = [
-    row({ kind: 'skill', name: 'build-ticket', label: 'Skill: build-ticket' }),
-    row({ kind: 'skill', name: 'build-ticket', label: 'Skill: build-ticket' }),
-    row({ kind: 'skill', name: 'graphify', label: 'Skill: graphify' }),
-    executor,
-    row({ parentId: executor.eventId, agent: 'executor', name: 'Edit' }),
-    row({ parentId: executor.eventId, agent: 'executor', name: 'Bash' }),
-    row({ parentId: executor.eventId, kind: 'note', name: 'note' }),
-  ];
-  const { skills, agents } = turnHighlights(events);
-  assert.deepStrictEqual(skills, ['build-ticket', 'graphify']);
-  assert.strictEqual(agents.length, 1);
-  assert.strictEqual(agents[0].node.event.eventId, executor.eventId);
-  assert.strictEqual(agents[0].steps, 2);
-});
-
-test('a turn without skills or subagents has nothing to highlight', () => {
-  assert.deepStrictEqual(turnHighlights([row(), row()]), { skills: [], agents: [] });
-});
 
 test('a subagent reads as its type and its task', () => {
   assert.strictEqual(agentType('oh-my-claudecode:executor'), 'executor');

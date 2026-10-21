@@ -531,9 +531,13 @@ export const typeDefs = gql`
 
   type ChatWorker {
     id: String!
+    parentId: String
+    turnId: Int!
     name: String!
     label: String!
     status: String!
+    startedAt: String!
+    endedAt: String
   }
 
   type ChatMessage {

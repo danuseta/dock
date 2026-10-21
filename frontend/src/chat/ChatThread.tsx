@@ -8,27 +8,24 @@ import { EmptyState } from '../components/EmptyState';
 import { TerminalScene } from '../components/empty/scenes/TerminalScene';
 import { cn } from '../lib/cn';
 import {
-  isOptimistic, isStopping, isTurnInProgress, machineCapabilities, machineOf, machineOnline, machinePlace, mergeMessages, newestAssistantId, oldestId, optimisticMessage, pollCursor, pollInterval, sendBlocker, sessionTurnOptions,
+  isStopping, isTurnInProgress, machineCapabilities, machineOf, machineOnline, machinePlace, mergeMessages, newestAssistantId, oldestId, optimisticMessage, pollCursor, pollInterval, sendBlocker, sessionTurnOptions,
   type ChatMachine, type ChatMessage, type ChatSession,
 } from './messages';
 import { MachineChip } from './MachineControls';
 import { SessionHeader } from './SessionHeader';
-import { CopyButton } from './CopyButton';
-import { Markdown } from './Markdown';
 import { recallMessages, rememberMessages } from './messageCache';
-import { ActivityGroup } from './activity/ActivityGroup';
-import { isThreadGroup, type ChatActivity } from './activity/activity';
+import type { ChatActivity } from './activity/activity';
+import { TranscriptList } from './activity/TranscriptList';
 import { useTurnActivity } from './activity/useTurnActivity';
 import { WorkerTray } from './activity/WorkerTray';
 import { Composer } from './composer/Composer';
 import { composerFeatures } from './composer/composerLogic';
 import { useTurnOptions, type TurnOptionsControl } from './composer/useTurnOptions';
-import { delayedMinutes, delayedText, dotState, workerGroups, type DotState } from './headerState';
+import { delayedMinutes, delayedText, dotState, type DotState } from './headerState';
 import { useChatStatus } from './useChatStatus';
 import type { ChatSessionStatus } from './status';
 import type { SendPayload } from './composer/composerLogic';
 import { InteractionCards } from './interactions/InteractionCards';
-import { MessageAttachments } from './interactions/MessageAttachments';
 import { useInteractionLog } from './interactions/useInteractionLog';
 import { chatStore } from './store';
 
@@ -42,9 +39,10 @@ interface ChatThreadProps {
   /** Receives every activity row of the session whenever they change, for summaries outside the thread. */
   onActivity?: (events: ChatActivity[]) => void;
   renderHeader?: (context: HeaderContext) => React.ReactNode;
-  workerId?: string | null;
-  /** Lets a click on the worker tray filter the thread to that worker. */
-  onSelectWorker?: (workerId: string | null) => void;
+  /** The agent thread open beside the conversation. */
+  threadId?: string | null;
+  /** Opens an agent's thread beside the conversation, or closes it with null. Without it a thread opens in place. */
+  onOpenThread?: (eventId: string | null) => void;
 }
 
 export interface HeaderContext { control: TurnOptionsControl; dot: DotState; delayed: boolean; status: ChatSessionStatus | undefined }
@@ -60,9 +58,8 @@ const PROMPT_EXAMPLES = [
 ];
 
 const messageOf = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
-const timeOf = (at: string) => new Date(at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 
-export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, readOnlyAction, hideMachine, onActivity, renderHeader, workerId, onSelectWorker }) => {
+export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, readOnlyAction, hideMachine, onActivity, renderHeader, threadId, onOpenThread }) => {
   const client = useApolloClient();
   const [recalled] = useState(() => recallMessages(sessionId));
   const [messages, setMessages] = useState<ChatMessage[]>(() => recalled?.messages ?? []);
@@ -124,7 +121,6 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
   const ownStatus = liveStatus?.sessions.find((item) => item.sessionId === sessionId);
   const delayed = Boolean(ownStatus?.stale) && busy;
   const dot = dotState({ bridgeUp: machineUp, waiting: interactions.cards.length > 0 || Boolean(session?.waiting), busy, delayed });
-  const shownItems = workerId ? workerGroups(activity.byTurn, workerId) : activity.items;
 
   useEffect(() => {
     if (status !== 'queued' && status !== 'running') setStopRequested(false);
@@ -289,48 +285,10 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
             ))}
           />
         ))}
-        <ol className="flex min-w-0 flex-col gap-2">
-          {shownItems.map((message) => (isThreadGroup(message) ? (
-            <ActivityGroup key={message.key} group={message} live={message.last && message.turnId === activity.liveTurnId} turnRunning={message.turnId === activity.liveTurnId} store={activity.store} stickRef={stickRef} />
-          ) : message.role === 'tool' ? (
-            <li key={message.id} className="flex min-w-0 items-baseline gap-1.5 font-mono text-[0.68rem] text-muted-foreground" title={timeOf(message.at)}>
-              <span aria-hidden="true">›</span><span className="min-w-0 break-words">{message.text}</span>
-            </li>
-          ) : (
-            <li key={message.id} className={cn('flex min-w-0 max-w-[86%] flex-col', message.role === 'user' ? 'items-end self-end' : 'items-start self-start')}>
-              {(message.text || !message.attachments?.length) && (message.role === 'user' ? (
-                <p
-                  className={cn(
-                    'max-w-full whitespace-pre-wrap break-words rounded-[10px] border px-3 py-2 text-[0.82rem] leading-relaxed [overflow-wrap:anywhere]',
-                    'rounded-br-xs border-accent/30 bg-accent-dim',
-                    isOptimistic(message) && 'opacity-60',
-                  )}
-                  title={timeOf(message.at)}
-                >
-                  <span className="sr-only">You: </span>{message.text}
-                </p>
-              ) : (
-                <div
-                  className="min-w-0 max-w-full break-words rounded-[10px] rounded-bl-xs border border-border bg-surface-1 px-3 py-2 text-[0.82rem] leading-relaxed [overflow-wrap:anywhere]"
-                  title={timeOf(message.at)}
-                >
-                  <span className="sr-only">Claude: </span><Markdown text={message.text} />
-                </div>
-              ))}
-              {message.role !== 'user' && message.text && <CopyButton text={message.text} />}
-              {message.attachments && <MessageAttachments attachments={message.attachments} />}
-              {isOptimistic(message) && <span className="mt-0.5 font-mono text-[0.62rem] text-muted-foreground">Sending...</span>}
-              {message.stopped && message.state !== 'queued' && message.state !== 'taken' ? (
-                <span className="mt-0.5 font-mono text-[0.62rem] text-muted-foreground">Stopped</span>
-              ) : message.state === 'failed' ? <span className="mt-0.5 font-mono text-[0.62rem] text-status-conflict">Not answered</span>
-                : message.state === 'held' ? <span className="mt-0.5 font-mono text-[0.62rem] text-muted-foreground">Waiting · sent when Claude finishes this turn</span>
-                : message.state === 'steer' && <span className="mt-0.5 font-mono text-[0.62rem] text-muted-foreground">Steering · added to this turn</span>}
-            </li>
-          )))}
-        </ol>
+        <TranscriptList items={activity.items} store={activity.store} threadId={threadId} onOpenThread={onOpenThread ? (eventId) => onOpenThread(eventId) : undefined} />
       </div>
 
-      {!missing && <WorkerTray events={allEvents} activeId={workerId} onSelect={onSelectWorker} />}
+      {!missing && <WorkerTray events={allEvents} activeId={threadId} onSelect={onOpenThread} />}
 
       {!missing && <InteractionCards sessionId={sessionId} cards={interactions.cards} lines={interactions.lines} messages={messages} onSettled={interactions.record} />}
 

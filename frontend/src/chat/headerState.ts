@@ -2,7 +2,6 @@ import { TICKET_STEPS } from '../lib/ticketDetail';
 import { effortChoices, MODE_LABELS, PERMISSION_MODES, type TurnOptions } from './composer/composerLogic';
 import type { ChatFileChange } from './status';
 import type { OptionField, SessionMachineOptions } from './sessionOptions';
-import type { ChatActivity, ThreadGroup } from './activity/activity';
 
 export type DotState = 'running' | 'needs' | 'delayed' | 'disconnected' | 'done';
 
@@ -84,27 +83,3 @@ export const defaultsToSave = (rows: readonly PopoverRow[]): Partial<Record<(typ
   Object.fromEntries(rows.filter((row) => row.value && !row.isDefault).map((row) => [SETTING_KEY[row.field], row.value]))
 );
 
-export function workerSteps(events: readonly ChatActivity[], workerId: string): ChatActivity[] {
-  const keep = new Set<string>([workerId]);
-  let grew = true;
-  while (grew) {
-    grew = false;
-    for (const event of events) {
-      if (!keep.has(event.eventId) && event.parentId && keep.has(event.parentId)) {
-        keep.add(event.eventId);
-        grew = true;
-      }
-    }
-  }
-  return events.filter((event) => keep.has(event.eventId));
-}
-
-export function workerGroups(byTurn: ReadonlyMap<number, ChatActivity[]>, workerId: string): ThreadGroup[] {
-  const groups: ThreadGroup[] = [];
-  for (const [turnId, events] of byTurn) {
-    const steps = workerSteps(events, workerId);
-    if (steps.length > 0) groups.push({ key: `worker-${workerId}-${turnId}`, turnId, events: steps, last: false, stopped: false });
-  }
-  if (groups.length > 0) groups[groups.length - 1].last = true;
-  return groups;
-}
