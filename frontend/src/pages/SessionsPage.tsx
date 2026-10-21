@@ -238,6 +238,7 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
                   className={cn('min-h-0 min-w-0 flex-1', showLanes && 'max-w-[44%]')}
                   hideMachine
                   workerId={workerId}
+                  onSelectWorker={setWorkerId}
                   onActivity={setEvents}
                   renderHeader={({ control, dot, delayed, status }) => (
                     <SessionHeaderBar
