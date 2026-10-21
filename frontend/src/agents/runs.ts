@@ -109,8 +109,8 @@ export const FLOW_RAIL = [
 
 export type AgentRunSummary = Pick<AgentRun, 'key' | 'stage' | 'waiting' | 'acPassed' | 'acFailed' | 'acTotal' | 'activity' | 'stalled' | 'finished' | 'machine' | 'kind'>;
 
-/** A review run reads as Review, a free form card as Card; a build run, or one that does not say, is a Task. */
-export const kindLabel = (kind?: string | null) => (kind === 'review' ? 'Review' : kind === 'card' ? 'Card' : 'Task');
+/** A review run reads as Review, a free form CARD-<slug> run (no Jira ticket) as Free task; a build run, or one that does not say, is a Task. */
+export const kindLabel = (kind?: string | null) => (kind === 'review' ? 'Review' : kind === 'card' ? 'Free task' : 'Task');
 
 export const FILTER_KINDS = ['review', 'task', 'card'] as const;
 export interface RunFilter { kind: typeof FILTER_KINDS[number] | null }
