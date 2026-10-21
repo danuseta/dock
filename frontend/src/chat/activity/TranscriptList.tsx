@@ -49,7 +49,7 @@ const LeadText: React.FC<{ message: ChatMessage }> = ({ message }) => {
       <div className="min-w-0 break-words [overflow-wrap:anywhere]">
         <span className="sr-only">Claude: </span>
         {message.text && <Markdown text={message.text} />}
-        {message.attachments && <div className="mt-1.5"><MessageAttachments attachments={message.attachments} /></div>}
+        {message.attachments && <div className="mt-1.5"><MessageAttachments attachments={message.attachments} align="left" /></div>}
         {message.text && <CopyButton text={message.text} />}
       </div>
     </li>

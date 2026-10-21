@@ -1,13 +1,15 @@
 import React from 'react';
 import { FileText } from 'lucide-react';
+import { cn } from '../../lib/cn';
 import { formatSize } from '../composer/composerLogic';
 import { isImageAttachment, type ChatAttachment } from '../messages';
 import { attachmentHref } from './attachmentUrl';
 
-export const MessageAttachments: React.FC<{ attachments: ChatAttachment[] }> = ({ attachments }) => {
+/** Files of a message: on the right under your own message, on the left under an agent's. */
+export const MessageAttachments: React.FC<{ attachments: ChatAttachment[]; align?: 'left' | 'right' }> = ({ attachments, align = 'right' }) => {
   if (attachments.length === 0) return null;
   return (
-    <ul className="mt-1 flex max-w-full flex-wrap justify-end gap-2" aria-label="Attachments">
+    <ul className={cn('mt-1 flex max-w-full flex-wrap gap-2', align === 'right' && 'justify-end')} aria-label="Attachments">
       {attachments.map((attachment) => (
         <li key={attachment.id} className="min-w-0 max-w-full">
           {isImageAttachment(attachment) ? (

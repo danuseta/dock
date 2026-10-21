@@ -41,10 +41,12 @@ export const RunDecisions: React.FC<RunDecisionsProps> = ({ run, onCancel, busy,
       <ol className="flex flex-col">
         {(open ? decisions : decisions.slice(0, SHOWN)).map((decision) => {
           const status = decision.status ?? 'DECIDED';
+          // An entry that does not say who decided is not claimed for the owner.
+          const recorded = status === 'DECIDED' && !decision.by;
           return (
             <li key={decision.n} className="flex flex-wrap items-baseline gap-x-2 gap-y-1 border-b border-border py-1.5 text-[0.82rem] last:border-b-0">
               <span className="font-mono text-[0.68rem] font-bold text-muted-foreground">D-{decision.n}</span>
-              <Badge variant={DECISION_TONE[status] ?? 'neutral'} className="text-[0.62rem]" title={`Ledger status ${status}`}>{DECISION_LABEL[status] ?? status}</Badge>
+              <Badge variant={recorded ? 'neutral' : DECISION_TONE[status] ?? 'neutral'} className="text-[0.62rem]" title={`Ledger status ${status}`}>{recorded ? 'Recorded' : DECISION_LABEL[status] ?? status}</Badge>
               <span className="font-mono text-[0.68rem] text-muted-foreground">{[decision.by && `by ${decision.by}`, decision.issue && `answers I-${decision.issue}`, decision.at && reportAge(decision.at)].filter(Boolean).join(' · ')}</span>
               <span className="basis-full text-pretty text-foreground">{decision.text}</span>
               {decision.status === 'CANCELLED' && decision.cancelNote && <span className="basis-full text-pretty text-xs text-status-conflict">Cancelled: {decision.cancelNote}</span>}

@@ -543,7 +543,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                     return (
                       <li key={stop.id} aria-current={index === at ? 'step' : undefined}>
                         <i className={cn('block h-1 rounded-full', index < at ? 'bg-status-merged' : index === at ? 'bg-sky-300' : 'bg-border-glow')} aria-hidden="true" />
-                        <span className="mt-1 block truncate font-mono text-[0.6rem] text-muted-foreground">{selected.kind === 'review' ? stop.review : stop.name}</span>
+                        <span className="mt-1 block font-mono text-[0.6rem] leading-tight text-muted-foreground">{selected.kind === 'review' ? stop.review : stop.name}</span>
                       </li>
                     );
                   })}

@@ -56,7 +56,7 @@ export const DECISION_STATUSES = ['DECIDED', 'SHOV', 'USULAN', 'SUPERSEDED', 'CA
 export type DecisionStatus = typeof DECISION_STATUSES[number];
 export const DECISION_BY = ['owner', 'arbiter', 'sous', 'agent'] as const;
 export type DecisionBy = typeof DECISION_BY[number];
-export interface LedgerDecision { n: number; at: string; text: string; status: DecisionStatus; by: DecisionBy; issue: number | null; cancelNote: string | null }
+export interface LedgerDecision { n: number; at: string; text: string; status: DecisionStatus; by: DecisionBy | null; issue: number | null; cancelNote: string | null }
 export const ISSUE_TYPES = ['BLOCKER', 'QUESTION', 'RISK', 'DISPUTE'] as const;
 export type IssueType = typeof ISSUE_TYPES[number];
 export const ISSUE_LEVELS = ['arbiter', 'sous', 'owner'] as const;
@@ -167,7 +167,7 @@ export const isCardKey = (key: string) => key.startsWith('CARD-');
 
 const positive = (value: unknown): number | null => (Number.isInteger(value) && Number(value) > 0 ? Number(value) : null);
 
-/** Decisions from the ledger; an entry written before D-n existed is D-<its place>, decided by the owner. */
+/** Decisions from the ledger; an entry written before D-n existed is D-<its place>, and one that does not say who decided has no author. */
 export function normalizeDecisions(input: unknown): LedgerDecision[] {
   return (Array.isArray(input) ? input : [])
     .filter(isRecord)
@@ -179,7 +179,7 @@ export function normalizeDecisions(input: unknown): LedgerDecision[] {
         at: text(item.at, 40),
         text: text(item.text, 1000),
         status: DECISION_STATUSES.includes(status) ? status : 'DECIDED',
-        by: DECISION_BY.includes(by) ? by : 'owner',
+        by: DECISION_BY.includes(by) ? by : null,
         issue: positive(item.issue),
         cancelNote: optionalText(item.cancelNote, 500),
       };

@@ -130,7 +130,7 @@ test('orchestrator ledger parsing keeps only what DOCK shows', () => {
   assert.deepStrictEqual(parsed.decisions, []);
   const withBrief = parseLedger({ ...ledger, brief: 'line 1\nline 2', decisions: [{ at: '2026-10-04T08:00:00.000Z', text: 'use X' }, 'bad', { at: 'x' }, null] });
   assert.strictEqual(withBrief.brief, 'line 1\nline 2');
-  assert.deepStrictEqual(withBrief.decisions, [{ n: 1, at: '2026-10-04T08:00:00.000Z', text: 'use X', status: 'DECIDED', by: 'owner', issue: null, cancelNote: null }], 'an old decision reads as D-1 decided by the owner');
+  assert.deepStrictEqual(withBrief.decisions, [{ n: 1, at: '2026-10-04T08:00:00.000Z', text: 'use X', status: 'DECIDED', by: null, issue: null, cancelNote: null }], 'an old decision reads as D-1 with no author');
   assert.deepStrictEqual(parsed.assumptions, []);
   assert.deepStrictEqual(parsed.failures, []);
   assert.strictEqual(parsed.closing, null);
@@ -221,7 +221,7 @@ test('sous ledger fields: engine, card kind, rounds, draft, numbered decisions a
   assert.deepStrictEqual([sous.engine, sous.rounds, sous.productionData, sous.draft], ['sous', { used: 2, max: 4 }, true, true]);
   assert.ok(!('blackboard' in sous), 'the local blackboard path stays on the machine');
   assert.deepStrictEqual(sous.decisions.map((item) => [item.n, item.status, item.by, item.issue, item.cancelNote]), [
-    [3, 'SHOV', 'arbiter', 2, null], [4, 'CANCELLED', 'sous', null, 'needed by QRD-9'], [5, 'DECIDED', 'owner', null, null],
+    [3, 'SHOV', 'arbiter', 2, null], [4, 'CANCELLED', 'sous', null, 'needed by QRD-9'], [5, 'DECIDED', null, null, null],
   ]);
   assert.deepStrictEqual(sous.issues, [
     { n: 2, at: '2026-10-20T00:30:00.000Z', type: 'DISPUTE', text: 'BE and FE disagree on the field', level: 'owner', status: 'open', resolvedBy: null, resolvedAt: null, options: ['A', 'B'] },
