@@ -3,7 +3,6 @@ import path from 'node:path';
 import { generateIngestToken, hashIngestToken } from '../auth/ingest-token';
 import { GitHubAPI } from '../datasources/GitHubAPI';
 import { StorageService } from '../storage/service';
-import { ledgerPeer, type LedgerPeer } from './ledger-peer';
 import { buildTimeline } from './orchestrator-timeline';
 import { reviewSignalOf, type ChecksState, type ReviewDecision } from './pr-signals';
 
@@ -42,7 +41,6 @@ const MAX_EVENTS_KEPT = 60;
 const EVENTS_RETURNED = 20;
 const MAX_TOOL_EVENTS_KEPT = 300;
 const MAX_BATCH_EVENTS = 100;
-const RESYNC_DISMISSED_MS = 24 * 3600 * 1000;
 // Tools that are plumbing between agents rather than work worth drawing.
 const HIDDEN_TOOLS = new Set(['SubagentHandback']);
 const SPAWN_TOOLS = new Set(['Agent', 'Task']);
@@ -472,7 +470,6 @@ interface RunRow {
   dismissedAt: Date | null;
   machine?: string;
   ledgerRaw?: string | null;
-  handover?: string | null;
   jiraStatus?: string | null;
   jiraStage?: string | null;
   stalledDetail?: string | null;
@@ -498,44 +495,7 @@ export const furthestStage = (ledgerStage: string, jiraStage: string | null | un
   jiraStage && stageRank(jiraStage) > stageRank(ledgerStage) ? jiraStage : ledgerStage
 );
 
-export interface Handover {
-  from: string;
-  to: string;
-  at: string;
-  note: string | null;
-  branches: { be: string | null; fe: string | null };
-}
-
 const isBranchName = (value: string) => BRANCH_NAME.test(value) && !value.includes('..') && !value.startsWith('-');
-
-function storedBranch(value: unknown): string | null {
-  return typeof value === 'string' && isBranchName(value) ? value : null;
-}
-
-function parseHandover(raw: string | null | undefined): Handover | null {
-  if (!raw) return null;
-  try {
-    const value: unknown = JSON.parse(raw);
-    if (!isRecord(value) || typeof value.from !== 'string' || typeof value.to !== 'string' || typeof value.at !== 'string') return null;
-    const branches = isRecord(value.branches) ? value.branches : {};
-    return {
-      from: value.from,
-      to: value.to,
-      at: value.at,
-      note: typeof value.note === 'string' ? value.note : null,
-      branches: { be: storedBranch(branches.be), fe: storedBranch(branches.fe) },
-    };
-  } catch {
-    return null;
-  }
-}
-
-function branchInput(value: unknown, name: string): string | null {
-  const branch = typeof value === 'string' ? value.trim() : value;
-  if (branch === undefined || branch === null || branch === '') return null;
-  if (typeof branch !== 'string' || !isBranchName(branch)) throw new OrchestratorInputError(`${name} is not a valid branch name`);
-  return branch;
-}
 
 const FINISHED_STAGES = new Set<string>(['done', 'blocked']);
 
@@ -581,7 +541,6 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
   const ac = Array.isArray(ledger.ac) ? ledger.ac : [];
   const lastSeen = row.lastEventAt && row.lastEventAt > row.ledgerUpdatedAt ? row.lastEventAt : row.ledgerUpdatedAt;
   const idleMs = Math.max(0, now.getTime() - lastSeen.getTime());
-  const handover = parseHandover(row.handover);
 
   // The ledger's "waiting" is a gate only the owner can open, so it wins over
   // whatever the hooks last reported.
@@ -611,8 +570,6 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
   return {
     key: row.key,
     machine: row.machine ?? DEFAULT_MACHINE,
-    handoverTo: handover?.to ?? null,
-    handoverAt: handover?.at ?? null,
     kind: runKind(ledger.kind, row.key),
     engine: ledger.engine ?? null,
     title: row.title,
@@ -705,7 +662,6 @@ export class OrchestratorService {
     private readonly storage = new StorageService(),
     private readonly transcriptDirectory = defaultTranscriptDirectory(),
     private readonly lookupPullRequests: PullRequestLookup | null = null,
-    private readonly peer: Pick<LedgerPeer, 'forward' | 'runs'> | null = null,
   ) {}
 
   private async present(row: RunRow, now: Date) {
@@ -757,19 +713,9 @@ export class OrchestratorService {
     await this.storage.addOrchestratorEvent(normalizeTicketKey(keyInput), kind, detail ? detail.slice(0, 500) : null, MAX_EVENTS_KEPT);
   }
 
-  async needsAttention(now = new Date()) {
-    return attentionItems(await this.list(now));
-  }
-
   async ingestLedger(input: unknown, now: Date, machine: string) {
     const ledger = parseLedger(input, now);
     const previous = await this.storage.getOrchestratorRun(ledger.key);
-    // The peer decides who owns a ticket: a leftover ledger here never brings back a run the peer gives to another machine.
-    const other = this.peer && (await this.peer.runs()).find((run) => run.key === ledger.key && run.machine !== machine);
-    if (other) {
-      if (previous && !previous.dismissedAt) await this.stepAside(ledger.key, other.machine, now);
-      return { ...other, ignored: true };
-    }
     if (!previous) {
       const reset = await this.storage.getOrchestratorReset(ledger.key);
       const createdAt = Date.parse(String((input as Record<string, unknown>).createdAt ?? ''));
@@ -815,7 +761,6 @@ export class OrchestratorService {
     } else if (!ledger.waiting && previous?.waiting) {
       await this.storage.addOrchestratorEvent(ledger.key, 'RESUMED', null, MAX_EVENTS_KEPT);
     }
-    void this.peer?.forward('', input);
     return { ...toOrchestration(row, now), ignored: false };
   }
 
@@ -840,7 +785,6 @@ export class OrchestratorService {
     if (next.activity !== current.activity) {
       await this.storage.addOrchestratorEvent(key, `AGENT_${next.activity}`, next.activityDetail, MAX_EVENTS_KEPT);
     }
-    void this.peer?.forward('/event', input);
     return { ...toOrchestration(updated, now), ignored: false };
   }
 
@@ -890,7 +834,6 @@ export class OrchestratorService {
     if (state.activity !== initial.activity) {
       await this.storage.addOrchestratorEvent(key, `AGENT_${state.activity}`, state.activityDetail, MAX_EVENTS_KEPT);
     }
-    void this.peer?.forward('/events', input);
     return { ...toOrchestration(updated, now), ignored: false };
   }
 
@@ -909,43 +852,12 @@ export class OrchestratorService {
     if (!row) return false;
     if ((row.machine ?? DEFAULT_MACHINE) !== machine) throw new OrchestratorInputError(`This run belongs to ${row.machine ?? DEFAULT_MACHINE}. Hide it on that DOCK.`);
     await this.storage.updateOrchestratorRun(key, { dismissedAt: new Date() });
-    void this.peer?.forward('/dismiss', { key });
     return true;
   }
 
   /**
-   * Sends every live run of this machine to the peer again, and the dismissals of the last day:
-   * a copy lost while the peer was down catches up here. Returns how many were sent.
-   */
-  async resyncPeer(machine: string, now = new Date()) {
-    if (!this.peer) return 0;
-    // The peer decides who owns a ticket. When it gives one this DOCK also holds to another machine,
-    // the run here steps aside, so both pages show one run. A ledger's own time never takes a ticket.
-    const theirs = new Map((await this.peer.runs()).filter((run) => run.machine !== machine).map((run) => [run.key, run]));
-    let sent = 0;
-    for (const row of await this.storage.getOrchestratorRuns()) {
-      if ((row.machine ?? DEFAULT_MACHINE) !== machine) continue;
-      if (row.dismissedAt) {
-        if (now.getTime() - row.dismissedAt.getTime() > RESYNC_DISMISSED_MS || theirs.has(row.key)) continue;
-        await this.peer.forward('/dismiss', { key: row.key });
-      } else {
-        const other = theirs.get(row.key);
-        if (other) {
-          await this.stepAside(row.key, other.machine, now);
-          continue;
-        }
-        const ledger = this.sharedLedger((await this.storage.getOrchestratorRunWithLedger(row.key)) ?? row).ledger;
-        if (!isRecord(ledger)) continue;
-        await this.peer.forward('', ledger);
-      }
-      sent += 1;
-    }
-    return sent;
-  }
-
-  /**
    * Every few minutes: the Jira status of each live build run this machine owns. A run whose ticket was moved back
-   * to To Do is removed on both DOCKs; any other change moves the stage on as far as Jira says. Returns how many changed.
+   * to To Do is removed; any other change moves the stage on as far as Jira says. Returns how many changed.
    */
   async syncJira(machine: string, tickets: Array<{ key: string; status?: string | null }>, now = new Date()) {
     const statuses = new Map(tickets.map((ticket) => [ticket.key, String(ticket.status ?? '').trim()]));
@@ -954,54 +866,29 @@ export class OrchestratorService {
       if ((row.machine ?? DEFAULT_MACHINE) !== machine || row.dismissedAt || toOrchestration(row, now).kind === 'review') continue;
       const status = statuses.get(row.key);
       if (!status || status === row.jiraStatus) continue;
-      const reset = await this.applyJiraStatus(row, status, now);
-      void this.peer?.forward('/jira', { key: row.key, status, reset });
+      await this.applyJiraStatus(row, status, now);
       changed += 1;
     }
     return changed;
   }
 
-  /** A Jira status the owner DOCK saw, applied to this DOCK's copy of that machine's run. */
-  async ingestJiraStatus(input: unknown, machine: string, now = new Date()) {
-    if (!isRecord(input)) throw new OrchestratorInputError('A request object is required');
-    const row = await this.storage.getOrchestratorRun(normalizeTicketKey(input.key));
-    const status = text(input.status, 60);
-    if (!row || !status || (row.machine ?? DEFAULT_MACHINE) !== machine) return false;
-    if (input.reset === true) await this.storage.resetOrchestratorRun(row.key, machine, now);
-    else await this.applyJiraStatus(row, status, now);
-    return true;
-  }
-
   // The first status seen is only recorded: a run the cron just started is still To Do until Jira moves it.
-  // True when the run was removed because its ticket went back to To Do.
   private async applyJiraStatus(row: RunRow, status: string, now: Date) {
     if (status.toLowerCase() === TODO_STATUS && row.jiraStatus) {
       await this.storage.resetOrchestratorRun(row.key, row.machine ?? DEFAULT_MACHINE, now);
-      return true;
+      return;
     }
     const jiraStage = JIRA_STAGES[status.toLowerCase()] ?? null;
     const stage = furthestStage(row.stage, jiraStage);
     await this.storage.updateOrchestratorRun(row.key, { jiraStatus: status, jiraStage, stage });
     await this.storage.addOrchestratorEvent(row.key, 'JIRA', status, MAX_EVENTS_KEPT);
     if (stage !== row.stage) await this.storage.addOrchestratorEvent(row.key, 'STAGE', stage, MAX_EVENTS_KEPT);
-    return false;
-  }
-
-  private async stepAside(key: string, owner: string, now: Date) {
-    await this.storage.updateOrchestratorRun(key, { dismissedAt: now });
-    await this.storage.addOrchestratorEvent(key, 'MACHINE', owner, MAX_EVENTS_KEPT);
-  }
-
-  /** What the peer DOCK reads for its own detail panel: the run and its recent events. */
-  async getWithEvents(keyInput: string, now = new Date()) {
-    const run = await this.get(keyInput, now);
-    return run && { ...run, events: await this.events(run.key) };
   }
 
   private sharedLedger(row: RunRow) {
     let ledger: unknown = null;
     try { ledger = JSON.parse(row.ledgerRaw || row.payload); } catch { ledger = null; }
-    return { key: row.key, machine: row.machine ?? DEFAULT_MACHINE, ledgerUpdatedAt: row.ledgerUpdatedAt.toISOString(), handover: parseHandover(row.handover), ledger };
+    return { key: row.key, machine: row.machine ?? DEFAULT_MACHINE, ledgerUpdatedAt: row.ledgerUpdatedAt.toISOString(), ledger };
   }
 
   private async liveRun(input: unknown, withLedger = false) {
@@ -1016,84 +903,21 @@ export class OrchestratorService {
     return {
       resets: resets.map((reset) => ({ key: reset.key, resetAt: reset.resetAt.toISOString() })),
       runs: rows
-        .filter((row) => !row.dismissedAt && ((row.machine ?? DEFAULT_MACHINE) === machine || parseHandover(row.handover)?.to === machine))
+        .filter((row) => !row.dismissedAt && (row.machine ?? DEFAULT_MACHINE) === machine)
         .map((row) => ({
           key: row.key,
           title: row.title,
           stage: row.stage,
           machine: row.machine ?? DEFAULT_MACHINE,
           ledgerUpdatedAt: row.ledgerUpdatedAt.toISOString(),
-          handoverTo: parseHandover(row.handover)?.to ?? null,
-          mine: (row.machine ?? DEFAULT_MACHINE) === machine,
+          mine: true,
         })),
     };
   }
 
   async ledgerGet(input: unknown, machine: string) {
     const row = await this.liveRun(input, true);
-    if (!row) return null;
-    const visible = (row.machine ?? DEFAULT_MACHINE) === machine || parseHandover(row.handover)?.to === machine;
-    return visible ? this.sharedLedger(row) : null;
-  }
-
-  async ledgerHandover(input: unknown, machine: string, now = new Date()) {
-    const row = await this.liveRun(input);
-    if (!row) return null;
-    const owner = row.machine ?? DEFAULT_MACHINE;
-    if (owner !== machine) throw new OrchestratorInputError('Only the owning machine can hand a ticket over');
-    const body = input as Record<string, unknown>;
-    if (body.cancel === true) {
-      await this.storage.updateOrchestratorRun(row.key, { handover: null });
-      if (row.handover) await this.storage.addOrchestratorEvent(row.key, 'HANDOVER_CANCELLED', parseHandover(row.handover)?.to ?? null, MAX_EVENTS_KEPT);
-      return { key: row.key, handover: null };
-    }
-    const to = String(body.to ?? '').trim().toLowerCase();
-    if (!(await this.machines()).includes(to)) throw new OrchestratorInputError('Unknown machine');
-    if (to === owner) throw new OrchestratorInputError('to must differ from the owner');
-    const branches = isRecord(body.branches) ? body.branches : {};
-    const handover: Handover = {
-      from: owner,
-      to,
-      at: now.toISOString(),
-      note: typeof body.note === 'string' ? optionalText(body.note.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' '), 500) : null,
-      branches: { be: branchInput(branches.be, 'branches.be'), fe: branchInput(branches.fe, 'branches.fe') },
-    };
-    await this.storage.updateOrchestratorRun(row.key, { handover: JSON.stringify(handover) });
-    await this.storage.addOrchestratorEvent(row.key, 'HANDOVER', to, MAX_EVENTS_KEPT);
-    return { key: row.key, handover };
-  }
-
-  async ledgerAccept(input: unknown, machine: string) {
-    const row = await this.liveRun(input, true);
-    if (!row) return null;
-    if ((row.machine ?? DEFAULT_MACHINE) === machine) return this.sharedLedger(row);
-    const offer = parseHandover(row.handover);
-    if (offer?.to !== machine) throw new OrchestratorInputError('This ticket is not offered to this machine');
-    const won = await this.storage.changeOrchestratorRunOwner(row.key, { machine: row.machine ?? DEFAULT_MACHINE, handover: row.handover ?? null }, machine);
-    const current = await this.storage.getOrchestratorRunWithLedger(row.key);
-    if (!won) {
-      if (current && !current.dismissedAt && (current.machine ?? DEFAULT_MACHINE) === machine) return this.sharedLedger(current);
-      throw new OrchestratorInputError('This ticket is not offered to this machine');
-    }
-    await this.storage.addOrchestratorEvent(row.key, 'MACHINE', machine, MAX_EVENTS_KEPT);
-    return this.sharedLedger(current!);
-  }
-
-  async moveRun(keyInput: string, machineInput: string, now = new Date()) {
-    const key = normalizeTicketKey(keyInput);
-    const machine = normalizeMachine(machineInput);
-    if (!(await this.machines()).includes(machine)) throw new OrchestratorInputError('Unknown machine');
-    const row = await this.storage.getOrchestratorRun(key);
-    if (!row) throw new OrchestratorInputError('Unknown ticket');
-    if ((row.machine ?? DEFAULT_MACHINE) === machine) return this.present(row, now);
-    const won = await this.storage.changeOrchestratorRunOwner(key, { machine: row.machine ?? DEFAULT_MACHINE, handover: row.handover ?? null }, machine);
-    const current = await this.storage.getOrchestratorRun(key);
-    if (!won) {
-      if (current && (current.machine ?? DEFAULT_MACHINE) === machine) return this.present(current, now);
-      throw new OrchestratorInputError('The ticket changed while it was being moved. Try again.');
-    }
-    await this.storage.addOrchestratorEvent(key, 'MACHINE', machine, MAX_EVENTS_KEPT);
-    return this.present(current!, now);
+    return row && (row.machine ?? DEFAULT_MACHINE) === machine ? this.sharedLedger(row) : null;
   }
 
   private transcriptFile(key: string) {
@@ -1160,16 +984,7 @@ export class OrchestratorService {
 
   async revokeToken(id: string) {
     if (!id) return false;
-    const token = (await this.storage.getIngestTokens()).find((item) => item.id === id);
-    const revoked = (await this.storage.revokeIngestToken(id)).count > 0;
-    if (revoked && token && !(await this.machines()).includes(token.machine)) {
-      for (const row of await this.storage.getOrchestratorRuns()) {
-        if (parseHandover(row.handover)?.to !== token.machine) continue;
-        await this.storage.updateOrchestratorRun(row.key, { handover: null });
-        await this.storage.addOrchestratorEvent(row.key, 'HANDOVER_CANCELLED', `${token.machine} (token revoked)`, MAX_EVENTS_KEPT);
-      }
-    }
-    return revoked;
+    return (await this.storage.revokeIngestToken(id)).count > 0;
   }
 
   async authenticateMachine(token: string, now = new Date()) {
@@ -1195,4 +1010,4 @@ export const orchestratorService = new OrchestratorService(undefined, undefined,
     reviewDecision: (signals as Record<string, { reviewDecision?: ReviewDecision }>)[pr.url]?.reviewDecision ?? null,
     checks: (signals as Record<string, { checks?: ChecksState }>)[pr.url]?.checks ?? null,
   }));
-}), ledgerPeer);
+}));

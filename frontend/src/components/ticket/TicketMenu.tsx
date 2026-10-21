@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowUpToLine, Copy, ExternalLink, Hand, Link2, MessagesSquare, ArrowUpRight, Unlink } from 'lucide-react';
 import { cn } from '../../lib/cn';
+import { monitorsOnly, useDockMode } from '../../lib/dockMode';
 import { useTicketWork } from './useTicketWork';
 
 export interface TicketMenuTarget {
@@ -40,6 +41,7 @@ export const TicketMenu: React.FC<TicketMenuProps> = ({ target, ticket, nextOrde
   const root = useRef<HTMLDivElement>(null);
   const [order, setOrder] = useState(ticket.workOrder != null ? String(ticket.workOrder) : '');
   const work = useTicketWork(refetchQueries);
+  const monitoring = monitorsOnly(useDockMode());
 
   useEffect(() => {
     root.current?.querySelector<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"]')?.focus();
@@ -74,10 +76,11 @@ export const TicketMenu: React.FC<TicketMenuProps> = ({ target, ticket, nextOrde
     <>
       <p className="flex items-center justify-between gap-2 px-2.5 pb-1 pt-1.5 font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground">
         <span className="text-accent">{ticket.key}</span>
-        <span>{ticket.workManual ? 'Manual' : 'Cron'}{ticket.workOrder != null ? ` · #${ticket.workOrder}` : ''}</span>
+        {!monitoring && <span>{ticket.workManual ? 'Manual' : 'Cron'}{ticket.workOrder != null ? ` · #${ticket.workOrder}` : ''}</span>}
       </p>
       {onOpen && <button type="button" role="menuitem" className={item} onClick={() => pick(onOpen)}><ArrowUpRight size={14} aria-hidden="true" />Open ticket</button>}
       <button type="button" role="menuitem" className={item} onClick={() => pick(onSession)}><MessagesSquare size={14} aria-hidden="true" />Open session</button>
+      {!monitoring && <>
       <div className="my-1 h-px bg-border" />
       <p className="px-2.5 pt-1 font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground">Work order</p>
       <form className="flex items-center gap-1.5 px-2.5 py-1.5" onSubmit={(event) => { event.preventDefault(); saveOrder(); }}>
@@ -102,6 +105,7 @@ export const TicketMenu: React.FC<TicketMenuProps> = ({ target, ticket, nextOrde
           <span className={cn('absolute top-0.5 size-3 rounded-full bg-black/80 transition-[left]', ticket.workManual ? 'left-3.5' : 'left-0.5')} />
         </span>
       </button>
+      </>}
       {onDependency && <button type="button" role="menuitem" className={item} onClick={() => pick(onDependency)}><Link2 size={14} aria-hidden="true" />Dependency…</button>}
       <div className="my-1 h-px bg-border" />
       <button type="button" role="menuitem" className={item} onClick={() => run(async () => { await navigator.clipboard.writeText(ticket.key); return `${ticket.key} copied.`; }, 'The key could not be copied')}><Copy size={14} aria-hidden="true" />Copy key</button>

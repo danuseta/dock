@@ -32,6 +32,7 @@ import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Toast } from '../components/Toast';
 import { Button, Card, ConfirmDialog, Input, Page } from '../components/ui';
 import { cn } from '../lib/cn';
+import { monitorsOnly, useDockMode } from '../lib/dockMode';
 import { CACHED_QUERY_OPTIONS, DETAIL_QUERY_OPTIONS, displayAssignee } from '../lib/queryPolicy';
 import { NO_DESCRIPTION, RUN_STATE_LABEL, dependencyChoices, isLongDescription, jiraAcLines, needsYou, runState, type NeedItem } from '../lib/ticketDetail';
 import { getPassLabels } from '../lib/ticketApprovals';
@@ -133,6 +134,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
   const run: AgentRun | null = runData?.orchestration?.key?.toUpperCase() === ticketKey.toUpperCase() ? runData.orchestration : null;
   const { openForTicket, opening: openingSession, error: sessionError } = useOpenForTicket();
   const { answer, sending: answering } = useAnswerTicket();
+  const monitoring = monitorsOnly(useDockMode());
   const closeMenu = useCallback(() => setMenu(null), []);
 
   const renderBackButton = () => onBack ? (
@@ -277,7 +279,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
   };
   const description = ticket.description && ticket.description !== NO_DESCRIPTION ? ticket.description : null;
   const jiraAc = jiraAcLines(ticket.acceptanceCriteria);
-  const blockedHere = run?.remote ? 'The other DOCK runs this ticket. Answer it there.' : null;
+  const blockedHere = monitoring ? 'This DOCK only monitors. Answer on the workspace DOCK.' : null;
 
   const handleApprove = async () => {
     try {
@@ -322,7 +324,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
         <div className="flex flex-wrap items-center gap-2">
           {ticket.url && <a href={ticket.url} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-border bg-surface-2 px-3 text-sm font-semibold hover:border-border-glow max-[760px]:h-11"><ExternalLink size={15} aria-hidden="true" />Jira</a>}
           {ticket.figmaUrl && <a href={ticket.figmaUrl} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-border bg-surface-2 px-3 text-sm font-semibold hover:border-border-glow max-[760px]:h-11"><Figma size={15} aria-hidden="true" />Figma</a>}
-          {run?.kind === 'review' && !run.remote && (run.approved
+          {run?.kind === 'review' && (run.approved
             ? <Button className="max-[760px]:h-11" disabled title="The Jira label pass is on the ticket and its pull requests are approved"><Check size={15} aria-hidden="true" />Approved</Button>
             : <Button variant="primary" className="max-[760px]:h-11" onClick={() => setConfirmApprove(true)} disabled={approving} title="Adds the Jira label pass and approves the open pull requests on GitHub"><Check size={15} aria-hidden="true" />{approving ? 'Approving...' : 'Approve'}</Button>)}
           <Button className="max-[760px]:h-11" onClick={() => void openForTicket(ticket.key)} disabled={openingSession}><MessagesSquare size={15} aria-hidden="true" />{openingSession ? 'Opening...' : 'Session'}</Button>
@@ -452,6 +454,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
               {run && <span className="font-mono text-[0.7rem] text-muted-foreground">{machineOf(run)} · <button type="button" className="font-semibold text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60" onClick={() => onNavigate(`/agents?run=${encodeURIComponent(run.key)}`)}>View run →</button></span>}
             </Property>
             {run?.stage === 'blocked' && <><dt className="sr-only">Blocked</dt><dd className="col-span-2 pb-1 text-pretty text-xs text-status-conflict">Blocked: {run.note || run.waiting || 'see the session for the reason'}.</dd></>}
+            {!monitoring && <>
             <Property label="Order">
               {editingOrder ? (
                 <form className="flex items-center gap-1.5" onSubmit={(event) => { event.preventDefault(); void handleSaveWorkOrder(); }}>
@@ -494,6 +497,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
                 ))}
               </span>
             </Property>
+            </>}
             <Property label="Depends on">
               <button type="button" className={cn(propertyButton, 'flex items-center gap-1.5', !relation?.dependsOnKey && 'font-normal text-muted-foreground')} onClick={() => setShowDependency(true)}>
                 <Link2 size={13} aria-hidden="true" />{relation?.dependsOnKey || 'None'}

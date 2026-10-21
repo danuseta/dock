@@ -1,4 +1,3 @@
-import { machineOf } from '../chat/messages';
 import { poseOf, slotFromServer, type Pose } from './office/activity';
 
 export interface AgentAc { n: number; state: string; text: string; evidence?: string | null }
@@ -76,9 +75,6 @@ export interface AgentRun {
   stalled: boolean;
   hasTranscript: boolean;
   machine?: string | null;
-  remote?: boolean;
-  handoverTo?: string | null;
-  handoverAt?: string | null;
   updatedAt: string;
   events?: AgentEvent[];
   members?: TimelineAgent[];
@@ -116,35 +112,30 @@ export type AgentRunSummary = Pick<AgentRun, 'key' | 'stage' | 'waiting' | 'acPa
 /** A review run reads as Review, a free form card as Card; a build run, or one that does not say, is a Task. */
 export const kindLabel = (kind?: string | null) => (kind === 'review' ? 'Review' : kind === 'card' ? 'Card' : 'Task');
 
-export const FILTER_MACHINES = ['laptop', 'workspace'] as const;
 export const FILTER_KINDS = ['review', 'task', 'card'] as const;
-export interface RunFilter { machine: typeof FILTER_MACHINES[number] | null; kind: typeof FILTER_KINDS[number] | null }
+export interface RunFilter { kind: typeof FILTER_KINDS[number] | null }
 
 const pick = <T extends string>(value: string | null, allowed: readonly T[]): T | null => (allowed.includes(value as T) ? value as T : null);
 
 /** The run a link opens on Agents: `/agents?run=QRD-1412`. */
 export const runKeyFromSearch = (search: string): string | null => new URLSearchParams(search).get('run');
 
-/** The Agents filter as the URL keeps it: `?machine=laptop&kind=review`; anything else means all. */
+/** The Agents filter as the URL keeps it: `?kind=review`; anything else means all. */
 export function runFilterFromSearch(search: string): RunFilter {
-  const params = new URLSearchParams(search);
-  return { machine: pick(params.get('machine'), FILTER_MACHINES), kind: pick(params.get('kind'), FILTER_KINDS) };
+  return { kind: pick(new URLSearchParams(search).get('kind'), FILTER_KINDS) };
 }
 
 /** The query string for a filter, keeping any other parameter the URL already has. */
 export function runFilterSearch(search: string, filter: RunFilter): string {
   const params = new URLSearchParams(search);
-  for (const name of ['machine', 'kind'] as const) {
-    if (filter[name]) params.set(name, filter[name]!);
-    else params.delete(name);
-  }
+  if (filter.kind) params.set('kind', filter.kind);
+  else params.delete('kind');
   const query = params.toString();
   return query ? `?${query}` : '';
 }
 
-export const matchesRunFilter = (run: Pick<AgentRun, 'machine' | 'kind'>, filter: RunFilter) => (
-  (!filter.machine || machineOf(run) === filter.machine)
-  && (!filter.kind || filter.kind === (run.kind === 'review' || run.kind === 'card' ? run.kind : 'task'))
+export const matchesRunFilter = (run: Pick<AgentRun, 'kind'>, filter: RunFilter) => (
+  !filter.kind || filter.kind === (run.kind === 'review' || run.kind === 'card' ? run.kind : 'task')
 );
 
 export const STAGE_LABEL: Record<string, string> = {
@@ -278,28 +269,10 @@ export const completeRun = (run: Omit<AgentRun, 'ac'> & { ac?: AgentAc[] | null 
   members: run.members ?? [],
 });
 
-/** What the Agents page offers on a run. A sample offers nothing; a run of another DOCK's machine is only read here. */
-export function runActions(run: Pick<AgentRun, 'remote' | 'sample'>) {
-  const editable = !run.sample && !run.remote;
-  return { hide: editable, confirm: editable, move: editable, chat: editable, replay: !run.remote };
-}
-
-/** The machine a ticket is offered to, with the time of the offer. */
-export function offerOf(run: Pick<AgentRun, 'handoverTo' | 'handoverAt'>): { to: string; at: string | null; label: string } | null {
-  if (!run.handoverTo) return null;
-  const at = run.handoverAt ? new Date(run.handoverAt) : null;
-  const time = at && !Number.isNaN(at.getTime()) ? at.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : null;
-  return { to: run.handoverTo, at: run.handoverAt || null, label: time ? `Offered to ${run.handoverTo} · ${time}` : `Offered to ${run.handoverTo}` };
-}
-
-/** The machines a ticket can be moved to: every machine but the one that owns it. */
-export const moveTargets = (machines: Array<{ name: string; online: boolean }> | null | undefined, current: string): Array<{ name: string; online: boolean }> => (
-  (machines || []).filter((machine) => machine.name !== current)
-);
-
-export function moveConfirmation(key: string, from: string, to: string, targetOnline: boolean): string {
-  const base = `Move ${key} from ${from} to ${to}? The work continues on ${to}, from the commits already pushed. The chat sessions of ${from} do not move with it. Work still running on ${from} is not stopped, and its updates will be ignored.`;
-  return targetOnline ? base : `${base} ${to} is offline, so nothing will pick ${key} up until it starts.`;
+/** What the Agents page offers on a run. A sample offers nothing; the DOCK that only monitors offers no control. */
+export function runActions(run: Pick<AgentRun, 'sample'>, monitoring: boolean) {
+  const editable = !run.sample && !monitoring;
+  return { hide: editable, confirm: editable, chat: editable };
 }
 
 export function pageOf<T>(items: T[], page: number, size: number): { items: T[]; page: number; pages: number; from: number; to: number } {

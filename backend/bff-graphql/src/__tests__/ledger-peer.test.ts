@@ -2,7 +2,8 @@ import assert from 'node:assert';
 import http from 'node:http';
 import net from 'node:net';
 import test from 'node:test';
-import { LedgerPeer, ledgerPeerFromEnv, withPeerRuns, type PeerRun } from '../integrations/ledger-peer';
+import { LedgerPeer, ledgerPeerFromEnv, type PeerRun } from '../integrations/ledger-peer';
+import { ownRuns } from '../mode';
 
 const run = (key: string, machine: string) => ({ key, machine } as PeerRun);
 
@@ -12,9 +13,14 @@ test('the peer is on only with both its URL and its token', () => {
   assert.ok(ledgerPeerFromEnv({ DOCK_LEDGER_PEER_URL: 'https://dock.example/ingest/orchestrator', DOCK_LEDGER_PEER_TOKEN: 'dock_x' }) instanceof LedgerPeer);
 });
 
-test('peer runs add the other machines, never this machine, and replace a run kept here for a ticket the peer gives away', () => {
-  const merged = withPeerRuns([run('ZED-1', 'workspace'), run('ZED-4', 'workspace')], [run('ZED-1', 'laptop'), run('ZED-2', 'laptop'), run('ZED-3', 'workspace')], 'workspace');
-  assert.deepStrictEqual(merged.map((item) => [item.key, item.machine, 'peer' in item]), [['ZED-4', 'workspace', false], ['ZED-1', 'laptop', true], ['ZED-2', 'laptop', true]]);
+test('each DOCK shows only the runs of its own machine', (t) => {
+  const before = process.env.DOCK_MODE;
+  t.after(() => { if (before === undefined) delete process.env.DOCK_MODE; else process.env.DOCK_MODE = before; });
+  const runs = [run('ZED-1', 'workspace'), run('ZED-2', 'laptop'), run('ZED-3', 'workspace')];
+  process.env.DOCK_MODE = 'workspace';
+  assert.deepStrictEqual(ownRuns(runs).map((item) => item.key), ['ZED-1', 'ZED-3']);
+  process.env.DOCK_MODE = 'laptop';
+  assert.deepStrictEqual(ownRuns(runs).map((item) => item.key), ['ZED-2']);
 });
 
 test('the peer reads with the bearer token, keeps its last runs through a failed read, and a hanging peer times out', async (t) => {
@@ -39,28 +45,12 @@ test('the peer reads with the bearer token, keeps its last runs through a failed
 
   answer = (response) => { response.statusCode = 500; response.end('{}'); };
   assert.deepStrictEqual(await peer.runs(), [run('ZED-5', 'laptop')], 'a failed read answers the last runs it read');
-  assert.strictEqual(await peer.get('ZED-5'), null);
-  assert.strictEqual(seen.at(-1)?.body, '{"key":"ZED-5"}');
   assert.deepStrictEqual(await new LedgerPeer(`http://127.0.0.1:${address.port}/ingest/orchestrator`, 'dock_token', 300, undefined, 300).runs(), [], 'with nothing read yet a failed read is empty');
 
   answer = () => undefined;
   const started = Date.now();
   assert.deepStrictEqual(await new LedgerPeer(`http://127.0.0.1:${address.port}/ingest/orchestrator`, 'dock_token', 300, undefined, 300).runs(), [], 'a hanging peer times out');
   assert.ok(Date.now() - started < 2000);
-});
-
-test('recent runs ask the peer at most once per window', async () => {
-  let asked = 0;
-  let clock = 0;
-  const peer = new LedgerPeer('http://peer.invalid', 'dock_token');
-  peer.runs = async () => { asked += 1; return [run('ZED-6', 'laptop')]; };
-  await Promise.all([peer.recentRuns(5000, () => clock), peer.recentRuns(5000, () => clock)]);
-  clock = 4000;
-  await peer.recentRuns(5000, () => clock);
-  assert.strictEqual(asked, 1);
-  clock = 6000;
-  assert.deepStrictEqual(await peer.recentRuns(5000, () => clock), [run('ZED-6', 'laptop')]);
-  assert.strictEqual(asked, 2);
 });
 
 test('the peer goes through its own proxy', async (t) => {

@@ -65,16 +65,16 @@ test('decisions read in plain English, fold at three, and only an agent ruling o
 test('a /agents?run=KEY link names the run and survives a filter change', () => {
   assert.strictEqual(runKeyFromSearch('?run=QRD-1412'), 'QRD-1412');
   assert.strictEqual(runKeyFromSearch(''), null);
-  assert.strictEqual(runFilterSearch('?run=QRD-1412', { machine: 'laptop', kind: null }), '?run=QRD-1412&machine=laptop');
+  assert.strictEqual(runFilterSearch('?run=QRD-1412', { kind: 'review' }), '?run=QRD-1412&kind=review');
 });
 
 test('cards: a Card kind with its own badge and filter', () => {
   assert.strictEqual(kindLabel('card'), 'Card');
   assert.match(renderToStaticMarkup(<KindBadge kind="card" />), />Card</);
-  assert.deepStrictEqual(runFilterFromSearch('?kind=card'), { machine: null, kind: 'card' });
-  const all = [{ machine: 'laptop', kind: 'card' }, { machine: 'laptop', kind: 'build' }, { machine: 'laptop', kind: 'review' }];
-  assert.deepStrictEqual(all.filter((item) => matchesRunFilter(item, { machine: null, kind: 'card' })), [all[0]]);
-  assert.deepStrictEqual(all.filter((item) => matchesRunFilter(item, { machine: null, kind: 'task' })), [all[1]], 'a card is not a task');
+  assert.deepStrictEqual(runFilterFromSearch('?kind=card'), { kind: 'card' });
+  const all = [{ kind: 'card' }, { kind: 'build' }, { kind: 'review' }];
+  assert.deepStrictEqual(all.filter((item) => matchesRunFilter(item, { kind: 'card' })), [all[0]]);
+  assert.deepStrictEqual(all.filter((item) => matchesRunFilter(item, { kind: 'task' })), [all[1]], 'a card is not a task');
 });
 
 test('a doctor report age reads like people say it', () => {

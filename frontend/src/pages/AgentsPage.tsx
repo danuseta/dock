@@ -12,11 +12,11 @@ import { Badge, Button, Card, Dialog, Page, PageHeader, PhoneCards } from '../co
 import { isPhone } from '../lib/phone';
 import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
-import { hasPage, useDockMode } from '../lib/dockMode';
+import { hasPage, monitorsOnly, useDockMode } from '../lib/dockMode';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { openIssues } from '../lib/sousReport';
 import { RUN_STATE_LABEL, isLongDescription, runState } from '../lib/ticketDetail';
-import { FILTER_KINDS, FILTER_MACHINES, FLOW_RAIL, PARKED_TEXT, START_FAILED_TEXT, completeRun, formatAge, reviewFindings, hasTrouble, isArchived, kindLabel, matchesRunFilter, offerOf, pageOf, runActions, runFilterFromSearch, runFilterSearch, runKeyFromSearch, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunFilter, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
+import { FILTER_KINDS, FLOW_RAIL, PARKED_TEXT, START_FAILED_TEXT, completeRun, formatAge, reviewFindings, hasTrouble, isArchived, kindLabel, matchesRunFilter, pageOf, runActions, runFilterFromSearch, runFilterSearch, runKeyFromSearch, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunFilter, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
 import { KindBadge } from '../agents/KindBadge';
 import { RunDecisions } from '../agents/RunDecisions';
 import { RunQuestions } from '../agents/RunQuestions';
@@ -25,8 +25,6 @@ import { RAIL_STAGES, railIndex } from '../agents/office/layout';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 import { AgentFlowGraph } from '../components/AgentFlowGraph';
 import { CHAT_MACHINE, machineOf, machinePlace, ticketBalloons, type ChatMessage } from '../chat/messages';
-import { MachineChip } from '../chat/MachineControls';
-import { MoveTicket } from '../agents/MoveTicket';
 import { CronSettingsDialog } from '../agents/CronSettingsDialog';
 import { CronRow } from '../agents/CronRow';
 import { chatStore } from '../chat/store';
@@ -102,12 +100,6 @@ const StatusChip: React.FC<{ status: RunStatus; review?: AgentRun['review'] }> =
   <span className={cn('inline-flex items-center rounded-xs border px-2 py-0.5 font-mono text-[0.66rem] font-bold', statusTone[status])}>{statusLabel(status, review)}</span>
 );
 
-const OfferBadge: React.FC<{ run: AgentRun; className?: string }> = ({ run, className }) => {
-  const offer = offerOf(run);
-  if (!offer) return null;
-  return <span className={cn('inline-flex items-center rounded-xs border border-amber-300/50 bg-amber-300/10 px-1.5 py-px font-mono text-[0.62rem] font-bold text-amber-200', className)}>{offer.label}</span>;
-};
-
 /** The oldest open sous question with its I-n, or the ledger's waiting text. */
 const WaitingText: React.FC<{ run: AgentRun }> = ({ run }) => {
   const issue = openIssues(run).owner[0];
@@ -121,7 +113,8 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
   const [stopAllAgents, { loading: stoppingAll }] = useMutation(STOP_ALL_AGENTS);
   const [showCron, setShowCron] = useState(false);
   const [cronError, setCronError] = useState('');
-  const chat = hasPage(useDockMode(), '/sessions');
+  const mode = useDockMode();
+  const chat = hasPage(mode, '/sessions');
   const { data: balloonData } = useQuery<{ chatBalloons: ChatMessage[]; chatSessions: Array<{ id: string; ticketKey?: string | null }> }>(GET_CHAT_BALLOONS, { fetchPolicy: 'network-only', pollInterval: POLL_MS, skip: !chat });
   const balloons = useMemo(() => ticketBalloons(balloonData?.chatBalloons || [], balloonData?.chatSessions || []), [balloonData]);
   const { openForTicket, opening: openingChat, error: chatError } = useOpenForTicket();
@@ -179,10 +172,10 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
   const timeline: AgentTimeline | null = sampling
     ? (selected?.key === 'SAMPLE-2' ? sampleTimeline(sampleTick) : null)
     : (detailData?.orchestration?.key === selected?.key ? detailData?.orchestration?.timeline || null : null);
-  const actions = selected ? runActions(selected) : null;
+  const actions = selected ? runActions(selected, monitorsOnly(mode)) : null;
   // Failing criteria first, so the fold never hides one.
   const acList = selected ? [...selected.ac].sort((first, second) => Number(second.state === 'FAIL') - Number(first.state === 'FAIL')) : [];
-  const readOnly = selected?.remote ? `Answer on the ${machineOf(selected)} DOCK. This one only reads it.` : null;
+  const readOnly = selected && monitorsOnly(mode) ? `This DOCK only monitors. Answer in the Claude Code session on ${machinePlace(machineOf(selected))}.` : null;
 
   useEffect(() => {
     setAcOpen(false);
@@ -198,7 +191,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
       box?.querySelector('input')?.focus({ preventScroll: true });
     });
   }, [focusKey, selected?.key]);
-  const canReplay = Boolean(selected?.hasTranscript) && !sampling && Boolean(actions?.replay);
+  const canReplay = Boolean(selected?.hasTranscript) && !sampling;
   const showReplay = flowView === 'replay' && canReplay;
 
   // Ages keep counting between polls; the server only sends how old things were when it answered.
@@ -290,7 +283,6 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
 
   const empty = allRuns.length === 0;
   const filterGroups = [
-    { name: 'machine', label: 'Machine', options: FILTER_MACHINES.map((value) => [value, value] as const) },
     { name: 'kind', label: 'Type', options: FILTER_KINDS.map((value) => [value, kindLabel(value)] as const) },
   ] as const;
 
@@ -406,8 +398,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                             {cards.map((run) => (
                               <button key={run.key} type="button" className={cn('rounded-xs border border-border-glow border-l-[3px] bg-surface-0 px-2 py-1.5 text-left hover:border-accent', run.waiting ? 'border-l-amber-300' : hasTrouble(run) ? 'border-l-status-conflict' : 'border-l-status-merged', selected?.key === run.key && 'border-accent')} onClick={() => { setSelectedKey(run.key); setBoardOpen(false); }}>
                                 <span className="flex items-center justify-between gap-2 font-mono text-xs font-extrabold text-accent"><span>{run.key}</span><span className="font-semibold text-muted-foreground tabular-nums">{run.acPassed}/{run.acTotal}</span></span>
-                                <span className="mt-0.5 flex flex-wrap gap-1"><MachineChip name={machineOf(run)} /><KindBadge kind={run.kind} /><VerdictBadge run={run} /></span>
-                                <OfferBadge run={run} className="mt-0.5" />
+                                <span className="mt-0.5 flex flex-wrap gap-1"><KindBadge kind={run.kind} /><VerdictBadge run={run} /></span>
                                 <span className="mt-0.5 line-clamp-2 text-[0.74rem] text-secondary-foreground">{run.waiting || run.title || 'Untitled'}</span>
                               </button>
                             ))}
@@ -477,7 +468,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                     )}
                     {listed.items.map((run) => (
                       <tr key={run.key} className={cn('cursor-pointer border-t border-border hover:bg-surface-1', selected?.key === run.key && 'bg-surface-1')} onClick={() => pickRun(run.key)}>
-                        <td className="px-4 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => pickRun(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><span className="sr-only">, machine </span><MachineChip name={machineOf(run)} className="ml-2" /><KindBadge kind={run.kind} className="ml-1" /><VerdictBadge run={run} className="ml-1" /><OfferBadge run={run} className="ml-2" /><span className="mt-0.5 block max-w-[320px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
+                        <td className="px-4 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => pickRun(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><KindBadge kind={run.kind} className="ml-2" /><VerdictBadge run={run} className="ml-1" /><span className="mt-0.5 block max-w-[320px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
                         <td className="px-4 py-3"><StageChip stage={run.stage} kind={run.kind} /></td>
                         <td className="px-4 py-3"><StatusChip status={statusOf(run)} review={run.review} /></td>
                         <td className="px-4 py-3 font-mono text-xs tabular-nums">{run.acPassed}/{run.acTotal}{run.acFailed > 0 && <span className="ml-1.5 text-status-conflict">{run.acFailed} failed</span>}</td>
@@ -511,13 +502,10 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                 <VerdictBadge run={selected} />
                 <StageChip stage={selected.stage} kind={selected.kind} />
                 <StatusChip status={statusOf(selected)} review={selected.review} />
-                <MachineChip name={machineOf(selected)} />
-                <OfferBadge run={selected} />
                 {chat && actions?.chat && <Button size="sm" className="ml-auto h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key)}><MessagesSquare size={13} aria-hidden="true" />Chat</Button>}
               </div>
               {chatError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The chat could not be opened: {chatError}</p>}
               <h2 className="text-pretty font-display text-base leading-snug font-bold">{selected.title || 'Untitled'}</h2>
-              {actions?.move && <MoveTicket key={selected.key} run={selected} />}
 
               {openIssues(selected).owner.length > 0 ? (
                 <RunQuestions key={`questions-${selected.key}`} run={selected} onAnswer={(issue, text) => handleIssueAnswer(selected.key, issue, text)} busy={answering} readOnly={readOnly} />
@@ -674,7 +662,6 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
                 <div className="mt-auto flex flex-wrap gap-2 border-t border-border pt-3.5">
                   <Button size="sm" variant="primary" onClick={() => onTicketClick(selected.key)}>Open ticket</Button>
                   {actions?.hide && <Button size="sm" variant="ghost" onClick={() => { setActionError(''); setDismissTarget(selected); }}><EyeOff size={14} aria-hidden="true" />Hide run</Button>}
-                  {selected.remote && <span className="self-center text-pretty text-xs text-muted-foreground">Read-only here. This run belongs to the {machineOf(selected)} DOCK.</span>}
                 </div>
               )}
             </>
@@ -699,7 +686,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
           ? <iframe key={selected.key} className="block h-[540px] w-full border-0 bg-[#0b0b0c]" title={`Session replay for ${selected.key}`} src={`${import.meta.env.BASE_URL}zoetrope/index.html?key=${encodeURIComponent(selected.key)}&api=${encodeURIComponent(apiOrigin)}`} />
           : selected && timeline
             ? <AgentFlowGraph run={selected} timeline={timeline} />
-            : <p className="px-5 py-8 text-center text-pretty text-sm text-muted-foreground">{!selected ? 'Select a ticket to see its flow.' : sampling ? 'Select SAMPLE-2 to see a sample flow.' : selected.remote && detailData?.orchestration?.key === selected.key ? `The flow and transcript of ${selected.key} stay on the ${machineOf(selected)} DOCK.` : 'Loading the flow...'}</p>}
+            : <p className="px-5 py-8 text-center text-pretty text-sm text-muted-foreground">{!selected ? 'Select a ticket to see its flow.' : sampling ? 'Select SAMPLE-2 to see a sample flow.' : 'Loading the flow...'}</p>}
       </Card>
 
       <Dialog open={Boolean(dismissTarget)} onClose={() => !dismissing && setDismissTarget(null)} dismissible={!dismissing} labelledBy="hide-run-title" describedBy="hide-run-description">
