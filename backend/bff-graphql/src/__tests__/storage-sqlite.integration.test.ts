@@ -857,6 +857,25 @@ test('SQLite keeps ElevenLabs keys encrypted, masked in the list, full in the st
   await assert.rejects(keys.add('ok', 'short'), /8 to 200/);
 });
 
+test('SQLite storage trims tool calls and activity flips but keeps spawns, stops, stages and gates', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }] = await Promise.all([import('../storage/service'), import('../storage/client')]);
+  const storage = new StorageService(prisma);
+  t.after(() => prisma.$disconnect());
+  const row = (kind: string, name: string, seconds: number) => ({ kind, agentId: 'main', agentType: null, name, detail: null, at: new Date(seconds * 1000) });
+  await storage.addOrchestratorToolEvents('ZED-481', [row('spawn', 'explore', 0), row('stop', 'explore', 1)], 3);
+  await storage.addOrchestratorToolEvents('ZED-481', [1, 2, 3, 4, 5].map((n) => row('tool', `Read${n}`, 10 + n)), 3);
+  const kept = await storage.getOrchestratorToolEvents('ZED-481', 3);
+  assert.deepStrictEqual(kept.map((event) => event.name), ['Read5', 'Read4', 'Read3', 'explore', 'explore'], 'the newest tool calls, then every spawn and stop');
+
+  await storage.addOrchestratorEvent('ZED-481', 'STAGE', 'plan', 2);
+  await storage.addOrchestratorEvent('ZED-481', 'WAITING', 'GATE 1', 2);
+  for (const kind of ['AGENT_ACTIVE', 'AGENT_IDLE', 'AGENT_ACTIVE', 'AGENT_IDLE']) await storage.addOrchestratorEvent('ZED-481', kind, null, 2);
+  assert.deepStrictEqual((await storage.getOrchestratorEvents('ZED-481', undefined, ['STAGE', 'WAITING'])).map((event) => event.kind).sort(), ['STAGE', 'WAITING']);
+  assert.strictEqual((await storage.getOrchestratorEvents('ZED-481')).filter((event) => event.kind.startsWith('AGENT_')).length, 2);
+});
+
 test('SQLite storage removes a reset run with its events and keeps the reset', {
   skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
 }, async (t) => {

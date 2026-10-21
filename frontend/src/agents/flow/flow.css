@@ -10,22 +10,34 @@
 .dock-flow-live i { width: 7px; height: 7px; border-radius: 50%; background: var(--color-status-merged); animation: dock-flow-pulse 1.4s ease-in-out infinite; }
 .dock-flow-live.is-quiet { color: var(--color-muted-foreground); }
 .dock-flow-live.is-quiet i { background: var(--color-muted-foreground); animation: none; }
-.dock-flow-round { border: 1px solid oklch(0.80 0.12 85); border-radius: 4px; padding: 1px 7px; background: oklch(0.80 0.12 85 / 0.12); color: oklch(0.80 0.12 85); font: 800 0.66rem var(--font-mono); }
+.dock-flow-viewing { display: inline-flex; align-items: center; gap: 6px; color: var(--color-secondary-foreground); font: 600 0.7rem var(--font-mono); }
+.dock-flow-viewing b { color: var(--color-foreground); }
+.dock-flow-viewing button { margin-left: 4px; padding: 1px 8px; border: 1px solid var(--color-border-glow); border-radius: 4px; background: var(--color-surface-1); color: var(--color-foreground); font: 700 0.66rem var(--font-mono); }
+.dock-flow-viewing button:hover { background: var(--color-surface-hover); }
 
 .dock-flow-node { position: absolute; transform: translate(-50%, -50%); transition: left 0.7s cubic-bezier(0.4, 0, 0.2, 1), top 0.7s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s; }
 
-.dock-flow-stage { display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.dock-flow-stage b { display: grid; place-items: center; width: 26px; height: 26px; border: 2px solid var(--color-border-glow); border-radius: 50%; background: var(--color-surface-1); color: var(--color-muted-foreground); font: 800 0.7rem var(--font-mono); }
-.dock-flow-stage span { color: var(--color-muted-foreground); font: 800 0.64rem var(--font-mono); letter-spacing: 0.14em; text-transform: uppercase; }
-.dock-flow-stage.is-done b { border-color: var(--color-status-merged); background: var(--color-status-merged-bg); color: var(--color-status-merged); }
-.dock-flow-stage.is-done span { color: var(--color-secondary-foreground); }
-.dock-flow-stage.is-now b { border-color: var(--stage); color: var(--stage); box-shadow: 0 0 0 5px color-mix(in oklch, var(--stage) 18%, transparent); animation: dock-flow-pulse 1.6s ease-in-out infinite; }
-.dock-flow-stage.is-now span { color: var(--stage); }
-.dock-flow-stage small { max-width: 150px; margin-top: -3px; overflow: hidden; color: var(--color-muted-foreground); font: 400 0.6rem var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+/* The rail: one row per round. Grey is ahead, green is done, white is now, red went back, amber waits on you. */
+.dock-flow-name { color: var(--color-muted-foreground); font: 800 0.66rem var(--font-mono); letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap; }
+.dock-flow-rowname { color: var(--color-muted-foreground); font: 700 0.64rem var(--font-mono); }
+.dock-flow-fold { padding: 1px 6px; border: 1px solid var(--color-border-glow); border-radius: 4px; background: var(--color-surface-1); color: var(--color-secondary-foreground); font: 700 0.6rem var(--font-mono); white-space: nowrap; }
+.dock-flow-visit { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 0; border: 0; background: none; transform: translate(-50%, -13px); }
+button.dock-flow-visit { cursor: pointer; }
+.dock-flow-visit b { display: grid; place-items: center; width: 26px; height: 26px; border: 2px solid var(--color-border-glow); border-radius: 50%; background: var(--color-surface-1); color: var(--color-muted-foreground); font: 800 0.7rem var(--font-mono); transition: box-shadow 0.15s; }
+.dock-flow-visit small { max-width: 160px; overflow: hidden; padding: 0 4px; border-radius: 3px; background: #0d0d0f; color: var(--color-muted-foreground); font: 400 0.62rem var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.dock-flow-visit small.is-note { display: -webkit-box; white-space: normal; text-align: center; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.dock-flow-visit.is-done b { border-color: var(--color-status-merged); background: var(--color-status-merged-bg); color: var(--color-status-merged); }
+.dock-flow-visit.is-returned b { border-color: var(--color-status-conflict); background: var(--color-status-conflict-bg); color: var(--color-status-conflict); }
+.dock-flow-visit.is-now b { border-color: var(--color-foreground); color: var(--color-foreground); box-shadow: 0 0 0 5px rgb(255 255 255 / 0.1); }
+.dock-flow-visit.is-now small { color: var(--color-secondary-foreground); }
+button.dock-flow-visit:hover b { box-shadow: 0 0 0 4px rgb(255 255 255 / 0.08); }
+button.dock-flow-visit:focus-visible { outline: none; }
+button.dock-flow-visit:focus-visible b { outline: 2px solid var(--color-accent); outline-offset: 3px; }
+.dock-flow-visit.is-picked b { outline: 1.5px solid var(--color-foreground); outline-offset: 4px; }
+.dock-flow-visit.is-picked small { color: var(--color-foreground); }
 
-.dock-flow-gate { width: 18px; height: 18px; border: 2px solid var(--color-status-merged); border-radius: 3px; background: var(--color-status-merged-bg); transform: translate(-50%, -50%) rotate(45deg); }
-.dock-flow-gate.is-waiting { border-color: oklch(0.80 0.12 85); background: oklch(0.80 0.12 85); box-shadow: 0 0 0 6px oklch(0.80 0.12 85 / 0.12); animation: dock-flow-pulse 0.9s ease-in-out infinite; }
-.dock-flow-loop { color: oklch(0.80 0.12 85); font: 700 0.6rem var(--font-mono); white-space: nowrap; }
+.dock-flow-gate { width: 10px; height: 10px; border-radius: 2px; background: var(--color-status-merged); pointer-events: auto; transform: translate(9px, -21px); }
+.dock-flow-gate.is-waiting { background: oklch(0.80 0.12 85); box-shadow: 0 0 0 4px oklch(0.80 0.12 85 / 0.18); animation: dock-flow-pulse 0.9s ease-in-out infinite; }
 
 .dock-flow-agent { width: 168px; padding: 8px 10px; border: 1px solid var(--color-border-glow); border-radius: 8px; background: rgb(22 22 24 / 0.96); box-shadow: 0 4px 16px rgb(0 0 0 / 0.5); }
 .dock-flow-agent.is-small { width: 150px; padding: 7px 9px; }

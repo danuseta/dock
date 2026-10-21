@@ -222,6 +222,17 @@ export const typeDefs = gql`
     state: String!
     tool: String
     tools: Int!
+    since: String
+    until: String
+  }
+
+  """One stop of the rail in one round: when the run was there, and who worked on it."""
+  type TimelineVisit {
+    stageIndex: Int!
+    round: Int!
+    from: String
+    to: String
+    agents: [TimelineAgent!]!
   }
 
   type TimelineBucket {
@@ -245,6 +256,7 @@ export const typeDefs = gql`
     hasGate: Boolean!
     gates: [TimelineGate!]!
     agents: [TimelineAgent!]!
+    visits: [TimelineVisit!]!
     buckets: [TimelineBucket!]!
     totalTools: Int!
     log: [TimelineLogEntry!]!

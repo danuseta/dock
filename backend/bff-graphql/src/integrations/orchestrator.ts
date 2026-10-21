@@ -736,10 +736,13 @@ export class OrchestratorService {
   async timeline(keyInput: string, now = new Date()) {
     const run = await this.get(keyInput, now);
     if (!run) return null;
-    const [stageEvents, toolEvents] = await Promise.all([
+    // The newest events feed the log; every stage change and gate since the run began feeds the rail.
+    const [recent, history, toolEvents] = await Promise.all([
       this.storage.getOrchestratorEvents(run.key, MAX_EVENTS_KEPT),
+      this.storage.getOrchestratorEvents(run.key, undefined, ['STAGE', 'WAITING']),
       this.storage.getOrchestratorToolEvents(run.key, MAX_TOOL_EVENTS_KEPT),
     ]);
+    const stageEvents = [...new Map([...recent, ...history].map((event) => [event.id, event])).values()];
     return buildTimeline(run, stageEvents, toolEvents, now);
   }
 

@@ -34,6 +34,9 @@ export interface TimelineAgent {
   state: 'active' | 'waiting' | 'idle' | 'done';
   tool: string | null;
   tools: number;
+  /** When a member was spawned and when it finished; the lead has neither. */
+  since?: string | null;
+  until?: string | null;
 }
 
 export function railIndex(stage: string, fallback = 0): number {
@@ -47,21 +50,29 @@ export function buildTimeline(run: TimelineRun, stageEventsDesc: StageEvent[], t
   const stageEvents = [...stageEventsDesc].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   const tools = [...toolEvents].sort((a, b) => a.at.getTime() - b.at.getTime());
 
-  // Rail: where the ticket is and the gates it met on the way.
+  // Rail: where the ticket is, the stops it visited on the way, and the gates it met.
   let position = 0;
-  let stageSince = new Date(0);
+  let visitRound = 1;
+  const visits: Array<{ stageIndex: number; round: number; from: Date | null; to: Date | null }> = [];
   const gates: Array<{ id: string; stageIndex: number; text: string; state: 'waiting' | 'passed'; at: string }> = [];
   for (const event of stageEvents) {
     if (event.kind === 'STAGE') {
       const next = railIndex(event.detail || '', position);
-      // The next task going back from test to code stays on Work, so its finished agents stay drawn.
-      if (next !== position) stageSince = event.createdAt;
+      // The next task going back from test to code stays on Work: the same visit, so its finished agents stay drawn.
+      if (visits.length === 0 || next !== position) {
+        const last = visits[visits.length - 1];
+        if (last) last.to = event.createdAt;
+        // Going back to an earlier stop starts the next round.
+        if (last && next < last.stageIndex) visitRound += 1;
+        visits.push({ stageIndex: next, round: visitRound, from: next !== position ? event.createdAt : null, to: null });
+      }
       position = next;
     } else if (event.kind === 'WAITING') {
       gates.push({ id: event.id, stageIndex: Math.min(position, RAIL.length - 1), text: event.detail || '', state: 'passed', at: event.createdAt.toISOString() });
     }
   }
   const current = railIndex(run.stage, position);
+  if (visits.length === 0 && current < RAIL.length) visits.push({ stageIndex: current, round: 1, from: null, to: null });
   if (run.waiting && gates.length > 0) gates[gates.length - 1].state = 'waiting';
   // A round is a FINAL review that sent findings back; the ledger counts them, a stage going back does not.
   const used = run.rounds?.used ?? 0;
@@ -80,10 +91,11 @@ export function buildTimeline(run: TimelineRun, stageEventsDesc: StageEvent[], t
     tool: null,
     tools: 0,
   };
-  interface Child extends TimelineAgent { type: string; linkedId: string | null; endedAt: Date | null; lastAt: Date }
+  interface Child extends TimelineAgent { type: string; linkedId: string | null; startedAt: Date; endedAt: Date | null; lastAt: Date }
   const children: Child[] = [];
+  const leadToolsAt: Date[] = [];
   const addChild = (parentId: string, type: string, name: string, detail: string | null, linkedId: string | null, at: Date): Child => {
-    const child: Child = { id: `agent-${children.length + 1}`, parentId, name, detail, state: 'active', tool: null, tools: 0, type, linkedId, endedAt: null, lastAt: at };
+    const child: Child = { id: `agent-${children.length + 1}`, parentId, name, detail, state: 'active', tool: null, tools: 0, type, linkedId, startedAt: at, endedAt: null, lastAt: at };
     children.push(child);
     return child;
   };
@@ -103,6 +115,7 @@ export function buildTimeline(run: TimelineRun, stageEventsDesc: StageEvent[], t
       if (event.agentId === 'main') {
         main.tool = event.name;
         main.tools += 1;
+        leadToolsAt.push(event.at);
         continue;
       }
       // Its spawn may have scrolled out of the buffer: an agent that is still calling tools still exists.
@@ -141,14 +154,31 @@ export function buildTimeline(run: TimelineRun, stageEventsDesc: StageEvent[], t
       }
     }
   }
-  const shown = children.filter((child) => child.state === 'active' || (child.endedAt != null && child.endedAt >= stageSince));
-  const shownIds = new Set(shown.map((child) => child.id));
-  const agents: TimelineAgent[] = [main, ...shown.slice(-MAX_CHILDREN).map((child) => ({
-    id: child.id,
-    // A finished parent that is no longer shown hands its members up to the lead.
-    parentId: child.parentId && child.parentId !== 'main' && !shownIds.has(child.parentId) ? 'main' : child.parentId,
-    name: child.name, detail: child.detail, state: child.state, tool: child.tool, tools: child.tools,
-  }))];
+  // The team of one visit: whoever was at work between its start and its end.
+  const teamOf = (from: Date | null, to: Date | null, lead: TimelineAgent): TimelineAgent[] => {
+    const shown = children.filter((child) => (to == null || child.startedAt < to)
+      && (child.state === 'active' || (child.endedAt != null && (from == null || child.endedAt >= from))));
+    const shownIds = new Set(shown.map((child) => child.id));
+    return [lead, ...shown.slice(-MAX_CHILDREN).map((child) => ({
+      id: child.id,
+      // A finished parent that is no longer shown hands its members up to the lead.
+      parentId: child.parentId && child.parentId !== 'main' && !shownIds.has(child.parentId) ? 'main' : child.parentId,
+      name: child.name, detail: child.detail, state: child.state, tool: child.tool, tools: child.tools,
+      since: child.startedAt.toISOString(), until: child.endedAt ? child.endedAt.toISOString() : null,
+    }))];
+  };
+  const within = (at: Date, from: Date | null, to: Date | null) => (from == null || at >= from) && (to == null || at < to);
+  const lastVisit = visits[visits.length - 1];
+  const agents = teamOf(lastVisit ? lastVisit.from : null, null, main);
+  const visitList = visits.map((visit, index) => ({
+    stageIndex: visit.stageIndex,
+    round: visit.round,
+    from: visit.from ? visit.from.toISOString() : null,
+    to: visit.to ? visit.to.toISOString() : null,
+    agents: index === visits.length - 1
+      ? agents
+      : teamOf(visit.from, visit.to, { ...main, state: 'done', tool: null, tools: leadToolsAt.filter((at) => within(at, visit.from, visit.to)).length }),
+  }));
 
   // Activity strip: tool calls per five seconds, newest on the right.
   const end = now.getTime();
@@ -191,6 +221,7 @@ export function buildTimeline(run: TimelineRun, stageEventsDesc: StageEvent[], t
     hasGate,
     gates: gates.slice(-MAX_GATES),
     agents,
+    visits: visitList,
     buckets,
     totalTools: tools.filter((event) => event.kind === 'tool').length,
     log,

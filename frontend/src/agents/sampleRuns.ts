@@ -81,20 +81,25 @@ export function sampleTimeline(elapsed: number): AgentTimeline {
   });
   if (waiting) buckets[Math.max(0, 47 - Math.floor(sinceStep / 5))].gate = true;
   const now = Date.now();
+  const stageIndex = SAMPLE_RAIL[run.stage] ?? 2;
+  const lead = { id: 'main', parentId: null, name: 'lead', detail: 'sample team', state: waiting ? 'waiting' : 'active', tool: null, tools: 2 };
+  const agents = [
+    lead,
+    { id: 'coord', parentId: 'main', name: 'coord-sample', detail: 'SAMPLE-2 coordinator', state: 'active', tool: waiting ? null : team.length ? 'Agent' : tool, tools: 6 + elapsedSeconds % 35 },
+    ...team,
+  ];
   return {
-    stageIndex: SAMPLE_RAIL[run.stage] ?? 2,
-    round: 1,
-    loopFrom: null,
-    loopTo: null,
+    stageIndex,
     hasGate: true,
     gates: [
       { id: 'g1', stageIndex: 1, text: 'Gate 1: approve the plan', state: 'passed', at: new Date(now - 60000).toISOString() },
       ...(waiting ? [{ id: 'g2', stageIndex: 3, text: run.waiting || '', state: 'waiting', at: new Date(now - sinceStep * 1000).toISOString() }] : []),
     ],
-    agents: [
-      { id: 'main', parentId: null, name: 'lead', detail: 'sample team', state: waiting ? 'waiting' : 'active', tool: null, tools: 2 },
-      { id: 'coord', parentId: 'main', name: 'coord-sample', detail: 'SAMPLE-2 coordinator', state: 'active', tool: waiting ? null : team.length ? 'Agent' : tool, tools: 6 + elapsedSeconds % 35 },
-      ...team,
+    agents,
+    visits: [
+      { stageIndex: 1, round: 1, from: new Date(now - 120000).toISOString(), to: new Date(now - 60000).toISOString(), agents: [{ ...lead, state: 'done', tools: 4 }] },
+      ...(stageIndex > 2 ? [{ stageIndex: 2, round: 1, from: new Date(now - 60000).toISOString(), to: new Date(now - 30000).toISOString(), agents: [{ ...lead, state: 'done', tools: 9 }] }] : []),
+      { stageIndex, round: 1, from: new Date(now - (stageIndex > 2 ? 30000 : 60000)).toISOString(), to: null, agents },
     ],
     buckets,
     totalTools: 20 + elapsedSeconds,

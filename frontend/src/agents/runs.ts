@@ -12,7 +12,12 @@ export interface TimelineAgent {
   state: string;
   tool?: string | null;
   tools: number;
+  since?: string | null;
+  until?: string | null;
 }
+
+/** One stop of the rail in one round: when the run was there, and who worked on it. */
+export interface TimelineVisit { stageIndex: number; round: number; from?: string | null; to?: string | null; agents: TimelineAgent[] }
 
 export type RunKind = 'build' | 'review' | 'card';
 
@@ -82,13 +87,12 @@ export interface AgentRun {
 
 export interface AgentTimeline {
   stageIndex: number;
-  round: number;
-  loopFrom?: number | null;
-  loopTo?: number | null;
   /** The run stopped at GATE 1 (a manual run); a cron run has no gate stop. */
   hasGate?: boolean;
   gates: Array<{ id: string; stageIndex: number; text: string; state: string; at: string }>;
   agents: TimelineAgent[];
+  /** Every stop the run visited, oldest first; the last is where it is now. */
+  visits: TimelineVisit[];
   buckets: Array<{ n: number; gate: boolean }>;
   totalTools: number;
   log: Array<{ at: string; kind: string; head: string; text: string }>;
@@ -99,12 +103,12 @@ export interface AgentTimeline {
  * FINAL review, commit shares PR. Gate is drawn only when the run stopped at GATE 1. `review` names the stop on a review run.
  */
 export const FLOW_RAIL = [
-  { id: 'gate', name: 'Gate', review: 'Brief', color: '#9aa0aa' },
-  { id: 'plan', name: 'Plan', review: 'Plan', color: '#8c9bf0' },
-  { id: 'work', name: 'Work', review: 'Work', color: '#e8c56c' },
-  { id: 'final', name: 'Final review', review: 'Review', color: '#5cc0e0' },
-  { id: 'evidence', name: 'Evidence', review: 'Evidence', color: '#5cc0e0' },
-  { id: 'pr', name: 'PR', review: 'Verdict', color: '#62cf9f' },
+  { id: 'gate', name: 'Gate', review: 'Brief' },
+  { id: 'plan', name: 'Plan', review: 'Plan' },
+  { id: 'work', name: 'Work', review: 'Work' },
+  { id: 'final', name: 'Final review', review: 'Review' },
+  { id: 'evidence', name: 'Evidence', review: 'Evidence' },
+  { id: 'pr', name: 'PR', review: 'Verdict' },
 ] as const;
 
 export type AgentRunSummary = Pick<AgentRun, 'key' | 'stage' | 'waiting' | 'acPassed' | 'acFailed' | 'acTotal' | 'activity' | 'stalled' | 'finished' | 'machine' | 'kind'>;
