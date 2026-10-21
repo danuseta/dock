@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useApolloClient, useQuery } from '@apollo/client';
 import { Clock, Loader2, RefreshCw, SendHorizontal } from 'lucide-react';
 import { SEND_CHAT_MESSAGE, STOP_CHAT_TURN } from '../graphql/mutations';
@@ -19,6 +19,7 @@ import { recallMessages, rememberMessages } from './messageCache';
 import { ActivityGroup } from './activity/ActivityGroup';
 import { isThreadGroup, type ChatActivity } from './activity/activity';
 import { useTurnActivity } from './activity/useTurnActivity';
+import { WorkerTray } from './activity/WorkerTray';
 import { Composer } from './composer/Composer';
 import { composerFeatures } from './composer/composerLogic';
 import { useTurnOptions, type TurnOptionsControl } from './composer/useTurnOptions';
@@ -42,6 +43,8 @@ interface ChatThreadProps {
   onActivity?: (events: ChatActivity[]) => void;
   renderHeader?: (context: HeaderContext) => React.ReactNode;
   workerId?: string | null;
+  /** Lets a click on the worker tray filter the thread to that worker. */
+  onSelectWorker?: (workerId: string | null) => void;
 }
 
 export interface HeaderContext { control: TurnOptionsControl; dot: DotState; delayed: boolean; status: ChatSessionStatus | undefined }
@@ -59,7 +62,7 @@ const PROMPT_EXAMPLES = [
 const messageOf = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
 const timeOf = (at: string) => new Date(at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 
-export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, readOnlyAction, hideMachine, onActivity, renderHeader, workerId }) => {
+export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, readOnlyAction, hideMachine, onActivity, renderHeader, workerId, onSelectWorker }) => {
   const client = useApolloClient();
   const [recalled] = useState(() => recallMessages(sessionId));
   const [messages, setMessages] = useState<ChatMessage[]>(() => recalled?.messages ?? []);
@@ -100,9 +103,10 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
   useLayoutEffect(() => {
     onActivityRef.current = onActivity;
   }, [onActivity]);
+  const allEvents = useMemo(() => [...activity.byTurn.values()].flat(), [activity.byTurn]);
   useEffect(() => {
-    onActivityRef.current?.([...activity.byTurn.values()].flat());
-  }, [activity.byTurn]);
+    onActivityRef.current?.(allEvents);
+  }, [allEvents]);
   const busy = isTurnInProgress(status, messages);
   const pollMs = pollInterval(busy);
   const machine = machineOf(session);
@@ -325,6 +329,8 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
           )))}
         </ol>
       </div>
+
+      {!missing && <WorkerTray events={allEvents} activeId={workerId} onSelect={onSelectWorker} />}
 
       {!missing && <InteractionCards sessionId={sessionId} cards={interactions.cards} lines={interactions.lines} messages={messages} onSettled={interactions.record} />}
 

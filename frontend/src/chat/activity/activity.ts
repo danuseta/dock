@@ -356,3 +356,30 @@ export function runningLanes(events: ChatActivity[], limit = 12): AgentLane[] {
   walk(buildTree(events));
   return lanes;
 }
+
+export interface TrayWorker { agent: ChatActivity; steps: number; last: ChatActivity | null }
+
+/** The subagents the tray above the composer keeps in view: every one still running, plus the ones the newest turn already finished. */
+export function trayWorkers(events: ChatActivity[]): TrayWorker[] {
+  const newestTurn = Math.max(...events.map((event) => event.turnId));
+  const workers: TrayWorker[] = [];
+  const collect = (node: ActivityNode, into: ChatActivity[]) => {
+    for (const child of node.children) {
+      if (child.event.kind !== 'note') into.push(child.event);
+      collect(child, into);
+    }
+  };
+  const walk = (nodes: ActivityNode[]) => {
+    for (const node of nodes) {
+      if (node.event.kind === 'agent' && (node.event.status === 'running' || node.event.turnId === newestTurn)) {
+        const steps: ChatActivity[] = [];
+        collect(node, steps);
+        steps.sort(compareEvents);
+        workers.push({ agent: node.event, steps: steps.length, last: steps[steps.length - 1] ?? null });
+      }
+      walk(node.children);
+    }
+  };
+  walk(buildTree(events));
+  return workers;
+}

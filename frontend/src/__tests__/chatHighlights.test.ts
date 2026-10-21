@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { agentTask, agentType, runningLanes, sessionStats, turnHighlights, type ChatActivity } from '../chat/activity/activity';
+import { agentTask, agentType, runningLanes, sessionStats, trayWorkers, turnHighlights, type ChatActivity } from '../chat/activity/activity';
 
 let nextId = 1;
 const at = (seconds: number) => new Date(Date.UTC(2026, 9, 19, 8, 0, seconds)).toISOString();
@@ -59,4 +59,18 @@ test('lanes hold each running subagent with its own newest steps; finished ones 
   assert.deepStrictEqual(lanes.map((lane) => lane.agent.eventId), [lead.eventId]);
   assert.strictEqual(lanes[0].steps.length, 12);
   assert.strictEqual(lanes[0].steps.at(-1)?.label, 'step 13');
+});
+
+test('the worker tray keeps every running subagent and the ones the newest turn finished', () => {
+  const old = row({ kind: 'agent', name: 'explore', turnId: 9 });
+  const stillRunning = row({ kind: 'agent', name: 'executor', label: 'Agent executor: build', status: 'running', endedAt: null, turnId: 9 });
+  const read = row({ parentId: stillRunning.eventId, name: 'Read', turnId: 9 });
+  const step = row({ parentId: stillRunning.eventId, name: 'Edit', label: 'Edit InboxList.tsx', status: 'running', endedAt: null, turnId: 9 });
+  const finished = row({ kind: 'agent', name: 'verifier', turnId: 10 });
+  const events = [old, row({ parentId: old.eventId, turnId: 9 }), stillRunning, step, read, finished, row({ parentId: finished.eventId }), row({ parentId: finished.eventId, kind: 'note', name: 'note' })];
+  const workers = trayWorkers(events);
+  assert.deepStrictEqual(workers.map((worker) => worker.agent.eventId), [stillRunning.eventId, finished.eventId]);
+  assert.strictEqual(workers[0].last?.label, 'Edit InboxList.tsx');
+  assert.strictEqual(workers[1].steps, 1);
+  assert.deepStrictEqual(trayWorkers([row(), row()]), []);
 });
