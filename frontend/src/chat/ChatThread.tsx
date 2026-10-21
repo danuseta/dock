@@ -50,8 +50,9 @@ const NEWEST_PAGE = 200;
 const OLDER_PAGE = 100;
 const NEAR_BOTTOM_PX = 80;
 const PROMPT_EXAMPLES = [
-  { label: 'Build QRD-…', text: 'Build QRD-' },
-  { label: 'Review PR …', text: 'Review PR ' },
+  { label: 'Build QRD-…', text: 'Pakai skill sous: kerjakan QRD-' },
+  { label: 'Review PR …', text: 'Pakai skill sous: review ' },
+  { label: 'Card …', text: 'Pakai skill sous: ' },
   { label: 'Explain this repo', text: 'Explain this repo' },
 ];
 
