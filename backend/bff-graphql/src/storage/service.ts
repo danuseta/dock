@@ -891,7 +891,7 @@ export class StorageService {
   getChatWorkers(sessionId: string) {
     return this.db.chatActivity.findMany({
       where: { sessionId, kind: 'agent' },
-      select: { eventId: true, name: true, label: true, status: true },
+      select: { eventId: true, parentId: true, turnId: true, name: true, label: true, status: true, startedAt: true, endedAt: true },
       orderBy: [{ seq: 'asc' }, { id: 'asc' }],
     });
   }

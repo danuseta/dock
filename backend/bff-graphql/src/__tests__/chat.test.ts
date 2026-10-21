@@ -31,7 +31,7 @@ function memoryStorage() {
   const tokens: any[] = [];
   let sequence = 0;
   const cache = new Map<string, string>();
-  const workerRows: Array<{ sessionId: string; eventId: string; name: string; label: string; status: string }> = [];
+  const workerRows: Array<{ sessionId: string; eventId: string; parentId: string | null; turnId: number; name: string; label: string; status: string; startedAt: Date; endedAt: Date | null }> = [];
   const ofSession = (sessionId: string) => messages.filter((message) => message.sessionId === sessionId);
   const storage = {
     getSettingValues: async () => [] as Array<{ key: string; value: string }>,
@@ -945,20 +945,20 @@ test('saved session lines are bounded per machine and a damaged save is ignored'
   assert.deepStrictEqual(damaged.statusSnapshot().sessions, []);
 });
 
-test('a session counts its agent rows, and its workers come back in order with their fields', async () => {
+test('a session counts its agent rows, and its workers come back in order with their place in the tree and their times', async () => {
   const { service, workerRows } = clockedService();
   const none = await service.createSession({ title: 'Alone' });
   const team = await service.createSession({ title: 'Team' });
   workerRows.push(
-    { sessionId: team.id, eventId: 'toolu_1', name: 'executor', label: 'Build the form', status: 'done' },
-    { sessionId: team.id, eventId: 'toolu_2', name: 'test-engineer', label: 'Cover it', status: 'running' },
+    { sessionId: team.id, eventId: 'toolu_1', parentId: null, turnId: 7, name: 'executor', label: 'Build the form', status: 'done', startedAt: new Date('2026-10-21T05:00:00Z'), endedAt: new Date('2026-10-21T05:03:00Z') },
+    { sessionId: team.id, eventId: 'toolu_2', parentId: 'toolu_1', turnId: 7, name: 'test-engineer', label: 'Cover it', status: 'running', startedAt: new Date('2026-10-21T05:01:00Z'), endedAt: null },
   );
   const listed = await service.sessions('dock', null, 'laptop');
   assert.deepStrictEqual(listed.map((session) => [session.id, session.workerCount]).sort(), [[none.id, 0], [team.id, 2]].sort());
   assert.strictEqual((await service.session(team.id))?.workerCount, 2);
   assert.deepStrictEqual(await service.workers(team.id), [
-    { id: 'toolu_1', name: 'executor', label: 'Build the form', status: 'done' },
-    { id: 'toolu_2', name: 'test-engineer', label: 'Cover it', status: 'running' },
+    { id: 'toolu_1', parentId: null, turnId: 7, name: 'executor', label: 'Build the form', status: 'done', startedAt: '2026-10-21T05:00:00.000Z', endedAt: '2026-10-21T05:03:00.000Z' },
+    { id: 'toolu_2', parentId: 'toolu_1', turnId: 7, name: 'test-engineer', label: 'Cover it', status: 'running', startedAt: '2026-10-21T05:01:00.000Z', endedAt: null },
   ]);
   assert.deepStrictEqual(await service.workers(none.id), []);
   assert.deepStrictEqual(await service.workers('not an id!'), []);

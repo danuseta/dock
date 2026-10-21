@@ -246,8 +246,8 @@ test('SQLite storage counts the agent rows of many sessions in one query and lis
 
   assert.deepStrictEqual([...(await storage.getChatWorkerCounts([team, alone]))], [[team, 2]]);
   assert.deepStrictEqual(await storage.getChatWorkers(team), [
-    { eventId: 'a1', name: 'executor', label: 'executor label', status: 'running' },
-    { eventId: 'a2', name: 'verifier', label: 'verifier label', status: 'ok' },
+    { eventId: 'a1', parentId: null, turnId: turn.id, name: 'executor', label: 'executor label', status: 'running', startedAt: at, endedAt: null },
+    { eventId: 'a2', parentId: null, turnId: turn.id, name: 'verifier', label: 'verifier label', status: 'ok', startedAt: at, endedAt: at },
   ]);
   assert.deepStrictEqual(await storage.getChatWorkers(alone), []);
   await storage.deleteChatSession(team);

@@ -770,7 +770,10 @@ export class ChatService {
 
   async workers(sessionId: string) {
     if (!CHAT_ID.test(String(sessionId))) return [];
-    return (await this.storage.getChatWorkers(sessionId)).map((row) => ({ id: row.eventId, name: row.name, label: row.label, status: row.status }));
+    return (await this.storage.getChatWorkers(sessionId)).map((row) => ({
+      id: row.eventId, parentId: row.parentId, turnId: row.turnId, name: row.name, label: row.label, status: row.status,
+      startedAt: row.startedAt.toISOString(), endedAt: row.endedAt ? row.endedAt.toISOString() : null,
+    }));
   }
 
   async activityDetail(sessionId: string, id: number) {

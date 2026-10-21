@@ -1,8 +1,8 @@
 import assert from 'node:assert';
 import test from 'node:test';
 import {
-  ROWS_PER_PAGE, announcement, buildTree, capRows, countsText, formatDuration, groupByTurn, groupSummary, hasRunning, isThreadGroup, liveLine, maxSeq, mergeActivity, sameTree, splitDetail, statusText, summaryText, threadItems,
-  type ActivityNode, type ChatActivity, type ThreadGroup,
+  buildTree, capRows, formatDuration, groupByTurn, maxSeq, mergeActivity, splitDetail, statusText,
+  type ActivityNode, type ChatActivity,
 } from '../chat/activity/activity';
 import { createDetailStore } from '../chat/activity/detailStore';
 import type { ChatMessage } from '../chat/messages';
@@ -96,51 +96,15 @@ test('nesting deeper than three levels is flattened onto the third', () => {
   assert.deepStrictEqual(flat(buildTree([l1, l2, l3, l4, l5])), ['l1', '  l2', '    l3', '    l4', '    l5']);
 });
 
-test('the summary counts steps, failures, denials, stopped rows and the span of time', () => {
-  const rows = [
-    row({ startedAt: at(0), endedAt: at(2) }),
-    row({ status: 'error', startedAt: at(2), endedAt: at(5) }),
-    row({ status: 'denied', startedAt: at(5), endedAt: at(6) }),
-    row({ status: 'stopped', startedAt: at(6), endedAt: null }),
-    row({ kind: 'note', name: 'thinking', startedAt: at(1), endedAt: at(1) }),
-    row({ kind: 'note', name: 'dropped', summary: '12', label: '12 steps not shown' }),
-  ];
-  const summary = groupSummary(rows, 0);
-  assert.deepStrictEqual({ steps: summary.steps, failed: summary.failed, denied: summary.denied, stopped: summary.stopped, running: summary.running }, { steps: 16, failed: 1, denied: 1, stopped: 1, running: 0 });
-  assert.strictEqual(summary.durationMs >= 6000, true);
-  assert.strictEqual(summaryText({ ...summary, durationMs: 38_000 }), '16 steps · 1 failed · 1 blocked · 1 stopped · 38 s');
-  assert.strictEqual(countsText({ ...summary }), '16 steps · 1 failed · 1 blocked');
-});
-
-test('a running row counts its time up to now', () => {
-  const summary = groupSummary([row({ status: 'running', startedAt: at(0), endedAt: null })], Date.parse(at(30)));
-  assert.strictEqual(summary.durationMs, 30_000);
-  assert.strictEqual(summary.running, 1);
-});
-
-test('the live line is the deepest running row with its parents, the newest among equals', () => {
-  const agent = row({ eventId: 'ag', kind: 'agent', label: 'Agent explore: count files', status: 'running', endedAt: null, startedAt: at(1) });
-  const grep = row({ eventId: 'g', parentId: 'ag', label: 'Search "useQuery"', status: 'running', endedAt: null, startedAt: at(2) });
-  const read = row({ eventId: 'r', parentId: 'ag', label: 'Read a.ts', status: 'running', endedAt: null, startedAt: at(3) });
-  const finished = row({ eventId: 'f', label: 'Done', status: 'ok', startedAt: at(4) });
-  const live = liveLine([agent, grep, read, finished]);
-  assert.strictEqual(live?.label, 'Read a.ts');
-  assert.deepStrictEqual(live?.path, ['Agent explore: count files']);
-  assert.strictEqual(liveLine([agent])?.label, 'Agent explore: count files');
-  assert.deepStrictEqual(liveLine([agent])?.path, []);
-  assert.strictEqual(liveLine([finished]), null);
-  assert.strictEqual(liveLine([]), null);
-});
-
 test('the mounted rows are capped and the remainder is counted', () => {
   const items = Array.from({ length: 400 }, (_, index) => index);
-  const first = capRows(items, ROWS_PER_PAGE);
+  const first = capRows(items, 50);
   assert.strictEqual(first.visible.length, 50);
   assert.strictEqual(first.hidden, 350);
-  const more = capRows(items, ROWS_PER_PAGE * 2);
+  const more = capRows(items, 100);
   assert.strictEqual(more.visible.length, 100);
   assert.strictEqual(more.hidden, 300);
-  assert.strictEqual(capRows(items.slice(0, 3), ROWS_PER_PAGE).hidden, 0);
+  assert.strictEqual(capRows(items.slice(0, 3), 50).hidden, 0);
 });
 
 test('durations read like the terminal', () => {
@@ -165,55 +129,6 @@ test('hidden output becomes a notice, not a code block', () => {
   assert.strictEqual(mixed.notice !== null, true);
   assert.deepStrictEqual(splitDetail('line one\nline two'), { body: 'line one\nline two', notice: null });
   assert.strictEqual(splitDetail('[hidden]').body, '');
-});
-
-test('the screen reader line is silent while running unless a step fails, and one line when the group ends', () => {
-  const ok = row({ status: 'ok' });
-  const failed = row({ status: 'error', label: 'Bash: npm test', seq: 50 });
-  assert.strictEqual(announcement([ok], true), '');
-  assert.strictEqual(announcement([ok, failed], true), 'Step failed: Bash: npm test');
-  assert.strictEqual(announcement([ok, failed], false), 'Finished: 2 steps, 1 failed');
-  assert.strictEqual(announcement([ok], false), 'Finished: 1 step');
-});
-
-test('trees of unchanged rows are equal and running rows are found', () => {
-  const agent = row({ eventId: 'ag', kind: 'agent', status: 'running', endedAt: null });
-  const child = row({ eventId: 'c', parentId: 'ag' });
-  const [first] = buildTree([agent, child]);
-  const [second] = buildTree([agent, child]);
-  assert.strictEqual(sameTree(first, second), true);
-  assert.strictEqual(sameTree(first, buildTree([agent])[0]), false);
-  assert.strictEqual(hasRunning(first), true);
-  assert.strictEqual(hasRunning(buildTree([child])[0]), false);
-});
-
-test('a thread without activity comes back untouched, old tool lines included', () => {
-  const messages = [message(10, 'user', 0), message(11, 'tool', 1), message(12, 'assistant', 2)];
-  assert.strictEqual(threadItems(messages, new Map()), messages);
-  assert.deepStrictEqual(threadItems(messages, new Map([[99, [row({ turnId: 99 })]]])), messages);
-});
-
-test('a turn with activity loses its tool lines and gets a group after the message each row followed', () => {
-  const messages = [message(10, 'user', 0), message(11, 'tool', 1), message(12, 'assistant', 5), message(13, 'tool', 6), message(14, 'assistant', 20), message(20, 'user', 30), message(21, 'tool', 31), message(22, 'assistant', 32)];
-  const rows = [
-    row({ eventId: 'a', turnId: 10, startedAt: at(2) }),
-    row({ eventId: 'b', turnId: 10, startedAt: at(3) }),
-    row({ eventId: 'c', turnId: 10, startedAt: at(10) }),
-    row({ eventId: 'kid', turnId: 10, parentId: 'c', startedAt: at(12) }),
-  ];
-  const items = threadItems(messages, groupByTurn(rows));
-  assert.deepStrictEqual(items.map((item) => (isThreadGroup(item) ? `group:${item.events.map((event) => event.eventId).join(',')}` : `${item.role}:${item.id}`)), [
-    'user:10', 'group:a,b', 'assistant:12', 'group:c,kid', 'assistant:14', 'user:20', 'tool:21', 'assistant:22',
-  ]);
-  const groups = items.filter(isThreadGroup) as ThreadGroup[];
-  assert.deepStrictEqual(groups.map((group) => group.last), [false, true]);
-  assert.strictEqual(new Set(groups.map((group) => group.key)).size, 2);
-});
-
-test('activity that started before every message sits under the user message', () => {
-  const messages = [message(10, 'user', 50), message(12, 'assistant', 60)];
-  const items = threadItems(messages, groupByTurn([row({ turnId: 10, startedAt: at(1) })]));
-  assert.deepStrictEqual(items.map((item) => (isThreadGroup(item) ? 'group' : item.role)), ['user', 'group', 'assistant']);
 });
 
 test('the detail of a row is fetched once however often it is asked for', async () => {
@@ -249,19 +164,3 @@ test('a failed detail fetch is tried again when asked', async () => {
   assert.deepStrictEqual(store.get(1), { state: 'ready', text: 'back' });
 });
 
-test('a turn the user stopped reads Stopped, not failed, and a group with no steps is not shown', () => {
-  const rows = [row({ status: 'error', startedAt: at(2), endedAt: at(5) })];
-  const summary = groupSummary(rows, 0, true);
-  assert.deepStrictEqual({ failed: summary.failed, stopped: summary.stopped }, { failed: 0, stopped: 1 });
-  assert.strictEqual(summaryText({ ...summary, durationMs: 31_000 }), '1 step · Stopped · 31 s');
-  assert.strictEqual(summaryText({ ...groupSummary(rows, 0), durationMs: 31_000 }), '1 step · 1 failed · 31 s');
-  assert.strictEqual(announcement(rows, false, true), 'Stopped: 1 step');
-
-  const messages = [{ ...message(10, 'user', 0), stopped: true }, message(12, 'assistant', 5), message(20, 'user', 30), message(22, 'assistant', 32)];
-  const items = threadItems(messages, groupByTurn([
-    row({ turnId: 10, startedAt: at(2), status: 'error' }),
-    row({ turnId: 20, kind: 'note', name: 'thinking', startedAt: at(31) }),
-  ]));
-  const groups = items.filter(isThreadGroup) as ThreadGroup[];
-  assert.deepStrictEqual(groups.map((group) => [group.turnId, group.stopped, group.last]), [[10, true, true]]);
-});

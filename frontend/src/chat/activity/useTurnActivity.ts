@@ -2,7 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { ApolloError, useApolloClient } from '@apollo/client';
 import { GET_CHAT_ACTIVITY, GET_CHAT_ACTIVITY_DETAIL } from '../../graphql/queries';
 import { FAST_POLL_MS, isOptimistic, type ChatMessage } from '../messages';
-import { groupByTurn, maxSeq, mergeActivity, threadItems, type ChatActivity, type ThreadItem } from './activity';
+import { groupByTurn, maxSeq, mergeActivity, type ChatActivity } from './activity';
+import { transcriptItems, type TranscriptItem } from './transcript';
 import { createDetailStore, type DetailStore } from './detailStore';
 
 const PAGE = 500;
@@ -21,7 +22,7 @@ const isRefusal = (error: unknown) => {
 };
 
 interface TurnActivity {
-  items: ThreadItem[];
+  items: TranscriptItem[];
   byTurn: Map<number, ChatActivity[]>;
   liveTurnId: number | undefined;
   store: DetailStore;
@@ -163,6 +164,6 @@ export function useTurnActivity(sessionId: string, status: string | undefined, m
   }), [client, sessionId]);
 
   const byTurn = useMemo(() => groupByTurn(rows), [rows]);
-  const items = useMemo(() => threadItems(messages, byTurn), [messages, byTurn]);
+  const items = useMemo(() => transcriptItems(messages, byTurn), [messages, byTurn]);
   return { items, byTurn, liveTurnId: running ? newestTurn : undefined, store };
 }

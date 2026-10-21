@@ -718,9 +718,13 @@ export const GET_CHAT_SESSION_WORKERS = gql`
   query GetChatSessionWorkers($sessionId: ID!) {
     chatSessionWorkers(sessionId: $sessionId) {
       id
+      parentId
+      turnId
       name
       label
       status
+      startedAt
+      endedAt
     }
   }
 `;

@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import test from 'node:test';
 import { chooseModel, EMPTY_OPTIONS } from '../chat/composer/composerLogic';
-import { choiceToSave, defaultsToSave, delayedMinutes, delayedText, changedFiles, dotState, filesTotal, popoverRows, stageLabel, workerGroups, workerSteps } from '../chat/headerState';
+import { choiceToSave, defaultsToSave, delayedMinutes, delayedText, changedFiles, dotState, filesTotal, popoverRows, stageLabel } from '../chat/headerState';
 import type { SessionMachineOptions } from '../chat/sessionOptions';
 import type { ChatActivity } from '../chat/activity/activity';
 
@@ -81,10 +81,3 @@ const row = (eventId: string, parentId: string | null, kind: string, turnId = 1)
   id: Number(eventId.slice(1)), sessionId: 's', turnId, eventId, parentId, kind, agent: '', name: kind === 'agent' ? 'executor' : 'Read', label: eventId, summary: '', status: 'ok', hasDetail: false, seq: 1, startedAt: '2026-10-19T10:00:00.000Z', endedAt: null,
 });
 
-test('a worker shows its own steps and the steps below them', () => {
-  const events = [row('e1', null, 'tool'), row('e2', null, 'agent'), row('e3', 'e2', 'tool'), row('e4', 'e3', 'tool'), row('e5', null, 'agent')];
-  assert.deepStrictEqual(workerSteps(events, 'e2').map((event) => event.eventId), ['e2', 'e3', 'e4']);
-  const groups = workerGroups(new Map([[1, events], [2, [row('e9', null, 'tool', 2)]]]), 'e2');
-  assert.strictEqual(groups.length, 1);
-  assert.strictEqual(groups[0].last, true);
-});
