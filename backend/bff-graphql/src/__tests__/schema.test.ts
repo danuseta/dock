@@ -106,6 +106,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'dockerRuntime',
       'doctorReports',
       'elevenLabsKeys',
+      'elevenLabsQuota',
       'githubRepos',
       'ingestTokens',
       'jiraProjects',
@@ -152,7 +153,6 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'disconnectGoogleCalendar',
       'dismissOrchestration',
       'lockSession',
-      'moveOrchestration',
       'previewLibraryAgent',
       'refreshData',
       'refreshSprintDashboard',
@@ -222,15 +222,13 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
     }
   });
 
-  await t.test('should expose machine identity and hand-over fields additively', () => {
+  await t.test('should expose machine identity fields', () => {
     const schema = buildASTSchema(typeDefs);
     const field = (type: string, name: string) => (schema.getType(type) as any).getFields()[name];
     for (const [type, name, shape] of [
       ['IngestToken', 'machine', 'String!'],
       ['ChatSession', 'machine', 'String!'],
       ['Orchestration', 'machine', 'String!'],
-      ['Orchestration', 'handoverTo', 'String'],
-      ['Orchestration', 'handoverAt', 'String'],
       ['ChatSessionStatus', 'machine', 'String'],
       ['ChatMachine', 'name', 'String!'],
       ['ChatMachine', 'online', 'Boolean!'],
@@ -272,32 +270,27 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
     assert.strictEqual(String(mutation.answerChatInteraction.type), 'ChatInteraction!');
     assert.deepStrictEqual(mutation.stopChatTurn.args.map((arg) => [arg.name, String(arg.type)]), [['sessionId', 'ID!']]);
     assert.strictEqual(String(mutation.stopChatTurn.type), 'ChatSession!');
-    assert.deepStrictEqual(mutation.moveOrchestration.args.map((arg) => [arg.name, String(arg.type)]), [['key', 'String!'], ['machine', 'String!']]);
-    assert.strictEqual(String(mutation.moveOrchestration.type), 'Orchestration!');
+    assert.strictEqual(mutation.moveOrchestration, undefined, 'no ticket moves between machines');
   });
 
-  await t.test('should mark runs of another DOCK as remote, keep peer runs off the local stores, and keep the cron on the workspace DOCK', async () => {
+  await t.test('should keep agent controls and the cron on the workspace DOCK', async () => {
     const previousDockMode = process.env.DOCK_MODE;
     const originalPin = StorageAPI.prototype.hasMasterPin;
     StorageAPI.prototype.hasMasterPin = async () => false;
     try {
       const schema = buildASTSchema(typeDefs);
-      assert.strictEqual(String((schema.getType('Orchestration') as GraphQLObjectType).getFields().remote.type), 'Boolean!');
-      const field = resolvers.Orchestration as Record<string, (parent: any) => unknown>;
-      process.env.DOCK_MODE = 'workspace';
-      assert.deepStrictEqual([field.remote({ machine: 'laptop' }), field.remote({ machine: 'workspace' })], [true, false]);
+      assert.strictEqual((schema.getType('Orchestration') as GraphQLObjectType).getFields().remote, undefined, 'a DOCK shows only its own runs');
       process.env.DOCK_MODE = 'laptop';
-      assert.deepStrictEqual([field.remote({ machine: 'laptop' }), field.remote({ machine: 'workspace' })], [false, true]);
-
-      const peerRun = { key: 'ZED-9', machine: 'laptop', peer: true, events: [{ id: '1', kind: 'STAGE', detail: 'code', at: '2026-10-16T00:00:00.000Z' }] };
-      assert.deepStrictEqual(await field.events(peerRun), peerRun.events);
-      assert.strictEqual(await field.timeline(peerRun), null);
-      assert.deepStrictEqual(await field.members(peerRun), []);
-
       const mutations = resolvers.Mutation as Record<string, (...args: unknown[]) => Promise<unknown>>;
       const unlocked = { request: { headers: {}, socket: {} }, authenticated: true } as any;
       for (const [name, args] of [['updateOrchestratorCronSettings', { config: '{}' }], ['runOrchestratorCronNow', {}], ['confirmOrchestration', { key: 'ZED-9' }]] as const) {
         await assert.rejects(mutations[name]({}, args, unlocked), /The cron runs on the workspace DOCK/, name);
+      }
+      for (const [name, args] of [
+        ['answerTicket', { ticketKey: 'ZED-9', text: 'yes' }], ['cancelDecision', { ticketKey: 'ZED-9', n: 1, note: 'no' }], ['setTicketManual', { ticketKey: 'ZED-9', manual: true }],
+        ['setTicketWorkOrder', { ticketKey: 'ZED-9', position: 1 }], ['clearTicketWorkOrder', { ticketKey: 'ZED-9' }], ['dismissOrchestration', { key: 'ZED-9' }], ['stopAllAgents', {}],
+      ] as const) {
+        await assert.rejects(mutations[name]({}, args, unlocked), /This DOCK only monitors agents. Act on the workspace DOCK./, name);
       }
     } finally {
       StorageAPI.prototype.hasMasterPin = originalPin;
@@ -318,7 +311,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       const locked = { request: { headers: {}, socket: {} }, authenticated: false } as any;
       const unlocked = { ...locked, authenticated: true };
       await assert.rejects(
-        mutations.moveOrchestration({}, { key: 'ZED-101', machine: 'workspace' }, locked),
+        mutations.dismissOrchestration({}, { key: 'ZED-101' }, locked),
         /Unlock DOCK to continue/,
       );
       await assert.rejects(

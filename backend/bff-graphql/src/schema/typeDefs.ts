@@ -500,6 +500,15 @@ export const typeDefs = gql`
     current: Boolean!
   }
 
+  type ElevenLabsQuota {
+    name: String!
+    characterCount: Int
+    characterLimit: Int
+    resetsAt: String
+    hidden: Boolean!
+    error: String
+  }
+
   type OrchestrationClosing {
     hours: Float
     fixRounds: Int!
@@ -561,10 +570,6 @@ export const typeDefs = gql`
     stalled: Boolean!
     hasTranscript: Boolean!
     machine: String!
-    """The run belongs to another DOCK's machine: shown here, changed only there."""
-    remote: Boolean!
-    handoverTo: String
-    handoverAt: String
     updatedAt: String!
     events: [OrchestrationEvent!]!
     timeline: OrchestrationTimeline
@@ -889,6 +894,7 @@ export const typeDefs = gql`
     devServers: DevServers!
     devServerLog(name: String!, bytes: Int): String!
     elevenLabsKeys: [ElevenLabsKey!]!
+    elevenLabsQuota: [ElevenLabsQuota!]!
     chatSessions(source: String, limit: Int): [ChatSession!]!
     chatSession(id: ID!): ChatSession
     chatMessages(sessionId: ID!, afterId: Int, beforeId: Int, limit: Int): [ChatMessage!]!
@@ -954,7 +960,6 @@ export const typeDefs = gql`
     removeElevenLabsKey(name: String!): Boolean!
     unparkElevenLabsKey(name: String!): Boolean!
     dismissOrchestration(key: String!): Boolean!
-    moveOrchestration(key: String!, machine: String!): Orchestration!
     createChatSession(title: String, ticketKey: String, forkFrom: ID, machine: String): ChatSession!
     sendChatMessage(sessionId: ID!, text: String!, attachmentIds: [ID!], options: ChatTurnOptionsInput, mode: String): ChatMessage!
     answerChatInteraction(sessionId: ID!, id: Int!, decision: String!, answers: [ChatAnswerInput!], note: String): ChatInteraction!

@@ -94,8 +94,6 @@ export function createOrchestratorIngestRouter(
   }));
   router.post('/ledger/list', small, handle((_body, _signal, machine) => service.ledgerList(machine)));
   router.post('/ledger/get', small, handle((body, _signal, machine) => service.ledgerGet(body, machine)));
-  router.post('/ledger/handover', small, handle((body, _signal, machine) => service.ledgerHandover(body, machine)));
-  router.post('/ledger/accept', small, handle((body, _signal, machine) => service.ledgerAccept(body, machine)));
   router.post('/event', small, handle(async (body, _signal, machine) => {
     const run = await service.ingestHookEvent(body, new Date(), machine);
     return run && { key: run.key, activity: run.activity, ...(run.ignored ? { ignored: true, owner: run.machine } : {}) };
@@ -104,15 +102,13 @@ export function createOrchestratorIngestRouter(
     const run = await service.ingestEventBatch(body, new Date(), machine);
     return run && { key: run.key, activity: run.activity, ...(run.ignored ? { ignored: true, owner: run.machine } : {}) };
   }));
-  // The workspace DOCK reads the runs kept here and copies its own dismissals, so both Agents pages agree.
+  // The workspace cron reads the runs kept here, so it never starts a ticket the laptop already works.
   router.post('/runs', small, handle(() => service.list()));
-  router.post('/runs/get', small, handle((body) => service.getWithEvents(String((body as { key?: unknown })?.key ?? ''))));
   for (const route of DEMO_STORAGE_ROUTES) router.post(`/demo-storage/${route}`, small, handle((body) => demoStorageRoute(storageSettings, route, (body ?? {}) as Record<string, unknown>)));
   router.post('/demo-link', small, handle((body) => ingestDemoLink(body)));
   router.post('/demo-video', (request: Request, response: Response) => receiveDemoVideo(videos, request.query.key, request, response, broadcast ? (key) => { void broadcast.afterDemoVideo(key).catch(broadcastFailed); } : undefined));
   router.post('/doctor', small, handle((body, _signal, machine) => doctor.ingest(body, machine)));
   for (const route of ELEVENLABS_ROUTES) router.post(`/elevenlabs/${route}`, small, handle((body) => elevenLabsRoute(keys, route, (body ?? {}) as Record<string, unknown>)));
-  router.post('/jira', small, handle((body, _signal, machine) => service.ingestJiraStatus(body, machine)));
   router.post('/dismiss', small,handle((body, _signal, machine) => service.dismiss(String((body as { key?: unknown })?.key ?? ''), machine)));
   router.post('/transcript', express.json({ limit: MAX_TRANSCRIPT_BYTES + 1024 * 1024 }), handle((body, _signal, machine) => service.saveTranscript(body, new Date(), machine)));
   const historyMachineOnly = (_request: Request, response: Response, next: express.NextFunction) => {

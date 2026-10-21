@@ -195,11 +195,11 @@ export function buildTimeline(run: TimelineRun, stageEventsDesc: StageEvent[], t
 
   const nameOf = (event: ToolEvent) => (event.agentId === 'main' ? main.name : shortType(event.agentType));
   const log = [
-    ...stageEvents.filter((event) => ['STAGE', 'WAITING', 'RESUMED', 'MACHINE', 'HANDOVER', 'HANDOVER_CANCELLED'].includes(event.kind)).map((event) => ({
+    ...stageEvents.filter((event) => ['STAGE', 'WAITING', 'RESUMED', 'MACHINE'].includes(event.kind)).map((event) => ({
       at: event.createdAt,
       kind: event.kind === 'STAGE' ? 'stage' : event.kind === 'WAITING' ? 'gate' : 'ok',
-      head: event.kind === 'STAGE' ? 'Stage' : event.kind === 'MACHINE' ? 'Machine' : event.kind === 'HANDOVER' || event.kind === 'HANDOVER_CANCELLED' ? 'Handover' : 'Gate',
-      text: event.kind === 'RESUMED' ? 'opened' : event.kind === 'HANDOVER_CANCELLED' ? `cancelled${event.detail ? ` for ${event.detail}` : ''}` : event.detail || '',
+      head: event.kind === 'STAGE' ? 'Stage' : event.kind === 'MACHINE' ? 'Machine' : 'Gate',
+      text: event.kind === 'RESUMED' ? 'opened' : event.detail || '',
     })),
     // The spawn row already says which agent was started, so the bare "Agent" tool row is left out.
     ...tools.filter((event) => !(event.kind === 'tool' && (event.name === 'Agent' || event.name === 'Task'))).map((event) => ({

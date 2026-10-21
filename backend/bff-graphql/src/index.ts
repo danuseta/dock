@@ -7,14 +7,12 @@ import { startSprintScheduler } from './integrations/sprint-scheduler';
 import { startOrchestratorCron } from './integrations/orchestrator-cron';
 import { orchestratorCron } from './integrations/orchestrator-cron-live';
 import { orchestratorService } from './integrations/orchestrator';
-import { ledgerPeer } from './integrations/ledger-peer';
 import { JiraAPI } from './datasources/JiraAPI';
 import { dockMode } from './mode';
 import { useWriteAheadLog } from './storage/client';
 import { StorageService } from './storage/service';
 
 const port = Number(process.env.PORT || 4000);
-const PEER_RESYNC_MS = 15 * 60 * 1000;
 const JIRA_SYNC_MS = 5 * 60 * 1000;
 
 export async function startServer(): Promise<void> {
@@ -31,13 +29,6 @@ export async function startServer(): Promise<void> {
     startSprintScheduler(sprintDashboardService);
     // Cron agents start in chat sessions, and chat runs on the workspace DOCK only.
     if (dockMode() === 'workspace') startOrchestratorCron(orchestratorCron);
-    if (dockMode() === 'workspace' && ledgerPeer) {
-      const resync = () => orchestratorService.resyncPeer('workspace').catch((error) => {
-        console.warn('[LedgerPeer] resync failed:', error instanceof Error ? error.message : 'unknown error');
-      });
-      void resync();
-      setInterval(resync, PEER_RESYNC_MS).unref();
-    }
     // Each DOCK follows Jira for the runs its own machine owns.
     const jira = new JiraAPI();
     const syncJira = () => jira.getTickets()

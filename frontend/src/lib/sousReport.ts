@@ -1,9 +1,6 @@
 import type { AgentDecision, AgentIssue, AgentRun } from '../agents/runs';
 
-type ReportFacts = Pick<AgentRun, 'engine' | 'issues' | 'decisions'>;
-
-/** The report shows for a run the sous engine works, or any run that recorded an issue. */
-export const showsSousReport = (run?: ReportFacts | null): boolean => Boolean(run && (run.engine === 'sous' || run.issues?.length));
+type ReportFacts = Pick<AgentRun, 'issues' | 'decisions'>;
 
 /** Open issues that wait on the owner first, oldest first; then the open issues the arbiter or sous still hold. */
 export function openIssues(run?: ReportFacts | null): { owner: AgentIssue[]; others: AgentIssue[] } {
@@ -21,6 +18,11 @@ export const canCancel = (decision: Pick<AgentDecision, 'status'>): boolean => d
 
 export const DECISION_TONE: Record<string, 'success' | 'warn' | 'neutral' | 'danger'> = {
   DECIDED: 'success', SHOV: 'warn', USULAN: 'warn', SUPERSEDED: 'neutral', CANCELLED: 'danger',
+};
+
+/** A ledger status as the owner reads it; the raw value stays in the tooltip. */
+export const DECISION_LABEL: Record<string, string> = {
+  DECIDED: 'Your decision', SHOV: 'Agent ruling', USULAN: 'Proposal', SUPERSEDED: 'Superseded', CANCELLED: 'Cancelled',
 };
 
 /** A report age as people say it: "just now", "5 min ago", "3 h ago", "2 days ago". */

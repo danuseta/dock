@@ -142,35 +142,29 @@ test('SQLite storage defaults machine to laptop and queues chat per machine', {
   const fields = { title: 'Zed', stage: 'code', waiting: '', payload: '{}', ledgerUpdatedAt: at, machine: 'workspace', ledgerRaw: '{"history":[]}' };
   const run = await storage.upsertOrchestratorRun('ZED-101', fields);
   assert.strictEqual(run.machine, 'workspace');
-  assert.deepStrictEqual([run.ledgerRaw, run.handover], ['{"history":[]}', null]);
-  const offered = await storage.updateOrchestratorRun('ZED-101', { handover: '{"to":"laptop"}' });
-  assert.strictEqual(offered.handover, '{"to":"laptop"}');
-  assert.strictEqual('ledgerRaw' in offered, false, 'the update answers without the ledger');
+  assert.strictEqual(run.ledgerRaw, '{"history":[]}');
+  const updated = await storage.updateOrchestratorRun('ZED-101', { stage: 'test' });
+  assert.strictEqual(updated.stage, 'test');
+  assert.strictEqual('ledgerRaw' in updated, false, 'the update answers without the ledger');
 
   const lists = [...await storage.getOrchestratorRuns(), await storage.getOrchestratorRun('ZED-101')];
   assert.ok(lists.every((row) => row && !('ledgerRaw' in row)), 'a list or a plain read never loads the ledger');
   assert.strictEqual((await storage.getOrchestratorRunWithLedger('ZED-101'))?.ledgerRaw, '{"history":[]}');
   assert.strictEqual(await storage.countLiveOrchestratorRuns('workspace'), 1);
 
-  assert.strictEqual(await storage.changeOrchestratorRunOwner('ZED-101', { machine: 'workspace', handover: '{"to":"other"}' }, 'laptop'), false, 'an offer that changed blocks the accept');
-  assert.strictEqual(await storage.changeOrchestratorRunOwner('ZED-101', { machine: 'workspace', handover: '{"to":"laptop"}' }, 'laptop'), true);
-  assert.strictEqual(await storage.changeOrchestratorRunOwner('ZED-101', { machine: 'workspace', handover: '{"to":"laptop"}' }, 'laptop'), false, 'the second of two racing accepts loses');
-  const moved = await storage.getOrchestratorRunWithLedger('ZED-101');
-  assert.deepStrictEqual([moved?.machine, moved?.handover, moved?.ledgerRaw], ['laptop', null, '{"history":[]}']);
-
-  const late = await storage.upsertOrchestratorRun('ZED-101', { ...fields, title: 'Late push' });
-  assert.deepStrictEqual([late.machine, late.title], ['laptop', 'Zed'], 'a push that read the old owner changes nothing and cannot take the ticket back');
-  assert.strictEqual((await storage.upsertOrchestratorRun('ZED-101', { ...fields, machine: 'laptop', title: 'Owner push' })).title, 'Owner push');
+  const other = await storage.upsertOrchestratorRun('ZED-101', { ...fields, machine: 'laptop', title: 'Other push' });
+  assert.deepStrictEqual([other.machine, other.title], ['workspace', 'Zed'], 'a push from another machine changes nothing and cannot take the ticket');
+  assert.strictEqual((await storage.upsertOrchestratorRun('ZED-101', { ...fields, title: 'Owner push' })).title, 'Owner push');
   assert.strictEqual((await storage.upsertOrchestratorRun('ZED-102', fields)).machine, 'workspace', 'the owner is written when the ticket is created');
   const raced = await storage.upsertOrchestratorRun('ZED-102', { ...fields, machine: 'laptop' });
   assert.strictEqual(raced.machine, 'workspace', 'a second creator gets the row of the first');
 
-  await storage.updateOrchestratorRun('ZED-101', { dismissedAt: at, handover: '{"to":"workspace"}' });
+  await storage.updateOrchestratorRun('ZED-101', { dismissedAt: at });
   assert.strictEqual(await storage.countLiveOrchestratorRuns('laptop'), 0);
-  const taken = await storage.takeDismissedOrchestratorRun('ZED-101', { ...fields, title: 'Taken' });
-  assert.deepStrictEqual([taken.machine, taken.title, taken.dismissedAt, taken.handover], ['workspace', 'Taken', null, null]);
-  const notDismissed = await storage.takeDismissedOrchestratorRun('ZED-101', { ...fields, machine: 'laptop', title: 'Not allowed' });
-  assert.deepStrictEqual([notDismissed.machine, notDismissed.title], ['workspace', 'Taken'], 'only a dismissed ticket can be taken');
+  const taken = await storage.takeDismissedOrchestratorRun('ZED-101', { ...fields, machine: 'laptop', title: 'Taken' });
+  assert.deepStrictEqual([taken.machine, taken.title, taken.dismissedAt], ['laptop', 'Taken', null]);
+  const notDismissed = await storage.takeDismissedOrchestratorRun('ZED-101', { ...fields, title: 'Not allowed' });
+  assert.deepStrictEqual([notDismissed.machine, notDismissed.title], ['laptop', 'Taken'], 'only a dismissed ticket can be taken');
 
   await storage.deleteChatSession(laptopSession);
   await storage.deleteChatSession(workspaceSession);

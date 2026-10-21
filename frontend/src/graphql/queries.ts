@@ -597,9 +597,6 @@ export const ORCHESTRATION_FIELDS = `
   stalled
   hasTranscript
   machine
-  remote
-  handoverTo
-  handoverAt
   updatedAt
 `;
 
@@ -926,6 +923,19 @@ export const GET_ELEVENLABS_KEYS = gql`
       masked
       parkedUntil
       current
+    }
+  }
+`;
+
+export const GET_ELEVENLABS_QUOTA = gql`
+  query GetElevenLabsQuota {
+    elevenLabsQuota {
+      name
+      characterCount
+      characterLimit
+      resetsAt
+      hidden
+      error
     }
   }
 `;

@@ -1,5 +1,5 @@
 import { gql } from '@apollo/client';
-import { CHAT_INTERACTION_FIELDS, CHAT_MESSAGE_FIELDS, CHAT_SESSION_FIELDS, ORCHESTRATION_FIELDS } from './queries';
+import { CHAT_INTERACTION_FIELDS, CHAT_MESSAGE_FIELDS, CHAT_SESSION_FIELDS } from './queries';
 
 export const SAVE_DEMO_LINK = gql`
   mutation SaveDemoLink($ticketKey: String!, $url: String!) {
@@ -227,14 +227,6 @@ export const REVOKE_INGEST_TOKEN = gql`
 export const DISMISS_ORCHESTRATION = gql`
   mutation DismissOrchestration($key: String!) {
     dismissOrchestration(key: $key)
-  }
-`;
-
-export const MOVE_ORCHESTRATION = gql`
-  mutation MoveOrchestration($key: String!, $machine: String!) {
-    moveOrchestration(key: $key, machine: $machine) {
-      ${ORCHESTRATION_FIELDS}
-    }
   }
 `;
 

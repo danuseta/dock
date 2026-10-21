@@ -2,32 +2,36 @@ import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { ArrowDown, ArrowUp, Building2, ChevronLeft, ChevronRight, Clock, ExternalLink, EyeOff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Square, Table2, X } from 'lucide-react';
 import { GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
-import { CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
+import { CANCEL_DECISION, CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { EmptyState } from '../components/EmptyState';
 import { DeskScene } from '../components/empty/scenes/DeskScene';
 import { RobotScene } from '../components/empty/scenes/RobotScene';
+import { Toast } from '../components/Toast';
 import { Badge, Button, Card, Dialog, Page, PageHeader, PhoneCards } from '../components/ui';
 import { isPhone } from '../lib/phone';
 import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
-import { hasPage, useDockMode } from '../lib/dockMode';
+import { hasPage, monitorsOnly, useDockMode } from '../lib/dockMode';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
-import { FILTER_KINDS, FILTER_MACHINES, PARKED_TEXT, START_FAILED_TEXT, completeRun, formatAge, reviewFindings, hasTrouble, isArchived, kindLabel, matchesRunFilter, offerOf, pageOf, runActions, runFilterFromSearch, runFilterSearch, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunFilter, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
+import { openIssues } from '../lib/sousReport';
+import { RUN_STATE_LABEL, isLongDescription, runState } from '../lib/ticketDetail';
+import { FILTER_KINDS, FLOW_RAIL, PARKED_TEXT, START_FAILED_TEXT, completeRun, formatAge, reviewFindings, hasTrouble, isArchived, kindLabel, matchesRunFilter, pageOf, runActions, runFilterFromSearch, runFilterSearch, runKeyFromSearch, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunFilter, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
 import { KindBadge } from '../agents/KindBadge';
+import { RunDecisions } from '../agents/RunDecisions';
+import { RunQuestions } from '../agents/RunQuestions';
 import { VerdictBadge } from '../agents/VerdictBadge';
 import { RAIL_STAGES, railIndex } from '../agents/office/layout';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 import { AgentFlowGraph } from '../components/AgentFlowGraph';
 import { CHAT_MACHINE, machineOf, machinePlace, ticketBalloons, type ChatMessage } from '../chat/messages';
-import { MachineChip } from '../chat/MachineControls';
-import { MoveTicket } from '../agents/MoveTicket';
 import { CronSettingsDialog } from '../agents/CronSettingsDialog';
 import { CronRow } from '../agents/CronRow';
 import { chatStore } from '../chat/store';
 import { LimitsLine } from '../chat/StatusLine';
 import { useOpenForTicket } from '../chat/useOpenForTicket';
 import { AgentsLibrary } from '../agents/library/AgentsLibrary';
+import { useAnswerTicket } from '../chat/useAnswerTicket';
 
 const AgentsOffice = lazy(() => import('../components/AgentsOffice'));
 
@@ -37,8 +41,14 @@ type View = 'office' | 'table';
 type FlowView = 'live' | 'replay';
 type TableTab = 'active' | 'archive';
 
+/** The run panel's rail: FLOW_RAIL without Gate; code and test are Work, verify is Final review, commit shares PR. */
+const PANEL_RAIL = FLOW_RAIL.slice(1);
+const PANEL_STOP: Record<string, number> = { plan: 0, code: 1, test: 1, verify: 2, evidence: 3, commit: 4, pr: 4, done: 5 };
+
 const POLL_MS = 5000;
 const PAGE_SIZE = 10;
+/** Acceptance criteria past this many start folded in the run panel. */
+const AC_SHOWN = 3;
 const OFFICE_VIEW_KEY = 'dock-agents-office-view';
 const OFFICE_VIEWS = [['overview', 'Overview'], ['lead', 'Lead'], ['owner', 'Me'], ['lounge', 'Lounge']] as const;
 const TABLE_COLUMNS: Array<[RunSortColumn, string]> = [
@@ -91,10 +101,10 @@ const StatusChip: React.FC<{ status: RunStatus; review?: AgentRun['review'] }> =
   <span className={cn('inline-flex items-center rounded-xs border px-2 py-0.5 font-mono text-[0.66rem] font-bold', statusTone[status])}>{statusLabel(status, review)}</span>
 );
 
-const OfferBadge: React.FC<{ run: AgentRun; className?: string }> = ({ run, className }) => {
-  const offer = offerOf(run);
-  if (!offer) return null;
-  return <span className={cn('inline-flex items-center rounded-xs border border-amber-300/50 bg-amber-300/10 px-1.5 py-px font-mono text-[0.62rem] font-bold text-amber-200', className)}>{offer.label}</span>;
+/** The oldest open sous question with its I-n, or the ledger's waiting text. */
+const WaitingText: React.FC<{ run: AgentRun }> = ({ run }) => {
+  const issue = openIssues(run).owner[0];
+  return issue ? <><b className="mr-1.5 font-mono text-amber-200">I-{issue.n}</b>{issue.text}</> : <>{run.waiting || '—'}</>;
 };
 
 const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTicketClick, onNavigate, tabs }) => {
@@ -104,13 +114,21 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
   const [stopAllAgents, { loading: stoppingAll }] = useMutation(STOP_ALL_AGENTS);
   const [showCron, setShowCron] = useState(false);
   const [cronError, setCronError] = useState('');
-  const chat = hasPage(useDockMode(), '/sessions');
+  const mode = useDockMode();
+  const chat = hasPage(mode, '/sessions');
   const { data: balloonData } = useQuery<{ chatBalloons: ChatMessage[]; chatSessions: Array<{ id: string; ticketKey?: string | null }> }>(GET_CHAT_BALLOONS, { fetchPolicy: 'network-only', pollInterval: POLL_MS, skip: !chat });
   const balloons = useMemo(() => ticketBalloons(balloonData?.chatBalloons || [], balloonData?.chatSessions || []), [balloonData]);
   const { openForTicket, opening: openingChat, error: chatError } = useOpenForTicket();
   const [view, setView] = useState<View>(() => (isPhone() ? 'table' : 'office'));
   const [flowView, setFlowView] = useState<FlowView>('live');
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(() => runKeyFromSearch(window.location.search));
+  // A /agents?run=KEY link brings that run's question into view once it has loaded.
+  const [focusKey, setFocusKey] = useState<string | null>(() => runKeyFromSearch(window.location.search));
+  const [acOpen, setAcOpen] = useState(false);
+  const [briefOpen, setBriefOpen] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const { answer, sending: answering } = useAnswerTicket();
+  const [cancelDecision, { loading: cancelling }] = useMutation(CANCEL_DECISION);
   const [sampleStartedAt, setSampleStartedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now() / 1000);
   const [dismissTarget, setDismissTarget] = useState<AgentRun | null>(null);
@@ -155,8 +173,26 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
   const timeline: AgentTimeline | null = sampling
     ? (selected?.key === 'SAMPLE-2' ? sampleTimeline(sampleTick) : null)
     : (detailData?.orchestration?.key === selected?.key ? detailData?.orchestration?.timeline || null : null);
-  const actions = selected ? runActions(selected) : null;
-  const canReplay = Boolean(selected?.hasTranscript) && !sampling && Boolean(actions?.replay);
+  const actions = selected ? runActions(selected, monitorsOnly(mode)) : null;
+  // Failing criteria first, so the fold never hides one.
+  const acList = selected ? [...selected.ac].sort((first, second) => Number(second.state === 'FAIL') - Number(first.state === 'FAIL')) : [];
+  const readOnly = selected && monitorsOnly(mode) ? `This DOCK only monitors. Answer in the Claude Code session on ${machinePlace(machineOf(selected))}.` : null;
+
+  useEffect(() => {
+    setAcOpen(false);
+    setBriefOpen(false);
+  }, [selected?.key]);
+
+  useEffect(() => {
+    if (!focusKey || selected?.key !== focusKey) return;
+    setFocusKey(null);
+    requestAnimationFrame(() => {
+      const box = document.getElementById('run-waiting');
+      box?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      box?.querySelector('input')?.focus({ preventScroll: true });
+    });
+  }, [focusKey, selected?.key]);
+  const canReplay = Boolean(selected?.hasTranscript) && !sampling;
   const showReplay = flowView === 'replay' && canReplay;
 
   // Ages keep counting between polls; the server only sends how old things were when it answered.
@@ -213,6 +249,28 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
     if (isPhone()) requestAnimationFrame(() => document.getElementById('agent-run-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   };
 
+  const handleIssueAnswer = async (key: string, issue: number, text: string) => {
+    try {
+      await answer(key, text, issue);
+      setToast({ message: `I-${issue} answered: a new sous session picks it up.`, type: 'success' });
+      void refetch();
+    } catch (answerError) {
+      setToast({ message: answerError instanceof Error ? answerError.message : 'The answer could not be sent', type: 'error' });
+      throw answerError;
+    }
+  };
+
+  const handleCancelDecision = async (key: string, n: number, note: string) => {
+    try {
+      await cancelDecision({ variables: { ticketKey: key, n, note } });
+      setToast({ message: `D-${n} cancel sent: a new sous session records it.`, type: 'success' });
+      void refetch();
+    } catch (cancelError) {
+      setToast({ message: cancelError instanceof Error ? cancelError.message : 'The cancel could not be sent', type: 'error' });
+      throw cancelError;
+    }
+  };
+
   const runAction = async (work: () => Promise<void>) => {
     setCronError('');
     try {
@@ -226,7 +284,6 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
 
   const empty = allRuns.length === 0;
   const filterGroups = [
-    { name: 'machine', label: 'Machine', options: FILTER_MACHINES.map((value) => [value, value] as const) },
     { name: 'kind', label: 'Type', options: FILTER_KINDS.map((value) => [value, kindLabel(value)] as const) },
   ] as const;
 
@@ -343,8 +400,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                             {cards.map((run) => (
                               <button key={run.key} type="button" className={cn('rounded-xs border border-border-glow border-l-[3px] bg-surface-0 px-2 py-1.5 text-left hover:border-accent', run.waiting ? 'border-l-amber-300' : hasTrouble(run) ? 'border-l-status-conflict' : 'border-l-status-merged', selected?.key === run.key && 'border-accent')} onClick={() => { setSelectedKey(run.key); setBoardOpen(false); }}>
                                 <span className="flex items-center justify-between gap-2 font-mono text-xs font-extrabold text-accent"><span>{run.key}</span><span className="font-semibold text-muted-foreground tabular-nums">{run.acPassed}/{run.acTotal}</span></span>
-                                <span className="mt-0.5 flex flex-wrap gap-1"><MachineChip name={machineOf(run)} /><KindBadge kind={run.kind} /><VerdictBadge run={run} /></span>
-                                <OfferBadge run={run} className="mt-0.5" />
+                                <span className="mt-0.5 flex flex-wrap gap-1"><KindBadge kind={run.kind} /><VerdictBadge run={run} /></span>
                                 <span className="mt-0.5 line-clamp-2 text-[0.74rem] text-secondary-foreground">{run.waiting || run.title || 'Untitled'}</span>
                               </button>
                             ))}
@@ -414,11 +470,11 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                     )}
                     {listed.items.map((run) => (
                       <tr key={run.key} className={cn('cursor-pointer border-t border-border hover:bg-surface-1', selected?.key === run.key && 'bg-surface-1')} onClick={() => pickRun(run.key)}>
-                        <td className="px-4 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => pickRun(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><span className="sr-only">, machine </span><MachineChip name={machineOf(run)} className="ml-2" /><KindBadge kind={run.kind} className="ml-1" /><VerdictBadge run={run} className="ml-1" /><OfferBadge run={run} className="ml-2" /><span className="mt-0.5 block max-w-[320px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
+                        <td className="px-4 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => pickRun(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><KindBadge kind={run.kind} className="ml-2" /><VerdictBadge run={run} className="ml-1" /><span className="mt-0.5 block max-w-[320px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
                         <td className="px-4 py-3"><StageChip stage={run.stage} kind={run.kind} /></td>
                         <td className="px-4 py-3"><StatusChip status={statusOf(run)} review={run.review} /></td>
                         <td className="px-4 py-3 font-mono text-xs tabular-nums">{run.acPassed}/{run.acTotal}{run.acFailed > 0 && <span className="ml-1.5 text-status-conflict">{run.acFailed} failed</span>}</td>
-                        <td className="max-w-[280px] px-4 py-3 text-xs text-secondary-foreground"><span className="line-clamp-2">{run.waiting || '—'}</span></td>
+                        <td className="max-w-[280px] px-4 py-3 text-xs text-secondary-foreground"><span className="line-clamp-2"><WaitingText run={run} /></span></td>
                         <td className="px-4 py-3 text-xs text-muted-foreground tabular-nums">{formatAge(run.idleSeconds + drift)} ago</td>
                       </tr>
                     ))}
@@ -437,7 +493,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
           )}
         </Card>
 
-        <Card id="agent-run-detail" className="flex max-h-[600px] scroll-mt-4 flex-col gap-3.5 overflow-y-auto bg-surface-0 p-[18px] max-[1120px]:max-h-none" aria-live="polite">
+        <Card id="agent-run-detail" className="flex scroll-mt-4 flex-col gap-3.5 bg-surface-0 p-[18px]" aria-live="polite">
           {!selected ? (
             <p className="text-pretty text-sm text-muted-foreground">Select a character, a wall card or a table row to see that ticket's run.</p>
           ) : (
@@ -448,16 +504,15 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                 <VerdictBadge run={selected} />
                 <StageChip stage={selected.stage} kind={selected.kind} />
                 <StatusChip status={statusOf(selected)} review={selected.review} />
-                <MachineChip name={machineOf(selected)} />
-                <OfferBadge run={selected} />
                 {chat && actions?.chat && <Button size="sm" className="ml-auto h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key)}><MessagesSquare size={13} aria-hidden="true" />Chat</Button>}
               </div>
               {chatError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The chat could not be opened: {chatError}</p>}
               <h2 className="text-pretty font-display text-base leading-snug font-bold">{selected.title || 'Untitled'}</h2>
-              {actions?.move && <MoveTicket key={selected.key} run={selected} />}
 
-              {selected.waiting && (
-                <div className="rounded-[8px] border border-amber-300/50 bg-amber-300/10 px-3 py-2.5 text-sm">
+              {openIssues(selected).owner.length > 0 ? (
+                <RunQuestions key={`questions-${selected.key}`} run={selected} onAnswer={(issue, text) => handleIssueAnswer(selected.key, issue, text)} busy={answering} readOnly={readOnly} />
+              ) : selected.waiting && (
+                <div id="run-waiting" className="scroll-mt-4 rounded-[8px] border border-amber-300/50 bg-amber-300/10 px-3 py-2.5 text-sm">
                   <b className="mb-0.5 block font-mono text-[0.66rem] font-bold uppercase tracking-[0.08em] text-amber-200">Waiting on you</b>
                   <span className="text-pretty">{selected.waiting}</span>
                   <p className="mt-1.5 text-pretty text-xs text-muted-foreground">{machineOf(selected) === CHAT_MACHINE ? 'Answer here, or' : 'Answer'} in the Claude Code session on {machinePlace(machineOf(selected))}.</p>
@@ -471,7 +526,10 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                 <p className={cn(sectionLabel, 'mb-1.5')}>Activity</p>
                 <dl className="grid grid-cols-[92px_1fr] gap-x-2.5 gap-y-1 text-[0.82rem]">
                   <dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">State</dt>
-                  <dd>{selected.activity === 'ACTIVE' ? `Active${selected.activityDetail ? ` · ${selected.activityDetail}` : ''}` : selected.activity === 'WAITING' ? 'Waiting' : 'Idle'}</dd>
+                  {runState(selected) === 'pr'
+                    ? <dd className="text-sky-200">{RUN_STATE_LABEL.pr}</dd>
+                    : <dd>{selected.activity === 'ACTIVE' ? `Active${selected.activityDetail ? ` · ${selected.activityDetail}` : ''}` : selected.activity === 'WAITING' ? 'Waiting' : 'Idle'}</dd>}
+                  {selected.rounds && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Round</dt><dd className="tabular-nums">{selected.rounds.used} of {selected.rounds.max}</dd></>}
                   <dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Last event</dt>
                   <dd className="tabular-nums">{formatAge(selected.idleSeconds + drift)} ago</dd>
                   {selected.reviewSignal === 'approved' && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Review</dt><dd>Approved</dd></>}
@@ -479,18 +537,40 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                   {selected.gate && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Gate</dt><dd>{selected.gate}</dd></>}
                   {selected.stalled && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Stalled</dt><dd className="text-status-conflict">No activity past the stale limit</dd></>}
                 </dl>
+                <ol className="mt-2.5 grid grid-cols-5 gap-1" aria-label="Stages">
+                  {PANEL_RAIL.map((stop, index) => {
+                    const at = PANEL_STOP[selected.stage] ?? -1;
+                    return (
+                      <li key={stop.id} aria-current={index === at ? 'step' : undefined}>
+                        <i className={cn('block h-1 rounded-full', index < at ? 'bg-status-merged' : index === at ? 'bg-sky-300' : 'bg-border-glow')} aria-hidden="true" />
+                        <span className="mt-1 block truncate font-mono text-[0.6rem] text-muted-foreground">{selected.kind === 'review' ? stop.review : stop.name}</span>
+                      </li>
+                    );
+                  })}
+                </ol>
               </div>
+
+              <RunDecisions key={`decisions-${selected.key}`} run={selected} onCancel={(n, note) => handleCancelDecision(selected.key, n, note)} busy={cancelling} readOnly={readOnly} />
 
               <div>
                 <p className={cn(sectionLabel, 'mb-1')}>Acceptance criteria · {selected.acPassed}/{selected.acTotal}</p>
                 {selected.ac.length === 0 && <p className="text-sm text-muted-foreground">No acceptance criteria recorded yet.</p>}
-                {selected.ac.map((item) => (
+                {(acOpen ? acList : acList.slice(0, AC_SHOWN)).map((item) => (
                   <div className="grid grid-cols-[46px_1fr] gap-[9px] border-b border-border py-1.5 text-[0.82rem] last:border-b-0" key={item.n}>
                     <span className={cn('h-fit rounded-xs border py-0.5 text-center font-mono text-[0.62rem] font-extrabold', acTone(item.state))}>{item.state}</span>
                     <span className="min-w-0"><span className="text-pretty">{item.text || `AC ${item.n}`}</span>{item.evidence && <span className="mt-0.5 block break-all font-mono text-[0.68rem] text-muted-foreground">{item.evidence}</span>}</span>
                   </div>
                 ))}
+                {acList.length > AC_SHOWN && <button type="button" className="mt-1 text-xs font-semibold text-accent hover:underline" aria-expanded={acOpen} onClick={() => setAcOpen((value) => !value)}>{acOpen ? 'Show less' : `Show all ${acList.length}`}</button>}
               </div>
+
+              {selected.brief && (
+                <div>
+                  <p className={cn(sectionLabel, 'mb-1')}>Brief</p>
+                  <p className={cn('whitespace-pre-wrap break-words text-[0.82rem]', !briefOpen && 'line-clamp-3')}>{selected.brief}</p>
+                  {isLongDescription(selected.brief, 3) && <button type="button" className="mt-1 text-xs font-semibold text-accent hover:underline" aria-expanded={briefOpen} onClick={() => setBriefOpen((value) => !value)}>{briefOpen ? 'Show less' : 'Show all'}</button>}
+                </div>
+              )}
 
               {(selected.testsBe || selected.testsFe || selected.prBe || selected.prFe || selected.note) && (
                 <dl className="grid grid-cols-[92px_1fr] gap-x-2.5 gap-y-1 text-[0.82rem]">
@@ -504,27 +584,6 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                   ))}
                   {selected.note && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Note</dt><dd className="break-words">{selected.note}</dd></>}
                 </dl>
-              )}
-
-              {selected.brief && (
-                <div>
-                  <p className={cn(sectionLabel, 'mb-1')}>Brief</p>
-                  <p className="whitespace-pre-wrap break-words text-[0.82rem]">{selected.brief}</p>
-                </div>
-              )}
-
-              {!!selected.decisions?.length && (
-                <div>
-                  <p className={cn(sectionLabel, 'mb-1')}>Decisions</p>
-                  <ol className="flex flex-col">
-                    {[...selected.decisions].reverse().map((decision, index) => (
-                      <li className="grid grid-cols-[1fr_auto] gap-2 border-b border-border py-1.5 text-[0.78rem] last:border-b-0" key={`${decision.at}-${index}`}>
-                        <span className="min-w-0 break-words">{decision.text}</span>
-                        <time className="font-mono text-[0.68rem] text-muted-foreground tabular-nums" dateTime={decision.at}>{new Date(decision.at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</time>
-                      </li>
-                    ))}
-                  </ol>
-                </div>
               )}
 
               {!!selected.assumptions?.length && (
@@ -605,7 +664,6 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                 <div className="mt-auto flex flex-wrap gap-2 border-t border-border pt-3.5">
                   <Button size="sm" variant="primary" onClick={() => onTicketClick(selected.key)}>Open ticket</Button>
                   {actions?.hide && <Button size="sm" variant="ghost" onClick={() => { setActionError(''); setDismissTarget(selected); }}><EyeOff size={14} aria-hidden="true" />Hide run</Button>}
-                  {selected.remote && <span className="self-center text-pretty text-xs text-muted-foreground">Read-only here. This run belongs to the {machineOf(selected)} DOCK.</span>}
                 </div>
               )}
             </>
@@ -630,7 +688,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
           ? <iframe key={selected.key} className="block h-[540px] w-full border-0 bg-[#0b0b0c]" title={`Session replay for ${selected.key}`} src={`${import.meta.env.BASE_URL}zoetrope/index.html?key=${encodeURIComponent(selected.key)}&api=${encodeURIComponent(apiOrigin)}`} />
           : selected && timeline
             ? <AgentFlowGraph run={selected} timeline={timeline} />
-            : <p className="px-5 py-8 text-center text-pretty text-sm text-muted-foreground">{!selected ? 'Select a ticket to see its flow.' : sampling ? 'Select SAMPLE-2 to see a sample flow.' : selected.remote && detailData?.orchestration?.key === selected.key ? `The flow and transcript of ${selected.key} stay on the ${machineOf(selected)} DOCK.` : 'Loading the flow...'}</p>}
+            : <p className="px-5 py-8 text-center text-pretty text-sm text-muted-foreground">{!selected ? 'Select a ticket to see its flow.' : sampling ? 'Select SAMPLE-2 to see a sample flow.' : 'Loading the flow...'}</p>}
       </Card>
 
       <Dialog open={Boolean(dismissTarget)} onClose={() => !dismissing && setDismissTarget(null)} dismissible={!dismissing} labelledBy="hide-run-title" describedBy="hide-run-description">
@@ -641,6 +699,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
           <div className="mt-6 flex justify-end gap-2"><Button onClick={() => setDismissTarget(null)} disabled={dismissing}>Cancel</Button><Button variant="danger" onClick={handleDismiss} disabled={dismissing}>{dismissing ? 'Hiding...' : 'Hide run'}</Button></div>
         </Card>
       </Dialog>
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </Page>
   );
 };

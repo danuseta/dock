@@ -1040,6 +1040,33 @@ test('a draft left by a failed move is removed with its files released, and a st
   assert.ok(ctx.calls.includes(`release:${draft.id}`));
 });
 
+test('a message held behind a draft is released when the draft is discarded, not left waiting', async () => {
+  const ctx = setup();
+  await ctx.service.claim({ wait: 0, caps: CAPS }, undefined, 'laptop');
+  const dock = await ctx.service.createSession({ title: 'Draft' });
+  const state = (id: number) => ctx.messages().find((message) => message.id === id).state;
+
+  let held: { id: number; state: string } | undefined;
+  wrap(ctx.storage, 'moveChatMessage', async (original, args) => {
+    if (args[2] !== 'draft') return original(...args);
+    held = await ctx.service.sendMessage(dock.id, 'and this', MACHINES, { mode: 'queue' });
+    return false;
+  });
+  await assert.rejects(ctx.service.sendMessage(dock.id, 'see', MACHINES, { attachmentIds: ['a1'] }), /could not be sent/);
+  assert.strictEqual(held?.state, 'held', 'sent while the attachments were stored');
+  assert.strictEqual(state(held.id), 'queued', 'the failed draft no longer holds it back');
+  assert.strictEqual((await ctx.service.claim({ wait: 0, caps: CAPS }, undefined, 'laptop')).message?.id, held.id);
+  await ctx.service.delta({ sessionId: dock.id, replyTo: held.id, done: true }, 'laptop');
+
+  const draft = await ctx.storage.createChatMessage({ sessionId: dock.id, role: 'user', text: 'half', state: 'draft', at: ctx.now() });
+  const behind = await ctx.service.sendMessage(dock.id, 'after the draft', MACHINES, { mode: 'queue' });
+  assert.strictEqual(behind.state, 'held');
+  ctx.advance(DRAFT_MAX_MS + 1000);
+  await ctx.service.session(dock.id);
+  assert.ok(ctx.calls.includes(`release:${draft.id}`), 'the stale draft is swept');
+  assert.strictEqual(state(behind.id), 'queued', 'the swept draft no longer holds it back');
+});
+
 test('the turn is closed when the session update fails after the message left taken, and on a retried delta', async () => {
   const ctx = setup();
   const turn = await takenTurn(ctx);

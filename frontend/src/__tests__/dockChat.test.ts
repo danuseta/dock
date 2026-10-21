@@ -33,6 +33,8 @@ test('chat poll cursor follows the newest id and steps back for a turn whose end
   const open = [message(2), message(6, 'user', 'taken'), message(7, 'tool')];
   assert.strictEqual(pollCursor(open, 'running'), 7, 'while the turn runs only new lines are asked for');
   assert.strictEqual(pollCursor(open, 'idle'), 5, 'once the session is idle the open message is fetched again');
+  const held = [message(6, 'user', 'done'), message(8, 'user', 'held'), message(9, 'user', 'steer'), message(10)];
+  assert.strictEqual(pollCursor(held, 'idle'), 7, 'a message still shown as waiting is fetched again with its final state');
   assert.strictEqual(oldestId([message(-1, 'user'), message(4), message(9)]), 4);
 });
 

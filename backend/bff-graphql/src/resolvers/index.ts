@@ -7,9 +7,8 @@ import { shouldRequirePin, type AuthContext } from '../auth/session';
 import { CalendarUnavailableError, googleCalendarService } from '../integrations/google-calendar';
 import { upstreamMonitorService } from '../integrations/upstream-monitor';
 import { dockerRuntimeService } from '../integrations/docker-runtime';
-import { OrchestratorInputError, normalizeTicketKey, orchestratorService } from '../integrations/orchestrator';
+import { OrchestratorInputError, attentionItems, normalizeTicketKey, orchestratorService } from '../integrations/orchestrator';
 import { CHAT_MACHINE, chatService } from '../integrations/chat';
-import { ledgerPeer, withPeerRuns } from '../integrations/ledger-peer';
 import { mergeAttention, withoutSettledTickets } from '../integrations/attention';
 import { CronInputError } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
@@ -26,7 +25,7 @@ import { agentLooks } from '../integrations/agent-looks';
 import { agentBridge } from '../integrations/agents-live';
 import type { AnswerInput } from '../integrations/chat-interactions';
 import { SprintBusyError, SprintInputError, sprintDashboardService } from '../integrations/sprint-dashboard';
-import { dockMode } from '../mode';
+import { dockMode, ownRuns } from '../mode';
 
 const jiraAPI = new JiraAPI();
 const githubAPI = new GitHubAPI();
@@ -57,6 +56,13 @@ function requireCron(): void {
 function requireAgents(): void {
   if (dockMode() !== 'workspace') {
     throw new GraphQLError('Agent files are managed from the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });
+  }
+}
+
+// The laptop DOCK on the VPS only monitors its runs; agents are steered from the workspace DOCK.
+function requireAgentControls(): void {
+  if (dockMode() !== 'workspace') {
+    throw new GraphQLError('This DOCK only monitors agents. Act on the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });
   }
 }
 
@@ -181,7 +187,7 @@ export const resolvers = {
     },
     needsAttention: async () => {
       const [agentItems, pullRequestItems] = await Promise.all([
-        orchestratorService.needsAttention().catch((error) => {
+        orchestratorService.list().then((runs) => attentionItems(ownRuns(runs))).catch((error) => {
           console.error('[BFF Orchestrator] Failed to load attention items:', error instanceof Error ? error.message : 'unknown error');
           return [];
         }),
@@ -219,13 +225,9 @@ export const resolvers = {
     dockerRuntime: async (_: unknown, { includeStats }: { includeStats?: boolean }) => {
       return dockerRuntimeService.runtime(Boolean(includeStats));
     },
-    orchestrations: async () => {
-      const [local, peerRuns] = await Promise.all([orchestratorService.list(), ledgerPeer ? ledgerPeer.runs() : []]);
-      return withPeerRuns(local, peerRuns, dockMode());
-    },
+    orchestrations: async () => ownRuns(await orchestratorService.list()),
     orchestration: async (_: unknown, { key }: { key: string }) => {
-      const [local, remote] = await Promise.all([orchestratorService.get(key), ledgerPeer ? ledgerPeer.get(key) : null]);
-      const [run] = withPeerRuns([local].filter(isPresent), [remote].filter(isPresent), dockMode());
+      const [run] = ownRuns([await orchestratorService.get(key)].filter(isPresent));
       return run ?? null;
     },
     ingestTokens: async () => orchestratorService.tokens(),
@@ -254,6 +256,7 @@ export const resolvers = {
       try { return devServers.log(name, bytes ?? undefined); } catch (error) { return devServerError(error); }
     },
     elevenLabsKeys: async () => elevenLabsKeys.list().catch(elevenLabsError),
+    elevenLabsQuota: async () => elevenLabsKeys.quota().catch(elevenLabsError),
     chatSessions: async (_: unknown, { source, limit }: { source?: string; limit?: number }) => {
       return chatService.sessions(source, limit, CHAT_MACHINE).catch(orchestratorInputError);
     },
@@ -313,21 +316,16 @@ export const resolvers = {
       return await storageAPI.getDemoLink(parent.key);
     },
     orchestration: async (parent: any) => {
-      const [local, peerRuns] = await Promise.all([orchestratorService.get(parent.key).catch(() => null), ledgerPeer ? ledgerPeer.recentRuns() : []]);
-      const [run] = withPeerRuns([local].filter(isPresent), peerRuns.filter((item) => item.key === parent.key), dockMode());
+      const [run] = ownRuns([await orchestratorService.get(parent.key).catch(() => null)].filter(isPresent));
       return run ?? null;
     },
   },
 
-  // A run read from the peer DOCK brings its own events; its tool events and transcript stay on that DOCK.
   Orchestration: {
-    remote: (parent: { machine: string }) => parent.machine !== dockMode(),
-    // A run from a peer DOCK that predates the sous fields has no issue list.
-    issues: (parent: { issues?: unknown[] }) => parent.issues ?? [],
-    approved: async (parent: { key: string; peer?: boolean }) => (parent.peer ? false : approvalRecords.approved(parent.key).catch(() => false)),
-    events: async (parent: { key: string; peer?: boolean; events?: unknown[] }) => (parent.peer ? parent.events ?? [] : orchestratorService.events(parent.key)),
-    timeline: async (parent: { key: string; peer?: boolean }) => (parent.peer ? null : orchestratorService.timeline(parent.key)),
-    members: async (parent: { key: string; peer?: boolean }) => (parent.peer ? [] : orchestratorService.members(parent.key).catch(() => [])),
+    approved: async (parent: { key: string }) => approvalRecords.approved(parent.key).catch(() => false),
+    events: async (parent: { key: string }) => orchestratorService.events(parent.key),
+    timeline: async (parent: { key: string }) => orchestratorService.timeline(parent.key),
+    members: async (parent: { key: string }) => orchestratorService.members(parent.key).catch(() => []),
   },
 
   TicketRelationGroup: {
@@ -368,16 +366,19 @@ export const resolvers = {
       }
     },
     setTicketWorkOrder: async (_: unknown, { ticketKey, position }: { ticketKey: string; position: number }) => {
+      requireAgentControls();
       await storageAPI.setTicketOrder(ticketKey, position).catch((error) => {
         throw new GraphQLError(error instanceof Error ? error.message : 'Invalid work order', { extensions: { code: 'BAD_USER_INPUT' } });
       });
       return true;
     },
     clearTicketWorkOrder: async (_: unknown, { ticketKey }: { ticketKey: string }) => {
+      requireAgentControls();
       await storageAPI.clearTicketOrder(ticketKey);
       return true;
     },
     setTicketManual: async (_: unknown, { ticketKey, manual }: { ticketKey: string; manual: boolean }) => {
+      requireAgentControls();
       await storageAPI.setTicketManual(ticketKey, manual).catch((error) => {
         throw new GraphQLError(error instanceof Error ? error.message : 'Invalid ticket', { extensions: { code: 'BAD_USER_INPUT' } });
       });
@@ -481,10 +482,8 @@ export const resolvers = {
     removeElevenLabsKey: async (_: unknown, { name }: { name: string }) => elevenLabsKeys.remove(name).catch(elevenLabsError),
     unparkElevenLabsKey: async (_: unknown, { name }: { name: string }) => elevenLabsKeys.park(name, null).then(() => true).catch(elevenLabsError),
     dismissOrchestration: async (_: unknown, { key }: { key: string }) => {
+      requireAgentControls();
       return orchestratorService.dismiss(key, dockMode()).catch(orchestratorInputError);
-    },
-    moveOrchestration: async (_: unknown, { key, machine }: { key: string; machine: string }) => {
-      return orchestratorService.moveRun(key, machine).catch(orchestratorInputError);
     },
     createChatSession: async (_: unknown, args: { title?: string; ticketKey?: string; forkFrom?: string; machine?: string | null }) => {
       if (args.machine && args.machine !== CHAT_MACHINE) {
@@ -502,6 +501,7 @@ export const resolvers = {
       return chatService.sendMessage(sessionId, text, await orchestratorService.machines(), { attachmentIds, options, mode }).catch(orchestratorInputError);
     },
     answerTicket: async (_: unknown, { ticketKey, text, issue }: { ticketKey: string; text: string; issue?: number | null }) => {
+      requireAgentControls();
       // A sous ticket gets a new session on its machine; a ticket on the older flow keeps the answer in its own session.
       const sous = await Promise.resolve().then(() => orchestratorCron.sousRun(normalizeTicketKey(ticketKey))).catch(() => null);
       if (sous) {
@@ -513,6 +513,7 @@ export const resolvers = {
       return true;
     },
     cancelDecision: async (_: unknown, { ticketKey, n, note }: { ticketKey: string; n: number; note: string }) => {
+      requireAgentControls();
       const key = await Promise.resolve().then(() => normalizeTicketKey(ticketKey)).catch(cronError);
       await orchestratorCron.cancelDecision(key, n, note).catch(cronError);
       await orchestratorService.recordEvent(key, 'OWNER_CANCEL', `D-${n}: new session`);
@@ -584,7 +585,7 @@ export const resolvers = {
       await orchestratorCron.confirm(key).catch(cronError);
       return true;
     },
-    stopAllAgents: async () => orchestratorCron.stopAll(),
+    stopAllAgents: async () => { requireAgentControls(); return orchestratorCron.stopAll(); },
     subscribePush: async (_: unknown, input: { endpoint: string; p256dh: string; auth: string }) => {
       await pushService.subscribe(input).catch(cronError);
       return true;
@@ -606,7 +607,7 @@ export const resolvers = {
 
 export const protectedQueries = [
   'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
-  'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
+  'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'agentLooks', 'libraryAgents', 'libraryAgent',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey',
@@ -649,7 +650,6 @@ export const protectedMutations = [
   'removeElevenLabsKey',
   'unparkElevenLabsKey',
   'dismissOrchestration',
-  'moveOrchestration',
   'createChatSession',
   'sendChatMessage',
   'answerTicket',

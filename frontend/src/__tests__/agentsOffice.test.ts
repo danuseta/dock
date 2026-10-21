@@ -10,7 +10,7 @@ import {
 } from '../agents/office/layout';
 import { calculateWalkDuration, interpolatePathPosition, pathLength, planWalkPath, routeThroughDoors } from '../agents/office/movement';
 import { GRID_CELL, GRID_COLS, astar, buildNavGrid, toWorld } from '../agents/office/navigation';
-import { completeRun, formatAge, hasTrouble, isArchived, moveConfirmation, moveTargets, offerOf, pageOf, runStatus, shirtColor, sortRuns, splitTeam, stageName, statusLabel, type AgentRun, type RunSortColumn } from '../agents/runs';
+import { completeRun, formatAge, hasTrouble, isArchived, pageOf, runStatus, shirtColor, sortRuns, splitTeam, stageName, statusLabel, type AgentRun, type RunSortColumn } from '../agents/runs';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 import { machineOf, machinePlace } from '../chat/messages';
 
@@ -308,36 +308,6 @@ test('a ticket shows the machine that owns it; a run without a machine belongs t
   assert.deepStrictEqual([machinePlace('laptop'), machinePlace('workspace')], ['your laptop', 'workspace']);
   const runs = [{ ...run, machine: 'workspace' }, { ...run, key: 'ZED-102' }];
   assert.deepStrictEqual(sortRuns(runs, { column: 'ticket', descending: false }, () => 'working').map((item) => [item.key, machineOf(item)]), [['ZED-101', 'workspace'], ['ZED-102', 'laptop']], 'the machine travels with the run through sorting');
-});
-
-test('an offered ticket shows the target machine and the time; a run without an offer shows none', () => {
-  const run = { ...sampleRuns(0)[0], key: 'ZED-101' };
-  assert.strictEqual(offerOf(run), null);
-  assert.strictEqual(offerOf({ ...run, handoverTo: null, handoverAt: null }), null);
-  assert.strictEqual(offerOf({ ...run, handoverAt: '2026-10-11T09:30:00.000Z' }), null, 'a time without a target is no offer');
-  const offer = offerOf({ ...run, handoverTo: 'workspace', handoverAt: '2026-10-11T09:30:00.000Z' });
-  assert.strictEqual(offer?.to, 'workspace');
-  assert.match(offer?.label || '', /^Offered to workspace · .*\d{2}:\d{2}$/);
-  assert.strictEqual(offerOf({ ...run, handoverTo: 'workspace' })?.label, 'Offered to workspace');
-  assert.strictEqual(offerOf({ ...run, handoverTo: 'workspace', handoverAt: 'not a time' })?.label, 'Offered to workspace');
-});
-
-test('a ticket can move to every machine but its own, and nowhere with one machine', () => {
-  const machines = [{ name: 'laptop', online: true }, { name: 'workspace', online: false }];
-  assert.deepStrictEqual(moveTargets(machines, 'laptop'), [{ name: 'workspace', online: false }]);
-  assert.deepStrictEqual(moveTargets(machines, 'workspace'), [{ name: 'laptop', online: true }]);
-  assert.deepStrictEqual(moveTargets([{ name: 'laptop', online: true }], 'laptop'), []);
-  assert.deepStrictEqual(moveTargets(undefined, 'laptop'), []);
-});
-
-test('the move confirmation names both machines and warns when the target is offline', () => {
-  const online = moveConfirmation('ZED-101', 'laptop', 'workspace', true);
-  assert.match(online, /Move ZED-101 from laptop to workspace\?/);
-  assert.match(online, /chat sessions of laptop do not move/);
-  assert.match(online, /Work still running on laptop is not stopped, and its updates will be ignored\./);
-  assert.doesNotMatch(online, /offline/);
-  const offline = moveConfirmation('ZED-101', 'laptop', 'workspace', false);
-  assert.match(offline, /workspace is offline, so nothing will pick ZED-101 up until it starts\.$/);
 });
 
 test('a run cached by the Home query completes to lists the Agents page can read', () => {
