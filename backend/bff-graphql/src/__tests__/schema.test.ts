@@ -105,6 +105,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'dockerRuntime',
       'doctorReports',
       'elevenLabsKeys',
+      'elevenLabsQuota',
       'githubRepos',
       'ingestTokens',
       'jiraProjects',

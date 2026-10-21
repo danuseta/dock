@@ -10,6 +10,9 @@ export interface ElevenLabsKeyView { name: string; masked: string; parkedUntil: 
 /** The shape el-rotate.cjs rotates over: the full keys, their order, the index in use and the parked ones (epoch ms). */
 export interface ElevenLabsStore { keys: Record<string, string>; order: string[]; current: number; cooldowns: Record<string, number> }
 
+/** One key's quota. hidden: the key lacks user_read. error: the call failed. Neither: the counts are set. */
+export interface ElevenLabsQuota { name: string; characterCount: number | null; characterLimit: number | null; resetsAt: string | null; hidden: boolean; error: string | null }
+
 export interface ElevenLabsKeys {
   list(): Promise<ElevenLabsKeyView[]>;
   store(): Promise<ElevenLabsStore>;
@@ -17,6 +20,7 @@ export interface ElevenLabsKeys {
   remove(name: string): Promise<boolean>;
   park(name: string, until: Date | null): Promise<void>;
   setCurrent(name: string): Promise<void>;
+  quota(): Promise<ElevenLabsQuota[]>;
 }
 
 export function maskKey(key: string): string {
@@ -37,7 +41,7 @@ function keyValue(value: unknown): string {
 
 /** The keys kept in this DOCK's database, encrypted. The laptop DOCK on the VPS is the one that keeps them. */
 export class LocalElevenLabsKeys implements ElevenLabsKeys {
-  constructor(private readonly db = prisma, private readonly clock: () => Date = () => new Date()) {}
+  constructor(private readonly db = prisma, private readonly clock: () => Date = () => new Date(), private readonly fetchQuota: typeof fetch = fetch) {}
 
   // A park that has run out is no park. Without a current key the first one is current.
   private async rows() {
@@ -95,6 +99,30 @@ export class LocalElevenLabsKeys implements ElevenLabsKeys {
       this.db.elevenLabsKey.updateMany({ where: { name }, data: { current: true } }),
     ]);
   }
+
+  // One failing key never fails the rest: each row carries its own hidden or error.
+  async quota() {
+    const { keys, order } = await this.store();
+    return Promise.all(order.map((name) => this.keyQuota(name, keys[name])));
+  }
+
+  private async keyQuota(name: string, key: string): Promise<ElevenLabsQuota> {
+    const row = { name, characterCount: null, characterLimit: null, resetsAt: null, hidden: false, error: null };
+    try {
+      const response = await this.fetchQuota('https://api.elevenlabs.io/v1/user/subscription', { headers: { 'xi-api-key': key }, signal: AbortSignal.timeout(10_000) });
+      if (response.status === 401 && (await response.text()).includes('missing_permissions')) return { ...row, hidden: true };
+      if (!response.ok) return { ...row, error: `ElevenLabs answered ${response.status}` };
+      const body = await response.json() as { character_count: number; character_limit: number; next_character_count_reset_unix?: number | null };
+      return {
+        ...row,
+        characterCount: body.character_count,
+        characterLimit: body.character_limit,
+        resetsAt: body.next_character_count_reset_unix ? new Date(body.next_character_count_reset_unix * 1000).toISOString() : null,
+      };
+    } catch (error) {
+      return { ...row, error: error instanceof Error ? error.message : 'The quota call failed' };
+    }
+  }
 }
 
 /** The workspace DOCK keeps no key: every call goes to the laptop DOCK, so both DOCKs and both machines share one set. */
@@ -107,15 +135,17 @@ export class PeerElevenLabsKeys implements ElevenLabsKeys {
   async remove(name: string) { return Boolean(await this.call('/elevenlabs/remove', { name })); }
   async park(name: string, until: Date | null) { await this.call('/elevenlabs/park', { name, until: until?.toISOString() ?? null }); }
   async setCurrent(name: string) { await this.call('/elevenlabs/current', { name }); }
+  quota() { return this.call('/elevenlabs/quota', {}) as Promise<ElevenLabsQuota[]>; }
 }
 
-export const ELEVENLABS_ROUTES = ['list', 'store', 'add', 'remove', 'park', 'current'] as const;
+export const ELEVENLABS_ROUTES = ['list', 'store', 'add', 'remove', 'park', 'current', 'quota'] as const;
 
 /** The ingest routes a machine token (or the workspace DOCK) calls. */
 export function elevenLabsRoute(keys: ElevenLabsKeys, route: string, body: Record<string, unknown>) {
   switch (route) {
     case 'list': return keys.list();
     case 'store': return keys.store();
+    case 'quota': return keys.quota();
     case 'add': return keys.add(String(body.name ?? ''), String(body.key ?? '')).then(() => true);
     case 'remove': return keys.remove(String(body.name ?? ''));
     case 'park': {
