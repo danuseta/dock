@@ -45,9 +45,8 @@ const LeadText: React.FC<{ message: ChatMessage }> = ({ message }) => {
     return <li className="flex min-w-0 items-baseline gap-1.5 text-muted-foreground" title={timeOf(message.at)}><span aria-hidden="true">›</span><span className="min-w-0 break-words">{message.text}</span></li>;
   }
   return (
-    <li className="group/text flex min-w-0 gap-2 font-body text-[0.84rem] leading-relaxed text-foreground">
-      <span aria-hidden="true" className="w-3 flex-none font-mono text-[0.72rem] leading-[1.6rem]">●</span>
-      <div className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">
+    <li className="group/text min-w-0 font-body text-[0.84rem] leading-relaxed text-foreground">
+      <div className="min-w-0 break-words [overflow-wrap:anywhere]">
         <span className="sr-only">Claude: </span>
         {message.text && <Markdown text={message.text} />}
         {message.attachments && <MessageAttachments attachments={message.attachments} />}
