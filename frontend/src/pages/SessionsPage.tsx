@@ -33,6 +33,15 @@ interface SearchHit { session: ChatSession; messageId: number; snippet: string; 
 const WIDE_QUERY = '(min-width: 901px)';
 const SEARCH_MIN = 2;
 const TITLE_MAX = 120;
+const SIDEBAR_STORAGE_KEY = 'jidis.sessions-sidebar-collapsed';
+
+const initialSidebarCollapsed = () => {
+  try {
+    return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+};
 
 const errorText = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
 
@@ -57,7 +66,13 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
   const [events, setEvents] = useState<ChatActivity[]>([]);
   const [lanesOn, setLanesOn] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(() => window.matchMedia(WIDE_QUERY).matches);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(initialSidebarCollapsed);
   const closeGone = useCallback(() => setGone(false), []);
+  const toggleSidebar = () => {
+    const next = !sidebarCollapsed;
+    setSidebarCollapsed(next);
+    try { window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(next)); } catch { /* Preference storage is optional. */ }
+  };
 
   useEffect(() => {
     const timer = window.setTimeout(() => setQuery(searchText.trim()), 300);
@@ -194,7 +209,7 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
     <Page width="full">
       {error && !data && <Card className="mb-4 border-status-conflict text-status-conflict" role="alert">Sessions failed to load: {error.message}</Card>}
 
-      <div className="grid h-[calc(100dvh-112px)] min-h-[420px] grid-cols-[290px_minmax(0,1fr)] items-stretch gap-4 max-[760px]:h-[calc(100dvh-96px-env(safe-area-inset-bottom))] max-[900px]:grid-cols-1">
+      <div className={cn('grid h-[calc(100dvh-112px)] min-h-[420px] items-stretch', sidebarCollapsed ? 'grid-cols-[72px_minmax(0,1fr)]' : 'grid-cols-[290px_minmax(0,1fr)]', 'gap-4 max-[760px]:h-[calc(100dvh-96px-env(safe-area-inset-bottom))] max-[900px]:grid-cols-1')}>
         <Card className={cn('flex min-h-0 min-w-0 flex-col overflow-hidden bg-surface-0 p-0', selected && 'max-[900px]:hidden')}>
           <div className="min-h-0 flex-1">
             <SessionSidebar
@@ -208,6 +223,8 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
               onNew={() => void create({})}
               onRename={openRename}
               onDelete={(session) => { setActionError(''); setDeleteTarget(session); }}
+              collapsed={sidebarCollapsed}
+              onToggleCollapsed={toggleSidebar}
               searchOpen={searchOpen}
               onToggleSearch={() => { if (searchOpen) setSearchText(''); setSearchOpen(!searchOpen); }}
               search={(

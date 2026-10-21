@@ -487,7 +487,7 @@ export class ChatService {
     const now = this.now().getTime();
     const stale = await this.storage.getStaleChatSessions(new Date(now - STALE_TAKEN_MS));
     const overdue = await this.storage.getOverdueChatSessions(new Date(now - TAKEN_HARD_MS));
-    for (const draft of await this.storage.getStaleChatDrafts(new Date(now - DRAFT_MAX_MS))) await this.discardDraft(draft.id);
+    for (const draft of await this.storage.getStaleChatDrafts(new Date(now - DRAFT_MAX_MS))) await this.discardDraft(draft.id, draft.sessionId);
     const staleIds = new Set(stale.map((session) => session.id));
     for (const session of stale) await this.giveUp(session.id, STALE_TEXT);
     for (const session of overdue) if (!staleIds.has(session.id)) await this.giveUp(session.id, TAKEN_HARD_TEXT);
@@ -530,8 +530,11 @@ export class ChatService {
     await this.releaseHeld(sessionId);
   }
 
-  private async discardDraft(id: number) {
-    if (await this.storage.deleteChatDraft(id)) await this.attachments.release(id);
+  /** A message held behind the draft would otherwise wait for a turn that never comes. */
+  private async discardDraft(id: number, sessionId: string) {
+    if (!await this.storage.deleteChatDraft(id)) return;
+    await this.attachments.release(id);
+    await this.releaseHeld(sessionId);
   }
 
   private async closeTurn(sessionId: string, turnId: number) {
@@ -1009,7 +1012,7 @@ export class ChatService {
           throw new OrchestratorInputError('The message could not be sent. Try again.');
         }
       } catch (error) {
-        await this.discardDraft(message.id).catch((cleanup) => {
+        await this.discardDraft(message.id, sessionId).catch((cleanup) => {
           console.error('[Chat] removing a draft failed:', cleanup instanceof Error ? cleanup.message : 'unknown error');
         });
         throw error;
