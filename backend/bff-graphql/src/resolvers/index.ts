@@ -237,6 +237,7 @@ export const resolvers = {
       try { return devServers.log(name, bytes ?? undefined); } catch (error) { return devServerError(error); }
     },
     elevenLabsKeys: async () => elevenLabsKeys.list().catch(elevenLabsError),
+    elevenLabsQuota: async () => elevenLabsKeys.quota().catch(elevenLabsError),
     chatSessions: async (_: unknown, { source, limit }: { source?: string; limit?: number }) => {
       return chatService.sessions(source, limit, CHAT_MACHINE).catch(orchestratorInputError);
     },
@@ -574,7 +575,7 @@ export const resolvers = {
 
 export const protectedQueries = [
   'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
-  'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
+  'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions', 'doctorReports',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey',

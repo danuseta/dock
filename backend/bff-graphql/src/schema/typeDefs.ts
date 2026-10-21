@@ -424,6 +424,15 @@ export const typeDefs = gql`
     current: Boolean!
   }
 
+  type ElevenLabsQuota {
+    name: String!
+    characterCount: Int
+    characterLimit: Int
+    resetsAt: String
+    hidden: Boolean!
+    error: String
+  }
+
   type OrchestrationClosing {
     hours: Float
     fixRounds: Int!
@@ -810,6 +819,7 @@ export const typeDefs = gql`
     devServers: DevServers!
     devServerLog(name: String!, bytes: Int): String!
     elevenLabsKeys: [ElevenLabsKey!]!
+    elevenLabsQuota: [ElevenLabsQuota!]!
     chatSessions(source: String, limit: Int): [ChatSession!]!
     chatSession(id: ID!): ChatSession
     chatMessages(sessionId: ID!, afterId: Int, beforeId: Int, limit: Int): [ChatMessage!]!
