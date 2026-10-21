@@ -21,11 +21,10 @@ import { useAnswerTicket } from '../chat/useAnswerTicket';
 import { useOpenForTicket } from '../chat/useOpenForTicket';
 import { DependencyDialog } from '../components/ticket/DependencyDialog';
 import { NeedsYouCard } from '../components/ticket/NeedsYouCard';
-import { SousReport } from '../components/ticket/SousReport';
 import { StackedOnBadge } from '../components/ticket/StackedOnBadge';
 import { MENU_WIDTH, TicketMenu, type TicketMenuTarget } from '../components/ticket/TicketMenu';
 import { useTicketWork } from '../components/ticket/useTicketWork';
-import { APPROVE_REVIEW, CANCEL_DECISION, SAVE_DEMO_LINK, SEND_TO_DISCORD, CHECK_CONFLICTS } from '../graphql/mutations';
+import { APPROVE_REVIEW, SAVE_DEMO_LINK, SEND_TO_DISCORD, CHECK_CONFLICTS } from '../graphql/mutations';
 import { PRBadge } from '../components/PRBadge';
 import { ConflictModal } from '../components/ConflictModal';
 import { DiscordPreviewModal } from '../components/DiscordPreviewModal';
@@ -36,12 +35,12 @@ import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, DETAIL_QUERY_OPTIONS, displayAssignee } from '../lib/queryPolicy';
 import { NO_DESCRIPTION, RUN_STATE_LABEL, dependencyChoices, isLongDescription, jiraAcLines, needsYou, runState, type NeedItem } from '../lib/ticketDetail';
 import { getPassLabels } from '../lib/ticketApprovals';
-import { showsSousReport } from '../lib/sousReport';
 import { nextWorkOrder } from '../lib/workOrder';
 
 interface TicketDetailPageProps {
   ticketKey: string;
   onBack?: () => void;
+  onNavigate: (path: string) => void;
 }
 
 const RUN_TONE: Record<ReturnType<typeof runState>, string> = {
@@ -49,6 +48,7 @@ const RUN_TONE: Record<ReturnType<typeof runState>, string> = {
   waiting: 'text-status-warn',
   stalled: 'text-status-conflict',
   running: 'text-status-warn',
+  pr: 'text-sky-200',
   finished: 'text-status-merged',
 };
 
@@ -87,7 +87,7 @@ const Property: React.FC<{ label: string; children: React.ReactNode }> = ({ labe
 const propertyButton = '-ml-2 rounded-xs border border-transparent px-2 py-1 text-left text-sm font-semibold hover:border-border hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 max-[760px]:min-h-11';
 const sectionTitle = 'mb-1.5 mt-4 border-t border-border pt-3 font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
 
-const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }) => {
+const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, onNavigate }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const { data: coreData, loading: coreLoading, error: coreError, refetch: refetchCore } = useQuery(GET_TICKET_DETAIL_CORE, {
     ...DETAIL_QUERY_OPTIONS,
@@ -112,7 +112,6 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const [saveDemoLink] = useMutation(SAVE_DEMO_LINK);
   const [sendToDiscord, { loading: sendingDiscord }] = useMutation(SEND_TO_DISCORD);
   const [checkConflicts] = useMutation(CHECK_CONFLICTS);
-  const [cancelDecision, { loading: cancelling }] = useMutation(CANCEL_DECISION, { refetchQueries: ['GetOrchestration'] });
   const [approveReview, { loading: approving }] = useMutation(APPROVE_REVIEW, { refetchQueries: ['GetOrchestration', 'GetTicketDetailCore'] });
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [approval, setApproval] = useState<Array<{ name: string; ok: boolean; detail: string }> | null>(null);
@@ -263,7 +262,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const needs = needsYou({ run, pullRequests: ticket.pullRequests });
   const handleNeed = (item: NeedItem) => {
     if (item.kind === 'question') void openForTicket(ticket.key);
-    else if (item.kind === 'sous') document.getElementById('laporan-sous')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    else if (item.kind === 'sous') onNavigate(`/agents?run=${encodeURIComponent(ticket.key)}`);
     else if (item.kind === 'ac') {
       setAcOpen(true);
       document.getElementById('acceptance-criteria')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -279,26 +278,6 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
   const description = ticket.description && ticket.description !== NO_DESCRIPTION ? ticket.description : null;
   const jiraAc = jiraAcLines(ticket.acceptanceCriteria);
   const blockedHere = run?.remote ? 'The other DOCK runs this ticket. Answer it there.' : null;
-
-  const handleIssueAnswer = async (issue: number, text: string) => {
-    try {
-      await answer(ticket.key, text, issue);
-      setToast({ message: `I-${issue} answered: a new sous session picks it up.`, type: 'success' });
-    } catch (answerError) {
-      setToast({ message: answerError instanceof Error ? answerError.message : 'The answer could not be sent', type: 'error' });
-      throw answerError;
-    }
-  };
-
-  const handleCancelDecision = async (n: number, note: string) => {
-    try {
-      await cancelDecision({ variables: { ticketKey: ticket.key, n, note } });
-      setToast({ message: `D-${n} cancel sent: a new sous session records it.`, type: 'success' });
-    } catch (cancelError) {
-      setToast({ message: cancelError instanceof Error ? cancelError.message : 'The cancel could not be sent', type: 'error' });
-      throw cancelError;
-    }
-  };
 
   const handleApprove = async () => {
     try {
@@ -344,7 +323,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
           {ticket.url && <a href={ticket.url} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-border bg-surface-2 px-3 text-sm font-semibold hover:border-border-glow max-[760px]:h-11"><ExternalLink size={15} aria-hidden="true" />Jira</a>}
           {ticket.figmaUrl && <a href={ticket.figmaUrl} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-border bg-surface-2 px-3 text-sm font-semibold hover:border-border-glow max-[760px]:h-11"><Figma size={15} aria-hidden="true" />Figma</a>}
           {run?.kind === 'review' && !run.remote && (run.approved
-            ? <Button className="max-[760px]:h-11" disabled title="The Jira label pass is on the ticket and its pull requests are approved"><Check size={15} aria-hidden="true" />Sudah di-approve</Button>
+            ? <Button className="max-[760px]:h-11" disabled title="The Jira label pass is on the ticket and its pull requests are approved"><Check size={15} aria-hidden="true" />Approved</Button>
             : <Button variant="primary" className="max-[760px]:h-11" onClick={() => setConfirmApprove(true)} disabled={approving} title="Adds the Jira label pass and approves the open pull requests on GitHub"><Check size={15} aria-hidden="true" />{approving ? 'Approving...' : 'Approve'}</Button>)}
           <Button className="max-[760px]:h-11" onClick={() => void openForTicket(ticket.key)} disabled={openingSession}><MessagesSquare size={15} aria-hidden="true" />{openingSession ? 'Opening...' : 'Session'}</Button>
           <Button
@@ -411,10 +390,6 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
             }}
           />
 
-          {run && showsSousReport(run) && (
-            <SousReport run={run} onAnswer={handleIssueAnswer} onCancel={handleCancelDecision} busy={answering || cancelling} blocked={blockedHere} />
-          )}
-
           <div className="grid grid-cols-2 items-start gap-8 max-[1280px]:grid-cols-1 max-[1280px]:gap-4">
             <div className="flex min-w-0 flex-col gap-4">
               {ticket.userStory && <JiraField title="User Story" text={ticket.userStory} />}
@@ -472,9 +447,9 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack }
             <Property label="Agent">
               <span className={cn('flex items-center gap-1.5 whitespace-nowrap font-semibold', RUN_TONE[state])}>
                 <i className={cn('size-1.5 rounded-full bg-current', state === 'running' && 'animate-pulse motion-reduce:animate-none')} aria-hidden="true" />
-                {RUN_STATE_LABEL[state]}{run ? ` · ${stageLabel(run.stage)}` : ''}
+                {RUN_STATE_LABEL[state]}{run && state !== 'pr' ? ` · ${stageLabel(run.stage)}` : ''}
               </span>
-              {run && <span className="font-mono text-[0.7rem] text-muted-foreground">{machineOf(run)}</span>}
+              {run && <span className="font-mono text-[0.7rem] text-muted-foreground">{machineOf(run)} · <button type="button" className="font-semibold text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60" onClick={() => onNavigate(`/agents?run=${encodeURIComponent(run.key)}`)}>View run →</button></span>}
             </Property>
             {run?.stage === 'blocked' && <><dt className="sr-only">Blocked</dt><dd className="col-span-2 pb-1 text-pretty text-xs text-status-conflict">Blocked: {run.note || run.waiting || 'see the session for the reason'}.</dd></>}
             <Property label="Order">

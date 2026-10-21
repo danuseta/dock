@@ -3,9 +3,10 @@ import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { KindBadge } from '../agents/KindBadge';
-import { kindLabel, matchesRunFilter, runFilterFromSearch, type AgentRun } from '../agents/runs';
-import { SousReport } from '../components/ticket/SousReport';
-import { canCancel, openIssues, reportAge, reportDecisions, showsSousReport } from '../lib/sousReport';
+import { kindLabel, matchesRunFilter, runFilterFromSearch, runFilterSearch, runKeyFromSearch, type AgentRun } from '../agents/runs';
+import { RunDecisions } from '../agents/RunDecisions';
+import { RunQuestions } from '../agents/RunQuestions';
+import { canCancel, openIssues, reportAge, reportDecisions } from '../lib/sousReport';
 import { needsYou } from '../lib/ticketDetail';
 import { NeedsYouCard } from '../components/ticket/NeedsYouCard';
 import { StackedOnBadge } from '../components/ticket/StackedOnBadge';
@@ -25,8 +26,6 @@ const run = {
 } as AgentRun;
 
 test('the sous report lists owner issues first, oldest first, and decisions newest first', () => {
-  assert.strictEqual(showsSousReport(run), true);
-  assert.strictEqual(showsSousReport({ engine: null, issues: [], decisions: [{ at: '', text: 'x' }] }), false, 'a run on the older flow has no report');
   const { owner, others } = openIssues(run);
   assert.deepStrictEqual([owner.map((item) => item.n), others.map((item) => item.n)], [[3, 4], [1]]);
   assert.deepStrictEqual(reportDecisions(run).map((item) => item.n), [4, 3, 2, 1]);
@@ -34,22 +33,39 @@ test('the sous report lists owner issues first, oldest first, and decisions newe
   assert.deepStrictEqual(run.decisions!.map(canCancel), [false, true, false, true], 'only SHOV and USULAN can be cancelled');
 });
 
-test('the sous report shows Batalkan on each cancellable decision and an answer box on each owner issue', () => {
-  const html = renderToStaticMarkup(<SousReport run={run} onAnswer={async () => undefined} onCancel={async () => undefined} busy={false} />);
-  assert.match(html, /Laporan sous/);
-  assert.match(html, /Round 2 of 4/);
-  assert.match(html, /Draft PR/);
-  assert.strictEqual(html.match(/>Batalkan</g)?.length, 2);
-  assert.match(html, /I-3 · Waiting on you/);
+test('the run panel asks each owner issue with an answer box, oldest first', () => {
+  const html = renderToStaticMarkup(<RunQuestions run={run} onAnswer={async () => undefined} busy={false} />);
+  assert.match(html, /Waiting on you · 2/);
+  assert.match(html, /aria-label="Answer to I-3"/);
   assert.match(html, /aria-label="Answer to I-4"/);
   assert.match(html, />Keep<.*>Drop</);
-  assert.match(html, /Cancelled: needed by QRD-8/);
-  assert.ok(html.indexOf('I-3') < html.indexOf('D-4'), 'what waits on the owner comes before the decisions');
+  assert.ok(html.indexOf('I-3') < html.indexOf('I-4'), 'oldest first');
 
-  const remote = renderToStaticMarkup(<SousReport run={run} onAnswer={async () => undefined} onCancel={async () => undefined} busy={false} blocked="Answer it there." />);
-  assert.doesNotMatch(remote, />Batalkan</);
+  const remote = renderToStaticMarkup(<RunQuestions run={run} onAnswer={async () => undefined} busy={false} readOnly="Answer it there." />);
   assert.doesNotMatch(remote, /Answer to I-/);
   assert.match(remote, /Answer it there\./);
+});
+
+test('decisions read in plain English, fold at three, and only an agent ruling or proposal can be cancelled', () => {
+  const html = renderToStaticMarkup(<RunDecisions run={run} onCancel={async () => undefined} busy={false} />);
+  assert.doesNotMatch(html, />(SHOV|USULAN|DECIDED)</, 'the raw ledger status stays in the tooltip');
+  assert.match(html, /title="Ledger status SHOV"[^>]*>Agent ruling</);
+  assert.match(html, /title="Ledger status USULAN"[^>]*>Proposal</);
+  assert.strictEqual(html.match(/>Cancel</g)?.length, 2);
+  assert.match(html, /Cancelled: needed by QRD-8/);
+  assert.match(html, /by arbiter · answers I-1/);
+  assert.doesNotMatch(html, /D-1</, 'the fourth decision is folded');
+  assert.match(html, /Show all 4 · 1 cancelled/);
+  assert.doesNotMatch(renderToStaticMarkup(<RunDecisions run={{ ...run, decisions: [{ at: '', text: 'old' }] }} onCancel={async () => undefined} busy={false} />), /by owner/, 'an entry without by names nobody');
+
+  const remote = renderToStaticMarkup(<RunDecisions run={run} onCancel={async () => undefined} busy={false} readOnly="Answer it there." />);
+  assert.doesNotMatch(remote, />Cancel</);
+});
+
+test('a /agents?run=KEY link names the run and survives a filter change', () => {
+  assert.strictEqual(runKeyFromSearch('?run=QRD-1412'), 'QRD-1412');
+  assert.strictEqual(runKeyFromSearch(''), null);
+  assert.strictEqual(runFilterSearch('?run=QRD-1412', { machine: 'laptop', kind: null }), '?run=QRD-1412&machine=laptop');
 });
 
 test('cards: a Card kind with its own badge and filter', () => {
@@ -69,12 +85,12 @@ test('a doctor report age reads like people say it', () => {
   );
 });
 
-test('on a sous ticket the I-n question is answered only in Laporan sous; other tickets keep their answer buttons', () => {
+test('on a sous ticket the I-n question is answered only on Agents; other tickets keep their answer buttons', () => {
   const facts = { stage: 'code', finished: false, ac: [], reviewSignal: null, waiting: 'I-4: Keep the export? [Keep|Drop]' };
   const sous = needsYou({ run: { ...facts, engine: 'sous' } });
   assert.deepStrictEqual(sous, [{ id: 'question', kind: 'sous', text: 'I-4: Keep the export?' }]);
   const card = renderToStaticMarkup(<NeedsYouCard items={sous} onAction={() => undefined} onAnswer={async () => undefined} answering={false} />);
-  assert.match(card, /Answer in Laporan sous/);
+  assert.match(card, /Answer in Agents →/);
   assert.doesNotMatch(card, />Keep<|Answer the agent|Send the answer/);
 
   const old = needsYou({ run: { ...facts, engine: null } });
@@ -83,10 +99,9 @@ test('on a sous ticket the I-n question is answered only in Laporan sous; other 
   assert.strictEqual(needsYou({ run: { ...facts, engine: 'sous', waiting: 'Confirm the base branch' } })[0].kind, 'question', 'a sous wait that is not an I-n keeps its answer box');
 });
 
-test('while an owner reply or cancel is in flight the Laporan sous buttons are disabled', () => {
-  const html = renderToStaticMarkup(<SousReport run={run} onAnswer={async () => undefined} onCancel={async () => undefined} busy />);
-  assert.strictEqual(html.match(/disabled=""[^>]*>Batalkan</g)?.length, 2);
-  assert.match(html, /<button[^>]*disabled=""[^>]*>Keep</);
+test('while an owner reply or cancel is in flight the run panel buttons are disabled', () => {
+  assert.strictEqual(renderToStaticMarkup(<RunDecisions run={run} onCancel={async () => undefined} busy />).match(/disabled=""[^>]*>Cancel</g)?.length, 2);
+  assert.match(renderToStaticMarkup(<RunQuestions run={run} onAnswer={async () => undefined} busy />), /<button[^>]*disabled=""[^>]*>Keep</);
 });
 
 test('a stacked ticket shows the parent and a link to each of its pull requests', () => {

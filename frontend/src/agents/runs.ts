@@ -122,6 +122,9 @@ export interface RunFilter { machine: typeof FILTER_MACHINES[number] | null; kin
 
 const pick = <T extends string>(value: string | null, allowed: readonly T[]): T | null => (allowed.includes(value as T) ? value as T : null);
 
+/** The run a link opens on Agents: `/agents?run=QRD-1412`. */
+export const runKeyFromSearch = (search: string): string | null => new URLSearchParams(search).get('run');
+
 /** The Agents filter as the URL keeps it: `?machine=laptop&kind=review`; anything else means all. */
 export function runFilterFromSearch(search: string): RunFilter {
   const params = new URLSearchParams(search);

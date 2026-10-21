@@ -18,14 +18,16 @@ export const stepIndex = (stage?: string | null): number => (
   stage ? TICKET_STEPS.findIndex((step) => step.id === (STEP_OF[stage] ?? stage)) : -1
 );
 
-export type RunState = 'none' | 'waiting' | 'stalled' | 'running' | 'finished';
+export type RunState = 'none' | 'waiting' | 'stalled' | 'running' | 'pr' | 'finished';
 
-type RunFacts = Pick<AgentRun, 'waiting' | 'stalled' | 'finished'>;
+type RunFacts = Pick<AgentRun, 'waiting' | 'stalled' | 'finished' | 'stage'>;
 
+/** A run at stage pr is not working: its pull request waits for a reviewer. */
 export const runState = (run?: RunFacts | null): RunState => {
   if (!run) return 'none';
   if (run.finished) return 'finished';
   if (run.waiting) return 'waiting';
+  if (run.stage === 'pr') return 'pr';
   return run.stalled ? 'stalled' : 'running';
 };
 
@@ -34,6 +36,7 @@ export const RUN_STATE_LABEL: Record<RunState, string> = {
   waiting: 'Waiting on you',
   stalled: 'Stalled',
   running: 'Agent running',
+  pr: 'PR open · waiting for review',
   finished: 'Run finished',
 };
 
@@ -71,7 +74,7 @@ export function needsYou({ run, pullRequests }: NeedFacts): NeedItem[] {
   const items: NeedItem[] = [];
   if (run?.waiting && !run.finished) {
     const { question, choices } = splitChoices(run.waiting);
-    // A sous issue is answered in Laporan sous, so it shows here without answers of its own.
+    // A sous issue is answered on Agents, so it shows here without answers of its own.
     if (run.engine === 'sous' && /^I-\d+:/.test(question)) items.push({ id: 'question', kind: 'sous', text: question });
     else items.push({ id: 'question', kind: 'question', text: question, choices });
   }
