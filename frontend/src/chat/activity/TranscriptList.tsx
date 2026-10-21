@@ -73,7 +73,7 @@ export const TranscriptList: React.FC<ListProps> = ({ items, store, threadId, on
     ? <LeadText key={`m${part.message.id}`} message={part.message} />
     : <TranscriptRow key={part.event.eventId} event={part.event} store={store} now={now} />);
   return (
-    <ol className="flex min-w-0 flex-col gap-3.5">
+    <ol className="flex min-w-0 flex-col gap-6">
       {items.map((item) => {
         if (item.kind === 'user') return <UserBubble key={item.key} message={item.message} />;
         if (item.kind === 'call') {
