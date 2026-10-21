@@ -6,11 +6,12 @@ import { OrchestratorInputError } from '../integrations/orchestrator';
 import { ApprovalRecords, approveReview, type ApprovalDeps } from '../integrations/review-approval';
 
 function autoWorld(overrides: Partial<AutoBroadcastDeps> = {}) {
-  const state = { posted: new Set<string>(), sent: [] as string[], events: [] as Array<[string, string, string | null]>, demo: true, open: true, accept: true };
+  const state = { posted: new Set<string>(), sent: [] as string[], events: [] as Array<[string, string, string | null]>, demo: true, open: true, accept: true, inReview: new Set<string>() };
   const deps: AutoBroadcastDeps = {
     posted: async (key) => state.posted.has(key),
     markPosted: async (key) => { state.posted.add(key); },
     hasDemo: async () => state.demo,
+    reviewStarted: async (key) => state.inReview.has(key),
     hasOpenPullRequest: async () => state.open,
     broadcast: async (key) => { state.sent.push(key); return state.accept; },
     event: async (key, kind, detail) => { state.events.push([key, kind, detail]); },
@@ -71,6 +72,35 @@ test('the broadcast posts the ticket group with its demo links and moves tickets
   assert.strictEqual(payloads[0].prs.length, 2);
   assert.strictEqual(payloads[0].demoUrl, '- **QRD-5 + QRD-6:** https://cdn/QRD-5.mp4');
   assert.deepStrictEqual(moves, ['QRD-5']);
+});
+
+test('a ticket already in PR Review was announced before, so a fix round ledger or a new video does not post it again', async () => {
+  const { state, auto } = autoWorld();
+  state.inReview.add('QRD-7');
+  assert.strictEqual(await auto.afterLedger({ key: 'QRD-7', prBe: 'https://github.com/o/be/pull/7' }), 'already');
+  assert.strictEqual(await auto.afterDemoVideo('QRD-7'), 'already');
+  assert.deepStrictEqual(state.sent, []);
+  assert.ok(state.posted.has('QRD-7'), 'remembered, so Jira is not asked again');
+});
+
+test('a broadcast by hand is remembered, and a grouped ticket without a pull request is neither posted nor moved', async () => {
+  const payloads: any[] = [];
+  const moves: string[] = [];
+  const marked: string[] = [];
+  const deps: BroadcastDeps = {
+    relation: async () => ({ ticketKeys: ['QRD-8', 'QRD-9'], primaryKey: 'QRD-8' }),
+    ticket: async (key) => ({ key, title: `T ${key}`, url: `https://jira/${key}`, status: 'In Progress' }),
+    pullRequests: async (key) => (key === 'QRD-8' ? [{ url: 'https://github.com/o/be/pull/8' }] : []),
+    demoLink: async () => ({ url: 'https://cdn/QRD-8.mp4' }),
+    settings: async () => ({ discordWebhookUrl: 'https://discord.com/api/webhooks/1/x', discordMessageTemplate: '{{demoUrl}}' }),
+    send: async (payload) => { payloads.push(payload); return true; },
+    move: async (key) => { moves.push(key); return true; },
+    markPosted: async (key) => { marked.push(key); },
+  };
+  assert.strictEqual(await sendBroadcast(deps, { ticketKey: 'QRD-8' }), true);
+  assert.deepStrictEqual(payloads[0].relatedTickets.map((t: { key: string }) => t.key), ['QRD-8'], 'QRD-9 depends on QRD-8 but has no pull request yet');
+  assert.deepStrictEqual(moves, ['QRD-8']);
+  assert.deepStrictEqual(marked, ['QRD-8']);
 });
 
 function approvalWorld(overrides: Partial<ApprovalDeps> = {}) {

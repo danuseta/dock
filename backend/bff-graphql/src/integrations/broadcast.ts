@@ -3,7 +3,7 @@ import { GitHubAPI } from '../datasources/GitHubAPI';
 import { JiraAPI } from '../datasources/JiraAPI';
 import { StorageAPI } from '../datasources/StorageAPI';
 import { StorageService } from '../storage/service';
-import { moveToReview } from './broadcast-review';
+import { isBeforeReview, moveToReview } from './broadcast-review';
 import { orchestratorService } from './orchestrator';
 
 export interface BroadcastInput { ticketKey: string; customMessage?: string; threadId?: string; threadName?: string }
@@ -16,20 +16,27 @@ export interface BroadcastDeps {
   settings(): Promise<Record<string, any>>;
   send(payload: any): Promise<boolean>;
   move(key: string, status: string): Promise<boolean>;
+  /** Remembers that the ticket was broadcast, so the automatic broadcast never posts it again. */
+  markPosted?(key: string): Promise<unknown>;
 }
 
 const isPresent = <T>(value: T | null | undefined): value is T => value != null;
 
-/** The Discord broadcast of a ticket and the tickets grouped with it; tickets before review move to PR Review once it is sent. */
+/**
+ * The Discord broadcast of a ticket and the tickets grouped with it that have a pull request; tickets before review move
+ * to PR Review once it is sent. A grouped ticket without a pull request (a dependent one still in work) is left out.
+ */
 export async function sendBroadcast(deps: BroadcastDeps, { ticketKey, customMessage, threadId, threadName }: BroadcastInput): Promise<boolean> {
   const relation = await deps.relation(ticketKey);
-  const tickets = (await Promise.all(relation.ticketKeys.map((key) => deps.ticket(key)))).filter(isPresent);
+  const grouped = (await Promise.all(relation.ticketKeys.map((key) => deps.ticket(key)))).filter(isPresent);
+  const groupedPullRequests = await Promise.all(grouped.map((ticket) => deps.pullRequests(ticket.key)));
+  const withPullRequest = grouped.map((ticket, index) => ({ ticket, prs: groupedPullRequests[index] }))
+    .filter(({ ticket, prs }) => prs.length > 0 || ticket.key === ticketKey);
+  const tickets = withPullRequest.map(({ ticket }) => ticket);
   if (tickets.length === 0) return false;
 
-  const [pullRequestGroups, demoLinks] = await Promise.all([
-    Promise.all(tickets.map((ticket) => deps.pullRequests(ticket.key))),
-    Promise.all(tickets.map((ticket) => deps.demoLink(ticket.key))),
-  ]);
+  const pullRequestGroups = withPullRequest.map(({ prs }) => prs);
+  const demoLinks = await Promise.all(tickets.map((ticket) => deps.demoLink(ticket.key)));
   const prs = [...new Map(pullRequestGroups.flat().map((pr: any) => [pr.url || pr.id, pr])).values()];
   const primaryTicket = tickets.find((ticket) => ticket.key === relation.primaryKey) || tickets[0];
   if (!primaryTicket) return false;
@@ -63,6 +70,7 @@ export async function sendBroadcast(deps: BroadcastDeps, { ticketKey, customMess
 
   const sent = await deps.send(payload);
   if (sent) {
+    if (deps.markPosted) await Promise.all(tickets.map((ticket) => deps.markPosted?.(ticket.key).catch(() => undefined)));
     const notMoved = await moveToReview(tickets, deps.move);
     if (notMoved.length) console.warn(`[Broadcast] Jira did not move ${notMoved.join(', ')} to PR Review`);
   }
@@ -74,6 +82,8 @@ export interface AutoBroadcastDeps {
   posted(key: string): Promise<boolean>;
   markPosted(key: string, at: Date): Promise<unknown>;
   hasDemo(key: string): Promise<boolean>;
+  /** True when Jira has the ticket in PR Review or further on: it was announced already, by hand or by another DOCK. */
+  reviewStarted(key: string): Promise<boolean>;
   /** True when the ticket has a pull request open for review. */
   hasOpenPullRequest(key: string): Promise<boolean>;
   broadcast(key: string): Promise<boolean>;
@@ -109,6 +119,10 @@ export class AutoBroadcast {
     this.running.add(key);
     try {
       if (await this.deps.posted(key)) return 'already';
+      if (await this.deps.reviewStarted(key)) {
+        await this.deps.markPosted(key, this.deps.now());
+        return 'already';
+      }
       if (!(await this.deps.hasOpenPullRequest(key))) return 'waiting';
       let detail = 'Discord did not accept the broadcast (check the webhook in Settings)';
       let sent = false;
@@ -146,12 +160,17 @@ export const broadcastDeps: BroadcastDeps = {
   settings: () => storageAPI.getSettings(),
   send: (payload) => discordAPI.sendSummary(payload),
   move: (key, status) => jiraAPI.transitionTicket(key, status),
+  markPosted: (key) => storage.upsertCache(AUTO_BROADCAST_CACHE, key, { at: new Date().toISOString() }, 0),
 };
 
 export const autoBroadcast = new AutoBroadcast({
   posted: async (key) => Boolean(await storage.getCache(AUTO_BROADCAST_CACHE, key)),
   markPosted: (key, at) => storage.upsertCache(AUTO_BROADCAST_CACHE, key, { at: at.toISOString() }, 0),
   hasDemo: async (key) => Boolean(await storageAPI.getDemoLink(key)),
+  reviewStarted: async (key) => {
+    const ticket = await jiraAPI.getTicket(key);
+    return Boolean(ticket) && !isBeforeReview(ticket.status);
+  },
   // A draft pull request is not up for review yet, so it does not count.
   hasOpenPullRequest: async (key) => (await githubAPI.getPullRequestsForTicket(key)).some((pr) => pr.status === 'open'),
   broadcast: (key) => sendBroadcast(broadcastDeps, { ticketKey: key }),
