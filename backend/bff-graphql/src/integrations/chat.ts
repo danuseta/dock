@@ -457,6 +457,8 @@ export class ChatService {
   cronTurn: (ticketKey: string, stalledDetail: string | null, ended: boolean) => Promise<unknown> = async () => undefined;
   /** Hears of every new request in a turn, for the phone notification. It must not throw. */
   onAsk: (ask: { sessionId: string; sessionTitle: string; id: number; kind: string; title: string; tool: string | null; summary: string | null }) => void = () => undefined;
+  /** Agent file jobs waiting for a machine's bridge, handed out once on a claim. Wired by the agents bridge like cronLimit. */
+  agentJobs: (machine: string) => Array<{ id: string; op: string; input: unknown }> = () => [];
 
   constructor(
     private readonly storage = new StorageService(),
@@ -1365,7 +1367,10 @@ export class ChatService {
       this.bridgeSeenAt.set(machine, this.now());
       const message = await this.takeNext(machine, caps);
       const wantDoctor = this.doctorWanted.delete(machine);
-      if (message || wantDoctor) return { message, ...extra, ...(wantDoctor ? { wantDoctor } : {}) };
+      const agentJobs = this.agentJobs(machine);
+      if (message || wantDoctor || agentJobs.length > 0) {
+        return { message, ...extra, ...(wantDoctor ? { wantDoctor } : {}), ...(agentJobs.length > 0 ? { agentJobs } : {}) };
+      }
       const left = deadline - this.now().getTime();
       if (left <= 0) return { message: null, ...extra };
       await this.sleep(Math.min(CLAIM_POLL_MS, left), signal);

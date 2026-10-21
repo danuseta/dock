@@ -333,6 +333,82 @@ export const typeDefs = gql`
     checks: [DoctorCheck!]!
   }
 
+  type AgentLook {
+    slug: String!
+    displayName: String
+    initials: String
+    color: String
+    avatarUrl: String
+  }
+
+  input AgentLookInput {
+    slug: String!
+    displayName: String
+    initials: String
+    color: String
+    removeAvatar: Boolean
+  }
+
+  type LibraryAgentLock {
+    slug: Boolean!
+    tools: Boolean!
+    hooks: Boolean!
+  }
+
+  type LibraryAgent {
+    slug: String!
+    source: String!
+    description: String!
+    model: String!
+    tools: [String!]!
+    guardProfile: String
+    hasHooks: Boolean!
+    dispatchable: Boolean!
+    locked: LibraryAgentLock!
+  }
+
+  type LibraryAgentDetail {
+    slug: String!
+    source: String!
+    description: String!
+    model: String!
+    tools: [String!]!
+    guardProfile: String
+    hasHooks: Boolean!
+    dispatchable: Boolean!
+    locked: LibraryAgentLock!
+    body: String!
+    hooksText: String!
+    kitBody: String
+  }
+
+  type LibraryAgentCheck {
+    ok: Boolean!
+    text: String!
+  }
+
+  type LibraryAgentPreview {
+    diff: String!
+    checks: [LibraryAgentCheck!]!
+  }
+
+  type LibraryAgentSave {
+    ok: Boolean!
+    diff: String!
+    error: String
+  }
+
+  input LibraryAgentInput {
+    slug: String!
+    create: Boolean!
+    description: String!
+    model: String!
+    tools: [String!]!
+    body: String!
+    guardProfile: String
+    dispatchable: Boolean!
+  }
+
   type OrchestrationAssumption {
     n: Int!
     text: String!
@@ -805,6 +881,9 @@ export const typeDefs = gql`
     orchestration(key: String!): Orchestration
     ingestTokens: [IngestToken!]!
     doctorReports: [DoctorReport!]!
+    agentLooks: [AgentLook!]!
+    libraryAgents(machine: String): [LibraryAgent!]!
+    libraryAgent(slug: String!, machine: String): LibraryAgentDetail!
     demoVideos: DemoVideoList!
     demoStorage: DemoStorage!
     devServers: DevServers!
@@ -884,6 +963,10 @@ export const typeDefs = gql`
     approveReview(ticketKey: String!): [ApprovalStep!]!
     stopChatTurn(sessionId: ID!): ChatSession!
     requestDoctorRun(machine: String!): Boolean!
+    saveAgentLook(input: AgentLookInput!): AgentLook!
+    previewLibraryAgent(input: LibraryAgentInput!, machine: String): LibraryAgentPreview!
+    saveLibraryAgent(input: LibraryAgentInput!, machine: String): LibraryAgentSave!
+    deleteLibraryAgent(slug: String!, machine: String): LibraryAgentSave!
     renameChatSession(id: ID!, title: String!): ChatSession!
     setChatSessionOptions(id: ID!, options: ChatTurnOptionsInput!): ChatSession!
     deleteChatSession(id: ID!): Boolean!

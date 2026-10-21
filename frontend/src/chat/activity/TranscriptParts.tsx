@@ -1,6 +1,7 @@
 import React, { memo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { cn } from '../../lib/cn';
+import { useAgentLooksStore } from '../../stores/useAgentLooksStore';
 import { durationOf, formatDuration, isDropped, statusText, type ChatActivity } from './activity';
 import { ActivityDetail } from './ActivityDetail';
 import type { DetailStore } from './detailStore';
@@ -21,14 +22,14 @@ const BULLET: Record<string, string> = {
 const OUTCOME: Record<string, string> = { error: 'text-status-conflict', denied: 'text-status-warn' };
 
 export const AgentAvatar: React.FC<{ name: string; small?: boolean; className?: string }> = ({ name, small, className }) => {
-  const look = agentLook(name);
+  const look = agentLook(name, useAgentLooksStore((state) => state.looks));
   return (
     <span
       aria-hidden="true"
-      className={cn('grid flex-none place-items-center font-mono font-extrabold text-background', small ? 'size-[18px] rounded-[5px] text-[0.5rem]' : 'size-[30px] rounded-[8px] text-[0.66rem]', className)}
+      className={cn('grid flex-none place-items-center overflow-hidden font-mono font-extrabold text-background', small ? 'size-[18px] rounded-[5px] text-[0.5rem]' : 'size-[30px] rounded-[8px] text-[0.66rem]', className)}
       style={{ background: look.color }}
     >
-      {look.initials}
+      {look.avatarUrl ? <img src={look.avatarUrl} alt="" className="size-full object-cover" /> : look.initials}
     </span>
   );
 };

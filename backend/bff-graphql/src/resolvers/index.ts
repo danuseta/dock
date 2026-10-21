@@ -22,6 +22,8 @@ import { elevenLabsKeys } from '../integrations/elevenlabs-keys';
 import { broadcastDeps, sendBroadcast } from '../integrations/broadcast';
 import { approvalRecords, approveReview, liveApprovalDeps } from '../integrations/review-approval';
 import { doctorReports } from '../integrations/doctor';
+import { agentLooks } from '../integrations/agent-looks';
+import { agentBridge } from '../integrations/agents-live';
 import type { AnswerInput } from '../integrations/chat-interactions';
 import { SprintBusyError, SprintInputError, sprintDashboardService } from '../integrations/sprint-dashboard';
 import { dockMode } from '../mode';
@@ -49,6 +51,12 @@ function sprintError(error: unknown): never {
 function requireCron(): void {
   if (dockMode() !== 'workspace') {
     throw new GraphQLError('The cron runs on the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });
+  }
+}
+
+function requireAgents(): void {
+  if (dockMode() !== 'workspace') {
+    throw new GraphQLError('Agent files are managed from the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });
   }
 }
 
@@ -222,6 +230,15 @@ export const resolvers = {
     },
     ingestTokens: async () => orchestratorService.tokens(),
     doctorReports: async () => doctorReports.list(),
+    agentLooks: async () => agentLooks.list(),
+    libraryAgents: async (_: unknown, { machine }: { machine?: string | null }) => {
+      requireAgents();
+      return agentBridge.list(machine || CHAT_MACHINE).catch(orchestratorInputError);
+    },
+    libraryAgent: async (_: unknown, { slug, machine }: { slug: string; machine?: string | null }) => {
+      requireAgents();
+      return agentBridge.get(machine || CHAT_MACHINE, slug).catch(orchestratorInputError);
+    },
     demoVideos: async () => {
       requireDemoVideos();
       const [result, tickets] = await Promise.all([
@@ -521,6 +538,21 @@ export const resolvers = {
     requestDoctorRun: async (_: unknown, { machine }: { machine: string }) => {
       return chatService.requestDoctor(machine, await orchestratorService.machines()).catch(orchestratorInputError);
     },
+    saveAgentLook: async (_: unknown, { input }: { input: unknown }) => agentLooks.save(input).catch(orchestratorInputError),
+    previewLibraryAgent: async (_: unknown, { input, machine }: { input: unknown; machine?: string | null }) => {
+      requireAgents();
+      return agentBridge.preview(machine || CHAT_MACHINE, input).catch(orchestratorInputError);
+    },
+    saveLibraryAgent: async (_: unknown, { input, machine }: { input: unknown; machine?: string | null }) => {
+      requireAgents();
+      return agentBridge.put(machine || CHAT_MACHINE, input).catch(orchestratorInputError);
+    },
+    deleteLibraryAgent: async (_: unknown, { slug, machine }: { slug: string; machine?: string | null }) => {
+      requireAgents();
+      const result = await agentBridge.delete(machine || CHAT_MACHINE, slug).catch(orchestratorInputError);
+      if (result.ok) await agentLooks.remove(slug);
+      return result;
+    },
     renameChatSession: async (_: unknown, { id, title }: { id: string; title: string }) => {
       return chatService.renameSession(id, title).catch(orchestratorInputError);
     },
@@ -576,7 +608,7 @@ export const protectedQueries = [
   'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
-  'chatCommands', 'chatMachineOptions', 'doctorReports',
+  'chatCommands', 'chatMachineOptions', 'doctorReports', 'agentLooks', 'libraryAgents', 'libraryAgent',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey',
 ] as const;
 export const protectedMutations = [
@@ -627,6 +659,10 @@ export const protectedMutations = [
   'stopChatTurn',
   'renameChatSession',
   'requestDoctorRun',
+  'saveAgentLook',
+  'previewLibraryAgent',
+  'saveLibraryAgent',
+  'deleteLibraryAgent',
   'setChatSessionOptions',
   'deleteChatSession',
   'refreshSprintDashboard',

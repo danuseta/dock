@@ -935,3 +935,28 @@ export const GET_DEMO_STORAGE = gql`
     demoStorage { configured endpoint region bucket folder publicBaseUrl accessKeyMasked secretSet }
   }
 `;
+
+export const GET_AGENT_LOOKS = gql`
+  query GetAgentLooks {
+    agentLooks { slug displayName initials color avatarUrl }
+  }
+`;
+
+export const GET_LIBRARY_AGENTS = gql`
+  query GetLibraryAgents($machine: String) {
+    libraryAgents(machine: $machine) {
+      slug source description model tools guardProfile hasHooks dispatchable
+      locked { slug tools hooks }
+    }
+  }
+`;
+
+export const GET_LIBRARY_AGENT = gql`
+  query GetLibraryAgent($slug: String!, $machine: String) {
+    libraryAgent(slug: $slug, machine: $machine) {
+      slug source description model tools guardProfile hasHooks dispatchable
+      locked { slug tools hooks }
+      body hooksText kitBody
+    }
+  }
+`;

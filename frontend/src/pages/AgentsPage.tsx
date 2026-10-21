@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowDown, ArrowUp, Building2, ChevronLeft, ChevronRight, Clock, ExternalLink, EyeOff, GitPullRequest, Hand, MessagesSquare, Moon, Octagon, Play, Square, Table2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Building2, ChevronLeft, ChevronRight, Clock, ExternalLink, EyeOff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Square, Table2, X } from 'lucide-react';
 import { GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
 import { CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
@@ -27,6 +27,7 @@ import { CronRow } from '../agents/CronRow';
 import { chatStore } from '../chat/store';
 import { LimitsLine } from '../chat/StatusLine';
 import { useOpenForTicket } from '../chat/useOpenForTicket';
+import { AgentsLibrary } from '../agents/library/AgentsLibrary';
 
 const AgentsOffice = lazy(() => import('../components/AgentsOffice'));
 
@@ -96,7 +97,7 @@ const OfferBadge: React.FC<{ run: AgentRun; className?: string }> = ({ run, clas
   return <span className={cn('inline-flex items-center rounded-xs border border-amber-300/50 bg-amber-300/10 px-1.5 py-px font-mono text-[0.62rem] font-bold text-amber-200', className)}>{offer.label}</span>;
 };
 
-const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) => {
+const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTicketClick, onNavigate, tabs }) => {
   const { data, loading, error, refetch } = useQuery(GET_ORCHESTRATIONS, { ...CACHED_QUERY_OPTIONS, returnPartialData: false, pollInterval: POLL_MS });
   const [dismissOrchestration, { loading: dismissing }] = useMutation(DISMISS_ORCHESTRATION);
   const [confirmOrchestration, { loading: confirming }] = useMutation(CONFIRM_ORCHESTRATION);
@@ -260,6 +261,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
             : (serverRuns || []).length === 0 && <Button size="sm" variant="primary" onClick={() => { setSampleStartedAt(Date.now() / 1000); setSelectedKey('SAMPLE-2'); }}><Play size={14} aria-hidden="true" />Run a sample</Button>}
         </div>
       </PageHeader>
+      {tabs}
 
       {error && !data && <Card className="mb-4 border-status-conflict text-status-conflict" role="alert">Agent runs failed to load: {error.message}</Card>}
       {cronError && <Card className="mb-4 border-status-conflict text-status-conflict" role="alert">{cronError}</Card>}
@@ -639,6 +641,53 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ onTicketClick, onNavigate }) =>
           <div className="mt-6 flex justify-end gap-2"><Button onClick={() => setDismissTarget(null)} disabled={dismissing}>Cancel</Button><Button variant="danger" onClick={handleDismiss} disabled={dismissing}>{dismissing ? 'Hiding...' : 'Hide run'}</Button></div>
         </Card>
       </Dialog>
+    </Page>
+  );
+};
+
+type AgentsTab = 'office' | 'library';
+
+const tabFromSearch = (search: string): AgentsTab => (new URLSearchParams(search).get('tab') === 'library' ? 'library' : 'office');
+
+/** Office shows the runs; Library edits the agent files, on the DOCK that has chat and the kit bridge. */
+const AgentsPage: React.FC<AgentsPageProps> = (props) => {
+  const library = hasPage(useDockMode(), '/sessions');
+  const [tab, setTab] = useState<AgentsTab>(() => (library ? tabFromSearch(window.location.search) : 'office'));
+  const choose = (next: AgentsTab) => {
+    setTab(next);
+    const params = new URLSearchParams(window.location.search);
+    if (next === 'library') params.set('tab', 'library');
+    else params.delete('tab');
+    const query = params.toString();
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
+  };
+  const tabs = library && (
+    <div className="mb-4 flex border-b border-border" role="tablist" aria-label="Agents">
+      {([['office', 'Office', Building2], ['library', 'Library', Library]] as const).map(([id, label, Icon]) => (
+        <button
+          key={id}
+          type="button"
+          role="tab"
+          aria-selected={tab === id}
+          onClick={() => choose(id)}
+          className={cn('-mb-px flex h-10 items-center gap-1.5 border-b-2 border-transparent px-4 font-display text-sm font-semibold text-secondary-foreground transition-colors duration-150 max-[760px]:h-11', tab === id && 'border-accent text-foreground')}
+        >
+          <Icon size={14} aria-hidden="true" />{label}
+        </button>
+      ))}
+    </div>
+  );
+  if (tab === 'office') return <OfficeTab {...props} tabs={tabs} />;
+  return (
+    <Page width="full">
+      <PageHeader>
+        <div>
+          <h1 className="text-balance font-display text-3xl font-black">Agents</h1>
+          <p className="mt-1 text-pretty text-secondary-foreground">The agent files Claude Code reads on the workspace: their body, model, tools, guard and look.</p>
+        </div>
+      </PageHeader>
+      {tabs}
+      <AgentsLibrary />
     </Page>
   );
 };

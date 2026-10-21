@@ -453,3 +453,27 @@ export const REQUEST_DOCTOR_RUN = gql`
     requestDoctorRun(machine: $machine)
   }
 `;
+
+export const SAVE_AGENT_LOOK = gql`
+  mutation SaveAgentLook($input: AgentLookInput!) {
+    saveAgentLook(input: $input) { slug displayName initials color avatarUrl }
+  }
+`;
+
+export const PREVIEW_LIBRARY_AGENT = gql`
+  mutation PreviewLibraryAgent($input: LibraryAgentInput!, $machine: String) {
+    previewLibraryAgent(input: $input, machine: $machine) { diff checks { ok text } }
+  }
+`;
+
+export const SAVE_LIBRARY_AGENT = gql`
+  mutation SaveLibraryAgent($input: LibraryAgentInput!, $machine: String) {
+    saveLibraryAgent(input: $input, machine: $machine) { ok diff error }
+  }
+`;
+
+export const DELETE_LIBRARY_AGENT = gql`
+  mutation DeleteLibraryAgent($slug: String!, $machine: String) {
+    deleteLibraryAgent(slug: $slug, machine: $machine) { ok diff error }
+  }
+`;

@@ -184,14 +184,25 @@ const LOOK: Record<string, [string, string]> = {
   'general-purpose': ['G', '#b48cf0'],
 };
 
-/** One initial and one colour per kind of agent, the same in every session. */
-export function agentLook(name: string): { initials: string; color: string } {
-  const type = agentType(name);
+export interface StoredAgentLook { initials?: string | null; color?: string | null; avatarUrl?: string | null }
+
+function defaultLook(type: string): { initials: string; color: string } {
   const known = LOOK[type];
   if (known) return { initials: known[0], color: known[1] };
   let hash = 0;
   for (const char of type) hash = (hash * 31 + char.charCodeAt(0)) % 360;
   return { initials: type.slice(0, 2).replace(/^./, (char) => char.toUpperCase()), color: `hsl(${hash} 45% 65%)` };
+}
+
+/** One initial and one colour per kind of agent, the same in every session. A look saved in DOCK wins; LOOK fills what it leaves out. */
+export function agentLook(name: string, stored: Readonly<Record<string, StoredAgentLook>> = {}): { initials: string; color: string; avatarUrl?: string } {
+  const type = agentType(name);
+  const fallback = defaultLook(type);
+  const saved = Object.prototype.hasOwnProperty.call(stored, type) ? stored[type] : undefined;
+  if (!saved) return fallback;
+  const look: { initials: string; color: string; avatarUrl?: string } = { initials: saved.initials || fallback.initials, color: saved.color || fallback.color };
+  if (saved.avatarUrl) look.avatarUrl = saved.avatarUrl;
+  return look;
 }
 
 /** "sous-ticket-runner" reads as "runner" where the space is short. */
