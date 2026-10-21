@@ -77,13 +77,14 @@ const isOpenTurn = (message: ChatMessage) => !isOptimistic(message) && message.r
 
 /**
  * The `afterId` for the next poll: normally the newest id we hold. When the session has gone quiet but one of
- * our own messages still reads queued or taken, the cursor steps back to just before it, so the poll returns
- * that message again with its final state.
+ * our own messages still reads queued, taken, held or steer, the cursor steps back to just before it, so the poll
+ * returns that message again with its final state.
  */
 export function pollCursor(messages: ChatMessage[], status?: string): number | undefined {
   const confirmed = messages.filter((message) => !isOptimistic(message));
   if (confirmed.length === 0) return undefined;
-  const open = status === 'queued' || status === 'running' ? undefined : confirmed.find(isOpenTurn);
+  const unsettled = (message: ChatMessage) => isOpenTurn(message) || (message.role === 'user' && (message.state === 'held' || message.state === 'steer'));
+  const open = status === 'queued' || status === 'running' ? undefined : confirmed.find(unsettled);
   return open ? open.id - 1 : confirmed[confirmed.length - 1].id;
 }
 
