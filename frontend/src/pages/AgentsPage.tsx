@@ -493,7 +493,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
           )}
         </Card>
 
-        <Card id="agent-run-detail" className="flex scroll-mt-4 flex-col gap-3.5 bg-surface-0 p-[18px]" aria-live="polite">
+        <Card id="agent-run-detail" className="flex max-h-[600px] scroll-mt-4 flex-col gap-3.5 overflow-y-auto bg-surface-0 p-[18px] max-[1120px]:max-h-none" aria-live="polite">
           {!selected ? (
             <p className="text-pretty text-sm text-muted-foreground">Select a character, a wall card or a table row to see that ticket's run.</p>
           ) : (

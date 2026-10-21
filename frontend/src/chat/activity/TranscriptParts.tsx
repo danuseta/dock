@@ -39,14 +39,11 @@ export const MessageTime: React.FC<{ at: string }> = ({ at }) => {
   return <time dateTime={at} title={date.toLocaleString('en-GB')} className="font-mono text-[0.66rem] font-normal text-muted-foreground">{date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</time>;
 };
 
-/** A chat message from an agent: avatar, who is speaking, when, and what it said or did. */
+/** A chat message from an agent: a header with avatar, who is speaking and when, then what it said or did from the left edge. */
 export const MessageShell: React.FC<{ name: string; title?: React.ReactNode; at: string; className?: string; children: React.ReactNode }> = ({ name, title, at, className, children }) => (
-  <li className={cn('flex min-w-0 gap-2.5', className)}>
-    <AgentAvatar name={name} />
-    <div className="min-w-0 flex-1">
-      <p className="mb-0.5 flex flex-wrap items-baseline gap-x-1.5 text-[0.8rem] font-bold text-foreground">{title ?? name}<MessageTime at={at} /></p>
-      {children}
-    </div>
+  <li className={cn('min-w-0', className)}>
+    <p className="mb-1 flex flex-wrap items-center gap-x-1.5 text-[0.8rem] font-bold text-foreground"><AgentAvatar name={name} small />{title ?? name}<MessageTime at={at} /></p>
+    {children}
   </li>
 );
 
@@ -91,7 +88,7 @@ export const TranscriptRow = memo(function TranscriptRow({ event, store, now }: 
   if (!event.hasDetail) return <li className="min-w-0">{head}</li>;
   return (
     <li className="min-w-0">
-      <button type="button" aria-expanded={open} className={cn('-mx-1.5 block w-[calc(100%+0.75rem)] rounded-xs px-1.5 text-left hover:bg-surface-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 max-[900px]:min-h-11', open && 'bg-surface-1')} onClick={() => setOpen((current) => !current)}>
+      <button type="button" aria-expanded={open} className={cn('block w-full min-w-0 rounded-xs text-left hover:bg-surface-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 max-[900px]:min-h-11', open && 'bg-surface-1')} onClick={() => setOpen((current) => !current)}>
         {head}
       </button>
       {open && <div className="mb-1 ml-5 min-w-0 border-l border-border pl-3"><ActivityDetail id={event.id} version={event.status} store={store} /></div>}
