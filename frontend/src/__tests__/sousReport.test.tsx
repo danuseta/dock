@@ -68,9 +68,9 @@ test('a /agents?run=KEY link names the run and survives a filter change', () => 
   assert.strictEqual(runFilterSearch('?run=QRD-1412', { kind: 'review' }), '?run=QRD-1412&kind=review');
 });
 
-test('cards: a Card kind with its own badge and filter', () => {
-  assert.strictEqual(kindLabel('card'), 'Card');
-  assert.match(renderToStaticMarkup(<KindBadge kind="card" />), />Card</);
+test('cards: a free task with its own badge, tooltip and filter', () => {
+  assert.strictEqual(kindLabel('card'), 'Free task');
+  assert.match(renderToStaticMarkup(<KindBadge kind="card" />), /title="No Jira ticket"[^>]*>.*Free task</);
   assert.deepStrictEqual(runFilterFromSearch('?kind=card'), { kind: 'card' });
   const all = [{ kind: 'card' }, { kind: 'build' }, { kind: 'review' }];
   assert.deepStrictEqual(all.filter((item) => matchesRunFilter(item, { kind: 'card' })), [all[0]]);
