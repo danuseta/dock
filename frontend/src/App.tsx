@@ -86,7 +86,8 @@ function App() {
 
   const handleNavigate = (path: string) => {
     window.history.pushState({}, '', path);
-    setCurrentPath(path);
+    // A link like /agents?run=KEY keeps its query in the URL for the page to read.
+    setCurrentPath(path.split('?')[0]);
     if (path !== '/ticket') {
       setSelectedTicketKey(null);
     }
@@ -115,9 +116,9 @@ function App() {
       case '/demo-videos': return <DemoVideosPage onTicketClick={navigateToTicket} />;
       case '/dev-servers': return <DevServersPage />;
       case '/machines': return <HealthPage />;
-      case '/attention': return <NeedsAttentionPage onTicketClick={navigateToTicket} />;
+      case '/attention': return <NeedsAttentionPage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;
       case '/settings': return <SettingsPage />;
-      case '/ticket': return selectedTicketKey ? <TicketDetailPage ticketKey={selectedTicketKey} onBack={() => handleNavigate('/dashboard')} /> : <DashboardPage onTicketClick={navigateToTicket} />;
+      case '/ticket': return selectedTicketKey ? <TicketDetailPage ticketKey={selectedTicketKey} onBack={() => handleNavigate('/dashboard')} onNavigate={handleNavigate} /> : <DashboardPage onTicketClick={navigateToTicket} />;
       default: return <HomePage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;
     }
   };

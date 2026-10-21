@@ -15,11 +15,14 @@ import { cn } from '../lib/cn';
 // An open owner level I-n waits on the owner just as the ledger's waiting text does.
 const WAITS = new Set(['AGENT_WAITING', 'AGENT_ISSUE']);
 
-interface NeedsAttentionPageProps { onTicketClick: (key: string) => void }
+interface NeedsAttentionPageProps { onTicketClick: (key: string) => void; onNavigate: (path: string) => void }
+
+/** A sous question is answered in the run panel on Agents. */
+const isSousQuestion = (item: { type: string; message: string }) => item.type === 'AGENT_ISSUE' || (item.type === 'AGENT_WAITING' && /^Waiting on you: I-\d+:/.test(item.message));
 
 const agentLabel: Record<string, string> = { AGENT_WAITING: 'WAITING', AGENT_ISSUE: 'WAITING', AGENT_AC_FAILED: 'AC FAILED', AGENT_STALLED: 'STALLED', AGENT_CHANGES_REQUESTED: 'CHANGES REQUESTED', AGENT_CHECKS_FAILING: 'CI FAILING' };
 
-const NeedsAttentionPage: React.FC<NeedsAttentionPageProps> = ({ onTicketClick }) => {
+const NeedsAttentionPage: React.FC<NeedsAttentionPageProps> = ({ onTicketClick, onNavigate }) => {
   const { data, loading, error } = useQuery(GET_NEEDS_ATTENTION, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
   const [checkConflicts] = useMutation(CHECK_CONFLICTS);
   const [showConflictModal, setShowConflictModal] = useState(false);
@@ -61,7 +64,12 @@ const NeedsAttentionPage: React.FC<NeedsAttentionPageProps> = ({ onTicketClick }
                 <Badge variant={WAITS.has(item.type) ? 'neutral' : 'danger'} className={cn('shrink-0 gap-1.5 px-3.5 py-2.5 text-sm', WAITS.has(item.type) && 'border-amber-300/45 bg-amber-300/10 text-amber-200')}>{WAITS.has(item.type) ? <Hand size={16} aria-hidden="true" /> : <Bot size={16} aria-hidden="true" />}<span>{item.ticketKey}</span></Badge>
                 <div className="min-w-0"><p className="font-mono text-[0.68rem] font-extrabold text-muted-foreground">AGENT · {agentLabel[item.type]}</p><h3 className="text-pretty text-lg font-medium">{item.message}</h3></div>
               </div>
-              {item.ticketKey && <Button size="sm" variant="primary" onClick={() => onTicketClick(item.ticketKey)}>Inspect Ticket</Button>}
+              {item.ticketKey && (
+                <div className="flex items-center gap-2">
+                  {isSousQuestion(item) && <Button size="sm" variant="primary" onClick={() => onNavigate(`/agents?run=${encodeURIComponent(item.ticketKey)}`)}>Answer in Agents →</Button>}
+                  <Button size="sm" variant={isSousQuestion(item) ? 'default' : 'primary'} onClick={() => onTicketClick(item.ticketKey)}>Inspect Ticket</Button>
+                </div>
+              )}
             </Card>
           ) : <Card key={item.id} className="flex flex-wrap items-center justify-between gap-4 border-status-conflict/40">
             <div className="flex min-w-0 items-center gap-4">

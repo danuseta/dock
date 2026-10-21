@@ -18,6 +18,9 @@ test('the run label reads none, waiting, stalled, running or finished', () => {
   assert.strictEqual(runState({ ...run, stalled: true }), 'stalled');
   assert.strictEqual(runState({ ...run, waiting: 'Keep tags?' }), 'waiting');
   assert.strictEqual(runState({ ...run, waiting: 'Keep tags?', finished: true }), 'finished');
+  assert.strictEqual(runState({ ...run, stage: 'pr' }), 'pr', 'an open PR waits for review, it is not running');
+  assert.strictEqual(runState({ ...run, stage: 'pr', stalled: true }), 'pr');
+  assert.strictEqual(runState({ ...run, stage: 'pr', waiting: 'Keep tags?' }), 'waiting');
 });
 
 test('needs you is empty when nothing waits on the owner', () => {
