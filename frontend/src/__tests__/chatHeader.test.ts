@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import test from 'node:test';
 import { chooseModel, EMPTY_OPTIONS } from '../chat/composer/composerLogic';
-import { choiceToSave, defaultsToSave, delayedMinutes, delayedText, changedFiles, dotState, filesTotal, popoverRows, stageLabel } from '../chat/headerState';
+import { choiceToSave, defaultsToSave, changedFiles, dotState, filesTotal, popoverRows, stageLabel } from '../chat/headerState';
 import type { SessionMachineOptions } from '../chat/sessionOptions';
 import type { ChatActivity } from '../chat/activity/activity';
 
@@ -26,20 +26,10 @@ test('the stage label counts the seven steps', () => {
   assert.strictEqual(stageLabel(-1), '');
 });
 
-test('the delayed banner names the minutes without the word stale', () => {
-  const now = Date.parse('2026-10-19T10:45:00.000Z');
-  const minutes = delayedMinutes('2026-10-19T10:00:00.000Z', now);
-  assert.strictEqual(minutes, 45);
-  assert.strictEqual(delayedText(minutes), 'The workspace has not sent a status for 45 minutes. The numbers above may be old.');
-  assert.strictEqual(delayedText(1), 'The workspace has not sent a status for 1 minute. The numbers above may be old.');
-  assert.ok(!/stale/i.test(delayedText(minutes)));
-});
-
-test('the status dot follows the five states', () => {
-  const base = { bridgeUp: true, waiting: false, busy: false, delayed: false };
+test('the status dot follows the four states', () => {
+  const base = { bridgeUp: true, waiting: false, busy: false };
   assert.strictEqual(dotState({ ...base, busy: true }), 'running');
   assert.strictEqual(dotState({ ...base, busy: true, waiting: true }), 'needs');
-  assert.strictEqual(dotState({ ...base, busy: true, delayed: true }), 'delayed');
   assert.strictEqual(dotState({ ...base, bridgeUp: false, busy: true }), 'disconnected');
   assert.strictEqual(dotState(base), 'done');
 });

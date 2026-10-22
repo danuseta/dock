@@ -8,10 +8,8 @@ import { agentTask } from './activity/activity';
 import { AgentAvatar } from './activity/TranscriptParts';
 import { shortAgent, threadRoot } from './activity/transcript';
 import { useNow } from './activity/useNow';
-import { delayedMinutes } from './headerState';
 import { SLOW_POLL_MS, machineOf, machineOnline, relativeTime, sessionTitle, type ChatMachine, type ChatSession } from './messages';
 import { groupSessions, sidebarDot } from './sessionGroups';
-import type { ChatSessionStatus } from './status';
 import { SessionMenu, type SessionMenuTarget } from './SessionMenu';
 import { StatusDot } from './StatusDot';
 
@@ -74,7 +72,6 @@ const SessionThreads: React.FC<SessionThreadsProps> = ({ sessionId, activeThread
 
 interface SessionSidebarProps {
   sessions: ChatSession[];
-  live: readonly ChatSessionStatus[];
   machines: ChatMachine[] | null | undefined;
   activeId: string | null;
   activeThreadId: string | null;
@@ -92,10 +89,9 @@ interface SessionSidebarProps {
   results?: React.ReactNode;
 }
 
-export const SessionSidebar: React.FC<SessionSidebarProps> = ({ sessions, live, machines, activeId, activeThreadId, onSelect, onOpenThread, onNew, onRename, onDelete, collapsed, onToggleCollapsed, searchOpen, onToggleSearch, search, limits, results }) => {
+export const SessionSidebar: React.FC<SessionSidebarProps> = ({ sessions, machines, activeId, activeThreadId, onSelect, onOpenThread, onNew, onRename, onDelete, collapsed, onToggleCollapsed, searchOpen, onToggleSearch, search, limits, results }) => {
   const [openOverride, setOpenOverride] = useState<ReadonlyMap<string, boolean>>(new Map());
   const now = useNow(true);
-  const liveById = new Map(live.map((item) => [item.sessionId, item]));
   const [menu, setMenu] = useState<SessionMenuTarget | null>(null);
   const press = useRef<{ timer: number; fired: boolean } | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
@@ -158,15 +154,11 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({ sessions, live, 
               const active = session.id === activeId;
               const workers = session.workerCount ?? 0;
               const open = workers > 0 && (openOverride.get(session.id) ?? active);
-              const status = liveById.get(session.id);
-              const dot = sidebarDot(session, { bridgeUp: machineOnline(machines, machineOf(session)), stale: Boolean(status?.stale) });
+              const dot = sidebarDot(session, { bridgeUp: machineOnline(machines, machineOf(session)) });
               let meta: React.ReactNode = <span className="flex-none font-mono text-[0.64rem] text-muted-foreground tabular-nums">{relativeTime(session.lastMessageAt, now)}</span>;
               if (group.key === 'needs-you') meta = <Pill className="border-amber-300/50 text-amber-300">answer</Pill>;
-              else if (dot === 'delayed' && status) meta = <span className="flex-none font-mono text-[0.64rem] text-amber-300 tabular-nums">delayed {delayedMinutes(status.receivedAt, now)}m</span>;
               else if ((session.status === 'queued' || session.status === 'running') && workers > 0) meta = <span className="flex-none font-mono text-[0.64rem] text-muted-foreground tabular-nums">team {workers}</span>;
-              let hint: string | undefined;
-              if (dot === 'delayed') hint = 'The workspace has not sent a status for a while';
-              else if (collapsed) hint = sessionTitle(session);
+              const hint = collapsed ? sessionTitle(session) : undefined;
               return (
                 <div key={session.id}>
                   <div className={cn('flex items-center rounded-xs border border-transparent hover:bg-surface-1', active && activeThreadId === null && 'border-border-glow bg-surface-1')}>

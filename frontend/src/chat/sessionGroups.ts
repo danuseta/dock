@@ -26,10 +26,10 @@ export function sessionGroupKey(session: Pick<ChatSession, 'waiting' | 'lastMess
 }
 
 // Done sessions stay grey even while the bridge is down, so the list does not turn red at once.
-export function sidebarDot(session: Pick<ChatSession, 'waiting' | 'status'>, facts: { bridgeUp: boolean | undefined; stale: boolean }): DotState {
+export function sidebarDot(session: Pick<ChatSession, 'waiting' | 'status'>, facts: { bridgeUp: boolean | undefined }): DotState {
   const busy = isBusy(session);
   if (!session.waiting && !busy) return 'done';
-  return dotState({ bridgeUp: facts.bridgeUp, waiting: Boolean(session.waiting), busy, delayed: facts.stale && busy });
+  return dotState({ bridgeUp: facts.bridgeUp, waiting: Boolean(session.waiting), busy });
 }
 
 export function groupSessions(sessions: ChatSession[], now: number): SessionGroup[] {

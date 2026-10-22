@@ -3,19 +3,18 @@ import { effortChoices, MODE_LABELS, PERMISSION_MODES, type TurnOptions } from '
 import type { ChatFileChange } from './status';
 import type { OptionField, SessionMachineOptions } from './sessionOptions';
 
-export type DotState = 'running' | 'needs' | 'delayed' | 'disconnected' | 'done';
+export type DotState = 'running' | 'needs' | 'disconnected' | 'done';
 
-export const dotState = (facts: { bridgeUp: boolean | undefined; waiting: boolean; busy: boolean; delayed: boolean }): DotState => {
+export const dotState = (facts: { bridgeUp: boolean | undefined; waiting: boolean; busy: boolean }): DotState => {
   if (facts.bridgeUp === false) return 'disconnected';
   if (facts.waiting) return 'needs';
-  if (facts.busy) return facts.delayed ? 'delayed' : 'running';
+  if (facts.busy) return 'running';
   return 'done';
 };
 
 export const DOT_LABEL: Record<DotState, string> = {
   running: 'Running',
   needs: 'Needs you',
-  delayed: 'Status delayed',
   disconnected: 'Bridge disconnected',
   done: 'Done',
 };
@@ -28,12 +27,6 @@ export const changedFiles = (files: readonly ChatFileChange[]): ChatFileChange[]
 
 export const filesTotal = (files: readonly ChatFileChange[]): { added: number; removed: number } => (
   files.reduce((total, file) => ({ added: total.added + file.added, removed: total.removed + file.removed }), { added: 0, removed: 0 })
-);
-
-export const delayedMinutes = (receivedAt: string, now: number): number => Math.max(1, Math.floor((now - Date.parse(receivedAt)) / 60000));
-
-export const delayedText = (minutes: number): string => (
-  `The workspace has not sent a status for ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}. The numbers above may be old.`
 );
 
 export interface PopoverOption { value: string; label: string; isDefault: boolean }
