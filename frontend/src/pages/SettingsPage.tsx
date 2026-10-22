@@ -182,8 +182,8 @@ const SettingsPage: React.FC = () => {
           {active === 'general' && <GeneralSection values={valuesOf('general')} set={setter('general')} />}
           {active === 'chat' && (
             <ChatDefaultsSection
-              value={{ model: chat.chatDefaultModel, effort: chat.chatDefaultEffort, mode: chat.chatDefaultMode, rtk: normalizeRtk(chat.chatRtk), caveman: normalizeCaveman(chat.chatCaveman) }}
-              onChange={(next) => setFields('chat', { chatDefaultModel: next.model, chatDefaultEffort: next.effort, chatDefaultMode: next.mode, chatRtk: next.rtk, chatCaveman: next.caveman })}
+              value={{ model: chat.chatDefaultModel, effort: chat.chatDefaultEffort, mode: chat.chatDefaultMode, rtk: normalizeRtk(chat.chatRtk), caveman: normalizeCaveman(chat.chatCaveman), turns: chat.chatParallelTurns }}
+              onChange={(next) => setFields('chat', { chatDefaultModel: next.model, chatDefaultEffort: next.effort, chatDefaultMode: next.mode, chatRtk: next.rtk, chatCaveman: next.caveman, chatParallelTurns: next.turns })}
             />
           )}
           {active === 'security' && <SecuritySection hasPin={Boolean(settings.hasMasterPin)} />}

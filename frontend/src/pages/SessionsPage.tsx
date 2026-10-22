@@ -16,7 +16,7 @@ import { ChatThread } from '../chat/ChatThread';
 import { LimitMeters } from '../chat/StatusLine';
 import { useChatStatus } from '../chat/useChatStatus';
 import { useFullViewport } from '../chat/useFullViewport';
-import { SLOW_POLL_MS, machineOf, sessionTitle as titleOf, type ChatMachine, type ChatSession } from '../chat/messages';
+import { SLOW_POLL_MS, machineOf, runningBeside, sessionTitle as titleOf, type ChatMachine, type ChatSession } from '../chat/messages';
 import { SessionSidebar } from '../chat/SessionSidebar';
 import { SessionRow } from '../chat/SessionRow';
 import { useNow } from '../chat/activity/useNow';
@@ -260,6 +260,7 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
                   threadId={threadId}
                   onOpenThread={(id) => openThread(selected.id, id)}
                   onActivity={setEvents}
+                  queuedBehind={runningBeside(selected, sessions)}
                   renderHeader={({ control, dot, status }) => (
                     <SessionHeaderBar
                       session={selected}

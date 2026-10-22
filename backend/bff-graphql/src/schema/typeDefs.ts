@@ -169,6 +169,8 @@ export const typeDefs = gql`
     chatDefaultMode: String
     chatRtk: String!
     chatCaveman: String!
+    """How many chat turns a bridge runs at once; null leaves it to the bridge's own file."""
+    chatParallelTurns: String
   }
 
   type ValidationResult {
@@ -817,6 +819,7 @@ export const typeDefs = gql`
     chatDefaultMode: String
     chatRtk: String
     chatCaveman: String
+    chatParallelTurns: String
   }
 
   input QuickLinkInput {
