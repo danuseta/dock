@@ -214,7 +214,6 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
           <div className="min-h-0 flex-1">
             <SessionSidebar
               sessions={sessions}
-              live={liveStatus?.sessions ?? []}
               machines={machinesData?.chatMachines}
               activeId={selectedId}
               activeThreadId={threadId}
@@ -261,12 +260,11 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
                   threadId={threadId}
                   onOpenThread={(id) => openThread(selected.id, id)}
                   onActivity={setEvents}
-                  renderHeader={({ control, dot, delayed, status }) => (
+                  renderHeader={({ control, dot, status }) => (
                     <SessionHeaderBar
                       session={selected}
                       dot={dot}
                       status={status}
-                      delayed={delayed}
                       control={control}
                       inspectorOpen={inspectorOpen}
                       lanes={inspectorOpen ? null : lanesToggle}

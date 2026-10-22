@@ -14,12 +14,11 @@ interface ModelPopoverProps {
   machine: string;
   fallbackLabel: string;
   disabled: boolean;
-  dimmed: boolean;
 }
 
 const labelClass = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
 
-export const ModelPopover: React.FC<ModelPopoverProps> = ({ control, machine, fallbackLabel, disabled, dimmed }) => {
+export const ModelPopover: React.FC<ModelPopoverProps> = ({ control, machine, fallbackLabel, disabled }) => {
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState<boolean | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -64,7 +63,7 @@ export const ModelPopover: React.FC<ModelPopoverProps> = ({ control, machine, fa
         aria-expanded={open}
         disabled={off}
         title={!disabled && rows.length === 0 ? 'The workspace has not sent its model list yet' : 'Model, effort and mode'}
-        className={cn('inline-flex h-7 max-w-[14rem] max-[760px]:max-w-[7.5rem] flex-none items-center gap-1.5 rounded-xs border border-border-glow px-2 font-mono text-[0.68rem] font-bold text-foreground hover:bg-surface-1 disabled:cursor-default disabled:text-secondary-foreground disabled:hover:bg-transparent max-[900px]:h-11', dimmed && 'opacity-50')}
+        className={cn('inline-flex h-7 max-w-[14rem] max-[760px]:max-w-[7.5rem] flex-none items-center gap-1.5 rounded-xs border border-border-glow px-2 font-mono text-[0.68rem] font-bold text-foreground hover:bg-surface-1 disabled:cursor-default disabled:text-secondary-foreground disabled:hover:bg-transparent max-[900px]:h-11')}
         onClick={() => setOpen((current) => !current)}
       >
         <Cpu size={12} aria-hidden="true" className="flex-none" />

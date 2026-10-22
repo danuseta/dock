@@ -5,7 +5,6 @@ import { DOT_LABEL, type DotState } from './headerState';
 const DOT_CLASS: Record<DotState, string> = {
   running: 'bg-status-merged',
   needs: 'bg-amber-300',
-  delayed: 'border-2 border-amber-300',
   disconnected: 'bg-status-conflict',
   done: 'bg-muted-foreground',
 };

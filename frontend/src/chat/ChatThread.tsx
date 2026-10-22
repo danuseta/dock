@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useApolloClient, useQuery } from '@apollo/client';
-import { Clock, Loader2, RefreshCw, SendHorizontal } from 'lucide-react';
+import { Loader2, SendHorizontal } from 'lucide-react';
 import { SEND_CHAT_MESSAGE, STOP_CHAT_TURN } from '../graphql/mutations';
 import { GET_CHAT_MESSAGES, GET_CHAT_SESSION } from '../graphql/queries';
 import { Button } from '../components/ui';
@@ -21,7 +21,7 @@ import { WorkerTray } from './activity/WorkerTray';
 import { Composer } from './composer/Composer';
 import { composerFeatures } from './composer/composerLogic';
 import { useTurnOptions, type TurnOptionsControl } from './composer/useTurnOptions';
-import { delayedMinutes, delayedText, dotState, type DotState } from './headerState';
+import { dotState, type DotState } from './headerState';
 import { useChatStatus } from './useChatStatus';
 import type { ChatSessionStatus } from './status';
 import type { SendPayload } from './composer/composerLogic';
@@ -45,7 +45,7 @@ interface ChatThreadProps {
   onOpenThread?: (eventId: string | null) => void;
 }
 
-export interface HeaderContext { control: TurnOptionsControl; dot: DotState; delayed: boolean; status: ChatSessionStatus | undefined }
+export interface HeaderContext { control: TurnOptionsControl; dot: DotState; status: ChatSessionStatus | undefined }
 
 const NEWEST_PAGE = 200;
 const OLDER_PAGE = 100;
@@ -117,10 +117,9 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
   const stopping = isStopping(stopRequested, status);
   const readOnly = session?.source === 'cli';
   const control = useTurnOptions(sessionId, machine, composerFeatures(capabilities), sessionTurnOptions(session));
-  const { status: liveStatus, now: statusNow, refetch: recheckStatus } = useChatStatus(machine);
+  const { status: liveStatus } = useChatStatus(machine);
   const ownStatus = liveStatus?.sessions.find((item) => item.sessionId === sessionId);
-  const delayed = Boolean(ownStatus?.stale) && busy;
-  const dot = dotState({ bridgeUp: machineUp, waiting: interactions.cards.length > 0 || Boolean(session?.waiting), busy, delayed });
+  const dot = dotState({ bridgeUp: machineUp, waiting: interactions.cards.length > 0 || Boolean(session?.waiting), busy });
 
   useEffect(() => {
     if (status !== 'queued' && status !== 'running') setStopRequested(false);
@@ -267,7 +266,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     <div className={cn('flex min-h-0 flex-col', className)}>
       {session && !hideMachine && <div className="flex flex-none items-center gap-2 border-b border-border bg-surface-0 px-3.5 py-1.5 font-mono text-[0.66rem] text-muted-foreground"><span>Runs on</span><MachineChip name={machine} online={machineUp} /></div>}
       {session && <SessionHeader session={session} showTitle={!hideMachine} />}
-      {session && renderHeader?.({ control, dot, delayed, status: ownStatus })}
+      {session && renderHeader?.({ control, dot, status: ownStatus })}
       <div ref={scrollRef} onScroll={handleScroll} className="min-h-[6.5rem] flex-1 overflow-y-auto overscroll-contain px-3.5 py-3" role="log" aria-label="Conversation">
         {loadingOlder && <p className="pb-2 text-center font-mono text-[0.66rem] text-muted-foreground" role="status">Loading older messages...</p>}
         {!loaded && !loadError && !missing && <p className="py-6 text-center text-sm text-muted-foreground" role="status">Loading the conversation...</p>}
@@ -293,13 +292,6 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
       {!missing && <InteractionCards sessionId={sessionId} cards={interactions.cards} lines={interactions.lines} messages={messages} onSettled={interactions.record} />}
 
       <div className="flex flex-col gap-1.5 border-t border-border bg-surface-0 px-3.5 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))]">
-        {delayed && ownStatus && (
-          <div className="flex items-center gap-2 rounded-xs border border-amber-300/50 bg-amber-300/10 px-2.5 py-1.5 text-xs text-amber-200" role="status">
-            <Clock size={13} aria-hidden="true" className="flex-none" />
-            <span className="min-w-0 flex-1 text-pretty">{delayedText(delayedMinutes(ownStatus.receivedAt, statusNow))}</span>
-            <button type="button" className="inline-flex flex-none items-center gap-1 whitespace-nowrap rounded-xs border border-amber-300/50 px-2 py-0.5 font-body text-[0.72rem] font-semibold hover:bg-amber-300/10 max-[900px]:min-h-11" onClick={recheckStatus}><RefreshCw size={12} aria-hidden="true" />Check again</button>
-          </div>
-        )}
         {status === 'queued' && !renderHeader && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-secondary-foreground" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" />Queued · waiting for the {machine} bridge to pick it up</p>}
         {status === 'running' && !renderHeader && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-status-merged" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">Running{interactions.cards.length > 0 ? ' · waiting for your answer' : session?.statusDetail ? ` · ${session.statusDetail}` : ''}</span></p>}
         {status === 'error' && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The last turn failed{session?.statusDetail ? `: ${session.statusDetail}` : '.'}</p>}

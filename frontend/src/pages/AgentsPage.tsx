@@ -97,6 +97,9 @@ const StageChip: React.FC<{ stage: string; kind?: string }> = ({ stage, kind }) 
   </span>
 );
 
+// The detail panel already says these in its waiting box or its Activity section.
+const ACTIVITY_SHOWS = new Set<RunStatus>(['waiting', 'stalled', 'working', 'thinking', 'asleep']);
+
 const StatusChip: React.FC<{ status: RunStatus; review?: AgentRun['review'] }> = ({ status, review }) => (
   <span className={cn('inline-flex items-center rounded-xs border px-2 py-0.5 font-mono text-[0.66rem] font-bold', statusTone[status])}>{statusLabel(status, review)}</span>
 );
@@ -357,7 +360,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
         ))}
       </section>
 
-      <div className="grid grid-cols-[minmax(0,1fr)_360px] items-start gap-4 max-[1120px]:grid-cols-1">
+      <div className={cn('grid grid-cols-[minmax(0,1fr)_360px] gap-4 max-[1120px]:grid-cols-1', view === 'office' ? 'items-stretch max-[1120px]:items-start' : 'items-start')}>
         <Card className="p-0">
           {view === 'office' ? (
             <>
@@ -493,17 +496,18 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
           )}
         </Card>
 
-        <Card id="agent-run-detail" className="flex max-h-[600px] scroll-mt-4 flex-col gap-3.5 overflow-y-auto bg-surface-0 p-[18px] max-[1120px]:max-h-none" aria-live="polite">
+        <Card id="agent-run-detail" className={cn('relative scroll-mt-4 bg-surface-0 p-0', view !== 'office' && 'max-h-[600px] overflow-y-auto max-[1120px]:max-h-none')} aria-live="polite">
+          <div className={cn('flex flex-col gap-3.5 p-[18px]', view === 'office' && 'absolute inset-0 overflow-y-auto max-[1120px]:static')}>
           {!selected ? (
             <p className="text-pretty text-sm text-muted-foreground">Select a character, a wall card or a table row to see that ticket's run.</p>
           ) : (
             <>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-xs border border-accent/30 bg-accent-dim px-[9px] py-[3px] font-mono text-sm font-extrabold text-accent">{selected.key}</span>
+              <div className="flex flex-wrap items-center gap-2 [&>span]:inline-flex [&>span]:h-6 [&>span]:items-center">
+                <span className="rounded-xs border border-accent/30 bg-accent-dim px-[9px] font-mono text-sm font-extrabold text-accent">{selected.key}</span>
                 <KindBadge kind={selected.kind} />
                 <VerdictBadge run={selected} />
                 <StageChip stage={selected.stage} kind={selected.kind} />
-                <StatusChip status={statusOf(selected)} review={selected.review} />
+                {!ACTIVITY_SHOWS.has(statusOf(selected)) && <StatusChip status={statusOf(selected)} review={selected.review} />}
                 {chat && actions?.chat && <Button size="sm" className="ml-auto h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key)}><MessagesSquare size={13} aria-hidden="true" />Chat</Button>}
               </div>
               {chatError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The chat could not be opened: {chatError}</p>}
@@ -668,6 +672,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
               )}
             </>
           )}
+          </div>
         </Card>
       </div>
 

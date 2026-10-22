@@ -37,10 +37,9 @@ test('empty groups are omitted', () => {
   assert.deepStrictEqual(groupSessions([], NOW), []);
 });
 
-test('sidebar dot: delayed ring only while busy, done stays grey when the bridge is down', () => {
-  assert.strictEqual(sidebarDot(make('a', 'running'), { bridgeUp: true, stale: true }), 'delayed');
-  assert.strictEqual(sidebarDot(make('a', 'running'), { bridgeUp: true, stale: false }), 'running');
-  assert.strictEqual(sidebarDot(make('a', 'idle', true), { bridgeUp: true, stale: true }), 'needs');
-  assert.strictEqual(sidebarDot(make('a', 'running'), { bridgeUp: false, stale: false }), 'disconnected');
-  assert.strictEqual(sidebarDot(make('a', 'idle'), { bridgeUp: false, stale: false }), 'done');
+test('sidebar dot: a long turn stays running, done stays grey when the bridge is down', () => {
+  assert.strictEqual(sidebarDot(make('a', 'running'), { bridgeUp: true }), 'running');
+  assert.strictEqual(sidebarDot(make('a', 'idle', true), { bridgeUp: true }), 'needs');
+  assert.strictEqual(sidebarDot(make('a', 'running'), { bridgeUp: false }), 'disconnected');
+  assert.strictEqual(sidebarDot(make('a', 'idle'), { bridgeUp: false }), 'done');
 });
