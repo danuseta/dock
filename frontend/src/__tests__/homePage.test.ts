@@ -28,6 +28,14 @@ test('Home keeps three blocks: the header with quick links, Needs you, and My ti
   assert.doesNotMatch(home, />Current work</);
 });
 
+test('Needs you pages five tickets at a time and a filter starts again on page one', () => {
+  const panel = read('components/HomeAttention.tsx');
+  assert.match(panel, /const PAGE_SIZE = 5;/);
+  assert.match(panel, /pageOf\(shown, page, PAGE_SIZE\)/);
+  assert.match(panel, /setFilter\(option\.value\); setPage\(1\);/);
+  assert.match(panel, /aria-label="Next page"/);
+});
+
 test('the workspace Home does not ask the BFF to check every monitor live', () => {
   const queries = read('graphql/queries.ts');
   const home = queries.slice(queries.indexOf('GET_HOME_SECONDARY'), queries.indexOf('`;', queries.indexOf('GET_HOME_SECONDARY')));
