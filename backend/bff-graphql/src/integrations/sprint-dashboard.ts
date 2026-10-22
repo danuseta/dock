@@ -2,7 +2,7 @@ import { StorageService } from '../storage/service';
 import { JiraSprintClient, createJiraHttp, type BoardSprint } from './jira-sprint';
 import {
   DEFAULT_SPRINT_CONFIG, RULES_VERSION, buildTrend, computeSprintMetrics, detectRoster, sprintLabel,
-  type SprintConfig, type SprintContext, type SprintIssue, type SprintResult,
+  type RosterMember, type SprintConfig, type SprintContext, type SprintIssue, type SprintResult,
 } from './sprint-metrics';
 
 const BOARD_KEY = 'sprintBoardId';
@@ -136,6 +136,17 @@ export class SprintDashboardService {
 
   async getConfig(): Promise<SprintConfig> {
     return parseSprintConfig(await this.setting(CONFIG_KEY));
+  }
+
+  /** The roster detected from every stored sprint, with the config's own entries on top. */
+  async roster(): Promise<RosterMember[]> {
+    const issues: SprintIssue[] = [];
+    for (const row of await this.store.getSprintSnapshots()) {
+      const events = await this.store.getSprintIssueEvents(row.sprintId);
+      if (!events) continue;
+      try { issues.push(...JSON.parse(events.issues) as SprintIssue[]); } catch { /* an unreadable sprint adds nobody */ }
+    }
+    return detectRoster(issues, (await this.getConfig()).roster);
   }
 
   async boardId(): Promise<string> {

@@ -890,6 +890,22 @@ test('a review ledger brings its findings with severities, the lgtm parts and th
   assert.deepStrictEqual([plain.findings, plain.lgtm, plain.verdict, plain.blockers], [[], [], null, 0]);
 });
 
+test('the owner LGTM moves a review ledger to done and keeps the rest of it', async () => {
+  const { storage, events } = memoryStorage();
+  const service = new OrchestratorService(storage, os.tmpdir());
+  const now = new Date();
+  await service.ingestLedger({
+    ...ledger, key: 'ZED-452', kind: 'review', stage: 'verify', waiting: 'LGTM from the owner', updatedAt: now.toISOString(),
+    verdict: { at: now.toISOString(), value: 'approve' },
+  }, now, 'workspace');
+  const later = new Date(now.getTime() + 60_000);
+  const done = await service.finishReview('zed-452', later);
+  assert.ok(done);
+  assert.deepStrictEqual([done.stage, done.waiting, done.kind, done.verdict, done.machine], ['done', null, 'review', 'approve', 'workspace']);
+  assert.deepStrictEqual(events.filter((event) => event.ticketKey === 'ZED-452').map((event) => [event.kind, event.detail]).slice(-2), [['STAGE', 'done'], ['RESUMED', null]]);
+  assert.strictEqual(await service.finishReview('ZED-999', later), null, 'no run, nothing to finish');
+});
+
 test('the doctor route keeps the report under the machine of its token; a ledger with a pull request asks for the automatic broadcast', async (t) => {
   const { storage } = memoryStorage();
   const service = new OrchestratorService(storage, os.tmpdir());

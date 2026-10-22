@@ -287,7 +287,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
       const steps = res.data?.approveReview ?? [];
       setApproval(steps);
       const failed = steps.filter((step: { ok: boolean }) => !step.ok).length;
-      setToast({ message: failed ? `${failed} of ${steps.length} approval steps failed. See the list on the page.` : 'Approved: Jira label pass added and the pull requests approved.', type: failed ? 'error' : 'success' });
+      setToast({ message: failed ? `${failed} of ${steps.length} approval steps failed. See the list on the page.` : 'Approved: Jira Pass label added and the pull requests approved.', type: failed ? 'error' : 'success' });
     } catch (approveError) {
       setToast({ message: approveError instanceof Error ? approveError.message : 'The approval could not be sent', type: 'error' });
     } finally {
@@ -325,8 +325,8 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
           {ticket.url && <a href={ticket.url} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-border bg-surface-2 px-3 text-sm font-semibold hover:border-border-glow max-[760px]:h-11"><ExternalLink size={15} aria-hidden="true" />Jira</a>}
           {ticket.figmaUrl && <a href={ticket.figmaUrl} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-border bg-surface-2 px-3 text-sm font-semibold hover:border-border-glow max-[760px]:h-11"><Figma size={15} aria-hidden="true" />Figma</a>}
           {run?.kind === 'review' && (run.approved
-            ? <Button className="max-[760px]:h-11" disabled title="The Jira label pass is on the ticket and its pull requests are approved"><Check size={15} aria-hidden="true" />Approved</Button>
-            : <Button variant="primary" className="max-[760px]:h-11" onClick={() => setConfirmApprove(true)} disabled={approving} title="Adds the Jira label pass and approves the open pull requests on GitHub"><Check size={15} aria-hidden="true" />{approving ? 'Approving...' : 'Approve'}</Button>)}
+            ? <Button className="max-[760px]:h-11" disabled title="Your Jira Pass label is on the ticket and its pull requests are approved"><Check size={15} aria-hidden="true" />Approved</Button>
+            : <Button variant="primary" className="max-[760px]:h-11" onClick={() => setConfirmApprove(true)} disabled={approving} title="Adds your Jira Pass label and approves the open pull requests on GitHub"><Check size={15} aria-hidden="true" />{approving ? 'Approving...' : 'Approve'}</Button>)}
           <Button className="max-[760px]:h-11" onClick={() => void openForTicket(ticket.key)} disabled={openingSession}><MessagesSquare size={15} aria-hidden="true" />{openingSession ? 'Opening...' : 'Session'}</Button>
           <Button
             className="border-status-discord bg-status-discord text-white hover:bg-status-discord/80 max-[760px]:h-11"
@@ -585,7 +585,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
       <ConfirmDialog
         open={confirmApprove}
         title={`Approve ${ticket.key}?`}
-        description="DOCK adds the Jira label pass to the reviewed ticket and submits an Approve review on each of its open pull requests on GitHub."
+        description="DOCK adds your Jira Pass label to the reviewed ticket and submits an Approve review on each of its open pull requests on GitHub. The review run then moves to done."
         confirmLabel="Approve"
         busyLabel="Approving..."
         busy={approving}

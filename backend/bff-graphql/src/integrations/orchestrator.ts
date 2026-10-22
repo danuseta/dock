@@ -713,6 +713,16 @@ export class OrchestratorService {
     await this.storage.addOrchestratorEvent(normalizeTicketKey(keyInput), kind, detail ? detail.slice(0, 500) : null, MAX_EVENTS_KEPT);
   }
 
+  /** The owner's LGTM ends a review run: its ledger moves to done and waits on nothing; the rest of the ledger is kept. */
+  async finishReview(keyInput: string, now = new Date()) {
+    const key = normalizeTicketKey(keyInput);
+    const row = await this.storage.getOrchestratorRunWithLedger(key);
+    if (!row) return null;
+    let ledger: Record<string, unknown> = {};
+    try { ledger = JSON.parse(row.ledgerRaw || row.payload); } catch { /* an unreadable ledger is finished with the row's own fields */ }
+    return this.ingestLedger({ ...ledger, key, title: ledger.title ?? row.title, stage: 'done', waiting: '', updatedAt: now.toISOString() }, now, row.machine ?? DEFAULT_MACHINE);
+  }
+
   async ingestLedger(input: unknown, now: Date, machine: string) {
     const ledger = parseLedger(input, now);
     const previous = await this.storage.getOrchestratorRun(ledger.key);

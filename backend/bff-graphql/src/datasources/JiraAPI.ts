@@ -73,6 +73,14 @@ export class JiraAPI {
     await this.jiraService.addLabel(credentials, key, label);
   }
 
+  /** The display name of the Jira account configured in Settings. */
+  async displayName(): Promise<string> {
+    const { credentials } = await this.getConfiguration();
+    if (!credentials.domain || !credentials.email || !credentials.apiToken) throw new Error('Jira is not configured in Settings');
+    const me = await this.jiraService.validateCredentials(credentials);
+    return String(me?.displayName ?? '');
+  }
+
   async refreshTickets() {
     try {
       const { credentials, projectKeys } = await this.getConfiguration();

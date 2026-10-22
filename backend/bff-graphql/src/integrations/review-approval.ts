@@ -2,12 +2,14 @@ import { GitHubAPI } from '../datasources/GitHubAPI';
 import { JiraAPI } from '../datasources/JiraAPI';
 import { StorageService } from '../storage/service';
 import { orchestratorService } from './orchestrator';
-
-export const PASS_LABEL = 'pass';
+import { sprintDashboardService } from './sprint-dashboard';
+import type { RosterMember } from './sprint-metrics';
 
 export interface ApprovalStep { name: string; ok: boolean; detail: string }
 
 export interface ApprovalDeps {
+  /** The `<name>Pass` label of the Jira account DOCK is signed in with. */
+  passLabel(): Promise<string>;
   addLabel(key: string, label: string): Promise<void>;
   pullRequests(key: string): Promise<Array<{ owner: string; repo: string; number: number; status: string; url: string }>>;
   approve(owner: string, repo: string, pullNumber: number): Promise<void>;
@@ -21,17 +23,26 @@ const reason = (error: unknown) => {
   return error instanceof Error ? error.message : 'unknown error';
 };
 
+/** The roster token of the named Jira account; the label is never guessed from the name (Aken's is kenPass). */
+export function passLabelOf(displayName: string, roster: RosterMember[]): string {
+  const member = roster.find((entry) => entry.full === displayName);
+  if (!member) throw new Error(`${displayName || 'The Jira account'} has no Pass label in the sprint roster. Add it to the roster in the sprint dashboard settings.`);
+  return member.token;
+}
+
 /**
- * The owner approves a review run: the reviewed Jira ticket gets the `pass` label and each of its open pull requests an
- * APPROVE review on GitHub. Every step reports its own result and lands in the ticket's event list; nothing is retried.
+ * The owner approves a review run: the reviewed Jira ticket gets the signed-in account's Pass label and each of its open
+ * pull requests an APPROVE review on GitHub. Every step reports its own result and lands in the ticket's event list; nothing is retried.
  */
 export async function approveReview(key: string, deps: ApprovalDeps, prUrls: string[] = []): Promise<ApprovalStep[]> {
   const steps: ApprovalStep[] = [];
+  let label = '';
   try {
-    await deps.addLabel(key, PASS_LABEL);
-    steps.push({ name: `Jira label ${PASS_LABEL}`, ok: true, detail: `added to ${key}` });
+    label = await deps.passLabel();
+    await deps.addLabel(key, label);
+    steps.push({ name: `Jira label ${label}`, ok: true, detail: `added to ${key}` });
   } catch (error) {
-    steps.push({ name: `Jira label ${PASS_LABEL}`, ok: false, detail: reason(error) });
+    steps.push({ name: label ? `Jira label ${label}` : 'Jira label', ok: false, detail: reason(error) });
   }
 
   let open: Awaited<ReturnType<ApprovalDeps['pullRequests']>> = [];
@@ -87,6 +98,7 @@ const jiraAPI = new JiraAPI();
 const githubAPI = new GitHubAPI();
 
 export const liveApprovalDeps: ApprovalDeps = {
+  passLabel: async () => passLabelOf(await jiraAPI.displayName(), await sprintDashboardService.roster()),
   addLabel: (key, label) => jiraAPI.addLabel(key, label),
   pullRequests: (key) => githubAPI.getPullRequestsForTicket(key),
   approve: (owner, repo, pullNumber) => githubAPI.approvePullRequest(owner, repo, pullNumber),

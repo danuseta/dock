@@ -102,7 +102,7 @@ const LgtmButton: React.FC<{ run: AgentRun; busy: boolean; onLgtm: (run: AgentRu
   if (run.kind === 'review' && run.approved) return <span className="inline-flex items-center gap-1 font-mono text-[0.68rem] font-semibold text-status-merged"><Check size={12} aria-hidden="true" />Approved</span>;
   if (!canLgtm(run)) return null;
   return (
-    <Button size="sm" variant="primary" className="h-7 px-2.5 max-[760px]:h-11" disabled={busy} title="Adds the Jira label pass to the reviewed ticket and approves its pull requests on GitHub" onClick={(event) => { event.stopPropagation(); onLgtm(run); }}>
+    <Button size="sm" variant="primary" className="h-7 px-2.5 max-[760px]:h-11" disabled={busy} title="Adds your Jira Pass label to the reviewed ticket and approves its pull requests on GitHub" onClick={(event) => { event.stopPropagation(); onLgtm(run); }}>
       <Check size={13} aria-hidden="true" />LGTM
     </Button>
   );
@@ -254,7 +254,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
       const failed = steps.filter((step) => !step.ok);
       setToast(failed.length
         ? { message: `${failed.length} of ${steps.length} steps failed: ${failed.map((step) => `${step.name} (${step.detail})`).join('; ')}`, type: 'error' }
-        : { message: `LGTM sent for ${lgtmTarget.key}: Jira label pass added and the pull requests approved.`, type: 'success' });
+        : { message: `LGTM sent for ${lgtmTarget.key}: Jira Pass label added and the pull requests approved.`, type: 'success' });
     } catch (lgtmError) {
       setToast({ message: lgtmError instanceof Error ? lgtmError.message : 'The LGTM could not be sent', type: 'error' });
     } finally {
@@ -745,7 +745,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
       <ConfirmDialog
         open={Boolean(lgtmTarget)}
         title={`LGTM ${lgtmTarget?.key ?? ''}?`}
-        description="DOCK adds the Jira label pass to the reviewed ticket and submits an Approve review on each of its pull requests on GitHub."
+        description="DOCK adds your Jira Pass label to the reviewed ticket and submits an Approve review on each of its pull requests on GitHub. The review run then moves to done."
         confirmLabel="LGTM"
         busyLabel="Sending..."
         busy={approving}
