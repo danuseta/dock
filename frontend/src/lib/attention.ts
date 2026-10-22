@@ -20,6 +20,7 @@ const SIGNALS: Record<string, Signal> = {
   AGENT_CHECKS_FAILING: { rank: 2, group: 'blocked', label: 'CI FAILING' },
   PR_CHECKS_FAILING: { rank: 2, group: 'blocked', label: 'CI FAILING' },
   AGENT_AC_FAILED: { rank: 3, group: 'blocked', label: 'AC FAILED' },
+  DISCORD: { rank: 4, group: 'answer', label: 'DISCORD' },
   AGENT_CHANGES_REQUESTED: { rank: 5, group: 'answer', label: 'CHANGES REQ' },
   PR_CHANGES_REQUESTED: { rank: 5, group: 'answer', label: 'CHANGES REQ' },
   AGENT_WAITING: { rank: 6, group: 'answer', label: 'WAITING' },

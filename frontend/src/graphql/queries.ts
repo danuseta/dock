@@ -118,6 +118,8 @@ export const GET_TICKET_DETAIL = gql`
     }
     settings {
       discordMessageTemplate
+      hasDiscordBotToken
+      discordGuildId
     }
   }
 `;
@@ -994,4 +996,53 @@ export const GET_LIBRARY_AGENT = gql`
       body hooksText kitBody
     }
   }
+`;
+
+export const DISCORD_THREAD_FIELDS = gql`
+  fragment DiscordThreadFields on DiscordThreads {
+    configured
+    syncedAt
+    error
+    channels { id name kind thread enabled }
+    rows {
+      id
+      channelId
+      channel
+      kind
+      title
+      url
+      state
+      why
+      needsYou
+      older
+      dismissed
+      createdBy
+      createdAt
+      lastActivity
+      messageCount
+      tags
+      tickets { key status assignee }
+      prs
+      claim { author mine at }
+      claimerRepliedAt
+      mentionedAt
+      repliedAt
+      messages {
+        id
+        author
+        mine
+        at
+        text
+        mentions { id name me }
+        attachments { name size type }
+      }
+    }
+  }
+`;
+
+export const GET_DISCORD_THREADS = gql`
+  query GetDiscordThreads {
+    discordThreads { ...DiscordThreadFields }
+  }
+  ${DISCORD_THREAD_FIELDS}
 `;

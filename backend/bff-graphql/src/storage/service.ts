@@ -12,6 +12,7 @@ const SENSITIVE_KEYS = new Set([
   'jiraApiToken',
   'githubToken',
   'discordWebhookUrl',
+  'discordBotToken',
   'orchestratorCronWebhookUrl',
   'pushVapidPrivateKey',
   'googleClientSecret',

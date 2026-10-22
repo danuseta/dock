@@ -8,6 +8,7 @@ import { Button } from './ui';
 import { cn } from '../lib/cn';
 import { QUESTIONS_RANK, signalOf, type SignalGroup, type TicketAttention } from '../lib/attention';
 import { pageOf } from '../agents/runs';
+import { DISCORD_ITEM } from '../lib/discordThreads';
 
 export interface HomeAttentionItem {
   id: string;
@@ -77,15 +78,18 @@ export const HomeAttention: React.FC<HomeAttentionProps> = ({ rows, titleOf, pan
     const top = row.items[0];
     const conflictItem = row.items.find((item) => item.type === 'CONFLICT' && item.owner && item.repo && item.pullNumber);
     const prUrl = row.items.map(pullUrl).find(Boolean);
+    const thread = row.items.find((item) => item.type === 'DISCORD')?.id.slice(DISCORD_ITEM.length);
     const main = conflictItem && top === conflictItem ? 'inspect'
-      : row.rank === QUESTIONS_RANK ? 'answer'
+      : row.rank === QUESTIONS_RANK && row.questions ? 'answer'
+      : thread && top?.type === 'DISCORD' ? 'discord'
       : key && (top?.type === 'AGENT_STALLED' || top?.type === 'AGENT_WAITING') ? 'run'
       : key ? 'ticket' : 'pr';
-    const second = row.questions && main !== 'answer' ? 'answer' : prUrl && main !== 'pr' ? 'pr' : null;
+    const second = row.questions && main !== 'answer' ? 'answer' : thread && main !== 'discord' ? 'discord' : prUrl && main !== 'pr' ? 'pr' : null;
     const button = (kind: string, primary: boolean) => {
       const variant = primary ? (kind === 'inspect' ? 'danger' : 'primary') : 'default';
       if (kind === 'inspect' && conflictItem) return <Button key={kind} size="sm" variant={variant} onClick={() => void inspect(conflictItem)}>Inspect file</Button>;
       if (kind === 'answer' && key) return <Button key={kind} size="sm" variant={variant} onClick={() => onNavigate(`/decisions?ticket=${encodeURIComponent(key)}`)}>Answer</Button>;
+      if (kind === 'discord' && thread) return <Button key={kind} size="sm" variant={variant} onClick={() => onNavigate(`/discord?thread=${encodeURIComponent(thread)}`)}>Read thread</Button>;
       if (kind === 'run' && key) return <Button key={kind} size="sm" variant={variant} onClick={() => onNavigate(`/agents?run=${encodeURIComponent(key)}`)}>Open run</Button>;
       if (kind === 'ticket' && key) return <Button key={kind} size="sm" variant={variant} onClick={() => onTicketClick(key)}>Open ticket</Button>;
       if (kind === 'pr' && prUrl) return <Button key={kind} size="sm" variant={variant} onClick={() => window.open(prUrl, '_blank', 'noopener')}>Open PR</Button>;
@@ -113,7 +117,7 @@ export const HomeAttention: React.FC<HomeAttentionProps> = ({ rows, titleOf, pan
         return (
           <div key={row.id} className="grid grid-cols-[4px_82px_minmax(0,1fr)_auto] items-center gap-3.5 border-b border-border py-3 pr-4 last:border-b-0 max-[760px]:grid-cols-[4px_68px_minmax(0,1fr)]">
             <span className={cn('h-full min-h-9 rounded-r-[3px]', BAR[group])} aria-hidden="true" />
-            {row.ticketKey ? <button type="button" className="border-0 bg-transparent p-0 text-left font-mono text-[0.69rem] font-bold text-accent hover:underline" onClick={() => onTicketClick(row.ticketKey as string)}>{row.ticketKey}</button> : <span className="font-mono text-[0.69rem] font-bold text-accent">PR</span>}
+            {row.ticketKey ? <button type="button" className="border-0 bg-transparent p-0 text-left font-mono text-[0.69rem] font-bold text-accent hover:underline" onClick={() => onTicketClick(row.ticketKey as string)}>{row.ticketKey}</button> : <span className="font-mono text-[0.69rem] font-bold text-accent">{row.items.every((item) => item.type === 'DISCORD') ? 'DISCORD' : 'PR'}</span>}
             <div className="grid min-w-0 gap-1.5">
               {title && <span className="truncate text-[0.84rem] font-medium">{title}</span>}
               <div className="flex min-w-0 flex-wrap items-center gap-1.5">
