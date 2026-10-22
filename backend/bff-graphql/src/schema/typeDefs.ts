@@ -159,6 +159,8 @@ export const typeDefs = gql`
     hasGithubToken: Boolean!
     hasDiscordWebhookUrl: Boolean!
     discordMessageTemplate: String!
+    hasDiscordBotToken: Boolean!
+    discordGuildId: String
     hasGoogleClientSecret: Boolean!
     googleCalendarConnected: Boolean!
     googleCalendarError: String
@@ -171,6 +173,86 @@ export const typeDefs = gql`
     chatCaveman: String!
     """How many chat turns a bridge runs at once; null leaves it to the bridge's own file."""
     chatParallelTurns: String
+  }
+
+  type DiscordAttachment {
+    name: String!
+    size: Int!
+    type: String
+  }
+
+  type DiscordMention {
+    id: ID!
+    name: String!
+    me: Boolean!
+  }
+
+  type DiscordMessage {
+    id: ID!
+    author: String!
+    mine: Boolean!
+    at: String!
+    text: String!
+    mentions: [DiscordMention!]!
+    attachments: [DiscordAttachment!]!
+  }
+
+  type DiscordClaim {
+    author: String!
+    mine: Boolean!
+    at: String!
+  }
+
+  type DiscordThreadTicket {
+    key: String!
+    status: String
+    assignee: String
+  }
+
+  """A Discord channel the owner follows, or one thread followed on its own. kind is bug, uat, pr or follow."""
+  type DiscordChannel {
+    id: ID!
+    """Null until the bot has read it."""
+    name: String
+    kind: String!
+    thread: Boolean!
+    enabled: Boolean!
+  }
+
+  """A thread of a followed channel, as the Discord reader sorted it."""
+  type DiscordThread {
+    id: ID!
+    channelId: ID!
+    channel: String!
+    kind: String!
+    title: String!
+    url: String!
+    state: String!
+    why: String!
+    needsYou: Boolean!
+    """Needs the owner but has been quiet for three days."""
+    older: Boolean!
+    dismissed: Boolean!
+    createdBy: String
+    createdAt: String!
+    lastActivity: String!
+    messageCount: Int!
+    tags: [String!]!
+    tickets: [DiscordThreadTicket!]!
+    prs: [String!]!
+    claim: DiscordClaim
+    claimerRepliedAt: String
+    mentionedAt: String
+    repliedAt: String
+    messages: [DiscordMessage!]!
+  }
+
+  type DiscordThreads {
+    configured: Boolean!
+    syncedAt: String
+    error: String
+    channels: [DiscordChannel!]!
+    rows: [DiscordThread!]!
   }
 
   type ValidationResult {
@@ -835,6 +917,8 @@ export const typeDefs = gql`
     githubRepos: String
     discordWebhookUrl: String
     discordMessageTemplate: String
+    discordBotToken: String
+    discordGuildId: String
     googleClientId: String
     googleClientSecret: String
     googleCalendarId: String
@@ -902,6 +986,7 @@ export const typeDefs = gql`
     ticketDetail(key: String!): Ticket
     ticketRelationGroup(ticketKey: String!): TicketRelationGroup!
     needsAttention: [NeedsAttentionItem!]!
+    discordThreads: DiscordThreads!
     settings: Settings
     jiraProjects(url: String, email: String, token: String): [JiraProject!]!
     githubRepos(token: String): [GitHubRepo!]!
@@ -960,6 +1045,14 @@ export const typeDefs = gql`
     validateJira(url: String, email: String, token: String): ValidationResult
     validateGitHub(token: String): ValidationResult
     validateDiscord(webhookUrl: String): ValidationResult
+    testDiscordReader: ValidationResult!
+    refreshDiscord: DiscordThreads!
+    """Hides the thread until a message newer than lastActivity arrives."""
+    dismissDiscordThread(id: ID!, lastActivity: String!): Boolean!
+    """Follows a channel or a thread from its id or a discord.com/channels link."""
+    addDiscordChannel(input: String!, kind: String!): DiscordThreads!
+    updateDiscordChannel(id: ID!, kind: String!, enabled: Boolean!): DiscordThreads!
+    removeDiscordChannel(id: ID!): DiscordThreads!
     setMasterPin(pin: String!): Boolean
     changeMasterPin(oldPin: String!, newPin: String!): Boolean
     verifyMasterPin(pin: String!): Boolean

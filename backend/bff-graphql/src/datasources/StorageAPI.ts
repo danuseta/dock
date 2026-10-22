@@ -32,7 +32,7 @@ export const isValidServiceHealthRefreshSeconds = (value: unknown) => {
 
 export class StorageAPI {
   private readonly sensitiveKeys = new Set([
-    'jiraApiToken', 'githubToken', 'discordWebhookUrl', 'googleClientSecret', 'googleRefreshToken',
+    'jiraApiToken', 'githubToken', 'discordWebhookUrl', 'discordBotToken', 'googleClientSecret', 'googleRefreshToken',
   ]);
 
   constructor(private readonly storage = new StorageService()) {}
@@ -165,6 +165,8 @@ export class StorageAPI {
       hasGithubToken: Boolean(settings.githubToken),
       hasDiscordWebhookUrl: Boolean(settings.discordWebhookUrl),
       discordMessageTemplate: settings.discordMessageTemplate || DEFAULT_DISCORD_MESSAGE_TEMPLATE,
+      hasDiscordBotToken: Boolean(settings.discordBotToken),
+      discordGuildId: settings.discordGuildId || null,
       hasGoogleClientSecret: Boolean(settings.googleClientSecret),
       googleCalendarConnected: Boolean(settings.googleRefreshToken),
       serviceHealthRefreshSeconds: isValidServiceHealthRefreshSeconds(settings.serviceHealthRefreshSeconds)

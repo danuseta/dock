@@ -33,6 +33,8 @@ export interface SavedSettings {
   hasGithubToken?: boolean | null;
   hasDiscordWebhookUrl?: boolean | null;
   discordMessageTemplate?: string | null;
+  hasDiscordBotToken?: boolean | null;
+  discordGuildId?: string | null;
   hasGoogleClientSecret?: boolean | null;
   googleCalendarConnected?: boolean | null;
   googleCalendarError?: string | null;
@@ -92,7 +94,12 @@ export function savedValues(settings: SavedSettings): Record<DraftSectionId, Sec
     },
     jira: { jiraUrl: settings.jiraUrl || '', jiraEmail: settings.jiraEmail || '', jiraApiToken: '', jiraProjectKeys: settings.jiraProjectKeys || '' },
     github: { githubToken: '', githubRepos: settings.githubRepos || '' },
-    discord: { discordWebhookUrl: '', discordMessageTemplate: settings.discordMessageTemplate || DEFAULT_DISCORD_MESSAGE_TEMPLATE },
+    discord: {
+      discordWebhookUrl: '',
+      discordMessageTemplate: settings.discordMessageTemplate || DEFAULT_DISCORD_MESSAGE_TEMPLATE,
+      discordBotToken: '',
+      discordGuildId: settings.discordGuildId || '',
+    },
     calendar: { googleClientId: settings.googleClientId || '', googleClientSecret: '', googleCalendarId: settings.googleCalendarId || 'primary' },
   };
 }

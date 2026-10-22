@@ -8,12 +8,14 @@ import { startOrchestratorCron } from './integrations/orchestrator-cron';
 import { orchestratorCron } from './integrations/orchestrator-cron-live';
 import { orchestratorService } from './integrations/orchestrator';
 import { JiraAPI } from './datasources/JiraAPI';
+import { discordReader } from './integrations/discord-reader-live';
 import { dockMode } from './mode';
 import { useWriteAheadLog } from './storage/client';
 import { StorageService } from './storage/service';
 
 const port = Number(process.env.PORT || 4000);
 const JIRA_SYNC_MS = 5 * 60 * 1000;
+const DISCORD_SYNC_MS = 5 * 60 * 1000;
 
 export async function startServer(): Promise<void> {
   const journal = await useWriteAheadLog().catch((error) => `unchanged (${error instanceof Error ? error.message : 'unknown error'})`);
@@ -35,6 +37,14 @@ export async function startServer(): Promise<void> {
       .then((tickets) => orchestratorService.syncJira(dockMode(), tickets))
       .catch((error) => console.warn('[Orchestrator] Jira sync failed:', error instanceof Error ? error.message : 'unknown error'));
     setInterval(syncJira, JIRA_SYNC_MS).unref();
+    // One DOCK reads Discord, so the bot does not read the forums twice.
+    if (dockMode() === 'workspace') {
+      const syncDiscord = () => discordReader.config()
+        .then((config) => (config ? discordReader.sync() : null))
+        .catch((error) => console.warn('[Discord] Sync failed:', error instanceof Error ? error.message : 'unknown error'));
+      void syncDiscord();
+      setInterval(syncDiscord, DISCORD_SYNC_MS).unref();
+    }
   });
 }
 

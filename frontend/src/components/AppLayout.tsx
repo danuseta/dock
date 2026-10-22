@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, BarChart3, Bot, Box, CalendarDays, ChevronLeft, ChevronRight, History, Home as HomeIcon, LayoutDashboard, ListChecks, MoreHorizontal, Settings as SettingsIcon, Clapperboard, Server, Stethoscope } from 'lucide-react';
+import { Activity, BarChart3, Bot, Box, CalendarDays, ChevronLeft, ChevronRight, History, Home as HomeIcon, LayoutDashboard, ListChecks, MessagesSquare, MoreHorizontal, Settings as SettingsIcon, Clapperboard, Server, Stethoscope } from 'lucide-react';
 import { useQuery } from '@apollo/client';
-import { GET_NEEDS_ATTENTION, GET_OWNER_QUESTIONS } from '../graphql/queries';
+import { GET_DISCORD_THREADS, GET_NEEDS_ATTENTION, GET_OWNER_QUESTIONS } from '../graphql/queries';
 import { ticketAttention, ticketQuestions } from '../lib/attention';
 import { questionCount } from '../decisions/questions';
+import { discordAttention, needsYou, type DiscordThread } from '../lib/discordThreads';
 import { NAVIGATION_PREFERENCES_EVENT, NavigationPreferences, readNavigationPreferences, saveNavigationPreferences } from '../lib/navigationPreferences';
 import { applyUpdate, checkForUpdate } from '../lib/appUpdate';
 import { cn } from '../lib/cn';
@@ -23,8 +24,10 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
   const [preferences, setPreferences] = useState(readNavigationPreferences);
   const { data } = useQuery(GET_NEEDS_ATTENTION, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
   const { data: questionsData } = useQuery(GET_OWNER_QUESTIONS, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
-  const attentionCount = ticketAttention(data?.needsAttention ?? [], ticketQuestions(questionsData?.orchestrations ?? [])).length;
   const decisionCount = questionCount(questionsData?.orchestrations ?? []);
+  const { data: discordData } = useQuery(GET_DISCORD_THREADS, { ...CACHED_QUERY_OPTIONS, pollInterval: 60000, skip: !hasPage(mode, '/discord') });
+  const discordCount = (discordData?.discordThreads?.rows ?? []).filter((row: DiscordThread) => needsYou(row) && !row.older).length;
+  const attentionCount = ticketAttention([...(data?.needsAttention ?? []), ...discordAttention(discordData?.discordThreads?.rows ?? [])], ticketQuestions(questionsData?.orchestrations ?? [])).length;
   const [moreOpen, setMoreOpen] = useState(false);
   const [updateOffered, setUpdateOffered] = useState(false);
 
@@ -60,6 +63,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
     // Not /health: the server answers that path itself for its health check.
     { path: '/machines', label: 'Health', icon: Stethoscope, badge: 0 },
     { path: '/decisions', label: 'Decisions', icon: ListChecks, badge: decisionCount },
+    { path: '/discord', label: 'Discord', icon: MessagesSquare, badge: discordCount },
     { path: '/settings', label: 'System Settings', icon: SettingsIcon, badge: 0 },
   ].filter((item) => hasPage(mode, item.path));
 

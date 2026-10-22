@@ -9,7 +9,10 @@ import { upstreamMonitorService } from '../integrations/upstream-monitor';
 import { dockerRuntimeService } from '../integrations/docker-runtime';
 import { OrchestratorInputError, attentionItems, normalizeTicketKey, orchestratorService } from '../integrations/orchestrator';
 import { CHAT_MACHINE, chatService } from '../integrations/chat';
-import { mergeAttention, withoutSettledTickets } from '../integrations/attention';
+import { isSettledStatus, mergeAttention, withoutSettledTickets } from '../integrations/attention';
+import { discordReader } from '../integrations/discord-reader-live';
+import { ChannelInputError, channelStore, isChannelKind, threadService, withJira } from '../integrations/discord-threads';
+import { DiscordReaderError } from '../integrations/discord-reader';
 import { CronInputError, type OwnerAnswer, type OwnerChange } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
 import { labelOrder } from '../integrations/orchestrator-cron';
@@ -33,6 +36,27 @@ const githubAPI = new GitHubAPI();
 const discordAPI = new DiscordAPI();
 const storageAPI = new StorageAPI();
 const isPresent = <T>(value: T | null | undefined): value is T => value != null;
+
+async function discordThreadsView() {
+  const [config, status, channels, stored] = await Promise.all([discordReader.config(), discordReader.status(), channelStore.list(), threadService.list()]);
+  // A channel turned off or removed hides its threads now; the next sync drops them.
+  const on = new Set(channels.filter((channel) => channel.enabled).map((channel) => channel.id));
+  const rows = stored.filter((row) => on.has(row.channelId));
+  const keys = [...new Set(rows.flatMap((row) => row.tickets))];
+  const tickets = await Promise.all(keys.map((key) => jiraAPI.getTicket(key).catch(() => null)));
+  const jira = new Map(tickets.filter(isPresent).map((ticket: any) => [String(ticket.key), { status: ticket.status ? String(ticket.status) : null, assignee: ticket.assignee ? String(ticket.assignee) : null }]));
+  return { configured: Boolean(config), syncedAt: status.syncedAt, error: status.error, channels, rows: withJira(rows, jira, isSettledStatus, new Date()) };
+}
+
+function channelKind(kind: string) {
+  if (!isChannelKind(kind)) throw new GraphQLError('kind must be bug, uat, pr or follow', { extensions: { code: 'BAD_USER_INPUT' } });
+  return kind;
+}
+
+const discordInputError = (error: unknown): never => {
+  if (error instanceof ChannelInputError || error instanceof DiscordReaderError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+  throw error;
+};
 
 function orchestratorInputError(error: unknown): never {
   if (error instanceof OrchestratorInputError) {
@@ -186,6 +210,7 @@ export const resolvers = {
     ticketRelationGroup: async (_: any, { ticketKey }: { ticketKey: string }) => {
       return storageAPI.getTicketRelationGroup(ticketKey);
     },
+    discordThreads: () => discordThreadsView(),
     needsAttention: async () => {
       const [agentItems, pullRequestItems] = await Promise.all([
         orchestratorService.list().then((runs) => attentionItems(ownRuns(runs))).catch((error) => {
@@ -401,6 +426,26 @@ export const resolvers = {
     },
     validateGitHub: async (_: any, { token }: { token?: string }) => {
       return await githubAPI.validateGitHub(token);
+    },
+    testDiscordReader: () => discordReader.test(),
+    refreshDiscord: async () => {
+      await discordReader.sync();
+      return discordThreadsView();
+    },
+    dismissDiscordThread: (_: unknown, { id, lastActivity }: { id: string; lastActivity: string }) => threadService.dismiss(id, lastActivity),
+    addDiscordChannel: async (_: unknown, { input, kind }: { input: string; kind: string }) => {
+      await discordReader.addChannel(input, channelKind(kind)).catch(discordInputError);
+      return discordThreadsView();
+    },
+    updateDiscordChannel: async (_: unknown, { id, kind, enabled }: { id: string; kind: string; enabled: boolean }) => {
+      const channel = (await channelStore.list()).find((entry) => entry.id === id);
+      if (!channel) throw new GraphQLError('That channel is not followed', { extensions: { code: 'BAD_USER_INPUT' } });
+      await channelStore.save({ ...channel, kind: channelKind(kind), enabled });
+      return discordThreadsView();
+    },
+    removeDiscordChannel: async (_: unknown, { id }: { id: string }) => {
+      await channelStore.remove(id);
+      return discordThreadsView();
     },
     validateDiscord: async (_: any, { webhookUrl }: { webhookUrl?: string }) => {
       return await discordAPI.validateDiscord(webhookUrl);
@@ -622,7 +667,7 @@ export const resolvers = {
 };
 
 export const protectedQueries = [
-  'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
+  'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'agentLooks', 'libraryAgents', 'libraryAgent',
@@ -640,6 +685,12 @@ export const protectedMutations = [
   'validateJira',
   'validateGitHub',
   'validateDiscord',
+  'testDiscordReader',
+  'refreshDiscord',
+  'dismissDiscordThread',
+  'addDiscordChannel',
+  'updateDiscordChannel',
+  'removeDiscordChannel',
   'changeMasterPin',
   'removeMasterPin',
   'refreshData',

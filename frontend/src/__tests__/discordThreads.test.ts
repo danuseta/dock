@@ -1,0 +1,64 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { ticketAttention } from '../lib/attention';
+import { ago, channelLabel, channelTabs, countFor, discordAttention, mentionParts, threadsFor, type DiscordThread } from '../lib/discordThreads';
+
+const thread = (id: string, extra: Partial<DiscordThread>): DiscordThread => ({
+  id, channelId: 'cb', channel: 'bug-report', kind: 'bug', title: `Thread ${id}`, url: `https://discord.com/channels/g/${id}`, state: 'FLOW_1', why: 'New bug; nobody said on it',
+  needsYou: true, older: false, dismissed: false, createdBy: 'Rina', createdAt: '2026-10-20T09:00:00.000Z', lastActivity: '2026-10-22T09:00:00.000Z',
+  messageCount: 1, tags: [], tickets: [], prs: [], claim: null, claimerRepliedAt: null, mentionedAt: null, repliedAt: null, messages: [], ...extra,
+});
+
+const rows = [
+  thread('a', { state: 'YOUR_TURN', lastActivity: '2026-10-22T08:00:00.000Z' }),
+  thread('b', { state: 'FLOW_1', lastActivity: '2026-10-22T10:00:00.000Z' }),
+  thread('c', { state: 'FLOW_1', older: true, lastActivity: '2026-10-22T11:00:00.000Z' }),
+  thread('d', { state: 'TAKEN', needsYou: false, channelId: 'cu', channel: 'uat-bug-report', kind: 'uat' }),
+  thread('e', { state: 'REVIEW_ASKED', channelId: 'cp', channel: 'pr-review', kind: 'pr', dismissed: true }),
+  thread('f', { state: 'CLOSED', needsYou: false }),
+];
+
+test('Needs you lists fresh threads by state, quiet ones after; Open and Done split the rest', () => {
+  assert.deepStrictEqual(threadsFor(rows, 'all', 'needs').map((row) => row.id), ['b', 'a', 'c'], 'FLOW_1 before YOUR_TURN, the quiet one last, a dismissed one out');
+  assert.deepStrictEqual(threadsFor(rows, 'all', 'open').map((row) => row.id), ['c', 'b', 'd', 'a']);
+  assert.deepStrictEqual(threadsFor(rows, 'all', 'done').map((row) => row.id).sort(), ['e', 'f']);
+  assert.deepStrictEqual(threadsFor(rows, 'cu', 'open').map((row) => row.id), ['d']);
+  assert.strictEqual(countFor(rows, 'cp', 'needs'), 0);
+});
+
+test('a message marks the owner and the others it mentions', () => {
+  const message = { id: '1', author: 'Rina', mine: false, at: '', text: '@Danu and @Rina QA please', mentions: [{ id: '9', name: 'Danu', me: true }, { id: '2', name: 'Rina QA', me: false }], attachments: [] };
+  assert.deepStrictEqual(mentionParts(message), [{ text: '@Danu', mention: 'me' }, { text: ' and ' }, { text: '@Rina QA', mention: 'other' }, { text: ' please' }]);
+  assert.deepStrictEqual(mentionParts({ ...message, mentions: [] }), [{ text: '@Danu and @Rina QA please' }]);
+});
+
+test('ago reads minutes, hours, then days', () => {
+  const now = new Date('2026-10-22T12:00:00.000Z');
+  assert.deepStrictEqual(['2026-10-22T11:48:00.000Z', '2026-10-22T09:00:00.000Z', '2026-10-19T12:00:00.000Z'].map((at) => ago(at, now)), ['12m', '3h', '3d']);
+});
+
+test('a Discord thread joins its ticket row on Home, or gets one of its own', () => {
+  const items = discordAttention([
+    thread('t1', { tickets: [{ key: 'QRD-1384', status: 'PR Review', assignee: null }], why: 'Rina mentioned you' }),
+    thread('t2', { title: 'Broadcast preview cut', why: 'Alvin mentioned you', channelId: 'cu', channel: 'uat-bug-report', kind: 'uat' }),
+    thread('t5', { title: 'Release checklist', channel: 'Release checklist', channelId: 't5', kind: 'follow', why: 'Rina mentioned you' }),
+    thread('t3', { older: true }),
+    thread('t4', { dismissed: true }),
+  ]);
+  assert.deepStrictEqual(items.map((item) => item.id), ['discord-t1', 'discord-t2', 'discord-t5'], 'quiet and dismissed threads stay on the Discord page');
+  assert.strictEqual(items[2].message, 'Rina mentioned you in a followed thread: Release checklist');
+  assert.strictEqual(items[1].message, 'Alvin mentioned you in #uat-bug-report: Broadcast preview cut');
+  const home = ticketAttention([{ id: 'pr-1', type: 'CONFLICT', message: 'Merge conflict', ticketKey: 'QRD-1384' }, ...items], []);
+  assert.deepStrictEqual(home.map((row) => [row.id, row.items.map((item) => item.type)]), [['QRD-1384', ['CONFLICT', 'DISCORD']], ['discord-t2', ['DISCORD']], ['discord-t5', ['DISCORD']]]);
+});
+
+test('the tabs follow the channels that are on, named once the bot has read them', () => {
+  const channels = [
+    { id: 'cb', name: 'bug-report', kind: 'bug' as const, thread: false, enabled: true },
+    { id: '1527229030439321820', name: null, kind: 'uat' as const, thread: false, enabled: true },
+    { id: 't5', name: 'Release checklist', kind: 'follow' as const, thread: true, enabled: true },
+    { id: 'cx', name: 'old', kind: 'bug' as const, thread: false, enabled: false },
+  ];
+  assert.deepStrictEqual(channelTabs(channels).map((tab) => tab.label), ['All', '#bug-report', '1527229030439321820', 'Release checklist']);
+  assert.strictEqual(channelLabel(channels[3]), '#old');
+});

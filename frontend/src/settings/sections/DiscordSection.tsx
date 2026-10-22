@@ -1,11 +1,11 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useMutation } from '@apollo/client';
 import { Zap } from 'lucide-react';
-import { VALIDATE_DISCORD } from '../../graphql/mutations';
-import { Badge, Button, Textarea } from '../../components/ui';
+import { TEST_DISCORD_READER, VALIDATE_DISCORD } from '../../graphql/mutations';
+import { Badge, Button, Input, Textarea } from '../../components/ui';
 import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, renderDiscordMessageTemplate } from '../../lib/discordTemplate';
 import { sectionErrors, type SavedSettings, type SectionValues, type TestResult } from '../sections';
-import { ConnectionStatus, SecretInput, SettingsCard, TestResultText } from '../SettingsParts';
+import { ConnectionStatus, Field, SecretInput, SettingsCard, TestResultText } from '../SettingsParts';
 
 const TEMPLATE_FIELDS = ['ticketKey', 'ticketTitle', 'ticketUrl', 'relatedTickets', 'pullRequests', 'demoUrl'];
 
@@ -23,6 +23,8 @@ export const DiscordSection = ({ values, set, settings, test, onTested }: {
   onTested: (result: TestResult) => void;
 }) => {
   const [validate, { loading: testing }] = useMutation(VALIDATE_DISCORD);
+  const [testReader, { loading: testingReader }] = useMutation(TEST_DISCORD_READER);
+  const [readerTest, setReaderTest] = useState<TestResult>();
   const templateRef = useRef<HTMLTextAreaElement>(null);
   const saved = Boolean(settings.hasDiscordWebhookUrl);
   const template = values.discordMessageTemplate;
@@ -35,6 +37,16 @@ export const DiscordSection = ({ values, set, settings, test, onTested }: {
       onTested({ ok: Boolean(result?.success), message: result?.success && !values.discordWebhookUrl ? `${result.message} (saved webhook)` : result?.message ?? 'No answer' });
     } catch (testError) {
       onTested({ ok: false, message: testError instanceof Error ? testError.message : 'Discord test failed' });
+    }
+  };
+
+  // The server tests the saved reader settings, so a change is saved first.
+  const handleReaderTest = async () => {
+    try {
+      const result = (await testReader()).data?.testDiscordReader;
+      setReaderTest({ ok: Boolean(result?.success), message: result?.message ?? 'No answer' });
+    } catch (testError) {
+      setReaderTest({ ok: false, message: testError instanceof Error ? testError.message : 'Discord test failed' });
     }
   };
 
@@ -59,6 +71,14 @@ export const DiscordSection = ({ values, set, settings, test, onTested }: {
         <div className="flex flex-col gap-3">
           <SecretInput label="Webhook URL" saved={saved} value={values.discordWebhookUrl} onChange={(value) => set('discordWebhookUrl', value)} placeholder="https://discord.com/api/webhooks/..." hint="Leave it blank and Test checks the saved webhook." />
           <div className="flex flex-wrap items-center gap-3"><Button onClick={handleTest} disabled={testing || (!saved && !values.discordWebhookUrl)}><Zap size={16} aria-hidden="true" />Test webhook</Button><TestResultText busy={testing} result={test} /></div>
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="Forum reader" caption="DOCK reads the channels you follow on the Discord page every 5 minutes. Add and remove channels there. Your Discord id comes from the Cron settings.">
+        <div className="flex flex-col gap-3">
+          <SecretInput label="Bot token" saved={Boolean(settings.hasDiscordBotToken)} value={values.discordBotToken} onChange={(value) => set('discordBotToken', value)} placeholder="Bot token" hint="The bot needs View Channel, Read Message History and the Message Content intent on the channels you follow." />
+          <Field label="Server id" hint="Developer Mode on, right click the server name, Copy Server ID."><Input className="font-mono text-xs" inputMode="numeric" value={values.discordGuildId} onChange={(event) => set('discordGuildId', event.target.value.trim())} placeholder="1389235158414000200" /></Field>
+          <div className="flex flex-wrap items-center gap-3"><Button onClick={handleReaderTest} disabled={testingReader || !settings.hasDiscordBotToken}><Zap size={16} aria-hidden="true" />Test saved reader</Button><TestResultText busy={testingReader} result={readerTest} /></div>
         </div>
       </SettingsCard>
 

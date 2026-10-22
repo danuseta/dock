@@ -324,3 +324,30 @@ model ElevenLabsKey {
   parkedUntil DateTime?
   createdAt   DateTime  @default(now())
 }
+
+/// A Discord forum thread the Discord page lists, saved by the Discord reader. Each sync sends the full set: a thread that is no longer sent gets removedAt.
+model DiscordThread {
+  id            String    @id
+  payload       String
+  lastActivity  DateTime
+  lastMessageId String?
+  updatedAt     DateTime
+  removedAt     DateTime?
+}
+
+/// The owner dismissed a thread. It holds only while the thread's lastActivity is the one that was dismissed.
+model DiscordThreadDismissal {
+  threadId     String   @id
+  lastActivity DateTime
+  createdAt    DateTime
+}
+
+/// A Discord channel or thread the owner follows on the Discord page. kind is bug, uat, pr or follow.
+model DiscordChannel {
+  id      String   @id
+  name    String?
+  kind    String
+  thread  Boolean
+  enabled Boolean
+  addedAt DateTime
+}

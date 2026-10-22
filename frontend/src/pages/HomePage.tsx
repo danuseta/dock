@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { Plus, RefreshCw, Trash2, X } from 'lucide-react';
-import { GET_HOME_CORE, GET_HOME_SECONDARY, GET_OWNER_QUESTIONS } from '../graphql/queries';
+import { GET_DISCORD_THREADS, GET_HOME_CORE, GET_HOME_SECONDARY, GET_OWNER_QUESTIONS } from '../graphql/queries';
 import { ADD_QUICK_LINK, REMOVE_QUICK_LINK } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { WebsiteIcon } from '../components/WebsiteIcon';
@@ -9,6 +9,7 @@ import { DockerRuntimeCard } from '../components/DockerRuntimeCard';
 import { AgentRunStrip } from '../components/AgentRunStrip';
 import { HomeAttention, type HomeAttentionItem } from '../components/HomeAttention';
 import { ticketAttention, ticketQuestions } from '../lib/attention';
+import { discordAttention } from '../lib/discordThreads';
 import { isArchived, type AgentRunSummary } from '../agents/runs';
 import { MonthCalendar } from '../components/MonthCalendar';
 import { Button, Card, Dialog, IconButton, Input, Page, Select } from '../components/ui';
@@ -45,6 +46,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
     { ...CACHED_QUERY_OPTIONS, variables: { calendar: showCalendar, docker: showDocker, monitors: showMonitors }, pollInterval: healthRefreshSeconds * 1000 },
   );
   const { data: questionsData } = useQuery(GET_OWNER_QUESTIONS, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
+  const { data: discordData } = useQuery(GET_DISCORD_THREADS, { ...CACHED_QUERY_OPTIONS, pollInterval: 60000, skip: !hasPage(mode, '/discord') });
   const [addQuickLink, { loading: adding }] = useMutation(ADD_QUICK_LINK, { refetchQueries: [{ query: GET_HOME_CORE }] });
   const [removeQuickLink] = useMutation(REMOVE_QUICK_LINK, { refetchQueries: [{ query: GET_HOME_CORE }] });
   const [now, setNow] = useState(new Date());
@@ -76,7 +78,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
   const monitors = secondaryData?.monitors || [];
   const healthyServices = monitors.filter((monitor: any) => monitor.lastStatus === 'UP').length;
   const calendarEvents: CalendarEvent[] = secondaryData?.calendarEvents || [];
-  const attention = ticketAttention<HomeAttentionItem>(secondaryData?.needsAttention ?? [], ticketQuestions(questionsData?.orchestrations ?? []));
+  const attention = ticketAttention<HomeAttentionItem>([...(secondaryData?.needsAttention ?? []), ...discordAttention(discordData?.discordThreads?.rows ?? [])], ticketQuestions(questionsData?.orchestrations ?? []));
   const agentRuns: Array<AgentRunSummary & { title: string }> = (secondaryData?.orchestrations || []).filter((run: AgentRunSummary) => !isArchived(run));
   const runOf = new Map(agentRuns.map((run) => [run.key, run]));
   const titleOf = (key: string) => tickets.find((ticket: any) => ticket.key === key)?.title;

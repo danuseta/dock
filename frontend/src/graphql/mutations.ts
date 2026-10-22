@@ -1,5 +1,5 @@
 import { gql } from '@apollo/client';
-import { CHAT_INTERACTION_FIELDS, CHAT_MESSAGE_FIELDS, CHAT_SESSION_FIELDS } from './queries';
+import { CHAT_INTERACTION_FIELDS, CHAT_MESSAGE_FIELDS, CHAT_SESSION_FIELDS, DISCORD_THREAD_FIELDS } from './queries';
 
 export const SAVE_DEMO_LINK = gql`
   mutation SaveDemoLink($ticketKey: String!, $url: String!) {
@@ -468,4 +468,47 @@ export const DELETE_LIBRARY_AGENT = gql`
   mutation DeleteLibraryAgent($slug: String!, $machine: String) {
     deleteLibraryAgent(slug: $slug, machine: $machine) { ok diff error }
   }
+`;
+
+export const REFRESH_DISCORD = gql`
+  mutation RefreshDiscord {
+    refreshDiscord { ...DiscordThreadFields }
+  }
+  ${DISCORD_THREAD_FIELDS}
+`;
+
+export const DISMISS_DISCORD_THREAD = gql`
+  mutation DismissDiscordThread($id: ID!, $lastActivity: String!) {
+    dismissDiscordThread(id: $id, lastActivity: $lastActivity)
+  }
+`;
+
+export const TEST_DISCORD_READER = gql`
+  mutation TestDiscordReader {
+    testDiscordReader {
+      success
+      message
+    }
+  }
+`;
+
+export const ADD_DISCORD_CHANNEL = gql`
+  mutation AddDiscordChannel($input: String!, $kind: String!) {
+    addDiscordChannel(input: $input, kind: $kind) { ...DiscordThreadFields }
+  }
+  ${DISCORD_THREAD_FIELDS}
+`;
+
+export const UPDATE_DISCORD_CHANNEL = gql`
+  mutation UpdateDiscordChannel($id: ID!, $kind: String!, $enabled: Boolean!) {
+    updateDiscordChannel(id: $id, kind: $kind, enabled: $enabled) { ...DiscordThreadFields }
+  }
+  ${DISCORD_THREAD_FIELDS}
+`;
+
+export const REMOVE_DISCORD_CHANNEL = gql`
+  mutation RemoveDiscordChannel($id: ID!) {
+    removeDiscordChannel(id: $id) { ...DiscordThreadFields }
+  }
+  ${DISCORD_THREAD_FIELDS}
 `;
