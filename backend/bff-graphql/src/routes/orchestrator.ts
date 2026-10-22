@@ -11,6 +11,7 @@ import { demoVideos, ingestDemoLink, type DemoVideos } from '../integrations/dem
 import { DEMO_STORAGE_ROUTES, demoStorage, demoStorageRoute, type DemoStorage } from '../integrations/demo-storage';
 import { receiveDemoVideo } from './demo-videos';
 import { autoBroadcast, type AutoBroadcast } from '../integrations/broadcast';
+import { decisionGate, type DecisionGate } from '../integrations/decision-gate';
 import { doctorReports, type DoctorReports } from '../integrations/doctor';
 import { dockMode } from '../mode';
 import { ELEVENLABS_ROUTES, elevenLabsKeys, elevenLabsRoute, type ElevenLabsKeys } from '../integrations/elevenlabs-keys';
@@ -18,6 +19,7 @@ import { MAX_TRANSCRIPT_BYTES, OrchestratorInputError, OrchestratorService, orch
 import { StorageService } from '../storage/service';
 
 const broadcastFailed = (error: unknown) => console.error('[Broadcast] automatic broadcast failed:', error instanceof Error ? error.message : 'unknown error');
+const gateFailed = (error: unknown) => console.error('[Decision gate] failed:', error instanceof Error ? error.message : 'unknown error');
 
 const clientKey = (request: Request) => request.ip || request.socket.remoteAddress || 'unknown';
 
@@ -59,6 +61,8 @@ export function createOrchestratorIngestRouter(
   // Only the workspace DOCK keeps the demo videos, so only it posts the broadcast that carries them.
   broadcast: Pick<AutoBroadcast, 'afterDemoVideo' | 'afterLedger'> | null = dockMode() === 'workspace' ? autoBroadcast : null,
   agents: Pick<AgentBridge, 'receive'> = agentBridge,
+  // A ledger push can answer the last issue: the gate then marks the draft pull requests ready.
+  gate: Pick<DecisionGate, 'settle'> | null = decisionGate,
 ): Router {
   const router = Router();
 
@@ -90,6 +94,7 @@ export function createOrchestratorIngestRouter(
   router.post('/', small, handle(async (body, _signal, machine) => {
     const run = await service.ingestLedger(body, new Date(), machine);
     if (!run.ignored && broadcast) void broadcast.afterLedger(run).catch(broadcastFailed);
+    if (!run.ignored && gate) void gate.settle(run).catch(gateFailed);
     return run.ignored ? { key: run.key, ignored: true, owner: run.machine } : { key: run.key, stage: run.stage };
   }));
   router.post('/ledger/list', small, handle((_body, _signal, machine) => service.ledgerList(machine)));

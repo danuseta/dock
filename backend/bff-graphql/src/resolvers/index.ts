@@ -20,6 +20,7 @@ import { DevServerError, devServers } from '../integrations/dev-servers';
 import { elevenLabsKeys } from '../integrations/elevenlabs-keys';
 import { broadcastDeps, sendBroadcast } from '../integrations/broadcast';
 import { approvalRecords, approveReview, liveApprovalDeps } from '../integrations/review-approval';
+import { decisionGate } from '../integrations/decision-gate';
 import { doctorReports } from '../integrations/doctor';
 import { agentLooks } from '../integrations/agent-looks';
 import { agentBridge } from '../integrations/agents-live';
@@ -323,6 +324,7 @@ export const resolvers = {
 
   Orchestration: {
     approved: async (parent: { key: string }) => approvalRecords.approved(parent.key).catch(() => false),
+    confirmedDecisions: async (parent: { key: string }) => decisionGate.confirmed(parent.key).catch(() => []),
     events: async (parent: { key: string }) => orchestratorService.events(parent.key),
     timeline: async (parent: { key: string }) => orchestratorService.timeline(parent.key),
     members: async (parent: { key: string }) => orchestratorService.members(parent.key).catch(() => []),
@@ -512,12 +514,21 @@ export const resolvers = {
       await chatService.answerTicket(ticketKey, text, await orchestratorService.machines()).catch(orchestratorInputError);
       return true;
     },
-    cancelDecision: async (_: unknown, { ticketKey, n, note }: { ticketKey: string; n: number; note: string }) => {
+    changeDecision: async (_: unknown, { ticketKey, n, choice }: { ticketKey: string; n: number; choice: string }) => {
       requireAgentControls();
       const key = await Promise.resolve().then(() => normalizeTicketKey(ticketKey)).catch(cronError);
-      await orchestratorCron.cancelDecision(key, n, note).catch(cronError);
-      await orchestratorService.recordEvent(key, 'OWNER_CANCEL', `D-${n}: new session`);
+      await orchestratorCron.changeDecision(key, n, choice).catch(cronError);
+      await orchestratorService.recordEvent(key, 'OWNER_CHANGE', `D-${n}: new session`);
       return true;
+    },
+    confirmDecisions: async (_: unknown, { ticketKey, ns }: { ticketKey: string; ns: number[] }) => {
+      requireAgentControls();
+      const run = await orchestratorService.get(ticketKey);
+      if (!run) throw new GraphQLError('No run for this ticket', { extensions: { code: 'BAD_USER_INPUT' } });
+      const confirmed = await decisionGate.confirm(run, ns)
+        .catch((error: Error) => { throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } }); });
+      await decisionGate.settle(run);
+      return confirmed;
     },
     approveReview: async (_: unknown, { ticketKey }: { ticketKey: string }) => {
       const run = await orchestratorService.get(ticketKey);
@@ -653,7 +664,8 @@ export const protectedMutations = [
   'createChatSession',
   'sendChatMessage',
   'answerTicket',
-  'cancelDecision',
+  'changeDecision',
+  'confirmDecisions',
   'approveReview',
   'answerChatInteraction',
   'stopChatTurn',

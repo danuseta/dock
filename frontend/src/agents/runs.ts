@@ -21,9 +21,13 @@ export interface TimelineVisit { stageIndex: number; round: number; from?: strin
 export type RunKind = 'build' | 'review' | 'card';
 
 /** A decision in the ledger, D-n; entries from before sous have no n, status or by. */
-export interface AgentDecision { n?: number | null; at: string; text: string; status?: string | null; by?: string | null; issue?: number | null; cancelNote?: string | null }
+export interface AgentDecisionAlt { label: string; effect?: string | null }
+export interface AgentDecision {
+  n?: number | null; at: string; text: string; status?: string | null; by?: string | null; issue?: number | null; cancelNote?: string | null;
+  effect?: string | null; alts?: AgentDecisionAlt[]; replaces?: number | null; supersededBy?: number | null;
+}
 /** An issue raised during the run, I-n; level owner means it waits on the owner. */
-export interface AgentIssue { n: number; at: string; type: string; text: string; level: string; status: string; resolvedBy?: number | null; resolvedAt?: string | null; options: string[] }
+export interface AgentIssue { n: number; at: string; type: string; text: string; level: string; status: string; resolvedBy?: number | null; resolvedAt?: string | null; options: string[]; effects?: Array<string | null> }
 
 export interface AgentStackRepo { pr: string; branch?: string | null; base?: string | null; retargetedAt?: string | null }
 /** The parent ticket this run's pull requests are stacked on, per repo. */
@@ -67,6 +71,8 @@ export interface AgentRun {
   issues?: AgentIssue[];
   /** Every step of the owner's last review approval succeeded. */
   approved?: boolean;
+  /** The guessed decisions (SHOV, USULAN) the owner confirmed in DOCK. */
+  confirmedDecisions?: number[];
   blockers?: number;
   activity: string;
   activityDetail?: string | null;

@@ -577,7 +577,8 @@ export const ORCHESTRATION_FIELDS = `
   finished
   note
   brief
-  decisions { n at text status by issue cancelNote }
+  decisions { n at text status by issue cancelNote effect alts { label effect } replaces supersededBy }
+  confirmedDecisions
   assumptions { n text falsifier state evidence }
   failures { at type what evidence attempt }
   closing { hours fixRounds replans }
@@ -589,7 +590,7 @@ export const ORCHESTRATION_FIELDS = `
   stackedOn { key be { pr branch base retargetedAt } fe { pr branch base retargetedAt } }
   productionData
   draft
-  issues { n at type text level status resolvedBy resolvedAt options }
+  issues { n at type text level status resolvedBy resolvedAt options effects }
   blockers
   activity
   activityDetail

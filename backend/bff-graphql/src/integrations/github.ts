@@ -154,6 +154,18 @@ export class GitHubClient {
     await this.client.post(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, { event: 'APPROVE' });
   }
 
+  /** Marks a draft pull request ready for review (GraphQL only); false when it was not a draft. */
+  async markReadyForReview(owner: string, repo: string, pullNumber: number): Promise<boolean> {
+    const { data } = await this.client.get(`/repos/${owner}/${repo}/pulls/${pullNumber}`);
+    if (!data?.draft) return false;
+    const response = await this.client.post('/graphql', {
+      query: 'mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { isDraft } } }',
+      variables: { id: data.node_id },
+    });
+    if (response.data?.errors?.length) throw new Error(String(response.data.errors[0]?.message ?? 'GitHub refused'));
+    return true;
+  }
+
   async validateCredentials() {
     const response = await this.client.get('/user');
     return response.data;

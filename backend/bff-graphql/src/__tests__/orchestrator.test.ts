@@ -130,7 +130,7 @@ test('orchestrator ledger parsing keeps only what DOCK shows', () => {
   assert.deepStrictEqual(parsed.decisions, []);
   const withBrief = parseLedger({ ...ledger, brief: 'line 1\nline 2', decisions: [{ at: '2026-10-04T08:00:00.000Z', text: 'use X' }, 'bad', { at: 'x' }, null] });
   assert.strictEqual(withBrief.brief, 'line 1\nline 2');
-  assert.deepStrictEqual(withBrief.decisions, [{ n: 1, at: '2026-10-04T08:00:00.000Z', text: 'use X', status: 'DECIDED', by: null, issue: null, cancelNote: null }], 'an old decision reads as D-1 with no author');
+  assert.deepStrictEqual(withBrief.decisions, [{ n: 1, at: '2026-10-04T08:00:00.000Z', text: 'use X', status: 'DECIDED', by: null, issue: null, cancelNote: null, effect: null, alts: [], replaces: null, supersededBy: null }], 'an old decision reads as D-1 with no author');
   assert.deepStrictEqual(parsed.assumptions, []);
   assert.deepStrictEqual(parsed.failures, []);
   assert.strictEqual(parsed.closing, null);
@@ -208,12 +208,12 @@ test('sous ledger fields: engine, card kind, rounds, draft, numbered decisions a
     draft: true,
     blackboard: 'E:/qonflo/.evidence/blackboard/QRD-1387',
     decisions: [
-      { n: 3, at: '2026-10-20T01:00:00.000Z', text: 'Keep the old export', status: 'shov', by: 'arbiter', issue: 2 },
+      { n: 3, at: '2026-10-20T01:00:00.000Z', text: 'Keep the old export', status: 'shov', by: 'arbiter', issue: 2, effect: 'Export keeps the old columns', alts: [{ label: 'New export', effect: 'Columns follow the grid' }, { label: '' }, 'bad'] },
       { n: 4, at: '2026-10-20T02:00:00.000Z', text: 'Drop the cache', status: 'CANCELLED', by: 'sous', cancelNote: 'needed by QRD-9' },
       { n: 5, text: 'Odd one', status: 'MAYBE', by: 'robot' },
     ],
     issues: [
-      { n: 2, at: '2026-10-20T00:30:00.000Z', type: 'DISPUTE', text: 'BE and FE disagree on the field', level: 'owner', status: 'open', options: ['A', 'B', ''] },
+      { n: 2, at: '2026-10-20T00:30:00.000Z', type: 'DISPUTE', text: 'BE and FE disagree on the field', level: 'owner', status: 'open', options: ['A', '', 'B'], effects: ['BE adapts', 'lost', 7] },
       { n: 1, type: 'weird', text: 'Old question', status: 'resolved', resolvedBy: 3, resolvedAt: '2026-10-20T01:00:00.000Z' },
       { n: 6, text: '' },
     ],
@@ -223,9 +223,10 @@ test('sous ledger fields: engine, card kind, rounds, draft, numbered decisions a
   assert.deepStrictEqual(sous.decisions.map((item) => [item.n, item.status, item.by, item.issue, item.cancelNote]), [
     [3, 'SHOV', 'arbiter', 2, null], [4, 'CANCELLED', 'sous', null, 'needed by QRD-9'], [5, 'DECIDED', null, null, null],
   ]);
+  assert.deepStrictEqual([sous.decisions[0].effect, sous.decisions[0].alts], ['Export keeps the old columns', [{ label: 'New export', effect: 'Columns follow the grid' }]], 'the effect and the options sous did not build');
   assert.deepStrictEqual(sous.issues, [
-    { n: 2, at: '2026-10-20T00:30:00.000Z', type: 'DISPUTE', text: 'BE and FE disagree on the field', level: 'owner', status: 'open', resolvedBy: null, resolvedAt: null, options: ['A', 'B'] },
-    { n: 1, at: '', type: 'QUESTION', text: 'Old question', level: 'arbiter', status: 'resolved', resolvedBy: 3, resolvedAt: '2026-10-20T01:00:00.000Z', options: [] },
+    { n: 2, at: '2026-10-20T00:30:00.000Z', type: 'DISPUTE', text: 'BE and FE disagree on the field', level: 'owner', status: 'open', resolvedBy: null, resolvedAt: null, options: ['A', 'B'], effects: ['BE adapts', null] },
+    { n: 1, at: '', type: 'QUESTION', text: 'Old question', level: 'arbiter', status: 'resolved', resolvedBy: 3, resolvedAt: '2026-10-20T01:00:00.000Z', options: [], effects: [] },
   ]);
   const review = parseLedger({ ...ledger, kind: 'review', verdict: { value: 'approve', ticket: 'qrd-77', prs: ['https://github.com/o/be/pull/4', 'javascript:x'] } });
   assert.deepStrictEqual([review.verdict, review.reviewTicket, review.reviewPrs], ['approve', 'QRD-77', ['https://github.com/o/be/pull/4']]);

@@ -35,6 +35,7 @@ const CARD_KEY = /^CARD-[a-z0-9][a-z0-9-]{0,63}$/;
 const MAX_AC = 50;
 const MAX_DECISIONS = 100;
 const MAX_ISSUES = 100;
+const MAX_OPTIONS = 4;
 const MAX_ASSUMPTIONS = 50;
 const MAX_FAILURES = 100;
 const MAX_EVENTS_KEPT = 60;
@@ -56,7 +57,12 @@ export const DECISION_STATUSES = ['DECIDED', 'SHOV', 'USULAN', 'SUPERSEDED', 'CA
 export type DecisionStatus = typeof DECISION_STATUSES[number];
 export const DECISION_BY = ['owner', 'arbiter', 'sous', 'agent'] as const;
 export type DecisionBy = typeof DECISION_BY[number];
-export interface LedgerDecision { n: number; at: string; text: string; status: DecisionStatus; by: DecisionBy | null; issue: number | null; cancelNote: string | null }
+/** An option sous did not build, and what choosing it would change. */
+export interface DecisionAlternative { label: string; effect: string | null }
+export interface LedgerDecision {
+  n: number; at: string; text: string; status: DecisionStatus; by: DecisionBy | null; issue: number | null; cancelNote: string | null;
+  effect: string | null; alts: DecisionAlternative[]; replaces: number | null; supersededBy: number | null;
+}
 export const ISSUE_TYPES = ['BLOCKER', 'QUESTION', 'RISK', 'DISPUTE'] as const;
 export type IssueType = typeof ISSUE_TYPES[number];
 export const ISSUE_LEVELS = ['arbiter', 'sous', 'owner'] as const;
@@ -64,6 +70,8 @@ export type IssueLevel = typeof ISSUE_LEVELS[number];
 export interface LedgerIssue {
   n: number; at: string; type: IssueType; text: string; level: IssueLevel; status: 'open' | 'resolved';
   resolvedBy: number | null; resolvedAt: string | null; options: string[];
+  /** What choosing each option changes, in the order of `options`; null where the ledger names none. */
+  effects: Array<string | null>;
 }
 export interface LedgerRounds { used: number; max: number }
 export interface LedgerStackRepo { pr: string; branch: string | null; base: string | null; retargetedAt: string | null }
@@ -182,6 +190,12 @@ export function normalizeDecisions(input: unknown): LedgerDecision[] {
         by: DECISION_BY.includes(by) ? by : null,
         issue: positive(item.issue),
         cancelNote: optionalText(item.cancelNote, 500),
+        effect: optionalText(item.effect, 500),
+        alts: (Array.isArray(item.alts) ? item.alts : []).filter(isRecord)
+          .map((alt) => ({ label: text(alt.label, 200), effect: optionalText(alt.effect, 500) }))
+          .filter((alt) => alt.label).slice(0, MAX_OPTIONS),
+        replaces: positive(item.replaces),
+        supersededBy: positive(item.supersededBy),
       };
     })
     .filter((item) => item.text)
@@ -194,6 +208,9 @@ export function normalizeIssues(input: unknown): LedgerIssue[] {
     .map((item, index): LedgerIssue => {
       const type = text(item.type, 12).toUpperCase() as IssueType;
       const level = text(item.level, 12).toLowerCase() as IssueLevel;
+      const options = (Array.isArray(item.options) ? item.options : []).map((option) => text(option, 200));
+      const effects = Array.isArray(item.effects) ? item.effects : [];
+      const kept = options.map((option, at) => [option, optionalText(effects[at], 500)] as const).filter(([option]) => option).slice(0, 10);
       return {
         n: positive(item.n) ?? index + 1,
         at: text(item.at, 40),
@@ -203,7 +220,8 @@ export function normalizeIssues(input: unknown): LedgerIssue[] {
         status: text(item.status, 12).toLowerCase() === 'resolved' ? 'resolved' : 'open',
         resolvedBy: positive(item.resolvedBy),
         resolvedAt: optionalText(item.resolvedAt, 40),
-        options: (Array.isArray(item.options) ? item.options : []).map((option) => text(option, 200)).filter(Boolean).slice(0, 10),
+        options: kept.map(([option]) => option),
+        effects: kept.map(([, effect]) => effect),
       };
     })
     .filter((item) => item.text)

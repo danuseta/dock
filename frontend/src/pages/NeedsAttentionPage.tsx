@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation } from '@apollo/client';
 import { AlertTriangle, Bot, ExternalLink, GitMerge, Hand } from 'lucide-react';
-import { GET_NEEDS_ATTENTION } from '../graphql/queries';
+import { GET_NEEDS_ATTENTION, GET_ORCHESTRATIONS } from '../graphql/queries';
 import { CHECK_CONFLICTS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { EmptyState } from '../components/EmptyState';
@@ -11,6 +11,10 @@ import { Toast } from '../components/Toast';
 import { Badge, Button, Card, Page } from '../components/ui';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { cn } from '../lib/cn';
+import { monitorsOnly, useDockMode } from '../lib/dockMode';
+import { waitsOnOwner } from '../lib/sousReport';
+import { OwnerChecks } from '../agents/OwnerChecks';
+import type { AgentRun } from '../agents/runs';
 
 // An open owner level I-n waits on the owner just as the ledger's waiting text does.
 const WAITS = new Set(['AGENT_WAITING', 'AGENT_ISSUE']);
@@ -24,6 +28,8 @@ const agentLabel: Record<string, string> = { AGENT_WAITING: 'WAITING', AGENT_ISS
 
 const NeedsAttentionPage: React.FC<NeedsAttentionPageProps> = ({ onTicketClick, onNavigate }) => {
   const { data, loading, error } = useQuery(GET_NEEDS_ATTENTION, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
+  const { data: runsData } = useQuery(GET_ORCHESTRATIONS, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
+  const mode = useDockMode();
   const [checkConflicts] = useMutation(CHECK_CONFLICTS);
   const [showConflictModal, setShowConflictModal] = useState(false);
   const [conflictMessage, setConflictMessage] = useState('');
@@ -32,7 +38,11 @@ const NeedsAttentionPage: React.FC<NeedsAttentionPageProps> = ({ onTicketClick, 
   if (isInitialQueryLoading(loading, data)) return <Page width="full"><LoadingSkeleton /></Page>;
   if (error && !data) return <Page width="full"><Card className="border-status-conflict text-status-conflict" role="alert">Error: {error.message}</Card></Page>;
 
-  const items = data?.needsAttention || [];
+  const runs: AgentRun[] = runsData?.orchestrations ?? [];
+  // A build with something to settle shows its questions in Before review, so its one-line waiting cards are left out.
+  const checked = new Set(runs.filter(waitsOnOwner).map((run) => run.key));
+  const items = (data?.needsAttention || []).filter((item: any) => !(isSousQuestion(item) && checked.has(item.ticketKey)));
+  const readOnly = monitorsOnly(mode) ? 'This DOCK only monitors. Answer on the workspace DOCK.' : null;
   const handleInspectConflict = async (owner: string, repo: string, pullNumber: number) => {
     try {
       const res = await checkConflicts({ variables: { owner, repo, pullNumber } });
@@ -54,7 +64,9 @@ const NeedsAttentionPage: React.FC<NeedsAttentionPageProps> = ({ onTicketClick, 
         </div>
       </Card>
 
-      {items.length === 0 ? (
+      <OwnerChecks runs={runs} readOnly={readOnly} onTicketClick={onTicketClick} onToast={setToast} />
+
+      {items.length === 0 && checked.size > 0 ? null : items.length === 0 ? (
         <Card><EmptyState scene={<AllClearScene />} title={<span className="text-status-merged">All clear</span>} description="No merge conflicts, and no agent is waiting on you." /></Card>
       ) : (
         <div className="flex flex-col gap-4">

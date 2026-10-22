@@ -6,7 +6,7 @@ import { KindBadge } from '../agents/KindBadge';
 import { kindLabel, matchesRunFilter, runFilterFromSearch, runFilterSearch, runKeyFromSearch, type AgentRun } from '../agents/runs';
 import { RunDecisions } from '../agents/RunDecisions';
 import { RunQuestions } from '../agents/RunQuestions';
-import { canCancel, openIssues, reportAge, reportDecisions } from '../lib/sousReport';
+import { isGuess, openIssues, ownerChecks, reportAge, reportDecisions, waitsOnOwner } from '../lib/sousReport';
 import { needsYou } from '../lib/ticketDetail';
 import { NeedsYouCard } from '../components/ticket/NeedsYouCard';
 import { StackedOnBadge } from '../components/ticket/StackedOnBadge';
@@ -30,7 +30,7 @@ test('the sous report lists owner issues first, oldest first, and decisions newe
   assert.deepStrictEqual([owner.map((item) => item.n), others.map((item) => item.n)], [[3, 4], [1]]);
   assert.deepStrictEqual(reportDecisions(run).map((item) => item.n), [4, 3, 2, 1]);
   assert.deepStrictEqual(reportDecisions({ decisions: [{ at: '', text: 'old' }, { at: '', text: 'older' }] }).map((item) => item.n), [2, 1], 'old entries count by their place');
-  assert.deepStrictEqual(run.decisions!.map(canCancel), [false, true, false, true], 'only SHOV and USULAN can be cancelled');
+  assert.deepStrictEqual(run.decisions!.map(isGuess), [false, true, false, true], 'only SHOV and USULAN are guesses the owner settles');
 });
 
 test('the run panel asks each owner issue with an answer box, oldest first', () => {
@@ -46,22 +46,44 @@ test('the run panel asks each owner issue with an answer box, oldest first', () 
   assert.match(remote, /Answer it there\./);
 });
 
-test('decisions read in plain English, fold at three, and only an agent ruling or proposal can be cancelled', () => {
-  const html = renderToStaticMarkup(<RunDecisions run={run} onCancel={async () => undefined} busy={false} />);
+test('decisions read in plain English, fold at three, and only an agent ruling or proposal can be confirmed or changed', () => {
+  const html = renderToStaticMarkup(<RunDecisions run={run} onConfirm={async () => undefined} onChange={async () => undefined} busy={false} />);
   assert.doesNotMatch(html, />(SHOV|USULAN|DECIDED)</, 'the raw ledger status stays in the tooltip');
   assert.match(html, /title="Ledger status SHOV"[^>]*>Agent ruling</);
   assert.match(html, /title="Ledger status USULAN"[^>]*>Proposal</);
-  assert.strictEqual(html.match(/>Cancel</g)?.length, 2);
+  assert.strictEqual(html.match(/>Confirm</g)?.length, 2);
+  assert.strictEqual(html.match(/>Change</g)?.length, 2);
+  assert.match(html, /2 to confirm/);
+  assert.match(html, />Confirm all except…</);
   assert.match(html, /Cancelled: needed by QRD-8/);
   assert.match(html, /by arbiter · answers I-1/);
   assert.doesNotMatch(html, /D-1</, 'the fourth decision is folded');
   assert.match(html, /Show all 4 · 1 cancelled/);
-  const old = renderToStaticMarkup(<RunDecisions run={{ ...run, decisions: [{ at: '', text: 'old' }] }} onCancel={async () => undefined} busy={false} />);
+  const old = renderToStaticMarkup(<RunDecisions run={{ ...run, decisions: [{ at: '', text: 'old' }] }} onConfirm={async () => undefined} onChange={async () => undefined} busy={false} />);
   assert.doesNotMatch(old, /by owner|Your decision/, 'an entry without by names nobody');
   assert.match(old, />Recorded</);
 
-  const remote = renderToStaticMarkup(<RunDecisions run={run} onCancel={async () => undefined} busy={false} readOnly="Answer it there." />);
-  assert.doesNotMatch(remote, />Cancel</);
+  const remote = renderToStaticMarkup(<RunDecisions run={run} onConfirm={async () => undefined} onChange={async () => undefined} busy={false} readOnly="Answer it there." />);
+  assert.doesNotMatch(remote, />(Confirm|Change)</);
+});
+
+test('a confirmed guess is marked, the effect and the other options are shown, and only unsettled items wait on the owner', () => {
+  const settled = { ...run, kind: 'build', confirmedDecisions: [2], decisions: [...run.decisions!, { n: 5, at: '', text: 'Disable Save on an empty form', status: 'SHOV', by: 'sous', effect: 'Save stays grey until a field is filled', alts: [{ label: 'Show an error on Save', effect: 'the button stays active' }] }] } as AgentRun;
+  const checks = ownerChecks(settled);
+  assert.deepStrictEqual([checks.issues.map((item) => item.n), checks.decisions.map((item) => item.n)], [[3, 4], [4, 5]], 'D-2 is confirmed; oldest first');
+  assert.strictEqual(waitsOnOwner(settled), true);
+  assert.strictEqual(waitsOnOwner({ ...settled, kind: 'review' }), false, 'a review gives feedback only');
+  assert.strictEqual(waitsOnOwner({ ...settled, issues: [], confirmedDecisions: [2, 4, 5] }), false);
+  const html = renderToStaticMarkup(<RunDecisions run={{ ...settled, decisions: [run.decisions![1], settled.decisions![4]] }} onConfirm={async () => undefined} onChange={async () => undefined} busy={false} />);
+  assert.match(html, /D-2<\/span>.*Confirmed by you/);
+  assert.strictEqual(html.match(/>Confirm</g)?.length, 1, 'a confirmed guess offers nothing more');
+  assert.match(html, /Effect:<\/b> Save stays grey until a field is filled/);
+  assert.match(html, /Other option:<\/b> Show an error on Save \(the button stays active\)/);
+  const pending = renderToStaticMarkup(<RunDecisions run={settled} onConfirm={async () => undefined} onChange={async () => undefined} busy={false} pendingOnly />);
+  assert.deepStrictEqual(pending.match(/D-\d+/g), ['D-5', 'D-4'], 'only what waits, unfolded');
+  const asked = renderToStaticMarkup(<RunQuestions run={{ ...run, issues: [{ ...issue(7, 'owner'), options: ['Hard', 'Soft'], effects: ['gone for good', null] }] }} onAnswer={async () => undefined} busy={false} />);
+  assert.match(asked, /Hard:<\/b> gone for good/);
+  assert.match(asked, /Soft:<\/b> no effect given/);
 });
 
 test('a /agents?run=KEY link names the run and survives a filter change', () => {
@@ -102,7 +124,7 @@ test('on a sous ticket the I-n question is answered only on Agents; other ticket
 });
 
 test('while an owner reply or cancel is in flight the run panel buttons are disabled', () => {
-  assert.strictEqual(renderToStaticMarkup(<RunDecisions run={run} onCancel={async () => undefined} busy />).match(/disabled=""[^>]*>Cancel</g)?.length, 2);
+  assert.strictEqual(renderToStaticMarkup(<RunDecisions run={run} onConfirm={async () => undefined} onChange={async () => undefined} busy />).match(/disabled=""[^>]*>Confirm</g)?.length, 2);
   assert.match(renderToStaticMarkup(<RunQuestions run={run} onAnswer={async () => undefined} busy />), /<button[^>]*disabled=""[^>]*>Keep</);
 });
 

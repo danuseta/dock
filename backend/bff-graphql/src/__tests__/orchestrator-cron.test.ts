@@ -585,21 +585,21 @@ test('an owner answer on a sous ticket opens a new cron session on the ticket ma
   await assert.rejects(old.cron.answer('QRD-9', 'Drop'), CronInputError);
 });
 
-test('the owner cancels a SHOV or USULAN decision in a new session; a decided or cancelled one cannot be cancelled', async () => {
+test('the owner changes a SHOV or USULAN decision in a new session; a decided, cancelled or superseded one cannot be changed', async () => {
   const w = world({ runs: [sousRun()] });
-  await w.cron.cancelDecision('QRD-9', 2, 'keep the old export');
-  assert.strictEqual(w.state.sent[0].text, ownerReplyPrompt('QRD-9', 'Owner membatalkan D-2: keep the old export'));
+  await w.cron.changeDecision('QRD-9', 2, 'keep the old export');
+  assert.strictEqual(w.state.sent[0].text, ownerReplyPrompt('QRD-9', 'Owner mengubah D-2: keep the old export'));
   w.endTurn('QRD-9');
-  await w.cron.cancelDecision('QRD-9', 4, 'not now');
+  await w.cron.changeDecision('QRD-9', 4, 'not now');
   assert.strictEqual(w.state.sessions.length, 2);
-  for (const n of [1, 3, 9]) await assert.rejects(w.cron.cancelDecision('QRD-9', n, 'no'), CronInputError, `D-${n}`);
+  for (const n of [1, 3, 9]) await assert.rejects(w.cron.changeDecision('QRD-9', n, 'no'), CronInputError, `D-${n}`);
 });
 
 test('an owner reply waits for the previous owner session of the ticket to finish its first turn', async () => {
   const w = world({ runs: [sousRun()] });
   await w.cron.answer('QRD-9', 'Drop');
   await assert.rejects(w.cron.answer('QRD-9', 'Drop'), (error: Error) => error instanceof CronInputError && error.message === OWNER_BUSY_TEXT, 'a second click while the first is queued');
-  await assert.rejects(w.cron.cancelDecision('QRD-9', 2, 'no'), CronInputError, 'a cancel waits too');
+  await assert.rejects(w.cron.changeDecision('QRD-9', 2, 'no'), CronInputError, 'a change waits too');
   w.claim();
   await assert.rejects(w.cron.answer('QRD-9', 'Drop'), CronInputError, 'and while it runs');
   w.endTurn('QRD-9');
@@ -625,10 +625,10 @@ test('an owner session uses only the options its machine takes and leaves no emp
 
   const failing = world({ runs: [sousRun()] });
   failing.state.failSend = true;
-  await assert.rejects(failing.cron.cancelDecision('QRD-9', 2, 'no'), /send refused/);
+  await assert.rejects(failing.cron.changeDecision('QRD-9', 2, 'no'), /send refused/);
   assert.strictEqual(failing.state.sessions.length, 0, 'the session whose first message failed is removed');
   failing.state.failSend = false;
-  await failing.cron.cancelDecision('QRD-9', 2, 'no');
+  await failing.cron.changeDecision('QRD-9', 2, 'no');
   assert.strictEqual(failing.state.sessions.length, 1, 'the owner can try again');
 });
 
