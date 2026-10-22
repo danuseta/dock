@@ -6,7 +6,7 @@ import { VERIFY_MASTER_PIN } from './graphql/mutations';
 import { AppLayout } from './components/AppLayout';
 import DashboardPage from './pages/DashboardPage';
 import TicketDetailPage from './pages/TicketDetailPage';
-import NeedsAttentionPage from './pages/NeedsAttentionPage';
+import DecisionsPage from './pages/DecisionsPage';
 import SettingsPage from './pages/SettingsPage';
 import HomePage from './pages/HomePage';
 import CalendarPage from './pages/CalendarPage';
@@ -52,7 +52,7 @@ function App() {
       const key = decodeURIComponent(path.split('/').pop() || '');
       return { path: '/ticket', key: key || null };
     }
-    if (path === '/dashboard' || path === '/agents' || path === '/sessions' || path === '/calendar' || path === '/sprint' || path === '/monitoring' || path === '/docker' || path === '/demo-videos' || path === '/dev-servers' || path === '/machines' || path === '/attention' || path === '/settings') {
+    if (path === '/dashboard' || path === '/agents' || path === '/sessions' || path === '/calendar' || path === '/sprint' || path === '/monitoring' || path === '/docker' || path === '/demo-videos' || path === '/dev-servers' || path === '/machines' || path === '/decisions' || path === '/settings') {
       return { path, key: null };
     }
     return { path: '/', key: null };
@@ -117,7 +117,7 @@ function App() {
       case '/demo-videos': return <DemoVideosPage onTicketClick={navigateToTicket} />;
       case '/dev-servers': return <DevServersPage />;
       case '/machines': return <HealthPage />;
-      case '/attention': return <NeedsAttentionPage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;
+      case '/decisions': return <DecisionsPage />;
       case '/settings': return <SettingsPage />;
       case '/ticket': return selectedTicketKey ? <TicketDetailPage ticketKey={selectedTicketKey} onBack={() => handleNavigate('/dashboard')} onNavigate={handleNavigate} /> : <DashboardPage onTicketClick={navigateToTicket} />;
       default: return <HomePage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;

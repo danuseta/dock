@@ -137,14 +137,12 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'answerTicket',
       'approveReview',
       'backfillSprintDashboards',
-      'changeDecision',
       'changeMasterPin',
       'checkConflicts',
       'checkMonitors',
       'clearDemoStorage',
       'clearTicketDependency',
       'clearTicketWorkOrder',
-      'confirmDecisions',
       'confirmOrchestration',
       'createChatSession',
       'createIngestToken',
@@ -185,6 +183,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'stopChatTurn',
       'stopDevServer',
       'stopWorktreeServer',
+      'submitDecisions',
       'subscribePush',
       'unparkElevenLabsKey',
       'unsubscribePush',
@@ -288,7 +287,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
         await assert.rejects(mutations[name]({}, args, unlocked), /The cron runs on the workspace DOCK/, name);
       }
       for (const [name, args] of [
-        ['answerTicket', { ticketKey: 'ZED-9', text: 'yes' }], ['changeDecision', { ticketKey: 'ZED-9', n: 1, choice: 'no' }], ['confirmDecisions', { ticketKey: 'ZED-9', ns: [1] }], ['setTicketManual', { ticketKey: 'ZED-9', manual: true }],
+        ['answerTicket', { ticketKey: 'ZED-9', text: 'yes' }], ['submitDecisions', { ticketKey: 'ZED-9', answers: [], changes: [], confirms: [1] }], ['setTicketManual', { ticketKey: 'ZED-9', manual: true }],
         ['setTicketWorkOrder', { ticketKey: 'ZED-9', position: 1 }], ['clearTicketWorkOrder', { ticketKey: 'ZED-9' }], ['dismissOrchestration', { key: 'ZED-9' }], ['stopAllAgents', {}],
       ] as const) {
         await assert.rejects(mutations[name]({}, args, unlocked), /This DOCK only monitors agents. Act on the workspace DOCK./, name);

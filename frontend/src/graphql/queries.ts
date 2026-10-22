@@ -232,6 +232,23 @@ export const GET_NEEDS_ATTENTION = gql`
   }
 `;
 
+/**
+ * Just enough of each run to count what waits on the owner: the sidebar badge and the Home panel. The issues and
+ * decisions ask for the same fields as ORCHESTRATION_FIELDS, so the two queries never overwrite each other's lists.
+ */
+export const GET_OWNER_QUESTIONS = gql`
+  query GetOwnerQuestions {
+    orchestrations {
+      key
+      kind
+      title
+      issues { n at type text level status resolvedBy resolvedAt options effects }
+      decisions { n at text status by issue cancelNote effect alts { label effect } replaces supersededBy }
+      confirmedDecisions
+    }
+  }
+`;
+
 export const GET_SETTINGS = gql`
   query GetSettings {
     settings {
@@ -342,8 +359,12 @@ export const GET_HOME_SECONDARY = gql`
   query GetHomeSecondary($calendar: Boolean = true, $docker: Boolean = true, $monitors: Boolean = true) {
     needsAttention {
       id
+      type
       message
       ticketKey
+      owner
+      repo
+      pullNumber
     }
     orchestrations {
       key

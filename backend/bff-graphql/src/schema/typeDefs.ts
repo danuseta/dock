@@ -723,6 +723,16 @@ export const typeDefs = gql`
     other: String
   }
 
+  input IssueAnswerInput {
+    issue: Int!
+    text: String!
+  }
+
+  input DecisionChangeInput {
+    n: Int!
+    choice: String!
+  }
+
   type ChatActivity {
     id: Int!
     sessionId: ID!
@@ -982,10 +992,11 @@ export const typeDefs = gql`
     sendChatMessage(sessionId: ID!, text: String!, attachmentIds: [ID!], options: ChatTurnOptionsInput, mode: String): ChatMessage!
     answerChatInteraction(sessionId: ID!, id: Int!, decision: String!, answers: [ChatAnswerInput!], note: String): ChatInteraction!
     answerTicket(ticketKey: String!, text: String!, issue: Int): Boolean!
-    """The owner changes a guessed decision: a new sous session records the choice and revises the work."""
-    changeDecision(ticketKey: String!, n: Int!, choice: String!): Boolean!
-    """The owner confirms guessed decisions; no session runs. A build with nothing left for the owner has its draft PRs marked ready."""
-    confirmDecisions(ticketKey: String!, ns: [Int!]!): [Int!]!
+    """
+    The owner's answer sheet for one ticket: confirmations are recorded (no session), answers and changes go to one new sous session.
+    A build with nothing left for the owner has its draft PRs marked ready. Returns the confirmed decisions.
+    """
+    submitDecisions(ticketKey: String!, answers: [IssueAnswerInput!]!, changes: [DecisionChangeInput!]!, confirms: [Int!]!): [Int!]!
     approveReview(ticketKey: String!): [ApprovalStep!]!
     stopChatTurn(sessionId: ID!): ChatSession!
     requestDoctorRun(machine: String!): Boolean!

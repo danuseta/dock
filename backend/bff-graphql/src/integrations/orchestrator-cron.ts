@@ -320,6 +320,9 @@ export interface CronRun {
   decisions?: Array<{ n: number; status: string }>;
 }
 
+export interface OwnerAnswer { issue: number; text: string }
+export interface OwnerChange { n: number; choice: string }
+
 const CHANGEABLE = new Set(['SHOV', 'USULAN']);
 const MAX_OWNER_TEXT = 4000;
 export const OWNER_BUSY_TEXT = 'The previous owner reply on this ticket has not finished its first turn yet. Wait for it, then send again.';
@@ -634,13 +637,23 @@ export class OrchestratorCron {
     return n;
   }
 
-  /** The owner changes a decision the arbiter or sous took (SHOV or USULAN): a new session records it and revises the work. */
-  async changeDecision(key: string, n: number, choiceInput: string): Promise<void> {
+  /**
+   * The owner's answer sheet for one ticket: every answered issue and changed decision goes in one new session,
+   * because a second owner session on the ticket is refused until the first finished its first turn.
+   */
+  async submit(key: string, answers: OwnerAnswer[], changes: OwnerChange[]): Promise<void> {
     const run = await this.sousRun(key);
     if (!run) throw new CronInputError(`${key} does not run on the sous engine`);
-    const decision = (run.decisions ?? []).find((item) => item.n === n);
-    if (!decision || !CHANGEABLE.has(decision.status)) throw new CronInputError(`D-${n} cannot be changed`);
-    await this.ownerSession(run, ownerReplyPrompt(key, `Owner mengubah D-${n}: ${ownerText(choiceInput)}`));
+    if (!answers.length && !changes.length) throw new CronInputError('Nothing to send');
+    const open = new Set((run.issues ?? []).filter((item) => item.status === 'open').map((item) => item.n));
+    const changeable = new Set((run.decisions ?? []).filter((item) => CHANGEABLE.has(item.status)).map((item) => item.n));
+    for (const answer of answers) if (!open.has(answer.issue)) throw new CronInputError(`I-${answer.issue} is not an open issue of ${key}`);
+    for (const change of changes) if (!changeable.has(change.n)) throw new CronInputError(`D-${change.n} cannot be changed`);
+    const lines = [
+      ...answers.map((answer) => `Jawaban owner untuk I-${answer.issue}: ${ownerText(answer.text)}`),
+      ...changes.map((change) => `Owner mengubah D-${change.n}: ${ownerText(change.choice)}`),
+    ];
+    await this.ownerSession(run, ownerReplyPrompt(key, lines.join('\n')));
   }
 
   /**

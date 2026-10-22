@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, AlertTriangle, BarChart3, Bot, Box, CalendarDays, ChevronLeft, ChevronRight, History, Home as HomeIcon, LayoutDashboard, MoreHorizontal, Settings as SettingsIcon, Clapperboard, Server, Stethoscope } from 'lucide-react';
+import { Activity, BarChart3, Bot, Box, CalendarDays, ChevronLeft, ChevronRight, History, Home as HomeIcon, LayoutDashboard, ListChecks, MoreHorizontal, Settings as SettingsIcon, Clapperboard, Server, Stethoscope } from 'lucide-react';
 import { useQuery } from '@apollo/client';
-import { GET_NEEDS_ATTENTION } from '../graphql/queries';
+import { GET_NEEDS_ATTENTION, GET_OWNER_QUESTIONS } from '../graphql/queries';
+import { homeAttention } from '../lib/attention';
+import { questionCount } from '../decisions/questions';
 import { NAVIGATION_PREFERENCES_EVENT, NavigationPreferences, readNavigationPreferences, saveNavigationPreferences } from '../lib/navigationPreferences';
 import { applyUpdate, checkForUpdate } from '../lib/appUpdate';
 import { cn } from '../lib/cn';
@@ -20,7 +22,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
   const mode = useDockMode();
   const [preferences, setPreferences] = useState(readNavigationPreferences);
   const { data } = useQuery(GET_NEEDS_ATTENTION, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
-  const conflictCount = data?.needsAttention?.length || 0;
+  const { data: questionsData } = useQuery(GET_OWNER_QUESTIONS, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
+  const attentionCount = homeAttention(data?.needsAttention ?? []).length;
+  const decisionCount = questionCount(questionsData?.orchestrations ?? []);
   const [moreOpen, setMoreOpen] = useState(false);
   const [updateOffered, setUpdateOffered] = useState(false);
 
@@ -43,7 +47,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
   }, []);
 
   const navItems = [
-    { path: '/', label: 'Home', icon: HomeIcon, badge: 0 },
+    { path: '/', label: 'Home', icon: HomeIcon, badge: attentionCount },
     { path: '/dashboard', label: 'Board', icon: LayoutDashboard, badge: 0 },
     { path: '/agents', label: 'Agents', icon: Bot, badge: 0 },
     { path: '/sessions', label: 'Sessions', icon: History, badge: 0 },
@@ -55,7 +59,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
     { path: '/dev-servers', label: 'Dev Servers', icon: Server, badge: 0 },
     // Not /health: the server answers that path itself for its health check.
     { path: '/machines', label: 'Health', icon: Stethoscope, badge: 0 },
-    { path: '/attention', label: 'Needs Attention', icon: AlertTriangle, badge: conflictCount },
+    { path: '/decisions', label: 'Decisions', icon: ListChecks, badge: decisionCount },
     { path: '/settings', label: 'System Settings', icon: SettingsIcon, badge: 0 },
   ].filter((item) => hasPage(mode, item.path));
 
