@@ -35,27 +35,39 @@ export const AnswerSheet: React.FC<AnswerSheetProps> = ({ run, questions, drafts
   const answered = questions.filter((question) => answerText(question, drafts[question.id])).length;
   const firstOpen = questions.findIndex((question) => !answerText(question, drafts[question.id]));
   const nothingNew = (({ answers, changes, confirms }) => answers.length + changes.length + confirms.length === 0)(submissionOf(questions, drafts));
+  // What still needs a look comes first: not answered, then unsure, then the rest; sent answers are folded away.
+  const rank = (question: Question) => (!answerText(question, drafts[question.id]) ? 0 : drafts[question.id]?.unsure ? 1 : 2);
+  const listed = questions.map((question, index) => ({ question, index })).filter(({ question }) => !drafts[question.id]?.sent).sort((a, b) => rank(a.question) - rank(b.question) || a.index - b.index);
+  const sent = questions.map((question, index) => ({ question, index })).filter(({ question }) => drafts[question.id]?.sent);
   return (
-    <article className="flex max-w-[760px] flex-col" aria-labelledby="answer-sheet">
+    <article className="flex flex-col p-7 max-[760px]:p-4" aria-labelledby="answer-sheet">
       <p className="text-xs text-muted-foreground">{run.key} · {run.title || 'Untitled'}</p>
       <h2 id="answer-sheet" className="mt-2 text-xl font-semibold">Answer sheet · {answered} of {questions.length} answered</h2>
-      <ol className="mt-4 flex flex-col">
-        {questions.map((question, index) => {
+      <ol className="mt-4 grid gap-x-6 @min-[860px]:grid-cols-2">
+        {listed.map(({ question, index }) => {
           const text = answerText(question, drafts[question.id]);
           return (
-            <li key={question.id} className="border-b border-border last:border-b-0">
-              <button type="button" className="grid w-full grid-cols-[24px_minmax(0,1fr)] gap-x-2 py-2.5 text-left hover:bg-surface-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 max-[760px]:min-h-11" onClick={() => onOpen(index)}>
+            <li key={question.id} className="border-b border-border">
+              <button type="button" className="grid w-full grid-cols-[28px_minmax(0,1fr)] gap-x-2 py-2.5 text-left hover:bg-surface-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 max-[760px]:min-h-11" onClick={() => onOpen(index)}>
                 <span className="font-mono text-sm text-muted-foreground">{index + 1}</span>
                 <span className="text-pretty text-sm text-foreground">{question.text}</span>
                 <span />
                 <span className={text ? 'text-pretty text-[0.8rem] text-secondary-foreground' : 'text-[0.8rem] text-amber-200'}>
-                  {text ?? 'Not answered'}{drafts[question.id]?.sent ? ' · sent, waiting for sous' : drafts[question.id]?.unsure ? ' · unsure' : ''}
+                  {text ?? 'Not answered'}{drafts[question.id]?.unsure ? ' · unsure' : ''}
                 </span>
               </button>
             </li>
           );
         })}
       </ol>
+      {sent.length > 0 && (
+        <details className="mt-3 text-sm text-secondary-foreground">
+          <summary className="cursor-pointer">{sent.length} sent, waiting for sous</summary>
+          <ol className="mt-2 flex flex-col gap-1 text-[0.8rem]">
+            {sent.map(({ question, index }) => <li key={question.id} className="text-pretty"><span className="mr-2 font-mono text-muted-foreground">{index + 1}</span>{question.text} · {answerText(question, drafts[question.id])}</li>)}
+          </ol>
+        </details>
+      )}
       <p className="mt-4 text-pretty text-sm text-secondary-foreground">{summary(questions, drafts)}</p>
       {error && <p className="mt-2 text-pretty text-sm text-status-conflict" role="alert">{error}</p>}
       <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-border pt-4">

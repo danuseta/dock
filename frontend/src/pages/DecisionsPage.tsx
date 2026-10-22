@@ -8,13 +8,13 @@ import { EmptyState } from '../components/EmptyState';
 import { AllClearScene } from '../components/empty/scenes/AllClearScene';
 import { Toast } from '../components/Toast';
 import { Card, Page } from '../components/ui';
-import { cn } from '../lib/cn';
 import { monitorsOnly, useDockMode } from '../lib/dockMode';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { AnswerSheet } from '../decisions/AnswerSheet';
 import { QuestionView } from '../decisions/QuestionView';
 import { isAnswered, questionsOf, submissionOf, type Question } from '../decisions/questions';
 import { useDraft } from '../decisions/useDraft';
+import { TicketList } from '../decisions/TicketList';
 
 const SHEET = 0;
 
@@ -105,43 +105,9 @@ const DecisionsPage: React.FC = () => {
       {!current ? (
         <Card><EmptyState scene={<AllClearScene />} title={<span className="text-status-merged">Nothing to answer</span>} description="Sous has no open question and every guess is confirmed." /></Card>
       ) : (
-        <div className="grid grid-cols-[260px_minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-surface-0 max-[900px]:grid-cols-1">
-          <nav className="border-r border-border p-2.5 max-[900px]:order-2 max-[900px]:border-r-0 max-[900px]:border-t" aria-label="Tickets with questions">
-            {tickets.map(({ run, questions: list }) => {
-              const on = run.key === current.run.key;
-              const saved = on ? drafts : {};
-              return (
-                <div key={run.key} className={cn('rounded-[8px] p-2.5', on && 'bg-surface-1')}>
-                  <button type="button" className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60" onClick={() => go(run.key, 1)}>
-                    <span className="flex justify-between font-mono text-[0.78rem] font-semibold"><span>{run.key}</span><span className="font-normal text-muted-foreground">{list.length} open</span></span>
-                    <span className="mt-0.5 block truncate text-[0.78rem] text-muted-foreground">{run.title || 'Untitled'}</span>
-                  </button>
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {list.map((question, index) => (
-                      <button
-                        key={question.id}
-                        type="button"
-                        aria-label={`Question ${index + 1}${question.blocking ? ', sous waits on it' : ''}${isAnswered(saved[question.id]) ? ', answered' : ''}`}
-                        aria-current={on && q === index + 1 ? 'step' : undefined}
-                        className={cn(
-                          'relative grid size-7 place-items-center rounded-[6px] font-mono text-xs text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 max-[760px]:size-11',
-                          isAnswered(saved[question.id]) && 'bg-surface-2 text-foreground',
-                          saved[question.id]?.unsure && 'border border-dashed border-border-glow',
-                          on && q === index + 1 && 'text-foreground ring-1 ring-secondary-foreground',
-                        )}
-                        onClick={() => go(run.key, index + 1)}
-                      >
-                        {index + 1}
-                        {question.blocking && <span className="absolute top-1 right-1 size-1.5 rounded-full bg-amber-300" aria-hidden="true" />}
-                      </button>
-                    ))}
-                    {on && <button type="button" className={cn('h-7 rounded-[6px] px-2 text-xs text-muted-foreground hover:text-foreground max-[760px]:h-11', q === SHEET && 'text-foreground ring-1 ring-secondary-foreground')} onClick={() => go(run.key, SHEET)}>Answer sheet</button>}
-                  </div>
-                </div>
-              );
-            })}
-          </nav>
-          <div className="min-w-0 p-7 max-[760px]:p-4">
+        <div className="grid grid-cols-[300px_minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-surface-0 max-[900px]:grid-cols-1">
+          <TicketList tickets={tickets} openKey={current.run.key} drafts={drafts} q={q} onOpen={go} />
+          <div className="@container min-w-0">
             {q === SHEET ? (
               <AnswerSheet run={current.run} questions={questions} drafts={drafts} submitting={submitting} readOnly={readOnly} error={submitError} onOpen={(index) => go(current.run.key, index + 1)} onSubmit={() => void submit()} />
             ) : (
@@ -152,6 +118,7 @@ const DecisionsPage: React.FC = () => {
                 number={q}
                 total={questions.length}
                 draft={drafts[questions[q - 1].id]}
+                sentCount={questions.filter((question) => drafts[question.id]?.sent).length}
                 readOnly={readOnly}
                 onChange={(next) => update(questions[q - 1].id, next)}
                 onPrevious={() => go(current.run.key, q - 1)}
