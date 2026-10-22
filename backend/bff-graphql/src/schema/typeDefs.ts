@@ -281,6 +281,17 @@ export const typeDefs = gql`
     by: String
     issue: Int
     cancelNote: String
+    """What choosing this decision changes, as sous wrote it."""
+    effect: String
+    """The options sous did not build, each with what it would change instead."""
+    alts: [OrchestrationDecisionAlt!]!
+    replaces: Int
+    supersededBy: Int
+  }
+
+  type OrchestrationDecisionAlt {
+    label: String!
+    effect: String
   }
 
   type OrchestrationIssue {
@@ -293,6 +304,8 @@ export const typeDefs = gql`
     resolvedBy: Int
     resolvedAt: String
     options: [String!]!
+    """What choosing each option changes, in the order of options."""
+    effects: [String]!
   }
 
   type OrchestrationStackRepo {
@@ -564,6 +577,8 @@ export const typeDefs = gql`
     issues: [OrchestrationIssue!]!
     """Every step of the owner's last review approval succeeded (Jira Pass label and GitHub approve)."""
     approved: Boolean!
+    """The guessed decisions (SHOV, USULAN) the owner confirmed in DOCK."""
+    confirmedDecisions: [Int!]!
     blockers: Int!
     activity: String!
     activityDetail: String
@@ -967,7 +982,10 @@ export const typeDefs = gql`
     sendChatMessage(sessionId: ID!, text: String!, attachmentIds: [ID!], options: ChatTurnOptionsInput, mode: String): ChatMessage!
     answerChatInteraction(sessionId: ID!, id: Int!, decision: String!, answers: [ChatAnswerInput!], note: String): ChatInteraction!
     answerTicket(ticketKey: String!, text: String!, issue: Int): Boolean!
-    cancelDecision(ticketKey: String!, n: Int!, note: String!): Boolean!
+    """The owner changes a guessed decision: a new sous session records the choice and revises the work."""
+    changeDecision(ticketKey: String!, n: Int!, choice: String!): Boolean!
+    """The owner confirms guessed decisions; no session runs. A build with nothing left for the owner has its draft PRs marked ready."""
+    confirmDecisions(ticketKey: String!, ns: [Int!]!): [Int!]!
     approveReview(ticketKey: String!): [ApprovalStep!]!
     stopChatTurn(sessionId: ID!): ChatSession!
     requestDoctorRun(machine: String!): Boolean!

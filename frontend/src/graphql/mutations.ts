@@ -428,9 +428,15 @@ export const ANSWER_TICKET = gql`
   }
 `;
 
-export const CANCEL_DECISION = gql`
-  mutation CancelDecision($ticketKey: String!, $n: Int!, $note: String!) {
-    cancelDecision(ticketKey: $ticketKey, n: $n, note: $note)
+export const CHANGE_DECISION = gql`
+  mutation ChangeDecision($ticketKey: String!, $n: Int!, $choice: String!) {
+    changeDecision(ticketKey: $ticketKey, n: $n, choice: $choice)
+  }
+`;
+
+export const CONFIRM_DECISIONS = gql`
+  mutation ConfirmDecisions($ticketKey: String!, $ns: [Int!]!) {
+    confirmDecisions(ticketKey: $ticketKey, ns: $ns)
   }
 `;
 

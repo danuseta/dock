@@ -13,8 +13,23 @@ export const reportDecisions = (run?: ReportFacts | null): Array<AgentDecision &
   (run?.decisions ?? []).map((decision, index) => ({ ...decision, n: decision.n ?? index + 1 })).reverse()
 );
 
-/** Only what the arbiter or sous decided on their own can be cancelled by the owner. */
-export const canCancel = (decision: Pick<AgentDecision, 'status'>): boolean => decision.status === 'SHOV' || decision.status === 'USULAN';
+/** What the arbiter or sous decided on the owner's behalf: the owner confirms or changes it before the pull requests are reviewed. */
+export const isGuess = (decision: Pick<AgentDecision, 'status'>): boolean => decision.status === 'SHOV' || decision.status === 'USULAN';
+
+/** What still waits on the owner before a build goes up for review: open owner issues and guessed decisions not confirmed yet. */
+export function ownerChecks(run?: (ReportFacts & Pick<AgentRun, 'confirmedDecisions'>) | null) {
+  const confirmed = new Set(run?.confirmedDecisions ?? []);
+  return {
+    issues: openIssues(run).owner,
+    decisions: reportDecisions(run).filter((decision) => isGuess(decision) && !confirmed.has(decision.n)).reverse(),
+  };
+}
+
+/** A build whose pull requests wait on the owner before review. */
+export function waitsOnOwner(run: AgentRun): boolean {
+  const checks = ownerChecks(run);
+  return run.kind === 'build' && checks.issues.length + checks.decisions.length > 0;
+}
 
 export const DECISION_TONE: Record<string, 'success' | 'warn' | 'neutral' | 'danger'> = {
   DECIDED: 'success', SHOV: 'warn', USULAN: 'warn', SUPERSEDED: 'neutral', CANCELLED: 'danger',

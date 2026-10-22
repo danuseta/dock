@@ -320,7 +320,7 @@ export interface CronRun {
   decisions?: Array<{ n: number; status: string }>;
 }
 
-const CANCELLABLE = new Set(['SHOV', 'USULAN']);
+const CHANGEABLE = new Set(['SHOV', 'USULAN']);
 const MAX_OWNER_TEXT = 4000;
 export const OWNER_BUSY_TEXT = 'The previous owner reply on this ticket has not finished its first turn yet. Wait for it, then send again.';
 export const ownerSessionTitle = (key: string) => `${key} (owner)`;
@@ -634,13 +634,13 @@ export class OrchestratorCron {
     return n;
   }
 
-  /** The owner cancels a decision the arbiter or sous took (SHOV or USULAN): a new session records it. */
-  async cancelDecision(key: string, n: number, noteInput: string): Promise<void> {
+  /** The owner changes a decision the arbiter or sous took (SHOV or USULAN): a new session records it and revises the work. */
+  async changeDecision(key: string, n: number, choiceInput: string): Promise<void> {
     const run = await this.sousRun(key);
     if (!run) throw new CronInputError(`${key} does not run on the sous engine`);
     const decision = (run.decisions ?? []).find((item) => item.n === n);
-    if (!decision || !CANCELLABLE.has(decision.status)) throw new CronInputError(`D-${n} cannot be cancelled`);
-    await this.ownerSession(run, ownerReplyPrompt(key, `Owner membatalkan D-${n}: ${ownerText(noteInput)}`));
+    if (!decision || !CHANGEABLE.has(decision.status)) throw new CronInputError(`D-${n} cannot be changed`);
+    await this.ownerSession(run, ownerReplyPrompt(key, `Owner mengubah D-${n}: ${ownerText(choiceInput)}`));
   }
 
   /**

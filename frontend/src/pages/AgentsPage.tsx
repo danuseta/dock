@@ -2,7 +2,7 @@ import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { ArrowDown, ArrowUp, Building2, Check, ChevronLeft, ChevronRight, Clock, ExternalLink, EyeOff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Square, Table2, X } from 'lucide-react';
 import { GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
-import { APPROVE_REVIEW, CANCEL_DECISION, CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
+import { APPROVE_REVIEW, CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { EmptyState } from '../components/EmptyState';
 import { DeskScene } from '../components/empty/scenes/DeskScene';
@@ -32,6 +32,7 @@ import { LimitsLine } from '../chat/StatusLine';
 import { useOpenForTicket } from '../chat/useOpenForTicket';
 import { AgentsLibrary } from '../agents/library/AgentsLibrary';
 import { useAnswerTicket } from '../chat/useAnswerTicket';
+import { useOwnerChecks } from '../agents/useOwnerChecks';
 
 const AgentsOffice = lazy(() => import('../components/AgentsOffice'));
 
@@ -142,7 +143,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
   const [briefOpen, setBriefOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const { answer, sending: answering } = useAnswerTicket();
-  const [cancelDecision, { loading: cancelling }] = useMutation(CANCEL_DECISION);
+  const ownerChecks = useOwnerChecks();
   const [approveReview, { loading: approving }] = useMutation(APPROVE_REVIEW, { refetchQueries: ['GetOrchestrations', 'GetOrchestration'] });
   const [lgtmTarget, setLgtmTarget] = useState<AgentRun | null>(null);
   const [sampleStartedAt, setSampleStartedAt] = useState<number | null>(null);
@@ -292,14 +293,23 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
     }
   };
 
-  const handleCancelDecision = async (key: string, n: number, note: string) => {
+  const handleChangeDecision = async (key: string, n: number, choice: string) => {
     try {
-      await cancelDecision({ variables: { ticketKey: key, n, note } });
-      setToast({ message: `D-${n} cancel sent: a new sous session records it.`, type: 'success' });
-      void refetch();
-    } catch (cancelError) {
-      setToast({ message: cancelError instanceof Error ? cancelError.message : 'The cancel could not be sent', type: 'error' });
-      throw cancelError;
+      await ownerChecks.changeDecision(key, n, choice);
+      setToast({ message: `D-${n} change sent: a new sous session revises the work.`, type: 'success' });
+    } catch (changeError) {
+      setToast({ message: changeError instanceof Error ? changeError.message : 'The change could not be sent', type: 'error' });
+      throw changeError;
+    }
+  };
+
+  const handleConfirmDecisions = async (key: string, ns: number[]) => {
+    try {
+      await ownerChecks.confirmDecisions(key, ns);
+      setToast({ message: `Confirmed ${ns.map((n) => `D-${n}`).join(', ')}.`, type: 'success' });
+    } catch (confirmError) {
+      setToast({ message: confirmError instanceof Error ? confirmError.message : 'The confirmation could not be saved', type: 'error' });
+      throw confirmError;
     }
   };
 
@@ -587,7 +597,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                 </ol>
               </div>
 
-              <RunDecisions key={`decisions-${selected.key}`} run={selected} onCancel={(n, note) => handleCancelDecision(selected.key, n, note)} busy={cancelling} readOnly={readOnly} />
+              <RunDecisions key={`decisions-${selected.key}`} run={selected} onConfirm={(ns) => handleConfirmDecisions(selected.key, ns)} onChange={(n, choice) => handleChangeDecision(selected.key, n, choice)} busy={ownerChecks.busy} readOnly={readOnly} />
 
               <div>
                 <p className={cn(sectionLabel, 'mb-1')}>Acceptance criteria · {selected.acPassed}/{selected.acTotal}</p>

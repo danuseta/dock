@@ -18,7 +18,7 @@ const IssueAnswer: React.FC<{ issue: AgentIssue; busy: boolean; onSend: (text: s
   const send = (text: string) => { if (text.trim()) onSend(text.trim()); };
   return (
     <div className="mt-1.5 flex flex-wrap items-center gap-2">
-      {issue.options.map((option, index) => <Button key={option} size="sm" variant={index === 0 ? 'primary' : 'default'} className="max-[760px]:h-11" disabled={busy} onClick={() => send(option)}>{option}</Button>)}
+      {issue.options.map((option, index) => <Button key={option} size="sm" variant={index === 0 ? 'primary' : 'default'} className="max-[760px]:h-11" title={issue.effects?.[index] ?? undefined} disabled={busy} onClick={() => send(option)}>{option}</Button>)}
       <form className="flex min-w-[200px] flex-1 items-center gap-2" onSubmit={(event) => { event.preventDefault(); send(draft); }}>
         <Input className="h-8 min-w-0 flex-1 text-sm max-[760px]:h-11" value={draft} placeholder={issue.options.length ? 'Or write your own answer...' : 'Answer the agent...'} aria-label={`Answer to I-${issue.n}`} disabled={busy} onChange={(event) => setDraft(event.target.value)} />
         <Button size="sm" type="submit" className="max-[760px]:h-11" disabled={busy || !draft.trim()} aria-label={`Send the answer to I-${issue.n}`}><SendHorizontal size={14} aria-hidden="true" />Send</Button>
@@ -55,6 +55,11 @@ export const RunQuestions: React.FC<RunQuestionsProps> = ({ run, onAnswer, busy,
             <div key={issue.n} className="border-t border-amber-300/20 py-2 first:border-t-0 first:pt-0 last:pb-0">
               <p className="font-mono text-[0.68rem] font-bold text-amber-200">I-{issue.n} · {issue.type.toLowerCase()}</p>
               <p className="text-pretty">{issue.text}</p>
+              {issue.effects?.some(Boolean) && (
+                <ul className="mt-1 flex flex-col gap-0.5 text-xs text-secondary-foreground">
+                  {issue.options.map((option, index) => <li key={option}><b className="font-semibold">{option}:</b> {issue.effects?.[index] ?? 'no effect given'}</li>)}
+                </ul>
+              )}
               {!readOnly && <IssueAnswer issue={issue} busy={busy} onSend={(text) => send(issue.n, text)} />}
             </div>
           ))}

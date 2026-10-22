@@ -117,6 +117,13 @@ export class GitHubAPI {
     await new GitHubClient(auth.headers.Authorization.replace('Bearer ', '')).approvePullRequest(owner, repo, pullNumber);
   }
 
+  /** Marks a draft pull request ready for review; false when it was not a draft. Throws when there is no token or GitHub refuses. */
+  async markReadyForReview(owner: string, repo: string, pullNumber: number): Promise<boolean> {
+    const auth = await this.getAuth();
+    if (!auth.hasToken) throw new Error('GitHub token is not configured in Settings');
+    return new GitHubClient(auth.headers.Authorization.replace('Bearer ', '')).markReadyForReview(owner, repo, pullNumber);
+  }
+
   async getNeedsAttention() {
     try {
       const auth = await this.getAuth();
