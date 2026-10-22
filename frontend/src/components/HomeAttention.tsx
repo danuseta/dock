@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { useMutation } from '@apollo/client';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { CHECK_CONFLICTS } from '../graphql/mutations';
 import { ConflictModal } from './ConflictModal';
 import { Toast } from './Toast';
 import { Button } from './ui';
 import { cn } from '../lib/cn';
 import { QUESTIONS_RANK, signalOf, type SignalGroup, type TicketAttention } from '../lib/attention';
+import { pageOf } from '../agents/runs';
 
 export interface HomeAttentionItem {
   id: string;
@@ -28,7 +30,7 @@ interface HomeAttentionProps {
   onNavigate: (path: string) => void;
 }
 
-const FOLDED = 5;
+const PAGE_SIZE = 5;
 const FILTERS: Array<{ value: 'all' | SignalGroup; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'blocked', label: 'Blocked' },
@@ -48,7 +50,7 @@ const pullUrl = (item: HomeAttentionItem) => item.prUrl || (item.owner && item.r
 export const HomeAttention: React.FC<HomeAttentionProps> = ({ rows, titleOf, panelClass, headerClass, titleClass, onTicketClick, onNavigate }) => {
   const [checkConflicts] = useMutation(CHECK_CONFLICTS);
   const [filter, setFilter] = useState<'all' | SignalGroup>('all');
-  const [showAll, setShowAll] = useState(false);
+  const [page, setPage] = useState(1);
   const [conflict, setConflict] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
@@ -67,7 +69,7 @@ export const HomeAttention: React.FC<HomeAttentionProps> = ({ rows, titleOf, pan
   };
 
   const shown = rows.filter((row) => filter === 'all' || row.groups.includes(filter));
-  const visible = showAll ? shown : shown.slice(0, FOLDED);
+  const listed = pageOf(shown, page, PAGE_SIZE);
 
   // The main button follows the worst signal; a second one offers the answer or the pull request.
   const actions = (row: TicketAttention<HomeAttentionItem>) => {
@@ -100,11 +102,11 @@ export const HomeAttention: React.FC<HomeAttentionProps> = ({ rows, titleOf, pan
           {FILTERS.map((option) => {
             const count = option.value === 'all' ? rows.length : rows.filter((row) => row.groups.includes(option.value as SignalGroup)).length;
             if (option.value !== 'all' && count === 0) return null;
-            return <button key={option.value} type="button" aria-pressed={filter === option.value} onClick={() => setFilter(option.value)} className={cn('min-h-7 rounded-full border px-2.5 text-[0.66rem] max-[760px]:min-h-11', filter === option.value ? 'border-border-glow bg-surface-2 text-foreground' : 'border-border bg-transparent text-secondary-foreground')}>{option.label} <span className="font-mono text-muted-foreground tabular-nums">{count}</span></button>;
+            return <button key={option.value} type="button" aria-pressed={filter === option.value} onClick={() => { setFilter(option.value); setPage(1); }} className={cn('min-h-7 rounded-full border px-2.5 text-[0.66rem] max-[760px]:min-h-11', filter === option.value ? 'border-border-glow bg-surface-2 text-foreground' : 'border-border bg-transparent text-secondary-foreground')}>{option.label} <span className="font-mono text-muted-foreground tabular-nums">{count}</span></button>;
           })}
         </div>
       </header>
-      {visible.map((row) => {
+      {listed.items.map((row) => {
         const worst = row.items[0] ? signalOf(row.items[0].type) : null;
         const group = row.rank === QUESTIONS_RANK || !worst ? 'answer' : worst.group;
         const title = (row.ticketKey && titleOf(row.ticketKey)) || row.questions?.title || null;
@@ -124,10 +126,14 @@ export const HomeAttention: React.FC<HomeAttentionProps> = ({ rows, titleOf, pan
           </div>
         );
       })}
-      {shown.length > FOLDED && (
-        <div className="flex items-center justify-between border-t border-border px-4 py-2.5 text-[0.72rem] text-muted-foreground">
-          <span>{showAll ? `${shown.length} tickets` : `${shown.length - FOLDED} more`}</span>
-          <button type="button" className="min-h-7 border-0 bg-transparent p-0 text-muted-foreground hover:text-foreground max-[760px]:min-h-11" onClick={() => setShowAll(!showAll)}>{showAll ? 'Show less' : 'Show all →'}</button>
+      {listed.pages > 1 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
+          <span className="tabular-nums">{listed.from}–{listed.to} of {shown.length}</span>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="ghost" disabled={listed.page <= 1} onClick={() => setPage(listed.page - 1)} aria-label="Previous page"><ChevronLeft size={14} aria-hidden="true" />Prev</Button>
+            <span className="font-mono tabular-nums">Page {listed.page} / {listed.pages}</span>
+            <Button size="sm" variant="ghost" disabled={listed.page >= listed.pages} onClick={() => setPage(listed.page + 1)} aria-label="Next page">Next<ChevronRight size={14} aria-hidden="true" /></Button>
+          </div>
         </div>
       )}
       {conflict && <ConflictModal isOpen message={conflict} onClose={() => setConflict(null)} />}
