@@ -58,7 +58,7 @@ npm run dev
 
 Open http://localhost:3000.
 
-`DOCK_MODE=workspace` is required. Without it DOCK starts as the laptop DOCK, which only monitors: it answers the bridge's chat routes with 404, hides the Confirm, Change and answer buttons, and never runs the automatic broadcast. On Windows PowerShell, set the variable first: `$env:DOCK_MODE='workspace'; npm run dev`.
+`DOCK_MODE=workspace` is required. Without it DOCK starts as the laptop DOCK, which only monitors: it answers the bridge's chat routes with 404, hides the Submit button on Decisions, and never runs the automatic broadcast. On Windows PowerShell, set the variable first: `$env:DOCK_MODE='workspace'; npm run dev`.
 
 ### 2. Create an ingest token for the machine `workspace`
 

@@ -1,13 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { Plus, RefreshCw, Trash2, X } from 'lucide-react';
-import { GET_HOME_CORE, GET_HOME_SECONDARY } from '../graphql/queries';
+import { GET_HOME_CORE, GET_HOME_SECONDARY, GET_OWNER_QUESTIONS } from '../graphql/queries';
 import { ADD_QUICK_LINK, REMOVE_QUICK_LINK } from '../graphql/mutations';
 import { GoogleSearch } from '../components/GoogleSearch';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { WebsiteIcon } from '../components/WebsiteIcon';
 import { DockerRuntimeCard } from '../components/DockerRuntimeCard';
 import { AgentRunStrip } from '../components/AgentRunStrip';
+import { HomeAttention, type HomeAttentionItem } from '../components/HomeAttention';
+import { homeAttention } from '../lib/attention';
 import { isArchived, type AgentRunSummary } from '../agents/runs';
 import { MonthCalendar } from '../components/MonthCalendar';
 import { Button, Card, Dialog, IconButton, Input, Page, Select } from '../components/ui';
@@ -42,6 +44,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
     GET_HOME_SECONDARY,
     { ...CACHED_QUERY_OPTIONS, variables: { calendar: showCalendar, docker: showDocker, monitors: showMonitors }, pollInterval: healthRefreshSeconds * 1000 },
   );
+  const { data: questionsData } = useQuery(GET_OWNER_QUESTIONS, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
   const [addQuickLink, { loading: adding }] = useMutation(ADD_QUICK_LINK, { refetchQueries: [{ query: GET_HOME_CORE }] });
   const [removeQuickLink] = useMutation(REMOVE_QUICK_LINK, { refetchQueries: [{ query: GET_HOME_CORE }] });
   const [now, setNow] = useState(new Date());
@@ -73,6 +76,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
   const monitors = secondaryData?.monitors || [];
   const healthyServices = monitors.filter((monitor: any) => monitor.lastStatus === 'UP').length;
   const calendarEvents: CalendarEvent[] = secondaryData?.calendarEvents || [];
+  const attention = homeAttention<HomeAttentionItem>(secondaryData?.needsAttention ?? []);
   const agentRuns: Array<AgentRunSummary & { title: string }> = (secondaryData?.orchestrations || []).filter((run: AgentRunSummary) => !isArchived(run));
 
   const handleAdd = async (event: React.FormEvent) => {
@@ -96,7 +100,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
   const metrics = [
     { label: 'Active tickets', value: activeTickets.length },
     { label: 'Story points', value: storyPoints },
-    { label: 'Needs attention', value: secondaryData?.needsAttention?.length || 0, className: 'text-status-conflict' },
+    { label: 'Needs attention', value: attention.length, className: 'text-status-conflict' },
     showMonitors
       ? { label: 'Services healthy', value: `${healthyServices}/${monitors.length}`, className: 'text-status-merged' }
       : { label: 'Agents running', value: agentRuns.filter((run) => run.activity === 'ACTIVE').length },
@@ -126,6 +130,8 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
           </div>
         ))}
       </section>
+
+      <HomeAttention items={attention} runs={questionsData?.orchestrations ?? []} panelClass={panelClass} headerClass={panelHeaderClass} titleClass={panelTitleClass} actionClass={textActionClass} onTicketClick={onTicketClick} onNavigate={onNavigate} />
 
       <div className={cn('grid items-stretch gap-3.5 max-[900px]:grid-cols-1', showSide ? 'grid-cols-[minmax(0,1fr)_minmax(340px,380px)]' : 'grid-cols-1')}>
         <div className={cn('grid gap-3.5', agentRuns.length > 0 ? 'grid-rows-[auto_minmax(0,1fr)_auto_auto]' : 'grid-rows-[auto_minmax(0,1fr)_auto]')}>

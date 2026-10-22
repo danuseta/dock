@@ -264,7 +264,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
   const needs = needsYou({ run, pullRequests: ticket.pullRequests });
   const handleNeed = (item: NeedItem) => {
     if (item.kind === 'question') void openForTicket(ticket.key);
-    else if (item.kind === 'sous') onNavigate(`/agents?run=${encodeURIComponent(ticket.key)}`);
+    else if (item.kind === 'sous') onNavigate(`/decisions?ticket=${encodeURIComponent(ticket.key)}`);
     else if (item.kind === 'ac') {
       setAcOpen(true);
       document.getElementById('acceptance-criteria')?.scrollIntoView({ behavior: 'smooth', block: 'start' });

@@ -585,21 +585,28 @@ test('an owner answer on a sous ticket opens a new cron session on the ticket ma
   await assert.rejects(old.cron.answer('QRD-9', 'Drop'), CronInputError);
 });
 
-test('the owner changes a SHOV or USULAN decision in a new session; a decided, cancelled or superseded one cannot be changed', async () => {
+test('the owner answer sheet sends every answer and change of a ticket in one new session', async () => {
   const w = world({ runs: [sousRun()] });
-  await w.cron.changeDecision('QRD-9', 2, 'keep the old export');
-  assert.strictEqual(w.state.sent[0].text, ownerReplyPrompt('QRD-9', 'Owner mengubah D-2: keep the old export'));
-  w.endTurn('QRD-9');
-  await w.cron.changeDecision('QRD-9', 4, 'not now');
-  assert.strictEqual(w.state.sessions.length, 2);
-  for (const n of [1, 3, 9]) await assert.rejects(w.cron.changeDecision('QRD-9', n, 'no'), CronInputError, `D-${n}`);
+  await w.cron.submit('QRD-9', [{ issue: 2, text: 'Drop' }, { issue: 3, text: 'Use the new table' }], [{ n: 4, choice: 'not now' }]);
+  assert.strictEqual(w.state.sessions.length, 1, 'one session for the whole sheet');
+  assert.strictEqual(w.state.sent[0].text, ownerReplyPrompt('QRD-9', 'Jawaban owner untuk I-2: Drop\nJawaban owner untuk I-3: Use the new table\nOwner mengubah D-4: not now'));
+
+  const fresh = () => world({ runs: [sousRun()] });
+  await assert.rejects(fresh().cron.submit('QRD-9', [{ issue: 1, text: 'x' }], []), CronInputError, 'a resolved issue');
+  await assert.rejects(fresh().cron.submit('QRD-9', [], [{ n: 1, choice: 'x' }]), CronInputError, 'a decided decision');
+  await assert.rejects(fresh().cron.submit('QRD-9', [{ issue: 2, text: '   ' }], []), CronInputError, 'an empty answer');
+  await assert.rejects(fresh().cron.submit('QRD-9', [], []), CronInputError, 'nothing to send');
+  const refused = fresh();
+  await assert.rejects(refused.cron.submit('QRD-9', [{ issue: 2, text: 'Drop' }], [{ n: 3, choice: 'x' }]), CronInputError, 'one wrong line refuses the sheet');
+  assert.strictEqual(refused.state.sessions.length, 0);
+  await assert.rejects(world({ runs: [sousRun({ engine: null })] }).cron.submit('QRD-9', [{ issue: 2, text: 'Drop' }], []), CronInputError, 'the older flow');
 });
 
 test('an owner reply waits for the previous owner session of the ticket to finish its first turn', async () => {
   const w = world({ runs: [sousRun()] });
   await w.cron.answer('QRD-9', 'Drop');
   await assert.rejects(w.cron.answer('QRD-9', 'Drop'), (error: Error) => error instanceof CronInputError && error.message === OWNER_BUSY_TEXT, 'a second click while the first is queued');
-  await assert.rejects(w.cron.changeDecision('QRD-9', 2, 'no'), CronInputError, 'a change waits too');
+  await assert.rejects(w.cron.submit('QRD-9', [], [{ n: 2, choice: 'no' }]), CronInputError, 'a change waits too');
   w.claim();
   await assert.rejects(w.cron.answer('QRD-9', 'Drop'), CronInputError, 'and while it runs');
   w.endTurn('QRD-9');
@@ -625,10 +632,10 @@ test('an owner session uses only the options its machine takes and leaves no emp
 
   const failing = world({ runs: [sousRun()] });
   failing.state.failSend = true;
-  await assert.rejects(failing.cron.changeDecision('QRD-9', 2, 'no'), /send refused/);
+  await assert.rejects(failing.cron.submit('QRD-9', [], [{ n: 2, choice: 'no' }]), /send refused/);
   assert.strictEqual(failing.state.sessions.length, 0, 'the session whose first message failed is removed');
   failing.state.failSend = false;
-  await failing.cron.changeDecision('QRD-9', 2, 'no');
+  await failing.cron.submit('QRD-9', [], [{ n: 2, choice: 'no' }]);
   assert.strictEqual(failing.state.sessions.length, 1, 'the owner can try again');
 });
 

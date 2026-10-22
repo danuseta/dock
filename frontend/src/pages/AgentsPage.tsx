@@ -19,7 +19,6 @@ import { RUN_STATE_LABEL, isLongDescription, runState } from '../lib/ticketDetai
 import { FILTER_KINDS, FLOW_RAIL, PARKED_TEXT, START_FAILED_TEXT, canLgtm, completeRun, formatAge, reviewFindings, hasTrouble, isArchived, kindLabel, matchesRunFilter, pageOf, runActions, runFilterFromSearch, runFilterSearch, runKeyFromSearch, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunFilter, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
 import { KindBadge } from '../agents/KindBadge';
 import { RunDecisions } from '../agents/RunDecisions';
-import { RunQuestions } from '../agents/RunQuestions';
 import { VerdictBadge } from '../agents/VerdictBadge';
 import { RAIL_STAGES, railIndex } from '../agents/office/layout';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
@@ -31,8 +30,7 @@ import { chatStore } from '../chat/store';
 import { LimitsLine } from '../chat/StatusLine';
 import { useOpenForTicket } from '../chat/useOpenForTicket';
 import { AgentsLibrary } from '../agents/library/AgentsLibrary';
-import { useAnswerTicket } from '../chat/useAnswerTicket';
-import { useOwnerChecks } from '../agents/useOwnerChecks';
+import { questionsOf } from '../decisions/questions';
 
 const AgentsOffice = lazy(() => import('../components/AgentsOffice'));
 
@@ -142,8 +140,6 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
   const [acOpen, setAcOpen] = useState(false);
   const [briefOpen, setBriefOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const { answer, sending: answering } = useAnswerTicket();
-  const ownerChecks = useOwnerChecks();
   const [approveReview, { loading: approving }] = useMutation(APPROVE_REVIEW, { refetchQueries: ['GetOrchestrations', 'GetOrchestration'] });
   const [lgtmTarget, setLgtmTarget] = useState<AgentRun | null>(null);
   const [sampleStartedAt, setSampleStartedAt] = useState<number | null>(null);
@@ -193,7 +189,6 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
   const actions = selected ? runActions(selected, monitorsOnly(mode)) : null;
   // Failing criteria first, so the fold never hides one.
   const acList = selected ? [...selected.ac].sort((first, second) => Number(second.state === 'FAIL') - Number(first.state === 'FAIL')) : [];
-  const readOnly = selected && monitorsOnly(mode) ? `This DOCK only monitors. Answer in the Claude Code session on ${machinePlace(machineOf(selected))}.` : null;
 
   useEffect(() => {
     setAcOpen(false);
@@ -280,37 +275,6 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
   const pickRun = (key: string) => {
     setSelectedKey(key);
     if (isPhone()) requestAnimationFrame(() => document.getElementById('agent-run-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-  };
-
-  const handleIssueAnswer = async (key: string, issue: number, text: string) => {
-    try {
-      await answer(key, text, issue);
-      setToast({ message: `I-${issue} answered: a new sous session picks it up.`, type: 'success' });
-      void refetch();
-    } catch (answerError) {
-      setToast({ message: answerError instanceof Error ? answerError.message : 'The answer could not be sent', type: 'error' });
-      throw answerError;
-    }
-  };
-
-  const handleChangeDecision = async (key: string, n: number, choice: string) => {
-    try {
-      await ownerChecks.changeDecision(key, n, choice);
-      setToast({ message: `D-${n} change sent: a new sous session revises the work.`, type: 'success' });
-    } catch (changeError) {
-      setToast({ message: changeError instanceof Error ? changeError.message : 'The change could not be sent', type: 'error' });
-      throw changeError;
-    }
-  };
-
-  const handleConfirmDecisions = async (key: string, ns: number[]) => {
-    try {
-      await ownerChecks.confirmDecisions(key, ns);
-      setToast({ message: `Confirmed ${ns.map((n) => `D-${n}`).join(', ')}.`, type: 'success' });
-    } catch (confirmError) {
-      setToast({ message: confirmError instanceof Error ? confirmError.message : 'The confirmation could not be saved', type: 'error' });
-      throw confirmError;
-    }
   };
 
   const runAction = async (work: () => Promise<void>) => {
@@ -552,8 +516,11 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
               {chatError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The chat could not be opened: {chatError}</p>}
               <h2 className="text-pretty font-display text-base leading-snug font-bold">{selected.title || 'Untitled'}</h2>
 
-              {openIssues(selected).owner.length > 0 ? (
-                <RunQuestions key={`questions-${selected.key}`} run={selected} onAnswer={(issue, text) => handleIssueAnswer(selected.key, issue, text)} busy={answering} readOnly={readOnly} />
+              {questionsOf(selected).length > 0 ? (
+                <div id="run-waiting" className="scroll-mt-4 rounded-[8px] border border-amber-300/50 bg-amber-300/10 px-3 py-2.5 text-sm">
+                  <p className="text-pretty">{questionsOf(selected).length === 1 ? 'A question from sous waits' : `${questionsOf(selected).length} questions from sous wait`} on you. The pull requests stay draft until they are answered.</p>
+                  <Button size="sm" variant="primary" className="mt-2 h-7 px-2.5" onClick={() => onNavigate(`/decisions?ticket=${encodeURIComponent(selected.key)}`)}>Answer in Decisions →</Button>
+                </div>
               ) : selected.waiting && (
                 <div id="run-waiting" className="scroll-mt-4 rounded-[8px] border border-amber-300/50 bg-amber-300/10 px-3 py-2.5 text-sm">
                   <b className="mb-0.5 block font-mono text-[0.66rem] font-bold uppercase tracking-[0.08em] text-amber-200">Waiting on you</b>
@@ -597,7 +564,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                 </ol>
               </div>
 
-              <RunDecisions key={`decisions-${selected.key}`} run={selected} onConfirm={(ns) => handleConfirmDecisions(selected.key, ns)} onChange={(n, choice) => handleChangeDecision(selected.key, n, choice)} busy={ownerChecks.busy} readOnly={readOnly} />
+              <RunDecisions key={`decisions-${selected.key}`} run={selected} />
 
               <div>
                 <p className={cn(sectionLabel, 'mb-1')}>Acceptance criteria · {selected.acPassed}/{selected.acTotal}</p>

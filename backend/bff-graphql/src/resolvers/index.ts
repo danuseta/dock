@@ -10,7 +10,7 @@ import { dockerRuntimeService } from '../integrations/docker-runtime';
 import { OrchestratorInputError, attentionItems, normalizeTicketKey, orchestratorService } from '../integrations/orchestrator';
 import { CHAT_MACHINE, chatService } from '../integrations/chat';
 import { mergeAttention, withoutSettledTickets } from '../integrations/attention';
-import { CronInputError } from '../integrations/orchestrator-cron';
+import { CronInputError, type OwnerAnswer, type OwnerChange } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
 import { labelOrder } from '../integrations/orchestrator-cron';
 import { pushService } from '../integrations/push';
@@ -514,20 +514,23 @@ export const resolvers = {
       await chatService.answerTicket(ticketKey, text, await orchestratorService.machines()).catch(orchestratorInputError);
       return true;
     },
-    changeDecision: async (_: unknown, { ticketKey, n, choice }: { ticketKey: string; n: number; choice: string }) => {
+    submitDecisions: async (
+      _: unknown,
+      { ticketKey, answers, changes, confirms }: { ticketKey: string; answers: OwnerAnswer[]; changes: OwnerChange[]; confirms: number[] },
+    ) => {
       requireAgentControls();
       const key = await Promise.resolve().then(() => normalizeTicketKey(ticketKey)).catch(cronError);
-      await orchestratorCron.changeDecision(key, n, choice).catch(cronError);
-      await orchestratorService.recordEvent(key, 'OWNER_CHANGE', `D-${n}: new session`);
-      return true;
-    },
-    confirmDecisions: async (_: unknown, { ticketKey, ns }: { ticketKey: string; ns: number[] }) => {
-      requireAgentControls();
-      const run = await orchestratorService.get(ticketKey);
+      const run = await orchestratorService.get(key);
       if (!run) throw new GraphQLError('No run for this ticket', { extensions: { code: 'BAD_USER_INPUT' } });
-      const confirmed = await decisionGate.confirm(run, ns)
-        .catch((error: Error) => { throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } }); });
+      const confirmed = confirms.length
+        ? await decisionGate.confirm(run, confirms).catch((error: Error) => { throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } }); })
+        : await decisionGate.confirmed(key);
       await decisionGate.settle(run);
+      if (answers.length || changes.length) {
+        await orchestratorCron.submit(key, answers, changes).catch(cronError);
+        const sent = [...answers.map((answer) => `I-${answer.issue}`), ...changes.map((change) => `D-${change.n}`)].join(', ');
+        await orchestratorService.recordEvent(key, 'OWNER_REPLY', `${sent}: new session`);
+      }
       return confirmed;
     },
     approveReview: async (_: unknown, { ticketKey }: { ticketKey: string }) => {
@@ -666,8 +669,7 @@ export const protectedMutations = [
   'createChatSession',
   'sendChatMessage',
   'answerTicket',
-  'changeDecision',
-  'confirmDecisions',
+  'submitDecisions',
   'approveReview',
   'answerChatInteraction',
   'stopChatTurn',

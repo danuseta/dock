@@ -1,0 +1,100 @@
+import React from 'react';
+import type { AgentRun } from '../agents/runs';
+import { reportAge } from '../lib/sousReport';
+import { cn } from '../lib/cn';
+import { Button, Textarea } from '../components/ui';
+import { OWN, OWN_EFFECT, type Draft, type Question } from './questions';
+
+interface QuestionViewProps {
+  run: AgentRun;
+  question: Question;
+  number: number;
+  total: number;
+  draft?: Draft;
+  /** Why this DOCK cannot answer; the options stay visible but cannot be picked. */
+  readOnly: string | null;
+  onChange: (next: Partial<Draft>) => void;
+  onPrevious: () => void;
+  onNext: () => void;
+}
+
+const LETTERS = 'ABCDEFGHIJ';
+
+/** One question as an exam item: what sous asks, its context, the options, and under the picked one what it causes. */
+export const QuestionView: React.FC<QuestionViewProps> = ({ run, question, number, total, draft, readOnly, onChange, onPrevious, onNext }) => {
+  const options = [...question.options, { key: OWN, label: question.kind === 'issue' ? 'Write my own answer' : 'Change it to what I write', effect: OWN_EFFECT[question.kind] }];
+  const sent = Boolean(draft?.sent);
+  const pullRequests = (run.pullRequests ?? []).filter((pr) => pr.status === 'open' || pr.status === 'draft');
+  return (
+    <article className="flex max-w-[760px] flex-col" aria-labelledby="decision-question">
+      <p className="text-xs text-muted-foreground">{run.key} · Question {number} of {total}</p>
+      <h2 id="decision-question" className="mt-2 text-pretty text-xl leading-snug font-semibold">
+        {question.blocking && <span className="mr-2 inline-block size-2 rounded-full bg-amber-300 align-middle" title="Sous waits on this answer" aria-label="Sous waits on this answer" />}
+        {question.text}
+      </h2>
+      <p className="mt-1 text-[0.8rem] text-muted-foreground">{question.kind === 'issue' ? 'Sous asked' : 'Sous guessed and went on'}{question.at ? ` · ${reportAge(question.at)}` : ''}</p>
+
+      <div className="mt-5 flex flex-col gap-2 border-l-2 border-border pl-3.5 text-sm text-secondary-foreground">
+        <p className="text-pretty"><span className="text-foreground">Ticket.</span> {run.title || 'Untitled'}</p>
+        {question.detail && <p className="text-pretty"><span className="text-foreground">What it does.</span> {question.detail}</p>}
+        {pullRequests.length > 0 && (
+          <p><span className="text-foreground">Pull requests.</span> {pullRequests.map((pr) => <a key={pr.url} href={pr.url} target="_blank" rel="noreferrer" className="mr-2 underline-offset-2 hover:underline">{pr.repo}#{pr.number}</a>)}</p>
+        )}
+        {run.ac.length > 0 && (
+          <details>
+            <summary className="cursor-pointer text-foreground">Acceptance criteria ({run.ac.length})</summary>
+            <ol className="mt-1.5 flex list-decimal flex-col gap-1 pl-5">{run.ac.map((item) => <li key={item.n} className="text-pretty">{item.text}</li>)}</ol>
+          </details>
+        )}
+      </div>
+
+      <div className="mt-6 flex flex-col gap-0.5" role="radiogroup" aria-label="Answer">
+        {options.map((option, index) => {
+          const picked = draft?.choice === option.key;
+          return (
+            <div key={option.key} className={cn('rounded-[8px] px-2.5 py-2.5 transition-colors duration-150', picked ? 'bg-surface-1' : 'hover:bg-surface-1')}>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={picked}
+                disabled={Boolean(readOnly) || sent}
+                className="flex w-full items-start gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default max-[760px]:min-h-11"
+                onClick={() => onChange({ choice: option.key })}
+              >
+                <span className={cn('grid size-6 flex-none place-items-center rounded-full border font-mono text-[0.68rem]', picked ? 'border-foreground bg-foreground text-background' : 'border-border-glow text-muted-foreground')}>{option.key === OWN ? '–' : LETTERS[index]}</span>
+                <span className="pt-0.5 text-[0.9rem] font-medium text-foreground">{option.label}</span>
+              </button>
+              {picked && (
+                <div className="mt-1.5 pl-9">
+                  {option.key === OWN && (
+                    <Textarea
+                      autoFocus
+                      readOnly={sent}
+                      rows={3}
+                      maxLength={4000}
+                      className="mb-1.5 text-sm"
+                      value={draft?.text ?? ''}
+                      placeholder={question.kind === 'issue' ? 'Your answer for sous…' : 'What it should be…'}
+                      aria-label={`Your own answer to question ${number}`}
+                      onChange={(event) => onChange({ text: event.target.value })}
+                    />
+                  )}
+                  <p className="text-pretty text-[0.8rem] text-secondary-foreground">{option.effect}</p>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-border pt-4">
+        <Button variant="ghost" size="sm" onClick={onPrevious} disabled={number === 1}>‹ Previous</Button>
+        {!readOnly && !sent && <Button variant="ghost" size="sm" aria-pressed={Boolean(draft?.unsure)} onClick={() => onChange({ unsure: !draft?.unsure })}>{draft?.unsure ? 'Marked unsure' : 'Mark unsure'}</Button>}
+        <span className="flex-1" />
+        <Button variant="primary" size="sm" onClick={onNext}>{number === total ? 'Answer sheet' : 'Save, next'}</Button>
+      </div>
+      {sent && <p className="mt-2 text-pretty text-xs text-status-merged">Sent. Sous picks it up in a new session; the question closes once sous records it.</p>}
+      {readOnly && <p className="mt-2 text-pretty text-xs text-muted-foreground">{readOnly}</p>}
+    </article>
+  );
+};
