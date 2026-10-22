@@ -3,13 +3,12 @@ import { useMutation, useQuery } from '@apollo/client';
 import { Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { GET_HOME_CORE, GET_HOME_SECONDARY, GET_OWNER_QUESTIONS } from '../graphql/queries';
 import { ADD_QUICK_LINK, REMOVE_QUICK_LINK } from '../graphql/mutations';
-import { GoogleSearch } from '../components/GoogleSearch';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { WebsiteIcon } from '../components/WebsiteIcon';
 import { DockerRuntimeCard } from '../components/DockerRuntimeCard';
 import { AgentRunStrip } from '../components/AgentRunStrip';
 import { HomeAttention, type HomeAttentionItem } from '../components/HomeAttention';
-import { homeAttention } from '../lib/attention';
+import { ticketAttention, ticketQuestions } from '../lib/attention';
 import { isArchived, type AgentRunSummary } from '../agents/runs';
 import { MonthCalendar } from '../components/MonthCalendar';
 import { Button, Card, Dialog, IconButton, Input, Page, Select } from '../components/ui';
@@ -31,6 +30,7 @@ const highlightColors = [
 const panelClass = 'min-w-0 rounded-md border border-border bg-surface-0';
 const panelHeaderClass = 'flex items-center justify-between gap-2.5 border-b border-border px-[17px] py-[15px]';
 const panelTitleClass = 'text-balance font-display text-[0.82rem] font-bold';
+const MY_TICKETS = 5;
 const textActionClass = 'h-6 max-[760px]:h-11 border-0 px-0 py-0 text-[0.68rem] text-muted-foreground hover:border-transparent hover:bg-transparent hover:text-foreground';
 
 const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
@@ -76,8 +76,10 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
   const monitors = secondaryData?.monitors || [];
   const healthyServices = monitors.filter((monitor: any) => monitor.lastStatus === 'UP').length;
   const calendarEvents: CalendarEvent[] = secondaryData?.calendarEvents || [];
-  const attention = homeAttention<HomeAttentionItem>(secondaryData?.needsAttention ?? []);
+  const attention = ticketAttention<HomeAttentionItem>(secondaryData?.needsAttention ?? [], ticketQuestions(questionsData?.orchestrations ?? []));
   const agentRuns: Array<AgentRunSummary & { title: string }> = (secondaryData?.orchestrations || []).filter((run: AgentRunSummary) => !isArchived(run));
+  const runOf = new Map(agentRuns.map((run) => [run.key, run]));
+  const titleOf = (key: string) => tickets.find((ticket: any) => ticket.key === key)?.title;
 
   const handleAdd = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -97,69 +99,50 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
 
   const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening';
   const monthLabel = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-  const metrics = [
-    { label: 'Active tickets', value: activeTickets.length },
-    { label: 'Story points', value: storyPoints },
-    { label: 'Needs attention', value: attention.length, className: 'text-status-conflict' },
-    showMonitors
-      ? { label: 'Services healthy', value: `${healthyServices}/${monitors.length}`, className: 'text-status-merged' }
-      : { label: 'Agents running', value: agentRuns.filter((run) => run.activity === 'ACTIVE').length },
-  ];
+  const running = agentRuns.filter((run) => run.activity === 'ACTIVE').length;
+  const summary = [
+    attention.length === 0 ? 'Nothing needs you' : `${attention.length} ${attention.length === 1 ? 'ticket needs' : 'tickets need'} you`,
+    `${running} ${running === 1 ? 'agent' : 'agents'} running`,
+    ...(showMonitors && monitors.length > 0 ? [`${healthyServices}/${monitors.length} services healthy`] : []),
+  ].join(' · ');
   const showSide = showCalendar || showMonitors;
+  const quickLinks = coreData?.quickLinks || [];
 
   return (
     <Page width="full">
-      <header className="mb-6 flex items-start justify-between gap-6 max-[600px]:items-end">
+      <header className="mb-6 flex items-start justify-between gap-6 max-[600px]:flex-col max-[600px]:gap-4">
         <div>
           <h1 className="text-balance font-display text-[clamp(2rem,4vw,2.75rem)] leading-[1.05] font-bold max-[600px]:text-[1.65rem]">{greeting}, Danu.</h1>
-          <p className="mt-2 text-pretty text-secondary-foreground max-[600px]:text-[0.72rem]">Here is what needs your attention before you start working.</p>
+          <p className="mt-2 text-pretty text-secondary-foreground max-[600px]:text-[0.72rem]">{summary}</p>
         </div>
-        <div className="flex-none text-right">
-          <strong className="block font-mono text-[clamp(1.7rem,3vw,2.25rem)] leading-none font-extrabold tabular-nums max-[600px]:text-[1.15rem]">{now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</strong>
-          <span className="mt-2 block text-[0.72rem] text-muted-foreground max-[600px]:text-[0.6rem]">{now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
+        <div className="grid flex-none justify-items-end gap-3 max-[600px]:justify-items-start">
+          <div className="text-right max-[600px]:text-left">
+            <strong className="block font-mono text-[clamp(1.7rem,3vw,2.25rem)] leading-none font-extrabold tabular-nums max-[600px]:text-[1.15rem]">{now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</strong>
+            <span className="mt-2 block text-[0.72rem] text-muted-foreground max-[600px]:text-[0.6rem]">{now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
+          </div>
+          <nav className="flex flex-wrap justify-end gap-1.5 max-[600px]:justify-start" aria-label="Quick links">
+            {quickLinks.map((link: any) => <span className="group relative" key={link.id}><a className="grid size-8 place-items-center rounded-[7px] border border-border bg-surface-0 transition-colors duration-150 ease-out hover:border-border-glow hover:bg-surface-1 max-[760px]:size-11" href={link.url} target="_blank" rel="noreferrer" aria-label={`Open ${link.title}`} title={link.title}><WebsiteIcon title={link.title} url={link.url} /></a><button className="absolute -top-[5px] -right-[5px] grid size-[17px] place-items-center rounded-full border border-border bg-surface-2 p-0 text-status-conflict opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100" type="button" aria-label={`Remove ${link.title}`} onClick={() => removeQuickLink({ variables: { id: link.id } })}><Trash2 size={10} aria-hidden="true" /></button></span>)}
+            <IconButton variant="ghost" className="size-8 rounded-[7px] border-dashed border-border max-[760px]:size-11" onClick={() => { setLinkError(''); setShowForm(true); }} aria-label="Add quick link" title="Add quick link"><Plus size={14} aria-hidden="true" /></IconButton>
+          </nav>
         </div>
       </header>
 
-      <GoogleSearch />
+      <HomeAttention rows={attention} titleOf={titleOf} panelClass={panelClass} headerClass={panelHeaderClass} titleClass={panelTitleClass} onTicketClick={onTicketClick} onNavigate={onNavigate} />
 
-      <section className="mb-6 grid grid-cols-4 overflow-hidden rounded-md border border-border bg-surface-1 max-[600px]:grid-cols-2 [&>div]:border-r [&>div]:border-border [&>div:last-child]:border-r-0 max-[600px]:[&>div:nth-child(2)]:border-r-0 max-[600px]:[&>div:nth-child(-n+2)]:border-b" aria-label="Work overview">
-        {metrics.map((metric) => (
-          <div className="p-[18px]" key={metric.label}>
-            <strong className={cn('block font-display text-[1.55rem] leading-none font-extrabold tabular-nums', metric.className)}>{metric.value}</strong>
-            <span className="mt-[7px] block text-[0.68rem] text-muted-foreground">{metric.label}</span>
-          </div>
-        ))}
-      </section>
-
-      <HomeAttention items={attention} runs={questionsData?.orchestrations ?? []} panelClass={panelClass} headerClass={panelHeaderClass} titleClass={panelTitleClass} actionClass={textActionClass} onTicketClick={onTicketClick} onNavigate={onNavigate} />
-
-      <div className={cn('grid items-stretch gap-3.5 max-[900px]:grid-cols-1', showSide ? 'grid-cols-[minmax(0,1fr)_minmax(340px,380px)]' : 'grid-cols-1')}>
-        <div className={cn('grid gap-3.5', agentRuns.length > 0 ? 'grid-rows-[auto_minmax(0,1fr)_auto_auto]' : 'grid-rows-[auto_minmax(0,1fr)_auto]')}>
-          <section className="min-w-0" aria-labelledby="quick-links-title">
-            <div className="mb-2 flex items-center justify-between">
-              <h2 id="quick-links-title" className={panelTitleClass}>Quick links</h2>
-              <IconButton variant="ghost" className="size-6 max-[760px]:size-11" onClick={() => { setLinkError(''); setShowForm(true); }} aria-label="Add quick link" title="Add quick link"><Plus size={14} aria-hidden="true" /></IconButton>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {(coreData?.quickLinks || []).map((link: any) => {
-                return <span className="group relative" key={link.id}><a className="grid size-11 place-items-center rounded-[9px] border border-border bg-surface-0 transition-colors duration-150 ease-out hover:border-border-glow hover:bg-surface-1" href={link.url} target="_blank" rel="noreferrer" aria-label={`Open ${link.title}`} title={link.title}><WebsiteIcon title={link.title} url={link.url} /></a><button className="absolute -top-[5px] -right-[5px] grid size-[17px] place-items-center rounded-full border border-border bg-surface-2 p-0 text-status-conflict opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100" type="button" aria-label={`Remove ${link.title}`} onClick={() => removeQuickLink({ variables: { id: link.id } })}><Trash2 size={10} aria-hidden="true" /></button></span>;
-              })}
-              {(coreData?.quickLinks || []).length === 0 && <button type="button" className="min-h-11 rounded-[9px] border border-dashed border-border bg-transparent px-3 text-muted-foreground" onClick={() => setShowForm(true)}>Add your first link</button>}
-            </div>
-          </section>
-
-          <article className={cn(panelClass, 'h-full')}>
-            <header className="flex items-center justify-between gap-2.5 border-b border-border px-3.5 py-[11px]"><h2 className={panelTitleClass}>Current work</h2><Button variant="ghost" size="sm" className={textActionClass} onClick={() => onNavigate('/dashboard')}>Open board →</Button></header>
-            {activeTickets.slice(0, 4).map((ticket: any) => <button className="grid w-full grid-cols-[82px_minmax(0,1fr)_auto_auto] items-center gap-2.5 border-0 border-b border-border bg-transparent px-3.5 py-2.5 text-left text-foreground transition-colors duration-150 ease-out last:border-b-0 hover:bg-surface-1 max-[600px]:grid-cols-[72px_minmax(0,1fr)_auto]" key={ticket.key} onClick={() => onTicketClick(ticket.key)}><span className="font-mono text-[0.69rem] font-bold text-accent">{ticket.key}</span><span className="truncate text-[0.8rem]">{ticket.title}</span><span className="whitespace-nowrap font-mono text-[0.63rem] font-bold text-muted-foreground tabular-nums">{ticket.storyPoints || 0} SP</span><span className="whitespace-nowrap rounded-[5px] bg-surface-2 px-1.5 py-0.5 text-[0.63rem] text-secondary-foreground max-[600px]:hidden">{ticket.status}</span></button>)}
-            {activeTickets.length === 0 && <div className="px-3.5 py-5 text-[0.78rem] text-muted-foreground">No active Jira tickets.</div>}
+      <div className={cn('grid items-start gap-3.5 max-[900px]:grid-cols-1', showSide ? 'grid-cols-[minmax(0,1fr)_minmax(340px,380px)]' : 'grid-cols-1')}>
+        <div className="grid gap-3.5">
+          <article className={panelClass}>
+            <header className={panelHeaderClass}>
+              <h2 className={panelTitleClass}>My tickets <span className="ml-1.5 font-mono text-[0.64rem] font-medium text-muted-foreground tabular-nums">{activeTickets.length} active · {storyPoints} SP</span></h2>
+              <div className="flex items-center gap-3.5"><Button variant="ghost" size="sm" className={textActionClass} onClick={() => onNavigate('/dashboard')}>Board →</Button><Button variant="ghost" size="sm" className={textActionClass} onClick={() => onNavigate('/agents')}>Agents →</Button></div>
+            </header>
+            {activeTickets.slice(0, MY_TICKETS).map((ticket: any) => {
+              const run = runOf.get(ticket.key);
+              return <button className="grid w-full grid-cols-[82px_minmax(0,1fr)_minmax(0,auto)_auto_auto] items-center gap-2.5 border-0 border-b border-border bg-transparent px-4 py-2.5 text-left text-foreground transition-colors duration-150 ease-out last:border-b-0 hover:bg-surface-1 max-[760px]:grid-cols-[72px_minmax(0,1fr)_auto]" key={ticket.key} onClick={() => onTicketClick(ticket.key)}><span className="font-mono text-[0.69rem] font-bold text-accent">{ticket.key}</span><span className="truncate text-[0.8rem]">{ticket.title}</span>{run ? <AgentRunStrip run={run} className="max-[760px]:col-span-3 max-[760px]:row-start-2" /> : <span className="justify-self-end rounded-xs border border-border px-2 py-1 font-mono text-[0.62rem] text-muted-foreground max-[760px]:hidden">No agent</span>}<span className="whitespace-nowrap font-mono text-[0.63rem] font-bold text-muted-foreground tabular-nums">{ticket.storyPoints || 0} SP</span><span className="whitespace-nowrap rounded-[5px] bg-surface-2 px-1.5 py-0.5 text-[0.63rem] text-secondary-foreground max-[760px]:hidden">{ticket.status}</span></button>;
+            })}
+            {activeTickets.length === 0 && <div className="px-4 py-5 text-[0.78rem] text-muted-foreground">No active Jira tickets.</div>}
+            {activeTickets.length > MY_TICKETS && <div className="flex items-center justify-between border-t border-border px-4 py-2.5 text-[0.72rem] text-muted-foreground"><span>{activeTickets.length - MY_TICKETS} more on the board</span><Button variant="ghost" size="sm" className={textActionClass} onClick={() => onNavigate('/dashboard')}>Open board →</Button></div>}
           </article>
-
-          {agentRuns.length > 0 && (
-            <article className={panelClass}>
-              <header className="flex items-center justify-between gap-2.5 border-b border-border px-3.5 py-[11px]"><h2 className={panelTitleClass}>Agents</h2><Button variant="ghost" size="sm" className={textActionClass} onClick={() => onNavigate('/agents')}>Open office →</Button></header>
-              {agentRuns.slice(0, 4).map((run) => <button className="grid w-full grid-cols-[82px_minmax(0,1fr)_minmax(0,auto)] items-center gap-2.5 border-0 border-b border-border bg-transparent px-3.5 py-2 text-left text-foreground transition-colors duration-150 ease-out last:border-b-0 hover:bg-surface-1 max-[600px]:grid-cols-[72px_minmax(0,1fr)]" key={run.key} onClick={() => onNavigate(`/agents?run=${encodeURIComponent(run.key)}`)}><span className="font-mono text-[0.69rem] font-bold text-accent">{run.key}</span><span className="truncate text-[0.8rem]">{run.title || 'Untitled'}</span><AgentRunStrip run={run} className="max-[600px]:col-span-2" /></button>)}
-            </article>
-          )}
 
           {showDocker && <DockerRuntimeCard runtime={secondaryData?.dockerRuntime} onNavigate={onNavigate} compact loading={secondaryLoading && !secondaryData} />}
         </div>

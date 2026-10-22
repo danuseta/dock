@@ -7,7 +7,7 @@ import { AnswerSheet } from '../decisions/AnswerSheet';
 import { QuestionView } from '../decisions/QuestionView';
 import { TicketList } from '../decisions/TicketList';
 import { KEEP, KEEP_EFFECT, OWN, answerText, questionCount, questionsOf, submissionOf, type Draft } from '../decisions/questions';
-import { homeAttention } from '../lib/attention';
+import { homeAttention, ticketAttention, ticketQuestions } from '../lib/attention';
 
 const issue = (n: number, level: string, status = 'open', options: string[] = [], effects?: Array<string | null>) => ({ n, at: '', type: 'QUESTION', text: `Issue ${n}`, level, status, options, effects });
 
@@ -89,6 +89,23 @@ test('Home lists pull request and agent problems; sous questions go to Decisions
     { id: '5', type: 'AGENT_STALLED', message: 'Quiet for 2 h' },
   ];
   assert.deepStrictEqual(homeAttention(items).map((item) => item.id), ['1', '4', '5']);
+});
+
+test('Needs you is one row per ticket, worst signal first, with the sous questions counted on the row', () => {
+  const items = [
+    { id: 'a', type: 'AGENT_STALLED', message: 'Quiet for 3 h', ticketKey: 'QRD-77' },
+    { id: 'b', type: 'AGENT_CHANGES_REQUESTED', message: 'Changes requested on fe#915', ticketKey: 'QRD-91' },
+    { id: 'c', type: 'AGENT_CHECKS_FAILING', message: 'Checks failing on fe#915', ticketKey: 'QRD-91' },
+    { id: 'd', type: 'CONFLICT', message: 'Merge conflict on chore branch', ticketKey: null },
+    { id: 'e', type: 'AGENT_ISSUE', message: 'Waiting on you: I-3: Refresh?', ticketKey: 'QRD-9' },
+  ];
+  const rows = ticketAttention(items, [...ticketQuestions([run]), { key: 'QRD-5', count: 0, blocking: false }]);
+  assert.deepStrictEqual(rows.map((row) => row.id), ['d', 'QRD-91', 'QRD-9', 'QRD-77'], 'a pull request without a ticket keeps its own row; a ticket with no question left drops out');
+  assert.deepStrictEqual(rows[1].items.map((item) => item.id), ['c', 'b'], 'failing checks come before requested changes');
+  assert.deepStrictEqual(rows[1].groups, ['blocked', 'answer']);
+  assert.deepStrictEqual(rows[2].items, [], 'the sous question is counted, not listed as an item');
+  assert.deepStrictEqual(rows[2].questions, { key: 'QRD-9', title: 'Sous ticket', count: 3, blocking: true });
+  assert.deepStrictEqual(rows[3].groups, ['quiet']);
 });
 
 test('the answer sheet lists what needs a look first and folds the answers already sent', () => {

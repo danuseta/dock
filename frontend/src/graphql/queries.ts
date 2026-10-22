@@ -362,6 +362,7 @@ export const GET_HOME_SECONDARY = gql`
       type
       message
       ticketKey
+      prUrl
       owner
       repo
       pullNumber
