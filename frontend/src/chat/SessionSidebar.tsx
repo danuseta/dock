@@ -157,6 +157,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({ sessions, machin
               const dot = sidebarDot(session, { bridgeUp: machineOnline(machines, machineOf(session)) });
               let meta: React.ReactNode = <span className="flex-none font-mono text-[0.64rem] text-muted-foreground tabular-nums">{relativeTime(session.lastMessageAt, now)}</span>;
               if (group.key === 'needs-you') meta = <Pill className="border-amber-300/50 text-amber-300">answer</Pill>;
+              else if (session.status === 'queued') meta = <Pill className="border-amber-300/50 text-amber-200">queued</Pill>;
               else if ((session.status === 'queued' || session.status === 'running') && workers > 0) meta = <span className="flex-none font-mono text-[0.64rem] text-muted-foreground tabular-nums">team {workers}</span>;
               const hint = collapsed ? sessionTitle(session) : undefined;
               return (

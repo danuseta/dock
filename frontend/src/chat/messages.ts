@@ -117,6 +117,18 @@ export const isImageAttachment = (attachment: ChatAttachment) => attachment.stat
 
 export const pollInterval = (busy: boolean) => (busy ? FAST_POLL_MS : SLOW_POLL_MS);
 
+/** The line a queued message shows: the turns ahead of it on the machine when there are any. */
+export function queuedText(machine: string, runningTitles: readonly string[]): string {
+  if (runningTitles.length === 0) return `Queued · waiting for the ${machine} bridge to pick it up`;
+  const count = runningTitles.length;
+  return `Queued · ${count} other ${count === 1 ? 'turn is' : 'turns are'} running on ${machine}: ${runningTitles.join(', ')}. It starts when one ends.`;
+}
+
+/** Titles of the sessions running on the same machine as `session`, for its queue line. */
+export const runningBeside = (session: Pick<ChatSession, 'id' | 'machine'>, sessions: readonly ChatSession[]): string[] => (
+  sessions.filter((other) => other.id !== session.id && other.status === 'running' && machineOf(other) === machineOf(session)).map(sessionTitle)
+);
+
 export const sessionTitle = (session: ChatSession) => session.title || session.ticketKey || 'Untitled session';
 export const machineOf = (session?: { machine?: string | null } | null) => session?.machine || DEFAULT_MACHINE;
 

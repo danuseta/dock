@@ -269,6 +269,11 @@ export const completeRun = (run: Omit<AgentRun, 'ac'> & { ac?: AgentAc[] | null 
   members: run.members ?? [],
 });
 
+/** A review the owner can still LGTM: the runner's verdict is approve and DOCK has not labelled and approved it yet. */
+export const canLgtm = (run: Pick<AgentRun, 'kind' | 'verdict' | 'approved' | 'sample'>): boolean => (
+  run.kind === 'review' && run.verdict === 'approve' && !run.approved && !run.sample
+);
+
 /** What the Agents page offers on a run. A sample offers nothing; the DOCK that only monitors offers no control. */
 export function runActions(run: Pick<AgentRun, 'sample'>, monitoring: boolean) {
   const editable = !run.sample && !monitoring;

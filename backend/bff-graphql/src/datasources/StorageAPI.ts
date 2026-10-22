@@ -8,6 +8,12 @@ export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto'] as co
 export const CHAT_MODES = ['auto', 'plan', 'acceptEdits'] as const;
 export const RTK_SETTINGS = ['on', 'off'] as const;
 export const CAVEMAN_LEVELS = ['off', 'lite', 'full', 'ultra'] as const;
+export const MAX_PARALLEL_TURNS = 6;
+/** A saved turn count, or null when it is unset or not a whole number from 1 to MAX_PARALLEL_TURNS. */
+export const parallelTurns = (value: unknown): number | null => {
+  const n = Number(value);
+  return String(value ?? '').trim() !== '' && Number.isInteger(n) && n >= 1 && n <= MAX_PARALLEL_TURNS ? n : null;
+};
 const MAX_CHAT_DEFAULT_CHARS = 100;
 const JIRA_TICKET_KEY = /^[A-Z][A-Z0-9_]{0,31}-[1-9]\d{0,9}$/;
 
@@ -170,6 +176,7 @@ export class StorageAPI {
       chatDefaultMode: settings.chatDefaultMode || null,
       chatRtk: settings.chatRtk || 'on',
       chatCaveman: settings.chatCaveman || 'full',
+      chatParallelTurns: parallelTurns(settings.chatParallelTurns)?.toString() ?? null,
     };
   }
 
@@ -185,6 +192,7 @@ export class StorageAPI {
       if (input.chatDefaultMode != null && input.chatDefaultMode !== '' && !(CHAT_MODES as readonly string[]).includes(String(input.chatDefaultMode))) throw new Error('Invalid chat default mode');
       if (input.chatRtk != null && !(RTK_SETTINGS as readonly string[]).includes(String(input.chatRtk))) throw new Error('Invalid RTK setting');
       if (input.chatCaveman != null && !(CAVEMAN_LEVELS as readonly string[]).includes(String(input.chatCaveman))) throw new Error('Invalid caveman level');
+      if (input.chatParallelTurns != null && input.chatParallelTurns !== '' && parallelTurns(input.chatParallelTurns) === null) throw new Error('Invalid turn count');
       if (input.discordMessageTemplate != null) normalizeDiscordMessageTemplate(String(input.discordMessageTemplate));
       await Promise.all(Object.entries(input)
         .filter(([key, value]) => !(this.sensitiveKeys.has(key)

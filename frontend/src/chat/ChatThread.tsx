@@ -8,7 +8,7 @@ import { EmptyState } from '../components/EmptyState';
 import { TerminalScene } from '../components/empty/scenes/TerminalScene';
 import { cn } from '../lib/cn';
 import {
-  isStopping, isTurnInProgress, machineCapabilities, machineOf, machineOnline, machinePlace, mergeMessages, newestAssistantId, oldestId, optimisticMessage, pollCursor, pollInterval, sendBlocker, sessionTurnOptions,
+  isStopping, isTurnInProgress, machineCapabilities, machineOf, machineOnline, machinePlace, mergeMessages, newestAssistantId, oldestId, optimisticMessage, pollCursor, pollInterval, queuedText, sendBlocker, sessionTurnOptions,
   type ChatMachine, type ChatMessage, type ChatSession,
 } from './messages';
 import { MachineChip } from './MachineControls';
@@ -43,6 +43,8 @@ interface ChatThreadProps {
   threadId?: string | null;
   /** Opens an agent's thread beside the conversation, or closes it with null. Without it a thread opens in place. */
   onOpenThread?: (eventId: string | null) => void;
+  /** Titles of the other sessions running on this machine, named while this one waits in the queue. */
+  queuedBehind?: string[];
 }
 
 export interface HeaderContext { control: TurnOptionsControl; dot: DotState; status: ChatSessionStatus | undefined }
@@ -59,7 +61,7 @@ const PROMPT_EXAMPLES = [
 
 const messageOf = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
 
-export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, readOnlyAction, hideMachine, onActivity, renderHeader, threadId, onOpenThread }) => {
+export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, readOnlyAction, hideMachine, onActivity, renderHeader, threadId, onOpenThread, queuedBehind = [] }) => {
   const client = useApolloClient();
   const [recalled] = useState(() => recallMessages(sessionId));
   const [messages, setMessages] = useState<ChatMessage[]>(() => recalled?.messages ?? []);
@@ -292,7 +294,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
       {!missing && <InteractionCards sessionId={sessionId} cards={interactions.cards} lines={interactions.lines} messages={messages} onSettled={interactions.record} />}
 
       <div className="flex flex-col gap-1.5 border-t border-border bg-surface-0 px-3.5 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))]">
-        {status === 'queued' && !renderHeader && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-secondary-foreground" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" />Queued · waiting for the {machine} bridge to pick it up</p>}
+        {status === 'queued' && <p className="flex items-start gap-1.5 font-mono text-[0.68rem] text-amber-200" role="status"><Loader2 size={12} className="mt-0.5 flex-none animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">{queuedText(machine, queuedBehind)}</span></p>}
         {status === 'running' && !renderHeader && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-status-merged" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">Running{interactions.cards.length > 0 ? ' · waiting for your answer' : session?.statusDetail ? ` · ${session.statusDetail}` : ''}</span></p>}
         {status === 'error' && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The last turn failed{session?.statusDetail ? `: ${session.statusDetail}` : '.'}</p>}
         {sendError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">Not sent: {sendError}</p>}

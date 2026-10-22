@@ -15,7 +15,10 @@ export interface ChatDefaultsValue {
   mode: string;
   rtk: RtkSetting;
   caveman: CavemanLevel;
+  turns: string;
 }
+
+const TURN_CHOICES: Choice[] = [{ value: '', label: "The bridge's own setting" }, ...['1', '2', '3', '4', '5', '6'].map((n) => ({ value: n, label: n }))];
 
 interface ChatDefaultsSectionProps {
   value: ChatDefaultsValue;
@@ -50,6 +53,7 @@ export const ChatDefaultsSection: React.FC<ChatDefaultsSectionProps> = ({ value,
         <Checkbox aria-label="RTK" checked={value.rtk === 'on'} onChange={(event) => onChange({ ...value, rtk: event.target.checked ? 'on' : 'off' })} />
       </SettingRow>
       <ChoiceField label="Caveman" help="How terse the agent writes." value={value.caveman} choices={cavemanChoices()} onPick={(caveman) => onChange({ ...value, caveman: normalizeCaveman(caveman) })} />
+      <ChoiceField label="Turns at once" help="How many chat turns a bridge runs together. A message past that waits in the queue. Applies within 15 seconds; a running turn is never stopped." value={value.turns} choices={TURN_CHOICES} onPick={(turns) => onChange({ ...value, turns })} />
     </SettingsCard>
   );
 };

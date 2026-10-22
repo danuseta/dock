@@ -106,7 +106,9 @@ export const AgentFlowGraph: React.FC<AgentFlowGraphProps> = ({ run, timeline })
   };
   const leafY = (index: number) => leafTop + Math.floor(index / LEAF_ROW) * LEAF_ROW_HEIGHT;
   const leafRows = Math.max(1, Math.ceil(leaves.length / LEAF_ROW));
-  const height = leafTop + 144 + (leafRows - 1) * LEAF_ROW_HEIGHT;
+  // The graph ends under its lowest row: the lead alone, the agents it spawned, or the last row of theirs.
+  const lowestY = leaves.length > 0 ? leafTop + (leafRows - 1) * LEAF_ROW_HEIGHT : children.length > 0 ? childY : rootY;
+  const height = lowestY + 144;
   const parentX = (agent: TimelineAgent) => childX(Math.max(0, children.findIndex((child) => child.id === agent.parentId)));
   const maxBucket = Math.max(3, ...timeline.buckets.map((bucket) => bucket.n));
   const busy = root?.state === 'active' && !looking;

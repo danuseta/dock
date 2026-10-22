@@ -1704,6 +1704,19 @@ test('the claim carries the RTK and caveman settings, on and full when unset or 
   assert.deepStrictEqual(((await ctx.service.claim({ wait: 0, caps: CAPS }, undefined, 'laptop')).message as { agent?: unknown } | null)?.agent, { rtk: true, caveman: 'full' });
 });
 
+test('the claim and the bridge settings carry the saved turn count, and leave it out when unset or out of range', async () => {
+  const ctx = setup();
+  assert.deepStrictEqual(await ctx.service.claim({ wait: 0, caps: CAPS }, undefined, 'laptop'), { message: null });
+  assert.deepStrictEqual(await ctx.service.bridgeSettings(), {});
+
+  ctx.settings.push({ key: 'chatParallelTurns', value: '5' });
+  assert.deepStrictEqual(await ctx.service.claim({ wait: 0, caps: CAPS }, undefined, 'laptop'), { message: null, parallelTurns: 5 });
+  assert.deepStrictEqual(await ctx.service.bridgeSettings(), { parallelTurns: 5 });
+
+  ctx.settings.splice(0, 1, { key: 'chatParallelTurns', value: '9' });
+  assert.deepStrictEqual(await ctx.service.bridgeSettings(), {});
+});
+
 test('a chat reads the old default mode as Auto, and only the cron keeps it', async () => {
   assert.strictEqual(chatMode('default'), 'auto');
   assert.strictEqual(chatMode('plan'), 'plan');

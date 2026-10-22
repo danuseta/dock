@@ -1,14 +1,14 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowDown, ArrowUp, Building2, ChevronLeft, ChevronRight, Clock, ExternalLink, EyeOff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Square, Table2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Building2, Check, ChevronLeft, ChevronRight, Clock, ExternalLink, EyeOff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Square, Table2, X } from 'lucide-react';
 import { GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
-import { CANCEL_DECISION, CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
+import { APPROVE_REVIEW, CANCEL_DECISION, CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { EmptyState } from '../components/EmptyState';
 import { DeskScene } from '../components/empty/scenes/DeskScene';
 import { RobotScene } from '../components/empty/scenes/RobotScene';
 import { Toast } from '../components/Toast';
-import { Badge, Button, Card, Dialog, Page, PageHeader, PhoneCards } from '../components/ui';
+import { Badge, Button, Card, ConfirmDialog, Dialog, Page, PageHeader, PhoneCards } from '../components/ui';
 import { isPhone } from '../lib/phone';
 import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
@@ -16,7 +16,7 @@ import { hasPage, monitorsOnly, useDockMode } from '../lib/dockMode';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { openIssues } from '../lib/sousReport';
 import { RUN_STATE_LABEL, isLongDescription, runState } from '../lib/ticketDetail';
-import { FILTER_KINDS, FLOW_RAIL, PARKED_TEXT, START_FAILED_TEXT, completeRun, formatAge, reviewFindings, hasTrouble, isArchived, kindLabel, matchesRunFilter, pageOf, runActions, runFilterFromSearch, runFilterSearch, runKeyFromSearch, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunFilter, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
+import { FILTER_KINDS, FLOW_RAIL, PARKED_TEXT, START_FAILED_TEXT, canLgtm, completeRun, formatAge, reviewFindings, hasTrouble, isArchived, kindLabel, matchesRunFilter, pageOf, runActions, runFilterFromSearch, runFilterSearch, runKeyFromSearch, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunFilter, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
 import { KindBadge } from '../agents/KindBadge';
 import { RunDecisions } from '../agents/RunDecisions';
 import { RunQuestions } from '../agents/RunQuestions';
@@ -97,6 +97,17 @@ const StageChip: React.FC<{ stage: string; kind?: string }> = ({ stage, kind }) 
   </span>
 );
 
+/** LGTM on a review whose verdict is approve; "Approved" once DOCK labelled the ticket and approved its PRs. */
+const LgtmButton: React.FC<{ run: AgentRun; busy: boolean; onLgtm: (run: AgentRun) => void }> = ({ run, busy, onLgtm }) => {
+  if (run.kind === 'review' && run.approved) return <span className="inline-flex items-center gap-1 font-mono text-[0.68rem] font-semibold text-status-merged"><Check size={12} aria-hidden="true" />Approved</span>;
+  if (!canLgtm(run)) return null;
+  return (
+    <Button size="sm" variant="primary" className="h-7 px-2.5 max-[760px]:h-11" disabled={busy} title="Adds the Jira label pass to the reviewed ticket and approves its pull requests on GitHub" onClick={(event) => { event.stopPropagation(); onLgtm(run); }}>
+      <Check size={13} aria-hidden="true" />LGTM
+    </Button>
+  );
+};
+
 // The detail panel already says these in its waiting box or its Activity section.
 const ACTIVITY_SHOWS = new Set<RunStatus>(['waiting', 'stalled', 'working', 'thinking', 'asleep']);
 
@@ -132,6 +143,8 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const { answer, sending: answering } = useAnswerTicket();
   const [cancelDecision, { loading: cancelling }] = useMutation(CANCEL_DECISION);
+  const [approveReview, { loading: approving }] = useMutation(APPROVE_REVIEW, { refetchQueries: ['GetOrchestrations', 'GetOrchestration'] });
+  const [lgtmTarget, setLgtmTarget] = useState<AgentRun | null>(null);
   const [sampleStartedAt, setSampleStartedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now() / 1000);
   const [dismissTarget, setDismissTarget] = useState<AgentRun | null>(null);
@@ -233,6 +246,22 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
     { label: 'Stalled or failed', value: active.filter(hasTrouble).length, className: 'text-status-conflict' },
   ];
 
+  const handleLgtm = async () => {
+    if (!lgtmTarget) return;
+    try {
+      const res = await approveReview({ variables: { ticketKey: lgtmTarget.key } });
+      const steps: { name: string; ok: boolean; detail: string }[] = res.data?.approveReview ?? [];
+      const failed = steps.filter((step) => !step.ok);
+      setToast(failed.length
+        ? { message: `${failed.length} of ${steps.length} steps failed: ${failed.map((step) => `${step.name} (${step.detail})`).join('; ')}`, type: 'error' }
+        : { message: `LGTM sent for ${lgtmTarget.key}: Jira label pass added and the pull requests approved.`, type: 'success' });
+    } catch (lgtmError) {
+      setToast({ message: lgtmError instanceof Error ? lgtmError.message : 'The LGTM could not be sent', type: 'error' });
+    } finally {
+      setLgtmTarget(null);
+    }
+  };
+
   const handleDismiss = async () => {
     if (!dismissTarget) return;
     setActionError('');
@@ -286,9 +315,25 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
   if (isInitialQueryLoading(loading, data)) return <Page width="full"><LoadingSkeleton /></Page>;
 
   const empty = allRuns.length === 0;
-  const filterGroups = [
-    { name: 'kind', label: 'Type', options: FILTER_KINDS.map((value) => [value, kindLabel(value)] as const) },
-  ] as const;
+  // Sits at the right end of the office and table header rows.
+  const typeFilter = !empty && (
+    <div className="ml-auto flex items-center gap-2 max-[700px]:ml-0" role="group" aria-label="Filter runs">
+      <span className={sectionLabel}>Type</span>
+      <div className="flex rounded-sm border border-border bg-surface-1 p-0.5" role="group" aria-label="Type shown">
+        {([[null, 'All'], ...FILTER_KINDS.map((value) => [value, kindLabel(value)] as const)] as const).map(([value, label]) => (
+          <button
+            key={label}
+            type="button"
+            className={cn('flex h-7 max-[760px]:h-11 items-center rounded-xs px-2.5 font-display text-xs font-semibold text-secondary-foreground transition-colors duration-150', filter.kind === value && 'bg-accent text-black')}
+            aria-pressed={filter.kind === value}
+            onClick={() => chooseFilter({ ...filter, kind: value })}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <Page width="full">
@@ -328,29 +373,6 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
       {chat && <CronSettingsDialog open={showCron} onClose={() => setShowCron(false)} />}
       {chat && <CronRow pollMs={POLL_MS} onOpenSettings={() => setShowCron(true)} />}
 
-      {!empty && (
-        <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2" role="group" aria-label="Filter runs">
-          {filterGroups.map((group) => (
-            <div key={group.name} className="flex items-center gap-2">
-              <span className={sectionLabel}>{group.label}</span>
-              <div className="flex rounded-sm border border-border bg-surface-1 p-0.5" role="group" aria-label={`${group.label} shown`}>
-                {([[null, 'All'], ...group.options] as const).map(([value, label]) => (
-                  <button
-                    key={label}
-                    type="button"
-                    className={cn('flex h-7 max-[760px]:h-11 items-center rounded-xs px-3 font-display text-xs font-semibold text-secondary-foreground transition-colors duration-150', filter[group.name] === value && 'bg-accent text-black')}
-                    aria-pressed={filter[group.name] === value}
-                    onClick={() => chooseFilter({ ...filter, [group.name]: value })}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
       <section className="mb-4 grid grid-cols-4 overflow-hidden rounded-md border border-border bg-surface-1 max-[700px]:grid-cols-2 [&>div]:border-r [&>div]:border-border [&>div:last-child]:border-r-0 max-[700px]:[&>div:nth-child(2)]:border-r-0 max-[700px]:[&>div:nth-child(-n+2)]:border-b" aria-label="Agent overview">
         {metrics.map((metric) => (
           <div className="p-[18px]" key={metric.label}>
@@ -380,6 +402,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                   {active.map((run) => <option key={run.key} value={run.key}>{run.key} · {stageName(run.stage, run.kind)}</option>)}
                 </select>
                 <button type="button" className={cn('h-7 max-[760px]:h-11 rounded-xs px-2.5 font-display text-xs font-semibold text-secondary-foreground transition-colors duration-150 hover:text-foreground', boardOpen && 'bg-accent text-black hover:text-black')} aria-pressed={boardOpen} onClick={() => setBoardOpen((open) => !open)}>Board</button>
+                {typeFilter}
               </div>
             )}
             <div className="relative">
@@ -452,33 +475,41 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                   ))}
                 </div>
                 <span className="text-pretty text-xs text-muted-foreground">{tableTab === 'archive' ? 'Finished tickets. They no longer count in the totals above.' : 'Tickets an agent is still on.'}</span>
+                {typeFilter}
               </div>
               <PhoneCards>
-                <table className="w-full min-w-[860px] border-collapse text-left text-sm">
+                <table className="w-full min-w-[740px] border-collapse text-left text-sm">
                   <thead className="bg-surface-1 text-xs text-muted-foreground">
                     <tr>
                       {TABLE_COLUMNS.map(([column, label]) => (
-                        <th key={column} className="px-4 py-2 font-medium" aria-sort={sort.column === column ? (sort.descending ? 'descending' : 'ascending') : 'none'}>
-                          <button type="button" className={cn('flex items-center gap-1 border-0 bg-transparent p-0 py-1 font-medium hover:text-foreground', sort.column === column && 'text-foreground')} onClick={() => sortBy(column)}>
-                            {label}
-                            {sort.column === column && (sort.descending ? <ArrowDown size={12} aria-hidden="true" /> : <ArrowUp size={12} aria-hidden="true" />)}
-                          </button>
-                        </th>
+                        <React.Fragment key={column}>
+                          <th className="px-3 py-2 font-medium" aria-sort={sort.column === column ? (sort.descending ? 'descending' : 'ascending') : 'none'}>
+                            <button type="button" className={cn('flex items-center gap-1 border-0 bg-transparent p-0 py-1 font-medium hover:text-foreground', sort.column === column && 'text-foreground')} onClick={() => sortBy(column)}>
+                              {label}
+                              {sort.column === column && (sort.descending ? <ArrowDown size={12} aria-hidden="true" /> : <ArrowUp size={12} aria-hidden="true" />)}
+                            </button>
+                          </th>
+                          {column === 'ticket' && <th className="px-3 py-2 font-medium">Type</th>}
+                        </React.Fragment>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {listed.items.length === 0 && (
-                      <tr><td colSpan={TABLE_COLUMNS.length} className="px-4 py-10 text-center text-sm text-muted-foreground">{tableTab === 'archive' ? 'Nothing archived yet. A ticket moves here when it is done.' : 'No ticket is being worked on right now.'}</td></tr>
+                      <tr><td colSpan={TABLE_COLUMNS.length + 1} className="px-4 py-10 text-center text-sm text-muted-foreground">{tableTab === 'archive' ? 'Nothing archived yet. A ticket moves here when it is done.' : 'No ticket is being worked on right now.'}</td></tr>
                     )}
                     {listed.items.map((run) => (
                       <tr key={run.key} className={cn('cursor-pointer border-t border-border hover:bg-surface-1', selected?.key === run.key && 'bg-surface-1')} onClick={() => pickRun(run.key)}>
-                        <td className="px-4 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => pickRun(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><KindBadge kind={run.kind} className="ml-2" /><VerdictBadge run={run} className="ml-1" /><span className="mt-0.5 block max-w-[320px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
-                        <td className="px-4 py-3"><StageChip stage={run.stage} kind={run.kind} /></td>
-                        <td className="px-4 py-3"><StatusChip status={statusOf(run)} review={run.review} /></td>
-                        <td className="px-4 py-3 font-mono text-xs tabular-nums">{run.acPassed}/{run.acTotal}{run.acFailed > 0 && <span className="ml-1.5 text-status-conflict">{run.acFailed} failed</span>}</td>
-                        <td className="max-w-[280px] px-4 py-3 text-xs text-secondary-foreground"><span className="line-clamp-2"><WaitingText run={run} /></span></td>
-                        <td className="px-4 py-3 text-xs text-muted-foreground tabular-nums">{formatAge(run.idleSeconds + drift)} ago</td>
+                        <td className="px-3 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => pickRun(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><VerdictBadge run={run} className="ml-2" /><span className="mt-0.5 block max-w-[200px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
+                        <td className="px-3 py-3 text-xs text-secondary-foreground">{kindLabel(run.kind)}</td>
+                        <td className="px-3 py-3"><StageChip stage={run.stage} kind={run.kind} /></td>
+                        <td className="px-3 py-3"><StatusChip status={statusOf(run)} review={run.review} /></td>
+                        <td className="px-3 py-3 font-mono text-xs tabular-nums">{run.acPassed}/{run.acTotal}{run.acFailed > 0 && <span className="ml-1.5 text-status-conflict">{run.acFailed} failed</span>}</td>
+                        <td className="max-w-[200px] px-3 py-3 text-xs text-secondary-foreground">
+                          <span className="line-clamp-2"><WaitingText run={run} /></span>
+                          {runActions(run, monitorsOnly(mode)).hide && (canLgtm(run) || (run.kind === 'review' && run.approved)) && <div className="mt-1.5"><LgtmButton run={run} busy={approving} onLgtm={setLgtmTarget} /></div>}
+                        </td>
+                        <td className="px-3 py-3 text-xs text-muted-foreground tabular-nums">{formatAge(run.idleSeconds + drift)} ago</td>
                       </tr>
                     ))}
                   </tbody>
@@ -504,9 +535,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
             <>
               <div className="flex flex-wrap items-center gap-2 [&>span]:inline-flex [&>span]:h-6 [&>span]:items-center">
                 <span className="rounded-xs border border-accent/30 bg-accent-dim px-[9px] font-mono text-sm font-extrabold text-accent">{selected.key}</span>
-                <KindBadge kind={selected.kind} />
                 <VerdictBadge run={selected} />
-                <StageChip stage={selected.stage} kind={selected.kind} />
                 {!ACTIVITY_SHOWS.has(statusOf(selected)) && <StatusChip status={statusOf(selected)} review={selected.review} />}
                 {chat && actions?.chat && <Button size="sm" className="ml-auto h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key)}><MessagesSquare size={13} aria-hidden="true" />Chat</Button>}
               </div>
@@ -527,8 +556,12 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
               )}
 
               <div className="rounded-[8px] border border-border bg-surface-1 px-3 py-2.5">
-                <p className={cn(sectionLabel, 'mb-1.5')}>Activity</p>
+                <p className={cn(sectionLabel, 'mb-1.5')}>Activity &amp; info</p>
                 <dl className="grid grid-cols-[92px_1fr] gap-x-2.5 gap-y-1 text-[0.82rem]">
+                  <dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Type</dt>
+                  <dd>{kindLabel(selected.kind)}</dd>
+                  <dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Stage</dt>
+                  <dd><StageChip stage={selected.stage} kind={selected.kind} /></dd>
                   <dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">State</dt>
                   {runState(selected) === 'pr'
                     ? <dd className="text-sky-200">{RUN_STATE_LABEL.pr}</dd>
@@ -621,7 +654,12 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                       </li>
                     ))}
                   </ol>
-                  {selected.verdict && <p className="mt-1.5 font-mono text-[0.72rem] font-bold">Verdict: {selected.verdict === 'approve' ? 'Approve' : 'Request change'}</p>}
+                  {selected.verdict && (
+                    <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-mono text-[0.72rem] font-bold">Verdict: {selected.verdict === 'approve' ? 'Approve' : 'Request change'}</p>
+                      {actions?.hide && <LgtmButton run={selected} busy={approving} onLgtm={setLgtmTarget} />}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -704,6 +742,16 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
           <div className="mt-6 flex justify-end gap-2"><Button onClick={() => setDismissTarget(null)} disabled={dismissing}>Cancel</Button><Button variant="danger" onClick={handleDismiss} disabled={dismissing}>{dismissing ? 'Hiding...' : 'Hide run'}</Button></div>
         </Card>
       </Dialog>
+      <ConfirmDialog
+        open={Boolean(lgtmTarget)}
+        title={`LGTM ${lgtmTarget?.key ?? ''}?`}
+        description="DOCK adds the Jira label pass to the reviewed ticket and submits an Approve review on each of its pull requests on GitHub."
+        confirmLabel="LGTM"
+        busyLabel="Sending..."
+        busy={approving}
+        onConfirm={() => void handleLgtm()}
+        onCancel={() => setLgtmTarget(null)}
+      />
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </Page>
   );

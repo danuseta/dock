@@ -255,6 +255,7 @@ export const GET_SETTINGS = gql`
       chatDefaultMode
       chatRtk
       chatCaveman
+      chatParallelTurns
     }
   }
 `;
@@ -618,6 +619,7 @@ export const GET_ORCHESTRATIONS = gql`
   query GetOrchestrations {
     orchestrations {
       ${ORCHESTRATION_FIELDS}
+      approved
       members { id parentId name detail state tool tools }
     }
   }

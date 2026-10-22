@@ -43,6 +43,7 @@ export interface SavedSettings {
   chatDefaultMode?: string | null;
   chatRtk?: string | null;
   chatCaveman?: string | null;
+  chatParallelTurns?: string | null;
 }
 
 export const SECTION_GROUPS: SectionGroup[] = ['Preferences', 'Integrations', 'Agents'];
@@ -87,6 +88,7 @@ export function savedValues(settings: SavedSettings): Record<DraftSectionId, Sec
       chatDefaultMode: settings.chatDefaultMode || '',
       chatRtk: normalizeRtk(settings.chatRtk),
       chatCaveman: normalizeCaveman(settings.chatCaveman),
+      chatParallelTurns: settings.chatParallelTurns || '',
     },
     jira: { jiraUrl: settings.jiraUrl || '', jiraEmail: settings.jiraEmail || '', jiraApiToken: '', jiraProjectKeys: settings.jiraProjectKeys || '' },
     github: { githubToken: '', githubRepos: settings.githubRepos || '' },

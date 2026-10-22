@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
-import { CAVEMAN_LEVELS, CHAT_MODES } from '../datasources/StorageAPI';
+import { CAVEMAN_LEVELS, CHAT_MODES, parallelTurns } from '../datasources/StorageAPI';
 import { StorageService } from '../storage/service';
 import {
   ACTIVITY_DETAIL_KEEP_MS,
@@ -100,7 +100,7 @@ const MAX_DETAIL_CHARS = 200;
 const MAX_ERROR_CHARS = 500;
 const MAX_STATUS_TEXT_CHARS = 60;
 const MAX_STATUS_FILES = 200;
-const CHAT_SETTING_KEYS = ['chatDefaultModel', 'chatDefaultEffort', 'chatDefaultMode', 'chatRtk', 'chatCaveman'];
+const CHAT_SETTING_KEYS = ['chatDefaultModel', 'chatDefaultEffort', 'chatDefaultMode', 'chatRtk', 'chatCaveman', 'chatParallelTurns'];
 const MAX_FILE_PATH_CHARS = 500;
 const MAX_QUERY_CHARS = 200;
 const MIN_QUERY_CHARS = 2;
@@ -645,6 +645,12 @@ export class ChatService {
     const setting = await this.chatSettings();
     const caveman = setting('chatCaveman');
     return { rtk: setting('chatRtk') !== 'off', caveman: CAVEMAN_LEVELS.find((level) => level === caveman) ?? 'full' };
+  }
+
+  /** What a bridge reads between claims; `parallelTurns` is left out when Settings has none, so the bridge keeps its own file. */
+  async bridgeSettings() {
+    const turns = parallelTurns((await this.chatSettings())('chatParallelTurns'));
+    return turns === null ? {} : { parallelTurns: turns };
   }
 
   async machinesWithInfo(names: string[]) {
@@ -1357,11 +1363,11 @@ export class ChatService {
     const { wait, caps = null } = parseClaim(input);
     const deadline = this.now().getTime() + wait * 1000;
     await this.failStale();
-    let extra: { wantCatalog?: true } = {};
+    let extra: { wantCatalog?: true; parallelTurns?: number } = await this.bridgeSettings();
     if (caps) {
       await this.recordCaps(machine, caps);
       if (caps.features.includes('attachments')) await this.pruneAttachments(this.now());
-      if (caps.catalogHash !== null && (await this.info(machine)).catalogHash !== caps.catalogHash) extra = { wantCatalog: true };
+      if (caps.catalogHash !== null && (await this.info(machine)).catalogHash !== caps.catalogHash) extra = { ...extra, wantCatalog: true };
     } else {
       await this.clearCaps(machine);
     }
