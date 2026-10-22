@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { AgentRun } from '../agents/runs';
 import { AnswerSheet } from '../decisions/AnswerSheet';
 import { QuestionView } from '../decisions/QuestionView';
+import { TicketList } from '../decisions/TicketList';
 import { KEEP, KEEP_EFFECT, OWN, answerText, questionCount, questionsOf, submissionOf, type Draft } from '../decisions/questions';
 import { homeAttention } from '../lib/attention';
 
@@ -49,7 +50,7 @@ test('the answer sheet sends answers, confirms what was kept and changes the res
 
 test('the effect is written under the picked option only', () => {
   const [, guess] = questionsOf(run);
-  const render = (draft?: Draft) => renderToStaticMarkup(<QuestionView run={run} question={guess} number={2} total={3} draft={draft} readOnly={null} onChange={() => undefined} onPrevious={() => undefined} onNext={() => undefined} />);
+  const render = (draft?: Draft) => renderToStaticMarkup(<QuestionView run={run} question={guess} number={2} total={3} draft={draft} sentCount={0} readOnly={null} onChange={() => undefined} onPrevious={() => undefined} onNext={() => undefined} />);
   const none = render();
   assert.doesNotMatch(none, new RegExp(KEEP_EFFECT), 'nothing picked, no effect');
   const kept = render({ choice: KEEP, text: '', unsure: false });
@@ -88,4 +89,26 @@ test('Home lists pull request and agent problems; sous questions go to Decisions
     { id: '5', type: 'AGENT_STALLED', message: 'Quiet for 2 h' },
   ];
   assert.deepStrictEqual(homeAttention(items).map((item) => item.id), ['1', '4', '5']);
+});
+
+test('the answer sheet lists what needs a look first and folds the answers already sent', () => {
+  const questions = questionsOf(run);
+  const drafts: Record<string, Draft> = { 'I-3': { choice: 'o0', text: '', unsure: false, sent: true }, 'D-4': { choice: KEEP, text: '', unsure: true } };
+  const html = renderToStaticMarkup(<AnswerSheet run={run} questions={questions} drafts={drafts} submitting={false} error={null} readOnly={null} onOpen={() => undefined} onSubmit={() => undefined} />);
+  assert.ok(html.indexOf('Keep the last state') < html.indexOf('Backoff 1s to 30s'), 'the unanswered question comes before the unsure one');
+  assert.match(html, /<summary[^>]*>1 sent, waiting for sous<\/summary>/);
+  assert.match(html, /Issue 3 · Refresh/);
+});
+
+test('the ticket list is one line per ticket and lays out the open ticket like a calendar', () => {
+  const other = { ...run, key: 'QRD-7', title: 'Other ticket', issues: [], decisions: [{ n: 1, at: '', text: 'Guess', status: 'SHOV', by: 'sous' }] } as AgentRun;
+  const tickets = [run, other].map((item) => ({ run: item, questions: questionsOf(item) }));
+  const html = renderToStaticMarkup(<TicketList tickets={tickets} openKey="QRD-9" drafts={{ 'I-3': { choice: 'o0', text: '', unsure: false } }} q={2} onOpen={() => undefined} />);
+  assert.match(html, /2 tickets/);
+  assert.match(html, /grid-cols-7/);
+  assert.strictEqual(html.match(/aria-label="Question \d+/g)?.length, 3, 'only the open ticket shows its questions');
+  assert.match(html, /aria-label="Question 1, answered, sous waits on it"/);
+  assert.match(html, /aria-current="step"[^>]*>2</);
+  assert.match(html, />1\/3</);
+  assert.match(html, />0\/1</);
 });

@@ -3,7 +3,8 @@ import type { Draft } from './questions';
 
 const PREFIX = 'dock.decisions.';
 
-function read(key: string): Record<string, Draft> {
+/** The drafts saved for a ticket; the ticket list reads them to show each ticket's progress. */
+export function read(key: string): Record<string, Draft> {
   try {
     const saved = JSON.parse(window.localStorage.getItem(PREFIX + key) ?? '{}');
     return typeof saved === 'object' && saved !== null ? saved as Record<string, Draft> : {};
