@@ -14,7 +14,18 @@ test('Home shows service health only where the Monitoring page exists', () => {
   const home = read('pages/HomePage.tsx');
   assert.match(home, /const showMonitors = hasPage\(mode, '\/monitoring'\)/);
   assert.match(home, /\{showMonitors && <article/);
-  assert.match(home, /label: 'Agents running'/);
+  assert.match(home, /services healthy/);
+});
+
+test('Home keeps three blocks: the header with quick links, Needs you, and My tickets with each agent', () => {
+  const home = read('pages/HomePage.tsx');
+  assert.doesNotMatch(home, /GoogleSearch/);
+  assert.doesNotMatch(home, /aria-label="Work overview"/);
+  assert.match(home, /aria-label="Quick links"/);
+  assert.match(home, /<HomeAttention rows=\{attention\}/);
+  assert.match(home, /My tickets/);
+  assert.match(home, /<AgentRunStrip run=\{run\}/);
+  assert.doesNotMatch(home, />Current work</);
 });
 
 test('the workspace Home does not ask the BFF to check every monitor live', () => {

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Activity, BarChart3, Bot, Box, CalendarDays, ChevronLeft, ChevronRight, History, Home as HomeIcon, LayoutDashboard, ListChecks, MoreHorizontal, Settings as SettingsIcon, Clapperboard, Server, Stethoscope } from 'lucide-react';
 import { useQuery } from '@apollo/client';
 import { GET_NEEDS_ATTENTION, GET_OWNER_QUESTIONS } from '../graphql/queries';
-import { homeAttention } from '../lib/attention';
+import { ticketAttention, ticketQuestions } from '../lib/attention';
 import { questionCount } from '../decisions/questions';
 import { NAVIGATION_PREFERENCES_EVENT, NavigationPreferences, readNavigationPreferences, saveNavigationPreferences } from '../lib/navigationPreferences';
 import { applyUpdate, checkForUpdate } from '../lib/appUpdate';
@@ -23,7 +23,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
   const [preferences, setPreferences] = useState(readNavigationPreferences);
   const { data } = useQuery(GET_NEEDS_ATTENTION, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
   const { data: questionsData } = useQuery(GET_OWNER_QUESTIONS, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
-  const attentionCount = homeAttention(data?.needsAttention ?? []).length;
+  const attentionCount = ticketAttention(data?.needsAttention ?? [], ticketQuestions(questionsData?.orchestrations ?? [])).length;
   const decisionCount = questionCount(questionsData?.orchestrations ?? []);
   const [moreOpen, setMoreOpen] = useState(false);
   const [updateOffered, setUpdateOffered] = useState(false);
