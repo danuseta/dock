@@ -562,7 +562,7 @@ export const typeDefs = gql`
     productionData: Boolean
     draft: Boolean
     issues: [OrchestrationIssue!]!
-    """Every step of the owner's last review approval succeeded (Jira label pass and GitHub approve)."""
+    """Every step of the owner's last review approval succeeded (Jira Pass label and GitHub approve)."""
     approved: Boolean!
     blockers: Int!
     activity: String!

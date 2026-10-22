@@ -3,7 +3,7 @@ import test from 'node:test';
 import { AutoBroadcast, sendBroadcast, type AutoBroadcastDeps, type BroadcastDeps } from '../integrations/broadcast';
 import { DoctorReports, parseDoctorReport } from '../integrations/doctor';
 import { OrchestratorInputError } from '../integrations/orchestrator';
-import { ApprovalRecords, approveReview, type ApprovalDeps } from '../integrations/review-approval';
+import { ApprovalRecords, approveReview, passLabelOf, type ApprovalDeps } from '../integrations/review-approval';
 
 function autoWorld(overrides: Partial<AutoBroadcastDeps> = {}) {
   const state = { posted: new Set<string>(), sent: [] as string[], events: [] as Array<[string, string, string | null]>, demo: true, open: true, accept: true, inReview: new Set<string>() };
@@ -107,6 +107,7 @@ function approvalWorld(overrides: Partial<ApprovalDeps> = {}) {
   const calls: string[] = [];
   const events: Array<[string, string | null]> = [];
   const deps: ApprovalDeps = {
+    passLabel: async () => 'danuPass',
     addLabel: async (key, label) => { calls.push(`label ${key} ${label}`); },
     pullRequests: async () => [
       { owner: 'o', repo: 'be', number: 1, status: 'open', url: 'https://github.com/o/be/pull/1' },
@@ -120,11 +121,11 @@ function approvalWorld(overrides: Partial<ApprovalDeps> = {}) {
   return { calls, events, deps };
 }
 
-test('approving a review labels the Jira ticket pass and approves each open pull request on GitHub', async () => {
+test('approving a review labels the Jira ticket with the account Pass label and approves each open pull request on GitHub', async () => {
   const { calls, events, deps } = approvalWorld();
   const steps = await approveReview('QRD-7', deps);
-  assert.deepStrictEqual(calls, ['label QRD-7 pass', 'approve o/be#1', 'approve o/fe#3']);
-  assert.deepStrictEqual(steps.map((step) => [step.name, step.ok]), [['Jira label pass', true], ['GitHub approve o/be#1', true], ['GitHub approve o/fe#3', true]]);
+  assert.deepStrictEqual(calls, ['label QRD-7 danuPass', 'approve o/be#1', 'approve o/fe#3']);
+  assert.deepStrictEqual(steps.map((step) => [step.name, step.ok]), [['Jira label danuPass', true], ['GitHub approve o/be#1', true], ['GitHub approve o/fe#3', true]]);
   assert.deepStrictEqual(events.map(([kind]) => kind), ['APPROVED', 'APPROVED', 'APPROVED']);
 });
 
@@ -143,11 +144,28 @@ test('each approval step reports its own failure and the others still run', asyn
 
   const named = approvalWorld({ pullRequests: async () => { throw new Error('no lookup when the verdict names the pull requests'); } });
   const steps2 = await approveReview('QRD-77', named.deps, ['https://github.com/o/fe/pull/9']);
-  assert.deepStrictEqual(named.calls, ['label QRD-77 pass', 'approve o/fe#9']);
+  assert.deepStrictEqual(named.calls, ['label QRD-77 danuPass', 'approve o/fe#9']);
   assert.ok(steps2.every((step) => step.ok));
 
   const none = await approveReview('QRD-8', approvalWorld({ pullRequests: async () => [] }).deps);
-  assert.deepStrictEqual(none.map((step) => [step.name, step.ok, step.detail]), [['Jira label pass', true, 'added to QRD-8'], ['GitHub approve', false, 'no open pull request found for QRD-8']]);
+  assert.deepStrictEqual(none.map((step) => [step.name, step.ok, step.detail]), [['Jira label danuPass', true, 'added to QRD-8'], ['GitHub approve', false, 'no open pull request found for QRD-8']]);
+
+  const unknown = approvalWorld({ passLabel: async () => passLabelOf('New Person', []) });
+  const steps3 = await approveReview('QRD-9', unknown.deps);
+  assert.deepStrictEqual(steps3[0], { name: 'Jira label', ok: false, detail: 'New Person has no Pass label in the sprint roster. Add it to the roster in the sprint dashboard settings.' });
+  assert.ok(!unknown.calls.some((call) => call.startsWith('label')), 'no label is added when the account has none');
+});
+
+test('the Pass label is the roster token of the signed-in Jira account, not one built from the name', () => {
+  const roster = [
+    { full: 'M Danu Seta W', short: 'Danu', token: 'danuPass' },
+    { full: 'Aken Setiawan', short: 'Aken', token: 'kenPass' },
+    { full: 'Alvin Theofilus Sutikno', short: 'Alvin', token: 'alvinPass' },
+  ];
+  assert.strictEqual(passLabelOf('M Danu Seta W', roster), 'danuPass');
+  assert.strictEqual(passLabelOf('Alvin Theofilus Sutikno', roster), 'alvinPass');
+  assert.strictEqual(passLabelOf('Aken Setiawan', roster), 'kenPass');
+  assert.throws(() => passLabelOf('', roster), /The Jira account has no Pass label/);
 });
 
 test('a doctor report keeps the latest report per machine with its checks', async () => {

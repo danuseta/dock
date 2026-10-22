@@ -527,6 +527,8 @@ export const resolvers = {
       const steps = await approveReview(target, liveApprovalDeps, run.reviewPrs);
       await approvalRecords.save(run.key, steps);
       if (target !== run.key) await Promise.all(steps.map((step) => orchestratorService.recordEvent(run.key, step.ok ? 'APPROVED' : 'APPROVE_FAILED', `${target} ${step.name}: ${step.detail}`)));
+      // A failed step leaves the run where it is, so the LGTM can be sent again.
+      if (steps.length > 0 && steps.every((step) => step.ok)) await orchestratorService.finishReview(run.key);
       return steps;
     },
     answerChatInteraction: async (
