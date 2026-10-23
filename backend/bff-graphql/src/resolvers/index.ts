@@ -50,6 +50,7 @@ async function discordThreadsView() {
     assignee: ticket.assignee ? String(ticket.assignee) : null,
     sprint: ticket.sprintState && ticket.sprintState !== 'NONE' ? String(ticket.sprintName) : null,
     sprintActive: ticket.sprintState === 'ACTIVE',
+    labels: Array.isArray(ticket.labels) ? ticket.labels.map(String) : [],
   }]));
   return { configured: Boolean(config), syncedAt: status.syncedAt, error: status.error, channels, rows: withJira(await discordReader.freshen(rows), jira, isSettledStatus, new Date()) };
 }

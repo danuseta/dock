@@ -38,6 +38,10 @@ export interface DiscordThread {
   tickets: Array<{ key: string; status: string | null; assignee: string | null; sprint: string | null; sprintActive: boolean }>;
   prs: string[];
   claim: { author: string; mine: boolean; at: string } | null;
+  /** Everyone who said on it; in a PR thread the author of the pull request is left out. */
+  onIt: string[];
+  /** The Jira Pass labels of the thread's tickets. */
+  passes: string[];
   claimerRepliedAt: string | null;
   mentionedAt: string | null;
   repliedAt: string | null;
@@ -48,9 +52,9 @@ export const ALL = 'all';
 
 /** What each kind of channel lists. */
 export const KINDS: Array<{ id: ChannelKind; label: string; help: string }> = [
-  { id: 'bug', label: 'Bug report', help: 'Every thread; new ones nobody took need you' },
-  { id: 'uat', label: 'UAT bug report', help: 'Every thread; new ones nobody took need you' },
-  { id: 'pr', label: 'PR review', help: 'Your PR threads and the ones that ask you' },
+  { id: 'bug', label: 'Bug report', help: 'Every thread; one that mentions you or answers you needs you' },
+  { id: 'uat', label: 'UAT bug report', help: 'Every thread; one that mentions you or answers you needs you' },
+  { id: 'pr', label: 'PR review', help: 'Every pull request with its two reviewer slots; yours and the ones that ask you need you' },
   { id: 'follow', label: 'Follow', help: 'Only what mentions or involves you; a thread always' },
 ];
 
@@ -78,15 +82,22 @@ export const STATE_LABEL: Record<string, string> = {
   TAKEN: 'Taken',
   WAITING_ON_REPORTER: 'Waiting on reporter',
   FOLLOWING: 'Following',
+  NOT_YOURS: 'Others reviewing',
+  FIXED: 'Fixed',
+  TICKET_MADE: 'Jira ticket made',
   HANDLED: 'Handled',
   CLOSED: 'Closed',
 };
 
-const ORDER = ['FLOW_1', 'FLOW_2', 'FLOW_3', 'FLOW_4', 'YOUR_TURN', 'FLOW_5', 'REVIEW_ASKED', 'YOURS_IN_PROGRESS', 'TAKEN', 'WAITING_ON_REPORTER', 'FOLLOWING', 'HANDLED', 'CLOSED'];
+const ORDER = ['FLOW_1', 'FLOW_2', 'FLOW_3', 'FLOW_4', 'YOUR_TURN', 'FLOW_5', 'REVIEW_ASKED', 'YOURS_IN_PROGRESS', 'TAKEN', 'WAITING_ON_REPORTER', 'FOLLOWING', 'NOT_YOURS', 'FIXED', 'TICKET_MADE', 'HANDLED', 'CLOSED'];
 const rank = (state: string) => (ORDER.includes(state) ? ORDER.indexOf(state) : ORDER.length);
-const SETTLED = new Set(['HANDLED', 'CLOSED']);
+const SETTLED = new Set(['FIXED', 'TICKET_MADE', 'HANDLED', 'CLOSED']);
 
-export const isDone = (thread: DiscordThread) => thread.dismissed || SETTLED.has(thread.state);
+/** Reviewers a pull request needs, and Pass labels it needs to be done. */
+export const REVIEW_SLOTS = 2;
+
+/** Settled, marked done, or a pull request with its two Pass labels. */
+export const isDone = (thread: DiscordThread) => thread.dismissed || SETTLED.has(thread.state) || (thread.kind === 'pr' && thread.passes.length >= REVIEW_SLOTS);
 export const needsYou = (thread: DiscordThread) => thread.needsYou && !thread.dismissed;
 
 const inView: Record<ThreadView, (thread: DiscordThread) => boolean> = {
@@ -163,8 +174,23 @@ export const titleParts = (title: string) => title.split(TICKET_IN_TITLE).filter
 
 export type Progress = 'open' | 'progress' | 'done';
 
-/** The one chip a row shows: done when settled or marked done, in progress once somebody said on it. */
-export const progressOf = (thread: DiscordThread): Progress => (isDone(thread) ? 'done' : thread.claim ? 'progress' : 'open');
+/** A PR thread's two reviewer slots: passed (a Pass label), on it (said on it, no Pass yet) or free. */
+export type Slot = 'pass' | 'onit' | 'free';
+export function slotsOf(thread: DiscordThread): Slot[] {
+  const passed = Math.min(thread.passes.length, REVIEW_SLOTS);
+  const taken = Math.max(passed, Math.min(thread.onIt.length, REVIEW_SLOTS));
+  return Array.from({ length: REVIEW_SLOTS }, (_, index) => (index < passed ? 'pass' : index < taken ? 'onit' : 'free'));
+}
+
+/**
+ * The one chip a row shows. A pull request is done with two Pass labels and in progress once both slots are taken;
+ * anything else is done when settled or marked done, and in progress once somebody said on it.
+ */
+export function progressOf(thread: DiscordThread): Progress {
+  if (isDone(thread)) return 'done';
+  if (thread.kind === 'pr') return thread.onIt.length >= REVIEW_SLOTS ? 'progress' : 'open';
+  return thread.claim ? 'progress' : 'open';
+}
 
 export const fileSize = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 

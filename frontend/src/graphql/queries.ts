@@ -1026,6 +1026,8 @@ export const DISCORD_THREAD_FIELDS = gql`
       tickets { key status assignee sprint sprintActive }
       prs
       claim { author mine at }
+      onIt
+      passes
       claimerRepliedAt
       mentionedAt
       repliedAt

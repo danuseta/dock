@@ -252,6 +252,10 @@ export const typeDefs = gql`
     tickets: [DiscordThreadTicket!]!
     prs: [String!]!
     claim: DiscordClaim
+    """Everyone who said on it; in a PR thread the author of the pull request is left out."""
+    onIt: [String!]!
+    """The Jira Pass labels of the thread's tickets, such as alvinPass."""
+    passes: [String!]!
     claimerRepliedAt: String
     mentionedAt: String
     repliedAt: String

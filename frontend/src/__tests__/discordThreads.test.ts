@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ticketAttention } from '../lib/attention';
-import { NO_SPRINT, ago, channelLabel, channelTabs, countFor, discordAttention, matchesSearch, mentionParts, progressOf, sprintGroups, threadsFor, titleParts, wib, wibDay, wibTime, type DiscordThread } from '../lib/discordThreads';
+import { NO_SPRINT, ago, channelLabel, channelTabs, countFor, discordAttention, matchesSearch, mentionParts, progressOf, slotsOf, sprintGroups, threadsFor, titleParts, wib, wibDay, wibTime, type DiscordThread } from '../lib/discordThreads';
 
 const thread = (id: string, extra: Partial<DiscordThread>): DiscordThread => ({
   id, channelId: 'cb', channel: 'bug-report', kind: 'bug', title: `Thread ${id}`, url: `https://discord.com/channels/g/${id}`, state: 'FLOW_1', why: 'New bug; nobody said on it',
   needsYou: true, older: false, dismissed: false, createdBy: 'Rina', createdAt: '2026-10-20T09:00:00.000Z', lastActivity: '2026-10-22T09:00:00.000Z',
-  messageCount: 1, tags: [], tickets: [], prs: [], claim: null, claimerRepliedAt: null, mentionedAt: null, repliedAt: null, messages: [], ...extra,
+  messageCount: 1, tags: [], tickets: [], prs: [], claim: null, onIt: [], passes: [], claimerRepliedAt: null, mentionedAt: null, repliedAt: null, messages: [], ...extra,
 });
 
 const rows = [
@@ -99,4 +99,16 @@ test('the title marks its ticket keys, and each row has one progress chip', () =
   assert.strictEqual(progressOf(thread('p', { claim: { author: 'Bima', mine: false, at: '' } })), 'progress');
   assert.strictEqual(progressOf(thread('p', { state: 'CLOSED', claim: { author: 'Bima', mine: false, at: '' } })), 'done');
   assert.strictEqual(progressOf(thread('p', { dismissed: true })), 'done');
+});
+
+test('a pull request fills two reviewer slots: Pass is green, on it is yellow, and two Pass labels make it done', () => {
+  const pr = (onIt: string[], passes: string[], extra: Partial<DiscordThread> = {}) => thread('pr', { kind: 'pr', onIt, passes, ...extra });
+  assert.deepStrictEqual([slotsOf(pr([], [])), progressOf(pr([], []))], [['free', 'free'], 'open']);
+  assert.deepStrictEqual([slotsOf(pr(['Bima'], [])), progressOf(pr(['Bima'], []))], [['onit', 'free'], 'open']);
+  assert.deepStrictEqual([slotsOf(pr(['Alvin', 'Bima'], ['alvinPass'])), progressOf(pr(['Alvin', 'Bima'], ['alvinPass']))], [['pass', 'onit'], 'progress']);
+  assert.deepStrictEqual([slotsOf(pr(['Alvin', 'Bima', 'Rina'], ['alvinPass', 'bimaPass'])), progressOf(pr(['Alvin', 'Bima'], ['alvinPass', 'bimaPass']))], [['pass', 'pass'], 'done']);
+  assert.deepStrictEqual(slotsOf(pr([], ['alvinPass'])), ['pass', 'free'], 'a Pass without on it still fills a slot');
+  assert.strictEqual(progressOf(pr(['Bima'], [], { state: 'CLOSED' })), 'done', 'an archived thread is done');
+  assert.strictEqual(progressOf(thread('b', { state: 'FIXED' })), 'done', 'a fixed bug is done');
+  assert.deepStrictEqual(threadsFor([pr(['Alvin', 'Bima'], ['alvinPass', 'bimaPass'], { state: 'NOT_YOURS', needsYou: false })], 'all', 'done').map((row) => row.id), ['pr'], 'two Pass labels put it under Done');
 });
