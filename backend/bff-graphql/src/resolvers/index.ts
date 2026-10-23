@@ -10,7 +10,7 @@ import { dockerRuntimeService } from '../integrations/docker-runtime';
 import { OrchestratorInputError, attentionItems, normalizeTicketKey, orchestratorService } from '../integrations/orchestrator';
 import { CHAT_MACHINE, chatService } from '../integrations/chat';
 import { isSettledStatus, mergeAttention, withoutSettledTickets } from '../integrations/attention';
-import { discordReader } from '../integrations/discord-reader-live';
+import { discordGateway, discordReader } from '../integrations/discord-reader-live';
 import { ChannelInputError, channelStore, isChannelKind, threadService, withJira } from '../integrations/discord-threads';
 import { DiscordReaderError, ROW_VERSION } from '../integrations/discord-reader';
 import { CronInputError, type OwnerAnswer, type OwnerChange } from '../integrations/orchestrator-cron';
@@ -50,8 +50,10 @@ async function discordThreadsView() {
     assignee: ticket.assignee ? String(ticket.assignee) : null,
     sprint: ticket.sprintState && ticket.sprintState !== 'NONE' ? String(ticket.sprintName) : null,
     sprintActive: ticket.sprintState === 'ACTIVE',
+    labels: Array.isArray(ticket.labels) ? ticket.labels.map(String) : [],
   }]));
-  return { configured: Boolean(config), syncedAt: status.syncedAt, error: status.error, channels, rows: withJira(await discordReader.freshen(rows), jira, isSettledStatus, new Date()) };
+  const error = status.error ?? discordGateway.error;
+  return { configured: Boolean(config), live: discordGateway.live, syncedAt: status.syncedAt, error, channels, rows: withJira(await discordReader.freshen(rows), jira, isSettledStatus, new Date()) };
 }
 
 function channelKind(kind: string) {
@@ -441,16 +443,19 @@ export const resolvers = {
     dismissDiscordThread: (_: unknown, { id, lastActivity }: { id: string; lastActivity: string }) => threadService.dismiss(id, lastActivity),
     addDiscordChannel: async (_: unknown, { input, kind }: { input: string; kind: string }) => {
       await discordReader.addChannel(input, channelKind(kind)).catch(discordInputError);
+      await discordReader.sync();
       return discordThreadsView();
     },
     updateDiscordChannel: async (_: unknown, { id, kind, enabled }: { id: string; kind: string; enabled: boolean }) => {
       const channel = (await channelStore.list()).find((entry) => entry.id === id);
       if (!channel) throw new GraphQLError('That channel is not followed', { extensions: { code: 'BAD_USER_INPUT' } });
       await channelStore.save({ ...channel, kind: channelKind(kind), enabled });
+      await discordReader.sync();
       return discordThreadsView();
     },
     removeDiscordChannel: async (_: unknown, { id }: { id: string }) => {
       await channelStore.remove(id);
+      await discordReader.sync();
       return discordThreadsView();
     },
     validateDiscord: async (_: any, { webhookUrl }: { webhookUrl?: string }) => {

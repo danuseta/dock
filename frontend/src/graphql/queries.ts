@@ -1003,6 +1003,7 @@ export const GET_LIBRARY_AGENT = gql`
 export const DISCORD_THREAD_FIELDS = gql`
   fragment DiscordThreadFields on DiscordThreads {
     configured
+    live
     syncedAt
     error
     channels { id name kind thread enabled }
@@ -1026,6 +1027,8 @@ export const DISCORD_THREAD_FIELDS = gql`
       tickets { key status assignee sprint sprintActive }
       prs
       claim { author mine at }
+      onIt
+      passes
       claimerRepliedAt
       mentionedAt
       repliedAt

@@ -8,10 +8,14 @@ import { channelIdOf, type Channel, type ChannelKind, type SyncStatus, type Thre
  */
 
 export const ON_IT = /\bon\s?it\b/i;
-export const NEEDS_YOU = new Set<ThreadState>(['FLOW_1', 'FLOW_2', 'FLOW_3', 'FLOW_4', 'YOUR_TURN', 'FLOW_5', 'REVIEW_ASKED']);
+/** "fix" or "fixed" said as done: not after belum, gak, not and the like. */
+export const FIXED = /(?<!\b(?:belum|blm|gak|ga|nggak|ngga|tidak|not|can't|cannot|isn't|bukan)\s+)\bfix(?:ed)?\b/i;
+const JIRA_LINK = /https:\/\/[\w.-]+\.atlassian\.net\/browse\/([A-Z][A-Z0-9_]{1,31}-[1-9]\d{0,9})\b/gi;
+/** A new bug nobody took (FLOW_1, FLOW_3) is not the owner's yet, so it does not need them. */
+export const NEEDS_YOU = new Set<ThreadState>(['FLOW_2', 'FLOW_4', 'YOUR_TURN', 'FLOW_5', 'REVIEW_ASKED']);
 export const SETTING_KEYS = { token: 'discordBotToken', guild: 'discordGuildId' } as const;
 /** Bumped when ThreadRow gains a field, so the next sync builds every stored row again. */
-export const ROW_VERSION = 2;
+export const ROW_VERSION = 3;
 /** Discord channel types that are threads. */
 const THREAD_TYPES = new Set([10, 11, 12]);
 
@@ -107,6 +111,8 @@ export function sortThread(kind: ChannelKind, followed: boolean, threadOwnerId: 
   const claimMessage = last(messages.filter((message) => ON_IT.test(message.text)));
   const claim = claimMessage ? { messageId: claimMessage.id, authorId: claimMessage.authorId, author: claimMessage.author, mine: claimMessage.mine, at: claimMessage.at } : null;
   const claimerReply = claimMessage ? messages.find((message) => message.at > claimMessage.at && message.authorId === claimMessage.authorId) : undefined;
+  const firstClaim = messages.find((message) => ON_IT.test(message.text));
+  const lastMessage = last(messages);
   const othersAfterMine = mine ? last(messages.filter((message) => !message.mine && message.at > mine.at)) : undefined;
   const unanswered = mention && (!mine || mention.at > mine.at) ? mention : undefined;
   const base = { claim, claimerRepliedAt: claimerReply?.at ?? null, mentionedAt: mention?.at ?? null, repliedAt: mine?.at ?? null };
@@ -120,15 +126,17 @@ export function sortThread(kind: ChannelKind, followed: boolean, threadOwnerId: 
     return followed ? result('FOLLOWING', 'You follow this thread') : result('NOT_YOURS', 'Not about you');
   }
   if (kind === 'pr') {
-    const lastMessage = last(messages);
     if (threadOwnerId === me) {
       return lastMessage && !lastMessage.mine ? result('FLOW_5', `${lastMessage.author} commented on your pull request`) : result('WAITING_ON_REPORTER', 'You wrote last; waiting for reviewers');
     }
     if (unanswered) return result('REVIEW_ASKED', `${unanswered.author} asked you`);
     if (claim?.mine) return result('YOURS_IN_PROGRESS', 'You said on it');
     if (mine) return result('WAITING_ON_REPORTER', 'You replied last');
-    return result('NOT_YOURS', 'Not about you');
+    return result('NOT_YOURS', 'Other reviewers have it');
   }
+  // The last message settles a bug: a Jira link, or "fix" after somebody took it. Any newer message opens it again.
+  if (lastMessage && new RegExp(JIRA_LINK.source, 'i').test(lastMessage.text)) return result('TICKET_MADE', `${lastMessage.author} linked the Jira ticket`);
+  if (lastMessage && firstClaim && lastMessage.at >= firstClaim.at && FIXED.test(lastMessage.text)) return result('FIXED', `${lastMessage.author}: "${lastMessage.text.slice(0, 80)}"`);
   const uat = kind === 'uat';
   if (unanswered) return mine ? result('YOUR_TURN', `${unanswered.author} mentioned you after your last reply`) : result(uat ? 'FLOW_4' : 'FLOW_2', `${unanswered.author} mentioned you`);
   if (claim && !claim.mine) return result('TAKEN', `${claim.author} said on it`);
@@ -143,6 +151,8 @@ export function buildRow(channel: Channel, guildId: string, thread: RawThread, t
   const sorted = sortThread(channel.kind, channel.thread, thread.owner_id ?? null, closed(thread), messages, me);
   const tags = (thread.applied_tags ?? []).map((id) => tagNames.get(id)).filter((name): name is string => Boolean(name));
   const createdBy = messages.find((message) => message.authorId === thread.owner_id)?.author ?? null;
+  const onIt = [...new Set(messages.filter((message) => ON_IT.test(message.text) && !(channel.kind === 'pr' && message.authorId === thread.owner_id)).map((message) => message.author))];
+  const linked = messages.flatMap((message) => [...message.text.matchAll(JIRA_LINK)].map((match) => match[1].toUpperCase()));
   const lastActivity = messages.length ? messages[messages.length - 1].at : createdAtOf(thread);
   return {
     version: ROW_VERSION,
@@ -160,7 +170,8 @@ export function buildRow(channel: Channel, guildId: string, thread: RawThread, t
     lastMessageId: thread.last_message_id ?? null,
     messageCount: thread.message_count ?? messages.length,
     tags,
-    tickets: matches([thread.name, ...tags].join(' ').toUpperCase(), TICKET),
+    onIt,
+    tickets: [...new Set([...matches([thread.name, ...tags].join(' ').toUpperCase(), TICKET), ...linked])],
     prs: matches(messages.map((message) => message.text).join(' '), PULL),
     messages: messages.slice(-KEPT_MESSAGES),
   };
@@ -178,6 +189,8 @@ export interface ReaderDeps {
   saveChannel(channel: Channel): Promise<void>;
   stored(): Promise<Map<string, ThreadRow>>;
   save(rows: ThreadRow[]): Promise<unknown>;
+  saveOne(row: ThreadRow): Promise<void>;
+  removeOne(id: string): Promise<void>;
   status(): Promise<SyncStatus>;
   saveStatus(status: SyncStatus): Promise<void>;
 }
@@ -190,6 +203,15 @@ export class DiscordReader {
   private requests = 0;
   /** Refreshed attachment links by the link stored in the row. */
   private readonly fresh = new Map<string, string>();
+  /** What the last sync followed, so an event can tell whether its thread matters: thread id -> channel, and the channels by id. */
+  private readonly threadChannels = new Map<string, Channel>();
+  private readonly containers = new Map<string, Channel>();
+  private readonly tagNames = new Map<string, string>();
+  private server: ServerNames | null = null;
+  private guild: string | null = null;
+  /** Threads being read again after an event, and the ones that had another event meanwhile. */
+  private readonly reading = new Set<string>();
+  private readonly again = new Set<string>();
 
   constructor(private readonly deps: ReaderDeps) {}
 
@@ -284,6 +306,13 @@ export class DiscordReader {
           if (!threads.has(thread.id) && Date.parse(thread.thread_metadata?.archive_timestamp ?? '') >= since) threads.set(thread.id, { thread, channel });
         }
       }
+      this.guild = config.guild;
+      this.containers.clear();
+      for (const channel of containers.values()) this.containers.set(channel.id, channel);
+      this.threadChannels.clear();
+      for (const [id, entry] of threads) this.threadChannels.set(id, entry.channel);
+      this.tagNames.clear();
+      for (const [id, name] of tagNames) this.tagNames.set(id, name);
       const stored = await this.deps.stored();
       const rows: ThreadRow[] = [];
       let server: ServerNames | null = null;
@@ -292,9 +321,11 @@ export class DiscordReader {
         const unchanged = kept && kept.version === ROW_VERSION && kept.kind === channel.kind && kept.lastMessageId === (thread.last_message_id ?? null) && (kept.state === 'CLOSED') === closed(thread);
         if (!unchanged) server ??= await this.serverNames(config);
         const row = unchanged ? kept : buildRow(channel, config.guild, thread, tagNames, await this.get<RawMessage[]>(`/channels/${thread.id}/messages?limit=50`, config.token), me, server ?? NO_NAMES);
-        if (row.state !== 'NOT_YOURS') rows.push(row);
+        // A PR review channel lists every pull request, so its slots and passes show for the whole team.
+        if (row.state !== 'NOT_YOURS' || row.kind === 'pr') rows.push(row);
       }
       await this.deps.save(rows);
+      if (server) this.server = server;
       const status = { syncedAt: now.toISOString(), error: null, requests: this.requests };
       await this.deps.saveStatus(status);
       return status;
@@ -302,6 +333,60 @@ export class DiscordReader {
       const status = { syncedAt: previous.syncedAt, error: error instanceof Error ? error.message : 'Discord sync failed', requests: this.requests };
       await this.deps.saveStatus(status);
       return status;
+    }
+  }
+
+  /**
+   * A Gateway event. A new or changed thread of a followed channel, or a message in one, is read again on its own
+   * (two requests); a deleted thread leaves the page; a role change makes the next read learn the names again.
+   * Events of other servers and channels are dropped.
+   */
+  async onEvent(type: string, data: unknown): Promise<void> {
+    const event = (data ?? {}) as { id?: string; channel_id?: string; parent_id?: string; guild_id?: string };
+    if (!this.guild || event.guild_id !== this.guild) return;
+    if (type.startsWith('GUILD_ROLE_') || type.startsWith('CHANNEL_')) {
+      this.server = null;
+      return;
+    }
+    if (type === 'THREAD_DELETE' && event.id && this.threadChannels.has(event.id)) {
+      this.threadChannels.delete(event.id);
+      await this.deps.removeOne(event.id);
+      return;
+    }
+    const id = type.startsWith('THREAD_') ? event.id : type.startsWith('MESSAGE_') ? event.channel_id : undefined;
+    if (!id) return;
+    const channel = this.threadChannels.get(id) ?? (type.startsWith('THREAD_') && event.parent_id ? this.containers.get(event.parent_id) : undefined);
+    if (!channel) return;
+    this.threadChannels.set(id, channel);
+    await this.readThread(id, channel);
+  }
+
+  /** Reads one thread again; an event that lands while it is read makes it read once more afterwards. */
+  private async readThread(id: string, channel: Channel): Promise<void> {
+    if (this.reading.has(id)) {
+      this.again.add(id);
+      return;
+    }
+    this.reading.add(id);
+    try {
+      do {
+        this.again.delete(id);
+        const config = await this.config();
+        const me = await this.deps.ownerId();
+        if (!config || !me) return;
+        this.server ??= await this.serverNames(config);
+        const thread = await this.get<RawThread>(`/channels/${id}`, config.token);
+        const raw = await this.get<RawMessage[]>(`/channels/${id}/messages?limit=50`, config.token);
+        const row = buildRow(channel, config.guild, thread, this.tagNames, raw, me, this.server);
+        if (row.state === 'NOT_YOURS' && row.kind !== 'pr') await this.deps.removeOne(id);
+        else await this.deps.saveOne(row);
+        await this.deps.saveStatus({ ...(await this.deps.status()), syncedAt: this.deps.now().toISOString(), error: null });
+      } while (this.again.has(id));
+    } catch (error) {
+      await this.deps.saveStatus({ ...(await this.deps.status()), error: error instanceof Error ? error.message : 'Discord read failed' });
+    } finally {
+      this.reading.delete(id);
+      this.again.delete(id);
     }
   }
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { DiscordReader, ON_IT, ROW_VERSION, buildRow, sortThread, toMessage, type DiscordResponse, type RawMessage, type RawThread, type RawUser } from '../integrations/discord-reader';
+import { DiscordReader, FIXED, ON_IT, ROW_VERSION, buildRow, sortThread, toMessage, type DiscordResponse, type RawMessage, type RawThread, type RawUser } from '../integrations/discord-reader';
 import { ThreadService, channelIdOf, withJira, type Channel, type ChannelKind, type SyncStatus, type ThreadRecord, type ThreadRow, type ThreadStore, type ThreadView } from '../integrations/discord-threads';
 
 const ME = '900';
@@ -148,6 +148,8 @@ function reader(routes: Record<string, DiscordResponse | DiscordResponse[]>, set
     saveChannel: async (channel) => { saved.set(channel.id, channel); },
     stored: () => service.stored(),
     save: (rows) => service.save(rows),
+    saveOne: (row) => service.saveOne(row),
+    removeOne: (id) => service.removeOne(id),
     status: async () => status,
     saveStatus: async (next) => { status = next; },
   });
@@ -178,13 +180,13 @@ test('a sync keeps the forum threads that matter and skips messages that did not
   const status = await instance.sync();
   assert.strictEqual(status.error, null);
   assert.strictEqual(status.syncedAt, NOW.toISOString());
-  assert.deepStrictEqual((await service.list()).map((row) => [row.id, row.state]), [['2001', 'FLOW_1']], 'the pr-review thread is not about the owner, the archived one is too old and the chat channel is not a forum');
+  assert.deepStrictEqual((await service.list()).map((row) => [row.id, row.state]).sort(), [['2001', 'FLOW_1'], ['2002', 'NOT_YOURS']], 'every pull request stays, the archived one is too old and the chat channel is not a forum');
   assert.ok(!calls.includes('/channels/2003/messages?limit=50'));
   assert.ok(!calls.includes('/channels/off'), 'a turned off channel is not read');
 
   calls.length = 0;
   await instance.sync();
-  assert.deepStrictEqual(calls.filter((path) => path.includes('/messages')), ['/channels/2002/messages?limit=50'], 'the kept thread is not read again while its last message is the same');
+  assert.deepStrictEqual(calls.filter((path) => path.includes('/messages')), [], 'a kept thread is not read again while its last message is the same');
 });
 
 test('a stored row of an older shape is built again; role and channel names are read only when a row is built', async () => {
@@ -280,7 +282,71 @@ test('Jira settles a thread, and a quiet thread that needs the owner is older', 
     { ...base, id: 'a', tickets: ['QRD-1'] },
     { ...base, id: 'b', tickets: ['QRD-2'] },
     { ...base, id: 'c', tickets: [], lastActivity: '2026-10-18T10:00:00.000Z' },
-  ], new Map([['QRD-1', { status: 'Done / MERGED', assignee: 'Danu', sprint: 'Sprint 25', sprintActive: true }], ['QRD-2', { status: 'In Progress', assignee: null, sprint: null, sprintActive: false }]]), (status) => status === 'Done / MERGED', NOW);
+  ], new Map([['QRD-1', { status: 'Done / MERGED', assignee: 'Danu', sprint: 'Sprint 25', sprintActive: true, labels: ['alvinPass', ' bimaPass ', 'pass', 'backend'] }], ['QRD-2', { status: 'In Progress', assignee: null, sprint: null, sprintActive: false, labels: [] }]]), (status) => status === 'Done / MERGED', NOW);
   assert.deepStrictEqual(rows.map((row) => [row.id, row.state, row.needsYou, row.older]), [['a', 'HANDLED', false, false], ['b', 'FLOW_1', true, false], ['c', 'FLOW_1', true, true]]);
   assert.deepStrictEqual(rows[0].tickets, [{ key: 'QRD-1', status: 'Done / MERGED', assignee: 'Danu', sprint: 'Sprint 25', sprintActive: true }]);
+  assert.deepStrictEqual(rows[0].passes, ['alvinPass', 'bimaPass'], 'a bare pass is not a person');
+  assert.deepStrictEqual(rows[1].passes, []);
+});
+
+test('a new bug nobody took does not need the owner; a mention still does', () => {
+  const row = (raw: RawMessage[]) => buildRow({ id: 'f1', name: 'bug-report', kind: 'bug', thread: false, enabled: true }, 'g1', { id: '1298000000000000001', parent_id: 'f1', name: 'Bug', owner_id: RINA.id }, new Map(), raw, ME);
+  assert.deepStrictEqual([row([msg(RINA, 'Login loop')]).state, row([msg(RINA, 'Login loop')]).needsYou], ['FLOW_1', false]);
+  assert.strictEqual(row([msg(RINA, '<@900> login loop', [DANU])]).needsYou, true);
+});
+
+test('fix said as done settles a taken bug; belum fix or prefix does not', () => {
+  for (const text of ['udah fix di staging', 'Fixed in build 412', 'sudah FIX ya']) assert.ok(FIXED.test(text), text);
+  for (const text of ['belum fix', 'blm fixed', 'not fixed yet', 'prefix salah', 'lagi fixing']) assert.ok(!FIXED.test(text), text);
+
+  const fixed = sorted('bug', [msg(RINA, 'Login loop'), msg(HAMZAH, 'on it'), msg(HAMZAH, 'udah fix di staging')]);
+  assert.deepStrictEqual([fixed.state, fixed.why], ['FIXED', 'Hamzah: "udah fix di staging"']);
+  assert.strictEqual(sorted('uat', [msg(RINA, 'Import fails'), msg(HAMZAH, 'onit'), msg(RINA, 'fixed?'), msg(HAMZAH, 'fixed')]).state, 'FIXED');
+  assert.strictEqual(sorted('bug', [msg(RINA, 'Login loop'), msg(HAMZAH, 'fixed')]).state, 'FLOW_1', 'nobody took it, so a fix is not trusted yet');
+  assert.strictEqual(sorted('bug', [msg(RINA, 'Login loop'), msg(HAMZAH, 'on it'), msg(HAMZAH, 'fixed'), msg(RINA, 'masih kejadian')]).state, 'TAKEN', 'a newer message opens it again');
+});
+
+test('a Jira link settles the bug and adds its ticket', () => {
+  const thread: RawThread = { id: '1298000000000000002', parent_id: 'f1', name: 'Broadcast preview cut', owner_id: RINA.id };
+  const raw = [msg(RINA, 'Preview cuts long templates'), msg(HAMZAH, 'udah dibuatin https://mysales.atlassian.net/browse/qrd-1405')];
+  const row = buildRow({ id: 'f1', name: 'uat-bug-report', kind: 'uat', thread: false, enabled: true }, 'g1', thread, new Map(), raw, ME);
+  assert.deepStrictEqual([row.state, row.why, row.tickets], ['TICKET_MADE', 'Hamzah linked the Jira ticket', ['QRD-1405']]);
+  assert.strictEqual(sorted('bug', [...raw, msg(RINA, 'still broken')]).state, 'FLOW_1', 'a newer message opens it again');
+});
+
+test('on it counts each reviewer once and leaves out the author of the pull request', () => {
+  const thread: RawThread = { id: '1298000000000000003', parent_id: 'fp', name: 'feat(QRD-1398): folder move', owner_id: ME };
+  const raw = [msg(DANU, 'Review please, on it after lunch'), msg(HAMZAH, 'on it'), msg(RINA, 'onit'), msg(HAMZAH, 'on it, second pass')];
+  const row = buildRow({ id: 'fp', name: 'pull-request', kind: 'pr', thread: false, enabled: true }, 'g1', thread, new Map(), raw, ME);
+  assert.deepStrictEqual(row.onIt, ['Hamzah', 'Rina']);
+  const bug = buildRow({ id: 'f1', name: 'bug-report', kind: 'bug', thread: false, enabled: true }, 'g1', { ...thread, parent_id: 'f1', owner_id: RINA.id }, new Map(), [msg(RINA, 'on it myself')], ME);
+  assert.deepStrictEqual(bug.onIt, ['Rina'], 'in a bug thread the reporter can take it');
+});
+
+test('a Gateway event reads its one thread again; other servers, unknown channels and deletes are handled', async () => {
+  const routes = routesFor() as Record<string, DiscordResponse | DiscordResponse[]>;
+  const { instance, service, calls } = reader(routes);
+  await instance.sync();
+  routes['/channels/2001'] = ok(bugThread);
+  routes['/channels/2001/messages?limit=50'] = ok([msg(RINA, 'Login loop on Safari'), msg(RINA, '<@900> any news?', [DANU])]);
+
+  calls.length = 0;
+  await instance.onEvent('MESSAGE_CREATE', { guild_id: 'g9', channel_id: '2001' });
+  await instance.onEvent('MESSAGE_CREATE', { guild_id: 'g1', channel_id: '999' });
+  assert.deepStrictEqual(calls, [], 'another server and an unfollowed channel are dropped');
+
+  await instance.onEvent('MESSAGE_CREATE', { guild_id: 'g1', channel_id: '2001' });
+  assert.deepStrictEqual(calls, ['/channels/2001', '/channels/2001/messages?limit=50'], 'one thread, two requests');
+  assert.deepStrictEqual((await service.list()).find((row) => row.id === '2001')?.state, 'FLOW_2');
+
+  const fresh: RawThread = { id: '2009', parent_id: 'fb', name: 'Logout loop', owner_id: RINA.id, last_message_id: 'n1' };
+  routes['/channels/2009'] = ok(fresh);
+  routes['/channels/2009/messages?limit=50'] = ok([msg(RINA, 'Logout loop')]);
+  await instance.onEvent('THREAD_CREATE', { guild_id: 'g1', id: '2009', parent_id: 'fb' });
+  assert.ok((await service.list()).some((row) => row.id === '2009'), 'a new thread of a followed channel appears');
+  await instance.onEvent('MESSAGE_CREATE', { guild_id: 'g1', channel_id: '2009' });
+  assert.strictEqual(calls.filter((path) => path === '/channels/2009/messages?limit=50').length, 2, 'and its messages are followed from then on');
+
+  await instance.onEvent('THREAD_DELETE', { guild_id: 'g1', id: '2009', parent_id: 'fb' });
+  assert.ok(!(await service.list()).some((row) => row.id === '2009'));
 });
