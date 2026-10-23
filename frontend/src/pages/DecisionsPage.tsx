@@ -12,7 +12,7 @@ import { monitorsOnly, useDockMode } from '../lib/dockMode';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { AnswerSheet } from '../decisions/AnswerSheet';
 import { QuestionView } from '../decisions/QuestionView';
-import { isAnswered, questionsOf, submissionOf, type Question } from '../decisions/questions';
+import { KEEP, isAnswered, questionsOf, submissionOf, type Question } from '../decisions/questions';
 import { useDraft } from '../decisions/useDraft';
 import { TicketList } from '../decisions/TicketList';
 
@@ -105,11 +105,11 @@ const DecisionsPage: React.FC = () => {
       {!current ? (
         <Card><EmptyState scene={<AllClearScene />} title={<span className="text-status-merged">Nothing to answer</span>} description="Sous has no open question and every guess is confirmed." /></Card>
       ) : (
-        <div className="grid grid-cols-[300px_minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-surface-0 max-[900px]:grid-cols-1">
+        <div className="grid grid-cols-[300px_minmax(0,1fr)] overflow-clip rounded-md border border-border bg-surface-0 max-[900px]:grid-cols-1">
           <TicketList tickets={tickets} openKey={current.run.key} drafts={drafts} q={q} onOpen={go} />
           <div className="@container min-w-0">
             {q === SHEET ? (
-              <AnswerSheet run={current.run} questions={questions} drafts={drafts} submitting={submitting} readOnly={readOnly} error={submitError} onOpen={(index) => go(current.run.key, index + 1)} onSubmit={() => void submit()} />
+              <AnswerSheet run={current.run} questions={questions} drafts={drafts} submitting={submitting} readOnly={readOnly} error={submitError} onOpen={(index) => go(current.run.key, index + 1)} onKeepAll={(ids) => ids.forEach((id) => update(id, { choice: KEEP }))} onSubmit={() => void submit()} />
             ) : (
               <QuestionView
                 key={questions[q - 1].id}
