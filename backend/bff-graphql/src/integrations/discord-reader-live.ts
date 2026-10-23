@@ -2,7 +2,6 @@ import { StorageService } from '../storage/service';
 import { DiscordReader } from './discord-reader';
 import type { SyncStatus } from './discord-threads';
 import { channelStore, threadService } from './discord-threads';
-import { orchestratorCron } from './orchestrator-cron-live';
 
 const storage = new StorageService();
 const API = 'https://discord.com/api/v10';
@@ -13,7 +12,7 @@ const EMPTY: SyncStatus = { syncedAt: null, error: null, requests: 0 };
 export const discordReader = new DiscordReader({
   now: () => new Date(),
   setting: async (key) => (await storage.getSettings()).find((setting) => setting.key === key)?.value || null,
-  ownerId: async () => (await orchestratorCron.settings()).notifyUserId,
+  ownerId: async () => (await storage.getSettings()).find((setting) => setting.key === 'discordUserId')?.value || '',
   request: async (path, token) => {
     const response = await fetch(`${API}${path}`, { headers: { Authorization: `Bot ${token}` }, signal: AbortSignal.timeout(15000) });
     return { status: response.status, body: await response.json().catch(() => null) };

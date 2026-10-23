@@ -295,8 +295,8 @@ export const SET_TICKET_MANUAL = gql`
 `;
 
 export const UPDATE_ORCHESTRATOR_CRON_SETTINGS = gql`
-  mutation UpdateOrchestratorCronSettings($config: String!, $webhookUrl: String) {
-    updateOrchestratorCronSettings(config: $config, webhookUrl: $webhookUrl)
+  mutation UpdateOrchestratorCronSettings($config: String!) {
+    updateOrchestratorCronSettings(config: $config)
   }
 `;
 

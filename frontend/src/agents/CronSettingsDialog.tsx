@@ -31,7 +31,6 @@ export const CronSettingsDialog = ({ open, onClose }: { open: boolean; onClose: 
   const [save, { loading: saving }] = useMutation(UPDATE_ORCHESTRATOR_CRON_SETTINGS, { refetchQueries: [GET_ORCHESTRATOR_CRON_STATUS] });
   const [runNow, { loading: running }] = useMutation(RUN_ORCHESTRATOR_CRON_NOW, { refetchQueries: [GET_ORCHESTRATIONS, GET_ORCHESTRATOR_CRON_STATUS] });
   const [form, setForm] = useState<CronForm | null>(null);
-  const [webhookUrl, setWebhookUrl] = useState('');
   const [message, setMessage] = useState<{ text: string; failed: boolean } | null>(null);
   const [portal, setPortal] = useState<HTMLDivElement | null>(null);
   const settings = data?.orchestratorCronSettings;
@@ -65,8 +64,7 @@ export const CronSettingsDialog = ({ open, onClose }: { open: boolean; onClose: 
     event.preventDefault();
     if (!form) return;
     void act(async () => {
-      await save({ variables: { config: configFromForm(form), webhookUrl: webhookUrl.trim() || null } });
-      setWebhookUrl('');
+      await save({ variables: { config: configFromForm(form) } });
       return 'Saved.';
     }, true);
   };
@@ -181,17 +179,6 @@ export const CronSettingsDialog = ({ open, onClose }: { open: boolean; onClose: 
                     </Field>
                     <Field id="cron-usageBrakePercent" label="Usage brake (%)" hint="No new ticket while the 5 hour usage is at or above this.">
                       <Input {...text('usageBrakePercent')} inputMode="numeric" />
-                    </Field>
-                  </div>
-                </Section>
-
-                <Section title="Pings">
-                  <div className="grid grid-cols-2 gap-4 max-[640px]:grid-cols-1">
-                    <Field id="cron-webhook" label="Discord webhook" hint="You are pinged when a ticket is parked, an agent is stuck, or a pull request is ready.">
-                      <Input id="cron-webhook" type="password" autoComplete="off" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder={settings?.webhookSet ? 'Saved. Paste a new URL to replace it.' : 'https://discord.com/api/webhooks/...'} />
-                    </Field>
-                    <Field id="cron-notifyUserId" label="Your Discord user id" hint="Digits only. Used for the mention in each ping.">
-                      <Input {...text('notifyUserId')} inputMode="numeric" />
                     </Field>
                   </div>
                 </Section>

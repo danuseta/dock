@@ -161,6 +161,7 @@ export const typeDefs = gql`
     discordMessageTemplate: String!
     hasDiscordBotToken: Boolean!
     discordGuildId: String
+    discordUserId: String
     hasGoogleClientSecret: Boolean!
     googleCalendarConnected: Boolean!
     googleCalendarError: String
@@ -919,6 +920,7 @@ export const typeDefs = gql`
     discordMessageTemplate: String
     discordBotToken: String
     discordGuildId: String
+    discordUserId: String
     googleClientId: String
     googleClientSecret: String
     googleCalendarId: String
@@ -975,7 +977,6 @@ export const typeDefs = gql`
 
   type OrchestratorCronSettings {
     config: String!
-    webhookSet: Boolean!
     lastFill: String!
   }
 
@@ -1103,7 +1104,7 @@ export const typeDefs = gql`
     refreshSprintDashboard(sprintId: Int!): SprintRefreshState!
     backfillSprintDashboards(count: Int!): SprintRefreshState!
     updateSprintDashboardSettings(boardId: String!, config: String!): Boolean!
-    updateOrchestratorCronSettings(config: String!, webhookUrl: String): Boolean!
+    updateOrchestratorCronSettings(config: String!): Boolean!
     runOrchestratorCronNow: String!
     confirmOrchestration(key: String!): Boolean!
     stopAllAgents: Int!

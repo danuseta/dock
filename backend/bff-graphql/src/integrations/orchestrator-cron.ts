@@ -1,4 +1,3 @@
-import axios from 'axios';
 import type { PushMessage } from './push';
 import { waitingNotice } from './push-notices';
 import { isSettledStatus } from './attention';
@@ -35,7 +34,6 @@ export interface CronSettings {
   model: string | null;
   effort: string | null;
   usageBrakePercent: number;
-  notifyUserId: string;
   engine: CronEngine;
 }
 
@@ -57,16 +55,13 @@ export const DEFAULT_CRON_SETTINGS: CronSettings = {
   model: null,
   effort: null,
   usageBrakePercent: 70,
-  notifyUserId: '',
   engine: 'sous',
 };
 
 const CONFIG_KEY = 'orchestratorCronConfig';
-const WEBHOOK_KEY = 'orchestratorCronWebhookUrl';
 const CACHE = 'orchestrator-cron';
 const TICK_MS = 60 * 1000;
 const WIB_OFFSET_MS = 7 * 3600 * 1000;
-const MAX_PING_CHARS = 1900;
 const MAX_DEFERRED_LOGGED = 30;
 /** The bridge's name for each cron mode. */
 const BRIDGE_MODE: Record<CronMode, string> = { auto: 'auto', acceptEdits: 'acceptEdits', manual: 'default' };
@@ -131,8 +126,6 @@ export function parseCronSettings(raw: string | null | undefined): CronSettings 
   if (todoStatuses.length === 0) throw new CronInputError('todoStatuses needs at least one status');
   const inProgressStatus = typeof merged.inProgressStatus === 'string' ? merged.inProgressStatus.trim() : '';
   if (!inProgressStatus) throw new CronInputError('inProgressStatus is required');
-  const notifyUserId = typeof merged.notifyUserId === 'string' ? merged.notifyUserId.trim() : '';
-  if (notifyUserId && !/^\d{5,25}$/.test(notifyUserId)) throw new CronInputError('notifyUserId must be a Discord user id (digits only)');
   if (!CRON_ENGINES.includes(merged.engine as CronEngine)) throw new CronInputError(`engine must be one of ${CRON_ENGINES.join(', ')}`);
   return {
     enabled: merged.enabled,
@@ -152,7 +145,6 @@ export function parseCronSettings(raw: string | null | undefined): CronSettings 
     model: optionalWord(merged.model, 'model'),
     effort: optionalWord(merged.effort, 'effort'),
     usageBrakePercent: integer(merged.usageBrakePercent, 'usageBrakePercent', 0, 100),
-    notifyUserId,
     engine: merged.engine as CronEngine,
   };
 }
@@ -367,7 +359,6 @@ export interface CronDeps {
   send(sessionId: string, text: string, options: Record<string, string>): Promise<unknown>;
   runningSessions(): Promise<string[]>;
   stopTurn(sessionId: string): Promise<unknown>;
-  post(webhookUrl: string, body: unknown): Promise<unknown>;
   hasPushDevices(): Promise<boolean>;
   push(message: PushMessage): Promise<unknown>;
 }
@@ -387,19 +378,14 @@ export class OrchestratorCron {
   async getSettings() {
     return {
       config: JSON.stringify(await this.settings(), null, 2),
-      webhookSet: Boolean(await this.deps.settingValue(WEBHOOK_KEY)),
       lastFill: JSON.stringify(await this.lastFill()),
     };
   }
 
-  /** `webhookUrl` undefined or null keeps the saved one; an empty string clears it. */
-  async updateSettings(configJson: string, webhookUrl?: string | null): Promise<void> {
+  async updateSettings(configJson: string): Promise<void> {
     const settings = parseCronSettings(configJson);
     if (!(await this.deps.machines()).includes(settings.machine)) throw new CronInputError(`Unknown machine ${settings.machine}`);
-    const url = typeof webhookUrl === 'string' ? webhookUrl.trim() : null;
-    if (url && !/^https:\/\/(discord|discordapp)\.com\/api\/webhooks\/\d+\/[\w-]+$/.test(url)) throw new CronInputError('The webhook must be a Discord webhook URL');
     await this.deps.saveSetting(CONFIG_KEY, JSON.stringify(settings, null, 2), 'Orchestrator cron config');
-    if (url !== null) await this.deps.saveSetting(WEBHOOK_KEY, url, 'Discord webhook for orchestrator pings to the owner');
   }
 
   async lastFill(): Promise<FillLog | null> {
@@ -685,22 +671,17 @@ export class OrchestratorCron {
   }
 
   /**
-   * One notice per run and reason it waits on the owner: a Discord ping when a webhook is set, a push to every phone that asked for one.
-   * The first call after either is set up only remembers what waits already.
+   * One notice per run and reason it waits on the owner: a push to every phone that asked for one.
+   * The first call after a phone is set up only remembers what waits already.
    */
   async notifyWaiting(): Promise<string[]> {
-    const webhookUrl = await this.deps.settingValue(WEBHOOK_KEY);
-    if (!webhookUrl && !(await this.deps.hasPushDevices())) return [];
-    const { notifyUserId } = await this.settings();
+    if (!(await this.deps.hasPushDevices())) return [];
     const waiting = (await this.deps.runs()).filter((run) => run.waiting);
     const marks = waiting.map((run) => `${run.key}\n${run.waiting}`);
     const saved = await this.deps.cacheGet('notified');
     const known = Array.isArray(saved) ? new Set(saved as string[]) : null;
     const pinged: string[] = [];
     for (const run of known ? waiting.filter((item) => !known.has(`${item.key}\n${item.waiting}`)) : []) {
-      const mention = notifyUserId ? `<@${notifyUserId}> ` : '';
-      const content = `${mention}**${run.key}** ${run.title}\n${run.waiting}`.slice(0, MAX_PING_CHARS);
-      if (webhookUrl) await this.deps.post(webhookUrl, { content, allowed_mentions: { users: notifyUserId ? [notifyUserId] : [] } });
       await this.deps.push(waitingNotice({ key: run.key, waiting: String(run.waiting) }));
       pinged.push(run.key);
     }
@@ -723,5 +704,4 @@ export function startOrchestratorCron(cron: OrchestratorCron): () => void {
   return () => clearInterval(timer);
 }
 
-export const postWebhook = (webhookUrl: string, body: unknown) => axios.post(webhookUrl, body, { timeout: 10000 });
 export const CRON_CACHE = CACHE;

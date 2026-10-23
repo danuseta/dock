@@ -24,7 +24,7 @@ test('settings: defaults when nothing is saved, saved fields win, v1 keys are ig
     '{', '[]', '{"parallel":0}', '{"workStart":17,"workEnd":9}', '{"workEnd":25}', '{"workDays":[]}', '{"workDays":[8]}', '{"maxPerDay":0}',
     '{"activeFrom":"2026-10-20","activeUntil":"2026-10-01"}', '{"activeFrom":"14-10-2026"}', '{"mode":"bypassPermissions"}',
     '{"sprint":"next"}', '{"todoStatuses":[]}', '{"usageBrakePercent":101}',
-    '{"notifyUserId":"danu"}', '{"enabled":"yes"}', '{"machine":""}', '{"engine":"codex"}',
+    '{"enabled":"yes"}', '{"machine":""}', '{"engine":"codex"}',
   ]) {
     assert.throws(() => parseCronSettings(bad), CronInputError, bad);
   }
@@ -92,7 +92,6 @@ interface Start {
   runs?: CronRun[];
   online?: boolean;
   used?: { usedPercentage: number; resetsAt: string | null } | null;
-  webhook?: string;
   moves?: boolean;
   dependencies?: Array<{ ticketKey: string; dependsOnKey: string }>;
   pushDevices?: boolean;
@@ -121,7 +120,6 @@ function world(start: Start = {}) {
     moved: [] as string[],
     movedTo: [] as Array<[string, string]>,
     stopped: [] as string[],
-    posts: [] as Array<{ url: string; body: unknown }>,
     pushes: [] as Array<{ title: string; body: string; url: string }>,
     clock: 0,
     ownerStopped: new Set<string>(),
@@ -130,7 +128,6 @@ function world(start: Start = {}) {
     // What the machine's reported capabilities make of the cron options; a throw is a refusal.
     machineOptions: (options: Record<string, string>): Record<string, string> => options,
   };
-  if (start.webhook) state.settings.set('orchestratorCronWebhookUrl', start.webhook);
   const parallel = () => JSON.parse(state.settings.get('orchestratorCronConfig') as string).parallel as number;
   const deps: CronDeps = {
     now: () => state.now,
@@ -177,7 +174,6 @@ function world(start: Start = {}) {
     ownerSessionBusy: async (key) => state.sessions.some((s) => s.ticketKey === key && s.title === `${key} (owner)` && (s.state === 'queued' || s.state === 'running')),
     runningSessions: async () => ['s-1', 's-2'],
     stopTurn: async (sessionId) => { state.stopped.push(sessionId); },
-    post: async (url, body) => { state.posts.push({ url, body }); },
     hasPushDevices: async () => start.pushDevices ?? false,
     push: async (message) => { state.pushes.push(message); },
   };
@@ -335,45 +331,35 @@ test('confirming a parked ticket queues it in a cron session with the asking-all
   await assert.rejects(() => cron.confirm('QRD-2'), CronInputError, 'it no longer waits for a confirmation');
 });
 
-test('each run that waits on the owner pings Discord once; the first look after a webhook is set stays quiet', async () => {
+test('each run that waits on the owner pushes to the phone once; the first look after a phone is set up stays quiet', async () => {
   const waiting: CronRun = { key: 'QRD-7', machine: 'workspace', title: 'Old gate', waiting: 'Which endpoint?', activity: 'WAITING' };
-  const { state, cron } = world({ runs: [waiting], webhook: 'https://discord.com/api/webhooks/1/abc', config: { notifyUserId: '123456789' } });
+  const { state, cron } = world({ runs: [waiting], pushDevices: true });
   assert.deepStrictEqual(await cron.notifyWaiting(), [], 'what already waited is remembered, not announced');
 
   state.runs = [waiting, { key: 'QRD-8', machine: 'workspace', title: 'New work', waiting: PARKED_TEXT, activity: 'IDLE' }];
   assert.deepStrictEqual(await cron.notifyWaiting(), ['QRD-8']);
-  assert.deepStrictEqual(state.posts, [{ url: 'https://discord.com/api/webhooks/1/abc', body: { content: `<@123456789> **QRD-8** New work\n${PARKED_TEXT}`, allowed_mentions: { users: ['123456789'] } } }]);
-  assert.deepStrictEqual(await cron.notifyWaiting(), [], 'no second ping for the same reason');
+  assert.deepStrictEqual(state.pushes.map((push) => push.title), ['QRD-8 waits on you']);
+  assert.deepStrictEqual(await cron.notifyWaiting(), [], 'no second push for the same reason');
 
   state.runs = [{ ...waiting, waiting: 'Ready for review: waiting for the owner' }];
-  assert.deepStrictEqual(await cron.notifyWaiting(), ['QRD-7'], 'a new reason on the same run pings again');
+  assert.deepStrictEqual(await cron.notifyWaiting(), ['QRD-7'], 'a new reason on the same run pushes again');
+  assert.deepStrictEqual(state.pushes[1], { title: 'QRD-7 waits on you', body: 'Ready for review: waiting for the owner', url: '/detail/QRD-7', tag: 'wait-QRD-7' });
 
   const silent = world({ runs: [waiting] });
-  assert.deepStrictEqual([await silent.cron.notifyWaiting(), silent.state.posts.length], [[], 0], 'no webhook, no ping');
-
-  const phone = world({ runs: [], pushDevices: true });
-  await phone.cron.notifyWaiting();
-  phone.state.runs = [waiting];
-  assert.deepStrictEqual(await phone.cron.notifyWaiting(), ['QRD-7']);
-  assert.deepStrictEqual([phone.state.posts.length, phone.state.pushes], [0, [{ title: 'QRD-7 waits on you', body: 'Which endpoint?', url: '/detail/QRD-7', tag: 'wait-QRD-7' }]], 'a phone alone gets the push, with no Discord post');
+  assert.deepStrictEqual([await silent.cron.notifyWaiting(), silent.state.pushes.length], [[], 0], 'no phone, no push');
 });
 
-test('settings are saved after validation; the webhook is kept, replaced or cleared; every tick fills while enabled', async () => {
+test('settings are saved after validation; every tick fills while enabled', async () => {
   const { state, cron } = world({ tickets: [ticket('QRD-1'), ticket('QRD-2')], config: { enabled: false, parallel: 1 } });
   await assert.rejects(() => cron.updateSettings('{"machine":"mars"}'), /Unknown machine mars/);
-  await assert.rejects(() => cron.updateSettings('{}', 'https://example.com/hook'), /Discord webhook URL/);
   await cron.tick();
   assert.strictEqual(state.sessions.length, 0, 'disabled: the tick starts nothing');
 
-  await cron.updateSettings('{"enabled":true,"parallel":1}', 'https://discord.com/api/webhooks/1/abc');
-  assert.deepStrictEqual([(await cron.getSettings()).webhookSet, JSON.parse((await cron.getSettings()).config).enabled], [true, true]);
   await cron.updateSettings('{"enabled":true,"parallel":1}');
-  assert.strictEqual((await cron.getSettings()).webhookSet, true, 'no webhook argument keeps the saved one');
+  assert.strictEqual(JSON.parse((await cron.getSettings()).config).enabled, true);
   await cron.tick();
   await cron.tick();
   assert.deepStrictEqual(state.sessions.map((session) => session.ticketKey), ['QRD-1'], 'the queued start holds the only slot');
-  await cron.updateSettings('{"enabled":true}', '');
-  assert.strictEqual((await cron.getSettings()).webhookSet, false);
 });
 
 test('stop all asks every running session to stop', async () => {

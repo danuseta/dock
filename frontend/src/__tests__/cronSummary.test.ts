@@ -35,7 +35,7 @@ test('the settings form round-trips the config and turns its text fields back in
   const config = {
     enabled: true, machine: 'workspace', parallel: 2, workStart: 9, workEnd: 17, workDays: [1, 2, 3, 4, 5], activeFrom: null, activeUntil: '2026-12-31',
     maxPerDay: 6, mode: 'auto', sprint: 'active', labels: ['be', 'fe'], todoStatuses: ['To Do'],
-    inProgressStatus: 'In Progress', model: null, effort: 'high', usageBrakePercent: 70, notifyUserId: '123456789', engine: 'omc',
+    inProgressStatus: 'In Progress', model: null, effort: 'high', usageBrakePercent: 70, engine: 'omc',
   };
   const form = formFromConfig(JSON.stringify(config));
   assert.deepStrictEqual([form.labels, form.model, form.parallel, form.activeFrom, form.engine], ['be, fe', '', '2', '', 'omc']);

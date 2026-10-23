@@ -632,9 +632,9 @@ export const resolvers = {
       await sprintDashboardService.updateSettings(boardId, config).catch(sprintError);
       return true;
     },
-    updateOrchestratorCronSettings: async (_: unknown, { config, webhookUrl }: { config: string; webhookUrl?: string | null }) => {
+    updateOrchestratorCronSettings: async (_: unknown, { config }: { config: string }) => {
       requireCron();
-      await orchestratorCron.updateSettings(config, webhookUrl).catch(cronError);
+      await orchestratorCron.updateSettings(config).catch(cronError);
       return true;
     },
     runOrchestratorCronNow: async () => {
