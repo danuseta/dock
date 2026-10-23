@@ -17,7 +17,7 @@ export interface Channel { id: string; name: string | null; kind: ChannelKind; t
 
 export const THREAD_STATES = [
   'FLOW_1', 'FLOW_2', 'FLOW_3', 'FLOW_4', 'YOUR_TURN', 'FLOW_5', 'REVIEW_ASKED',
-  'YOURS_IN_PROGRESS', 'TAKEN', 'WAITING_ON_REPORTER', 'FOLLOWING', 'HANDLED', 'CLOSED', 'NOT_YOURS',
+  'YOURS_IN_PROGRESS', 'TAKEN', 'WAITING_ON_REPORTER', 'FOLLOWING', 'FIXED', 'TICKET_MADE', 'HANDLED', 'CLOSED', 'NOT_YOURS',
 ] as const;
 export type ThreadState = typeof THREAD_STATES[number];
 
@@ -61,6 +61,8 @@ export interface ThreadRow {
   prs: string[];
   /** The last "on it" in the thread. */
   claim: ThreadClaim | null;
+  /** Everyone who said on it, first one first; in a PR thread the author of the pull request is left out. */
+  onIt: string[];
   /** When the claimer wrote again after the claim. */
   claimerRepliedAt: string | null;
   mentionedAt: string | null;
@@ -125,8 +127,16 @@ export class ThreadService {
 }
 
 /** `sprint` is null when the ticket is in no sprint. */
-export interface JiraFacts { status: string | null; assignee: string | null; sprint: string | null; sprintActive: boolean }
-export interface PageThread extends Omit<ThreadView, 'tickets'> { older: boolean; tickets: Array<{ key: string } & JiraFacts> }
+export interface JiraFacts { status: string | null; assignee: string | null; sprint: string | null; sprintActive: boolean; labels: string[] }
+export interface PageThread extends Omit<ThreadView, 'tickets'> {
+  older: boolean;
+  tickets: Array<{ key: string } & Omit<JiraFacts, 'labels'>>;
+  /** The Jira Pass labels of the thread's tickets, such as alvinPass. */
+  passes: string[];
+}
+
+/** A label that names who approved the ticket, such as alvinPass; the Discord page reads them like lib/ticketApprovals.ts. */
+const PASS_LABEL = /^.+pass$/i;
 
 const QUIET_MS = 3 * 24 * 3600 * 1000;
 
@@ -136,12 +146,14 @@ const QUIET_MS = 3 * 24 * 3600 * 1000;
  */
 export function withJira(rows: ThreadView[], jira: Map<string, JiraFacts>, isSettled: (status: string | null) => boolean, now: Date): PageThread[] {
   return rows.map((row) => {
-    const tickets = row.tickets.map((key) => ({ key, ...(jira.get(key) ?? { status: null, assignee: null, sprint: null, sprintActive: false }) }));
+    const facts = row.tickets.map((key) => ({ key, ...(jira.get(key) ?? { status: null, assignee: null, sprint: null, sprintActive: false, labels: [] }) }));
+    const tickets = facts.map(({ labels: _labels, ...ticket }) => ticket);
     const handled = row.state !== 'CLOSED' && tickets.length > 0 && tickets.every((ticket) => isSettled(ticket.status));
     const needsYou = handled ? false : row.needsYou;
     return {
       ...row,
       tickets,
+      passes: [...new Set(facts.flatMap((ticket) => ticket.labels.map((label) => label.trim()).filter((label) => PASS_LABEL.test(label))))],
       ...(handled ? { state: 'HANDLED' as const, why: `Jira says ${tickets[0].status}` } : {}),
       needsYou,
       older: needsYou && now.getTime() - Date.parse(row.lastActivity) > QUIET_MS,
