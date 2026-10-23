@@ -1023,7 +1023,7 @@ export const DISCORD_THREAD_FIELDS = gql`
       lastActivity
       messageCount
       tags
-      tickets { key status assignee }
+      tickets { key status assignee sprint sprintActive }
       prs
       claim { author mine at }
       claimerRepliedAt
@@ -1032,11 +1032,12 @@ export const DISCORD_THREAD_FIELDS = gql`
       messages {
         id
         author
+        avatar
         mine
         at
         text
-        mentions { id name me }
-        attachments { name size type }
+        mentions { id name me role }
+        attachments { name size type url width height }
       }
     }
   }

@@ -21,12 +21,16 @@ export const THREAD_STATES = [
 ] as const;
 export type ThreadState = typeof THREAD_STATES[number];
 
-export interface ThreadAttachment { name: string; size: number; type: string | null }
-export interface ThreadMention { id: string; name: string; me: boolean }
+/** `url` is Discord's signed CDN link; it expires, so the page gets it through DiscordReader.freshen. */
+export interface ThreadAttachment { name: string; size: number; type: string | null; url: string; width: number | null; height: number | null }
+/** A user or, with `role`, a server role named in the message. */
+export interface ThreadMention { id: string; name: string; me: boolean; role: boolean }
 export interface ThreadMessage {
   id: string;
   authorId: string;
   author: string;
+  /** The author's Discord avatar, or Discord's default one. */
+  avatar: string;
   mine: boolean;
   at: string;
   text: string;
@@ -36,6 +40,8 @@ export interface ThreadMessage {
 export interface ThreadClaim { messageId: string; authorId: string; author: string; mine: boolean; at: string }
 
 export interface ThreadRow {
+  /** The shape the row was built with; a row of an older shape is built again on the next sync. */
+  version: number;
   id: string;
   channelId: string;
   channel: string;
@@ -118,7 +124,8 @@ export class ThreadService {
   }
 }
 
-export interface JiraFacts { status: string | null; assignee: string | null }
+/** `sprint` is null when the ticket is in no sprint. */
+export interface JiraFacts { status: string | null; assignee: string | null; sprint: string | null; sprintActive: boolean }
 export interface PageThread extends Omit<ThreadView, 'tickets'> { older: boolean; tickets: Array<{ key: string } & JiraFacts> }
 
 const QUIET_MS = 3 * 24 * 3600 * 1000;
@@ -129,7 +136,7 @@ const QUIET_MS = 3 * 24 * 3600 * 1000;
  */
 export function withJira(rows: ThreadView[], jira: Map<string, JiraFacts>, isSettled: (status: string | null) => boolean, now: Date): PageThread[] {
   return rows.map((row) => {
-    const tickets = row.tickets.map((key) => ({ key, ...(jira.get(key) ?? { status: null, assignee: null }) }));
+    const tickets = row.tickets.map((key) => ({ key, ...(jira.get(key) ?? { status: null, assignee: null, sprint: null, sprintActive: false }) }));
     const handled = row.state !== 'CLOSED' && tickets.length > 0 && tickets.every((ticket) => isSettled(ticket.status));
     const needsYou = handled ? false : row.needsYou;
     return {
