@@ -138,7 +138,7 @@ export function buildRow(channel: Channel, guildId: string, thread: RawThread, t
 export interface ReaderDeps {
   now(): Date;
   setting(key: string): Promise<string | null>;
-  /** The owner's Discord user id, kept in the Cron settings. */
+  /** The owner's Discord user id, kept in Settings > Discord. */
   ownerId(): Promise<string>;
   request(path: string, token: string): Promise<DiscordResponse>;
   sleep(ms: number): Promise<void>;
@@ -224,7 +224,7 @@ export class DiscordReader {
       const config = await this.config();
       if (!config) throw new DiscordReaderError('Discord reader is not set up');
       const me = await this.deps.ownerId();
-      if (!me) throw new DiscordReaderError('Set your Discord user id in the Cron settings');
+      if (!me) throw new DiscordReaderError('Set your Discord user id in Settings > Discord');
       const now = this.deps.now();
       const tagNames = new Map<string, string>();
       const containers = new Map<string, Channel>();

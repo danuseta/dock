@@ -263,6 +263,9 @@ export const GET_SETTINGS = gql`
       hasJiraApiToken
       hasGithubToken
       hasDiscordWebhookUrl
+      hasDiscordBotToken
+      discordGuildId
+      discordUserId
       discordMessageTemplate
       hasGoogleClientSecret
       googleCalendarConnected
@@ -901,7 +904,6 @@ export const GET_ORCHESTRATOR_CRON_SETTINGS = gql`
   query GetOrchestratorCronSettings {
     orchestratorCronSettings {
       config
-      webhookSet
       lastFill
     }
   }

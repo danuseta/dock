@@ -133,7 +133,7 @@ const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) 
 
 const ChannelManager: React.FC<{ channels: DiscordChannel[]; configured: boolean }> = ({ channels, configured }) => {
   const [input, setInput] = useState('');
-  const [kind, setKind] = useState<ChannelKind>('bug');
+  const [kind, setKind] = useState<ChannelKind>('follow');
   const [error, setError] = useState<string | null>(null);
   const [add, { loading: adding }] = useMutation(ADD_DISCORD_CHANNEL, { update: writeFeed('addDiscordChannel') });
   const [change] = useMutation(UPDATE_DISCORD_CHANNEL, { update: writeFeed('updateDiscordChannel') });

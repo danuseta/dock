@@ -35,6 +35,7 @@ export interface SavedSettings {
   discordMessageTemplate?: string | null;
   hasDiscordBotToken?: boolean | null;
   discordGuildId?: string | null;
+  discordUserId?: string | null;
   hasGoogleClientSecret?: boolean | null;
   googleCalendarConnected?: boolean | null;
   googleCalendarError?: string | null;
@@ -99,6 +100,7 @@ export function savedValues(settings: SavedSettings): Record<DraftSectionId, Sec
       discordMessageTemplate: settings.discordMessageTemplate || DEFAULT_DISCORD_MESSAGE_TEMPLATE,
       discordBotToken: '',
       discordGuildId: settings.discordGuildId || '',
+      discordUserId: settings.discordUserId || '',
     },
     calendar: { googleClientId: settings.googleClientId || '', googleClientSecret: '', googleCalendarId: settings.googleCalendarId || 'primary' },
   };
@@ -113,7 +115,8 @@ export function sectionErrors(id: DraftSectionId, values: SectionValues): string
   if (id === 'general') return isValidServiceHealthRefreshSeconds(healthSeconds(values)) ? [] : ['Enter a whole-number interval between 5 seconds and 24 hours.'];
   if (id === 'discord') {
     const error = getDiscordTemplateError(values.discordMessageTemplate);
-    return error ? [error] : [];
+    const userId = values.discordUserId.trim();
+    return [...(error ? [error] : []), ...(userId && !/^\d{5,25}$/.test(userId) ? ['Your Discord user id is digits only.'] : [])];
   }
   return [];
 }

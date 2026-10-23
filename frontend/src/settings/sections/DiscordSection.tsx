@@ -74,10 +74,11 @@ export const DiscordSection = ({ values, set, settings, test, onTested }: {
         </div>
       </SettingsCard>
 
-      <SettingsCard title="Forum reader" caption="DOCK reads the channels you follow on the Discord page every 5 minutes. Add and remove channels there. Your Discord id comes from the Cron settings.">
+      <SettingsCard title="Forum reader" caption="DOCK reads the channels you follow on the Discord page every 5 minutes. Add and remove channels there.">
         <div className="flex flex-col gap-3">
           <SecretInput label="Bot token" saved={Boolean(settings.hasDiscordBotToken)} value={values.discordBotToken} onChange={(value) => set('discordBotToken', value)} placeholder="Bot token" hint="The bot needs View Channel, Read Message History and the Message Content intent on the channels you follow." />
           <Field label="Server id" hint="Developer Mode on, right click the server name, Copy Server ID."><Input className="font-mono text-xs" inputMode="numeric" value={values.discordGuildId} onChange={(event) => set('discordGuildId', event.target.value.trim())} placeholder="1389235158414000200" /></Field>
+          <Field label="Your Discord user id" hint="Right click your name, Copy User ID. Threads that mention you or that you wrote in are sorted with it."><Input className="font-mono text-xs" inputMode="numeric" value={values.discordUserId} onChange={(event) => set('discordUserId', event.target.value.trim())} placeholder="123456789012345678" /></Field>
           <div className="flex flex-wrap items-center gap-3"><Button onClick={handleReaderTest} disabled={testingReader || !settings.hasDiscordBotToken}><Zap size={16} aria-hidden="true" />Test saved reader</Button><TestResultText busy={testingReader} result={readerTest} /></div>
         </div>
       </SettingsCard>

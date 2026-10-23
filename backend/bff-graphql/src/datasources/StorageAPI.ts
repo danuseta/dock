@@ -167,6 +167,7 @@ export class StorageAPI {
       discordMessageTemplate: settings.discordMessageTemplate || DEFAULT_DISCORD_MESSAGE_TEMPLATE,
       hasDiscordBotToken: Boolean(settings.discordBotToken),
       discordGuildId: settings.discordGuildId || null,
+      discordUserId: settings.discordUserId || null,
       hasGoogleClientSecret: Boolean(settings.googleClientSecret),
       googleCalendarConnected: Boolean(settings.googleRefreshToken),
       serviceHealthRefreshSeconds: isValidServiceHealthRefreshSeconds(settings.serviceHealthRefreshSeconds)
@@ -196,6 +197,7 @@ export class StorageAPI {
       if (input.chatCaveman != null && !(CAVEMAN_LEVELS as readonly string[]).includes(String(input.chatCaveman))) throw new Error('Invalid caveman level');
       if (input.chatParallelTurns != null && input.chatParallelTurns !== '' && parallelTurns(input.chatParallelTurns) === null) throw new Error('Invalid turn count');
       if (input.discordMessageTemplate != null) normalizeDiscordMessageTemplate(String(input.discordMessageTemplate));
+      if (input.discordUserId != null && input.discordUserId !== '' && !/^\d{5,25}$/.test(String(input.discordUserId).trim())) throw new Error('Invalid Discord user id');
       await Promise.all(Object.entries(input)
         .filter(([key, value]) => !(this.sensitiveKeys.has(key)
           && (value == null || String(value).trim() === '')))

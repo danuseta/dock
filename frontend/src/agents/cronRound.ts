@@ -88,7 +88,6 @@ export interface CronForm {
   model: string;
   effort: string;
   usageBrakePercent: string;
-  notifyUserId: string;
   engine: string;
 }
 
@@ -114,7 +113,6 @@ export function formFromConfig(configJson: string): CronForm {
     model: config.model || '',
     effort: config.effort || '',
     usageBrakePercent: String(config.usageBrakePercent),
-    notifyUserId: config.notifyUserId,
     engine: config.engine || 'sous',
   };
 }
@@ -140,7 +138,6 @@ export function configFromForm(form: CronForm): string {
     model: form.model.trim() || null,
     effort: form.effort.trim() || null,
     usageBrakePercent: number(form.usageBrakePercent),
-    notifyUserId: form.notifyUserId.trim(),
     engine: form.engine,
   });
 }
