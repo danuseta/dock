@@ -6,7 +6,7 @@ import type { AgentRun } from '../agents/runs';
 import { AnswerSheet } from '../decisions/AnswerSheet';
 import { QuestionView } from '../decisions/QuestionView';
 import { TicketList } from '../decisions/TicketList';
-import { KEEP, KEEP_EFFECT, OWN, answerText, questionCount, questionsOf, submissionOf, type Draft } from '../decisions/questions';
+import { KEEP, KEEP_EFFECT, OWN, answerText, questionCount, questionsOf, submissionOf, unansweredGuesses, type Draft } from '../decisions/questions';
 import { homeAttention, ticketAttention, ticketQuestions } from '../lib/attention';
 
 const issue = (n: number, level: string, status = 'open', options: string[] = [], effects?: Array<string | null>) => ({ n, at: '', type: 'QUESTION', text: `Issue ${n}`, level, status, options, effects });
@@ -67,7 +67,7 @@ test('the effect is written under the picked option only', () => {
 test('the answer sheet lists every answer, says what submitting does, and hides Submit on a DOCK that only monitors', () => {
   const questions = questionsOf(run);
   const drafts: Record<string, Draft> = { 'I-3': { choice: 'o1', text: '', unsure: false }, 'D-4': { choice: KEEP, text: '', unsure: true } };
-  const props = { run, questions, drafts, submitting: false, error: null, onOpen: () => undefined, onSubmit: () => undefined };
+  const props = { run, questions, drafts, submitting: false, error: null, onOpen: () => undefined, onKeepAll: () => undefined, onSubmit: () => undefined };
   const html = renderToStaticMarkup(<AnswerSheet {...props} readOnly={null} />);
   assert.match(html, /2 of 3 answered/);
   assert.match(html, /Log in again/);
@@ -108,10 +108,22 @@ test('Needs you is one row per ticket, worst signal first, with the sous questio
   assert.deepStrictEqual(rows[3].groups, ['quiet']);
 });
 
+test('Keep all fills only the unanswered sous guesses of the ticket, and is hidden when none is left or the DOCK only monitors', () => {
+  const questions = questionsOf(run);
+  assert.deepStrictEqual(unansweredGuesses(questions, {}), ['D-4', 'D-6'], 'an issue has no Keep');
+  assert.deepStrictEqual(unansweredGuesses(questions, { 'D-4': { choice: 'a0', text: '', unsure: false } }), ['D-6'], 'an answered guess keeps its answer');
+  assert.deepStrictEqual(unansweredGuesses(questions, { 'D-6': { choice: KEEP, text: '', unsure: false, sent: true } }), ['D-4'], 'a sent guess is left alone');
+  const props = { run, questions, submitting: false, error: null, onOpen: () => undefined, onKeepAll: () => undefined, onSubmit: () => undefined };
+  assert.match(renderToStaticMarkup(<AnswerSheet {...props} drafts={{}} readOnly={null} />), />Keep all sous built \(2\)</);
+  const kept = { 'D-4': { choice: KEEP, text: '', unsure: false }, 'D-6': { choice: KEEP, text: '', unsure: false } };
+  assert.doesNotMatch(renderToStaticMarkup(<AnswerSheet {...props} drafts={kept} readOnly={null} />), /Keep all/);
+  assert.doesNotMatch(renderToStaticMarkup(<AnswerSheet {...props} drafts={{}} readOnly="This DOCK only monitors." />), /Keep all/);
+});
+
 test('the answer sheet lists what needs a look first and folds the answers already sent', () => {
   const questions = questionsOf(run);
   const drafts: Record<string, Draft> = { 'I-3': { choice: 'o0', text: '', unsure: false, sent: true }, 'D-4': { choice: KEEP, text: '', unsure: true } };
-  const html = renderToStaticMarkup(<AnswerSheet run={run} questions={questions} drafts={drafts} submitting={false} error={null} readOnly={null} onOpen={() => undefined} onSubmit={() => undefined} />);
+  const html = renderToStaticMarkup(<AnswerSheet run={run} questions={questions} drafts={drafts} submitting={false} error={null} readOnly={null} onOpen={() => undefined} onKeepAll={() => undefined} onSubmit={() => undefined} />);
   assert.ok(html.indexOf('Keep the last state') < html.indexOf('Backoff 1s to 30s'), 'the unanswered question comes before the unsure one');
   assert.match(html, /<summary[^>]*>1 sent, waiting for sous<\/summary>/);
   assert.match(html, /Issue 3 · Refresh/);

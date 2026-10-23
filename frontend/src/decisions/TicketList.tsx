@@ -63,7 +63,7 @@ export const TicketList: React.FC<TicketListProps> = ({ tickets, openKey, drafts
   });
 
   return (
-    <nav className="flex max-h-[680px] flex-col border-r border-border p-2.5 max-[900px]:order-2 max-[900px]:max-h-none max-[900px]:border-r-0 max-[900px]:border-t" aria-label="Tickets with questions">
+    <nav className="sticky top-4 flex max-h-[calc(100dvh-2rem)] flex-col self-start border-r border-border p-2.5 max-[900px]:static max-[900px]:order-2 max-[900px]:max-h-none max-[900px]:border-r-0 max-[900px]:border-t" aria-label="Tickets with questions">
       <div className="flex items-center gap-2 px-1 pb-2">
         <input className="h-8 min-w-0 flex-1 rounded-[6px] border border-border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 max-[760px]:h-11" placeholder="Find a ticket…" aria-label="Find a ticket" value={query} onChange={(event) => setQuery(event.target.value)} />
         <span className="font-mono text-[0.68rem] whitespace-nowrap text-muted-foreground">{shown.length} tickets</span>

@@ -79,6 +79,11 @@ export function answerText(question: Question, draft?: Draft): string | null {
   return question.options.find((option) => option.key === draft.choice)?.label ?? null;
 }
 
+/** Sous's guesses still without an answer: Keep all fills these with Keep. Issues have no Keep, so they are left alone. */
+export const unansweredGuesses = (questions: Question[], drafts: Record<string, Draft>) => questions
+  .filter((question) => question.kind === 'decision' && !drafts[question.id]?.sent && !isAnswered(drafts[question.id]))
+  .map((question) => question.id);
+
 export interface Submission {
   answers: Array<{ issue: number; text: string }>;
   changes: Array<{ n: number; choice: string }>;

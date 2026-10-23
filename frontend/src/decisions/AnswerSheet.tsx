@@ -1,7 +1,7 @@
 import React from 'react';
 import type { AgentRun } from '../agents/runs';
 import { Button } from '../components/ui';
-import { answerText, submissionOf, type Draft, type Question } from './questions';
+import { answerText, submissionOf, unansweredGuesses, type Draft, type Question } from './questions';
 
 interface AnswerSheetProps {
   run: AgentRun;
@@ -11,6 +11,7 @@ interface AnswerSheetProps {
   readOnly: string | null;
   error: string | null;
   onOpen: (index: number) => void;
+  onKeepAll: (ids: string[]) => void;
   onSubmit: () => void;
 }
 
@@ -31,7 +32,8 @@ function summary(questions: Question[], drafts: Record<string, Draft>): string {
 }
 
 /** The ticket's answers on one page before they are sent together. */
-export const AnswerSheet: React.FC<AnswerSheetProps> = ({ run, questions, drafts, submitting, readOnly, error, onOpen, onSubmit }) => {
+export const AnswerSheet: React.FC<AnswerSheetProps> = ({ run, questions, drafts, submitting, readOnly, error, onOpen, onKeepAll, onSubmit }) => {
+  const guesses = unansweredGuesses(questions, drafts);
   const answered = questions.filter((question) => answerText(question, drafts[question.id])).length;
   const firstOpen = questions.findIndex((question) => !answerText(question, drafts[question.id]));
   const nothingNew = (({ answers, changes, confirms }) => answers.length + changes.length + confirms.length === 0)(submissionOf(questions, drafts));
@@ -73,6 +75,7 @@ export const AnswerSheet: React.FC<AnswerSheetProps> = ({ run, questions, drafts
       <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-border pt-4">
         {firstOpen >= 0 && <Button variant="ghost" size="sm" onClick={() => onOpen(firstOpen)}>Back to question {firstOpen + 1}</Button>}
         <span className="flex-1" />
+        {!readOnly && guesses.length > 0 && <Button size="sm" title="Answers every unanswered sous guess with Keep what sous built; nothing is sent until you submit" onClick={() => onKeepAll(guesses)}>Keep all sous built ({guesses.length})</Button>}
         {!readOnly && <Button variant="primary" size="sm" disabled={submitting || nothingNew} onClick={onSubmit}>{submitting ? 'Submitting…' : 'Submit'}</Button>}
       </div>
       {readOnly && <p className="mt-2 text-pretty text-xs text-muted-foreground">{readOnly}</p>}
