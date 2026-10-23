@@ -180,17 +180,24 @@ export const typeDefs = gql`
     name: String!
     size: Int!
     type: String
+    """A CDN link that works for at least the next hour."""
+    url: String!
+    width: Int
+    height: Int
   }
 
+  """A user or, with role, a server role named in a message."""
   type DiscordMention {
     id: ID!
     name: String!
     me: Boolean!
+    role: Boolean!
   }
 
   type DiscordMessage {
     id: ID!
     author: String!
+    avatar: String!
     mine: Boolean!
     at: String!
     text: String!
@@ -208,6 +215,9 @@ export const typeDefs = gql`
     key: String!
     status: String
     assignee: String
+    """The ticket's Jira sprint; null when it is in none."""
+    sprint: String
+    sprintActive: Boolean!
   }
 
   """A Discord channel the owner follows, or one thread followed on its own. kind is bug, uat, pr or follow."""

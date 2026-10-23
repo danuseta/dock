@@ -10,6 +10,8 @@ import { channelIdOf, type Channel, type ChannelKind, type SyncStatus, type Thre
 export const ON_IT = /\bon\s?it\b/i;
 export const NEEDS_YOU = new Set<ThreadState>(['FLOW_1', 'FLOW_2', 'FLOW_3', 'FLOW_4', 'YOUR_TURN', 'FLOW_5', 'REVIEW_ASKED']);
 export const SETTING_KEYS = { token: 'discordBotToken', guild: 'discordGuildId' } as const;
+/** Bumped when ThreadRow gains a field, so the next sync builds every stored row again. */
+export const ROW_VERSION = 2;
 /** Discord channel types that are threads. */
 const THREAD_TYPES = new Set([10, 11, 12]);
 
@@ -22,15 +24,23 @@ const DISCORD_EPOCH = 1420070400000;
 const TICKET = /\b[A-Z][A-Z0-9_]{1,31}-[1-9]\d{0,9}\b/g;
 const PULL = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/g;
 const USER_MENTION = /<@!?(\d+)>/g;
+const ROLE_MENTION = /<@&(\d+)>/g;
+const CHANNEL_MENTION = /<#(\d+)>/g;
+const CDN = 'https://cdn.discordapp.com';
+/** Signed CDN links Discord refreshes in one call at most. */
+const REFRESH_BATCH = 50;
+/** A link is refreshed this long before it expires. */
+const EXPIRY_MARGIN_MS = 3600 * 1000;
 
-export interface RawUser { id: string; username: string; global_name?: string | null }
+export interface RawUser { id: string; username: string; global_name?: string | null; avatar?: string | null }
 export interface RawMessage {
   id: string;
   content: string;
   timestamp: string;
   author: RawUser;
   mentions: RawUser[];
-  attachments: Array<{ filename: string; size: number; content_type?: string | null }>;
+  mention_roles?: string[];
+  attachments: Array<{ filename: string; size: number; content_type?: string | null; url: string; width?: number | null; height?: number | null }>;
 }
 export interface RawThread {
   id: string;
@@ -45,27 +55,47 @@ export interface RawThread {
   thread_metadata?: { archived?: boolean; locked?: boolean; archive_timestamp?: string; create_timestamp?: string };
 }
 export interface DiscordResponse { status: number; body: unknown }
+/** Role and channel names of the server, for the mentions in a message. */
+export interface ServerNames { roles: Map<string, string>; channels: Map<string, string> }
+const NO_NAMES: ServerNames = { roles: new Map(), channels: new Map() };
 
 export class DiscordReaderError extends Error {}
 
 const nameOf = (user: RawUser) => user.global_name || user.username;
+/** The user's avatar, or the default Discord gives an account without one. */
+export const avatarOf = (user: RawUser) => (user.avatar
+  ? `${CDN}/avatars/${user.id}/${user.avatar}.png?size=64`
+  : `${CDN}/embed/avatars/${Number((BigInt(user.id) >> 22n) % 6n)}.png`);
 const createdAtOf = (thread: RawThread) => thread.thread_metadata?.create_timestamp ?? new Date(Number(BigInt(thread.id) >> 22n) + DISCORD_EPOCH).toISOString();
 const closed = (thread: RawThread) => Boolean(thread.thread_metadata?.archived || thread.thread_metadata?.locked);
 const matches = (text: string, pattern: RegExp) => [...new Set(text.match(pattern) ?? [])];
 
-export function toMessage(raw: RawMessage, me: string): ThreadMessage {
+/** One message with its mentions written as names; a role or channel the server does not list keeps its token. */
+export function toMessage(raw: RawMessage, me: string, server: ServerNames = NO_NAMES): ThreadMessage {
   const names = new Map(raw.mentions.map((user) => [user.id, nameOf(user)]));
+  const roles = (raw.mention_roles ?? []).filter((id) => server.roles.has(id));
   return {
     id: raw.id,
     authorId: raw.author.id,
     author: nameOf(raw.author),
+    avatar: avatarOf(raw.author),
     mine: raw.author.id === me,
     at: new Date(raw.timestamp).toISOString(),
-    text: raw.content.replace(USER_MENTION, (token, id: string) => (names.has(id) ? `@${names.get(id)}` : token)).slice(0, MAX_TEXT),
-    mentions: raw.mentions.map((user) => ({ id: user.id, name: nameOf(user), me: user.id === me })),
-    attachments: raw.attachments.map((file) => ({ name: file.filename, size: file.size, type: file.content_type ?? null })),
+    text: raw.content
+      .replace(USER_MENTION, (token, id: string) => (names.has(id) ? `@${names.get(id)}` : token))
+      .replace(ROLE_MENTION, (token, id: string) => (server.roles.has(id) ? `@${server.roles.get(id)}` : token))
+      .replace(CHANNEL_MENTION, (token, id: string) => (server.channels.has(id) ? `#${server.channels.get(id)}` : token))
+      .slice(0, MAX_TEXT),
+    mentions: [
+      ...raw.mentions.map((user) => ({ id: user.id, name: nameOf(user), me: user.id === me, role: false })),
+      ...roles.map((id) => ({ id, name: server.roles.get(id) as string, me: false, role: true })),
+    ],
+    attachments: raw.attachments.map((file) => ({ name: file.filename, size: file.size, type: file.content_type ?? null, url: file.url, width: file.width ?? null, height: file.height ?? null })),
   };
 }
+
+/** When a signed CDN link stops working: its `ex` parameter, seconds in hex. NaN for a link without one. */
+export const expiresAt = (url: string) => parseInt(new URL(url).searchParams.get('ex') ?? '', 16) * 1000;
 
 export interface Sorted { state: ThreadState; why: string; claim: ThreadClaim | null; claimerRepliedAt: string | null; mentionedAt: string | null; repliedAt: string | null }
 
@@ -108,13 +138,14 @@ export function sortThread(kind: ChannelKind, followed: boolean, threadOwnerId: 
 }
 
 /** One thread as a row; `channel` is the followed channel it belongs to, or the followed thread itself. */
-export function buildRow(channel: Channel, guildId: string, thread: RawThread, tagNames: Map<string, string>, raw: RawMessage[], me: string): ThreadRow {
-  const messages = [...raw].sort((a, b) => a.timestamp.localeCompare(b.timestamp)).map((message) => toMessage(message, me));
+export function buildRow(channel: Channel, guildId: string, thread: RawThread, tagNames: Map<string, string>, raw: RawMessage[], me: string, server: ServerNames = NO_NAMES): ThreadRow {
+  const messages = [...raw].sort((a, b) => a.timestamp.localeCompare(b.timestamp)).map((message) => toMessage(message, me, server));
   const sorted = sortThread(channel.kind, channel.thread, thread.owner_id ?? null, closed(thread), messages, me);
   const tags = (thread.applied_tags ?? []).map((id) => tagNames.get(id)).filter((name): name is string => Boolean(name));
   const createdBy = messages.find((message) => message.authorId === thread.owner_id)?.author ?? null;
   const lastActivity = messages.length ? messages[messages.length - 1].at : createdAtOf(thread);
   return {
+    version: ROW_VERSION,
     id: thread.id,
     channelId: channel.id,
     channel: channel.thread ? thread.name : channel.name ?? channel.id,
@@ -140,7 +171,8 @@ export interface ReaderDeps {
   setting(key: string): Promise<string | null>;
   /** The owner's Discord user id, kept in Settings > Discord. */
   ownerId(): Promise<string>;
-  request(path: string, token: string): Promise<DiscordResponse>;
+  /** A GET, or a POST of `body` when one is given. */
+  request(path: string, token: string, body?: unknown): Promise<DiscordResponse>;
   sleep(ms: number): Promise<void>;
   channels(): Promise<Channel[]>;
   saveChannel(channel: Channel): Promise<void>;
@@ -156,6 +188,8 @@ interface RawChannel extends RawThread { available_tags?: Array<{ id: string; na
 export class DiscordReader {
   private running: Promise<SyncStatus> | null = null;
   private requests = 0;
+  /** Refreshed attachment links by the link stored in the row. */
+  private readonly fresh = new Map<string, string>();
 
   constructor(private readonly deps: ReaderDeps) {}
 
@@ -169,9 +203,9 @@ export class DiscordReader {
     return this.deps.status();
   }
 
-  private async get<T>(path: string, token: string): Promise<T> {
+  private async get<T>(path: string, token: string, body?: unknown): Promise<T> {
     for (let attempt = 1; ; attempt += 1) {
-      const response = await this.deps.request(path, token);
+      const response = await this.deps.request(path, token, body);
       this.requests += 1;
       if (response.status === 429 && attempt < MAX_TRIES) {
         const wait = Number((response.body as { retry_after?: number } | null)?.retry_after ?? 1);
@@ -252,10 +286,12 @@ export class DiscordReader {
       }
       const stored = await this.deps.stored();
       const rows: ThreadRow[] = [];
+      let server: ServerNames | null = null;
       for (const { thread, channel } of threads.values()) {
         const kept = stored.get(thread.id);
-        const unchanged = kept && kept.kind === channel.kind && kept.lastMessageId === (thread.last_message_id ?? null) && (kept.state === 'CLOSED') === closed(thread);
-        const row = unchanged ? kept : buildRow(channel, config.guild, thread, tagNames, await this.get<RawMessage[]>(`/channels/${thread.id}/messages?limit=50`, config.token), me);
+        const unchanged = kept && kept.version === ROW_VERSION && kept.kind === channel.kind && kept.lastMessageId === (thread.last_message_id ?? null) && (kept.state === 'CLOSED') === closed(thread);
+        if (!unchanged) server ??= await this.serverNames(config);
+        const row = unchanged ? kept : buildRow(channel, config.guild, thread, tagNames, await this.get<RawMessage[]>(`/channels/${thread.id}/messages?limit=50`, config.token), me, server ?? NO_NAMES);
         if (row.state !== 'NOT_YOURS') rows.push(row);
       }
       await this.deps.save(rows);
@@ -267,6 +303,40 @@ export class DiscordReader {
       await this.deps.saveStatus(status);
       return status;
     }
+  }
+
+  /** The server's role and channel names; read only when a thread is built again. */
+  private async serverNames(config: Config): Promise<ServerNames> {
+    const roles = await this.get<Array<{ id: string; name: string }>>(`/guilds/${config.guild}/roles`, config.token);
+    const channels = await this.get<Array<{ id: string; name: string }>>(`/guilds/${config.guild}/channels`, config.token);
+    return { roles: new Map(roles.map((role) => [role.id, role.name])), channels: new Map(channels.map((channel) => [channel.id, channel.name])) };
+  }
+
+  /**
+   * The rows with attachment links that still work. A stored link expires about a day after the sync that read it, so
+   * the ones expiring within the hour are refreshed, 50 per call, and remembered until the new link expires.
+   * When Discord refuses, the rows keep the old links and the page shows the file name.
+   */
+  async freshen<T extends ThreadRow>(rows: T[]): Promise<T[]> {
+    const soon = this.deps.now().getTime() + EXPIRY_MARGIN_MS;
+    const usable = (url: string) => !(expiresAt(url) < soon);
+    for (const [old, url] of this.fresh) if (!usable(url)) this.fresh.delete(old);
+    const stale = [...new Set(rows.flatMap((row) => row.messages.flatMap((message) => message.attachments.map((file) => file.url))))]
+      .filter((url) => !usable(url) && !this.fresh.has(url));
+    const config = stale.length ? await this.config() : null;
+    if (config) {
+      try {
+        for (let start = 0; start < stale.length; start += REFRESH_BATCH) {
+          const answer = await this.get<{ refreshed_urls: Array<{ original: string; refreshed: string }> }>('/attachments/refresh-urls', config.token, { attachment_urls: stale.slice(start, start + REFRESH_BATCH) });
+          for (const pair of answer.refreshed_urls) this.fresh.set(pair.original, pair.refreshed);
+        }
+      } catch {
+        // The links stay as they are; an expired one shows as a file name.
+      }
+    }
+    if (!this.fresh.size) return rows;
+    const link = (url: string) => this.fresh.get(url) ?? url;
+    return rows.map((row) => ({ ...row, messages: row.messages.map((message) => ({ ...message, attachments: message.attachments.map((file) => ({ ...file, url: link(file.url) })) })) }));
   }
 
   /** Checks the token and every followed channel; the message names what Discord answered. */

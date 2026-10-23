@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ticketAttention } from '../lib/attention';
-import { ago, channelLabel, channelTabs, countFor, discordAttention, mentionParts, threadsFor, type DiscordThread } from '../lib/discordThreads';
+import { NO_SPRINT, ago, channelLabel, channelTabs, countFor, discordAttention, matchesSearch, mentionParts, progressOf, sprintGroups, threadsFor, titleParts, wib, wibDay, wibTime, type DiscordThread } from '../lib/discordThreads';
 
 const thread = (id: string, extra: Partial<DiscordThread>): DiscordThread => ({
   id, channelId: 'cb', channel: 'bug-report', kind: 'bug', title: `Thread ${id}`, url: `https://discord.com/channels/g/${id}`, state: 'FLOW_1', why: 'New bug; nobody said on it',
@@ -27,9 +27,9 @@ test('Needs you lists fresh threads by state, quiet ones after; Open and Done sp
 });
 
 test('a message marks the owner and the others it mentions', () => {
-  const message = { id: '1', author: 'Rina', mine: false, at: '', text: '@Danu and @Rina QA please', mentions: [{ id: '9', name: 'Danu', me: true }, { id: '2', name: 'Rina QA', me: false }], attachments: [] };
-  assert.deepStrictEqual(mentionParts(message), [{ text: '@Danu', mention: 'me' }, { text: ' and ' }, { text: '@Rina QA', mention: 'other' }, { text: ' please' }]);
-  assert.deepStrictEqual(mentionParts({ ...message, mentions: [] }), [{ text: '@Danu and @Rina QA please' }]);
+  const message = { id: '1', author: 'Rina', avatar: '', mine: false, at: '', text: '@Danu and @Rina QA please, @QA Team -2', mentions: [{ id: '9', name: 'Danu', me: true, role: false }, { id: '2', name: 'Rina QA', me: false, role: false }, { id: '7', name: 'QA Team', me: false, role: true }], attachments: [] };
+  assert.deepStrictEqual(mentionParts(message), [{ text: '@Danu', mention: 'me' }, { text: ' and ' }, { text: '@Rina QA', mention: 'other' }, { text: ' please, ' }, { text: '@QA Team', mention: 'role' }, { text: ' -2' }]);
+  assert.deepStrictEqual(mentionParts({ ...message, mentions: [] }), [{ text: '@Danu and @Rina QA please, @QA Team -2' }]);
 });
 
 test('ago reads minutes, hours, then days', () => {
@@ -39,7 +39,7 @@ test('ago reads minutes, hours, then days', () => {
 
 test('a Discord thread joins its ticket row on Home, or gets one of its own', () => {
   const items = discordAttention([
-    thread('t1', { tickets: [{ key: 'QRD-1384', status: 'PR Review', assignee: null }], why: 'Rina mentioned you' }),
+    thread('t1', { tickets: [{ key: 'QRD-1384', status: 'PR Review', assignee: null, sprint: null, sprintActive: false }], why: 'Rina mentioned you' }),
     thread('t2', { title: 'Broadcast preview cut', why: 'Alvin mentioned you', channelId: 'cu', channel: 'uat-bug-report', kind: 'uat' }),
     thread('t5', { title: 'Release checklist', channel: 'Release checklist', channelId: 't5', kind: 'follow', why: 'Rina mentioned you' }),
     thread('t3', { older: true }),
@@ -61,4 +61,42 @@ test('the tabs follow the channels that are on, named once the bot has read them
   ];
   assert.deepStrictEqual(channelTabs(channels).map((tab) => tab.label), ['All', '#bug-report', '1527229030439321820', 'Release checklist']);
   assert.strictEqual(channelLabel(channels[3]), '#old');
+});
+
+test('times are written in WIB whatever the browser zone', () => {
+  assert.strictEqual(wib('2026-10-22T16:05:00.000Z'), '22 Oct 23:05 WIB');
+  assert.strictEqual(wibTime('2026-10-22T16:05:00.000Z'), '23:05 WIB');
+  assert.strictEqual(wibDay('2026-10-22T18:00:00.000Z'), 'Fri 23 Oct', 'past midnight in Jakarta is the next day');
+});
+
+test('search reads the title, ticket keys, people and messages', () => {
+  const row = thread('s', {
+    title: 'Contact name wrong', createdBy: 'Rina', tickets: [{ key: 'QRD-1384', status: null, assignee: null, sprint: null, sprintActive: false }],
+    messages: [{ id: 'm', author: 'Aken', avatar: '', mine: false, at: '', text: 'reassign dari HP', mentions: [], attachments: [] }],
+  });
+  for (const query of ['', 'contact', 'qrd-1384', 'rina', 'aken', 'DARI hp']) assert.ok(matchesSearch(row, query), query);
+  assert.ok(!matchesSearch(row, 'broadcast'));
+});
+
+test('threads group by the sprint of their ticket: active first, then the newest sprint, none last', () => {
+  const ticket = (sprint: string | null, sprintActive = false) => [{ key: 'QRD-1', status: null, assignee: null, sprint, sprintActive }];
+  const groups = sprintGroups([
+    thread('a', { tickets: ticket('Sprint 24') }),
+    thread('b', { tickets: [] }),
+    thread('c', { tickets: ticket('Sprint 25', true) }),
+    thread('d', { tickets: ticket('Sprint 9') }),
+    thread('e', { tickets: ticket('Sprint 24') }),
+  ]);
+  assert.deepStrictEqual(groups.map((group) => [group.name, group.active, group.threads.map((row) => row.id)]), [
+    ['Sprint 25', true, ['c']], ['Sprint 24', false, ['a', 'e']], ['Sprint 9', false, ['d']], [NO_SPRINT, false, ['b']],
+  ]);
+});
+
+test('the title marks its ticket keys, and each row has one progress chip', () => {
+  assert.deepStrictEqual(titleParts('feat(qrd-1398): folder move'), [{ text: 'feat(', ticket: false }, { text: 'qrd-1398', ticket: true }, { text: '): folder move', ticket: false }]);
+  assert.deepStrictEqual(titleParts('Kanban label hilang'), [{ text: 'Kanban label hilang', ticket: false }]);
+  assert.strictEqual(progressOf(thread('p', {})), 'open');
+  assert.strictEqual(progressOf(thread('p', { claim: { author: 'Bima', mine: false, at: '' } })), 'progress');
+  assert.strictEqual(progressOf(thread('p', { state: 'CLOSED', claim: { author: 'Bima', mine: false, at: '' } })), 'done');
+  assert.strictEqual(progressOf(thread('p', { dismissed: true })), 'done');
 });

@@ -1,22 +1,33 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ChevronLeft, ChevronRight, ExternalLink, RefreshCw, Settings2, Trash2 } from 'lucide-react';
+import { ExternalLink, RefreshCw, Settings2, Trash2 } from 'lucide-react';
 import { GET_DISCORD_THREADS } from '../graphql/queries';
 import { ADD_DISCORD_CHANNEL, DISMISS_DISCORD_THREAD, REFRESH_DISCORD, REMOVE_DISCORD_CHANNEL, UPDATE_DISCORD_CHANNEL } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Button, Input, Page, Select } from '../components/ui';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
-import { pageOf } from '../agents/runs';
-import { ALL, KINDS, STATE_LABEL, VIEWS, ago, channelLabel, channelTabs, countFor, fileSize, isDone, mentionParts, needsYou, threadsFor, type ChannelKind, type ChannelTab, type DiscordChannel, type DiscordThread, type ThreadView } from '../lib/discordThreads';
+import {
+  ALL, KINDS, STATE_LABEL, VIEWS, ago, channelLabel, channelTabs, countFor, fileSize, isDone, matchesSearch, mentionParts, needsYou, progressOf, sprintGroups, threadsFor, titleParts, wib, wibDay, wibTime,
+  type ChannelKind, type ChannelTab, type DiscordChannel, type DiscordMessage, type DiscordThread, type Progress, type ThreadView,
+} from '../lib/discordThreads';
 
 interface DiscordPageProps { onTicketClick: (key: string) => void; onNavigate: (path: string) => void }
 
-const PAGE_SIZE = 20;
-const time = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-const day = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-const stamp = (iso: string) => `${day(iso)} ${time(iso)}`;
-const initials = (name: string) => name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
+const PROGRESS_STYLE: Record<Progress, string> = {
+  open: 'bg-status-discord-bg text-status-discord',
+  progress: 'bg-status-warn/15 text-status-warn',
+  done: 'bg-status-merged/15 text-status-merged',
+};
+
+const ProgressChip: React.FC<{ progress: Progress }> = ({ progress }) => (
+  <span className={cn('shrink-0 rounded-[3px] px-1 py-px font-mono text-[0.58rem] font-bold', PROGRESS_STYLE[progress])}>{progress}</span>
+);
+
+/** The title with its ticket keys in the accent colour. */
+const Title: React.FC<{ text: string }> = ({ text }) => (
+  <>{titleParts(text).map((part, index) => (part.ticket ? <span key={index} className="font-mono text-accent">{part.text}</span> : <React.Fragment key={index}>{part.text}</React.Fragment>))}</>
+);
 
 const selectedFromUrl = () => new URLSearchParams(window.location.search).get('thread');
 
@@ -32,18 +43,20 @@ const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) 
   const [chosenTab, setTab] = useState<ChannelTab>(ALL);
   const [managing, setManaging] = useState(false);
   const [view, setView] = useState<ThreadView>('needs');
-  const [page, setPage] = useState(1);
+  const [query, setQuery] = useState('');
+  const [folded, setFolded] = useState<string[]>([]);
   const [picked, setPicked] = useState<string | null>(selectedFromUrl);
   const now = new Date();
 
   const feed = data?.discordThreads;
-  const rows: DiscordThread[] = useMemo(() => feed?.rows ?? [], [feed]);
+  const all: DiscordThread[] = useMemo(() => feed?.rows ?? [], [feed]);
+  const rows = all.filter((row) => matchesSearch(row, query));
   const channels: DiscordChannel[] = useMemo(() => feed?.channels ?? [], [feed]);
   const tabs = channelTabs(channels);
   const tab = tabs.some((entry) => entry.id === chosenTab) ? chosenTab : ALL;
   const shown = threadsFor(rows, tab, view);
-  const listed = pageOf(shown, page, PAGE_SIZE);
-  const selected = rows.find((row) => row.id === picked) ?? listed.items[0] ?? null;
+  const groups = sprintGroups(shown);
+  const selected = all.find((row) => row.id === picked) ?? shown[0] ?? null;
 
   if (isInitialQueryLoading(loading, data)) return <Page width="full"><LoadingSkeleton /></Page>;
   if (error && !data) return <Page width="full"><p className="rounded-md border border-status-conflict bg-status-conflict-bg p-4 text-sm text-status-conflict" role="alert">Discord threads failed to load: {error.message}</p></Page>;
@@ -56,8 +69,7 @@ const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) 
     setPicked(null);
     window.history.replaceState(window.history.state, '', '/discord');
   };
-  const pickTab = (next: ChannelTab) => { setTab(next); setPage(1); };
-  const pickView = (next: ThreadView) => { setView(next); setPage(1); };
+  const toggle = (name: string) => setFolded(folded.includes(name) ? folded.filter((item) => item !== name) : [...folded, name]);
   const turn = countFor(rows, tab, 'needs');
   const labelOf = (row: DiscordThread) => {
     const channel = channels.find((entry) => entry.id === row.channelId);
@@ -75,8 +87,8 @@ const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) 
           {!feed?.configured
             ? <span className="text-status-warn">Bot not set up · <button type="button" className="border-0 bg-transparent p-0 text-status-warn underline" onClick={() => onNavigate('/settings')}>Settings</button></span>
             : feed.error
-            ? <span className="text-status-conflict" role="alert">Last sync failed: {feed.error}{feed.syncedAt ? ` · showing ${stamp(feed.syncedAt)}` : ''}</span>
-            : <span className="text-muted-foreground">{feed.syncedAt ? `Synced ${time(feed.syncedAt)}` : 'Not synced yet'}</span>}
+            ? <span className="text-status-conflict" role="alert">Last sync failed: {feed.error}{feed.syncedAt ? ` · showing ${wib(feed.syncedAt)}` : ''}</span>
+            : <span className="text-muted-foreground">{feed.syncedAt ? `Synced ${wibTime(feed.syncedAt)}` : 'Not synced yet'}</span>}
           <Button size="sm" variant={managing ? 'primary' : 'default'} onClick={() => setManaging(!managing)} aria-expanded={managing}><Settings2 size={14} aria-hidden="true" />Channels</Button>
           <Button size="sm" onClick={() => void refresh()} disabled={refreshing || !feed?.configured}><RefreshCw size={14} className={cn(refreshing && 'animate-spin')} aria-hidden="true" />{refreshing ? 'Syncing' : 'Refresh'}</Button>
         </div>
@@ -86,41 +98,34 @@ const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) 
 
       <div className="grid min-h-[640px] grid-cols-[400px_minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-background max-[960px]:grid-cols-1">
         <section className={cn('flex min-w-0 flex-col border-r border-border max-[960px]:border-r-0', picked && 'max-[960px]:hidden')} aria-label="Threads">
+          <div className="border-b border-border px-4 py-2.5">
+            <Input type="search" aria-label="Search threads" className="h-8 text-xs max-[760px]:h-11" placeholder="Search title, message, person or ticket" value={query} onChange={(event) => setQuery(event.target.value)} />
+          </div>
           <div className="flex gap-4 overflow-x-auto border-b border-border px-4" role="tablist" aria-label="Forum">
             {tabs.map((entry) => (
-              <button key={entry.id} type="button" role="tab" aria-selected={tab === entry.id} onClick={() => pickTab(entry.id)} className={cn('min-h-11 whitespace-nowrap border-0 border-b-2 bg-transparent px-0 pt-2 text-xs font-medium', tab === entry.id ? 'border-accent text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}>
+              <button key={entry.id} type="button" role="tab" aria-selected={tab === entry.id} onClick={() => setTab(entry.id)} className={cn('min-h-11 whitespace-nowrap border-0 border-b-2 bg-transparent px-0 pt-2 text-xs font-medium', tab === entry.id ? 'border-accent text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}>
                 {entry.label} <span className="font-mono text-[0.64rem] tabular-nums">{countFor(rows, entry.id, view)}</span>
               </button>
             ))}
           </div>
           <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2 text-xs text-muted-foreground">
             <span className="whitespace-nowrap">{turn === 0 ? 'Nothing needs you' : `${turn} ${turn === 1 ? 'needs' : 'need'} you`}</span>
-            <Select aria-label="Show" className="h-8 w-36 text-xs max-[760px]:h-11" value={view} onValueChange={(value) => pickView(value as ThreadView)} options={VIEWS.map((option) => ({ value: option.id, label: option.label }))} />
+            <Select aria-label="Show" className="h-8 w-36 text-xs max-[760px]:h-11" value={view} onValueChange={(value) => setView(value as ThreadView)} options={VIEWS.map((option) => ({ value: option.id, label: option.label }))} />
           </div>
-          <div className="flex-1">
-            {listed.items.length === 0 && <p className="px-4 py-6 text-sm text-muted-foreground">{view === 'needs' ? 'No thread needs you here.' : 'No threads here.'}</p>}
-            {listed.items.map((row) => {
-              const fresh = needsYou(row) && !row.older;
+          <div className="max-h-[calc(100dvh-15rem)] min-h-[320px] flex-1 overflow-y-auto max-[960px]:max-h-none">
+            {shown.length === 0 && <p className="px-4 py-6 text-sm text-muted-foreground">{query.trim() ? 'No thread matches.' : view === 'needs' ? 'No thread needs you here.' : 'No threads here.'}</p>}
+            {groups.map((group) => {
+              const expanded = !folded.includes(group.name);
               return (
-                <button key={row.id} type="button" onClick={() => open(row.id)} aria-current={selected?.id === row.id ? 'true' : undefined}
-                  className={cn('grid w-full grid-cols-[10px_minmax(0,1fr)_auto] gap-2.5 border-0 border-b border-l-2 border-border border-l-transparent bg-transparent py-2.5 pr-4 pl-3.5 text-left text-foreground hover:bg-surface-0', selected?.id === row.id && 'border-l-accent bg-surface-1')}>
-                  <span className={cn('mt-1.5 size-[7px] rounded-full', fresh ? 'bg-status-warn' : needsYou(row) ? 'border border-status-warn' : 'border border-border-glow')} aria-label={fresh ? 'Needs you' : undefined} />
-                  <span className="min-w-0">
-                    <strong className={cn('block truncate text-[0.8rem]', fresh ? 'font-semibold' : 'font-medium')}>{row.title}</strong>
-                    <small className="mt-0.5 block truncate text-[0.68rem] text-muted-foreground">{labelOf(row)} · {STATE_LABEL[row.state] ?? row.state}{row.tickets[0] ? <> · <span className="font-mono text-accent">{row.tickets[0].key}</span></> : ''}</small>
-                  </span>
-                  <time className="pt-0.5 font-mono text-[0.62rem] text-muted-foreground">{ago(row.lastActivity, now)}</time>
-                </button>
+                <div key={group.name}>
+                  <button type="button" aria-expanded={expanded} onClick={() => toggle(group.name)} className="sticky top-0 z-[1] flex w-full items-center justify-between border-0 border-b border-border bg-surface-0 px-4 py-1.5 text-left font-mono text-[0.64rem] font-bold tracking-wide uppercase max-[760px]:min-h-11">
+                    <span className={group.active ? 'text-accent' : 'text-secondary-foreground'}>{group.name}{group.active ? ' · active' : ''}</span>
+                    <span className="font-normal text-muted-foreground tabular-nums">{group.threads.length}</span>
+                  </button>
+                  {expanded && group.threads.map((row) => <ThreadRow key={row.id} row={row} now={now} selected={selected?.id === row.id} onOpen={() => open(row.id)} />)}
+                </div>
               );
             })}
-          </div>
-          <div className="flex items-center justify-between gap-2 border-t border-border px-4 py-2 text-xs text-muted-foreground">
-            <span className="tabular-nums">{listed.from === 0 ? '0 threads' : `${listed.from}–${listed.to} of ${shown.length}`}</span>
-            <div className="flex items-center gap-1">
-              <Button size="sm" variant="ghost" disabled={listed.page <= 1} onClick={() => setPage(listed.page - 1)} aria-label="Previous page"><ChevronLeft size={14} aria-hidden="true" />Prev</Button>
-              <span className="font-mono tabular-nums">{listed.page} / {listed.pages}</span>
-              <Button size="sm" variant="ghost" disabled={listed.page >= listed.pages} onClick={() => setPage(listed.page + 1)} aria-label="Next page">Next<ChevronRight size={14} aria-hidden="true" /></Button>
-            </div>
           </div>
         </section>
 
@@ -129,6 +134,53 @@ const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) 
       </div>
     </Page>
   );
+};
+
+/** One thread in the list: who wrote last, the title, one chip with why, and when. */
+const ThreadRow: React.FC<{ row: DiscordThread; now: Date; selected: boolean; onOpen: () => void }> = ({ row, now, selected, onOpen }) => {
+  const fresh = needsYou(row) && !row.older;
+  const last = row.messages[row.messages.length - 1];
+  return (
+    <button type="button" onClick={onOpen} aria-current={selected ? 'true' : undefined}
+      className={cn('grid w-full grid-cols-[28px_minmax(0,1fr)_auto] gap-2.5 border-0 border-b border-l-2 border-border border-l-transparent bg-transparent py-2.5 pr-4 pl-3.5 text-left text-foreground hover:bg-surface-0', selected && 'border-l-accent bg-surface-1')}>
+      <span className="relative mt-0.5 size-7">
+        {last ? <img src={last.avatar} alt="" loading="lazy" className="size-7 rounded-full bg-surface-2" /> : <span className="block size-7 rounded-full bg-surface-2" />}
+        {needsYou(row) && <span className={cn('absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full border-2 border-background', fresh ? 'bg-status-warn' : 'bg-surface-2 ring-1 ring-status-warn')} aria-label="Needs you" />}
+      </span>
+      <span className="min-w-0">
+        <strong className={cn('block truncate text-[0.8rem]', fresh ? 'font-semibold' : 'font-medium')}><Title text={row.title} /></strong>
+        <small className="mt-1 flex min-w-0 items-center gap-1.5 text-[0.68rem] text-muted-foreground"><ProgressChip progress={progressOf(row)} /><span className="truncate">{row.why}</span></small>
+      </span>
+      <span className="text-right">
+        <time className="block font-mono text-[0.62rem] text-secondary-foreground">{ago(row.lastActivity, now)}</time>
+        <time className="mt-0.5 block font-mono text-[0.58rem] whitespace-nowrap text-muted-foreground">{wib(row.lastActivity)}</time>
+      </span>
+    </button>
+  );
+};
+
+/** A picture or a video as a thumbnail; anything else, or a link that stopped working, as its name and size. */
+const Attachment: React.FC<{ file: DiscordMessage['attachments'][number] }> = ({ file }) => {
+  const [broken, setBroken] = useState(false);
+  const kind = file.type?.split('/')[0];
+  const caption = <span className="flex justify-between gap-2 px-2 py-1 text-[0.64rem] text-muted-foreground"><b className="truncate font-medium text-secondary-foreground">{file.name}</b><span className="whitespace-nowrap">{file.width && file.height ? `${file.width}×${file.height} · ` : ''}{fileSize(file.size)}</span></span>;
+  if (!broken && kind === 'image') {
+    return (
+      <a href={file.url} target="_blank" rel="noreferrer" className="block w-[220px] overflow-hidden rounded-sm border border-border bg-surface-0 hover:border-border-glow" aria-label={`Open ${file.name}`}>
+        <img src={file.url} alt={file.name} loading="lazy" onError={() => setBroken(true)} className="h-[124px] w-full bg-surface-1 object-cover" />
+        {caption}
+      </a>
+    );
+  }
+  if (!broken && kind === 'video') {
+    return (
+      <span className="block w-[260px] overflow-hidden rounded-sm border border-border bg-surface-0">
+        <video src={file.url} controls preload="metadata" onError={() => setBroken(true)} className="h-[146px] w-full bg-black" />
+        {caption}
+      </span>
+    );
+  }
+  return <p className="inline-flex gap-2.5 self-start rounded-sm border border-border bg-surface-0 px-2.5 py-1.5 text-[0.7rem] text-secondary-foreground"><b className="font-medium text-foreground">{file.name}</b>{fileSize(file.size)}{file.type ? ` · ${file.type.split('/')[0]}` : ''}</p>;
 };
 
 const ChannelManager: React.FC<{ channels: DiscordChannel[]; configured: boolean }> = ({ channels, configured }) => {
@@ -182,40 +234,41 @@ const ThreadPane: React.FC<{ thread: DiscordThread; channel: string; picked: boo
   const pr = thread.prs[0];
   const facts: Array<[string, React.ReactNode]> = [
     ['Ticket', thread.tickets.length ? thread.tickets.map((item) => <span key={item.key} className="mr-2"><span className="font-mono text-accent">{item.key}</span>{item.status ? ` · ${item.status}` : ''}{item.assignee ? ` · ${item.assignee}` : ''}</span>) : 'None in the title or tags'],
+    ['Sprint', thread.tickets.find((item) => item.sprint)?.sprint ?? 'None'],
     ['Pull request', pr ? <a href={pr} target="_blank" rel="noreferrer" className="text-foreground hover:underline">{pr.replace('https://github.com/', '')}</a> : '—'],
-    ['On it', thread.claim ? `${thread.claim.mine ? 'You' : thread.claim.author} · ${stamp(thread.claim.at)}${thread.claimerRepliedAt ? '' : ' · no update since'}` : 'Nobody yet'],
-    ['Your last reply', thread.repliedAt ? stamp(thread.repliedAt) : 'None'],
+    ['On it', thread.claim ? `${thread.claim.mine ? 'You' : thread.claim.author} · ${wib(thread.claim.at)}${thread.claimerRepliedAt ? '' : ' · no update since'}` : 'Nobody yet'],
+    ['Your last reply', thread.repliedAt ? wib(thread.repliedAt) : 'None'],
   ];
 
   return (
     <section className={cn('flex min-w-0 flex-col', !picked && 'max-[960px]:hidden')} aria-label="Thread">
       <div className="border-b border-border px-5 py-4">
         {picked && <button type="button" onClick={onBack} className="mb-2 hidden min-h-11 border-0 bg-transparent p-0 text-xs text-secondary-foreground max-[960px]:block">‹ Discord</button>}
-        <p className="text-[0.7rem] text-muted-foreground">{channel}{thread.createdBy ? ` · opened by ${thread.createdBy}` : ''} · {day(thread.createdAt)} · {thread.messageCount} messages{thread.tags.length ? ` · tags: ${thread.tags.join(', ')}` : ''}</p>
-        <h2 className="mt-1.5 mb-3 font-display text-lg leading-snug font-bold">{thread.title}</h2>
-        <dl className="grid grid-cols-4 gap-x-7 gap-y-1 text-[0.72rem] max-[1100px]:grid-cols-2 max-[600px]:grid-cols-1">
+        <p className="text-[0.7rem] text-muted-foreground">{channel}{thread.createdBy ? ` · opened by ${thread.createdBy}` : ''} · {wib(thread.createdAt)} · {thread.messageCount} messages{thread.tags.length ? ` · tags: ${thread.tags.join(', ')}` : ''}</p>
+        <h2 className="mt-1.5 mb-3 font-display text-lg leading-snug font-bold"><Title text={thread.title} /></h2>
+        <dl className="grid grid-cols-5 gap-x-7 gap-y-1 text-[0.72rem] max-[1100px]:grid-cols-2 max-[600px]:grid-cols-1">
           {facts.map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-muted-foreground">{label}</dt><dd className="m-0 truncate text-foreground">{value}</dd></div>)}
         </dl>
       </div>
       <div className="flex-1 py-1.5">
         {earlier > 0 && <p className="mx-5 my-1.5 pl-11 text-[0.68rem] text-muted-foreground">{earlier} earlier {earlier === 1 ? 'message' : 'messages'} · Open in Discord to read them</p>}
         {thread.messages.map((message, index) => {
-          const label = day(message.at);
-          const divider = index === 0 || label !== day(thread.messages[index - 1].at);
+          const label = wibDay(message.at);
+          const divider = index === 0 || label !== wibDay(thread.messages[index - 1].at);
           const hit = message.mentions.some((mention) => mention.me) && !message.mine;
           return (
             <React.Fragment key={message.id}>
               {divider && <p className="mx-5 my-2.5 flex items-center gap-2.5 font-mono text-[0.62rem] text-muted-foreground before:h-px before:flex-1 before:bg-border after:h-px after:flex-1 after:bg-border">{label.toUpperCase()}</p>}
               <div className={cn('grid grid-cols-[32px_minmax(0,1fr)] gap-3 border-l-2 border-transparent px-5 py-1.5', hit && 'border-status-warn bg-status-warn/[0.08]')}>
-                <span className={cn('grid size-8 place-items-center rounded-full text-[0.62rem] font-bold', message.mine ? 'bg-accent text-black' : 'bg-surface-2 text-secondary-foreground')} aria-hidden="true">{initials(message.mine ? 'You' : message.author)}</span>
+                <img src={message.avatar} alt="" loading="lazy" className="size-8 rounded-full bg-surface-2" />
                 <div className="min-w-0">
-                  <p className="text-[0.76rem] font-semibold">{message.mine ? 'You' : message.author}<time className="ml-2 font-mono text-[0.6rem] font-normal text-muted-foreground">{time(message.at)}</time></p>
+                  <p className="text-[0.76rem] font-semibold">{message.mine ? 'You' : message.author}<time className="ml-2 font-mono text-[0.6rem] font-normal text-muted-foreground">{wibTime(message.at)}</time></p>
                   <p className="mt-0.5 whitespace-pre-wrap break-words text-[0.8rem] leading-relaxed text-secondary-foreground">
                     {mentionParts(message).map((part, index) => part.mention
-                      ? <span key={index} className={cn('rounded-[3px] px-0.5', part.mention === 'me' ? 'bg-status-warn/15 text-status-warn' : 'bg-status-discord-bg text-status-discord')}>{part.text}</span>
+                      ? <span key={index} className={cn('rounded-[3px] px-0.5', part.mention === 'me' ? 'bg-status-warn/15 text-status-warn' : part.mention === 'role' ? 'bg-[oklch(0.70_0.14_305/0.14)] text-[oklch(0.78_0.12_305)]' : 'bg-status-discord-bg text-status-discord')}>{part.text}</span>
                       : <React.Fragment key={index}>{part.text}</React.Fragment>)}
                   </p>
-                  {message.attachments.map((file) => <p key={file.name} className="mt-1.5 inline-flex gap-2.5 rounded-sm border border-border bg-surface-0 px-2.5 py-1.5 text-[0.7rem] text-secondary-foreground"><b className="font-medium text-foreground">{file.name}</b>{fileSize(file.size)}{file.type ? ` · ${file.type.split('/')[0]}` : ''}</p>)}
+                  {message.attachments.length > 0 && <div className="mt-2 flex flex-wrap gap-2">{message.attachments.map((file) => <Attachment key={file.url} file={file} />)}</div>}
                 </div>
               </div>
             </React.Fragment>

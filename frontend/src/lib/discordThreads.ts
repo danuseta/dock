@@ -10,11 +10,12 @@ export interface DiscordChannel { id: string; name: string | null; kind: Channel
 export interface DiscordMessage {
   id: string;
   author: string;
+  avatar: string;
   mine: boolean;
   at: string;
   text: string;
-  mentions: Array<{ id: string; name: string; me: boolean }>;
-  attachments: Array<{ name: string; size: number; type: string | null }>;
+  mentions: Array<{ id: string; name: string; me: boolean; role: boolean }>;
+  attachments: Array<{ name: string; size: number; type: string | null; url: string; width: number | null; height: number | null }>;
 }
 
 export interface DiscordThread {
@@ -34,7 +35,7 @@ export interface DiscordThread {
   lastActivity: string;
   messageCount: number;
   tags: string[];
-  tickets: Array<{ key: string; status: string | null; assignee: string | null }>;
+  tickets: Array<{ key: string; status: string | null; assignee: string | null; sprint: string | null; sprintActive: boolean }>;
   prs: string[];
   claim: { author: string; mine: boolean; at: string } | null;
   claimerRepliedAt: string | null;
@@ -117,16 +118,64 @@ export function ago(iso: string, now: Date): string {
   return `${Math.round(minutes / 1440)}d`;
 }
 
+const WIB: Intl.DateTimeFormatOptions = { timeZone: 'Asia/Jakarta' };
+
+/** "22 Oct 18:58 WIB": when it was posted, in Jakarta time whatever the browser's zone. */
+export const wib = (iso: string) => `${new Date(iso).toLocaleString('en-GB', { ...WIB, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).replace(',', '')} WIB`;
+/** "18:58 WIB". */
+export const wibTime = (iso: string) => `${new Date(iso).toLocaleTimeString('en-GB', { ...WIB, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })} WIB`;
+/** "Thu 23 Oct", the day in Jakarta, for the dividers between messages. */
+export const wibDay = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { ...WIB, weekday: 'short', day: 'numeric', month: 'short' }).replace(',', '');
+
+/** True when the title, a ticket key, a person or a message has the text, in any case. */
+export function matchesSearch(thread: DiscordThread, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return [thread.title, thread.createdBy ?? '', ...thread.tickets.map((ticket) => ticket.key), ...thread.messages.flatMap((message) => [message.author, message.text])]
+    .some((value) => value.toLowerCase().includes(needle));
+}
+
+export const NO_SPRINT = 'No sprint';
+export interface SprintGroup { name: string; active: boolean; threads: DiscordThread[] }
+
+const sprintNumber = (name: string) => Number(/(\d+)\s*$/.exec(name)?.[1] ?? -1);
+
+/**
+ * The threads by the Jira sprint of their first ticket that has one: the active sprint first, then the newest sprint
+ * number first, and threads without a sprint last. Each group keeps the order it was given.
+ */
+export function sprintGroups(threads: DiscordThread[]): SprintGroup[] {
+  const groups = new Map<string, SprintGroup>();
+  for (const thread of threads) {
+    const ticket = thread.tickets.find((item) => item.sprint);
+    const name = ticket?.sprint ?? NO_SPRINT;
+    const group = groups.get(name) ?? { name, active: Boolean(ticket?.sprintActive), threads: [] };
+    group.threads.push(thread);
+    groups.set(name, group);
+  }
+  return [...groups.values()].sort((a, b) => Number(a.name === NO_SPRINT) - Number(b.name === NO_SPRINT) || Number(b.active) - Number(a.active) || sprintNumber(b.name) - sprintNumber(a.name) || a.name.localeCompare(b.name));
+}
+
+const TICKET_IN_TITLE = /(\b[A-Z][A-Z0-9_]{1,31}-[1-9]\d{0,9}\b)/i;
+
+/** The title with its ticket keys marked, so the list colours them instead of repeating them as a chip. */
+export const titleParts = (title: string) => title.split(TICKET_IN_TITLE).filter(Boolean).map((text) => ({ text, ticket: TICKET_IN_TITLE.test(text) }));
+
+export type Progress = 'open' | 'progress' | 'done';
+
+/** The one chip a row shows: done when settled or marked done, in progress once somebody said on it. */
+export const progressOf = (thread: DiscordThread): Progress => (isDone(thread) ? 'done' : thread.claim ? 'progress' : 'open');
+
 export const fileSize = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 
 /** Splits a message into plain text and the @names it mentions, so the page can mark them. */
-export function mentionParts(message: DiscordMessage): Array<{ text: string; mention?: 'me' | 'other' }> {
-  const names = message.mentions.map((mention) => ({ token: `@${mention.name}`, me: mention.me })).sort((a, b) => b.token.length - a.token.length);
+export function mentionParts(message: DiscordMessage): Array<{ text: string; mention?: 'me' | 'other' | 'role' }> {
+  const names = message.mentions.map((mention) => ({ token: `@${mention.name}`, me: mention.me, role: mention.role })).sort((a, b) => b.token.length - a.token.length);
   if (!names.length) return [{ text: message.text }];
   const escaped = names.map((name) => name.token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   return message.text.split(new RegExp(`(${escaped.join('|')})`)).filter(Boolean).map((part) => {
     const name = names.find((entry) => entry.token === part);
-    return name ? { text: part, mention: name.me ? 'me' : 'other' } : { text: part };
+    return name ? { text: part, mention: name.me ? 'me' : name.role ? 'role' : 'other' } : { text: part };
   });
 }
 

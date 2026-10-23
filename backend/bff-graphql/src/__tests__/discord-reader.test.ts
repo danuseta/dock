@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { DiscordReader, ON_IT, buildRow, sortThread, toMessage, type DiscordResponse, type RawMessage, type RawThread } from '../integrations/discord-reader';
+import { DiscordReader, ON_IT, ROW_VERSION, buildRow, sortThread, toMessage, type DiscordResponse, type RawMessage, type RawThread, type RawUser } from '../integrations/discord-reader';
 import { ThreadService, channelIdOf, withJira, type Channel, type ChannelKind, type SyncStatus, type ThreadRecord, type ThreadRow, type ThreadStore, type ThreadView } from '../integrations/discord-threads';
 
 const ME = '900';
@@ -10,7 +10,7 @@ const HAMZAH = user('102', 'Hamzah');
 const DANU = user(ME, 'Danu');
 
 let clock = 0;
-const msg = (author: ReturnType<typeof user>, content: string, mentions: Array<ReturnType<typeof user>> = []): RawMessage => {
+const msg = (author: RawUser, content: string, mentions: RawUser[] = []): RawMessage => {
   clock += 1;
   return { id: String(1000 + clock), content, timestamp: new Date(Date.UTC(2026, 9, 20, 9, clock)).toISOString(), author, mentions, attachments: [] };
 };
@@ -73,6 +73,21 @@ test('a channel is followed from its id or any discord.com/channels link', () =>
   assert.throws(() => channelIdOf('#bug-report'), /Paste a Discord channel id/);
 });
 
+test('a message names its roles and channels, and every author has an avatar', () => {
+  const server = { roles: new Map([['1444724098537357434', 'QA Team']]), channels: new Map([['555', 'bug-report']]) };
+  const raw: RawMessage = {
+    ...msg({ ...RINA, avatar: 'a1b2' }, '<@&1444724098537357434> -2 retest, see <#555>, not <@&999> or <#777>'),
+    mention_roles: ['1444724098537357434', '999'],
+    attachments: [{ filename: 'shot.png', size: 2048, content_type: 'image/png', url: 'https://cdn.discordapp.com/attachments/1/2/shot.png?ex=6a&is=69&hm=x', width: 1280, height: 720 }],
+  };
+  const message = toMessage(raw, ME, server);
+  assert.strictEqual(message.text, '@QA Team -2 retest, see #bug-report, not <@&999> or <#777>', 'a role or channel the server does not list keeps its token');
+  assert.deepStrictEqual(message.mentions, [{ id: '1444724098537357434', name: 'QA Team', me: false, role: true }]);
+  assert.strictEqual(message.avatar, `https://cdn.discordapp.com/avatars/${RINA.id}/a1b2.png?size=64`);
+  assert.deepStrictEqual(message.attachments, [{ name: 'shot.png', size: 2048, type: 'image/png', url: 'https://cdn.discordapp.com/attachments/1/2/shot.png?ex=6a&is=69&hm=x', width: 1280, height: 720 }]);
+  assert.strictEqual(toMessage(msg({ id: '1389235158414000200', username: 'new' }, 'hi'), ME).avatar, 'https://cdn.discordapp.com/embed/avatars/5.png', 'no avatar: the default Discord picks from the id');
+});
+
 test('a row names its tickets, pull requests and mentions', () => {
   const thread: RawThread = { id: '1298000000000000000', parent_id: 'f1', name: '[Inbox] qrd-1384 contact name wrong', owner_id: RINA.id, last_message_id: '1003', message_count: 3, applied_tags: ['t1', 't9'] };
   const raw = [msg(RINA, 'Repro <@900>', [DANU]), msg(DANU, 'fix in https://github.com/acme/api/pull/912 and https://github.com/acme/api/pull/912')];
@@ -82,7 +97,7 @@ test('a row names its tickets, pull requests and mentions', () => {
   assert.deepStrictEqual(row.tags, ['QRD-1391']);
   assert.strictEqual(row.url, 'https://discord.com/channels/g1/1298000000000000000');
   assert.strictEqual(row.messages[0].text, 'Repro @Danu');
-  assert.deepStrictEqual(row.messages[0].mentions, [{ id: ME, name: 'Danu', me: true }]);
+  assert.deepStrictEqual(row.messages[0].mentions, [{ id: ME, name: 'Danu', me: true, role: false }]);
   assert.strictEqual(row.createdBy, 'Rina');
   assert.deepStrictEqual([row.channelId, row.channel, row.kind], ['f1', 'bug-report', 'bug']);
   assert.strictEqual(row.needsYou, false, 'the owner replied last');
@@ -114,14 +129,16 @@ function reader(routes: Record<string, DiscordResponse | DiscordResponse[]>, set
   const service = new ThreadService(memoryStore());
   let status: SyncStatus = { syncedAt: '2026-10-22T11:00:00.000Z', error: null, requests: 0 };
   const calls: string[] = [];
+  const bodies: unknown[] = [];
   const waits: number[] = [];
   const saved = new Map<string, Channel>(channels.map((channel) => [channel.id, { ...channel }]));
   const instance = new DiscordReader({
     now: () => NOW,
     setting: async (key) => settings[key] ?? null,
     ownerId: async () => ME,
-    request: async (path) => {
+    request: async (path, _token, body) => {
       calls.push(path);
+      if (body !== undefined) bodies.push(body);
       const route = routes[path];
       if (!route) return { status: 404, body: null };
       return Array.isArray(route) ? (route.shift() as DiscordResponse) : route;
@@ -134,7 +151,7 @@ function reader(routes: Record<string, DiscordResponse | DiscordResponse[]>, set
     status: async () => status,
     saveStatus: async (next) => { status = next; },
   });
-  return { instance, service, calls, waits, saved };
+  return { instance, service, calls, bodies, waits, saved };
 }
 
 const ok = (body: unknown): DiscordResponse => ({ status: 200, body });
@@ -152,6 +169,8 @@ const routesFor = () => ({
   '/channels/fp/threads/archived/public?limit=50': ok({ threads: [] }),
   '/channels/2001/messages?limit=50': ok([msg(RINA, 'Login loop on Safari')]),
   '/channels/2002/messages?limit=50': ok([msg(RINA, 'Review #930 please')]),
+  '/guilds/g1/roles': ok([{ id: 'r1', name: 'QA Team' }]),
+  '/guilds/g1/channels': ok([{ id: 'fb', name: 'bug-report' }]),
 });
 
 test('a sync keeps the forum threads that matter and skips messages that did not change', async () => {
@@ -166,6 +185,39 @@ test('a sync keeps the forum threads that matter and skips messages that did not
   calls.length = 0;
   await instance.sync();
   assert.deepStrictEqual(calls.filter((path) => path.includes('/messages')), ['/channels/2002/messages?limit=50'], 'the kept thread is not read again while its last message is the same');
+});
+
+test('a stored row of an older shape is built again; role and channel names are read only when a row is built', async () => {
+  const { instance, service, calls } = reader(routesFor());
+  await instance.sync();
+  assert.strictEqual(calls.filter((path) => path === '/guilds/g1/roles').length, 1);
+  const [row] = await service.list();
+  assert.strictEqual(row.version, ROW_VERSION);
+  await service.save([{ ...(row as ThreadRow), version: ROW_VERSION - 1 }]);
+
+  calls.length = 0;
+  await instance.sync();
+  assert.ok(calls.includes('/channels/2001/messages?limit=50'), 'the old row is read again');
+  assert.strictEqual(calls.filter((path) => path === '/guilds/g1/roles').length, 1, 'once per sync, not once per thread');
+  assert.strictEqual((await service.list())[0].version, ROW_VERSION);
+});
+
+test('attachment links about to expire are refreshed once and remembered; a refusal keeps the old links', async () => {
+  const expired = `https://cdn.discordapp.com/attachments/1/2/a.png?ex=${Math.floor(NOW.getTime() / 1000 - 60).toString(16)}&is=0&hm=old`;
+  const lasting = `https://cdn.discordapp.com/attachments/1/2/b.png?ex=${Math.floor(NOW.getTime() / 1000 + 86400).toString(16)}&is=0&hm=ok`;
+  const renewed = `https://cdn.discordapp.com/attachments/1/2/a.png?ex=${Math.floor(NOW.getTime() / 1000 + 86400).toString(16)}&is=0&hm=new`;
+  const file = (url: string) => ({ name: 'a.png', size: 1, type: 'image/png', url, width: 1, height: 1 });
+  const row = { id: 'r', messages: [{ attachments: [file(expired), file(lasting)] }] } as unknown as ThreadRow;
+  const { instance, calls, bodies } = reader({ '/attachments/refresh-urls': ok({ refreshed_urls: [{ original: expired, refreshed: renewed }] }) });
+
+  const [fresh] = await instance.freshen([row]);
+  assert.deepStrictEqual(fresh.messages[0].attachments.map((item) => item.url), [renewed, lasting]);
+  assert.deepStrictEqual(bodies, [{ attachment_urls: [expired] }], 'only the expiring link is sent');
+  await instance.freshen([row]);
+  assert.strictEqual(calls.length, 1, 'the refreshed link is remembered');
+
+  const refused = reader({ '/attachments/refresh-urls': { status: 403, body: null } });
+  assert.deepStrictEqual((await refused.instance.freshen([row]))[0].messages[0].attachments.map((item) => item.url), [expired, lasting]);
 });
 
 test('the reader learns channel names and follows a thread outside the channels', async () => {
@@ -228,7 +280,7 @@ test('Jira settles a thread, and a quiet thread that needs the owner is older', 
     { ...base, id: 'a', tickets: ['QRD-1'] },
     { ...base, id: 'b', tickets: ['QRD-2'] },
     { ...base, id: 'c', tickets: [], lastActivity: '2026-10-18T10:00:00.000Z' },
-  ], new Map([['QRD-1', { status: 'Done / MERGED', assignee: 'Danu' }], ['QRD-2', { status: 'In Progress', assignee: null }]]), (status) => status === 'Done / MERGED', NOW);
+  ], new Map([['QRD-1', { status: 'Done / MERGED', assignee: 'Danu', sprint: 'Sprint 25', sprintActive: true }], ['QRD-2', { status: 'In Progress', assignee: null, sprint: null, sprintActive: false }]]), (status) => status === 'Done / MERGED', NOW);
   assert.deepStrictEqual(rows.map((row) => [row.id, row.state, row.needsYou, row.older]), [['a', 'HANDLED', false, false], ['b', 'FLOW_1', true, false], ['c', 'FLOW_1', true, true]]);
-  assert.deepStrictEqual(rows[0].tickets, [{ key: 'QRD-1', status: 'Done / MERGED', assignee: 'Danu' }]);
+  assert.deepStrictEqual(rows[0].tickets, [{ key: 'QRD-1', status: 'Done / MERGED', assignee: 'Danu', sprint: 'Sprint 25', sprintActive: true }]);
 });

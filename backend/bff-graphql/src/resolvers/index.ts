@@ -12,7 +12,7 @@ import { CHAT_MACHINE, chatService } from '../integrations/chat';
 import { isSettledStatus, mergeAttention, withoutSettledTickets } from '../integrations/attention';
 import { discordReader } from '../integrations/discord-reader-live';
 import { ChannelInputError, channelStore, isChannelKind, threadService, withJira } from '../integrations/discord-threads';
-import { DiscordReaderError } from '../integrations/discord-reader';
+import { DiscordReaderError, ROW_VERSION } from '../integrations/discord-reader';
 import { CronInputError, type OwnerAnswer, type OwnerChange } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
 import { labelOrder } from '../integrations/orchestrator-cron';
@@ -39,13 +39,19 @@ const isPresent = <T>(value: T | null | undefined): value is T => value != null;
 
 async function discordThreadsView() {
   const [config, status, channels, stored] = await Promise.all([discordReader.config(), discordReader.status(), channelStore.list(), threadService.list()]);
-  // A channel turned off or removed hides its threads now; the next sync drops them.
+  // A channel turned off or removed hides its threads now; the next sync drops them. A row of an older shape waits for
+  // the sync that builds it again.
   const on = new Set(channels.filter((channel) => channel.enabled).map((channel) => channel.id));
-  const rows = stored.filter((row) => on.has(row.channelId));
+  const rows = stored.filter((row) => on.has(row.channelId) && row.version === ROW_VERSION);
   const keys = [...new Set(rows.flatMap((row) => row.tickets))];
   const tickets = await Promise.all(keys.map((key) => jiraAPI.getTicket(key).catch(() => null)));
-  const jira = new Map(tickets.filter(isPresent).map((ticket: any) => [String(ticket.key), { status: ticket.status ? String(ticket.status) : null, assignee: ticket.assignee ? String(ticket.assignee) : null }]));
-  return { configured: Boolean(config), syncedAt: status.syncedAt, error: status.error, channels, rows: withJira(rows, jira, isSettledStatus, new Date()) };
+  const jira = new Map(tickets.filter(isPresent).map((ticket: any) => [String(ticket.key), {
+    status: ticket.status ? String(ticket.status) : null,
+    assignee: ticket.assignee ? String(ticket.assignee) : null,
+    sprint: ticket.sprintState && ticket.sprintState !== 'NONE' ? String(ticket.sprintName) : null,
+    sprintActive: ticket.sprintState === 'ACTIVE',
+  }]));
+  return { configured: Boolean(config), syncedAt: status.syncedAt, error: status.error, channels, rows: withJira(await discordReader.freshen(rows), jira, isSettledStatus, new Date()) };
 }
 
 function channelKind(kind: string) {

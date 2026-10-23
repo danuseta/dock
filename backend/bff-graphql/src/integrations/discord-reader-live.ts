@@ -13,8 +13,13 @@ export const discordReader = new DiscordReader({
   now: () => new Date(),
   setting: async (key) => (await storage.getSettings()).find((setting) => setting.key === key)?.value || null,
   ownerId: async () => (await storage.getSettings()).find((setting) => setting.key === 'discordUserId')?.value || '',
-  request: async (path, token) => {
-    const response = await fetch(`${API}${path}`, { headers: { Authorization: `Bot ${token}` }, signal: AbortSignal.timeout(15000) });
+  request: async (path, token, body) => {
+    const response = await fetch(`${API}${path}`, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { Authorization: `Bot ${token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(15000),
+    });
     return { status: response.status, body: await response.json().catch(() => null) };
   },
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
