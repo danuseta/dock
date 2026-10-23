@@ -189,6 +189,8 @@ export interface ReaderDeps {
   saveChannel(channel: Channel): Promise<void>;
   stored(): Promise<Map<string, ThreadRow>>;
   save(rows: ThreadRow[]): Promise<unknown>;
+  saveOne(row: ThreadRow): Promise<void>;
+  removeOne(id: string): Promise<void>;
   status(): Promise<SyncStatus>;
   saveStatus(status: SyncStatus): Promise<void>;
 }
@@ -201,6 +203,15 @@ export class DiscordReader {
   private requests = 0;
   /** Refreshed attachment links by the link stored in the row. */
   private readonly fresh = new Map<string, string>();
+  /** What the last sync followed, so an event can tell whether its thread matters: thread id -> channel, and the channels by id. */
+  private readonly threadChannels = new Map<string, Channel>();
+  private readonly containers = new Map<string, Channel>();
+  private readonly tagNames = new Map<string, string>();
+  private server: ServerNames | null = null;
+  private guild: string | null = null;
+  /** Threads being read again after an event, and the ones that had another event meanwhile. */
+  private readonly reading = new Set<string>();
+  private readonly again = new Set<string>();
 
   constructor(private readonly deps: ReaderDeps) {}
 
@@ -295,6 +306,13 @@ export class DiscordReader {
           if (!threads.has(thread.id) && Date.parse(thread.thread_metadata?.archive_timestamp ?? '') >= since) threads.set(thread.id, { thread, channel });
         }
       }
+      this.guild = config.guild;
+      this.containers.clear();
+      for (const channel of containers.values()) this.containers.set(channel.id, channel);
+      this.threadChannels.clear();
+      for (const [id, entry] of threads) this.threadChannels.set(id, entry.channel);
+      this.tagNames.clear();
+      for (const [id, name] of tagNames) this.tagNames.set(id, name);
       const stored = await this.deps.stored();
       const rows: ThreadRow[] = [];
       let server: ServerNames | null = null;
@@ -307,6 +325,7 @@ export class DiscordReader {
         if (row.state !== 'NOT_YOURS' || row.kind === 'pr') rows.push(row);
       }
       await this.deps.save(rows);
+      if (server) this.server = server;
       const status = { syncedAt: now.toISOString(), error: null, requests: this.requests };
       await this.deps.saveStatus(status);
       return status;
@@ -314,6 +333,60 @@ export class DiscordReader {
       const status = { syncedAt: previous.syncedAt, error: error instanceof Error ? error.message : 'Discord sync failed', requests: this.requests };
       await this.deps.saveStatus(status);
       return status;
+    }
+  }
+
+  /**
+   * A Gateway event. A new or changed thread of a followed channel, or a message in one, is read again on its own
+   * (two requests); a deleted thread leaves the page; a role change makes the next read learn the names again.
+   * Events of other servers and channels are dropped.
+   */
+  async onEvent(type: string, data: unknown): Promise<void> {
+    const event = (data ?? {}) as { id?: string; channel_id?: string; parent_id?: string; guild_id?: string };
+    if (!this.guild || event.guild_id !== this.guild) return;
+    if (type.startsWith('GUILD_ROLE_') || type.startsWith('CHANNEL_')) {
+      this.server = null;
+      return;
+    }
+    if (type === 'THREAD_DELETE' && event.id && this.threadChannels.has(event.id)) {
+      this.threadChannels.delete(event.id);
+      await this.deps.removeOne(event.id);
+      return;
+    }
+    const id = type.startsWith('THREAD_') ? event.id : type.startsWith('MESSAGE_') ? event.channel_id : undefined;
+    if (!id) return;
+    const channel = this.threadChannels.get(id) ?? (type.startsWith('THREAD_') && event.parent_id ? this.containers.get(event.parent_id) : undefined);
+    if (!channel) return;
+    this.threadChannels.set(id, channel);
+    await this.readThread(id, channel);
+  }
+
+  /** Reads one thread again; an event that lands while it is read makes it read once more afterwards. */
+  private async readThread(id: string, channel: Channel): Promise<void> {
+    if (this.reading.has(id)) {
+      this.again.add(id);
+      return;
+    }
+    this.reading.add(id);
+    try {
+      do {
+        this.again.delete(id);
+        const config = await this.config();
+        const me = await this.deps.ownerId();
+        if (!config || !me) return;
+        this.server ??= await this.serverNames(config);
+        const thread = await this.get<RawThread>(`/channels/${id}`, config.token);
+        const raw = await this.get<RawMessage[]>(`/channels/${id}/messages?limit=50`, config.token);
+        const row = buildRow(channel, config.guild, thread, this.tagNames, raw, me, this.server);
+        if (row.state === 'NOT_YOURS' && row.kind !== 'pr') await this.deps.removeOne(id);
+        else await this.deps.saveOne(row);
+        await this.deps.saveStatus({ ...(await this.deps.status()), syncedAt: this.deps.now().toISOString(), error: null });
+      } while (this.again.has(id));
+    } catch (error) {
+      await this.deps.saveStatus({ ...(await this.deps.status()), error: error instanceof Error ? error.message : 'Discord read failed' });
+    } finally {
+      this.reading.delete(id);
+      this.again.delete(id);
     }
   }
 

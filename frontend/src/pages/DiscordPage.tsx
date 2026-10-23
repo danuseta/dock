@@ -50,7 +50,8 @@ const writeFeed = (field: string) => (cache: any, result: any) => {
 
 /** Threads of the followed Discord channels: a list on the left, the open thread on the right. */
 const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) => {
-  const { data, loading, error } = useQuery(GET_DISCORD_THREADS, { ...CACHED_QUERY_OPTIONS, pollInterval: 60000 });
+  // Discord pushes changes to the server, so this only reads DOCK's own copy.
+  const { data, loading, error } = useQuery(GET_DISCORD_THREADS, { ...CACHED_QUERY_OPTIONS, pollInterval: 10000 });
   const [refresh, { loading: refreshing }] = useMutation(REFRESH_DISCORD, { update: writeFeed('refreshDiscord') });
   const [dismiss] = useMutation(DISMISS_DISCORD_THREAD, { refetchQueries: ['GetDiscordThreads'] });
   const [chosenTab, setTab] = useState<ChannelTab>(ALL);
@@ -101,7 +102,7 @@ const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) 
             ? <span className="text-status-warn">Bot not set up · <button type="button" className="border-0 bg-transparent p-0 text-status-warn underline" onClick={() => onNavigate('/settings')}>Settings</button></span>
             : feed.error
             ? <span className="text-status-conflict" role="alert">Last sync failed: {feed.error}{feed.syncedAt ? ` · showing ${wib(feed.syncedAt)}` : ''}</span>
-            : <span className="text-muted-foreground">{feed.syncedAt ? `Synced ${wibTime(feed.syncedAt)}` : 'Not synced yet'}</span>}
+            : <span className="flex items-center gap-1.5 text-muted-foreground"><span className={cn('size-1.5 rounded-full', feed.live ? 'bg-status-merged' : 'bg-status-warn')} aria-hidden="true" />{feed.live ? 'Live' : 'Reconnecting'}{feed.syncedAt ? ` · updated ${wibTime(feed.syncedAt)}` : ''}</span>}
           <Button size="sm" variant={managing ? 'primary' : 'default'} onClick={() => setManaging(!managing)} aria-expanded={managing}><Settings2 size={14} aria-hidden="true" />Channels</Button>
           <Button size="sm" onClick={() => void refresh()} disabled={refreshing || !feed?.configured}><RefreshCw size={14} className={cn(refreshing && 'animate-spin')} aria-hidden="true" />{refreshing ? 'Syncing' : 'Refresh'}</Button>
         </div>

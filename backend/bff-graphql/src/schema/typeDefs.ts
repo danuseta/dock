@@ -264,6 +264,8 @@ export const typeDefs = gql`
 
   type DiscordThreads {
     configured: Boolean!
+    """The Gateway is connected, so Discord pushes changes as they happen."""
+    live: Boolean!
     syncedAt: String
     error: String
     channels: [DiscordChannel!]!

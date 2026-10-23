@@ -148,6 +148,8 @@ function reader(routes: Record<string, DiscordResponse | DiscordResponse[]>, set
     saveChannel: async (channel) => { saved.set(channel.id, channel); },
     stored: () => service.stored(),
     save: (rows) => service.save(rows),
+    saveOne: (row) => service.saveOne(row),
+    removeOne: (id) => service.removeOne(id),
     status: async () => status,
     saveStatus: async (next) => { status = next; },
   });
@@ -319,4 +321,32 @@ test('on it counts each reviewer once and leaves out the author of the pull requ
   assert.deepStrictEqual(row.onIt, ['Hamzah', 'Rina']);
   const bug = buildRow({ id: 'f1', name: 'bug-report', kind: 'bug', thread: false, enabled: true }, 'g1', { ...thread, parent_id: 'f1', owner_id: RINA.id }, new Map(), [msg(RINA, 'on it myself')], ME);
   assert.deepStrictEqual(bug.onIt, ['Rina'], 'in a bug thread the reporter can take it');
+});
+
+test('a Gateway event reads its one thread again; other servers, unknown channels and deletes are handled', async () => {
+  const routes = routesFor() as Record<string, DiscordResponse | DiscordResponse[]>;
+  const { instance, service, calls } = reader(routes);
+  await instance.sync();
+  routes['/channels/2001'] = ok(bugThread);
+  routes['/channels/2001/messages?limit=50'] = ok([msg(RINA, 'Login loop on Safari'), msg(RINA, '<@900> any news?', [DANU])]);
+
+  calls.length = 0;
+  await instance.onEvent('MESSAGE_CREATE', { guild_id: 'g9', channel_id: '2001' });
+  await instance.onEvent('MESSAGE_CREATE', { guild_id: 'g1', channel_id: '999' });
+  assert.deepStrictEqual(calls, [], 'another server and an unfollowed channel are dropped');
+
+  await instance.onEvent('MESSAGE_CREATE', { guild_id: 'g1', channel_id: '2001' });
+  assert.deepStrictEqual(calls, ['/channels/2001', '/channels/2001/messages?limit=50'], 'one thread, two requests');
+  assert.deepStrictEqual((await service.list()).find((row) => row.id === '2001')?.state, 'FLOW_2');
+
+  const fresh: RawThread = { id: '2009', parent_id: 'fb', name: 'Logout loop', owner_id: RINA.id, last_message_id: 'n1' };
+  routes['/channels/2009'] = ok(fresh);
+  routes['/channels/2009/messages?limit=50'] = ok([msg(RINA, 'Logout loop')]);
+  await instance.onEvent('THREAD_CREATE', { guild_id: 'g1', id: '2009', parent_id: 'fb' });
+  assert.ok((await service.list()).some((row) => row.id === '2009'), 'a new thread of a followed channel appears');
+  await instance.onEvent('MESSAGE_CREATE', { guild_id: 'g1', channel_id: '2009' });
+  assert.strictEqual(calls.filter((path) => path === '/channels/2009/messages?limit=50').length, 2, 'and its messages are followed from then on');
+
+  await instance.onEvent('THREAD_DELETE', { guild_id: 'g1', id: '2009', parent_id: 'fb' });
+  assert.ok(!(await service.list()).some((row) => row.id === '2009'));
 });
