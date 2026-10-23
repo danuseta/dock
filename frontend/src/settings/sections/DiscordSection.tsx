@@ -74,7 +74,7 @@ export const DiscordSection = ({ values, set, settings, test, onTested }: {
         </div>
       </SettingsCard>
 
-      <SettingsCard title="Forum reader" caption="DOCK reads the channels you follow on the Discord page every 5 minutes. Add and remove channels there.">
+      <SettingsCard title="Forum reader" caption="Discord sends DOCK each change in the channels you follow on the Discord page as it happens. Add and remove channels there.">
         <div className="flex flex-col gap-3">
           <SecretInput label="Bot token" saved={Boolean(settings.hasDiscordBotToken)} value={values.discordBotToken} onChange={(value) => set('discordBotToken', value)} placeholder="Bot token" hint="The bot needs View Channel, Read Message History and the Message Content intent on the channels you follow." />
           <Field label="Server id" hint="Developer Mode on, right click the server name, Copy Server ID."><Input className="font-mono text-xs" inputMode="numeric" value={values.discordGuildId} onChange={(event) => set('discordGuildId', event.target.value.trim())} placeholder="1389235158414000200" /></Field>

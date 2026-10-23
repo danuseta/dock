@@ -8,14 +8,15 @@ import { startOrchestratorCron } from './integrations/orchestrator-cron';
 import { orchestratorCron } from './integrations/orchestrator-cron-live';
 import { orchestratorService } from './integrations/orchestrator';
 import { JiraAPI } from './datasources/JiraAPI';
-import { discordReader } from './integrations/discord-reader-live';
+import { discordGateway, discordReader } from './integrations/discord-reader-live';
 import { dockMode } from './mode';
 import { useWriteAheadLog } from './storage/client';
 import { StorageService } from './storage/service';
 
 const port = Number(process.env.PORT || 4000);
 const JIRA_SYNC_MS = 5 * 60 * 1000;
-const DISCORD_SYNC_MS = 5 * 60 * 1000;
+/** How often the saved bot token is checked, so the Gateway starts, stops or switches tokens after a Settings change. */
+const DISCORD_TOKEN_CHECK_MS = 60 * 1000;
 
 export async function startServer(): Promise<void> {
   const journal = await useWriteAheadLog().catch((error) => `unchanged (${error instanceof Error ? error.message : 'unknown error'})`);
@@ -37,13 +38,14 @@ export async function startServer(): Promise<void> {
       .then((tickets) => orchestratorService.syncJira(dockMode(), tickets))
       .catch((error) => console.warn('[Orchestrator] Jira sync failed:', error instanceof Error ? error.message : 'unknown error'));
     setInterval(syncJira, JIRA_SYNC_MS).unref();
-    // One DOCK reads Discord, so the bot does not read the forums twice.
+    // One DOCK reads Discord, so the bot does not read the forums twice. Discord pushes changes over the Gateway; each
+    // new session reads everything once.
     if (dockMode() === 'workspace') {
-      const syncDiscord = () => discordReader.config()
-        .then((config) => (config ? discordReader.sync() : null))
-        .catch((error) => console.warn('[Discord] Sync failed:', error instanceof Error ? error.message : 'unknown error'));
-      void syncDiscord();
-      setInterval(syncDiscord, DISCORD_SYNC_MS).unref();
+      const followToken = () => discordReader.config()
+        .then((config) => discordGateway.ensure(config?.token ?? null))
+        .catch((error) => console.warn('[Discord] Gateway check failed:', error instanceof Error ? error.message : 'unknown error'));
+      void followToken();
+      setInterval(followToken, DISCORD_TOKEN_CHECK_MS).unref();
     }
   });
 }

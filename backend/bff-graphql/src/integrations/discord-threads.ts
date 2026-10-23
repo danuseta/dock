@@ -105,6 +105,15 @@ export class ThreadService {
     return { rows: rows.length, removed: gone.length };
   }
 
+  /** One thread an event changed; the others stay as they are. */
+  async saveOne(row: ThreadRow, now = new Date()) {
+    await this.store.upsertRow(row, now);
+  }
+
+  async removeOne(id: string, now = new Date()) {
+    await this.store.removeRows([id], now);
+  }
+
   async list(): Promise<ThreadView[]> {
     const [records, dismissed] = await Promise.all([this.store.rows(), this.store.dismissed()]);
     return records.map((record): ThreadView => {
