@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ticketAttention } from '../lib/attention';
-import { NO_SPRINT, ago, channelLabel, channelTabs, countFor, discordAttention, matchesSearch, mentionParts, progressOf, slotsOf, sprintGroups, threadsFor, titleParts, wib, wibDay, wibTime, type DiscordThread } from '../lib/discordThreads';
+import { NO_SPRINT, ago, channelLabel, channelTabs, countFor, discordAttention, discordMarkdown, kindLabel, matchesSearch, progressOf, slotsOf, sprintGroups, threadsFor, titleParts, wib, wibDay, wibTime, type DiscordThread } from '../lib/discordThreads';
 
 const thread = (id: string, extra: Partial<DiscordThread>): DiscordThread => ({
   id, channelId: 'cb', channel: 'bug-report', kind: 'bug', title: `Thread ${id}`, url: `https://discord.com/channels/g/${id}`, state: 'FLOW_1', why: 'New bug; nobody said on it',
-  needsYou: true, older: false, dismissed: false, createdBy: 'Rina', createdAt: '2026-10-20T09:00:00.000Z', lastActivity: '2026-10-22T09:00:00.000Z',
-  messageCount: 1, tags: [], tickets: [], prs: [], claim: null, onIt: [], passes: [], claimerRepliedAt: null, mentionedAt: null, repliedAt: null, messages: [], ...extra,
+  needsYou: true, older: false, dismissed: false, createdBy: 'Rina', createdByAvatar: null, createdAt: '2026-10-20T09:00:00.000Z', lastActivity: '2026-10-22T09:00:00.000Z',
+  messageCount: 1, tags: [], slots: 2, tickets: [], prs: [], claim: null, onIt: [], passes: [], claimerRepliedAt: null, mentionedAt: null, repliedAt: null, messages: [], ...extra,
 });
 
 const rows = [
@@ -24,12 +24,14 @@ test('Needs you lists fresh threads by state, quiet ones after; Open and Done sp
   assert.deepStrictEqual(threadsFor(rows, 'all', 'done').map((row) => row.id).sort(), ['e', 'f']);
   assert.deepStrictEqual(threadsFor(rows, 'cu', 'open').map((row) => row.id), ['d']);
   assert.strictEqual(countFor(rows, 'cp', 'needs'), 0);
+  assert.deepStrictEqual(threadsFor(rows, 'all', 'all').map((row) => row.id).sort(), ['a', 'b', 'c', 'd', 'e', 'f'], 'All lists every thread');
 });
 
-test('a message marks the owner and the others it mentions', () => {
-  const message = { id: '1', author: 'Rina', avatar: '', mine: false, at: '', text: '@Danu and @Rina QA please, @QA Team -2', mentions: [{ id: '9', name: 'Danu', me: true, role: false }, { id: '2', name: 'Rina QA', me: false, role: false }, { id: '7', name: 'QA Team', me: false, role: true }], attachments: [] };
-  assert.deepStrictEqual(mentionParts(message), [{ text: '@Danu', mention: 'me' }, { text: ' and ' }, { text: '@Rina QA', mention: 'other' }, { text: ' please, ' }, { text: '@QA Team', mention: 'role' }, { text: ' -2' }]);
-  assert.deepStrictEqual(mentionParts({ ...message, mentions: [] }), [{ text: '@Danu and @Rina QA please, @QA Team -2' }]);
+test('a message becomes markdown with its mentions marked, its line breaks kept and custom emoji named', () => {
+  const message = { id: '1', author: 'Rina', avatar: '', mine: false, at: '', text: '@Danu and @Rina QA please, @QA Team -2\n**urgent** <:pepe:123>', mentions: [{ id: '9', name: 'Danu', me: true, role: false }, { id: '2', name: 'Rina QA', me: false, role: false }, { id: '7', name: 'QA Team', me: false, role: true }], attachments: [] };
+  assert.strictEqual(discordMarkdown(message), '[@Danu](#mention-me) and [@Rina QA](#mention-other) please, [@QA Team](#mention-role) -2  \n**urgent** :pepe:');
+  assert.strictEqual(discordMarkdown({ ...message, mentions: [] }), '@Danu and @Rina QA please, @QA Team -2  \n**urgent** :pepe:');
+  assert.strictEqual(kindLabel('uat'), 'UAT bug report');
 });
 
 test('ago reads minutes, hours, then days', () => {
@@ -99,6 +101,7 @@ test('the title marks its ticket keys, and each row has one progress chip', () =
   assert.strictEqual(progressOf(thread('p', { claim: { author: 'Bima', mine: false, at: '' } })), 'progress');
   assert.strictEqual(progressOf(thread('p', { state: 'CLOSED', claim: { author: 'Bima', mine: false, at: '' } })), 'done');
   assert.strictEqual(progressOf(thread('p', { dismissed: true })), 'done');
+  assert.strictEqual(progressOf(thread('p', { repliedAt: '2026-10-22T09:00:00.000Z' })), 'progress', 'the owner replied');
 });
 
 test('a pull request fills two reviewer slots: Pass is green, on it is yellow, and two Pass labels make it done', () => {
@@ -111,4 +114,5 @@ test('a pull request fills two reviewer slots: Pass is green, on it is yellow, a
   assert.strictEqual(progressOf(pr(['Bima'], [], { state: 'CLOSED' })), 'done', 'an archived thread is done');
   assert.strictEqual(progressOf(thread('b', { state: 'FIXED' })), 'done', 'a fixed bug is done');
   assert.deepStrictEqual(threadsFor([pr(['Alvin', 'Bima'], ['alvinPass', 'bimaPass'], { state: 'NOT_YOURS', needsYou: false })], 'all', 'done').map((row) => row.id), ['pr'], 'two Pass labels put it under Done');
+  assert.deepStrictEqual([slotsOf(pr(['Bima'], [], { slots: 1 })), progressOf(pr(['Bima'], [], { slots: 1 })), progressOf(pr(['Bima'], ['bimaPass'], { slots: 1 }))], [['onit'], 'progress', 'done'], 'a -1 pull request has one slot');
 });

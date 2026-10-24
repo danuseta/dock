@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { DiscordReader, FIXED, ON_IT, ROW_VERSION, buildRow, sortThread, toMessage, type DiscordResponse, type RawMessage, type RawThread, type RawUser } from '../integrations/discord-reader';
+import { CHECK_ASKED, DiscordReader, FINISHED, FIXED, NOT_YET, ON_IT, ROW_VERSION, buildRow, slotsOf, sortThread, toMessage, type DiscordResponse, type RawMessage, type RawThread, type RawUser } from '../integrations/discord-reader';
 import { ThreadService, channelIdOf, withJira, type Channel, type ChannelKind, type SyncStatus, type ThreadRecord, type ThreadRow, type ThreadStore, type ThreadView } from '../integrations/discord-threads';
 
 const ME = '900';
@@ -14,8 +14,11 @@ const msg = (author: RawUser, content: string, mentions: RawUser[] = []): RawMes
   clock += 1;
   return { id: String(1000 + clock), content, timestamp: new Date(Date.UTC(2026, 9, 20, 9, clock)).toISOString(), author, mentions, attachments: [] };
 };
-const sorted = (kind: ChannelKind, raw: RawMessage[], owner: string | null = RINA.id, closed = false, followed = false) =>
-  sortThread(kind, followed, owner, closed, raw.map((message) => toMessage(message, ME)), ME);
+const ROLE = { id: 'r7', name: 'ITteam' };
+const SERVER = { roles: new Map([[ROLE.id, ROLE.name]]), channels: new Map<string, string>(), myRoles: new Set([ROLE.id]) };
+const sorted = (kind: ChannelKind, raw: RawMessage[], owner: string | null = RINA.id, closed = false, followed = false, tags: string[] = [], slots = 2) =>
+  sortThread(kind, followed, owner, closed, raw.map((message) => toMessage(message, ME, SERVER)), ME, tags, slots);
+const toRole = (author: RawUser, content: string): RawMessage => ({ ...msg(author, content), mention_roles: [ROLE.id] });
 
 test('on it is read with or without the space and in any case', () => {
   for (const text of ['on it', 'On it!', 'onit', 'ok ONIT ya', 'aku on it']) assert.ok(ON_IT.test(text), text);
@@ -37,8 +40,8 @@ test('a bug report thread follows who took it and who spoke last', () => {
   assert.strictEqual(mine.state, 'YOURS_IN_PROGRESS');
   assert.strictEqual(mine.claim?.mine, true);
 
-  assert.strictEqual(sorted('bug', [msg(RINA, 'Login loop'), msg(DANU, 'on it'), msg(RINA, 'video attached')]).state, 'YOUR_TURN');
-  assert.strictEqual(sorted('bug', [msg(RINA, 'Login loop'), msg(DANU, 'fixed in #918')]).state, 'WAITING_ON_REPORTER');
+  assert.strictEqual(sorted('bug', [msg(RINA, 'Login loop'), msg(DANU, 'on it'), msg(RINA, 'video attached')]).state, 'YOURS_IN_PROGRESS', 'a message without a mention keeps it in progress');
+  assert.strictEqual(sorted('bug', [msg(RINA, 'Login loop'), msg(DANU, 'aku lihat dulu')]).state, 'WAITING_ON_REPORTER', 'a reply without on it is in progress too');
   assert.strictEqual(sorted('bug', [msg(DANU, 'fixed'), msg(RINA, '<@900> still broken', [DANU])]).state, 'YOUR_TURN');
   assert.strictEqual(sorted('bug', [msg(HAMZAH, 'on it'), msg(RINA, '<@900> can you look', [DANU])]).state, 'FLOW_2', 'a mention to the owner wins over somebody else taking it');
   assert.strictEqual(sorted('bug', [msg(RINA, 'x')], RINA.id, true).state, 'CLOSED');
@@ -74,7 +77,7 @@ test('a channel is followed from its id or any discord.com/channels link', () =>
 });
 
 test('a message names its roles and channels, and every author has an avatar', () => {
-  const server = { roles: new Map([['1444724098537357434', 'QA Team']]), channels: new Map([['555', 'bug-report']]) };
+  const server = { roles: new Map([['1444724098537357434', 'QA Team']]), channels: new Map([['555', 'bug-report']]), myRoles: new Set<string>() };
   const raw: RawMessage = {
     ...msg({ ...RINA, avatar: 'a1b2' }, '<@&1444724098537357434> -2 retest, see <#555>, not <@&999> or <#777>'),
     mention_roles: ['1444724098537357434', '999'],
@@ -173,6 +176,7 @@ const routesFor = () => ({
   '/channels/2002/messages?limit=50': ok([msg(RINA, 'Review #930 please')]),
   '/guilds/g1/roles': ok([{ id: 'r1', name: 'QA Team' }]),
   '/guilds/g1/channels': ok([{ id: 'fb', name: 'bug-report' }]),
+  '/guilds/g1/members/900': ok({ roles: ['r1'] }),
 });
 
 test('a sync keeps the forum threads that matter and skips messages that did not change', async () => {
@@ -302,7 +306,7 @@ test('fix said as done settles a taken bug; belum fix or prefix does not', () =>
   const fixed = sorted('bug', [msg(RINA, 'Login loop'), msg(HAMZAH, 'on it'), msg(HAMZAH, 'udah fix di staging')]);
   assert.deepStrictEqual([fixed.state, fixed.why], ['FIXED', 'Hamzah: "udah fix di staging"']);
   assert.strictEqual(sorted('uat', [msg(RINA, 'Import fails'), msg(HAMZAH, 'onit'), msg(RINA, 'fixed?'), msg(HAMZAH, 'fixed')]).state, 'FIXED');
-  assert.strictEqual(sorted('bug', [msg(RINA, 'Login loop'), msg(HAMZAH, 'fixed')]).state, 'FLOW_1', 'nobody took it, so a fix is not trusted yet');
+  assert.strictEqual(sorted('bug', [msg(RINA, 'Login loop'), msg(HAMZAH, 'fixed')]).state, 'FIXED', 'a fix counts without an on it');
   assert.strictEqual(sorted('bug', [msg(RINA, 'Login loop'), msg(HAMZAH, 'on it'), msg(HAMZAH, 'fixed'), msg(RINA, 'masih kejadian')]).state, 'TAKEN', 'a newer message opens it again');
 });
 
@@ -311,7 +315,7 @@ test('a Jira link settles the bug and adds its ticket', () => {
   const raw = [msg(RINA, 'Preview cuts long templates'), msg(HAMZAH, 'udah dibuatin https://mysales.atlassian.net/browse/qrd-1405')];
   const row = buildRow({ id: 'f1', name: 'uat-bug-report', kind: 'uat', thread: false, enabled: true }, 'g1', thread, new Map(), raw, ME);
   assert.deepStrictEqual([row.state, row.why, row.tickets], ['TICKET_MADE', 'Hamzah linked the Jira ticket', ['QRD-1405']]);
-  assert.strictEqual(sorted('bug', [...raw, msg(RINA, 'still broken')]).state, 'FLOW_1', 'a newer message opens it again');
+  assert.strictEqual(sorted('bug', [...raw, msg(RINA, 'masih error')]).state, 'TICKET_MADE', 'the work moved to Jira, so a later complaint stays there');
 });
 
 test('on it counts each reviewer once and leaves out the author of the pull request', () => {
@@ -349,4 +353,66 @@ test('a Gateway event reads its one thread again; other servers, unknown channel
 
   await instance.onEvent('THREAD_DELETE', { guild_id: 'g1', id: '2009', parent_id: 'fb' });
   assert.ok(!(await service.list()).some((row) => row.id === '2009'));
+});
+
+test('the team words for done, try again and still broken', () => {
+  for (const text of ['ok kak sdh aman jg ini', 'Oke, udah done mas', 'Iya dah bisa', 'sdh ak geser ke rfp', 'udah kutes dan aman']) assert.ok(FINISHED.test(text), text);
+  for (const text of ['ini bsa di cek ya', 'bisa dicoba lagi mas', 'sudah deploy ke staging', 'updated']) assert.ok(CHECK_ASKED.test(text), text);
+  for (const text of ['msh msh sama kak diaku blm bsa', 'msh blm bisa kak', 'di device ku masih sama', 'tetap', 'masih error', 'gabisa']) assert.ok(NOT_YET.test(text), text);
+  for (const text of ['udah gak error lagi', 'Oke mas, aku cek ya', 'sdh aman kak']) assert.ok(!NOT_YET.test(text), text);
+});
+
+test('a bug is done by a closing tag, a finish word or a check request, and opens again when the reporter says it still fails', () => {
+  assert.deepStrictEqual([sorted('bug', [msg(RINA, 'Secret key changes')], RINA.id, false, false, ['High', 'Resolved']).state, sorted('uat', [msg(RINA, 'x')], RINA.id, false, false, ['Done']).state], ['FIXED', 'FIXED']);
+  assert.strictEqual(sorted('bug', [msg(RINA, 'x')], RINA.id, false, false, ['JiraTasked']).state, 'TICKET_MADE');
+  assert.strictEqual(sorted('uat', [msg(RINA, 'PDF image wrong'), msg(HAMZAH, 'on it'), msg(RINA, 'ok kak sdh aman jg ini')]).state, 'FIXED');
+  const asked = [msg(RINA, 'Mask name not resolved'), msg(HAMZAH, 'ini bsa di cek ya')];
+  assert.strictEqual(sorted('bug', asked).state, 'FIXED', 'a check request with no answer is done');
+  assert.strictEqual(sorted('bug', [...asked, msg(RINA, 'Oke mas')]).state, 'FIXED', 'an okay keeps it done');
+  assert.strictEqual(sorted('bug', [...asked, msg(RINA, 'msh blm bisa kak')]).state, 'FLOW_1', 'still broken opens it again');
+  assert.strictEqual(sorted('bug', [...asked, msg(RINA, 'msh blm bisa kak'), msg(HAMZAH, 'bisa dicek lagi')]).state, 'FIXED');
+  assert.strictEqual(sorted('bug', [msg(RINA, 'x'), msg(RINA, 'mas bisa dicek?')]).state, 'FLOW_1', 'the reporter asking is not a check request');
+  assert.strictEqual(sorted('bug', [msg(RINA, 'WA cannot connect'), msg(HAMZAH, 'Oke2 mas ta coba lg, thanks mas')]).state, 'FLOW_1', 'thanks alone is not done');
+});
+
+test('a mention newer than the done message asks the owner again; an older one does not', () => {
+  assert.strictEqual(sorted('bug', [msg(RINA, '<@900> login loop', [DANU]), msg(HAMZAH, 'udah fix')]).state, 'FIXED');
+  assert.strictEqual(sorted('bug', [msg(HAMZAH, 'udah fix'), msg(HAMZAH, '<@900> tolong lihat juga', [DANU])]).state, 'FLOW_2');
+});
+
+test('a role tag asks a member while a reviewer slot is free; when full only a direct tag does', () => {
+  assert.strictEqual(sorted('bug', [toRole(RINA, '<@&r7> login loop')]).state, 'FLOW_2', 'a tag of a role the owner has counts');
+  const ask = toRole(RINA, '<@&r7> -1 review #930');
+  assert.strictEqual(sorted('pr', [ask]).state, 'REVIEW_ASKED');
+  assert.strictEqual(sorted('pr', [ask, msg(HAMZAH, 'on it')], RINA.id, false, false, [], 1).state, 'NOT_YOURS', 'the one slot is taken');
+  assert.strictEqual(sorted('pr', [ask, msg(HAMZAH, 'on it')], RINA.id, false, false, [], 2).state, 'REVIEW_ASKED', 'a second slot is free');
+  assert.strictEqual(sorted('pr', [ask, msg(HAMZAH, 'on it'), msg(RINA, '<@900> can you take it', [DANU])], RINA.id, false, false, [], 1).state, 'REVIEW_ASKED', 'a direct tag counts when full');
+  assert.strictEqual(sorted('pr', [ask, msg(DANU, 'on it'), msg(HAMZAH, 'on it')], RINA.id, false, false, [], 1).state, 'YOURS_IN_PROGRESS');
+  assert.strictEqual(sorted('pr', [ask, msg(DANU, 'on it'), toRole(RINA, '<@&r7> updated')], RINA.id, false, false, [], 1).state, 'REVIEW_ASKED', 'a reviewer tagged again after their reply');
+});
+
+test('the reviewers a pull request asks for come from its first message, then its tags, else two', () => {
+  const first = (text: string) => [toMessage(msg(RINA, text), ME)];
+  assert.strictEqual(slotsOf(first('@ITteam -1 feat(QRD-1234): x'), RINA.id, ['-2']), 1);
+  assert.strictEqual(slotsOf(first('feat(QRD-1234): x'), RINA.id, ['High', '-1']), 1);
+  assert.strictEqual(slotsOf(first('feat(QRD-1234): x - 2 files'), RINA.id, []), 2);
+  const row = buildRow({ id: 'fp', name: 'pull-request', kind: 'pr', thread: false, enabled: true }, 'g1', { id: '1298000000000000009', parent_id: 'fp', name: 'PR', owner_id: RINA.id }, new Map(), [msg({ ...RINA, avatar: 'a1' }, '-1 please'), msg(HAMZAH, 'on it')], ME);
+  assert.deepStrictEqual([row.slots, row.createdByAvatar], [1, `https://cdn.discordapp.com/avatars/${RINA.id}/a1.png?size=64`], 'the avatar is the poster, not the last writer');
+});
+
+test('a pull request with a Pass for every reviewer it asked for stops needing the owner', () => {
+  const pr = { needsYou: true, dismissed: false, kind: 'pr', state: 'REVIEW_ASKED', why: '', lastActivity: NOW.toISOString(), tickets: ['QRD-9'] } as unknown as ThreadView;
+  const jira = new Map([['QRD-9', { status: 'PR Review', assignee: null, sprint: null, sprintActive: false, labels: ['alvinPass'] }]]);
+  assert.deepStrictEqual(withJira([{ ...pr, slots: 1 }, { ...pr, slots: 2 }], jira, () => false, NOW).map((row) => row.needsYou), [false, true]);
+});
+
+test('a changed tag builds the row again even when the last message is the same', async () => {
+  const routes = routesFor() as Record<string, DiscordResponse | DiscordResponse[]>;
+  routes['/channels/fb'] = ok({ ...forum('bug-report'), available_tags: [{ id: 'tr', name: 'Resolved' }] });
+  const { instance, service } = reader(routes);
+  await instance.sync();
+  assert.strictEqual((await service.list()).find((row) => row.id === '2001')?.state, 'FLOW_1');
+  routes['/guilds/g1/threads/active'] = ok({ threads: [{ ...bugThread, applied_tags: ['tr'] }, prThread] });
+  await instance.sync();
+  assert.strictEqual((await service.list()).find((row) => row.id === '2001')?.state, 'FIXED');
 });

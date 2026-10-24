@@ -245,10 +245,14 @@ export const typeDefs = gql`
     older: Boolean!
     dismissed: Boolean!
     createdBy: String
+    """The avatar of whoever opened the thread."""
+    createdByAvatar: String
     createdAt: String!
     lastActivity: String!
     messageCount: Int!
     tags: [String!]!
+    """Reviewers a pull request asks for, from "-1" or "-2" in its first message or tags; two otherwise."""
+    slots: Int!
     tickets: [DiscordThreadTicket!]!
     prs: [String!]!
     claim: DiscordClaim

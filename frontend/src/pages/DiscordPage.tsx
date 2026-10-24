@@ -1,15 +1,17 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ExternalLink, RefreshCw, Settings2, Trash2 } from 'lucide-react';
+import type { Components } from 'react-markdown';
+import { ChevronLeft, ChevronRight, ExternalLink, RefreshCw, Settings2, Trash2, X } from 'lucide-react';
 import { GET_DISCORD_THREADS } from '../graphql/queries';
 import { ADD_DISCORD_CHANNEL, DISMISS_DISCORD_THREAD, REFRESH_DISCORD, REMOVE_DISCORD_CHANNEL, UPDATE_DISCORD_CHANNEL } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
-import { Button, Input, Page, Select } from '../components/ui';
+import { Button, Dialog, IconButton, Input, Page, Select } from '../components/ui';
+import { Markdown } from '../chat/Markdown';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import {
-  ALL, KINDS, REVIEW_SLOTS, STATE_LABEL, VIEWS, ago, channelLabel, channelTabs, countFor, fileSize, isDone, matchesSearch, mentionParts, needsYou, progressOf, slotsOf, sprintGroups, threadsFor, titleParts, wib, wibDay, wibTime,
-  type ChannelKind, type ChannelTab, type DiscordChannel, type DiscordMessage, type DiscordThread, type Progress, type Slot, type ThreadView,
+  ALL, KINDS, MENTION_LINK, STATE_LABEL, VIEWS, ago, channelLabel, channelTabs, countFor, discordMarkdown, fileSize, isDone, kindLabel, matchesSearch, needsYou, progressOf, slotsOf, sprintGroups, threadsFor, titleParts, wib, wibDay, wibTime,
+  type ChannelKind, type ChannelTab, type DiscordChannel, type DiscordMessage, type DiscordThread, type MentionKind, type Progress, type Slot, type ThreadView,
 } from '../lib/discordThreads';
 
 interface DiscordPageProps { onTicketClick: (key: string) => void; onNavigate: (path: string) => void }
@@ -26,10 +28,10 @@ const ProgressChip: React.FC<{ progress: Progress }> = ({ progress }) => (
 
 const SLOT_STYLE: Record<Slot, string> = { pass: 'bg-status-merged', onit: 'bg-status-warn', free: 'bg-border-glow' };
 
-/** A pull request's two reviewer slots: green passed, yellow on it, grey free. */
+/** A pull request's reviewer slots: green passed, yellow on it, grey free. */
 const Slots: React.FC<{ thread: DiscordThread; large?: boolean }> = ({ thread, large }) => {
   const slots = slotsOf(thread);
-  const label = `On it ${Math.min(thread.onIt.length, REVIEW_SLOTS)}/${REVIEW_SLOTS} · Pass ${Math.min(thread.passes.length, REVIEW_SLOTS)}/${REVIEW_SLOTS}`;
+  const label = `On it ${Math.min(thread.onIt.length, thread.slots)}/${thread.slots} · Pass ${Math.min(thread.passes.length, thread.slots)}/${thread.slots}`;
   return (
     <span className="inline-flex shrink-0 gap-0.5" role="img" aria-label={label} title={label}>
       {slots.map((slot, index) => <span key={index} className={cn('rounded-[1px]', large ? 'h-1.5 w-6' : 'h-1.5 w-[11px]', SLOT_STYLE[slot])} />)}
@@ -85,10 +87,6 @@ const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) 
   };
   const toggle = (name: string) => setFolded(folded.includes(name) ? folded.filter((item) => item !== name) : [...folded, name]);
   const turn = countFor(rows, tab, 'needs');
-  const labelOf = (row: DiscordThread) => {
-    const channel = channels.find((entry) => entry.id === row.channelId);
-    return channel ? channelLabel(channel) : row.channel;
-  };
 
   return (
     <Page width="full">
@@ -143,22 +141,21 @@ const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) 
           </div>
         </section>
 
-        {selected ? <ThreadPane thread={selected} channel={labelOf(selected)} onBack={back} picked={Boolean(picked)} onTicketClick={onTicketClick} onDismiss={() => void dismiss({ variables: { id: selected.id, lastActivity: selected.lastActivity } })} />
+        {selected ? <ThreadPane key={selected.id} thread={selected} onBack={back} picked={Boolean(picked)} onTicketClick={onTicketClick} onDismiss={() => void dismiss({ variables: { id: selected.id, lastActivity: selected.lastActivity } })} />
           : <p className="p-6 text-sm text-muted-foreground max-[960px]:hidden">Pick a thread.</p>}
       </div>
     </Page>
   );
 };
 
-/** One thread in the list: who wrote last, the title, one chip with why, and when. */
+/** One thread in the list: who opened it, the title, one chip with why, and when. */
 const ThreadRow: React.FC<{ row: DiscordThread; now: Date; selected: boolean; onOpen: () => void }> = ({ row, now, selected, onOpen }) => {
   const fresh = needsYou(row) && !row.older;
-  const last = row.messages[row.messages.length - 1];
   return (
     <button type="button" onClick={onOpen} aria-current={selected ? 'true' : undefined}
       className={cn('grid w-full grid-cols-[28px_minmax(0,1fr)_auto] gap-2.5 border-0 border-b border-l-2 border-border border-l-transparent bg-transparent py-2.5 pr-4 pl-3.5 text-left text-foreground hover:bg-surface-0', selected && 'border-l-accent bg-surface-1')}>
       <span className="relative mt-0.5 size-7">
-        {last ? <img src={last.avatar} alt="" loading="lazy" className="size-7 rounded-full bg-surface-2" /> : <span className="block size-7 rounded-full bg-surface-2" />}
+        {row.createdByAvatar ? <img src={row.createdByAvatar} alt="" loading="lazy" className="size-7 rounded-full bg-surface-2" /> : <span className="block size-7 rounded-full bg-surface-2" />}
         {needsYou(row) && <span className={cn('absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full border-2 border-background', fresh ? 'bg-status-warn' : 'bg-surface-2 ring-1 ring-status-warn')} aria-label="Needs you" />}
       </span>
       <span className="min-w-0">
@@ -173,17 +170,20 @@ const ThreadRow: React.FC<{ row: DiscordThread; now: Date; selected: boolean; on
   );
 };
 
-/** A picture or a video as a thumbnail; anything else, or a link that stopped working, as its name and size. */
-const Attachment: React.FC<{ file: DiscordMessage['attachments'][number] }> = ({ file }) => {
+type DiscordFile = DiscordMessage['attachments'][number];
+const isImage = (file: DiscordFile) => file.type?.split('/')[0] === 'image';
+
+/** A picture or a video as a thumbnail; anything else, or a link that stopped working, as its name and size. A picture opens in the viewer. */
+const Attachment: React.FC<{ file: DiscordFile; onView: () => void }> = ({ file, onView }) => {
   const [broken, setBroken] = useState(false);
   const kind = file.type?.split('/')[0];
   const caption = <span className="flex justify-between gap-2 px-2 py-1 text-[0.64rem] text-muted-foreground"><b className="truncate font-medium text-secondary-foreground">{file.name}</b><span className="whitespace-nowrap">{file.width && file.height ? `${file.width}×${file.height} · ` : ''}{fileSize(file.size)}</span></span>;
   if (!broken && kind === 'image') {
     return (
-      <a href={file.url} target="_blank" rel="noreferrer" className="block w-[220px] overflow-hidden rounded-sm border border-border bg-surface-0 hover:border-border-glow" aria-label={`Open ${file.name}`}>
+      <button type="button" onClick={onView} className="block w-[220px] overflow-hidden rounded-sm border border-border bg-surface-0 p-0 text-left hover:border-border-glow" aria-label={`Open ${file.name}`}>
         <img src={file.url} alt={file.name} loading="lazy" onError={() => setBroken(true)} className="h-[124px] w-full bg-surface-1 object-cover" />
         {caption}
-      </a>
+      </button>
     );
   }
   if (!broken && kind === 'video') {
@@ -195,6 +195,49 @@ const Attachment: React.FC<{ file: DiscordMessage['attachments'][number] }> = ({
     );
   }
   return <p className="inline-flex gap-2.5 self-start rounded-sm border border-border bg-surface-0 px-2.5 py-1.5 text-[0.7rem] text-secondary-foreground"><b className="font-medium text-foreground">{file.name}</b>{fileSize(file.size)}{file.type ? ` · ${file.type.split('/')[0]}` : ''}</p>;
+};
+
+/** The pictures of one message over the page, like a file in a session; the arrows step through the others. */
+const ImageViewer: React.FC<{ files: DiscordFile[]; index: number; onIndex: (index: number) => void; onClose: () => void }> = ({ files, index, onIndex, onClose }) => {
+  const file = files[index];
+  const many = files.length > 1;
+  const step = (delta: number) => onIndex((index + delta + files.length) % files.length);
+  const onKeyDown = (event: React.KeyboardEvent) => {
+    if (!many) return;
+    if (event.key === 'ArrowLeft') step(-1);
+    if (event.key === 'ArrowRight') step(1);
+  };
+  return (
+    <Dialog open onClose={onClose} labelledBy="discord-image-name" className="h-dvh w-[min(980px,100%)] max-[760px]:p-0">
+      <div className="flex h-full max-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-md border border-border-glow bg-surface-0 max-[760px]:max-h-dvh max-[760px]:rounded-none max-[760px]:border-0" onKeyDown={onKeyDown}>
+        <div className="flex min-w-0 flex-none items-center gap-1.5 border-b border-border px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2">
+          <h2 id="discord-image-name" className="min-w-0 flex-1 truncate font-mono text-[0.78rem] font-semibold">{file.name}</h2>
+          <span className="flex-none font-mono text-[0.68rem] text-muted-foreground max-[760px]:hidden">{fileSize(file.size)}</span>
+          {many && <IconButton variant="ghost" aria-label="Previous picture" className="max-[900px]:size-11" onClick={() => step(-1)}><ChevronLeft size={15} aria-hidden="true" /></IconButton>}
+          {many && <IconButton variant="ghost" aria-label="Next picture" className="max-[900px]:size-11" onClick={() => step(1)}><ChevronRight size={15} aria-hidden="true" /></IconButton>}
+          <a href={file.url} target="_blank" rel="noopener noreferrer" aria-label="Open in a new tab" title="Open in a new tab" className="inline-grid size-8 flex-none place-items-center rounded-xs text-secondary-foreground hover:bg-surface-1 hover:text-foreground max-[900px]:size-11"><ExternalLink size={14} aria-hidden="true" /></a>
+          <IconButton variant="ghost" aria-label="Close" className="max-[900px]:size-11" onClick={onClose}><X size={15} aria-hidden="true" /></IconButton>
+        </div>
+        <div className="grid min-h-0 flex-1 place-items-center overflow-auto bg-surface-1/40 p-4">
+          <img src={file.url} alt={file.name} className="max-h-[calc(100dvh-10rem)] max-w-full object-contain" />
+        </div>
+        {many && <p className="flex-none border-t border-border px-3 py-1.5 font-mono text-[0.66rem] text-muted-foreground tabular-nums">{index + 1} of {files.length}</p>}
+      </div>
+    </Dialog>
+  );
+};
+
+const MENTION_STYLE: Record<MentionKind, string> = {
+  me: 'bg-status-warn/15 text-status-warn',
+  role: 'bg-[oklch(0.70_0.14_305/0.14)] text-[oklch(0.78_0.12_305)]',
+  other: 'bg-status-discord-bg text-status-discord',
+};
+
+/** A mention link from discordMarkdown is drawn as a highlighted name; any other link opens in a new tab. */
+const MESSAGE_MARKDOWN: Components = {
+  a: ({ children, href }) => (href?.startsWith(MENTION_LINK)
+    ? <span className={cn('rounded-[3px] px-0.5', MENTION_STYLE[href.slice(MENTION_LINK.length) as MentionKind] ?? MENTION_STYLE.other)}>{children}</span>
+    : <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2 hover:text-accent-hover">{children}</a>),
 };
 
 const ChannelManager: React.FC<{ channels: DiscordChannel[]; configured: boolean }> = ({ channels, configured }) => {
@@ -242,11 +285,16 @@ const ChannelManager: React.FC<{ channels: DiscordChannel[]; configured: boolean
   );
 };
 
-const ThreadPane: React.FC<{ thread: DiscordThread; channel: string; picked: boolean; onBack: () => void; onTicketClick: (key: string) => void; onDismiss: () => void }> = ({ thread, channel, picked, onBack, onTicketClick, onDismiss }) => {
+const ThreadPane: React.FC<{ thread: DiscordThread; picked: boolean; onBack: () => void; onTicketClick: (key: string) => void; onDismiss: () => void }> = ({ thread, picked, onBack, onTicketClick, onDismiss }) => {
+  const [viewing, setViewing] = useState<{ files: DiscordFile[]; index: number } | null>(null);
   const earlier = Math.max(0, thread.messageCount - thread.messages.length);
   const ticket = thread.tickets[0];
   const pr = thread.prs[0];
   const facts: Array<[string, React.ReactNode]> = [
+    ['Opened', wib(thread.createdAt)],
+    ['Opened by', thread.createdBy ?? 'Unknown'],
+    ['Kind', kindLabel(thread.kind)],
+    ['Tags', thread.tags.length ? thread.tags.join(', ') : 'None'],
     ['Ticket', thread.tickets.length ? thread.tickets.map((item) => <span key={item.key} className="mr-2"><span className="font-mono text-accent">{item.key}</span>{item.status ? ` · ${item.status}` : ''}{item.assignee ? ` · ${item.assignee}` : ''}</span>) : 'None in the title or tags'],
     ['Sprint', thread.tickets.find((item) => item.sprint)?.sprint ?? 'None'],
     ['Pull request', pr ? <a href={pr} target="_blank" rel="noreferrer" className="text-foreground hover:underline">{pr.replace('https://github.com/', '')}</a> : '—'],
@@ -260,8 +308,7 @@ const ThreadPane: React.FC<{ thread: DiscordThread; channel: string; picked: boo
     <section className={cn('flex min-w-0 flex-col', !picked && 'max-[960px]:hidden')} aria-label="Thread">
       <div className="border-b border-border px-5 py-4">
         {picked && <button type="button" onClick={onBack} className="mb-2 hidden min-h-11 border-0 bg-transparent p-0 text-xs text-secondary-foreground max-[960px]:block">‹ Discord</button>}
-        <p className="text-[0.7rem] text-muted-foreground">{channel}{thread.createdBy ? ` · opened by ${thread.createdBy}` : ''} · {wib(thread.createdAt)} · {thread.messageCount} messages{thread.tags.length ? ` · tags: ${thread.tags.join(', ')}` : ''}</p>
-        <h2 className="mt-1.5 mb-3 font-display text-lg leading-snug font-bold"><Title text={thread.title} /></h2>
+        <h2 className="mb-3 font-display text-lg leading-snug font-bold"><Title text={thread.title} /></h2>
         <dl className="grid grid-cols-5 gap-x-7 gap-y-1 text-[0.72rem] max-[1100px]:grid-cols-2 max-[600px]:grid-cols-1">
           {facts.map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-muted-foreground">{label}</dt><dd className="m-0 truncate text-foreground">{value}</dd></div>)}
         </dl>
@@ -279,12 +326,11 @@ const ThreadPane: React.FC<{ thread: DiscordThread; channel: string; picked: boo
                 <img src={message.avatar} alt="" loading="lazy" className="size-8 rounded-full bg-surface-2" />
                 <div className="min-w-0">
                   <p className="text-[0.76rem] font-semibold">{message.mine ? 'You' : message.author}<time className="ml-2 font-mono text-[0.6rem] font-normal text-muted-foreground">{wibTime(message.at)}</time></p>
-                  <p className="mt-0.5 whitespace-pre-wrap break-words text-[0.8rem] leading-relaxed text-secondary-foreground">
-                    {mentionParts(message).map((part, index) => part.mention
-                      ? <span key={index} className={cn('rounded-[3px] px-0.5', part.mention === 'me' ? 'bg-status-warn/15 text-status-warn' : part.mention === 'role' ? 'bg-[oklch(0.70_0.14_305/0.14)] text-[oklch(0.78_0.12_305)]' : 'bg-status-discord-bg text-status-discord')}>{part.text}</span>
-                      : <React.Fragment key={index}>{part.text}</React.Fragment>)}
-                  </p>
-                  {message.attachments.length > 0 && <div className="mt-2 flex flex-wrap gap-2">{message.attachments.map((file) => <Attachment key={file.url} file={file} />)}</div>}
+                  <div className="mt-0.5 break-words text-[0.8rem] leading-relaxed text-secondary-foreground"><Markdown text={discordMarkdown(message)} overrides={MESSAGE_MARKDOWN} /></div>
+                  {message.attachments.length > 0 && <div className="mt-2 flex flex-wrap gap-2">{message.attachments.map((file) => {
+                    const images = message.attachments.filter(isImage);
+                    return <Attachment key={file.url} file={file} onView={() => setViewing({ files: images, index: images.indexOf(file) })} />;
+                  })}</div>}
                 </div>
               </div>
             </React.Fragment>
@@ -301,6 +347,7 @@ const ThreadPane: React.FC<{ thread: DiscordThread; channel: string; picked: boo
           <Button size="sm" variant="primary" onClick={() => window.open(thread.url, '_blank', 'noopener')}>Open in Discord<ExternalLink size={13} aria-hidden="true" /></Button>
         </div>
       </div>
+      {viewing && <ImageViewer files={viewing.files} index={viewing.index} onIndex={(index) => setViewing({ ...viewing, index })} onClose={() => setViewing(null)} />}
     </section>
   );
 };

@@ -40,9 +40,9 @@ const components: Components = {
 
 const remarkPlugins = [remarkGfm];
 
-/** Claude's reply as formatted text. Raw HTML in the reply is shown as text, never rendered. */
-export const Markdown: React.FC<{ text: string }> = React.memo(({ text }) => (
-  <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>{text}</ReactMarkdown>
+/** Claude's reply as formatted text; `overrides` replaces how some elements are drawn. Raw HTML in the reply is shown as text, never rendered. */
+export const Markdown: React.FC<{ text: string; overrides?: Components }> = React.memo(({ text, overrides }) => (
+  <ReactMarkdown remarkPlugins={remarkPlugins} components={overrides ? { ...components, ...overrides } : components}>{text}</ReactMarkdown>
 ));
 
 Markdown.displayName = 'Markdown';

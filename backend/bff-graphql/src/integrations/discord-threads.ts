@@ -52,11 +52,15 @@ export interface ThreadRow {
   why: string;
   needsYou: boolean;
   createdBy: string | null;
+  /** The avatar of whoever opened the thread. */
+  createdByAvatar: string | null;
   createdAt: string;
   lastActivity: string;
   lastMessageId: string | null;
   messageCount: number;
   tags: string[];
+  /** Reviewers a pull request asks for, from "-1" or "-2" in its first message or tags; two otherwise. */
+  slots: number;
   tickets: string[];
   prs: string[];
   /** The last "on it" in the thread. */
@@ -158,11 +162,14 @@ export function withJira(rows: ThreadView[], jira: Map<string, JiraFacts>, isSet
     const facts = row.tickets.map((key) => ({ key, ...(jira.get(key) ?? { status: null, assignee: null, sprint: null, sprintActive: false, labels: [] }) }));
     const tickets = facts.map(({ labels: _labels, ...ticket }) => ticket);
     const handled = row.state !== 'CLOSED' && tickets.length > 0 && tickets.every((ticket) => isSettled(ticket.status));
-    const needsYou = handled ? false : row.needsYou;
+    const passes = [...new Set(facts.flatMap((ticket) => ticket.labels.map((label) => label.trim()).filter((label) => PASS_LABEL.test(label))))];
+    // A pull request with a Pass label for every reviewer it asked for is done.
+    const passed = row.kind === 'pr' && passes.length >= row.slots;
+    const needsYou = handled || passed ? false : row.needsYou;
     return {
       ...row,
       tickets,
-      passes: [...new Set(facts.flatMap((ticket) => ticket.labels.map((label) => label.trim()).filter((label) => PASS_LABEL.test(label))))],
+      passes,
       ...(handled ? { state: 'HANDLED' as const, why: `Jira says ${tickets[0].status}` } : {}),
       needsYou,
       older: needsYou && now.getTime() - Date.parse(row.lastActivity) > QUIET_MS,
