@@ -3,7 +3,7 @@
 export type ChannelKind = 'bug' | 'uat' | 'pr' | 'follow';
 /** 'all', or the id of one followed channel. */
 export type ChannelTab = string;
-export type ThreadView = 'needs' | 'open' | 'done';
+export type ThreadView = 'needs' | 'open' | 'done' | 'all';
 
 export interface DiscordChannel { id: string; name: string | null; kind: ChannelKind; thread: boolean; enabled: boolean }
 
@@ -31,10 +31,14 @@ export interface DiscordThread {
   older: boolean;
   dismissed: boolean;
   createdBy: string | null;
+  /** The avatar of whoever opened the thread. */
+  createdByAvatar: string | null;
   createdAt: string;
   lastActivity: string;
   messageCount: number;
   tags: string[];
+  /** Reviewers a pull request asks for, from "-1" or "-2" in its first message or tags; two otherwise. */
+  slots: number;
   tickets: Array<{ key: string; status: string | null; assignee: string | null; sprint: string | null; sprintActive: boolean }>;
   prs: string[];
   claim: { author: string; mine: boolean; at: string } | null;
@@ -54,9 +58,11 @@ export const ALL = 'all';
 export const KINDS: Array<{ id: ChannelKind; label: string; help: string }> = [
   { id: 'bug', label: 'Bug report', help: 'Every thread; one that mentions you or answers you needs you' },
   { id: 'uat', label: 'UAT bug report', help: 'Every thread; one that mentions you or answers you needs you' },
-  { id: 'pr', label: 'PR review', help: 'Every pull request with its two reviewer slots; yours and the ones that ask you need you' },
+  { id: 'pr', label: 'PR review', help: 'Every pull request with the reviewers it asks for; yours and the ones that ask you need you' },
   { id: 'follow', label: 'Follow', help: 'Only what mentions or involves you; a thread always' },
 ];
+
+export const kindLabel = (kind: ChannelKind) => KINDS.find((entry) => entry.id === kind)?.label ?? kind;
 
 export const channelLabel = (channel: DiscordChannel) => (channel.name ? `${channel.thread ? '' : '#'}${channel.name}` : channel.id);
 
@@ -67,6 +73,7 @@ export const VIEWS: Array<{ id: ThreadView; label: string }> = [
   { id: 'needs', label: 'Needs you' },
   { id: 'open', label: 'Open' },
   { id: 'done', label: 'Done' },
+  { id: 'all', label: 'All' },
 ];
 
 /** The labels of the board-threads branch of shovian/dock. */
@@ -93,17 +100,15 @@ const ORDER = ['FLOW_1', 'FLOW_2', 'FLOW_3', 'FLOW_4', 'YOUR_TURN', 'FLOW_5', 'R
 const rank = (state: string) => (ORDER.includes(state) ? ORDER.indexOf(state) : ORDER.length);
 const SETTLED = new Set(['FIXED', 'TICKET_MADE', 'HANDLED', 'CLOSED']);
 
-/** Reviewers a pull request needs, and Pass labels it needs to be done. */
-export const REVIEW_SLOTS = 2;
-
-/** Settled, marked done, or a pull request with its two Pass labels. */
-export const isDone = (thread: DiscordThread) => thread.dismissed || SETTLED.has(thread.state) || (thread.kind === 'pr' && thread.passes.length >= REVIEW_SLOTS);
+/** Settled, marked done, or a pull request with a Pass label for every reviewer it asks for. */
+export const isDone = (thread: DiscordThread) => thread.dismissed || SETTLED.has(thread.state) || (thread.kind === 'pr' && thread.passes.length >= thread.slots);
 export const needsYou = (thread: DiscordThread) => thread.needsYou && !thread.dismissed;
 
 const inView: Record<ThreadView, (thread: DiscordThread) => boolean> = {
   needs: needsYou,
   open: (thread) => !isDone(thread),
   done: isDone,
+  all: () => true,
 };
 
 const inTab = (row: DiscordThread, tab: ChannelTab) => tab === ALL || row.channelId === tab;
@@ -174,35 +179,46 @@ export const titleParts = (title: string) => title.split(TICKET_IN_TITLE).filter
 
 export type Progress = 'open' | 'progress' | 'done';
 
-/** A PR thread's two reviewer slots: passed (a Pass label), on it (said on it, no Pass yet) or free. */
+/** A PR thread's reviewer slots: passed (a Pass label), on it (said on it, no Pass yet) or free. */
 export type Slot = 'pass' | 'onit' | 'free';
 export function slotsOf(thread: DiscordThread): Slot[] {
-  const passed = Math.min(thread.passes.length, REVIEW_SLOTS);
-  const taken = Math.max(passed, Math.min(thread.onIt.length, REVIEW_SLOTS));
-  return Array.from({ length: REVIEW_SLOTS }, (_, index) => (index < passed ? 'pass' : index < taken ? 'onit' : 'free'));
+  const passed = Math.min(thread.passes.length, thread.slots);
+  const taken = Math.max(passed, Math.min(thread.onIt.length, thread.slots));
+  return Array.from({ length: thread.slots }, (_, index) => (index < passed ? 'pass' : index < taken ? 'onit' : 'free'));
 }
 
 /**
- * The one chip a row shows. A pull request is done with two Pass labels and in progress once both slots are taken;
- * anything else is done when settled or marked done, and in progress once somebody said on it.
+ * The one chip a row shows. A pull request is done with a Pass label for every reviewer and in progress once every
+ * slot is taken; anything else is done when settled or marked done, and in progress once somebody said on it or the
+ * owner replied.
  */
 export function progressOf(thread: DiscordThread): Progress {
   if (isDone(thread)) return 'done';
-  if (thread.kind === 'pr') return thread.onIt.length >= REVIEW_SLOTS ? 'progress' : 'open';
-  return thread.claim ? 'progress' : 'open';
+  if (thread.kind === 'pr') return thread.onIt.length >= thread.slots ? 'progress' : 'open';
+  return thread.claim || thread.repliedAt ? 'progress' : 'open';
 }
 
 export const fileSize = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 
-/** Splits a message into plain text and the @names it mentions, so the page can mark them. */
-export function mentionParts(message: DiscordMessage): Array<{ text: string; mention?: 'me' | 'other' | 'role' }> {
-  const names = message.mentions.map((mention) => ({ token: `@${mention.name}`, me: mention.me, role: mention.role })).sort((a, b) => b.token.length - a.token.length);
-  if (!names.length) return [{ text: message.text }];
+/** The link a mention becomes in a message's markdown; the page draws it as a highlighted name. */
+export const MENTION_LINK = '#mention-';
+export type MentionKind = 'me' | 'other' | 'role';
+
+/**
+ * A message as markdown the way Discord shows it: every line break kept, custom emoji as :name:, and each @name it
+ * mentions as a link to MENTION_LINK + me, role or other.
+ */
+export function discordMarkdown(message: DiscordMessage): string {
+  const names = message.mentions.map((mention) => ({ token: `@${mention.name}`, kind: (mention.me ? 'me' : mention.role ? 'role' : 'other') as MentionKind })).sort((a, b) => b.token.length - a.token.length);
   const escaped = names.map((name) => name.token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  return message.text.split(new RegExp(`(${escaped.join('|')})`)).filter(Boolean).map((part) => {
-    const name = names.find((entry) => entry.token === part);
-    return name ? { text: part, mention: name.me ? 'me' : name.role ? 'role' : 'other' } : { text: part };
-  });
+  const text = message.text.replace(/<a?:(\w+):\d+>/g, ':$1:');
+  const marked = names.length
+    ? text.split(new RegExp(`(${escaped.join('|')})`)).map((part) => {
+      const name = names.find((entry) => entry.token === part);
+      return name ? `[${part.replace(/[[\]]/g, '\\$&')}](${MENTION_LINK}${name.kind})` : part;
+    }).join('')
+    : text;
+  return marked.replace(/\n/g, '  \n');
 }
 
 export const DISCORD_ITEM = 'discord-';

@@ -1020,10 +1020,12 @@ export const DISCORD_THREAD_FIELDS = gql`
       older
       dismissed
       createdBy
+      createdByAvatar
       createdAt
       lastActivity
       messageCount
       tags
+      slots
       tickets { key status assignee sprint sprintActive }
       prs
       claim { author mine at }
