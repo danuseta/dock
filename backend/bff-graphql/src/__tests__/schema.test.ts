@@ -119,6 +119,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'orchestrations',
       'orchestratorCronSettings',
       'orchestratorCronStatus',
+      'ownerName',
       'pushPublicKey',
       'quickLinks',
       'settings',
@@ -278,6 +279,31 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
     assert.deepStrictEqual(mutation.stopChatTurn.args.map((arg) => [arg.name, String(arg.type)]), [['sessionId', 'ID!']]);
     assert.strictEqual(String(mutation.stopChatTurn.type), 'ChatSession!');
     assert.strictEqual(mutation.moveOrchestration, undefined, 'no ticket moves between machines');
+  });
+
+  await t.test('should name the owner from GIT_AUTHOR_NAME, then CODER_WORKSPACE_OWNER_NAME, then Danu', async () => {
+    const previous = [process.env.GIT_AUTHOR_NAME, process.env.CODER_WORKSPACE_OWNER_NAME];
+    const originalPin = StorageAPI.prototype.hasMasterPin;
+    StorageAPI.prototype.hasMasterPin = async () => false;
+    const ownerName = (resolvers.Query as unknown as Record<string, (...args: unknown[]) => Promise<string>>).ownerName;
+    const context = { request: { headers: {}, socket: {} }, authenticated: true };
+    try {
+      delete process.env.GIT_AUTHOR_NAME;
+      delete process.env.CODER_WORKSPACE_OWNER_NAME;
+      assert.strictEqual(await ownerName({}, {}, context), 'Danu');
+      process.env.CODER_WORKSPACE_OWNER_NAME = 'Coder Owner';
+      assert.strictEqual(await ownerName({}, {}, context), 'Coder Owner');
+      process.env.GIT_AUTHOR_NAME = ' M Danu Seta W ';
+      assert.strictEqual(await ownerName({}, {}, context), 'M Danu Seta W');
+      process.env.GIT_AUTHOR_NAME = ' ';
+      assert.strictEqual(await ownerName({}, {}, context), 'Coder Owner');
+    } finally {
+      StorageAPI.prototype.hasMasterPin = originalPin;
+      for (const [name, value] of [['GIT_AUTHOR_NAME', previous[0]], ['CODER_WORKSPACE_OWNER_NAME', previous[1]]] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
   });
 
   await t.test('should keep agent controls and the cron on the workspace DOCK', async () => {

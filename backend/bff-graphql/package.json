@@ -9,7 +9,8 @@
     "build": "tsc",
     "test": "tsx --test src/__tests__/*.test.ts",
     "db:generate": "prisma generate",
-    "db:push": "prisma db push"
+    "db:push": "prisma db push",
+    "ingest-token:ensure": "node dist/cli/ensure-ingest-token.js"
   },
   "dependencies": {
     "@apollo/server": "^4.10.2",

@@ -13,7 +13,7 @@ import { createDemoVideoRouter } from '../routes/demo-videos';
 import { createOrchestratorIngestRouter } from '../routes/orchestrator';
 
 const BASE = 'https://www.danuseta.my.id/assets';
-const KEYS = { accessKey: 'AKIAEXAMPLE000001', secretKey: 'secret-example-0001' };
+const KEYS = { endpoint: 'https://kencana.basic.box.cloudeka.id', region: 'kencana', bucket: 'porto-rzwbgw', folder: 'demo-qonflo', publicBaseUrl: BASE, accessKey: 'AKIAEXAMPLE000001', secretKey: 'secret-example-0001' };
 
 function memorySettings(initial: Partial<DemoStorageConfig> = {}): DemoStorage & { config: DemoStorageConfig } {
   const holder = { config: { ...DEMO_STORAGE_DEFAULTS, ...initial } };
@@ -57,6 +57,14 @@ test('the storage settings keep the keys out of the view, keep a saved key when 
   assert.throws(() => mergeDemoStorage(saved, { endpoint: 'http://plain.example' }), /https/);
   assert.throws(() => mergeDemoStorage(saved, { publicBaseUrl: 'not a url' }), /URL/);
   assert.strictEqual(viewOf(DEMO_STORAGE_DEFAULTS).configured, false);
+});
+
+test('the storage defaults are empty, so a first save needs every field and saved values stay as stored', () => {
+  assert.deepStrictEqual(Object.values(DEMO_STORAGE_DEFAULTS), ['', '', '', '', '', '', '']);
+  assert.throws(() => mergeDemoStorage(DEMO_STORAGE_DEFAULTS, { accessKey: KEYS.accessKey, secretKey: KEYS.secretKey }), /URL/);
+  const saved = mergeDemoStorage(DEMO_STORAGE_DEFAULTS, KEYS);
+  assert.deepStrictEqual({ ...DEMO_STORAGE_DEFAULTS, ...saved }, KEYS);
+  assert.deepStrictEqual(mergeDemoStorage(saved, {}), KEYS);
 });
 
 test('one video per ticket in the set folder: the link goes through the public base URL, a removal clears only that link', async () => {

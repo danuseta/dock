@@ -2,7 +2,7 @@ import { lazy, Suspense, useState, useEffect } from 'react';
 import { useApolloClient, useQuery, useMutation } from '@apollo/client';
 import { Loader2 } from 'lucide-react';
 import { GET_AUTH_STATUS } from './graphql/queries';
-import { VERIFY_MASTER_PIN } from './graphql/mutations';
+import { SET_MASTER_PIN, VERIFY_MASTER_PIN } from './graphql/mutations';
 import { AppLayout } from './components/AppLayout';
 import DashboardPage from './pages/DashboardPage';
 import TicketDetailPage from './pages/TicketDetailPage';
@@ -20,6 +20,8 @@ import SessionsPage from './pages/SessionsPage';
 import SprintPage from './pages/SprintPage';
 import { PageBoundary } from './components/PageBoundary';
 import { PinLockModal } from './components/PinLockModal';
+import { SetPinScreen } from './components/SetPinScreen';
+import { needsSetPin } from './lib/setPin';
 import { LoadingSkeleton } from './components/LoadingSkeleton';
 import { Button, Page } from './components/ui';
 import { DockModeContext, hasPage, type DockMode } from './lib/dockMode';
@@ -46,6 +48,7 @@ function App() {
     };
   }, [unreachable, refetch]);
   const [verifyMasterPin] = useMutation(VERIFY_MASTER_PIN);
+  const [setMasterPin] = useMutation(SET_MASTER_PIN);
 
   const getInitialRoute = () => {
     const path = window.location.pathname;
@@ -81,6 +84,17 @@ function App() {
         return true;
       }
       return false;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleSetPin = async (pin: string): Promise<boolean> => {
+    try {
+      const res = await setMasterPin({ variables: { pin } });
+      if (!res.data?.setMasterPin) return false;
+      await refetch();
+      return true;
     } catch {
       return false;
     }
@@ -147,6 +161,10 @@ function App() {
         </div>
       </main>
     );
+  }
+
+  if (needsSetPin(mode, data.authStatus.hasMasterPin)) {
+    return <SetPinScreen onSave={handleSetPin} />;
   }
 
   const isLocked = data.authStatus.hasMasterPin && !data.authStatus.authenticated;

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { Plus, RefreshCw, Trash2, X } from 'lucide-react';
-import { GET_DISCORD_THREADS, GET_HOME_CORE, GET_HOME_SECONDARY, GET_OWNER_QUESTIONS } from '../graphql/queries';
+import { GET_DISCORD_THREADS, GET_HOME_CORE, GET_HOME_SECONDARY, GET_OWNER_NAME, GET_OWNER_QUESTIONS } from '../graphql/queries';
 import { ADD_QUICK_LINK, REMOVE_QUICK_LINK } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { WebsiteIcon } from '../components/WebsiteIcon';
@@ -45,6 +45,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
     GET_HOME_SECONDARY,
     { ...CACHED_QUERY_OPTIONS, variables: { calendar: showCalendar, docker: showDocker, monitors: showMonitors }, pollInterval: healthRefreshSeconds * 1000 },
   );
+  const { data: ownerData } = useQuery(GET_OWNER_NAME, CACHED_QUERY_OPTIONS);
   const { data: questionsData } = useQuery(GET_OWNER_QUESTIONS, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
   const { data: discordData } = useQuery(GET_DISCORD_THREADS, { ...CACHED_QUERY_OPTIONS, pollInterval: 60000, skip: !hasPage(mode, '/discord') });
   const [addQuickLink, { loading: adding }] = useMutation(ADD_QUICK_LINK, { refetchQueries: [{ query: GET_HOME_CORE }] });
@@ -114,7 +115,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
     <Page width="full">
       <header className="mb-6 flex items-start justify-between gap-6 max-[600px]:flex-col max-[600px]:gap-4">
         <div>
-          <h1 className="text-balance font-display text-[clamp(2rem,4vw,2.75rem)] leading-[1.05] font-bold max-[600px]:text-[1.65rem]">{greeting}, Danu.</h1>
+          <h1 className="text-balance font-display text-[clamp(2rem,4vw,2.75rem)] leading-[1.05] font-bold max-[600px]:text-[1.65rem]">{greeting}{ownerData?.ownerName ? `, ${ownerData.ownerName}` : ''}.</h1>
           <p className="mt-2 text-pretty text-secondary-foreground max-[600px]:text-[0.72rem]">{summary}</p>
         </div>
         <div className="grid flex-none justify-items-end gap-3 max-[600px]:justify-items-start">
