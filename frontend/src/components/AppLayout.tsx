@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, BarChart3, Bot, Box, CalendarDays, ChevronLeft, ChevronRight, History, Home as HomeIcon, LayoutDashboard, ListChecks, MessagesSquare, MoreHorizontal, Settings as SettingsIcon, Clapperboard, Server, Stethoscope } from 'lucide-react';
+import { Activity, BarChart3, Bot, Box, Bug, CalendarDays, ChevronLeft, ChevronRight, History, Home as HomeIcon, LayoutDashboard, ListChecks, MessagesSquare, MoreHorizontal, Settings as SettingsIcon, Clapperboard, Server, Stethoscope } from 'lucide-react';
 import { useQuery } from '@apollo/client';
 import { GET_DISCORD_THREADS, GET_NEEDS_ATTENTION, GET_OWNER_QUESTIONS } from '../graphql/queries';
 import { ticketAttention, ticketQuestions } from '../lib/attention';
@@ -11,6 +11,8 @@ import { cn } from '../lib/cn';
 import { PHONE_PRIMARY_PATHS, phoneMore } from '../lib/phoneNavigation';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 import { ChatDock } from '../chat/ChatDock';
+import { ReportDockIssue } from './ReportDockIssue';
+import { IconButton } from './ui';
 import { hasPage, showsChatDock, useDockMode } from '../lib/dockMode';
 import { version as appVersion } from '../../package.json';
 
@@ -30,6 +32,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
   const attentionCount = ticketAttention([...(data?.needsAttention ?? []), ...discordAttention(discordData?.discordThreads?.rows ?? [])], ticketQuestions(questionsData?.orchestrations ?? [])).length;
   const [moreOpen, setMoreOpen] = useState(false);
   const [updateOffered, setUpdateOffered] = useState(false);
+  const [reporting, setReporting] = useState(false);
 
   // A phone keeps the app alive in the background for days, so a deploy is looked for each time it comes back.
   useEffect(() => {
@@ -64,6 +67,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
     { path: '/machines', label: 'Health', icon: Stethoscope, badge: 0 },
     { path: '/decisions', label: 'Decisions', icon: ListChecks, badge: decisionCount },
     { path: '/discord', label: 'Discord', icon: MessagesSquare, badge: discordCount },
+    { path: '/issues', label: 'DOCK Issues', icon: Bug, badge: 0 },
     { path: '/settings', label: 'System Settings', icon: SettingsIcon, badge: 0 },
   ].filter((item) => hasPage(mode, item.path));
 
@@ -178,6 +182,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
             {more.badge > 0 && <span className="absolute right-1 top-0 min-w-[18px] rounded-pill bg-status-conflict px-[5px] py-px text-center font-mono text-[0.6rem] font-extrabold text-black tabular-nums">{more.badge}</span>}
           </button>
         </nav>
+        <IconButton variant="ghost" className="hidden size-8 min-[761px]:inline-flex" aria-label="Report bug" title="Report bug" onClick={() => setReporting(true)}><Bug size={16} aria-hidden="true" /></IconButton>
         <span className={cn(
           'hidden whitespace-nowrap font-mono text-[0.67rem] font-bold text-muted-foreground min-[761px]:block',
           isSidebar ? 'min-[761px]:w-full min-[761px]:border-t min-[761px]:border-border min-[761px]:px-2 min-[761px]:pt-[13px] min-[761px]:pb-0.5 min-[761px]:text-center' : 'min-[761px]:border-l min-[761px]:border-border min-[761px]:pl-2',
@@ -231,6 +236,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
         )}
         {children}
       </main>
+      <ReportDockIssue open={reporting} onClose={() => setReporting(false)} onNavigate={onNavigate} />
       {showsChatDock(mode, currentPath) && <ChatDock inset={chatInset} />}
     </div>
   );

@@ -30,6 +30,7 @@ import { agentBridge } from '../integrations/agents-live';
 import type { AnswerInput } from '../integrations/chat-interactions';
 import { SprintBusyError, SprintInputError, sprintDashboardService } from '../integrations/sprint-dashboard';
 import { dockMode, ownRuns } from '../mode';
+import { buildIssueBody, currentBuild, dockIssueError, draftUrl, issueEnvironment, issueTitle, issuesRepo, reporterName, type IssueDraft } from '../integrations/dock-issues';
 
 const jiraAPI = new JiraAPI();
 const githubAPI = new GitHubAPI();
@@ -156,7 +157,11 @@ export const resolvers = {
     },
     // Public: the page needs it before the PIN to know which navigation to draw.
     dockMode: () => dockMode(),
-    ownerName: () => process.env.GIT_AUTHOR_NAME?.trim() || process.env.CODER_WORKSPACE_OWNER_NAME?.trim() || 'Danu',
+    dockBuild: () => currentBuild() ?? 'unknown',
+    dockIssues: async (_: unknown, { filter }: { filter: 'OPEN' | 'CLOSED' | 'MINE' }) => githubAPI.listDockIssues(filter),
+    dockIssue: async (_: unknown, { number }: { number: number }) => githubAPI.getDockIssue(number),
+    dockIssueDraftUrl: (_: unknown, draft: IssueDraft) => draftUrl(issuesRepo(), draft, issueEnvironment(draft.page)),
+    ownerName: () => reporterName(),
     dashboard: async () => {
       // Scatter-gather parallel fetching
       const [tickets] = await Promise.all([
@@ -668,6 +673,13 @@ export const resolvers = {
       return true;
     },
     sendTestPush: async () => pushService.send({ title: 'DOCK', body: 'Notifications work on this device.', url: '/' }),
+    reportDockIssue: async (_: unknown, draft: IssueDraft) => {
+      const title = issueTitle(draft.title);
+      if (!title || !draft.happened.trim()) throw new GraphQLError('Title and what happened are required', { extensions: { code: 'BAD_USER_INPUT' } });
+      return githubAPI.createDockIssue(title, buildIssueBody(draft, issueEnvironment(draft.page))).catch((error: any) => {
+        throw dockIssueError(error);
+      });
+    },
   },
   ChatSession: {
     pending: async (session: { id: string; status: string; machine: string }) => chatService.pending(session.id, session.status, session.machine),
@@ -684,6 +696,7 @@ export const protectedQueries = [
   'chatSessions', 'chatSession', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'agentLooks', 'libraryAgents', 'libraryAgent',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
+  'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl',
 ] as const;
 export const protectedMutations = [
   'saveDemoLink',
@@ -754,6 +767,7 @@ export const protectedMutations = [
   'subscribePush',
   'unsubscribePush',
   'sendTestPush',
+  'reportDockIssue',
 ] as const;
 
 for (const field of protectedQueries) {

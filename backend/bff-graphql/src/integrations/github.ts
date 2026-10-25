@@ -166,6 +166,27 @@ export class GitHubClient {
     return true;
   }
 
+  /** Issues of a repository, pull requests left out; `creator` narrows to one author. */
+  async listIssues(repo: string, state: 'open' | 'closed' | 'all', creator?: string): Promise<any[]> {
+    const response = await this.client.get(`/repos/${repo}/issues`, {
+      params: { state, per_page: 100, sort: 'updated', direction: 'desc', ...(creator ? { creator } : {}) },
+    });
+    return (Array.isArray(response.data) ? response.data : []).filter((item: any) => !item.pull_request);
+  }
+
+  async getIssue(repo: string, number: number): Promise<{ issue: any; comments: any[] }> {
+    const [issue, comments] = await Promise.all([
+      this.client.get(`/repos/${repo}/issues/${number}`),
+      this.client.get(`/repos/${repo}/issues/${number}/comments`, { params: { per_page: 100 } }),
+    ]);
+    return { issue: issue.data, comments: Array.isArray(comments.data) ? comments.data : [] };
+  }
+
+  async createIssue(repo: string, title: string, body: string): Promise<{ number: number; html_url: string }> {
+    const response = await this.client.post(`/repos/${repo}/issues`, { title, body });
+    return response.data;
+  }
+
   async validateCredentials() {
     const response = await this.client.get('/user');
     return response.data;

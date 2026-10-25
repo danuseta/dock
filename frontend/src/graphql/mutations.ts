@@ -512,3 +512,12 @@ export const REMOVE_DISCORD_CHANNEL = gql`
   }
   ${DISCORD_THREAD_FIELDS}
 `;
+
+export const REPORT_DOCK_ISSUE = gql`
+  mutation ReportDockIssue($title: String!, $happened: String!, $steps: String, $expected: String, $imageLinks: [String!], $page: String!) {
+    reportDockIssue(title: $title, happened: $happened, steps: $steps, expected: $expected, imageLinks: $imageLinks, page: $page) {
+      number
+      url
+    }
+  }
+`;

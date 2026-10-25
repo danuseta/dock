@@ -6,6 +6,7 @@ import { cn } from '../lib/cn';
 interface ToastProps {
   message: string;
   type: 'success' | 'error' | 'info';
+  link?: { href: string; label: string };
   onClose: () => void;
 }
 
@@ -15,7 +16,7 @@ const toastStyles = {
   info: { Icon: Info, container: 'border-accent', icon: 'text-accent' },
 } as const;
 
-export const Toast: React.FC<ToastProps> = ({ message, type, onClose }) => {
+export const Toast: React.FC<ToastProps> = ({ message, type, link, onClose }) => {
   useEffect(() => {
     const timer = setTimeout(onClose, 4000);
     return () => clearTimeout(timer);
@@ -34,6 +35,7 @@ export const Toast: React.FC<ToastProps> = ({ message, type, onClose }) => {
     >
       <IconComponent className={style.icon} size={18} aria-hidden="true" />
       <span className="text-pretty">{message}</span>
+      {link && <a href={link.href} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2">{link.label}</a>}
       <IconButton variant="ghost" className="ml-2 size-8" onClick={onClose} aria-label="Dismiss notification">
         <X size={14} aria-hidden="true" />
       </IconButton>

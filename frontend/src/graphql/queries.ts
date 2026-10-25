@@ -1060,3 +1060,34 @@ export const GET_DISCORD_THREADS = gql`
   }
   ${DISCORD_THREAD_FIELDS}
 `;
+
+export const GET_DOCK_BUILD = gql`
+  query GetDockBuild {
+    dockBuild
+  }
+`;
+
+export const GET_DOCK_ISSUES = gql`
+  query GetDockIssues($filter: DockIssueFilter!) {
+    dockIssues(filter: $filter) {
+      tokenMissing
+      viewer
+      issues { number title state author { login avatarUrl } createdAt updatedAt comments url }
+    }
+  }
+`;
+
+export const GET_DOCK_ISSUE = gql`
+  query GetDockIssue($number: Int!) {
+    dockIssue(number: $number) {
+      number title state author { login avatarUrl } createdAt updatedAt comments url body
+      commentList { id author { login avatarUrl } createdAt body }
+    }
+  }
+`;
+
+export const GET_DOCK_ISSUE_DRAFT_URL = gql`
+  query GetDockIssueDraftUrl($title: String!, $happened: String!, $steps: String, $expected: String, $imageLinks: [String!], $page: String!) {
+    dockIssueDraftUrl(title: $title, happened: $happened, steps: $steps, expected: $expected, imageLinks: $imageLinks, page: $page)
+  }
+`;

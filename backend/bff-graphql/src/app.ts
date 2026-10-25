@@ -19,6 +19,7 @@ import { createChatAttachmentRouter } from './routes/chat-attachments';
 import { createDemoVideoRouter } from './routes/demo-videos';
 import { createOrchestratorApiRouter, createOrchestratorIngestRouter } from './routes/orchestrator';
 import { dockMode } from './mode';
+import { buildOf } from './integrations/dock-issues';
 
 export interface CreateAppOptions {
   corsOrigin?: string;
@@ -35,8 +36,7 @@ function defaultFrontendDistPath(): string {
   return path.resolve(__dirname, '../../../frontend/dist');
 }
 
-/** The build a page belongs to: the hashed name of its entry script, the same value the running page reads from its own script tag. */
-export const buildOf = (indexHtml: string): string | null => indexHtml.match(/\/assets\/index-[\w-]+\.js/)?.[0] ?? null;
+export { buildOf };
 
 export async function createApp(options: CreateAppOptions = {}): Promise<JidisApp> {
   const app = express();
