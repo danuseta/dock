@@ -251,6 +251,12 @@ export const GET_OWNER_QUESTIONS = gql`
   }
 `;
 
+export const GET_OWNER_NAME = gql`
+  query GetOwnerName {
+    ownerName
+  }
+`;
+
 export const GET_SETTINGS = gql`
   query GetSettings {
     settings {

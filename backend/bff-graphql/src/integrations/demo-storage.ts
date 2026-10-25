@@ -13,11 +13,11 @@ export interface DemoStorageView { configured: boolean; endpoint: string; region
 export type DemoStorageInput = Partial<DemoStorageConfig>;
 
 export const DEMO_STORAGE_DEFAULTS: DemoStorageConfig = {
-  endpoint: 'https://kencana.basic.box.cloudeka.id',
-  region: 'kencana',
-  bucket: 'porto-rzwbgw',
-  folder: 'demo-qonflo',
-  publicBaseUrl: 'https://www.danuseta.my.id/assets',
+  endpoint: '',
+  region: '',
+  bucket: '',
+  folder: '',
+  publicBaseUrl: '',
   accessKey: '',
   secretKey: '',
 };

@@ -17,6 +17,14 @@ test('Home shows service health only where the Monitoring page exists', () => {
   assert.match(home, /services healthy/);
 });
 
+test('the Home greeting names the owner from the ownerName query and shows no name before it loads', () => {
+  const home = read('pages/HomePage.tsx');
+  assert.match(home, /useQuery\(GET_OWNER_NAME, CACHED_QUERY_OPTIONS\)/);
+  assert.match(home, /\{greeting\}\{ownerData\?\.ownerName \? `, \$\{ownerData\.ownerName\}` : ''\}\./);
+  assert.doesNotMatch(home, /'Danu'/);
+  assert.match(read('graphql/queries.ts'), /query GetOwnerName \{\s*ownerName\s*\}/);
+});
+
 test('Home keeps three blocks: the header with quick links, Needs you, and My tickets with each agent', () => {
   const home = read('pages/HomePage.tsx');
   assert.doesNotMatch(home, /GoogleSearch/);

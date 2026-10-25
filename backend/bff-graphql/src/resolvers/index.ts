@@ -156,6 +156,7 @@ export const resolvers = {
     },
     // Public: the page needs it before the PIN to know which navigation to draw.
     dockMode: () => dockMode(),
+    ownerName: () => process.env.GIT_AUTHOR_NAME?.trim() || process.env.CODER_WORKSPACE_OWNER_NAME?.trim() || 'Danu',
     dashboard: async () => {
       // Scatter-gather parallel fetching
       const [tickets] = await Promise.all([
@@ -682,7 +683,7 @@ export const protectedQueries = [
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'agentLooks', 'libraryAgents', 'libraryAgent',
-  'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey',
+  'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
 ] as const;
 export const protectedMutations = [
   'saveDemoLink',
