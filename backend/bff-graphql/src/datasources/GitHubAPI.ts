@@ -1,6 +1,7 @@
 import { StorageAPI } from './StorageAPI';
 import { GitHubClient, GitHubService, SearchPRsOptions } from '../integrations/github';
 import type { PullRequestProblem } from '../integrations/attention';
+import { dockIssueError, issuesRepo, toDockIssue } from '../integrations/dock-issues';
 
 const PROBLEM_LABEL: Record<PullRequestProblem, string> = { CONFLICT: 'Merge conflict', PR_CHANGES_REQUESTED: 'Changes requested', PR_CHECKS_FAILING: 'Checks failing' };
 
@@ -122,6 +123,50 @@ export class GitHubAPI {
     const auth = await this.getAuth();
     if (!auth.hasToken) throw new Error('GitHub token is not configured in Settings');
     return new GitHubClient(auth.headers.Authorization.replace('Bearer ', '')).markReadyForReview(owner, repo, pullNumber);
+  }
+
+  /** DOCK issues of the repo; without a token it answers `tokenMissing` and never calls GitHub. */
+  async listDockIssues(filter: 'OPEN' | 'CLOSED' | 'MINE') {
+    const auth = await this.getAuth();
+    if (!auth.hasToken) return { tokenMissing: true, viewer: null, issues: [] };
+    const client = new GitHubClient(auth.headers.Authorization.replace('Bearer ', ''));
+    const repo = issuesRepo();
+    try {
+      const viewer: string | null = filter === 'MINE' ? ((await client.validateCredentials()).login ?? null) : null;
+      if (filter === 'MINE' && !viewer) return { tokenMissing: false, viewer: null, issues: [] };
+      const items = filter === 'MINE' ? await client.listIssues(repo, 'all', viewer ?? undefined) : await client.listIssues(repo, filter === 'OPEN' ? 'open' : 'closed');
+      return { tokenMissing: false, viewer, issues: items.map(toDockIssue) };
+    } catch (error) {
+      throw dockIssueError(error);
+    }
+  }
+
+  async getDockIssue(number: number) {
+    const auth = await this.getAuth();
+    if (!auth.hasToken) return null;
+    const found = await new GitHubClient(auth.headers.Authorization.replace('Bearer ', '')).getIssue(issuesRepo(), number).catch((error: any) => {
+      if (error.response?.status === 404) return null;
+      throw dockIssueError(error);
+    });
+    if (!found || found.issue.pull_request) return null;
+    const { issue, comments } = found;
+    return {
+      ...toDockIssue(issue),
+      commentList: comments.map((comment: any) => ({
+        id: String(comment.id),
+        author: { login: comment.user?.login ?? 'ghost', avatarUrl: comment.user?.avatar_url ?? '' },
+        createdAt: comment.created_at,
+        body: comment.body ?? '',
+      })),
+    };
+  }
+
+  /** Opens an issue; throws when there is no token or GitHub refuses. */
+  async createDockIssue(title: string, body: string) {
+    const auth = await this.getAuth();
+    if (!auth.hasToken) throw new Error('GitHub token is not configured in Settings');
+    const created = await new GitHubClient(auth.headers.Authorization.replace('Bearer ', '')).createIssue(issuesRepo(), title, body);
+    return { number: created.number, url: created.html_url };
   }
 
   async getNeedsAttention() {

@@ -396,6 +396,18 @@ test('the reviewers a pull request asks for come from its first message, then it
   assert.strictEqual(slotsOf(first('@ITteam -1 feat(QRD-1234): x'), RINA.id, ['-2']), 1);
   assert.strictEqual(slotsOf(first('feat(QRD-1234): x'), RINA.id, ['High', '-1']), 1);
   assert.strictEqual(slotsOf(first('feat(QRD-1234): x - 2 files'), RINA.id, []), 2);
+  const opening = [toMessage(msg(RINA, '[BUGFIX] review QRD-1418 please'), ME), toMessage(msg(RINA, '@ITteam -1'), ME), toMessage(msg(HAMZAH, 'on it'), ME)];
+  assert.strictEqual(slotsOf(opening, RINA.id, []), 1, 'a -1 in a second opening message by the poster counts');
+  const later = [toMessage(msg(RINA, 'feat(QRD-1336): x'), ME), toMessage(msg(HAMZAH, 'LGTM'), ME), toMessage(msg(RINA, '-1 guys'), ME)];
+  assert.strictEqual(slotsOf(later, RINA.id, ['-2']), 2, 'a -1 written after a reviewer replied does not change the ask');
+  const followUp = [toMessage(msg(RINA, '@ITteam -2 feat(QRD-1234): x'), ME), toMessage(msg(HAMZAH, 'on it'), ME), toMessage(msg(RINA, '@ITteam -1'), ME)];
+  assert.strictEqual(slotsOf(followUp, RINA.id, []), 2, 'the first -N the poster wrote stays when a follow-up says -1');
+  const askedLate = [toMessage(msg(RINA, 'feat(QRD-1234): x'), ME), toMessage(msg(HAMZAH, 'which repo?'), ME), toMessage(msg(RINA, '@ITteam -1'), ME), toMessage(msg(RINA, '@ITteam -2'), ME)];
+  assert.strictEqual(slotsOf(askedLate, RINA.id, []), 1, 'with no opening -N and no tag, the first -N the poster wrote counts');
+  const BOT = user('103', 'sous-rina');
+  const botPost = [msg(BOT, 'Jira: QRD-1460, review please'), toRole(RINA, '-1 <@&r7>'), msg(HAMZAH, 'on it buat besok')];
+  assert.strictEqual(slotsOf(botPost.map((message) => toMessage(message, ME, SERVER)), BOT.id, []), 1, 'a bot posted the thread and a person asked the role with -1');
+  assert.strictEqual(sorted('pr', botPost, BOT.id, false, false, [], 1).state, 'NOT_YOURS', 'the one slot is taken');
   const row = buildRow({ id: 'fp', name: 'pull-request', kind: 'pr', thread: false, enabled: true }, 'g1', { id: '1298000000000000009', parent_id: 'fp', name: 'PR', owner_id: RINA.id }, new Map(), [msg({ ...RINA, avatar: 'a1' }, '-1 please'), msg(HAMZAH, 'on it')], ME);
   assert.deepStrictEqual([row.slots, row.createdByAvatar], [1, `https://cdn.discordapp.com/avatars/${RINA.id}/a1.png?size=64`], 'the avatar is the poster, not the last writer');
 });

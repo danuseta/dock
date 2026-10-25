@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import crypto from 'node:crypto';
 import { decrypt, encrypt, hashPin, verifyPin } from '../storage/crypto';
 
@@ -21,6 +21,27 @@ test('SQLite storage encrypts secrets and uses salted PIN hashes', () => {
     const legacy = crypto.createHash('sha256').update('889900jidis-pin-salt').digest('hex');
     assert.strictEqual(verifyPin('889900', legacy), true);
   } finally {
+    if (previousKey === undefined) delete process.env.ENCRYPTION_KEY;
+    else process.env.ENCRYPTION_KEY = previousKey;
+  }
+});
+
+test('the encryption key is derived once per ENCRYPTION_KEY, not on every encrypt and decrypt', () => {
+  const previousKey = process.env.ENCRYPTION_KEY;
+  const scrypt = mock.method(crypto, 'scryptSync');
+
+  try {
+    process.env.ENCRYPTION_KEY = 'derive-once-key-a';
+    const values = Array.from({ length: 5 }, (_, index) => encrypt(`secret-${index}`));
+    values.forEach((value, index) => assert.strictEqual(decrypt(value), `secret-${index}`));
+    assert.strictEqual(scrypt.mock.callCount(), 1);
+
+    process.env.ENCRYPTION_KEY = 'derive-once-key-b';
+    assert.strictEqual(decrypt(encrypt('other')), 'other');
+    assert.strictEqual(scrypt.mock.callCount(), 2);
+    assert.throws(() => decrypt(values[0]));
+  } finally {
+    scrypt.mock.restore();
     if (previousKey === undefined) delete process.env.ENCRYPTION_KEY;
     else process.env.ENCRYPTION_KEY = previousKey;
   }

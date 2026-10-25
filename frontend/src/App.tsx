@@ -8,6 +8,7 @@ import DashboardPage from './pages/DashboardPage';
 import TicketDetailPage from './pages/TicketDetailPage';
 import DecisionsPage from './pages/DecisionsPage';
 import DiscordPage from './pages/DiscordPage';
+import DockIssuesPage from './pages/DockIssuesPage';
 import SettingsPage from './pages/SettingsPage';
 import HomePage from './pages/HomePage';
 import CalendarPage from './pages/CalendarPage';
@@ -56,7 +57,7 @@ function App() {
       const key = decodeURIComponent(path.split('/').pop() || '');
       return { path: '/ticket', key: key || null };
     }
-    if (path === '/dashboard' || path === '/agents' || path === '/sessions' || path === '/calendar' || path === '/sprint' || path === '/monitoring' || path === '/docker' || path === '/demo-videos' || path === '/dev-servers' || path === '/machines' || path === '/decisions' || path === '/discord' || path === '/settings') {
+    if (path === '/dashboard' || path === '/agents' || path === '/sessions' || path === '/calendar' || path === '/sprint' || path === '/monitoring' || path === '/docker' || path === '/demo-videos' || path === '/dev-servers' || path === '/machines' || path === '/decisions' || path === '/discord' || path === '/issues' || path === '/settings') {
       return { path, key: null };
     }
     return { path: '/', key: null };
@@ -134,6 +135,7 @@ function App() {
       case '/machines': return <HealthPage />;
       case '/decisions': return <DecisionsPage />;
       case '/discord': return <DiscordPage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;
+      case '/issues': return <DockIssuesPage onNavigate={handleNavigate} />;
       case '/settings': return <SettingsPage />;
       case '/ticket': return selectedTicketKey ? <TicketDetailPage ticketKey={selectedTicketKey} onBack={() => handleNavigate('/dashboard')} onNavigate={handleNavigate} /> : <DashboardPage onTicketClick={navigateToTicket} />;
       default: return <HomePage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;

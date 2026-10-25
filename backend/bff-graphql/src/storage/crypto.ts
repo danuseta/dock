@@ -2,10 +2,13 @@ import crypto from 'node:crypto';
 
 const ALGORITHM = 'aes-256-gcm';
 
+let derived: { secret: string; key: Buffer } | null = null;
+
 function encryptionKey(): Buffer {
   const secret = process.env.ENCRYPTION_KEY;
   if (!secret) throw new Error('ENCRYPTION_KEY is required');
-  return crypto.scryptSync(secret, 'jidis-salt', 32);
+  if (derived?.secret !== secret) derived = { secret, key: crypto.scryptSync(secret, 'jidis-salt', 32) };
+  return derived.key;
 }
 
 export function encrypt(text: string): string {
