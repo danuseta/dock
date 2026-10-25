@@ -1,6 +1,8 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { chooseModel, EMPTY_OPTIONS } from '../chat/composer/composerLogic';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { chooseModel, EMPTY_OPTIONS, MODE_LABELS, PERMISSION_MODES } from '../chat/composer/composerLogic';
 import { choiceToSave, defaultsToSave, changedFiles, dotState, filesTotal, popoverRows, stageLabel } from '../chat/headerState';
 import type { SessionMachineOptions } from '../chat/sessionOptions';
 import type { ChatActivity } from '../chat/activity/activity';
@@ -10,7 +12,7 @@ const machine: SessionMachineOptions = {
     { value: 'opus', label: 'Opus 4.7', efforts: ['low', 'high', 'max'], fast: true },
     { value: 'haiku', label: 'Haiku 4.5', efforts: ['low'], fast: false },
   ],
-  modes: ['plan', 'auto', 'acceptEdits'],
+  modes: ['plan', 'auto', 'acceptEdits', 'bypassPermissions'],
   fastAvailable: true,
   defaults: { model: 'opus', effort: 'high', permissionMode: 'auto' },
 };
@@ -41,7 +43,7 @@ test('the popover marks the values that equal the defaults', () => {
   assert.deepStrictEqual(marked('model'), ['opus']);
   assert.deepStrictEqual(marked('effort'), ['high']);
   assert.deepStrictEqual(marked('permissionMode'), ['auto']);
-  assert.deepStrictEqual(rows.find((row) => row.field === 'permissionMode')?.options.map((option) => option.label), ['Auto', 'Plan', 'Accept edits']);
+  assert.deepStrictEqual(rows.find((row) => row.field === 'permissionMode')?.options.map((option) => option.label), ['Auto', 'Plan', 'Accept edits', 'Bypass permissions']);
   assert.ok(rows.every((row) => row.isDefault));
 });
 
@@ -71,3 +73,11 @@ const row = (eventId: string, parentId: string | null, kind: string, turnId = 1)
   id: Number(eventId.slice(1)), sessionId: 's', turnId, eventId, parentId, kind, agent: '', name: kind === 'agent' ? 'executor' : 'Read', label: eventId, summary: '', status: 'ok', hasDetail: false, seq: 1, startedAt: '2026-10-19T10:00:00.000Z', endedAt: null,
 });
 
+
+test('the chat offers exactly four modes in order, and a red Bypass badge marks bypassPermissions', () => {
+  assert.deepStrictEqual(PERMISSION_MODES, ['auto', 'plan', 'acceptEdits', 'bypassPermissions']);
+  assert.deepStrictEqual(PERMISSION_MODES.map((mode) => MODE_LABELS[mode]), ['Auto', 'Plan', 'Accept edits', 'Bypass permissions']);
+  const popover = readFileSync(fileURLToPath(new URL('../chat/ModelPopover.tsx', import.meta.url)), 'utf8');
+  assert.match(popover, /=== 'bypassPermissions'/);
+  assert.match(popover, /\{bypass && <span[^>]*text-status-conflict[^>]*>Bypass<\/span>\}/);
+});

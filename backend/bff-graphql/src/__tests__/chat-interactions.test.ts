@@ -270,7 +270,7 @@ test('the bridge capabilities are parsed, capped and ignored when they are not v
   const caps = parseCaps({ ...CAPS, kit: 'k'.repeat(60), features: ['stop', 'stop', 'teleport', 'fast'], modes: ['plan', 'bypassPermissions', 'auto', 'dontAsk', 'default'], catalogHash: 'not a hash!' });
   assert.deepStrictEqual(
     [caps?.kit.length, caps?.features, caps?.modes, caps?.catalogHash],
-    [40, ['stop', 'fast'], ['plan', 'auto', 'default'], null],
+    [40, ['stop', 'fast'], ['plan', 'bypassPermissions', 'auto', 'default'], null],
   );
   assert.strictEqual(parseCaps({ ...CAPS, features: Array.from({ length: 40 }, () => 'stop') })?.features.length, 1);
 });
@@ -367,7 +367,7 @@ test('turn options are parsed and checked against the machine capabilities and c
   assert.strictEqual(parseTurnOptions(null), null);
   assert.strictEqual(parseTurnOptions({ model: '', effort: null }), null);
   assert.throws(() => parseTurnOptions({ model: '--dangerously-skip-permissions' }), OrchestratorInputError);
-  assert.throws(() => parseTurnOptions({ permissionMode: 'bypassPermissions' }), OrchestratorInputError);
+  assert.throws(() => parseTurnOptions({ permissionMode: 'dontAsk' }), OrchestratorInputError);
   assert.throws(() => parseTurnOptions({ fast: 'yes' }), OrchestratorInputError);
 
   const ctx = setup();
@@ -1720,6 +1720,8 @@ test('the claim and the bridge settings carry the saved turn count, and leave it
 test('a chat reads the old default mode as Auto, and only the cron keeps it', async () => {
   assert.strictEqual(chatMode('default'), 'auto');
   assert.strictEqual(chatMode('plan'), 'plan');
+  assert.strictEqual(chatMode('bypassPermissions'), 'bypassPermissions');
+  assert.strictEqual(parseTurnOptions({ permissionMode: 'bypassPermissions' })?.permissionMode, 'bypassPermissions');
   assert.strictEqual(chatMode(null), null);
   assert.deepStrictEqual(chatOptions({ model: null, effort: 'high', permissionMode: 'default', fast: null }), { model: null, effort: 'high', permissionMode: 'auto', fast: null });
   assert.strictEqual(chatOptions(null), null);
