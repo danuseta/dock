@@ -45,3 +45,17 @@ export function formatTokens(value: number): string {
 }
 
 export const formatCost = (value: number) => `$${value.toFixed(2)}`;
+
+/** Every day from `from` to `to`, with zero for a day ccusage did not report, so the chart keeps a true time axis. */
+export function fillDays(from: string, to: string, days: ClaudeUsageDay[]): ClaudeUsageDay[] {
+  const byDate = new Map(days.map((day) => [day.date, day]));
+  const start = Date.parse(`${from}T00:00:00Z`);
+  const end = Date.parse(`${to}T00:00:00Z`);
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return days;
+  const filled: ClaudeUsageDay[] = [];
+  for (let at = start; at <= end; at += 86_400_000) {
+    const date = new Date(at).toISOString().slice(0, 10);
+    filled.push(byDate.get(date) ?? { date, totalTokens: 0, cost: 0 });
+  }
+  return filled;
+}

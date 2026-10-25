@@ -92,7 +92,7 @@ export class ClaudeUsageService {
     if (hit && this.now() - hit.at < CACHE_TTL_MS) return hit.value;
     const value = await this.read(from, to);
     for (const [saved, entry] of this.cache) if (this.now() - entry.at >= CACHE_TTL_MS) this.cache.delete(saved);
-    this.cache.set(key, { at: this.now(), value });
+    if (value.available) this.cache.set(key, { at: this.now(), value });
     return value;
   }
 
