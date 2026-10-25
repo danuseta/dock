@@ -1,0 +1,6 @@
+Interface Sounds by Kenney (kenney.nl)
+Source: https://github.com/Calinou/kenney-interface-sounds (addons/kenney_interface_sounds/)
+License: Creative Commons Zero (CC0 1.0 Universal), https://creativecommons.org/publicdomain/zero/1.0/
+Attribution is not required.
+
+Files: confirmation_001, confirmation_002, confirmation_003, glass_001, glass_003, bong_001, drop_002, maximize_004, open_001, pluck_001 (.wav)

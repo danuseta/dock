@@ -48,7 +48,7 @@ test('push is offered where the browser has it; an iPhone in Safari is told to i
 });
 
 // Runs public/sw.js in a bare scope with stand-ins for the worker globals.
-function worker(network: (url: string) => Response | null) {
+function worker(network: (url: string) => Response | null, windows: Array<{ visibilityState: string; postMessage: (message: unknown) => void }> = []) {
   const handlers = new Map<string, (event: any) => void>();
   const saved = new Map<string, Response>();
   const shown: Array<{ title: string; options: any }> = [];
@@ -62,7 +62,7 @@ function worker(network: (url: string) => Response | null) {
       location: { origin: 'https://dock.test' },
       addEventListener: (name: string, handler: (event: any) => void) => { handlers.set(name, handler); },
       skipWaiting: async () => undefined,
-      clients: { claim: async () => undefined, matchAll: async () => [], openWindow: async (url: string) => { opened.push(url); } },
+      clients: { claim: async () => undefined, matchAll: async () => windows, openWindow: async (url: string) => { opened.push(url); } },
       registration: { showNotification: async (title: string, options: any) => { shown.push({ title, options }); } },
     },
     caches: { open: async () => cache, keys: async () => [], delete: async () => true, match: async (key: string | Request) => saved.get(keyOf(key))?.clone() },
@@ -109,6 +109,18 @@ test('a push becomes a notification, and tapping it opens the page it names', as
   assert.deepStrictEqual(JSON.parse(JSON.stringify(sw.shown)), [{ title: 'QRD-7 waits on you', options: { body: 'Which endpoint?', icon: '/icon-192.png', data: { url: '/agents' } } }]);
   await sw.run('notificationclick', { notification: { close: () => undefined, data: { url: '/agents' } } });
   assert.deepStrictEqual(sw.opened, ['/agents']);
+});
+
+test('a push shows no notification while a page is in view; the page is told which event it was', async () => {
+  const told: unknown[] = [];
+  const view = { visibilityState: 'visible', postMessage: (message: unknown) => { told.push(message); } };
+  const sw = worker(() => null, [{ visibilityState: 'hidden', postMessage: (message: unknown) => { told.push(message); } }, view]);
+  await sw.run('push', { data: { json: () => ({ title: 'QRD-7 waits on you', body: 'Keep it?', url: '/detail/QRD-7', data: { event: 'needsYou' } }) } });
+  assert.deepStrictEqual(sw.shown, []);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(told)), [{ type: 'dock-push', event: 'needsYou' }, { type: 'dock-push', event: 'needsYou' }]);
+  const hidden = worker(() => null, [{ visibilityState: 'hidden', postMessage: () => undefined }]);
+  await hidden.run('push', { data: { json: () => ({ title: 'a', body: 'b', url: '/' }) } });
+  assert.strictEqual(hidden.shown.length, 1, 'a page out of view does not stand in for the notification');
 });
 
 test('a notification button answers DOCK, and the page opens when DOCK refuses', async () => {

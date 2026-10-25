@@ -457,6 +457,8 @@ export class ChatService {
   cronTurn: (ticketKey: string, stalledDetail: string | null, ended: boolean) => Promise<unknown> = async () => undefined;
   /** Hears of every new request in a turn, for the phone notification. It must not throw. */
   onAsk: (ask: { sessionId: string; sessionTitle: string; id: number; kind: string; title: string; tool: string | null; summary: string | null }) => void = () => undefined;
+  /** Hears of every turn that ends on its own, for the phone notification. It must not throw. */
+  onTurnDone: (turn: { sessionId: string; sessionTitle: string }) => void = () => undefined;
   /** Agent file jobs waiting for a machine's bridge, handed out once on a claim. Wired by the agents bridge like cronLimit. */
   agentJobs: (machine: string) => Array<{ id: string; op: string; input: unknown }> = () => [];
 
@@ -747,6 +749,12 @@ export class ChatService {
     }
     await this.failStale();
     return this.present(await this.storage.getChatSessions(source, limit(limitInput, SESSIONS_LIMIT), machine));
+  }
+
+  /** Just what a notification needs to tell a turn ended: no stale sweep, no last text, no waits. */
+  async sessionStates(limitInput?: number | null, machine: string | null = null) {
+    const rows = await this.storage.getChatSessions(null, limit(limitInput, SESSIONS_LIMIT), machine);
+    return rows.map((row) => ({ id: row.id, title: row.title, status: row.status, statusDetail: row.statusDetail, origin: row.origin ?? 'manual', ticketKey: row.ticketKey }));
   }
 
   async session(id: string, machine: string | null = null) {
@@ -1434,6 +1442,7 @@ export class ChatService {
         const detail = running > 0 ? `Lead ended its turn while ${running} ${running === 1 ? 'subagent was' : 'subagents were'} still running` : null;
         await this.cronTurn(session.ticketKey, detail, true).catch(() => undefined);
       }
+      if (ended && !delta.error && !delta.stopped && session.origin !== 'cron') this.onTurnDone({ sessionId: session.id, sessionTitle: session.title });
       return { id: updated.id, status: updated.status, messageCount };
     } finally {
       if (ended) await this.closeActivity(session.id, replyTo.id);

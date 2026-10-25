@@ -38,12 +38,17 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(caches.match(request).then((saved) => saved || fetch(request).then((response) => keep(request, response))));
 });
 
+// A page that is in view plays the sound for the event itself; showing a notification as well would be a second one.
 self.addEventListener('push', (event) => {
   const message = event.data.json();
   const options = { body: message.body, icon: '/icon-192.png', data: { ...(message.data || {}), url: message.url } };
   if (message.tag) options.tag = message.tag;
   if (Array.isArray(message.actions) && message.actions.length > 0) options.actions = message.actions.slice(0, 2);
-  event.waitUntil(self.registration.showNotification(message.title, options));
+  event.waitUntil(self.clients.matchAll({ type: 'window' }).then((windows) => {
+    if (!windows.some((page) => page.visibilityState === 'visible')) return self.registration.showNotification(message.title, options);
+    windows.forEach((page) => page.postMessage({ type: 'dock-push', event: (message.data || {}).event }));
+    return undefined;
+  }));
 });
 
 const ANSWER_TICKET = 'mutation AnswerTicket($ticketKey: String!, $text: String!) { answerTicket(ticketKey: $ticketKey, text: $text) }';

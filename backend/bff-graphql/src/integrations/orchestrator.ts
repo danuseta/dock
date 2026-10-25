@@ -676,6 +676,9 @@ function defaultTranscriptDirectory(): string {
 }
 
 export class OrchestratorService {
+  /** Told when a run's ledger reaches the done stage, for the phone notification. It must not throw. */
+  onFinished: (run: { key: string; title: string }) => void = () => undefined;
+
   constructor(
     private readonly storage = new StorageService(),
     private readonly transcriptDirectory = defaultTranscriptDirectory(),
@@ -784,6 +787,7 @@ export class OrchestratorService {
     if (!previous || previous.stage !== stage) {
       await this.storage.addOrchestratorEvent(ledger.key, 'STAGE', stage, MAX_EVENTS_KEPT);
     }
+    if (previous && previous.stage !== 'done' && stage === 'done') this.onFinished({ key: ledger.key, title: ledger.title });
     if (ledger.waiting && previous?.waiting !== ledger.waiting) {
       await this.storage.addOrchestratorEvent(ledger.key, 'WAITING', ledger.waiting, MAX_EVENTS_KEPT);
     } else if (!ledger.waiting && previous?.waiting) {

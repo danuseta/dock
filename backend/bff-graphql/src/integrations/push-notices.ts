@@ -51,3 +51,33 @@ export function askNotice(ask: AskInfo): PushMessage {
     : [{ action: 'allow', title: 'Allow once' }, { action: 'deny', title: 'Deny' }];
   return { ...base, actions, data: { kind: 'interaction', sessionId: ask.sessionId, id: ask.id } };
 }
+
+/** A chat turn that ended on its own. */
+export function turnDoneNotice(turn: { sessionId: string; sessionTitle: string }): PushMessage {
+  return {
+    title: `${turn.sessionTitle || 'A session'} finished`,
+    body: 'The agent finished its turn.',
+    url: `/sessions?session=${encodeURIComponent(turn.sessionId)}`,
+    tag: `done-${turn.sessionId}`,
+  };
+}
+
+/** A ticket run that reached its last stage. */
+export function runDoneNotice(run: { key: string; title: string }): PushMessage {
+  return { title: `${run.key} finished`, body: run.title.slice(0, MAX_BODY), url: `/detail/${encodeURIComponent(run.key)}`, tag: `done-${run.key}` };
+}
+
+/** A run that went quiet or ended its turn with agents still running. */
+export function stalledNotice(run: { key: string; stalledDetail?: string | null }): PushMessage {
+  return {
+    title: `${run.key} is stalled`,
+    body: (run.stalledDetail || 'No agent activity for a while.').slice(0, MAX_BODY),
+    url: `/detail/${encodeURIComponent(run.key)}`,
+    tag: `stalled-${run.key}`,
+  };
+}
+
+/** One new post in a followed Discord channel. */
+export function discordPostNotice(post: { threadId: string; messageId: string; channel: string; author: string; text: string }): PushMessage {
+  return { title: `${post.channel}: ${post.author}`, body: post.text.slice(0, MAX_BODY), url: '/discord', tag: `discord-${post.threadId}-${post.messageId}` };
+}

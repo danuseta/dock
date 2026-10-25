@@ -1,5 +1,5 @@
 import type { PushMessage } from './push';
-import { waitingNotice } from './push-notices';
+import { stalledNotice, waitingNotice } from './push-notices';
 import { isSettledStatus } from './attention';
 import { REVIEW_STATUS } from './broadcast-review';
 
@@ -674,24 +674,46 @@ export class OrchestratorCron {
    * One notice per run and reason it waits on the owner: a push to every phone that asked for one.
    * The first call after a phone is set up only remembers what waits already.
    */
-  async notifyWaiting(): Promise<string[]> {
+  async notifyWaiting(runs?: CronRun[]): Promise<string[]> {
     if (!(await this.deps.hasPushDevices())) return [];
-    const waiting = (await this.deps.runs()).filter((run) => run.waiting);
-    const marks = waiting.map((run) => `${run.key}\n${run.waiting}`);
-    const saved = await this.deps.cacheGet('notified');
-    const known = Array.isArray(saved) ? new Set(saved as string[]) : null;
+    const waiting = (runs ?? await this.deps.runs()).filter((run) => run.waiting);
+    return this.ping('notified', waiting, (run) => `${run.key}
+${run.waiting}`, (run) => waitingNotice({ key: run.key, waiting: String(run.waiting) }));
+  }
+
+  /** Like notifyWaiting, for a run that went stalled; one that waits on the owner is already announced as waiting. */
+  async notifyStalled(runs?: CronRun[]): Promise<string[]> {
+    if (!(await this.deps.hasPushDevices())) return [];
+    const stalled = (runs ?? await this.deps.runs()).filter((run) => run.stalled && !run.waiting);
+    return this.ping('notifiedStalled', stalled, (run) => `${run.key}
+${run.stalledDetail ?? ''}`, stalledNotice);
+  }
+
+  /** Pushes the runs whose mark was not remembered; the remembered marks are rewritten only when they changed. */
+  private async ping(cacheKey: string, runs: CronRun[], mark: (run: CronRun) => string, notice: (run: CronRun) => PushMessage): Promise<string[]> {
+    const marks = runs.map(mark);
+    const saved = await this.deps.cacheGet(cacheKey);
+    const known = Array.isArray(saved) ? saved as string[] : null;
     const pinged: string[] = [];
-    for (const run of known ? waiting.filter((item) => !known.has(`${item.key}\n${item.waiting}`)) : []) {
-      await this.deps.push(waitingNotice({ key: run.key, waiting: String(run.waiting) }));
+    for (const run of known ? runs.filter((item) => !known.includes(mark(item))) : []) {
+      await this.deps.push(notice(run));
       pinged.push(run.key);
     }
-    await this.deps.cacheSet('notified', marks);
+    if (!known || known.length !== marks.length || known.some((item, index) => item !== marks[index])) await this.deps.cacheSet(cacheKey, marks);
     return pinged;
   }
 
   /** Every minute: pings, then a fill when the cron is on. The work window and every limit are checked inside the fill. */
   async tick(): Promise<void> {
-    await this.notifyWaiting().catch((error) => console.error('[Orchestrator cron] Ping failed:', error instanceof Error ? error.message : 'unknown error'));
+    try {
+      if (await this.deps.hasPushDevices()) {
+        const runs = await this.deps.runs();
+        await this.notifyWaiting(runs);
+        await this.notifyStalled(runs);
+      }
+    } catch (error) {
+      console.error('[Orchestrator cron] Ping failed:', error instanceof Error ? error.message : 'unknown error');
+    }
     if ((await this.settings()).enabled) await this.runFill();
   }
 }

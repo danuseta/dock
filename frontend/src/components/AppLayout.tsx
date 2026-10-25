@@ -9,6 +9,7 @@ import { NAVIGATION_PREFERENCES_EVENT, NavigationPreferences, readNavigationPref
 import { applyUpdate, checkForUpdate } from '../lib/appUpdate';
 import { cn } from '../lib/cn';
 import { PHONE_PRIMARY_PATHS, phoneMore } from '../lib/phoneNavigation';
+import { useNotificationEvents } from '../lib/useNotificationEvents';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 import { ChatDock } from '../chat/ChatDock';
 import { ReportDockIssue } from './ReportDockIssue';
@@ -28,11 +29,12 @@ interface AppLayoutProps { currentPath: string; onNavigate: (path: string) => vo
 export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, unreachable, onRetry, children }) => {
   const mode = useDockMode();
   const [preferences, setPreferences] = useState(readNavigationPreferences);
-  const { data } = useQuery(GET_NEEDS_ATTENTION, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
+  const { data, loading: attentionLoading } = useQuery(GET_NEEDS_ATTENTION, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
   const { data: questionsData } = useQuery(GET_OWNER_QUESTIONS, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
   const decisionCount = questionCount(questionsData?.orchestrations ?? []);
-  const { data: discordData } = useQuery(GET_DISCORD_THREADS, { ...CACHED_QUERY_OPTIONS, pollInterval: 60000, skip: !hasPage(mode, '/discord') });
+  const { data: discordData, loading: discordLoading } = useQuery(GET_DISCORD_THREADS, { ...CACHED_QUERY_OPTIONS, pollInterval: 60000, skip: !hasPage(mode, '/discord') });
   const discordCount = (discordData?.discordThreads?.rows ?? []).filter((row: DiscordThread) => needsYou(row) && !row.older).length;
+  useNotificationEvents(attentionLoading ? undefined : data?.needsAttention, discordLoading ? undefined : discordData?.discordThreads?.rows);
   const attentionCount = ticketAttention([...(data?.needsAttention ?? []), ...discordAttention(discordData?.discordThreads?.rows ?? [])], ticketQuestions(questionsData?.orchestrations ?? [])).length;
   const [moreOpen, setMoreOpen] = useState(false);
   const [updateOffered, setUpdateOffered] = useState(false);

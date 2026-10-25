@@ -1,11 +1,12 @@
-import { CalendarDays, Film, GitBranch, KeyRound, LayoutPanelLeft, Lock, MessageSquare, MessagesSquare, ShieldCheck, type LucideIcon } from 'lucide-react';
+import { Bell, CalendarDays, Film, GitBranch, KeyRound, LayoutPanelLeft, Lock, MessageSquare, MessagesSquare, ShieldCheck, type LucideIcon } from 'lucide-react';
 import { normalizeCaveman, normalizeRtk } from '../chat/chatDefaults';
 import { hasPage, type DockMode } from '../lib/dockMode';
 import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, getDiscordTemplateError } from '../lib/discordTemplate';
+import { parseNotificationPrefs, prefsToValues, valuesToPrefs } from '../lib/notificationPrefs';
 import { isValidServiceHealthRefreshSeconds, normalizeServiceHealthRefreshSeconds } from '../lib/serviceHealthRefresh';
 
-export type SectionId = 'general' | 'chat' | 'security' | 'jira' | 'github' | 'discord' | 'calendar' | 'tokens' | 'demo';
-export type DraftSectionId = 'general' | 'chat' | 'jira' | 'github' | 'discord' | 'calendar';
+export type SectionId = 'general' | 'chat' | 'notifications' | 'security' | 'jira' | 'github' | 'discord' | 'calendar' | 'tokens' | 'demo';
+export type DraftSectionId = 'general' | 'chat' | 'notifications' | 'jira' | 'github' | 'discord' | 'calendar';
 export type SectionGroup = 'Preferences' | 'Integrations' | 'Agents';
 export type SectionValues = Record<string, string>;
 export type SectionStatus = 'ok' | 'bad' | 'off' | 'unsaved' | null;
@@ -47,6 +48,7 @@ export interface SavedSettings {
   chatRtk?: string | null;
   chatCaveman?: string | null;
   chatParallelTurns?: string | null;
+  notificationPrefs?: string | null;
 }
 
 export const SECTION_GROUPS: SectionGroup[] = ['Preferences', 'Integrations', 'Agents'];
@@ -54,6 +56,7 @@ export const SECTION_GROUPS: SectionGroup[] = ['Preferences', 'Integrations', 'A
 export const SETTINGS_SECTIONS: SectionInfo[] = [
   { id: 'general', label: 'General', title: 'General', description: 'How DOCK looks on this device, and how often live data refreshes.', icon: LayoutPanelLeft, group: 'Preferences' },
   { id: 'chat', label: 'Chat', title: 'Chat', description: 'Defaults for a chat turn that sets no value of its own.', icon: MessagesSquare, group: 'Preferences' },
+  { id: 'notifications', label: 'Notifications', title: 'Notifications', description: 'Which events make a sound and a notification, how loud, and with which sound. Shared by every device.', icon: Bell, group: 'Preferences' },
   { id: 'security', label: 'Security', title: 'Security', description: 'A fallback PIN for access that does not come through Tailscale. Every action here saves immediately.', icon: Lock, group: 'Preferences' },
   { id: 'jira', label: 'Jira', title: 'Jira Cloud', description: 'The account DOCK reads tickets with, and the projects on the board.', icon: ShieldCheck, group: 'Integrations' },
   { id: 'github', label: 'GitHub', title: 'GitHub', description: 'The token DOCK reads pull requests with, and the repositories it watches.', icon: GitBranch, group: 'Integrations' },
@@ -63,7 +66,7 @@ export const SETTINGS_SECTIONS: SectionInfo[] = [
   { id: 'demo', label: 'Demo videos', title: 'Demo videos', description: 'The narration keys and the bucket a demo video goes to, shared by both DOCKs. Every action here saves immediately.', icon: Film, group: 'Agents' },
 ];
 
-export const DRAFT_SECTIONS: DraftSectionId[] = ['general', 'chat', 'jira', 'github', 'discord', 'calendar'];
+export const DRAFT_SECTIONS: DraftSectionId[] = ['general', 'chat', 'notifications', 'jira', 'github', 'discord', 'calendar'];
 
 export const isDraftSection = (id: SectionId): id is DraftSectionId => (DRAFT_SECTIONS as SectionId[]).includes(id);
 
@@ -93,6 +96,7 @@ export function savedValues(settings: SavedSettings): Record<DraftSectionId, Sec
       chatCaveman: normalizeCaveman(settings.chatCaveman),
       chatParallelTurns: settings.chatParallelTurns || '',
     },
+    notifications: prefsToValues(parseNotificationPrefs(settings.notificationPrefs)),
     jira: { jiraUrl: settings.jiraUrl || '', jiraEmail: settings.jiraEmail || '', jiraApiToken: '', jiraProjectKeys: settings.jiraProjectKeys || '' },
     github: { githubToken: '', githubRepos: settings.githubRepos || '' },
     discord: {
@@ -124,6 +128,7 @@ export function sectionErrors(id: DraftSectionId, values: SectionValues): string
 /** The updateSettings input of one section: only its own keys, so a save never touches another section. */
 export function sectionInput(id: DraftSectionId, values: SectionValues): Record<string, string | number> {
   if (id === 'general') return { serviceHealthRefreshSeconds: healthSeconds(values) };
+  if (id === 'notifications') return { notificationPrefs: JSON.stringify(valuesToPrefs(values)) };
   return { ...values };
 }
 
