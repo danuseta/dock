@@ -1,13 +1,11 @@
-import { dockMode } from '../mode';
 import { StorageService } from '../storage/service';
 import { maskKey } from './elevenlabs-keys';
-import { ledgerPeer } from './ledger-peer';
 import { OrchestratorInputError } from './orchestrator';
 
 export const DEMO_STORAGE_SETTING = 'demoStorage';
 export const FOLDER = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 
-/** Where the demo videos go and the link they get. The keys stay on the laptop DOCK; the workspace DOCK asks for them. */
+/** Where the demo videos go and the link they get, kept in this DOCK's database. */
 export interface DemoStorageConfig { endpoint: string; region: string; bucket: string; folder: string; publicBaseUrl: string; accessKey: string; secretKey: string }
 export interface DemoStorageView { configured: boolean; endpoint: string; region: string; bucket: string; folder: string; publicBaseUrl: string; accessKeyMasked: string | null; secretSet: boolean }
 export type DemoStorageInput = Partial<DemoStorageConfig>;
@@ -111,6 +109,4 @@ export function demoStorageRoute(storage: DemoStorage, route: string, body: Reco
   }
 }
 
-export const demoStorage: DemoStorage = dockMode() === 'workspace' && ledgerPeer
-  ? new PeerDemoStorage((route, body) => ledgerPeer!.call(route, body))
-  : new LocalDemoStorage();
+export const demoStorage: DemoStorage = new LocalDemoStorage();
