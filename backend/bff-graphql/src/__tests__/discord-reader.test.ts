@@ -404,6 +404,10 @@ test('the reviewers a pull request asks for come from its first message, then it
   assert.strictEqual(slotsOf(followUp, RINA.id, []), 2, 'the first -N the poster wrote stays when a follow-up says -1');
   const askedLate = [toMessage(msg(RINA, 'feat(QRD-1234): x'), ME), toMessage(msg(HAMZAH, 'which repo?'), ME), toMessage(msg(RINA, '@ITteam -1'), ME), toMessage(msg(RINA, '@ITteam -2'), ME)];
   assert.strictEqual(slotsOf(askedLate, RINA.id, []), 1, 'with no opening -N and no tag, the first -N the poster wrote counts');
+  const BOT = user('103', 'sous-rina');
+  const botPost = [msg(BOT, 'Jira: QRD-1460, review please'), toRole(RINA, '-1 <@&r7>'), msg(HAMZAH, 'on it buat besok')];
+  assert.strictEqual(slotsOf(botPost.map((message) => toMessage(message, ME, SERVER)), BOT.id, []), 1, 'a bot posted the thread and a person asked the role with -1');
+  assert.strictEqual(sorted('pr', botPost, BOT.id, false, false, [], 1).state, 'NOT_YOURS', 'the one slot is taken');
   const row = buildRow({ id: 'fp', name: 'pull-request', kind: 'pr', thread: false, enabled: true }, 'g1', { id: '1298000000000000009', parent_id: 'fp', name: 'PR', owner_id: RINA.id }, new Map(), [msg({ ...RINA, avatar: 'a1' }, '-1 please'), msg(HAMZAH, 'on it')], ME);
   assert.deepStrictEqual([row.slots, row.createdByAvatar], [1, `https://cdn.discordapp.com/avatars/${RINA.id}/a1.png?size=64`], 'the avatar is the poster, not the last writer');
 });
