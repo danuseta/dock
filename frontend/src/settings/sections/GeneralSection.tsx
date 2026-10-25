@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { PushCard } from '../../components/PushCard';
 import { Checkbox, Input, Select } from '../../components/ui';
 import { cn } from '../../lib/cn';
 import { NAVIGATION_PREFERENCES_EVENT, readNavigationPreferences, saveNavigationPreferences, type NavigationMode, type NavigationPreferences } from '../../lib/navigationPreferences';
@@ -60,8 +59,6 @@ export const GeneralSection = ({ values, set }: { values: SectionValues; set: (k
           </SettingRow>
         )}
       </SettingsCard>
-
-      <PushCard />
 
       <SettingsCard title="All devices" caption="Saved with the General save bar.">
         <SettingRow label="Service health refresh" help="How often Home and Services check upstream. Longer intervals send fewer requests.">

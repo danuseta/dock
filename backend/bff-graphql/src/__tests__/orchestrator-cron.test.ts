@@ -349,6 +349,20 @@ test('each run that waits on the owner pushes to the phone once; the first look 
   assert.deepStrictEqual([await silent.cron.notifyWaiting(), silent.state.pushes.length], [[], 0], 'no phone, no push');
 });
 
+test('a run that goes stalled pushes once; the first look and a run waiting on the owner stay quiet', async () => {
+  const stalled: CronRun = { key: 'QRD-7', machine: 'workspace', title: 'Quiet', waiting: null, activity: 'IDLE', stalled: true };
+  const { state, cron } = world({ runs: [stalled], pushDevices: true });
+  assert.deepStrictEqual(await cron.notifyStalled(), [], 'what was stalled already is remembered, not announced');
+
+  state.runs = [stalled, { ...stalled, key: 'QRD-8', stalledDetail: 'Lead ended its turn while 2 subagents were still running' }, { ...stalled, key: 'QRD-9', waiting: 'Which endpoint?' }];
+  assert.deepStrictEqual(await cron.notifyStalled(), ['QRD-8']);
+  assert.deepStrictEqual(state.pushes.map((push) => [push.title, push.url]), [['QRD-8 is stalled', '/detail/QRD-8']]);
+  assert.deepStrictEqual(await cron.notifyStalled(), [], 'no second push for the same stall');
+
+  const silent = world({ runs: [stalled] });
+  assert.deepStrictEqual([await silent.cron.notifyStalled(), silent.state.pushes.length], [[], 0], 'no phone, no push');
+});
+
 test('settings are saved after validation; every tick fills while enabled', async () => {
   const { state, cron } = world({ tickets: [ticket('QRD-1'), ticket('QRD-2')], config: { enabled: false, parallel: 1 } });
   await assert.rejects(() => cron.updateSettings('{"machine":"mars"}'), /Unknown machine mars/);

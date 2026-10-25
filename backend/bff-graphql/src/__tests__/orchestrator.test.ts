@@ -490,6 +490,21 @@ test('the service looks up GitHub only for runs that can be in review', async ()
   assert.deepStrictEqual(calls.sort(), ['QRD-1', 'QRD-2', 'QRD-3'], 'a run that would be stalled is looked up too');
 });
 
+test('a run announces itself once, when its ledger moves to done; a ledger first seen at done does not', async () => {
+  const { storage } = memoryStorage();
+  const service = new OrchestratorService(storage, os.tmpdir());
+  const finished: string[] = [];
+  service.onFinished = (run) => { finished.push(run.key); };
+  const now = new Date('2026-10-05T00:00:00.000Z');
+  const ledger = (key: string, stage: string) => ({ key, title: `Title ${key}`, stage, ac: [] });
+  await service.ingestLedger(ledger('QRD-1', 'code'), now, 'laptop');
+  await service.ingestLedger(ledger('QRD-2', 'done'), now, 'laptop');
+  assert.deepStrictEqual(finished, []);
+  await service.ingestLedger(ledger('QRD-1', 'done'), now, 'laptop');
+  await service.ingestLedger(ledger('QRD-1', 'done'), now, 'laptop');
+  assert.deepStrictEqual(finished, ['QRD-1']);
+});
+
 test('the pull request lookup asks GitHub at most once per ticket per window', async () => {
   let clock = 1_000;
   let searches = 0;

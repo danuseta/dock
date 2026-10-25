@@ -128,7 +128,9 @@ const CHANNELS: Channel[] = [
   { id: 'off', name: 'old', kind: 'bug', thread: false, enabled: false },
 ];
 
-function reader(routes: Record<string, DiscordResponse | DiscordResponse[]>, settings = SETTINGS, channels = CHANNELS) {
+type DiscordReaderPosted = NonNullable<ConstructorParameters<typeof DiscordReader>[0]['posted']>;
+
+function reader(routes: Record<string, DiscordResponse | DiscordResponse[]>, settings = SETTINGS, channels = CHANNELS, posted?: DiscordReaderPosted) {
   const service = new ThreadService(memoryStore());
   let status: SyncStatus = { syncedAt: '2026-10-22T11:00:00.000Z', error: null, requests: 0 };
   const calls: string[] = [];
@@ -155,6 +157,7 @@ function reader(routes: Record<string, DiscordResponse | DiscordResponse[]>, set
     removeOne: (id) => service.removeOne(id),
     status: async () => status,
     saveStatus: async (next) => { status = next; },
+    posted,
   });
   return { instance, service, calls, bodies, waits, saved };
 }
@@ -353,6 +356,42 @@ test('a Gateway event reads its one thread again; other servers, unknown channel
 
   await instance.onEvent('THREAD_DELETE', { guild_id: 'g1', id: '2009', parent_id: 'fb' });
   assert.ok(!(await service.list()).some((row) => row.id === '2009'));
+});
+
+test('every new post by someone else in a followed channel is announced, a post by the owner is not', async () => {
+  const routes = routesFor() as Record<string, DiscordResponse | DiscordResponse[]>;
+  const posts: Array<{ threadId: string; messageId: string; channel: string; author: string; text: string }> = [];
+  const { instance } = reader(routes, SETTINGS, CHANNELS, (post) => { posts.push(post); });
+  await instance.sync();
+  routes['/channels/2001'] = ok(bugThread);
+  routes['/channels/2001/messages?limit=50'] = ok([msg(RINA, 'Login loop on Safari')]);
+
+  const event = (author: ReturnType<typeof user>, channel_id: string, id: string, content: string) => ({ guild_id: 'g1', channel_id, id, content, author: { id: author.id, username: author.username, global_name: author.global_name }, attachments: [] });
+  await instance.onEvent('MESSAGE_CREATE', event(RINA, '2001', 'm9', 'still broken'));
+  await instance.onEvent('MESSAGE_CREATE', event(DANU, '2001', 'm10', 'looking'));
+  await instance.onEvent('MESSAGE_CREATE', event(RINA, '999', 'm11', 'elsewhere'));
+  await instance.onEvent('MESSAGE_CREATE', { ...event(RINA, '2001', 'm12', ''), guild_id: 'g9' });
+  assert.deepStrictEqual(posts, [{ threadId: '2001', messageId: 'm9', channel: 'bug-report', author: 'Rina', text: 'still broken' }]);
+});
+
+test('bots, webhooks and system notices are not announced; a failing announcement leaves the thread read', async () => {
+  const routes = routesFor() as Record<string, DiscordResponse | DiscordResponse[]>;
+  const posts: string[] = [];
+  const { instance, service } = reader(routes, SETTINGS, CHANNELS, (post) => { posts.push(post.messageId); });
+  await instance.sync();
+  routes['/channels/2001'] = ok(bugThread);
+  routes['/channels/2001/messages?limit=50'] = ok([msg(RINA, 'Login loop on Safari')]);
+  const event = (id: string, extra: Record<string, unknown>) => ({ guild_id: 'g1', channel_id: '2001', id, content: 'hi', attachments: [], author: { id: RINA.id, username: 'rina', global_name: 'Rina' }, ...extra });
+  await instance.onEvent('MESSAGE_CREATE', event('b1', { author: { id: '5', username: 'bot', bot: true } }));
+  await instance.onEvent('MESSAGE_CREATE', event('w1', { webhook_id: '77' }));
+  await instance.onEvent('MESSAGE_CREATE', event('s1', { type: 7 }));
+  await instance.onEvent('MESSAGE_CREATE', event('r1', { type: 19 }));
+  assert.deepStrictEqual(posts, ['r1'], 'a reply is a post, a join notice is not');
+
+  const quiet = reader(routes, { ...SETTINGS }, CHANNELS, () => { throw new Error('boom'); });
+  await quiet.instance.sync();
+  await quiet.instance.onEvent('MESSAGE_CREATE', event('x1', {}));
+  assert.ok((await quiet.service.list()).some((row) => row.id === '2001'), 'the thread is still read');
 });
 
 test('the team words for done, try again and still broken', () => {

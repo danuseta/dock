@@ -4,8 +4,8 @@ import { STOPPED_QUEUED_TEXT, STOPPED_TEXT, chatService } from './chat';
 import { ledgerPeer } from './ledger-peer';
 import { DEFAULT_MACHINE, orchestratorService } from './orchestrator';
 import { CRON_CACHE, OrchestratorCron, ownerSessionTitle } from './orchestrator-cron';
-import { pushService } from './push';
-import { askNotice } from './push-notices';
+import { eventPush, pushService } from './push';
+import { askNotice, runDoneNotice, turnDoneNotice } from './push-notices';
 
 const storage = new StorageService();
 const jira = new JiraAPI();
@@ -61,10 +61,12 @@ export const orchestratorCron = new OrchestratorCron({
   runningSessions: async () => (await chatService.sessions('dock', SESSIONS_LOOKED_AT)).filter((session) => session.status !== 'idle').map((session) => session.id),
   stopTurn: (sessionId) => chatService.stopTurn(sessionId),
   hasPushDevices: async () => (await pushService.subscriptions()).length > 0,
-  push: (message) => pushService.send(message),
+  push: (message) => eventPush.send('needsYou', message),
 });
 
-chatService.onAsk = (ask) => { void pushService.send(askNotice(ask)).catch(() => undefined); };
+chatService.onAsk = (ask) => { void eventPush.send('needsYou', askNotice(ask)).catch(() => undefined); };
+chatService.onTurnDone = (turn) => { void eventPush.send('sessionDone', turnDoneNotice(turn)).catch(() => undefined); };
+orchestratorService.onFinished = (run) => { void eventPush.send('sessionDone', runDoneNotice(run)).catch(() => undefined); };
 chatService.cronLimit = async () => (await orchestratorCron.settings().catch(() => null))?.parallel ?? null;
 chatService.cronTurn = async (ticketKey, stalledDetail, ended) => {
   await orchestratorService.setStalledDetail(ticketKey, stalledDetail);

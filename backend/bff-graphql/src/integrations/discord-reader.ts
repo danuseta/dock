@@ -59,6 +59,8 @@ export interface RawMessage {
   mention_roles?: string[];
   attachments: Array<{ filename: string; size: number; content_type?: string | null; url: string; width?: number | null; height?: number | null }>;
 }
+/** A MESSAGE_CREATE event: a message plus the fields that tell a person's post from a bot's or a system notice. */
+export interface GatewayMessage extends Omit<RawMessage, 'author'> { author: RawUser & { bot?: boolean }; webhook_id?: string; type?: number }
 export interface RawThread {
   id: string;
   type?: number;
@@ -253,6 +255,8 @@ export interface ReaderDeps {
   removeOne(id: string): Promise<void>;
   status(): Promise<SyncStatus>;
   saveStatus(status: SyncStatus): Promise<void>;
+  /** A new post by someone else in a followed channel; it must not throw. */
+  posted?(post: { threadId: string; messageId: string; channel: string; author: string; text: string }): void;
 }
 
 interface Config { token: string; guild: string }
@@ -416,9 +420,26 @@ export class DiscordReader {
     const id = type.startsWith('THREAD_') ? event.id : type.startsWith('MESSAGE_') ? event.channel_id : undefined;
     if (!id) return;
     const channel = this.threadChannels.get(id) ?? (type.startsWith('THREAD_') && event.parent_id ? this.containers.get(event.parent_id) : undefined);
-    if (!channel) return;
-    this.threadChannels.set(id, channel);
-    await this.readThread(id, channel);
+    const announced = type === 'MESSAGE_CREATE' ? this.announce(id, channel ?? this.containers.get(id), data as GatewayMessage).catch(() => undefined) : undefined;
+    if (channel) {
+      this.threadChannels.set(id, channel);
+      await this.readThread(id, channel);
+    }
+    await announced;
+  }
+
+  /** Tells the owner of a new post, unless they wrote it themselves. */
+  private async announce(threadId: string, channel: Channel | undefined, message: GatewayMessage): Promise<void> {
+    if (!channel || !this.deps.posted || message.author.bot || message.webhook_id || ((message.type ?? 0) !== 0 && message.type !== 19)) return;
+    const owner = await this.deps.ownerId();
+    if (owner && message.author.id === owner) return;
+    this.deps.posted({
+      threadId,
+      messageId: message.id,
+      channel: channel.name ?? 'Discord',
+      author: message.author.global_name || message.author.username,
+      text: message.content || (message.attachments?.length ? 'Sent an attachment' : ''),
+    });
   }
 
   /** Reads one thread again; an event that lands while it is read makes it read once more afterwards. */

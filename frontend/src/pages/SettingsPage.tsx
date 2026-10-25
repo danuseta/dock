@@ -19,6 +19,7 @@ import {
 } from '../settings/sections';
 import { SaveBar, type SaveOutcome } from '../settings/SettingsParts';
 import { GeneralSection } from '../settings/sections/GeneralSection';
+import { NotificationsSection } from '../settings/sections/NotificationsSection';
 import { SecuritySection } from '../settings/sections/SecuritySection';
 import { JiraSection } from '../settings/sections/JiraSection';
 import { GitHubSection } from '../settings/sections/GitHubSection';
@@ -186,6 +187,7 @@ const SettingsPage: React.FC = () => {
               onChange={(next) => setFields('chat', { chatDefaultModel: next.model, chatDefaultEffort: next.effort, chatDefaultMode: next.mode, chatRtk: next.rtk, chatCaveman: next.caveman, chatParallelTurns: next.turns })}
             />
           )}
+          {active === 'notifications' && <NotificationsSection values={valuesOf('notifications')} set={setter('notifications')} />}
           {active === 'security' && <SecuritySection hasPin={Boolean(settings.hasMasterPin)} />}
           {active === 'jira' && <JiraSection values={valuesOf('jira')} set={setter('jira')} settings={settings} test={tests.jira} onTested={tested('jira')} />}
           {active === 'github' && <GitHubSection values={valuesOf('github')} set={setter('github')} settings={settings} test={tests.github} onTested={tested('github')} />}

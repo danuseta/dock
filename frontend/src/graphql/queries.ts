@@ -284,6 +284,7 @@ export const GET_SETTINGS = gql`
       chatRtk
       chatCaveman
       chatParallelTurns
+      notificationPrefs
     }
   }
 `;
@@ -743,6 +744,19 @@ export const GET_CHAT_SESSIONS = gql`
   query GetChatSessions($source: String, $limit: Int) {
     chatSessions(source: $source, limit: $limit) {
       ${CHAT_SESSION_FIELDS}
+    }
+  }
+`;
+
+export const GET_CHAT_SESSION_STATES = gql`
+  query GetChatSessionStates($limit: Int) {
+    chatSessionStates(limit: $limit) {
+      id
+      title
+      status
+      statusDetail
+      origin
+      ticketKey
     }
   }
 `;
