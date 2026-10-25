@@ -4,6 +4,8 @@ import { DiscordGateway } from './discord-gateway';
 import { DiscordReader } from './discord-reader';
 import type { SyncStatus } from './discord-threads';
 import { channelStore, threadService } from './discord-threads';
+import { eventPush } from './push';
+import { discordPostNotice } from './push-notices';
 
 const storage = new StorageService();
 const API = 'https://discord.com/api/v10';
@@ -14,7 +16,7 @@ const EMPTY: SyncStatus = { syncedAt: null, error: null, requests: 0 };
 export const discordReader = new DiscordReader({
   now: () => new Date(),
   setting: async (key) => (await storage.getSettings()).find((setting) => setting.key === key)?.value || null,
-  ownerId: async () => (await storage.getSettings()).find((setting) => setting.key === 'discordUserId')?.value || '',
+  ownerId: async () => (await storage.getSettingValues(['discordUserId']))[0]?.value || '',
   request: async (path, token, body) => {
     const response = await fetch(`${API}${path}`, {
       method: body === undefined ? 'GET' : 'POST',
@@ -33,6 +35,7 @@ export const discordReader = new DiscordReader({
   removeOne: (id) => threadService.removeOne(id),
   status: async () => ((await storage.getCache(CACHE, 'status')) as SyncStatus | null) ?? EMPTY,
   saveStatus: async (status) => { await storage.upsertCache(CACHE, 'status', status, 0); },
+  posted: (post) => { void eventPush.send('discordPost', discordPostNotice(post)).catch(() => undefined); },
 });
 
 /** The bot's Gateway connection; a new session reads everything once, since events may have been missed. */

@@ -9,12 +9,19 @@ import { NAVIGATION_PREFERENCES_EVENT, NavigationPreferences, readNavigationPref
 import { applyUpdate, checkForUpdate } from '../lib/appUpdate';
 import { cn } from '../lib/cn';
 import { PHONE_PRIMARY_PATHS, phoneMore } from '../lib/phoneNavigation';
+import { useNotificationEvents } from '../lib/useNotificationEvents';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 import { ChatDock } from '../chat/ChatDock';
 import { ReportDockIssue } from './ReportDockIssue';
 import { IconButton } from './ui';
 import { hasPage, showsChatDock, useDockMode } from '../lib/dockMode';
 import { version as appVersion } from '../../package.json';
+
+const appChannel = import.meta.env.VITE_APP_CHANNEL;
+const appCommit = import.meta.env.VITE_APP_COMMIT;
+const shortVersionLabel = `v${import.meta.env.VITE_APP_VERSION || appVersion}`;
+const versionLabel = `${shortVersionLabel}${appChannel ? ` · ${appChannel}` : ''}`;
+const versionTitle = appCommit ? `${versionLabel} (${appCommit})` : versionLabel;
 
 // A phone tab: icon over a short label, 44 px tall.
 const PHONE_TAB = 'max-[760px]:h-11 max-[760px]:w-[60px] max-[760px]:flex-col max-[760px]:gap-0.5 max-[760px]:text-[0.6875rem]';
@@ -24,11 +31,12 @@ interface AppLayoutProps { currentPath: string; onNavigate: (path: string) => vo
 export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, unreachable, onRetry, children }) => {
   const mode = useDockMode();
   const [preferences, setPreferences] = useState(readNavigationPreferences);
-  const { data } = useQuery(GET_NEEDS_ATTENTION, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
+  const { data, loading: attentionLoading } = useQuery(GET_NEEDS_ATTENTION, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
   const { data: questionsData } = useQuery(GET_OWNER_QUESTIONS, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
   const decisionCount = questionCount(questionsData?.orchestrations ?? []);
-  const { data: discordData } = useQuery(GET_DISCORD_THREADS, { ...CACHED_QUERY_OPTIONS, pollInterval: 60000, skip: !hasPage(mode, '/discord') });
+  const { data: discordData, loading: discordLoading } = useQuery(GET_DISCORD_THREADS, { ...CACHED_QUERY_OPTIONS, pollInterval: 60000, skip: !hasPage(mode, '/discord') });
   const discordCount = (discordData?.discordThreads?.rows ?? []).filter((row: DiscordThread) => needsYou(row) && !row.older).length;
+  useNotificationEvents(attentionLoading ? undefined : data?.needsAttention, discordLoading ? undefined : discordData?.discordThreads?.rows);
   const attentionCount = ticketAttention([...(data?.needsAttention ?? []), ...discordAttention(discordData?.discordThreads?.rows ?? [])], ticketQuestions(questionsData?.orchestrations ?? [])).length;
   const [moreOpen, setMoreOpen] = useState(false);
   const [updateOffered, setUpdateOffered] = useState(false);
@@ -53,26 +61,28 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
   }, []);
 
   const navItems = [
-    { path: '/', label: 'Home', icon: HomeIcon, badge: attentionCount },
-    { path: '/dashboard', label: 'Board', icon: LayoutDashboard, badge: 0 },
-    { path: '/agents', label: 'Agents', icon: Bot, badge: 0 },
-    { path: '/sessions', label: 'Sessions', icon: History, badge: 0 },
-    { path: '/calendar', label: 'Calendar', icon: CalendarDays, badge: 0 },
-    { path: '/sprint', label: 'Sprint', icon: BarChart3, badge: 0 },
-    { path: '/monitoring', label: 'Monitoring', icon: Activity, badge: 0 },
-    { path: '/docker', label: 'Docker Services', icon: Box, badge: 0 },
-    { path: '/demo-videos', label: 'Demo Videos', icon: Clapperboard, badge: 0 },
-    { path: '/dev-servers', label: 'Dev Servers', icon: Server, badge: 0 },
+    { path: '/', label: 'Home', icon: HomeIcon, badge: attentionCount, group: 'Work' },
+    { path: '/dashboard', label: 'Board', icon: LayoutDashboard, badge: 0, group: 'Work' },
+    { path: '/agents', label: 'Agents', icon: Bot, badge: 0, group: 'Work' },
+    { path: '/sessions', label: 'Sessions', icon: History, badge: 0, group: 'Work' },
+    { path: '/decisions', label: 'Decisions', icon: ListChecks, badge: decisionCount, group: 'Work' },
+    { path: '/demo-videos', label: 'Demo Videos', icon: Clapperboard, badge: 0, group: 'Work' },
+    { path: '/calendar', label: 'Calendar', icon: CalendarDays, badge: 0, group: 'Work' },
+    { path: '/sprint', label: 'Sprint', icon: BarChart3, badge: 0, group: 'Team' },
+    { path: '/discord', label: 'Discord', icon: MessagesSquare, badge: discordCount, group: 'Team' },
+    { path: '/monitoring', label: 'Monitoring', icon: Activity, badge: 0, group: 'System' },
+    { path: '/docker', label: 'Docker Services', icon: Box, badge: 0, group: 'System' },
+    { path: '/dev-servers', label: 'Dev Servers', icon: Server, badge: 0, group: 'System' },
     // Not /health: the server answers that path itself for its health check.
-    { path: '/machines', label: 'Health', icon: Stethoscope, badge: 0 },
-    { path: '/decisions', label: 'Decisions', icon: ListChecks, badge: decisionCount },
-    { path: '/discord', label: 'Discord', icon: MessagesSquare, badge: discordCount },
-    { path: '/issues', label: 'DOCK Issues', icon: Bug, badge: 0 },
-    { path: '/settings', label: 'System Settings', icon: SettingsIcon, badge: 0 },
+    { path: '/machines', label: 'Health', icon: Stethoscope, badge: 0, group: 'System' },
+    { path: '/issues', label: 'DOCK Issues', icon: Bug, badge: 0, group: 'System' },
+    { path: '/settings', label: 'System Settings', icon: SettingsIcon, badge: 0, group: 'System' },
   ].filter((item) => hasPage(mode, item.path));
 
   // A phone has room for four destinations and a More button; the rest sit in the sheet that button opens.
   const more = phoneMore(navItems, currentPath);
+  // The sidebar titles its groups; a group whose pages are all hidden in this mode is dropped with its title and divider.
+  const navGroups = ['Work', 'Team', 'System'].map((title) => ({ title, items: navItems.filter((item) => item.group === title) })).filter((group) => group.items.length > 0);
   const go = (path: string) => { setMoreOpen(false); onNavigate(path); };
 
   const isSidebar = preferences.mode === 'left' || preferences.mode === 'right';
@@ -80,6 +90,39 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
   const CollapseIcon = preferences.mode === 'right'
     ? (preferences.collapsed ? ChevronLeft : ChevronRight)
     : (preferences.collapsed ? ChevronRight : ChevronLeft);
+
+  const renderNavItem = (item: (typeof navItems)[number]) => {
+    const Icon = item.icon;
+    const active = currentPath === item.path;
+    const iconOnly = preferences.collapsed || !isSidebar;
+    return (
+      <button
+        className={cn(
+          'relative flex size-10 min-w-0 items-center justify-center gap-[11px] rounded-[7px] border border-transparent bg-transparent p-0 font-display text-[0.78rem] font-semibold text-secondary-foreground transition-colors duration-150 ease-out hover:border-border hover:bg-surface-1 hover:text-foreground',
+          PHONE_TAB,
+          !PHONE_PRIMARY_PATHS.includes(item.path) && 'max-[760px]:hidden',
+          isSidebar && 'min-[761px]:h-auto min-[761px]:w-full min-[761px]:px-3 min-[761px]:py-[11px] min-[761px]:text-left',
+          isSidebar && !preferences.collapsed && 'min-[761px]:justify-start',
+          active && 'border-accent bg-accent text-black hover:border-accent hover:bg-accent hover:text-black',
+        )}
+        type="button"
+        key={item.path}
+        onClick={() => go(item.path)}
+        aria-current={active ? 'page' : undefined}
+        aria-label={iconOnly ? item.label : undefined}
+        title={iconOnly ? item.label : undefined}
+      >
+        <Icon size={18} aria-hidden="true" />
+        <span className={cn('hidden min-w-0 truncate max-[760px]:block', isSidebar && !preferences.collapsed && 'min-[761px]:inline')}>{item.label}</span>
+        {item.badge > 0 && (
+          <span className={cn(
+            'absolute -right-[3px] -top-[3px] min-w-[18px] rounded-pill bg-status-conflict px-[5px] py-px text-center font-mono text-[0.6rem] font-extrabold text-black tabular-nums',
+            isSidebar && !preferences.collapsed && 'min-[761px]:static min-[761px]:ml-auto',
+          )}>{item.badge}</span>
+        )}
+      </button>
+    );
+  };
 
   const sidebarPixels = preferences.collapsed ? 72 : 248;
   const chatInset = {
@@ -134,38 +177,14 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
           </span>
         </button>
         <nav aria-label="Primary" className={cn('flex flex-none items-center gap-1 max-[760px]:w-full max-[760px]:justify-around max-[760px]:gap-0', isSidebar && 'min-[761px]:w-full min-[761px]:flex-1 min-[761px]:flex-col min-[761px]:items-stretch min-[761px]:pt-3.5')}>
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const active = currentPath === item.path;
-            const iconOnly = preferences.collapsed || !isSidebar;
-            return (
-              <button
-                className={cn(
-                  'relative flex size-10 min-w-0 items-center justify-center gap-[11px] rounded-[7px] border border-transparent bg-transparent p-0 font-display text-[0.78rem] font-semibold text-secondary-foreground transition-colors duration-150 ease-out hover:border-border hover:bg-surface-1 hover:text-foreground',
-                  PHONE_TAB,
-                  !PHONE_PRIMARY_PATHS.includes(item.path) && 'max-[760px]:hidden',
-                  isSidebar && 'min-[761px]:h-auto min-[761px]:w-full min-[761px]:px-3 min-[761px]:py-[11px] min-[761px]:text-left',
-                  isSidebar && !preferences.collapsed && 'min-[761px]:justify-start',
-                  active && 'border-accent bg-accent text-black hover:border-accent hover:bg-accent hover:text-black',
-                )}
-                type="button"
-                key={item.path}
-                onClick={() => go(item.path)}
-                aria-current={active ? 'page' : undefined}
-                aria-label={iconOnly ? item.label : undefined}
-                title={iconOnly ? item.label : undefined}
-              >
-                <Icon size={18} aria-hidden="true" />
-                <span className={cn('hidden min-w-0 truncate max-[760px]:block', isSidebar && !preferences.collapsed && 'min-[761px]:inline')}>{item.label}</span>
-                {item.badge > 0 && (
-                  <span className={cn(
-                    'absolute -right-[3px] -top-[3px] min-w-[18px] rounded-pill bg-status-conflict px-[5px] py-px text-center font-mono text-[0.6rem] font-extrabold text-black tabular-nums',
-                    isSidebar && !preferences.collapsed && 'min-[761px]:static min-[761px]:ml-auto',
-                  )}>{item.badge}</span>
-                )}
-              </button>
-            );
-          })}
+          {isSidebar ? navGroups.map((group, index) => (
+            <div key={group.title} className={cn('max-[760px]:contents', index > 0 && (preferences.collapsed ? 'min-[761px]:mt-2 min-[761px]:border-t min-[761px]:border-border min-[761px]:pt-2' : 'min-[761px]:mt-4'))}>
+              {!preferences.collapsed && <p className="mb-1 hidden px-3 font-mono text-[0.62rem] font-bold uppercase tracking-wider text-muted-foreground min-[761px]:block" aria-hidden="true">{group.title}</p>}
+              <ul aria-label={group.title} className="m-0 flex list-none flex-col gap-1 p-0 max-[760px]:contents">
+                {group.items.map((item) => <li key={item.path} className="max-[760px]:contents">{renderNavItem(item)}</li>)}
+              </ul>
+            </div>
+          )) : navItems.map(renderNavItem)}
           <button
             className={cn(
               'relative flex items-center justify-center rounded-[7px] border border-transparent bg-transparent p-0 font-display font-semibold text-secondary-foreground min-[761px]:hidden',
@@ -182,11 +201,11 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
             {more.badge > 0 && <span className="absolute right-1 top-0 min-w-[18px] rounded-pill bg-status-conflict px-[5px] py-px text-center font-mono text-[0.6rem] font-extrabold text-black tabular-nums">{more.badge}</span>}
           </button>
         </nav>
-        <IconButton variant="ghost" className="hidden size-8 min-[761px]:inline-flex" aria-label="Report bug" title="Report bug" onClick={() => setReporting(true)}><Bug size={16} aria-hidden="true" /></IconButton>
+        <IconButton variant="ghost" className="hidden size-8 min-[761px]:inline-flex" aria-label="Report bug" title="Report a DOCK bug (opens a GitHub issue on danuseta/dock)" onClick={() => setReporting(true)}><Bug size={16} aria-hidden="true" /></IconButton>
         <span className={cn(
           'hidden whitespace-nowrap font-mono text-[0.67rem] font-bold text-muted-foreground min-[761px]:block',
           isSidebar ? 'min-[761px]:w-full min-[761px]:border-t min-[761px]:border-border min-[761px]:px-2 min-[761px]:pt-[13px] min-[761px]:pb-0.5 min-[761px]:text-center' : 'min-[761px]:border-l min-[761px]:border-border min-[761px]:pl-2',
-        )}>v{appVersion}</span>
+        )} title={versionTitle}>{isSidebar && preferences.collapsed ? shortVersionLabel : versionLabel}</span>
         {isSidebar && (
           <button
             type="button"

@@ -25,6 +25,7 @@ import { broadcastDeps, sendBroadcast } from '../integrations/broadcast';
 import { approvalRecords, approveReview, liveApprovalDeps } from '../integrations/review-approval';
 import { decisionGate } from '../integrations/decision-gate';
 import { doctorReports } from '../integrations/doctor';
+import { claudeUsage } from '../integrations/claude-usage';
 import { agentLooks } from '../integrations/agent-looks';
 import { agentBridge } from '../integrations/agents-live';
 import type { AnswerInput } from '../integrations/chat-interactions';
@@ -272,6 +273,7 @@ export const resolvers = {
     },
     ingestTokens: async () => orchestratorService.tokens(),
     doctorReports: async () => doctorReports.list(),
+    claudeUsage: async (_: unknown, { from, to }: { from: string; to: string }) => claudeUsage.usage(from, to).catch(orchestratorInputError),
     agentLooks: async () => agentLooks.list(),
     libraryAgents: async (_: unknown, { machine }: { machine?: string | null }) => {
       requireAgents();
@@ -301,6 +303,7 @@ export const resolvers = {
       return chatService.sessions(source, limit, CHAT_MACHINE).catch(orchestratorInputError);
     },
     chatSession: async (_: unknown, { id }: { id: string }) => chatService.session(id, CHAT_MACHINE),
+    chatSessionStates: async (_: unknown, { limit }: { limit?: number }) => chatService.sessionStates(limit, CHAT_MACHINE),
     chatMessages: async (_: unknown, args: { sessionId: string; afterId?: number; beforeId?: number; limit?: number }) => {
       return chatService.messages(args.sessionId, args.afterId, args.beforeId, args.limit)
         .then((rows) => chatService.withAttachments(rows)).catch(orchestratorInputError);
@@ -693,8 +696,8 @@ export const resolvers = {
 export const protectedQueries = [
   'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
-  'chatSessions', 'chatSession', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
-  'chatCommands', 'chatMachineOptions', 'doctorReports', 'agentLooks', 'libraryAgents', 'libraryAgent',
+  'chatSessions', 'chatSession', 'chatSessionStates', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
+  'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'agentLooks', 'libraryAgents', 'libraryAgent',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
   'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl',
 ] as const;

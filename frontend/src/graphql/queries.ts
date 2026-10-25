@@ -284,6 +284,7 @@ export const GET_SETTINGS = gql`
       chatRtk
       chatCaveman
       chatParallelTurns
+      notificationPrefs
     }
   }
 `;
@@ -747,6 +748,19 @@ export const GET_CHAT_SESSIONS = gql`
   }
 `;
 
+export const GET_CHAT_SESSION_STATES = gql`
+  query GetChatSessionStates($limit: Int) {
+    chatSessionStates(limit: $limit) {
+      id
+      title
+      status
+      statusDetail
+      origin
+      ticketKey
+    }
+  }
+`;
+
 export const GET_CHAT_SESSION_WORKERS = gql`
   query GetChatSessionWorkers($sessionId: ID!) {
     chatSessionWorkers(sessionId: $sessionId) {
@@ -1089,5 +1103,17 @@ export const GET_DOCK_ISSUE = gql`
 export const GET_DOCK_ISSUE_DRAFT_URL = gql`
   query GetDockIssueDraftUrl($title: String!, $happened: String!, $steps: String, $expected: String, $imageLinks: [String!], $page: String!) {
     dockIssueDraftUrl(title: $title, happened: $happened, steps: $steps, expected: $expected, imageLinks: $imageLinks, page: $page)
+  }
+`;
+
+export const GET_CLAUDE_USAGE = gql`
+  query GetClaudeUsage($from: String!, $to: String!) {
+    claudeUsage(from: $from, to: $to) {
+      available
+      error
+      totals { inputTokens outputTokens cacheCreationTokens cacheReadTokens totalTokens cost }
+      days { date totalTokens cost }
+      models { model inputTokens outputTokens cacheCreationTokens cacheReadTokens totalTokens cost }
+    }
   }
 `;

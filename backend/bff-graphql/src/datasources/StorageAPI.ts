@@ -1,11 +1,12 @@
 import { StorageService } from '../storage/service';
 import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, normalizeDiscordMessageTemplate } from '../integrations/discord';
+import { forgetNotificationPrefs, parseNotificationPrefs, validateNotificationPrefs } from '../integrations/notification-prefs';
 
 const MIN_SERVICE_HEALTH_REFRESH_SECONDS = 5;
 const MAX_SERVICE_HEALTH_REFRESH_SECONDS = 86_400;
-export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto'] as const;
+export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'] as const;
 /** What a chat offers; "default" (ask before each tool) stays for the cron's manual mode only. */
-export const CHAT_MODES = ['auto', 'plan', 'acceptEdits'] as const;
+export const CHAT_MODES = ['auto', 'plan', 'acceptEdits', 'bypassPermissions'] as const;
 export const RTK_SETTINGS = ['on', 'off'] as const;
 export const CAVEMAN_LEVELS = ['off', 'lite', 'full', 'ultra'] as const;
 export const MAX_PARALLEL_TURNS = 6;
@@ -180,6 +181,7 @@ export class StorageAPI {
       chatRtk: settings.chatRtk || 'on',
       chatCaveman: settings.chatCaveman || 'full',
       chatParallelTurns: parallelTurns(settings.chatParallelTurns)?.toString() ?? null,
+      notificationPrefs: JSON.stringify(parseNotificationPrefs(settings.notificationPrefs)),
     };
   }
 
@@ -198,10 +200,12 @@ export class StorageAPI {
       if (input.chatParallelTurns != null && input.chatParallelTurns !== '' && parallelTurns(input.chatParallelTurns) === null) throw new Error('Invalid turn count');
       if (input.discordMessageTemplate != null) normalizeDiscordMessageTemplate(String(input.discordMessageTemplate));
       if (input.discordUserId != null && input.discordUserId !== '' && !/^\d{5,25}$/.test(String(input.discordUserId).trim())) throw new Error('Invalid Discord user id');
-      await Promise.all(Object.entries(input)
+      const saved = input.notificationPrefs == null ? input : { ...input, notificationPrefs: JSON.stringify(validateNotificationPrefs(String(input.notificationPrefs))) };
+      await Promise.all(Object.entries(saved)
         .filter(([key, value]) => !(this.sensitiveKeys.has(key)
           && (value == null || String(value).trim() === '')))
         .map(([key, value]) => this.storage.upsertSetting(key, value == null ? '' : String(value))));
+      forgetNotificationPrefs();
       return true;
     } catch { return false; }
   }

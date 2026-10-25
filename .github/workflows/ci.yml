@@ -42,11 +42,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
-      contents: read
+      contents: write
       packages: write
     steps:
       - uses: actions/checkout@v7
-      - run: npm pkg set version=1.0.${{ github.run_number }} --workspace=frontend
+        with:
+          fetch-depth: 0
+      - id: version
+        run: echo "value=$(node tools/version.mjs)" >> "$GITHUB_OUTPUT"
+      - run: npm pkg set version=${{ steps.version.outputs.value }} --workspace=frontend
+      - name: Tag the version
+        run: |
+          tag="v${{ steps.version.outputs.value }}"
+          if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            git tag "$tag"
+            git push origin "$tag"
+          fi
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:

@@ -255,6 +255,27 @@ test('history sync upserts a cli session, replaces or appends, and keeps the new
   assert.strictEqual(messages().at(-1).text, 'm5499');
 });
 
+test('a turn that ends on its own announces itself; a stopped turn, a failed one and a cron one do not', async () => {
+  const { service } = clockedService();
+  await service.syncSession(syncBody(), 'laptop');
+  const heard: string[] = [];
+  service.onTurnDone = (turn) => { heard.push(turn.sessionId); };
+  const turn = async (session: { id: string }, delta: Record<string, unknown>) => {
+    const sent = await service.sendMessage(session.id, 'go', MACHINES);
+    await service.claim({ wait: 0 }, undefined, 'laptop');
+    await service.delta({ sessionId: session.id, replyTo: sent.id, ...delta }, 'laptop');
+  };
+  const manual = await service.createSession({ title: 'Manual' });
+  await turn(manual, { done: true });
+  assert.deepStrictEqual(heard, [manual.id]);
+  await turn(manual, { done: true, stopped: true });
+  await turn(manual, { done: true, error: 'claude exited' });
+  const cron = await service.createSession({ title: 'Cron', origin: 'cron' });
+  await turn(cron, { done: true });
+  assert.deepStrictEqual(heard, [manual.id]);
+  assert.deepStrictEqual((await service.sessionStates(10)).filter((state) => state.id === cron.id), [{ id: cron.id, title: 'Cron', status: 'idle', statusDetail: null, origin: 'cron', ticketKey: null }]);
+});
+
 test('a DOCK session takes one turn at a time and the bridge moves it through its states', async () => {
   const { service, sessions, advance } = clockedService();
   await service.syncSession(syncBody(), 'laptop');

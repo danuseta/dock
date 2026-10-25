@@ -30,8 +30,9 @@ test('effort follows the chosen model, else the catalog default model', () => {
   assert.deepStrictEqual(settingEffortChoices(machine, '', '').slice(1).map((c) => c.value), ['low', 'medium', 'high']);
 });
 
-test('modes the picker does not know are not offered', () => {
-  assert.deepStrictEqual(settingModeChoices(machine, 'auto').map((c) => c.value), ['auto', 'plan']);
+test('modes the picker does not know are not offered, and the four known ones come in order', () => {
+  assert.deepStrictEqual(settingModeChoices({ ...machine, modes: ['default', 'bypassPermissions', 'acceptEdits', 'plan', 'auto'] }, 'auto').map((c) => c.value), ['auto', 'plan', 'acceptEdits', 'bypassPermissions']);
+  assert.deepStrictEqual(settingModeChoices(machine, 'auto').map((c) => c.value), ['auto', 'plan', 'bypassPermissions']);
 });
 
 test('a saved value the catalog lacks stays selectable', () => {

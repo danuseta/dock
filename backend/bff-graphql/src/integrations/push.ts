@@ -1,6 +1,7 @@
 import webpush from 'web-push';
 import { StorageService } from '../storage/service';
 import { OrchestratorInputError } from './orchestrator';
+import { EventPush, NOTIFICATION_PREFS_KEY, parseNotificationPrefs } from './notification-prefs';
 
 const PUBLIC_KEY = 'pushVapidPublicKey';
 const PRIVATE_KEY = 'pushVapidPrivateKey';
@@ -103,4 +104,9 @@ export const pushService = new PushService({
   cacheSet: (key, value) => storage.upsertCache(CACHE, key, value, 0),
   generateKeys: () => webpush.generateVAPIDKeys(),
   deliver,
+});
+
+export const eventPush = new EventPush({
+  prefs: async () => parseNotificationPrefs((await storage.getSettingValues([NOTIFICATION_PREFS_KEY]))[0]?.value),
+  send: (message) => pushService.send(message),
 });

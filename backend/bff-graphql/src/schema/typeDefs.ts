@@ -174,6 +174,8 @@ export const typeDefs = gql`
     chatCaveman: String!
     """How many chat turns a bridge runs at once; null leaves it to the bridge's own file."""
     chatParallelTurns: String
+    """JSON: the volume and, per event, whether it notifies and with which bundled sound."""
+    notificationPrefs: String!
   }
 
   type DiscordAttachment {
@@ -433,6 +435,39 @@ export const typeDefs = gql`
     name: String!
     ok: Boolean!
     detail: String!
+  }
+
+  type ClaudeUsageTotals {
+    inputTokens: Float!
+    outputTokens: Float!
+    cacheCreationTokens: Float!
+    cacheReadTokens: Float!
+    totalTokens: Float!
+    cost: Float!
+  }
+
+  type ClaudeUsageDay {
+    date: String!
+    totalTokens: Float!
+    cost: Float!
+  }
+
+  type ClaudeUsageModel {
+    model: String!
+    inputTokens: Float!
+    outputTokens: Float!
+    cacheCreationTokens: Float!
+    cacheReadTokens: Float!
+    totalTokens: Float!
+    cost: Float!
+  }
+
+  type ClaudeUsage {
+    available: Boolean!
+    totals: ClaudeUsageTotals
+    days: [ClaudeUsageDay!]!
+    models: [ClaudeUsageModel!]!
+    error: String
   }
 
   type DoctorCheck {
@@ -730,6 +765,15 @@ export const typeDefs = gql`
     options: ChatTurnOptions
   }
 
+  type ChatSessionState {
+    id: ID!
+    title: String!
+    status: String!
+    statusDetail: String
+    origin: String!
+    ticketKey: String
+  }
+
   type ChatWorker {
     id: String!
     parentId: String
@@ -951,6 +995,7 @@ export const typeDefs = gql`
     chatRtk: String
     chatCaveman: String
     chatParallelTurns: String
+    notificationPrefs: String
   }
 
   input QuickLinkInput {
@@ -1075,6 +1120,7 @@ export const typeDefs = gql`
     orchestration(key: String!): Orchestration
     ingestTokens: [IngestToken!]!
     doctorReports: [DoctorReport!]!
+    claudeUsage(from: String!, to: String!): ClaudeUsage!
     agentLooks: [AgentLook!]!
     libraryAgents(machine: String): [LibraryAgent!]!
     libraryAgent(slug: String!, machine: String): LibraryAgentDetail!
@@ -1086,6 +1132,7 @@ export const typeDefs = gql`
     elevenLabsQuota: [ElevenLabsQuota!]!
     chatSessions(source: String, limit: Int): [ChatSession!]!
     chatSession(id: ID!): ChatSession
+    chatSessionStates(limit: Int): [ChatSessionState!]!
     chatMessages(sessionId: ID!, afterId: Int, beforeId: Int, limit: Int): [ChatMessage!]!
     chatActivity(sessionId: ID!, afterSeq: Int, fromTurnId: Int, beforeTurnId: Int, limit: Int): [ChatActivity!]!
     chatSessionWorkers(sessionId: ID!): [ChatWorker!]!

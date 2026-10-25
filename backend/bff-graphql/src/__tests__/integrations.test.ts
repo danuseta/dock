@@ -943,6 +943,7 @@ test('internal integration behavior', async (t) => {
     assert.strictEqual(await api.updateSettings({ chatCaveman: 'loud' }), false);
     assert.strictEqual(await api.updateSettings({ chatRtk: 'maybe' }), false);
     assert.strictEqual(await api.updateSettings({ chatDefaultMode: 'yolo' }), false);
+    assert.strictEqual(await api.updateSettings({ chatDefaultMode: 'default' }), false);
     assert.strictEqual(await api.updateSettings({ chatDefaultModel: 'm'.repeat(101) }), false);
     assert.strictEqual(await api.updateSettings({ chatDefaultEffort: 'e'.repeat(101) }), false);
     assert.strictEqual(await api.updateSettings({ chatParallelTurns: '7' }), false);
@@ -955,6 +956,7 @@ test('internal integration behavior', async (t) => {
     writes.length = 0;
     assert.strictEqual(settings.chatParallelTurns, null);
     assert.strictEqual(await api.updateSettings({ chatDefaultMode: '' }), true);
+    assert.strictEqual(await api.updateSettings({ chatDefaultMode: 'bypassPermissions' }), true);
     writes.length = 0;
     assert.strictEqual(await api.updateSettings({ chatCaveman: 'lite', chatRtk: 'off', chatDefaultModel: 'sonnet' }), true);
     assert.deepStrictEqual(writes, [['chatCaveman', 'lite'], ['chatRtk', 'off'], ['chatDefaultModel', 'sonnet']]);
