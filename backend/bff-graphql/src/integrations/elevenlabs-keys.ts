@@ -1,7 +1,5 @@
-import { dockMode } from '../mode';
 import { prisma } from '../storage/client';
 import { decrypt, encrypt } from '../storage/crypto';
-import { ledgerPeer } from './ledger-peer';
 import { OrchestratorInputError } from './orchestrator';
 
 const NAME = /^[A-Za-z0-9._-]{1,40}$/;
@@ -39,7 +37,7 @@ function keyValue(value: unknown): string {
   return key;
 }
 
-/** The keys kept in this DOCK's database, encrypted. The laptop DOCK on the VPS is the one that keeps them. */
+/** The keys kept in this DOCK's database, encrypted. */
 export class LocalElevenLabsKeys implements ElevenLabsKeys {
   constructor(private readonly db = prisma, private readonly clock: () => Date = () => new Date(), private readonly fetchQuota: typeof fetch = fetch) {}
 
@@ -125,7 +123,7 @@ export class LocalElevenLabsKeys implements ElevenLabsKeys {
   }
 }
 
-/** The workspace DOCK keeps no key: every call goes to the laptop DOCK, so both DOCKs and both machines share one set. */
+/** The keys of another DOCK, read through its ingest routes; pull-peer-secrets copies them into this DOCK. */
 export class PeerElevenLabsKeys implements ElevenLabsKeys {
   constructor(private readonly call: (route: string, body: unknown) => Promise<unknown>) {}
 
@@ -158,6 +156,4 @@ export function elevenLabsRoute(keys: ElevenLabsKeys, route: string, body: Recor
   }
 }
 
-export const elevenLabsKeys: ElevenLabsKeys = dockMode() === 'workspace' && ledgerPeer
-  ? new PeerElevenLabsKeys((route, body) => ledgerPeer!.call(route, body))
-  : new LocalElevenLabsKeys();
+export const elevenLabsKeys: ElevenLabsKeys = new LocalElevenLabsKeys();
