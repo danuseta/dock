@@ -65,3 +65,14 @@ test('a missing binary is unavailable, any other failure is an error, and bad in
   await assert.rejects(() => missing.usage('x', 'y'), OrchestratorInputError);
   assert.equal(ran, 1);
 });
+
+test('an unavailable answer is not cached, so installing ccusage shows usage on the next look', async () => {
+  let installed = false;
+  const service = new ClaudeUsageService(() => 'ccusage', async () => {
+    if (!installed) throw Object.assign(new Error('spawn ccusage ENOENT'), { code: 'ENOENT' });
+    return { stdout: JSON.stringify({ daily: [] }) };
+  });
+  assert.equal((await service.usage('2026-10-01', '2026-10-07')).available, false);
+  installed = true;
+  assert.equal((await service.usage('2026-10-01', '2026-10-07')).available, true);
+});

@@ -66,16 +66,16 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
     { path: '/agents', label: 'Agents', icon: Bot, badge: 0, group: 'Work' },
     { path: '/sessions', label: 'Sessions', icon: History, badge: 0, group: 'Work' },
     { path: '/decisions', label: 'Decisions', icon: ListChecks, badge: decisionCount, group: 'Work' },
+    { path: '/demo-videos', label: 'Demo Videos', icon: Clapperboard, badge: 0, group: 'Work' },
     { path: '/calendar', label: 'Calendar', icon: CalendarDays, badge: 0, group: 'Work' },
     { path: '/sprint', label: 'Sprint', icon: BarChart3, badge: 0, group: 'Team' },
     { path: '/discord', label: 'Discord', icon: MessagesSquare, badge: discordCount, group: 'Team' },
-    { path: '/issues', label: 'DOCK Issues', icon: Bug, badge: 0, group: 'Team' },
     { path: '/monitoring', label: 'Monitoring', icon: Activity, badge: 0, group: 'System' },
     { path: '/docker', label: 'Docker Services', icon: Box, badge: 0, group: 'System' },
     { path: '/dev-servers', label: 'Dev Servers', icon: Server, badge: 0, group: 'System' },
     // Not /health: the server answers that path itself for its health check.
     { path: '/machines', label: 'Health', icon: Stethoscope, badge: 0, group: 'System' },
-    { path: '/demo-videos', label: 'Demo Videos', icon: Clapperboard, badge: 0, group: 'System' },
+    { path: '/issues', label: 'DOCK Issues', icon: Bug, badge: 0, group: 'System' },
     { path: '/settings', label: 'System Settings', icon: SettingsIcon, badge: 0, group: 'System' },
   ].filter((item) => hasPage(mode, item.path));
 
@@ -201,7 +201,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
             {more.badge > 0 && <span className="absolute right-1 top-0 min-w-[18px] rounded-pill bg-status-conflict px-[5px] py-px text-center font-mono text-[0.6rem] font-extrabold text-black tabular-nums">{more.badge}</span>}
           </button>
         </nav>
-        <IconButton variant="ghost" className="hidden size-8 min-[761px]:inline-flex" aria-label="Report bug" title="Report bug" onClick={() => setReporting(true)}><Bug size={16} aria-hidden="true" /></IconButton>
+        <IconButton variant="ghost" className="hidden size-8 min-[761px]:inline-flex" aria-label="Report bug" title="Report a DOCK bug (opens a GitHub issue on danuseta/dock)" onClick={() => setReporting(true)}><Bug size={16} aria-hidden="true" /></IconButton>
         <span className={cn(
           'hidden whitespace-nowrap font-mono text-[0.67rem] font-bold text-muted-foreground min-[761px]:block',
           isSidebar ? 'min-[761px]:w-full min-[761px]:border-t min-[761px]:border-border min-[761px]:px-2 min-[761px]:pt-[13px] min-[761px]:pb-0.5 min-[761px]:text-center' : 'min-[761px]:border-l min-[761px]:border-border min-[761px]:pl-2',

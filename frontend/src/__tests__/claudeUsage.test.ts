@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { formatCost, formatTokens, periodRange, USAGE_PERIODS, validCustomRange } from '../lib/claudeUsage';
+import { fillDays, formatCost, formatTokens, periodRange, USAGE_PERIODS, validCustomRange } from '../lib/claudeUsage';
 
 const src = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (file: string) => readFileSync(join(src, file), 'utf8');
@@ -42,4 +42,16 @@ test('Home carries the Claude usage card with the period chips, the not installe
   assert.match(card, /Loading Claude usage\.\.\./);
   assert.match(card, /aria-label="Usage per day"/);
   assert.match(read('graphql/queries.ts'), /claudeUsage\(from: \$from, to: \$to\)/);
+});
+
+test('usage is always read from the server, never from a cached unavailable answer, and drawn as day columns', () => {
+  const card = read('components/ClaudeUsageCard.tsx');
+  assert.match(card, /fetchPolicy: 'network-only'/);
+  assert.match(card, /<ol className="flex h-36 items-end/);
+  assert.doesNotMatch(card, /style=\{\{ width:/);
+});
+
+test('every day of the range gets a column, zero when ccusage reported nothing', () => {
+  const days = fillDays('2026-10-29', '2026-11-02', [{ date: '2026-10-30', totalTokens: 5, cost: 1 }, { date: '2026-11-02', totalTokens: 7, cost: 2 }]);
+  assert.deepEqual(days.map((day) => `${day.date}:${day.totalTokens}`), ['2026-10-29:0', '2026-10-30:5', '2026-10-31:0', '2026-11-01:0', '2026-11-02:7']);
 });
