@@ -6,6 +6,7 @@ import { ADD_QUICK_LINK, REMOVE_QUICK_LINK } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { WebsiteIcon } from '../components/WebsiteIcon';
 import { DockerRuntimeCard } from '../components/DockerRuntimeCard';
+import { ClaudeUsageCard } from '../components/ClaudeUsageCard';
 import { AgentRunStrip } from '../components/AgentRunStrip';
 import { HomeAttention, type HomeAttentionItem } from '../components/HomeAttention';
 import { ticketAttention, ticketQuestions } from '../lib/attention';
@@ -146,6 +147,8 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
             {activeTickets.length === 0 && <div className="px-4 py-5 text-[0.78rem] text-muted-foreground">No active Jira tickets.</div>}
             {activeTickets.length > MY_TICKETS && <div className="flex items-center justify-between border-t border-border px-4 py-2.5 text-[0.72rem] text-muted-foreground"><span>{activeTickets.length - MY_TICKETS} more on the board</span><Button variant="ghost" size="sm" className={textActionClass} onClick={() => onNavigate('/dashboard')}>Open board →</Button></div>}
           </article>
+
+          <ClaudeUsageCard />
 
           {showDocker && <DockerRuntimeCard runtime={secondaryData?.dockerRuntime} onNavigate={onNavigate} compact loading={secondaryLoading && !secondaryData} />}
         </div>

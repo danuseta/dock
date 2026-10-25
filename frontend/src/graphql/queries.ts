@@ -1091,3 +1091,15 @@ export const GET_DOCK_ISSUE_DRAFT_URL = gql`
     dockIssueDraftUrl(title: $title, happened: $happened, steps: $steps, expected: $expected, imageLinks: $imageLinks, page: $page)
   }
 `;
+
+export const GET_CLAUDE_USAGE = gql`
+  query GetClaudeUsage($from: String!, $to: String!) {
+    claudeUsage(from: $from, to: $to) {
+      available
+      error
+      totals { inputTokens outputTokens cacheCreationTokens cacheReadTokens totalTokens cost }
+      days { date totalTokens cost }
+      models { model inputTokens outputTokens cacheCreationTokens cacheReadTokens totalTokens cost }
+    }
+  }
+`;
