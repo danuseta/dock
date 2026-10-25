@@ -17,6 +17,14 @@ export function bumpVersion(base, subjects) {
   return `${major}.${minor}.${patch}`;
 }
 
+export function titlesOf(log) {
+  return log.split('\x1e').map((entry) => entry.trim()).filter(Boolean).map((entry) => {
+    const [subject, body = ''] = entry.split('\x1f');
+    if (!/^Merge pull request /.test(subject)) return subject;
+    return body.split('\n').map((line) => line.trim()).find(Boolean) ?? subject;
+  });
+}
+
 function git(args) {
   return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
 }
@@ -29,8 +37,8 @@ export function currentVersion() {
     tag = '';
   }
   if (!tag) return BASELINE;
-  const log = git(['log', `${tag}..HEAD`, '--first-parent', '--no-merges', '--reverse', '--format=%s']);
-  return bumpVersion(tag.slice(1), log ? log.split('\n') : []);
+  const log = git(['log', `${tag}..HEAD`, '--first-parent', '--reverse', '--format=%s%x1f%b%x1e']);
+  return bumpVersion(tag.slice(1), titlesOf(log));
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

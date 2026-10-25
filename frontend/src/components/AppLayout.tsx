@@ -19,8 +19,9 @@ import { version as appVersion } from '../../package.json';
 
 const appChannel = import.meta.env.VITE_APP_CHANNEL;
 const appCommit = import.meta.env.VITE_APP_COMMIT;
-const shortVersionLabel = appChannel === 'main' ? 'main' : `v${import.meta.env.VITE_APP_VERSION || appVersion}`;
-const versionLabel = appChannel === 'main' ? `main · ${appCommit}` : `${shortVersionLabel}${appChannel ? ` · ${appChannel}` : ''}`;
+const shortVersionLabel = `v${import.meta.env.VITE_APP_VERSION || appVersion}`;
+const versionLabel = `${shortVersionLabel}${appChannel ? ` · ${appChannel}` : ''}`;
+const versionTitle = appCommit ? `${versionLabel} (${appCommit})` : versionLabel;
 
 // A phone tab: icon over a short label, 44 px tall.
 const PHONE_TAB = 'max-[760px]:h-11 max-[760px]:w-[60px] max-[760px]:flex-col max-[760px]:gap-0.5 max-[760px]:text-[0.6875rem]';
@@ -204,7 +205,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
         <span className={cn(
           'hidden whitespace-nowrap font-mono text-[0.67rem] font-bold text-muted-foreground min-[761px]:block',
           isSidebar ? 'min-[761px]:w-full min-[761px]:border-t min-[761px]:border-border min-[761px]:px-2 min-[761px]:pt-[13px] min-[761px]:pb-0.5 min-[761px]:text-center' : 'min-[761px]:border-l min-[761px]:border-border min-[761px]:pl-2',
-        )} title={versionLabel}>{isSidebar && preferences.collapsed ? shortVersionLabel : versionLabel}</span>
+        )} title={versionTitle}>{isSidebar && preferences.collapsed ? shortVersionLabel : versionLabel}</span>
         {isSidebar && (
           <button
             type="button"
