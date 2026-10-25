@@ -437,6 +437,39 @@ export const typeDefs = gql`
     detail: String!
   }
 
+  type ClaudeUsageTotals {
+    inputTokens: Float!
+    outputTokens: Float!
+    cacheCreationTokens: Float!
+    cacheReadTokens: Float!
+    totalTokens: Float!
+    cost: Float!
+  }
+
+  type ClaudeUsageDay {
+    date: String!
+    totalTokens: Float!
+    cost: Float!
+  }
+
+  type ClaudeUsageModel {
+    model: String!
+    inputTokens: Float!
+    outputTokens: Float!
+    cacheCreationTokens: Float!
+    cacheReadTokens: Float!
+    totalTokens: Float!
+    cost: Float!
+  }
+
+  type ClaudeUsage {
+    available: Boolean!
+    totals: ClaudeUsageTotals
+    days: [ClaudeUsageDay!]!
+    models: [ClaudeUsageModel!]!
+    error: String
+  }
+
   type DoctorCheck {
     name: String!
     ok: Boolean!
@@ -1087,6 +1120,7 @@ export const typeDefs = gql`
     orchestration(key: String!): Orchestration
     ingestTokens: [IngestToken!]!
     doctorReports: [DoctorReport!]!
+    claudeUsage(from: String!, to: String!): ClaudeUsage!
     agentLooks: [AgentLook!]!
     libraryAgents(machine: String): [LibraryAgent!]!
     libraryAgent(slug: String!, machine: String): LibraryAgentDetail!

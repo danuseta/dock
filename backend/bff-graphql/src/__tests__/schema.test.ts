@@ -97,6 +97,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'chatSessionWorkers',
       'chatSessions',
       'chatStatus',
+      'claudeUsage',
       'dashboard',
       'demoStorage',
       'demoVideos',
