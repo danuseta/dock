@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { bumpVersion } from '../../../tools/version.mjs';
+import { bumpVersion, titlesOf } from '../../../tools/version.mjs';
 
 const frontendRoot = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -28,11 +28,25 @@ test('no commits keeps the baseline', () => {
   assert.equal(bumpVersion('1.1.0', []), '1.1.0');
 });
 
-test('the sidebar label shows the version with the channel, or main with the commit', () => {
+test('a GitHub merge commit counts by the pull request title in its body; sync merges count nothing', () => {
+  const entry = (subject, body = '') => `${subject}\x1f${body}\x1e`;
+  const log = [
+    entry('Merge pull request #137 from danuseta/feat/x', 'feat(QRD-1456): bypassPermissions chat mode\n'),
+    entry('Merge pull request #140 from danuseta/fix/y', '\nfix(QRD-1456): sidebar groups reach main\n'),
+    entry("Merge remote-tracking branch 'origin/main' into feat/z"),
+    entry('Merge pull request #134 from danuseta/main', 'Release: main to stable'),
+    entry('fix: pushed straight to main'),
+  ].join('\n');
+  assert.deepEqual(titlesOf(log), ['feat(QRD-1456): bypassPermissions chat mode', 'fix(QRD-1456): sidebar groups reach main', "Merge remote-tracking branch 'origin/main' into feat/z", 'Release: main to stable', 'fix: pushed straight to main']);
+  assert.equal(bumpVersion('2.0.0', titlesOf(log)), '2.1.2');
+});
+
+test('the sidebar label always shows the version, with the channel, and the commit in its tooltip', () => {
   const layout = readFileSync(join(frontendRoot, 'src/components/AppLayout.tsx'), 'utf8');
   assert.match(layout, /import\.meta\.env\.VITE_APP_VERSION/);
   assert.match(layout, /import\.meta\.env\.VITE_APP_CHANNEL/);
   assert.match(layout, /import\.meta\.env\.VITE_APP_COMMIT/);
-  assert.match(layout, /`main · \$\{appCommit\}`/);
+  assert.doesNotMatch(layout, /`main · \$\{appCommit\}`/);
+  assert.match(layout, /title=\{versionTitle\}/);
   assert.match(layout, /\{versionLabel\}/);
 });

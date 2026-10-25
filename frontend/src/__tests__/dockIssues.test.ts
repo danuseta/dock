@@ -9,14 +9,12 @@ import { environmentPreview, imageLinksOf, ISSUE_FILTERS, matchesIssue } from '.
 const src = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (file: string) => readFileSync(join(src, file), 'utf8');
 
-test('DOCK Issues has a route and sits just before System Settings in the navigation', () => {
+test('DOCK Issues has a route and sits in the Team group of the navigation', () => {
   const app = read('App.tsx');
   assert.match(app, /path === '\/issues'/);
   assert.match(app, /case '\/issues': return <DockIssuesPage/);
   const layout = read('components/AppLayout.tsx');
-  assert.ok(layout.indexOf("label: 'DOCK Issues'") > 0);
-  assert.ok(layout.indexOf("label: 'DOCK Issues'") < layout.indexOf("label: 'System Settings'"));
-  assert.match(layout, /\{ path: '\/issues', label: 'DOCK Issues', icon: Bug, badge: 0 \},\s*\{ path: '\/settings'/);
+  assert.match(layout, /\{ path: '\/issues', label: 'DOCK Issues', icon: Bug, badge: 0, group: 'Team' \}/);
   assert.equal(hasPage('laptop', '/issues') && hasPage('workspace', '/issues'), true);
 });
 
