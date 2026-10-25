@@ -28,7 +28,7 @@ const JIRA_LINK = /https:\/\/[\w.-]+\.atlassian\.net\/browse\/([A-Z][A-Z0-9_]{1,
 export const NEEDS_YOU = new Set<ThreadState>(['FLOW_2', 'FLOW_4', 'YOUR_TURN', 'FLOW_5', 'REVIEW_ASKED']);
 export const SETTING_KEYS = { token: 'discordBotToken', guild: 'discordGuildId' } as const;
 /** Bumped when ThreadRow gains a field, so the next sync builds every stored row again. */
-export const ROW_VERSION = 4;
+export const ROW_VERSION = 5;
 /** Discord channel types that are threads. */
 const THREAD_TYPES = new Set([10, 11, 12]);
 
@@ -116,10 +116,12 @@ export const expiresAt = (url: string) => parseInt(new URL(url).searchParams.get
 
 export interface Sorted { state: ThreadState; why: string; claim: ThreadClaim | null; claimerRepliedAt: string | null; mentionedAt: string | null; repliedAt: string | null }
 
-/** Reviewers a pull request asks for: "-1" or "-2" in its first message, else a "-1" or "-2" tag, else two. */
+/** Reviewers a pull request asks for: "-1" or "-2" in the poster's opening messages, else a "-1" or "-2" tag, else two. */
 export function slotsOf(messages: ThreadMessage[], threadOwnerId: string | null, tags: string[]): number {
-  const first = messages.find((message) => message.authorId === threadOwnerId);
-  const said = first && SLOTS_TEXT.exec(first.text);
+  const start = messages.findIndex((message) => message.authorId === threadOwnerId);
+  const reply = start < 0 ? -1 : messages.findIndex((message, index) => index > start && message.authorId !== threadOwnerId);
+  const opening = start < 0 ? [] : messages.slice(start, reply < 0 ? undefined : reply);
+  const said = opening.map((message) => SLOTS_TEXT.exec(message.text)).find(Boolean);
   const tagged = tags.map((tag) => SLOTS_TAG.exec(tag.trim())).find(Boolean);
   return Number(said?.[1] ?? tagged?.[1] ?? DEFAULT_SLOTS);
 }

@@ -396,6 +396,10 @@ test('the reviewers a pull request asks for come from its first message, then it
   assert.strictEqual(slotsOf(first('@ITteam -1 feat(QRD-1234): x'), RINA.id, ['-2']), 1);
   assert.strictEqual(slotsOf(first('feat(QRD-1234): x'), RINA.id, ['High', '-1']), 1);
   assert.strictEqual(slotsOf(first('feat(QRD-1234): x - 2 files'), RINA.id, []), 2);
+  const opening = [toMessage(msg(RINA, '[BUGFIX] review QRD-1418 please'), ME), toMessage(msg(RINA, '@ITteam -1'), ME), toMessage(msg(HAMZAH, 'on it'), ME)];
+  assert.strictEqual(slotsOf(opening, RINA.id, []), 1, 'a -1 in a second opening message by the poster counts');
+  const later = [toMessage(msg(RINA, 'feat(QRD-1336): x'), ME), toMessage(msg(HAMZAH, 'LGTM'), ME), toMessage(msg(RINA, '-1 guys'), ME)];
+  assert.strictEqual(slotsOf(later, RINA.id, ['-2']), 2, 'a -1 written after a reviewer replied does not change the ask');
   const row = buildRow({ id: 'fp', name: 'pull-request', kind: 'pr', thread: false, enabled: true }, 'g1', { id: '1298000000000000009', parent_id: 'fp', name: 'PR', owner_id: RINA.id }, new Map(), [msg({ ...RINA, avatar: 'a1' }, '-1 please'), msg(HAMZAH, 'on it')], ME);
   assert.deepStrictEqual([row.slots, row.createdByAvatar], [1, `https://cdn.discordapp.com/avatars/${RINA.id}/a1.png?size=64`], 'the avatar is the poster, not the last writer');
 });
