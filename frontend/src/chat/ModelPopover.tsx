@@ -42,6 +42,7 @@ export const ModelPopover: React.FC<ModelPopoverProps> = ({ control, machine, fa
   const model = rows.find((row) => row.field === 'model');
   const label = (model && modelName(machineOptions?.models ?? [], model.value)) || fallbackLabel;
   const setters: Record<OptionField, (value: string | null) => void> = { model: control.setModel, effort: control.setEffort, permissionMode: control.setMode };
+  const bypass = rows.find((row) => row.field === 'permissionMode')?.value === 'bypassPermissions';
   const toSave = defaultsToSave(rows);
   const pending = Object.keys(toSave).length > 0;
   const off = disabled || rows.length === 0;
@@ -56,7 +57,7 @@ export const ModelPopover: React.FC<ModelPopoverProps> = ({ control, machine, fa
   };
 
   return (
-    <div ref={root} className="flex-none">
+    <div ref={root} className="flex flex-none items-center gap-1.5">
       <button
         type="button"
         aria-haspopup="dialog"
@@ -70,6 +71,7 @@ export const ModelPopover: React.FC<ModelPopoverProps> = ({ control, machine, fa
         <span className="min-w-0 truncate">{label}</span>
         {!off && (open ? <ChevronUp size={12} aria-hidden="true" className="flex-none" /> : <ChevronDown size={12} aria-hidden="true" className="flex-none" />)}
       </button>
+      {bypass && <span className="inline-flex h-7 flex-none items-center rounded-xs border border-status-conflict px-1.5 font-mono text-[0.62rem] font-bold uppercase text-status-conflict max-[900px]:h-11" title="Bypass permissions: tools run without asking">Bypass</span>}
       {open && machineOptions && (
         <div role="dialog" aria-label="Model, effort and mode" className="absolute top-full right-3 z-[55] mt-1 flex w-[min(21rem,calc(100vw-2rem))] flex-col gap-2.5 rounded-sm border border-border-glow bg-surface-1 p-3 shadow-card">
           {rows.map((row) => (

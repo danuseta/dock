@@ -3,9 +3,9 @@ import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, normalizeDiscordMessageTemplate } fro
 
 const MIN_SERVICE_HEALTH_REFRESH_SECONDS = 5;
 const MAX_SERVICE_HEALTH_REFRESH_SECONDS = 86_400;
-export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto'] as const;
+export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'] as const;
 /** What a chat offers; "default" (ask before each tool) stays for the cron's manual mode only. */
-export const CHAT_MODES = ['auto', 'plan', 'acceptEdits'] as const;
+export const CHAT_MODES = ['auto', 'plan', 'acceptEdits', 'bypassPermissions'] as const;
 export const RTK_SETTINGS = ['on', 'off'] as const;
 export const CAVEMAN_LEVELS = ['off', 'lite', 'full', 'ultra'] as const;
 export const MAX_PARALLEL_TURNS = 6;

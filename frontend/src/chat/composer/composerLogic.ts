@@ -73,8 +73,8 @@ export const IMAGE_EDGE_PX = 2000;
 export const COMMAND_LIMIT = 30;
 export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 export const TEXT_EXTENSIONS = ['md', 'txt', 'log', 'csv', 'json', 'yaml', 'yml', 'xml', 'html', 'css', 'js', 'jsx', 'ts', 'tsx', 'py', 'go', 'rs', 'java', 'kt', 'sh', 'sql', 'diff', 'patch'];
-export const PERMISSION_MODES = ['auto', 'plan', 'acceptEdits'];
-export const MODE_LABELS: Record<string, string> = { auto: 'Auto', plan: 'Plan', acceptEdits: 'Accept edits' };
+export const PERMISSION_MODES = ['auto', 'plan', 'acceptEdits', 'bypassPermissions'];
+export const MODE_LABELS: Record<string, string> = { auto: 'Auto', plan: 'Plan', acceptEdits: 'Accept edits', bypassPermissions: 'Bypass permissions' };
 export const EMPTY_OPTIONS: TurnOptions = { model: null, effort: null, permissionMode: null, fast: null };
 
 export const composerFeatures = (capabilities: readonly string[]): ComposerFeatures => ({
