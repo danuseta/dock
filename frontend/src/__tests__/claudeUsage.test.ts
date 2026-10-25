@@ -40,15 +40,19 @@ test('Home carries the Claude usage card with the period chips, the not installe
   assert.match(card, /type="date"/);
   assert.match(card, /ccusage is not installed on this workspace\./);
   assert.match(card, /Loading Claude usage\.\.\./);
-  assert.match(card, /aria-label="Usage per day"/);
   assert.match(read('graphql/queries.ts'), /claudeUsage\(from: \$from, to: \$to\)/);
 });
 
-test('usage is always read from the server, never from a cached unavailable answer, and drawn as day columns', () => {
+test('usage is always read from the server, never from a cached unavailable answer, and drawn as an area line chart', () => {
   const card = read('components/ClaudeUsageCard.tsx');
   assert.match(card, /fetchPolicy: 'network-only'/);
-  assert.match(card, /<ol className="flex h-36 items-end/);
-  assert.doesNotMatch(card, /style=\{\{ width:/);
+  assert.match(card, /<UsageLineChart days=\{days\} \/>/);
+  const chart = read('components/UsageLineChart.tsx');
+  assert.match(chart, /<polyline points=\{line\}/);
+  assert.match(chart, /<polygon points=/);
+  assert.match(chart, /aria-label="Usage per day"/);
+  assert.match(chart, /onMouseMove=\{pick\}/);
+  assert.doesNotMatch(chart, /rounded-t-/);
 });
 
 test('every day of the range gets a column, zero when ccusage reported nothing', () => {
