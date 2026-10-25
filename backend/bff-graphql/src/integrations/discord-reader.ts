@@ -116,14 +116,19 @@ export const expiresAt = (url: string) => parseInt(new URL(url).searchParams.get
 
 export interface Sorted { state: ThreadState; why: string; claim: ThreadClaim | null; claimerRepliedAt: string | null; mentionedAt: string | null; repliedAt: string | null }
 
-/** Reviewers a pull request asks for: "-1" or "-2" in the poster's opening messages, else a "-1" or "-2" tag, else two. */
+/**
+ * Reviewers a pull request asks for: "-1" or "-2" in the poster's opening messages, else a "-1" or "-2" tag, else the
+ * first "-1" or "-2" the poster wrote later, else two. A later follow-up never replaces the first ask.
+ */
 export function slotsOf(messages: ThreadMessage[], threadOwnerId: string | null, tags: string[]): number {
   const start = messages.findIndex((message) => message.authorId === threadOwnerId);
   const reply = start < 0 ? -1 : messages.findIndex((message, index) => index > start && message.authorId !== threadOwnerId);
+  const poster = messages.filter((message) => message.authorId === threadOwnerId);
   const opening = start < 0 ? [] : messages.slice(start, reply < 0 ? undefined : reply);
   const said = opening.map((message) => SLOTS_TEXT.exec(message.text)).find(Boolean);
   const tagged = tags.map((tag) => SLOTS_TAG.exec(tag.trim())).find(Boolean);
-  return Number(said?.[1] ?? tagged?.[1] ?? DEFAULT_SLOTS);
+  const later = poster.map((message) => SLOTS_TEXT.exec(message.text)).find(Boolean);
+  return Number(said?.[1] ?? tagged?.[1] ?? later?.[1] ?? DEFAULT_SLOTS);
 }
 
 /**
