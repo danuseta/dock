@@ -1000,6 +1000,60 @@ export const typeDefs = gql`
     lastFill: String!
   }
 
+  type DockIssueAuthor {
+    login: String!
+    avatarUrl: String!
+  }
+
+  type DockIssue {
+    number: Int!
+    title: String!
+    state: String!
+    author: DockIssueAuthor!
+    createdAt: String!
+    updatedAt: String!
+    comments: Int!
+    url: String!
+    body: String!
+  }
+
+  type DockIssueComment {
+    id: ID!
+    author: DockIssueAuthor!
+    createdAt: String!
+    body: String!
+  }
+
+  type DockIssueDetail {
+    number: Int!
+    title: String!
+    state: String!
+    author: DockIssueAuthor!
+    createdAt: String!
+    updatedAt: String!
+    comments: Int!
+    url: String!
+    body: String!
+    commentList: [DockIssueComment!]!
+  }
+
+  type DockIssueList {
+    tokenMissing: Boolean!
+    viewer: String
+    issues: [DockIssue!]!
+  }
+
+  type PostedDockIssue {
+    number: Int!
+    url: String!
+  }
+
+  enum DockIssueFilter {
+    OPEN
+    CLOSED
+    MINE
+  }
+
   type Query {
     authStatus: AuthStatus!
     dockMode: String!
@@ -1052,6 +1106,11 @@ export const typeDefs = gql`
     """JSON: cron slots in use, today's count against the cap, and the last fill (started, parked, deferred)."""
     orchestratorCronStatus: String!
     pushPublicKey: String!
+    dockBuild: String!
+    dockIssues(filter: DockIssueFilter!): DockIssueList!
+    dockIssue(number: Int!): DockIssueDetail
+    """The GitHub new-issue address filled with the same title and body that reportDockIssue posts."""
+    dockIssueDraftUrl(title: String!, happened: String!, steps: String, expected: String, imageLinks: [String!], page: String!): String!
   }
 
   type Mutation {
@@ -1132,5 +1191,6 @@ export const typeDefs = gql`
     subscribePush(endpoint: String!, p256dh: String!, auth: String!): Boolean!
     unsubscribePush(endpoint: String!): Boolean!
     sendTestPush: Int!
+    reportDockIssue(title: String!, happened: String!, steps: String, expected: String, imageLinks: [String!], page: String!): PostedDockIssue!
   }
 `;
