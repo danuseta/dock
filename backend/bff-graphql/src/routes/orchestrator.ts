@@ -13,6 +13,8 @@ import { receiveDemoVideo } from './demo-videos';
 import { autoBroadcast, type AutoBroadcast } from '../integrations/broadcast';
 import { decisionGate, type DecisionGate } from '../integrations/decision-gate';
 import { doctorReports, type DoctorReports } from '../integrations/doctor';
+import { DiscordReaderError, type DiscordReader } from '../integrations/discord-reader';
+import { discordReader } from '../integrations/discord-reader-live';
 import { dockMode } from '../mode';
 import { ELEVENLABS_ROUTES, elevenLabsKeys, elevenLabsRoute, type ElevenLabsKeys } from '../integrations/elevenlabs-keys';
 import { MAX_TRANSCRIPT_BYTES, OrchestratorInputError, OrchestratorService, orchestratorService } from '../integrations/orchestrator';
@@ -63,6 +65,7 @@ export function createOrchestratorIngestRouter(
   agents: Pick<AgentBridge, 'receive'> = agentBridge,
   // A ledger push can answer the last issue: the gate then marks the draft pull requests ready.
   gate: Pick<DecisionGate, 'settle'> | null = decisionGate,
+  discord: Pick<DiscordReader, 'threadFiles'> = discordReader,
 ): Router {
   const router = Router();
 
@@ -112,6 +115,15 @@ export function createOrchestratorIngestRouter(
   for (const route of DEMO_STORAGE_ROUTES) router.post(`/demo-storage/${route}`, small, handle((body) => demoStorageRoute(storageSettings, route, (body ?? {}) as Record<string, unknown>)));
   router.post('/demo-link', small, handle((body) => ingestDemoLink(body)));
   router.post('/demo-video', (request: Request, response: Response) => receiveDemoVideo(videos, request.query.key, request, response, broadcast ? (key) => { void broadcast.afterDemoVideo(key).catch(broadcastFailed); } : undefined));
+  // An agent fetching a teammate's evidence from a Discord thread, through the bot token only DOCK holds.
+  router.post('/discord-thread', small, handle(async (body) => {
+    try {
+      return await discord.threadFiles(String((body as { threadId?: unknown })?.threadId ?? ''));
+    } catch (error) {
+      if (error instanceof DiscordReaderError) throw new OrchestratorInputError(error.message);
+      throw error;
+    }
+  }));
   router.post('/doctor', small, handle((body, _signal, machine) => doctor.ingest(body, machine)));
   for (const route of ELEVENLABS_ROUTES) router.post(`/elevenlabs/${route}`, small, handle((body) => elevenLabsRoute(keys, route, (body ?? {}) as Record<string, unknown>)));
   router.post('/dismiss', small,handle((body, _signal, machine) => service.dismiss(String((body as { key?: unknown })?.key ?? ''), machine)));

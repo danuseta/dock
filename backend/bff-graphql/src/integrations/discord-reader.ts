@@ -80,6 +80,11 @@ const NO_NAMES: ServerNames = { roles: new Map(), channels: new Map(), myRoles: 
 
 export class DiscordReaderError extends Error {}
 
+export interface ThreadFiles {
+  threadId: string;
+  messages: Array<{ at: string; author: string; text: string; files: Array<{ name: string; size: number; type: string | null; url: string }> }>;
+}
+
 const nameOf = (user: RawUser) => user.global_name || user.username;
 /** The user's avatar, or the default Discord gives an account without one. */
 export const avatarOf = (user: RawUser) => (user.avatar
@@ -504,6 +509,26 @@ export class DiscordReader {
     if (!this.fresh.size) return rows;
     const link = (url: string) => this.fresh.get(url) ?? url;
     return rows.map((row) => ({ ...row, messages: row.messages.map((message) => ({ ...message, attachments: message.attachments.map((file) => ({ ...file, url: link(file.url) })) })) }));
+  }
+
+  /**
+   * One thread's last 100 messages, oldest first, with their files, read now with the bot token from Settings. For an
+   * agent that must look at evidence a teammate posted (a PDF, a screenshot); the file links are fresh from Discord.
+   */
+  async threadFiles(threadId: string): Promise<ThreadFiles> {
+    if (!/^\d{5,25}$/.test(threadId)) throw new DiscordReaderError('threadId must be a Discord id (digits only)');
+    const config = await this.config();
+    if (!config) throw new DiscordReaderError('Discord is not set up in DOCK Settings (bot token and server id)');
+    const raw = await this.get<RawMessage[]>(`/channels/${threadId}/messages?limit=100`, config.token);
+    return {
+      threadId,
+      messages: [...raw].reverse().map((message) => ({
+        at: message.timestamp,
+        author: message.author.global_name || message.author.username,
+        text: message.content,
+        files: message.attachments.map((file) => ({ name: file.filename, size: file.size, type: file.content_type ?? null, url: file.url })),
+      })),
+    };
   }
 
   /** Checks the token and every followed channel; the message names what Discord answered. */
