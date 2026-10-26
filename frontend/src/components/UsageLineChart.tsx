@@ -21,9 +21,9 @@ export const UsageLineChart = ({ days }: { days: ClaudeUsageDay[] }) => {
     <figure className="border-b border-border px-4 pb-2 pt-3">
       <figcaption className="mb-1.5 flex justify-between gap-3 font-mono text-[0.62rem] text-muted-foreground tabular-nums">
         <span>Tokens per day</span>
-        <span>{active ? `${active.date} · ${formatTokens(active.totalTokens)} · ${formatCost(active.cost)}` : `peak ${formatTokens(peak)}`}</span>
+        <span>peak {formatTokens(peak)}</span>
       </figcaption>
-      <div className="relative h-36" onMouseMove={pick} onMouseLeave={() => setHover(null)}>
+      <div className="relative h-36 touch-none" onPointerMove={pick} onPointerDown={pick} onPointerLeave={() => setHover(null)}>
         <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 size-full overflow-visible" aria-hidden="true">
           <g className="text-border">{[25, 50, 75].map((at) => <line key={at} x1="0" x2="100" y1={at} y2={at} stroke="currentColor" strokeWidth="1" vectorEffect="non-scaling-stroke" />)}</g>
           <g className="text-accent">
@@ -33,6 +33,11 @@ export const UsageLineChart = ({ days }: { days: ClaudeUsageDay[] }) => {
           {hover !== null && <line className="text-muted-foreground" x1={x(hover)} x2={x(hover)} y1="0" y2="100" stroke="currentColor" strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />}
         </svg>
         {days.map((day, index) => (hover === index || days.length === 1) && <span key={day.date} className="pointer-events-none absolute size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-accent bg-surface-0" style={{ left: `${x(index)}%`, top: `${y(day.totalTokens)}%` }} />)}
+        {active && hover !== null && <div role="tooltip" className={cn('pointer-events-none absolute z-10 min-w-[128px] rounded-md border border-border-glow bg-surface-1 px-2.5 py-1.5 font-mono text-[0.66rem] tabular-nums shadow-lg', x(hover) > 70 ? '-translate-x-[calc(100%+10px)]' : 'translate-x-[10px]', y(active.totalTokens) < 35 ? 'translate-y-[8px]' : '-translate-y-[calc(100%+8px)]')} style={{ left: `${x(hover)}%`, top: `${y(active.totalTokens)}%` }}>
+          <div className="text-muted-foreground">{active.date}</div>
+          <div className="flex justify-between gap-3"><span className="text-muted-foreground">Tokens</span><strong className="text-foreground">{formatTokens(active.totalTokens)}</strong></div>
+          <div className="flex justify-between gap-3"><span className="text-muted-foreground">Cost</span><strong className="text-foreground">{formatCost(active.cost)}</strong></div>
+        </div>}
         <ol className="sr-only" aria-label="Usage per day">
           {days.map((day) => <li key={day.date}>{`${day.date}: ${formatTokens(day.totalTokens)} tokens, ${formatCost(day.cost)}`}</li>)}
         </ol>

@@ -51,7 +51,8 @@ test('usage is always read from the server, never from a cached unavailable answ
   assert.match(chart, /<polyline points=\{line\}/);
   assert.match(chart, /<polygon points=/);
   assert.match(chart, /aria-label="Usage per day"/);
-  assert.match(chart, /onMouseMove=\{pick\}/);
+  assert.match(chart, /onPointerMove=\{pick\}/);
+  assert.match(chart, /role="tooltip"/);
   assert.doesNotMatch(chart, /rounded-t-/);
 });
 
