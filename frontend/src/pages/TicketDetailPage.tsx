@@ -3,8 +3,10 @@ import { useQuery, useMutation } from '@apollo/client';
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowRight,
   Check,
   Circle,
+  ClipboardList,
   ExternalLink,
   Figma,
   GitBranch,
@@ -36,6 +38,7 @@ import { monitorsOnly, useDockMode } from '../lib/dockMode';
 import { CACHED_QUERY_OPTIONS, DETAIL_QUERY_OPTIONS, displayAssignee } from '../lib/queryPolicy';
 import { NO_DESCRIPTION, RUN_STATE_LABEL, dependencyChoices, isLongDescription, jiraAcLines, needsYou, runState, type NeedItem } from '../lib/ticketDetail';
 import { getPassLabels } from '../lib/ticketApprovals';
+import { blackboardFileHref, blackboardHref, folderOf, useBlackboardFiles } from '../lib/blackboard';
 import { nextWorkOrder } from '../lib/workOrder';
 
 interface TicketDetailPageProps {
@@ -135,6 +138,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
   const { openForTicket, opening: openingSession, error: sessionError } = useOpenForTicket();
   const { answer, sending: answering } = useAnswerTicket();
   const monitoring = monitorsOnly(useDockMode());
+  const blackboardFiles = useBlackboardFiles(ticketKey, !monitoring);
   const closeMenu = useCallback(() => setMenu(null), []);
 
   const renderBackButton = () => onBack ? (
@@ -327,6 +331,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
           {run?.kind === 'review' && (run.approved
             ? <Button className="max-[760px]:h-11" disabled title="Your Jira Pass label is on the ticket and its pull requests are approved"><Check size={15} aria-hidden="true" />Approved</Button>
             : <Button variant="primary" className="max-[760px]:h-11" onClick={() => setConfirmApprove(true)} disabled={approving} title="Adds your Jira Pass label and approves the open pull requests on GitHub"><Check size={15} aria-hidden="true" />{approving ? 'Approving...' : 'Approve'}</Button>)}
+          {blackboardFiles && <Button className="max-[760px]:h-11" onClick={() => onNavigate(blackboardHref(ticket.key))}><ClipboardList size={15} aria-hidden="true" />Blackboard</Button>}
           <Button className="max-[760px]:h-11" onClick={() => void openForTicket(ticket.key)} disabled={openingSession}><MessagesSquare size={15} aria-hidden="true" />{openingSession ? 'Opening...' : 'Session'}</Button>
           <Button
             className="border-status-discord bg-status-discord text-white hover:bg-status-discord/80 max-[760px]:h-11"
@@ -540,6 +545,27 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
               );
             })}
           </ul>
+
+          {blackboardFiles && (() => {
+            const latest = blackboardFiles.reduce((at, file) => (file.updatedAt > at ? file.updatedAt : at), '');
+            const shots = blackboardFiles.filter((file) => folderOf(file.path) === 'screenshots').length;
+            const quick = [
+              ...['NOW.md', 'review.md'].filter((name) => blackboardFiles.some((file) => file.path === name)).map((name) => ({ label: name, href: blackboardFileHref(ticket.key, name) })),
+              ...(shots ? [{ label: `screenshots · ${shots}`, href: blackboardFileHref(ticket.key, 'screenshots') }] : []),
+            ];
+            return (
+              <>
+                <h2 className={sectionTitle}>Blackboard</h2>
+                <p className="font-mono text-[0.68rem] text-muted-foreground">{blackboardFiles.length} files{latest ? ` · changed ${new Date(latest).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</p>
+                {quick.length > 0 && (
+                  <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                    {quick.map((link) => <button key={link.label} type="button" onClick={() => onNavigate(link.href)} className="border-0 bg-transparent p-0 font-mono text-xs text-accent hover:underline">{link.label}</button>)}
+                  </p>
+                )}
+                <button type="button" onClick={() => onNavigate(blackboardHref(ticket.key))} className="mt-1.5 inline-flex items-center gap-1 border-0 bg-transparent p-0 text-xs text-secondary-foreground hover:text-foreground">See all<ArrowRight size={12} aria-hidden="true" /></button>
+              </>
+            );
+          })()}
 
           <h2 className={sectionTitle}>Demo</h2>
           {editingDemo ? (

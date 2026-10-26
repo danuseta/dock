@@ -11,7 +11,7 @@ const labelsOf = (group: string) => [...layout.matchAll(new RegExp(`label: '([^'
 
 test('the sidebar titles three groups with the pages the owner assigned', () => {
   assert.match(layout, /\['Work', 'Team', 'System'\]\.map\(\(title\)/);
-  assert.deepEqual(labelsOf('Work'), ['Home', 'Board', 'Agents', 'Sessions', 'Decisions', 'Demo Videos', 'Calendar']);
+  assert.deepEqual(labelsOf('Work'), ['Home', 'Board', 'Agents', 'Blackboard', 'Sessions', 'Decisions', 'Demo Videos', 'Calendar']);
   assert.deepEqual(labelsOf('Team'), ['Sprint', 'Discord']);
   assert.deepEqual(labelsOf('System'), ['Monitoring', 'Docker Services', 'Dev Servers', 'Health', 'DOCK Issues', 'System Settings']);
 });
