@@ -1,5 +1,8 @@
 const TRIED_KEY = 'dock-update-tried';
 
+/** How often an open, visible page asks the server for its build, so a deploy lands without leaving the tab. */
+export const UPDATE_CHECK_MS = 60_000;
+
 /** The build this page is running: the hashed name of its entry script. Null in development, where nothing is hashed. */
 export function runningBuild(): string | null {
   return document.querySelector('script[type="module"][src*="/assets/index-"]')?.getAttribute('src') ?? null;
@@ -23,7 +26,8 @@ export function updateStep(running: string | null, server: string | null, typing
   return typing || tried === server ? 'offer' : 'reload';
 }
 
-const typing = () => [...document.querySelectorAll('textarea')].some((box) => box.value.trim() !== '');
+/** Text in a box on screen, or an open dialog whose form a reload would throw away. A hidden prefilled box does not count. */
+const typing = () => [...document.querySelectorAll('textarea')].some((box) => box.getClientRects().length > 0 && box.value.trim() !== '') || document.querySelector('[role="dialog"]') !== null;
 
 /** Checks once; resolves true when the caller should show the "new version" offer. */
 export async function checkForUpdate(): Promise<boolean> {
