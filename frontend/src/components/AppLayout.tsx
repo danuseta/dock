@@ -266,7 +266,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
         {children}
       </main>
       <ReportDockIssue open={reporting} onClose={() => setReporting(false)} onNavigate={onNavigate} />
-      {showsChatDock(mode, currentPath) && <ChatDock inset={chatInset} />}
+      {showsChatDock(mode, currentPath) && <ChatDock inset={chatInset} onNavigate={onNavigate} />}
     </div>
   );
 };

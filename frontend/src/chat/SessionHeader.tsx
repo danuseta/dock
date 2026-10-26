@@ -13,11 +13,18 @@ interface SessionHeaderProps {
   session: ChatSession;
   /** The Sessions page has its own title and rename control. */
   showTitle: boolean;
+  /** Opens with the title already in the rename box; saving or cancelling then calls `onDone`. */
+  startEditing?: boolean;
+  onDone?: () => void;
 }
 
-export const SessionHeader: React.FC<SessionHeaderProps> = ({ session, showTitle }) => {
+export const SessionHeader: React.FC<SessionHeaderProps> = ({ session, showTitle, startEditing, onDone }) => {
   const [rename, { loading: renaming }] = useMutation(RENAME_CHAT_SESSION);
-  const [titleDraft, setTitleDraft] = useState<string | null>(null);
+  const [titleDraft, setDraft] = useState<string | null>(startEditing ? session.title : null);
+  const setTitleDraft = (value: string | null) => {
+    setDraft(value);
+    if (value === null) onDone?.();
+  };
   const [error, setError] = useState('');
 
   if (session.source !== 'dock' || !showTitle) return null;

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useApolloClient, useQuery } from '@apollo/client';
-import { Loader2, SendHorizontal } from 'lucide-react';
+import { Loader2, Power, SendHorizontal } from 'lucide-react';
 import { SEND_CHAT_MESSAGE, STOP_CHAT_TURN } from '../graphql/mutations';
 import { GET_CHAT_MESSAGES, GET_CHAT_SESSION } from '../graphql/queries';
 import { Button } from '../components/ui';
@@ -17,7 +17,7 @@ import { recallMessages, rememberMessages } from './messageCache';
 import type { ChatActivity } from './activity/activity';
 import { TranscriptList } from './activity/TranscriptList';
 import { useTurnActivity } from './activity/useTurnActivity';
-import { WorkerTray } from './activity/WorkerTray';
+import { WorkerStrip, WorkerTray } from './activity/WorkerTray';
 import { Composer } from './composer/Composer';
 import { composerFeatures } from './composer/composerLogic';
 import { useTurnOptions, type TurnOptionsControl } from './composer/useTurnOptions';
@@ -26,6 +26,7 @@ import { useChatStatus } from './useChatStatus';
 import type { ChatSessionStatus } from './status';
 import type { SendPayload } from './composer/composerLogic';
 import { InteractionCards } from './interactions/InteractionCards';
+import { offlineLine } from './phonePanel';
 import { useInteractionLog } from './interactions/useInteractionLog';
 import { chatStore } from './store';
 
@@ -45,9 +46,11 @@ interface ChatThreadProps {
   onOpenThread?: (eventId: string | null) => void;
   /** Titles of the other sessions running on this machine, named while this one waits in the queue. */
   queuedBehind?: string[];
+  /** The chat panel on a phone: the header comes from `renderHeader`, workers sit in one strip and the composer is compact. */
+  compact?: boolean;
 }
 
-export interface HeaderContext { control: TurnOptionsControl; dot: DotState; status: ChatSessionStatus | undefined }
+export interface HeaderContext { control: TurnOptionsControl; dot: DotState; status: ChatSessionStatus | undefined; session: ChatSession; busy: boolean; turnStartedAt: string | null }
 
 const NEWEST_PAGE = 200;
 const OLDER_PAGE = 100;
@@ -61,7 +64,7 @@ const PROMPT_EXAMPLES = [
 
 const messageOf = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
 
-export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, readOnlyAction, hideMachine, onActivity, renderHeader, threadId, onOpenThread, queuedBehind = [] }) => {
+export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, readOnlyAction, hideMachine, onActivity, renderHeader, threadId, onOpenThread, queuedBehind = [], compact }) => {
   const client = useApolloClient();
   const [recalled] = useState(() => recallMessages(sessionId));
   const [messages, setMessages] = useState<ChatMessage[]>(() => recalled?.messages ?? []);
@@ -262,13 +265,14 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
   };
 
   const missing = data !== undefined && data.chatSession === null;
+  const turnStartedAt = busy ? [...messages].reverse().find((message) => message.role === 'user')?.at ?? null : null;
   const blockerId = `chat-blocker-${sessionId}`;
 
   return (
     <div className={cn('flex min-h-0 flex-col', className)}>
-      {session && !hideMachine && <div className="flex flex-none items-center gap-2 border-b border-border bg-surface-0 px-3.5 py-1.5 font-mono text-[0.66rem] text-muted-foreground"><span>Runs on</span><MachineChip name={machine} online={machineUp} /></div>}
-      {session && <SessionHeader session={session} showTitle={!hideMachine} />}
-      {session && renderHeader?.({ control, dot, status: ownStatus })}
+      {session && !hideMachine && !compact && <div className="flex flex-none items-center gap-2 border-b border-border bg-surface-0 px-3.5 py-1.5 font-mono text-[0.66rem] text-muted-foreground"><span>Runs on</span><MachineChip name={machine} online={machineUp} /></div>}
+      {session && !compact && <SessionHeader session={session} showTitle={!hideMachine} />}
+      {session && renderHeader?.({ control, dot, status: ownStatus, session, busy, turnStartedAt })}
       <div ref={scrollRef} onScroll={handleScroll} className="min-h-[6.5rem] flex-1 overflow-y-auto overscroll-contain px-3.5 py-3" role="log" aria-label="Conversation">
         {loadingOlder && <p className="pb-2 text-center font-mono text-[0.66rem] text-muted-foreground" role="status">Loading older messages...</p>}
         {!loaded && !loadError && !missing && <p className="py-6 text-center text-sm text-muted-foreground" role="status">Loading the conversation...</p>}
@@ -289,7 +293,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
         <TranscriptList items={activity.items} store={activity.store} threadId={threadId} onOpenThread={onOpenThread ? (eventId) => onOpenThread(eventId) : undefined} />
       </div>
 
-      {!missing && <WorkerTray events={allEvents} activeId={threadId} onSelect={onOpenThread} />}
+      {!missing && (compact && onOpenThread ? <WorkerStrip events={allEvents} onOpen={onOpenThread} /> : <WorkerTray events={allEvents} activeId={threadId} onSelect={onOpenThread} />)}
 
       {!missing && <InteractionCards sessionId={sessionId} cards={interactions.cards} lines={interactions.lines} messages={messages} onSettled={interactions.record} />}
 
@@ -300,7 +304,10 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
         {sendError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">Not sent: {sendError}</p>}
         {loadError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">{loadError}</p>}
         {sessionError && !data && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The session could not be loaded: {sessionError.message}</p>}
-        {blocker && !readOnly && machineUp === false && (
+        {blocker && !readOnly && machineUp === false && compact && (
+          <p id={blockerId} className="flex items-center gap-2 rounded-xs bg-amber-300/10 px-2.5 py-1.5 text-xs text-amber-200" role="status" title={blocker}><Power size={13} aria-hidden="true" className="flex-none" /><span className="min-w-0 truncate" aria-hidden="true">{offlineLine(machine)}</span><span className="sr-only">{blocker}</span></p>
+        )}
+        {blocker && !readOnly && machineUp === false && !compact && (
           <p id={blockerId} className="rounded-xs border border-amber-300/50 bg-amber-300/10 px-2.5 py-1.5 text-pretty text-xs text-amber-200" role="status">{blocker}</p>
         )}
         {readOnly && (
@@ -336,6 +343,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
             onSend={send}
             onStop={() => void stop()}
             seed={seed}
+            compact={compact ? { modelLabel: ownStatus?.model ?? '' } : null}
           />
         )}
       </div>
