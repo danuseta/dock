@@ -15,7 +15,7 @@ test('settings: defaults when nothing is saved, saved fields win, v1 keys are ig
   assert.deepStrictEqual(parseCronSettings(null), DEFAULT_CRON_SETTINGS);
   assert.deepStrictEqual(
     [DEFAULT_CRON_SETTINGS.enabled, DEFAULT_CRON_SETTINGS.workStart, DEFAULT_CRON_SETTINGS.workEnd, DEFAULT_CRON_SETTINGS.workDays, DEFAULT_CRON_SETTINGS.maxPerDay, DEFAULT_CRON_SETTINGS.mode],
-    [false, 9, 17, [1, 2, 3, 4, 5], 6, 'auto'],
+    [false, 9, 17, [1, 2, 3, 4, 5], 6, null],
   );
   const saved = parseCronSettings(JSON.stringify({ enabled: true, hoursWib: [9], perRound: 3, workDays: [5, 1, 1], parallel: 1, labels: [' be ', 'be'], epicBase: { 'QRD-1232': 'feat/V1-Playbook' } }));
   assert.deepStrictEqual([saved.enabled, saved.workDays, saved.parallel, saved.labels], [true, [1, 5], 1, ['be']]);
@@ -294,9 +294,9 @@ test('a fill starts in the chosen mode with model and effort and opens cron sess
   assert.deepStrictEqual(state.sent[0].options, { permissionMode: 'default', model: 'opus', effort: 'high' });
   assert.match(state.sent[0].text, /^Build ticket QRD-1 with the build-ticket skill\. The ticket has acceptance criteria: do not stop to ask/);
   assert.deepStrictEqual(state.moved, ['QRD-1']);
-  const auto = world({ tickets: [ticket('QRD-1')] });
-  await auto.cron.runFill();
-  assert.strictEqual(auto.state.sent[0].options.permissionMode, 'auto');
+  const settings = world({ tickets: [ticket('QRD-1')] });
+  await settings.cron.runFill();
+  assert.deepStrictEqual(settings.state.sent[0].options, {}, 'without a cron mode the chat defaults in System Settings apply');
 });
 
 test('a fill is skipped when the machine is offline or the usage brake is reached; a limit whose window has passed does not brake', async () => {
@@ -449,7 +449,7 @@ test('a run whose lead left subagents running is resumed in its own session befo
     const log = await w.cron.runFill();
     assert.deepStrictEqual([log.resumed, log.started], [['QRD-1'], []], `resume ${round} takes no new ticket`);
     assert.match(String(log.skipped), /stalled runs are resumed first: QRD-1/);
-    assert.deepStrictEqual(w.state.sent.at(-1), { sessionId: 's-1', text: resumePrompt('QRD-1'), options: { permissionMode: 'auto', effort: 'high' } });
+    assert.deepStrictEqual(w.state.sent.at(-1), { sessionId: 's-1', text: resumePrompt('QRD-1'), options: { effort: 'high' } });
     assert.strictEqual(w.state.cache.get('resumes:QRD-1'), round, 'the count is kept in the cron cache');
     w.endTurn('QRD-1');
   }
