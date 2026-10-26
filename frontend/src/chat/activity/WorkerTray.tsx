@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { Bot, ChevronDown } from 'lucide-react';
+import { Bot, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import { agentTask, agentType, capRows, durationOf, formatDuration, statusText, stepsText, trayWorkers, type ChatActivity, type TrayWorker } from './activity';
 import { StatusIcon } from './ActivityRow';
+import { AgentAvatar } from './TranscriptParts';
 import { useNow } from './useNow';
 
 const SHOWN = 3;
@@ -72,5 +73,60 @@ export const WorkerTray: React.FC<WorkerTrayProps> = ({ events, activeId, onSele
         </ul>
       )}
     </section>
+  );
+};
+
+/** The phone panel's tray: one line with who is working; a tap lists every worker in a sheet, and a worker opens its thread. */
+export const WorkerStrip: React.FC<{ events: ChatActivity[]; onOpen: (workerId: string) => void }> = ({ events, onOpen }) => {
+  const workers = useMemo(() => trayWorkers(events), [events]);
+  const [open, setOpen] = useState(false);
+  const running = workers.filter((worker) => worker.agent.status === 'running').length;
+  const now = useNow(running > 0);
+  if (workers.length === 0) return null;
+  const sorted = [...workers].sort((a, b) => Number(b.agent.status === 'running') - Number(a.agent.status === 'running'));
+  const counts = running > 0 ? `${running} running` : 'No worker running';
+  const finished = workers.length - running;
+
+  return (
+    <>
+      <button type="button" className="mx-3.5 mt-2 flex h-11 flex-none items-center gap-2.5 rounded-sm border border-border bg-surface-1 px-3 text-left text-[0.76rem] text-secondary-foreground hover:bg-surface-2" aria-expanded={open} aria-label={`Workers: ${counts}${finished > 0 ? `, ${finished} finished` : ''}`} onClick={() => setOpen(true)}>
+        <span className="flex pr-1">{sorted.slice(0, 4).map((worker) => <AgentAvatar key={worker.agent.eventId} name={worker.agent.name} small className="-mr-1 ring-2 ring-surface-1" />)}</span>
+        <b className="font-semibold text-foreground">{counts}</b>
+        {finished > 0 && <span>· {finished} done</span>}
+        <ChevronUp size={14} aria-hidden="true" className="ml-auto flex-none" />
+      </button>
+      {open && (
+        <div className="absolute inset-0 z-20 flex flex-col justify-end" role="dialog" aria-label="Workers of this session">
+          <button type="button" className="min-h-0 flex-1 bg-black/50" aria-label="Close the worker list" onClick={() => setOpen(false)} />
+          <section className="flex max-h-[75%] flex-col gap-2 overflow-y-auto rounded-t-lg border-t border-border-glow bg-surface-1 px-3 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-card">
+            <div className="flex items-center gap-2">
+              <span className="flex-1 font-mono text-[0.62rem] font-bold tracking-[0.1em] text-muted-foreground">WORKERS</span>
+              <span className="font-mono text-[0.66rem] text-muted-foreground">{counts}{finished > 0 && ` · ${finished} done`}</span>
+              <button type="button" className="grid size-11 place-items-center rounded-xs text-muted-foreground hover:bg-surface-2 hover:text-foreground" aria-label="Close" onClick={() => setOpen(false)}><X size={15} aria-hidden="true" /></button>
+            </div>
+            <ul className="m-0 flex list-none flex-col gap-2 p-0">
+              {sorted.map((worker) => {
+                const { agent } = worker;
+                const elapsed = durationOf(agent, now);
+                const step = agent.status === 'running' ? (worker.last ? worker.last.label || worker.last.name : 'Starting...') : `${statusText(agent.status)} · ${stepsText(worker.steps)}`;
+                return (
+                  <li key={agent.eventId}>
+                    <button type="button" className={cn('grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2.5 rounded-sm border border-border bg-surface-0 p-2.5 text-left hover:bg-surface-2', agent.status !== 'running' && 'opacity-60')} onClick={() => { setOpen(false); onOpen(agent.eventId); }}>
+                      <AgentAvatar name={agent.name} />
+                      <span className="min-w-0">
+                        <span className="flex items-center gap-1.5 text-[0.8rem] font-bold text-foreground">{agentType(agent.name)}<StatusIcon status={agent.status} size={11} /></span>
+                        <span className="block truncate text-[0.76rem] text-secondary-foreground">{agentTask(agent)}</span>
+                        <span className="block truncate font-mono text-[0.66rem] text-muted-foreground">{step}</span>
+                      </span>
+                      {elapsed !== null && <span className="font-mono text-[0.66rem] tabular-nums text-muted-foreground">{formatDuration(elapsed)}</span>}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        </div>
+      )}
+    </>
   );
 };

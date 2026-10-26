@@ -14,11 +14,13 @@ interface ModelPopoverProps {
   machine: string;
   fallbackLabel: string;
   disabled: boolean;
+  /** Opens above the button, for a button at the bottom of the screen. */
+  up?: boolean;
 }
 
 const labelClass = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
 
-export const ModelPopover: React.FC<ModelPopoverProps> = ({ control, machine, fallbackLabel, disabled }) => {
+export const ModelPopover: React.FC<ModelPopoverProps> = ({ control, machine, fallbackLabel, disabled, up }) => {
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState<boolean | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -73,7 +75,7 @@ export const ModelPopover: React.FC<ModelPopoverProps> = ({ control, machine, fa
       </button>
       {bypass && <span className="inline-flex h-7 flex-none items-center rounded-xs border border-status-conflict px-1.5 font-mono text-[0.62rem] font-bold uppercase text-status-conflict max-[900px]:h-11" title="Bypass permissions: tools run without asking">Bypass</span>}
       {open && machineOptions && (
-        <div role="dialog" aria-label="Model, effort and mode" className="absolute top-full right-3 z-[55] mt-1 flex w-[min(21rem,calc(100vw-2rem))] flex-col gap-2.5 rounded-sm border border-border-glow bg-surface-1 p-3 shadow-card">
+        <div role="dialog" aria-label="Model, effort and mode" className={cn('absolute z-[55] flex', up ? 'bottom-full left-0 mb-1' : 'top-full right-3 mt-1', 'w-[min(21rem,calc(100vw-2rem))] flex-col gap-2.5 rounded-sm border border-border-glow bg-surface-1 p-3 shadow-card')}>
           {rows.map((row) => (
             <div key={row.field} className="flex flex-col gap-1">
               <span id={`popover-${row.field}`} className={labelClass}>{row.label}</span>

@@ -200,6 +200,19 @@ export function progressOf(thread: DiscordThread): Progress {
 
 export const fileSize = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 
+const TEXT_FILE = /\.(txt|log|md|json|csv)$/i;
+
+/** How DOCK opens a Discord file that is not a picture or a video: text in a viewer, a PDF in a new tab, anything else not at all. */
+export function fileOpening(file: { name: string; type: string | null }): 'text' | 'pdf' | null {
+  const type = (file.type ?? '').split(';')[0].trim().toLowerCase();
+  if (type === 'application/pdf' || /\.pdf$/i.test(file.name)) return 'pdf';
+  return type.startsWith('text/') || type === 'application/json' || TEXT_FILE.test(file.name) ? 'text' : null;
+}
+
+/** The file through DOCK, which fetches it from Discord so the page can read text and a PDF opens instead of downloading. */
+export const discordFileUrl = (url: string, name: string, download = false) =>
+  `/api/discord/file?url=${encodeURIComponent(url)}&name=${encodeURIComponent(name)}${download ? '&download=1' : ''}`;
+
 /** The link a mention becomes in a message's markdown; the page draws it as a highlighted name. */
 export const MENTION_LINK = '#mention-';
 export type MentionKind = 'me' | 'other' | 'role';

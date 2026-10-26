@@ -467,3 +467,19 @@ test('a changed tag builds the row again even when the last message is the same'
   await instance.sync();
   assert.strictEqual((await service.list()).find((row) => row.id === '2001')?.state, 'FIXED');
 });
+
+test('threadFiles: a thread read now with the Settings token, oldest first, with each message\'s files; bad input and a missing setup are refused', async () => {
+  const pdf = { filename: 'evidence.pdf', size: 2048, content_type: 'application/pdf', url: 'https://cdn.discordapp.com/attachments/1/2/evidence.pdf?ex=1' };
+  const raw = [
+    { id: 'm2', content: 'ini evidence-nya', timestamp: '2026-10-26T08:01:00Z', author: RINA, mentions: [], attachments: [pdf] },
+    { id: 'm1', content: 'tolong review', timestamp: '2026-10-26T08:00:00Z', author: { id: 'u9', username: 'aken', global_name: null }, mentions: [], attachments: [] },
+  ];
+  const { instance, calls } = reader({ '/channels/1564141300721393694/messages?limit=100': ok(raw) });
+  const files = await instance.threadFiles('1564141300721393694');
+  assert.deepStrictEqual(calls, ['/channels/1564141300721393694/messages?limit=100']);
+  assert.deepStrictEqual(files.messages.map((message) => [message.author, message.text, message.files.map((file) => file.name)]), [['aken', 'tolong review', []], [RINA.global_name || RINA.username, 'ini evidence-nya', ['evidence.pdf']]]);
+  assert.deepStrictEqual(files.messages[1].files[0], { name: 'evidence.pdf', size: 2048, type: 'application/pdf', url: pdf.url });
+  await assert.rejects(() => instance.threadFiles('../x'), /must be a Discord id/);
+  await assert.rejects(() => reader({}, {}).instance.threadFiles('1564141300721393694'), /not set up in DOCK Settings/);
+  await assert.rejects(() => reader({}).instance.threadFiles('1564141300721393694'), /Discord has no \/channels\/1564141300721393694\/messages/);
+});

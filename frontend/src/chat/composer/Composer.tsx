@@ -13,8 +13,10 @@ import { readDraft, useDraftSaver } from './composerInput';
 import { useAttachments } from './useAttachments';
 import { useCommands } from './useCommands';
 import { isPhone } from '../../lib/phone';
+import { ModelPopover } from '../ModelPopover';
+import type { SessionMachineOptions } from '../sessionOptions';
 
-const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilities, blocker, busy, stopping, control, onSend, onStop, seed }) => {
+const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilities, blocker, busy, stopping, control, onSend, onStop, seed, compact }) => {
   const features = composerFeatures(capabilities);
   const [draft, setDraft] = useState(() => readDraft(sessionId));
   const [sending, setSending] = useState(false);
@@ -50,6 +52,8 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
   const showStop = features.stop && busy;
   const sendable = canSend({ text: draft, attachments: attachments.items.length, attachmentsEnabled: features.attachments, uploading: attachments.uploading, blocker, sending });
   const hasRows = pickerOpen && commands.length > 0;
+  const stopInPlace = Boolean(compact) && showStop && !draft.trim() && attachments.items.length === 0;
+  const modelKnown = Boolean(compact && (compact.modelLabel || (control.machineOptions as SessionMachineOptions | undefined)?.models.length));
 
   const change = (value: string) => {
     setDraft(value);
@@ -124,11 +128,11 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
 
   return (
     <div className={cn('flex min-w-0 flex-col gap-1.5', full && 'max-[900px]:fixed max-[900px]:inset-0 max-[900px]:z-[60] max-[900px]:bg-background max-[900px]:p-3 max-[900px]:pt-[max(0.75rem,env(safe-area-inset-top))]')}>
-      <div className="flex items-center justify-end min-[901px]:hidden">
+      {!compact && <div className="flex items-center justify-end min-[901px]:hidden">
         <Button size="sm" variant="ghost" className="h-11 min-w-11" aria-pressed={full} aria-label={full ? 'Back to the small message box' : 'Write in full screen'} onClick={() => setFull((current) => !current)}>
           {full ? <Minimize2 size={15} aria-hidden="true" /> : <Maximize2 size={15} aria-hidden="true" />}
         </Button>
-      </div>
+      </div>}
       {hasRows || (pickerOpen && (loading || commands.length === 0)) ? (
         <CommandPicker id={pickerId} commands={commands} loading={loading} highlight={highlight} onHighlight={setHighlight} onPick={pick} />
       ) : null}
@@ -171,7 +175,12 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
             </>
           )}
           <span className="flex-1" />
-          {busy && (
+          {compact && (
+            <button type="button" className={cn(iconButton, 'border-transparent text-secondary-foreground hover:bg-surface-hover hover:text-foreground')} aria-pressed={full} aria-label={full ? 'Back to the small message box' : 'Write in full screen'} title={full ? 'Back to the small message box' : 'Write in full screen'} onClick={() => setFull((current) => !current)}>
+              {full ? <Minimize2 size={15} aria-hidden="true" /> : <Maximize2 size={15} aria-hidden="true" />}
+            </button>
+          )}
+          {busy && !compact && (
             <span className="inline-flex flex-none overflow-hidden rounded-[10px] border border-border-glow" role="radiogroup" aria-label="How a message is sent while Claude works">
               {(['queue', 'steer'] as const).map((choice) => (
                 <button
@@ -189,7 +198,7 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
               ))}
             </span>
           )}
-          <button
+          {!stopInPlace && <button
             type="button"
             className={cn(iconButton, 'border-transparent bg-accent text-black hover:bg-accent-hover')}
             disabled={!sendable}
@@ -199,14 +208,37 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
             onClick={() => void send()}
           >
             <ArrowUp size={15} aria-hidden="true" />
-          </button>
-          {showStop && (
+          </button>}
+          {showStop && (!compact || stopInPlace) && (
             <button type="button" className={cn(iconButton, 'border-status-conflict text-status-conflict hover:bg-status-conflict/10')} disabled={stopping} aria-label={stopping ? 'Stopping the turn' : 'Stop the turn'} title={stopping ? 'Stopping...' : 'Stop the turn'} onClick={onStop}>
               {stopping ? <Loader2 size={15} className="animate-spin" aria-hidden="true" /> : <Square size={14} aria-hidden="true" />}
             </button>
           )}
         </div>
       </div>
+      {compact && (busy || modelKnown) && (
+        <div className="relative flex items-center gap-2">
+          {modelKnown && <ModelPopover control={control} machine={machine} fallbackLabel={compact.modelLabel || 'Model'} disabled={false} up />}
+          <span className="flex-1" />
+          {busy && (
+            <span className="inline-flex flex-none overflow-hidden rounded-[10px] border border-border-glow" role="radiogroup" aria-label="How a message is sent while Claude works">
+              {(['queue', 'steer'] as const).map((choice) => (
+                <button
+                  key={choice}
+                  type="button"
+                  role="radio"
+                  aria-checked={mode === choice}
+                  title={choice === 'queue' ? 'Queue: sent when Claude finishes this turn' : features.steer ? 'Steer: added to this turn; Claude reads it after the current step' : 'Steer: stops the current step and answers this next'}
+                  className={cn('inline-flex h-11 items-center px-3 font-mono text-[0.7rem]', mode === choice ? 'bg-surface-hover font-bold text-foreground' : 'text-muted-foreground hover:bg-surface-2')}
+                  onClick={() => setMode(choice)}
+                >
+                  {choice === 'queue' ? 'Queue' : 'Steer'}
+                </button>
+              ))}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 };

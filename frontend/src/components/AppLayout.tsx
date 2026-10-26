@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, BarChart3, Bot, Box, Bug, CalendarDays, ChevronLeft, ChevronRight, History, Home as HomeIcon, LayoutDashboard, ListChecks, MessagesSquare, MoreHorizontal, Settings as SettingsIcon, Clapperboard, Server, Stethoscope } from 'lucide-react';
+import { Activity, BarChart3, Bot, Box, Bug, CalendarDays, ClipboardList, ChevronLeft, ChevronRight, History, Home as HomeIcon, LayoutDashboard, ListChecks, MessagesSquare, MoreHorizontal, Settings as SettingsIcon, Clapperboard, Server, Stethoscope } from 'lucide-react';
 import { useQuery } from '@apollo/client';
 import { GET_DISCORD_THREADS, GET_NEEDS_ATTENTION, GET_OWNER_QUESTIONS } from '../graphql/queries';
 import { ticketAttention, ticketQuestions } from '../lib/attention';
@@ -12,6 +12,7 @@ import { PHONE_PRIMARY_PATHS, phoneMore } from '../lib/phoneNavigation';
 import { useNotificationEvents } from '../lib/useNotificationEvents';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 import { ChatDock } from '../chat/ChatDock';
+import { NoticeToasts } from './NoticeToasts';
 import { ReportDockIssue } from './ReportDockIssue';
 import { IconButton } from './ui';
 import { hasPage, showsChatDock, useDockMode } from '../lib/dockMode';
@@ -73,6 +74,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
     { path: '/', label: 'Home', icon: HomeIcon, badge: attentionCount, group: 'Work' },
     { path: '/dashboard', label: 'Board', icon: LayoutDashboard, badge: 0, group: 'Work' },
     { path: '/agents', label: 'Agents', icon: Bot, badge: 0, group: 'Work' },
+    { path: '/blackboard', label: 'Blackboard', icon: ClipboardList, badge: 0, group: 'Work' },
     { path: '/sessions', label: 'Sessions', icon: History, badge: 0, group: 'Work' },
     { path: '/decisions', label: 'Decisions', icon: ListChecks, badge: decisionCount, group: 'Work' },
     { path: '/demo-videos', label: 'Demo Videos', icon: Clapperboard, badge: 0, group: 'Work' },
@@ -265,7 +267,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
         {children}
       </main>
       <ReportDockIssue open={reporting} onClose={() => setReporting(false)} onNavigate={onNavigate} />
-      {showsChatDock(mode, currentPath) && <ChatDock inset={chatInset} />}
+      {showsChatDock(mode, currentPath) && <ChatDock inset={chatInset} onNavigate={onNavigate} />}
+      <NoticeToasts onNavigate={onNavigate} />
     </div>
   );
 };

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { CAVEMAN_LEVELS, CHAT_MODES, parallelTurns } from '../datasources/StorageAPI';
 import { StorageService } from '../storage/service';
+import { TICKET_TITLE, nextSessionTitle } from './session-titles';
 import {
   ACTIVITY_DETAIL_KEEP_MS,
   ACTIVITY_ID,
@@ -942,6 +943,12 @@ export class ChatService {
     return newest.flatMap((message) => (message && message.at >= since ? [toMessage(message)] : []));
   }
 
+  /** A `Task-` or `Review-` title of a ticket gets ` (2)`, ` (3)`... when a session already has it. */
+  private async uniqueTitle(title: string): Promise<string> {
+    if (!TICKET_TITLE.test(title)) return title;
+    return nextSessionTitle(title, await this.storage.getChatSessionTitles(title));
+  }
+
   async createSession(input: { title?: string | null; ticketKey?: string | null; forkFrom?: string | null; machine?: string | null; origin?: 'cron' | 'manual'; options?: unknown }) {
     const forkFrom = optionalChatId(input.forkFrom, 'forkFrom');
     const source = forkFrom ? await this.storage.getChatSession(forkFrom) : null;
@@ -959,7 +966,7 @@ export class ChatService {
       id: randomUUID(),
       source: 'dock',
       machine,
-      title: text(input.title, MAX_TITLE_CHARS),
+      title: await this.uniqueTitle(text(input.title, MAX_TITLE_CHARS)),
       ticketKey: optionalTicketKey(input.ticketKey),
       forkFrom,
       startedAt: now,

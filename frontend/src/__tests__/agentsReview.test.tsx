@@ -18,3 +18,12 @@ test('findings list blockers first, then non-blocking, then nits, each in the or
   ]);
   assert.deepEqual(ordered.map((item) => item.text), ['b', 'd', 'c', 'a']);
 });
+
+test('a resolved finding is struck through with its reason and labelled resolved instead of its severity', async () => {
+  const { readFileSync } = await import('node:fs');
+  const page = readFileSync(new URL('../pages/AgentsPage.tsx', import.meta.url), 'utf8');
+  assert.match(page, /finding\.resolvedAt && 'text-muted-foreground line-through'/);
+  assert.match(page, /Resolved: \{finding\.resolvedWhy\}/);
+  assert.match(page, /finding\.resolvedAt \? 'resolved' : finding\.severity/);
+  assert.match(readFileSync(new URL('../graphql/queries.ts', import.meta.url), 'utf8'), /findings \{ at severity text resolvedAt resolvedWhy \}/);
+});

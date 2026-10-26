@@ -1,3 +1,4 @@
+import { showNotice as showPageNotice } from './notices';
 import { soundUrl, type NotificationEventId, type NotificationPrefs } from './notificationPrefs';
 
 /** Tags match the ones the server pushes with. */
@@ -104,16 +105,24 @@ async function showNotice(item: NotifyEvent) {
 }
 
 /**
- * A sound and a notification for each event the owner left on. A device with a push subscription is told by the
- * server's push instead (see `soundForPush`), so it hears and sees each event once.
+ * A sound and a notification for each event the owner left on: inside the page while it is in view, from the system
+ * otherwise. A device with a push subscription is told by the server's push instead (see `soundForPush`), so it
+ * hears and sees each event once.
  */
 export async function announce(events: NotifyEvent[], prefs: NotificationPrefs) {
   const wanted = events.filter((item) => prefs.events[item.event].enabled);
   if (wanted.length === 0 || await hasPushSubscription()) return;
   for (const item of wanted) {
     playSound(prefs.events[item.event].sound, prefs.volume);
-    await showNotice(item);
+    if (document.visibilityState === 'visible') showPageNotice({ title: item.title, body: item.body, url: item.url });
+    else await showNotice(item);
   }
+}
+
+/** A push for an event the owner turned off shows nothing; a push that names no event (an ask) always shows. */
+export function pushWanted(message: unknown, prefs: NotificationPrefs): boolean {
+  const event = (message as { event?: unknown } | null)?.event;
+  return typeof event !== 'string' || !(event in prefs.events) || prefs.events[event as NotificationEventId].enabled;
 }
 
 /** What the service worker sends a page in view instead of showing a notification: the sound to play, if any. */

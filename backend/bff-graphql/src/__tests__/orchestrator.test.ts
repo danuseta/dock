@@ -906,6 +906,23 @@ test('a review ledger brings its findings with severities, the lgtm parts and th
   assert.deepStrictEqual([plain.findings, plain.lgtm, plain.verdict, plain.blockers], [[], [], null, 0]);
 });
 
+test('a resolved blocker stays in the review and no longer counts as a blocker', async () => {
+  const { storage } = memoryStorage();
+  const service = new OrchestratorService(storage, os.tmpdir());
+  const now = new Date();
+  const run = await service.ingestLedger({
+    ...ledger, key: 'ZED-452', kind: 'review', waiting: '', updatedAt: now.toISOString(),
+    findings: [
+      { at: now.toISOString(), severity: 'blocker', text: 'old AC', resolved: { at: now.toISOString(), why: 'AC changed (D-1)' } },
+      { at: now.toISOString(), severity: 'blocker', text: 'still open' },
+      { at: now.toISOString(), severity: 'blocker', text: 'bad shape', resolved: 'yes' },
+    ],
+    verdict: { at: now.toISOString(), value: 'request-change' },
+  }, now, 'laptop');
+  assert.deepStrictEqual(run.findings.map((item: { text: string; resolvedAt: string | null; resolvedWhy: string | null }) => [item.text, item.resolvedAt !== null, item.resolvedWhy]), [['old AC', true, 'AC changed (D-1)'], ['still open', false, null], ['bad shape', false, null]]);
+  assert.strictEqual(run.blockers, 2);
+});
+
 test('the owner LGTM moves a review ledger to done and keeps the rest of it', async () => {
   const { storage, events } = memoryStorage();
   const service = new OrchestratorService(storage, os.tmpdir());
@@ -920,6 +937,44 @@ test('the owner LGTM moves a review ledger to done and keeps the rest of it', as
   assert.deepStrictEqual([done.stage, done.waiting, done.kind, done.verdict, done.machine], ['done', null, 'review', 'approve', 'workspace']);
   assert.deepStrictEqual(events.filter((event) => event.ticketKey === 'ZED-452').map((event) => [event.kind, event.detail]).slice(-2), [['STAGE', 'done'], ['RESUMED', null]]);
   assert.strictEqual(await service.finishReview('ZED-999', later), null, 'no run, nothing to finish');
+});
+
+test('a review the owner finished stays done when the agent pushes its evidence ledger again; a new request-change reopens it', async () => {
+  const { storage } = memoryStorage();
+  const service = new OrchestratorService(storage, os.tmpdir());
+  const now = new Date();
+  const review = { ...ledger, key: 'ZED-453', kind: 'review', stage: 'evidence', waiting: 'Review approve: sampaikan ke author', verdict: { at: now.toISOString(), value: 'approve' } };
+  await service.ingestLedger({ ...review, updatedAt: now.toISOString() }, now, 'workspace');
+  await service.finishReview('ZED-453', new Date(now.getTime() + 60_000));
+  const pushed = await service.ingestLedger({ ...review, updatedAt: new Date(now.getTime() + 120_000).toISOString() }, new Date(now.getTime() + 120_000), 'workspace');
+  assert.deepStrictEqual([pushed.stage, pushed.waiting], ['done', null], 'the old evidence ledger does not undo the LGTM');
+  const reopened = await service.ingestLedger({ ...review, waiting: 'Review request-change', verdict: { at: now.toISOString(), value: 'request-change' }, updatedAt: new Date(now.getTime() + 180_000).toISOString() }, new Date(now.getTime() + 180_000), 'workspace');
+  assert.strictEqual(reopened.stage, 'evidence', 'a new round that finds a problem opens the review again');
+  const build = { ...ledger, key: 'ZED-454', stage: 'done', updatedAt: now.toISOString() };
+  await service.ingestLedger(build, now, 'workspace');
+  const back = await service.ingestLedger({ ...build, stage: 'verify', updatedAt: new Date(now.getTime() + 60_000).toISOString() }, new Date(now.getTime() + 60_000), 'workspace');
+  assert.strictEqual(back.stage, 'verify', 'a build run still follows its ledger');
+});
+
+test('a review whose ticket has the owner Pass label in Jira is done, blockers or not; other runs are left alone', async () => {
+  const { storage, events } = memoryStorage();
+  const service = new OrchestratorService(storage, os.tmpdir());
+  const now = new Date();
+  const at = now.toISOString();
+  await service.ingestLedger({ ...ledger, key: 'ZED-460', kind: 'review', stage: 'evidence', waiting: 'Review request-change', updatedAt: at, findings: [{ at, severity: 'blocker', text: 'CI red' }], verdict: { at, value: 'request-change' } }, now, 'workspace');
+  await service.ingestLedger({ ...ledger, key: 'ZED-461', kind: 'review', stage: 'evidence', waiting: 'Review approve', updatedAt: at, verdict: { at, value: 'approve' } }, now, 'workspace');
+  await service.ingestLedger({ ...ledger, key: 'ZED-462', stage: 'verify', updatedAt: at }, now, 'workspace');
+  const asked: string[] = [];
+  const labels: Record<string, string[]> = { 'ZED-460': ['QRD25', 'danuPass'], 'ZED-461': ['alvinPass'], 'ZED-462': ['danuPass'] };
+  const finished = await service.syncReviewPasses('workspace', { passLabel: async () => 'danuPass', labels: async (key) => { asked.push(key); return labels[key] ?? null; } }, new Date(now.getTime() + 60_000));
+  assert.strictEqual(finished, 1);
+  assert.deepStrictEqual(asked.sort(), ['ZED-460', 'ZED-461'], 'only live review runs are looked up');
+  const runs = await service.list();
+  const stageOf = (key: string) => runs.find((run: { key: string }) => run.key === key)?.stage;
+  assert.deepStrictEqual([stageOf('ZED-460'), stageOf('ZED-461'), stageOf('ZED-462')], ['done', 'evidence', 'verify']);
+  assert.ok(events.some((event) => event.ticketKey === 'ZED-460' && event.kind === 'JIRA' && event.detail === 'danuPass on ZED-460'));
+  const empty = new OrchestratorService(memoryStorage().storage, os.tmpdir());
+  assert.strictEqual(await empty.syncReviewPasses('workspace', { passLabel: async () => { throw new Error('not asked'); }, labels: async () => null }), 0, 'no live review: Jira is not asked at all');
 });
 
 test('the doctor route keeps the report under the machine of its token; a ledger with a pull request asks for the automatic broadcast', async (t) => {

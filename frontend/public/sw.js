@@ -38,7 +38,7 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(caches.match(request).then((saved) => saved || fetch(request).then((response) => keep(request, response))));
 });
 
-// A page that is in view plays the sound for the event itself; showing a notification as well would be a second one.
+// A page that is in view plays the sound and shows the notification itself; a system one as well would be a second one.
 self.addEventListener('push', (event) => {
   const message = event.data.json();
   const options = { body: message.body, icon: '/icon-192.png', data: { ...(message.data || {}), url: message.url } };
@@ -46,7 +46,7 @@ self.addEventListener('push', (event) => {
   if (Array.isArray(message.actions) && message.actions.length > 0) options.actions = message.actions.slice(0, 2);
   event.waitUntil(self.clients.matchAll({ type: 'window' }).then((windows) => {
     if (!windows.some((page) => page.visibilityState === 'visible')) return self.registration.showNotification(message.title, options);
-    windows.forEach((page) => page.postMessage({ type: 'dock-push', event: (message.data || {}).event }));
+    windows.forEach((page) => page.postMessage({ type: 'dock-push', event: (message.data || {}).event, title: message.title, body: message.body, url: message.url }));
     return undefined;
   }));
 });

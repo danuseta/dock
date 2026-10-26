@@ -3,7 +3,7 @@ import { createContext, useContext } from 'react';
 export type DockMode = 'laptop' | 'workspace';
 
 const MISSING_PAGES: Record<DockMode, string[]> = {
-  laptop: ['/sessions', '/demo-videos', '/dev-servers', '/machines', '/health', '/discord'],
+  laptop: ['/blackboard', '/sessions', '/demo-videos', '/dev-servers', '/machines', '/health', '/discord'],
   workspace: ['/monitoring', '/docker', '/calendar'],
 };
 

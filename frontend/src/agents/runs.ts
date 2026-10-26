@@ -60,7 +60,7 @@ export interface AgentRun {
   assumptions?: { n: number; text: string; falsifier: string; state: string; evidence?: string | null }[];
   failures?: { at: string; type: string; what?: string | null; evidence: string; attempt: number }[];
   closing?: { hours?: number | null; fixRounds: number; replans: number } | null;
-  findings?: { at: string; severity: string; text: string }[];
+  findings?: { at: string; severity: string; text: string; resolvedAt?: string | null; resolvedWhy?: string | null }[];
   lgtm?: { at: string; text: string }[];
   verdict?: 'approve' | 'request-change' | null;
   engine?: string | null;

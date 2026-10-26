@@ -7,7 +7,7 @@ import { chatStore } from './store';
 
 /**
  * Opens the chat on a ticket: the newest DOCK session for that ticket when there is one,
- * otherwise a new session titled with the ticket key.
+ * otherwise a new session titled Task-<key>.
  */
 export function useOpenForTicket() {
   const client = useApolloClient();
@@ -22,7 +22,7 @@ export function useOpenForTicket() {
       // The list arrives newest first.
       let session = data.chatSessions.find((item) => item.ticketKey === ticketKey);
       if (!session) {
-        const created = await client.mutate<{ createChatSession: ChatSession }>({ mutation: CREATE_CHAT_SESSION, variables: { title: ticketKey, ticketKey } });
+        const created = await client.mutate<{ createChatSession: ChatSession }>({ mutation: CREATE_CHAT_SESSION, variables: { title: `Task-${ticketKey}`, ticketKey } });
         session = created.data?.createChatSession;
       }
       if (!session) throw new Error('DOCK did not return a session');

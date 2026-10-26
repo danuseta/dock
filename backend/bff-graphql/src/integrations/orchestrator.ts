@@ -90,7 +90,8 @@ export const FINDING_SEVERITIES = ['blocker', 'non-blocking', 'nit'] as const;
 export type FindingSeverity = typeof FINDING_SEVERITIES[number];
 export const REVIEW_VERDICTS = ['approve', 'request-change'] as const;
 export type ReviewVerdict = typeof REVIEW_VERDICTS[number];
-export interface LedgerFinding { at: string; severity: FindingSeverity; text: string }
+/** resolvedAt and resolvedWhy are set once the reviewer marks the finding as no longer applying; it is kept, not counted. */
+export interface LedgerFinding { at: string; severity: FindingSeverity; text: string; resolvedAt: string | null; resolvedWhy: string | null }
 export interface LedgerLgtm { at: string; text: string }
 const MAX_FINDINGS = 50;
 
@@ -322,7 +323,14 @@ export function parseLedger(input: unknown, now = new Date()): Ledger {
     .filter(isRecord)
     .map((item): LedgerFinding => {
       const severity = text(item.severity, 20) as FindingSeverity;
-      return { at: text(item.at, 40), severity: FINDING_SEVERITIES.includes(severity) ? severity : 'non-blocking', text: text(item.text, 1000) };
+      const resolved = isRecord(item.resolved) ? item.resolved : null;
+      return {
+        at: text(item.at, 40),
+        severity: FINDING_SEVERITIES.includes(severity) ? severity : 'non-blocking',
+        text: text(item.text, 1000),
+        resolvedAt: resolved ? text(resolved.at, 40) || null : null,
+        resolvedWhy: resolved ? text(resolved.why, 1000) || null : null,
+      };
     })
     .filter((item) => item.text)
     .slice(-MAX_FINDINGS);
@@ -622,7 +630,7 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     productionData: ledger.productionData === true,
     draft: ledger.draft === true,
     issues: normalizeIssues(ledger.issues),
-    blockers: Array.isArray(ledger.findings) ? ledger.findings.filter((item) => item.severity === 'blocker').length : 0,
+    blockers: Array.isArray(ledger.findings) ? ledger.findings.filter((item) => item.severity === 'blocker' && !item.resolvedAt).length : 0,
     activity,
     activityDetail,
     idleSeconds: Math.floor(idleMs / 1000),
@@ -678,6 +686,8 @@ function defaultTranscriptDirectory(): string {
 export class OrchestratorService {
   /** Told when a run's ledger reaches the done stage, for the phone notification. It must not throw. */
   onFinished: (run: { key: string; title: string }) => void = () => undefined;
+  /** Every ledger DOCK keeps, after it is stored; the auto review acts on a review verdict here. */
+  onLedger: (run: Orchestration) => void = () => undefined;
 
   constructor(
     private readonly storage = new StorageService(),
@@ -745,8 +755,12 @@ export class OrchestratorService {
   }
 
   async ingestLedger(input: unknown, now: Date, machine: string) {
-    const ledger = parseLedger(input, now);
-    const previous = await this.storage.getOrchestratorRun(ledger.key);
+    const parsed = parseLedger(input, now);
+    const previous = await this.storage.getOrchestratorRun(parsed.key);
+    // The owner's LGTM finished this review in DOCK only; the agent's ledger still says evidence. A later push of
+    // that ledger keeps the review done, unless it carries a request-change from a new round.
+    const ownerFinished = previous?.stage === 'done' && !previous.dismissedAt && parsed.kind === 'review' && parsed.stage !== 'done' && parsed.verdict !== 'request-change';
+    const ledger = ownerFinished ? { ...parsed, stage: 'done' as OrchestratorStage, waiting: '' } : parsed;
     if (!previous) {
       const reset = await this.storage.getOrchestratorReset(ledger.key);
       const createdAt = Date.parse(String((input as Record<string, unknown>).createdAt ?? ''));
@@ -793,7 +807,9 @@ export class OrchestratorService {
     } else if (!ledger.waiting && previous?.waiting) {
       await this.storage.addOrchestratorEvent(ledger.key, 'RESUMED', null, MAX_EVENTS_KEPT);
     }
-    return { ...toOrchestration(row, now), ignored: false };
+    const stored = toOrchestration(row, now);
+    this.onLedger(stored);
+    return { ...stored, ignored: false };
   }
 
   /**
@@ -902,6 +918,27 @@ export class OrchestratorService {
       changed += 1;
     }
     return changed;
+  }
+
+  /**
+   * Every few minutes: a live review run whose ticket carries the owner's Pass label in Jira is done, whatever its
+   * ledger still lists; the owner passed it in Jira instead of with the LGTM button. Returns how many were finished.
+   */
+  async syncReviewPasses(machine: string, deps: { passLabel(): Promise<string>; labels(key: string): Promise<string[] | null> }, now = new Date()) {
+    const reviews = (await this.storage.getOrchestratorRuns())
+      .filter((row) => (row.machine ?? DEFAULT_MACHINE) === machine && !row.dismissedAt && row.stage !== 'done' && toOrchestration(row, now).kind === 'review');
+    if (!reviews.length) return 0;
+    const label = await deps.passLabel();
+    let finished = 0;
+    for (const row of reviews) {
+      const ticket = toOrchestration(row, now).reviewTicket ?? row.key;
+      const labels = await deps.labels(ticket).catch(() => null);
+      if (!labels?.includes(label)) continue;
+      await this.recordEvent(row.key, 'JIRA', `${label} on ${ticket}`);
+      await this.finishReview(row.key, now);
+      finished += 1;
+    }
+    return finished;
   }
 
   // The first status seen is only recorded: a run the cron just started is still To Do until Jira moves it.

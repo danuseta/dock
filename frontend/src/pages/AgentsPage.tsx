@@ -1,7 +1,7 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowDown, ArrowUp, Building2, Check, ChevronLeft, ChevronRight, Clock, ExternalLink, EyeOff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Square, Table2, X } from 'lucide-react';
-import { GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
+import { ArrowDown, ArrowUp, Building2, Check, ChevronLeft, ChevronRight, ClipboardList, Clock, ExternalLink, EyeOff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Square, Table2, X } from 'lucide-react';
+import { GET_AUTO_REVIEWS, GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
 import { APPROVE_REVIEW, CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { EmptyState } from '../components/EmptyState';
@@ -13,6 +13,7 @@ import { isPhone } from '../lib/phone';
 import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
 import { hasPage, monitorsOnly, useDockMode } from '../lib/dockMode';
+import { blackboardFileHref, blackboardHref, folderOf, sortFiles, useBlackboardFiles } from '../lib/blackboard';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { openIssues } from '../lib/sousReport';
 import { RUN_STATE_LABEL, isLongDescription, runState } from '../lib/ticketDetail';
@@ -20,6 +21,8 @@ import { FILTER_KINDS, FLOW_RAIL, PARKED_TEXT, START_FAILED_TEXT, canLgtm, compl
 import { KindBadge } from '../agents/KindBadge';
 import { RunDecisions } from '../agents/RunDecisions';
 import { VerdictBadge } from '../agents/VerdictBadge';
+import { AutoReviewBadge, AutoReviewList } from '../agents/AutoReviewList';
+import { latestByTicket, type AutoReviewRow } from '../agents/autoReviews';
 import { RAIL_STAGES, railIndex } from '../agents/office/layout';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 import { AgentFlowGraph } from '../components/AgentFlowGraph';
@@ -131,6 +134,9 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
   const chat = hasPage(mode, '/sessions');
   const { data: balloonData } = useQuery<{ chatBalloons: ChatMessage[]; chatSessions: Array<{ id: string; ticketKey?: string | null }> }>(GET_CHAT_BALLOONS, { fetchPolicy: 'network-only', pollInterval: POLL_MS, skip: !chat });
   const balloons = useMemo(() => ticketBalloons(balloonData?.chatBalloons || [], balloonData?.chatSessions || []), [balloonData]);
+  const { data: autoData } = useQuery<{ autoReviews: AutoReviewRow[] }>(GET_AUTO_REVIEWS, { ...CACHED_QUERY_OPTIONS, pollInterval: POLL_MS, skip: !chat });
+  const autoReviews = useMemo(() => autoData?.autoReviews ?? [], [autoData]);
+  const autoByTicket = useMemo(() => latestByTicket(autoReviews), [autoReviews]);
   const { openForTicket, opening: openingChat, error: chatError } = useOpenForTicket();
   const [view, setView] = useState<View>(() => (isPhone() ? 'table' : 'office'));
   const [flowView, setFlowView] = useState<FlowView>('live');
@@ -187,6 +193,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
     ? (selected?.key === 'SAMPLE-2' ? sampleTimeline(sampleTick) : null)
     : (detailData?.orchestration?.key === selected?.key ? detailData?.orchestration?.timeline || null : null);
   const actions = selected ? runActions(selected, monitorsOnly(mode)) : null;
+  const blackboardFiles = useBlackboardFiles(selected?.key, hasPage(mode, '/blackboard'));
   // Failing criteria first, so the fold never hides one.
   const acList = selected ? [...selected.ac].sort((first, second) => Number(second.state === 'FAIL') - Number(first.state === 'FAIL')) : [];
 
@@ -342,6 +349,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
       </PageHeader>
       {tabs}
 
+      <AutoReviewList rows={autoReviews} now={now * 1000} onTicket={pickRun} onNavigate={onNavigate} />
       {error && !data && <Card className="mb-4 border-status-conflict text-status-conflict" role="alert">Agent runs failed to load: {error.message}</Card>}
       {cronError && <Card className="mb-4 border-status-conflict text-status-conflict" role="alert">{cronError}</Card>}
       {chat && <CronSettingsDialog open={showCron} onClose={() => setShowCron(false)} />}
@@ -474,7 +482,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                     )}
                     {listed.items.map((run) => (
                       <tr key={run.key} className={cn('cursor-pointer border-t border-border hover:bg-surface-1', selected?.key === run.key && 'bg-surface-1')} onClick={() => pickRun(run.key)}>
-                        <td className="px-3 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => pickRun(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><VerdictBadge run={run} className="ml-2" /><span className="mt-0.5 block max-w-[200px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
+                        <td className="px-3 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => pickRun(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><VerdictBadge run={run} className="ml-2" /><AutoReviewBadge row={autoByTicket.get(run.key)} className="ml-1.5" /><span className="mt-0.5 block max-w-[200px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
                         <td className="px-3 py-3 text-xs text-secondary-foreground">{kindLabel(run.kind)}</td>
                         <td className="px-3 py-3"><StageChip stage={run.stage} kind={run.kind} /></td>
                         <td className="px-3 py-3"><StatusChip status={statusOf(run)} review={run.review} /></td>
@@ -620,8 +628,11 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                   <ol className="flex flex-col">
                     {reviewFindings(selected.findings ?? []).map((finding, index) => (
                       <li className="grid grid-cols-[1fr_auto] gap-2 border-b border-border py-1.5 text-[0.78rem] last:border-b-0" key={`${finding.at}-${index}`}>
-                        <span className="min-w-0 break-words">{finding.text}</span>
-                        <span className={cn('font-mono text-[0.68rem] font-semibold', finding.severity === 'blocker' ? 'text-status-conflict' : 'text-muted-foreground')}>{finding.severity}</span>
+                        <span className="min-w-0 break-words">
+                          <span className={cn(finding.resolvedAt && 'text-muted-foreground line-through')}>{finding.text}</span>
+                          {finding.resolvedAt && <span className="mt-0.5 block text-[0.72rem] text-muted-foreground">Resolved: {finding.resolvedWhy}</span>}
+                        </span>
+                        <span className={cn('font-mono text-[0.68rem] font-semibold', finding.resolvedAt ? 'text-status-merged' : finding.severity === 'blocker' ? 'text-status-conflict' : 'text-muted-foreground')}>{finding.resolvedAt ? 'resolved' : finding.severity}</span>
                       </li>
                     ))}
                     {(selected.lgtm ?? []).map((part, index) => (
@@ -639,6 +650,29 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                   )}
                 </div>
               )}
+
+              {blackboardFiles && blackboardFiles.length > 0 && (() => {
+                const top = sortFiles(blackboardFiles).filter((file) => !folderOf(file.path)).slice(0, 3);
+                const folders = [...new Set(blackboardFiles.map((file) => folderOf(file.path)).filter(Boolean))];
+                return (
+                  <div>
+                    <p className={cn(sectionLabel, 'mb-1 flex items-center gap-1.5')}><ClipboardList size={12} aria-hidden="true" />Blackboard</p>
+                    <ul className="flex flex-col overflow-hidden rounded-xs border border-border">
+                      {top.map((file) => (
+                        <li key={file.path} className="border-b border-border last:border-b-0">
+                          <button type="button" onClick={() => onNavigate(blackboardFileHref(selected.key, file.path))} className="w-full border-0 bg-transparent px-2.5 py-1.5 text-left font-mono text-[0.72rem] text-secondary-foreground hover:bg-surface-1 hover:text-foreground">{file.path}</button>
+                        </li>
+                      ))}
+                      {folders.map((folder) => (
+                        <li key={folder} className="border-b border-border last:border-b-0">
+                          <button type="button" onClick={() => onNavigate(blackboardFileHref(selected.key, folder))} className="w-full border-0 bg-transparent px-2.5 py-1.5 text-left font-mono text-[0.72rem] text-secondary-foreground hover:bg-surface-1 hover:text-foreground">{folder} · {blackboardFiles.filter((file) => folderOf(file.path) === folder).length}</button>
+                        </li>
+                      ))}
+                    </ul>
+                    <button type="button" onClick={() => onNavigate(blackboardHref(selected.key))} className="mt-1.5 border-0 bg-transparent p-0 text-xs text-secondary-foreground hover:text-foreground">All {blackboardFiles.length} files</button>
+                  </div>
+                );
+              })()}
 
               {!!selected.failures?.length && (
                 <div>

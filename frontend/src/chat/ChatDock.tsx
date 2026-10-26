@@ -1,12 +1,17 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowLeft, MessagesSquare, Minus, PanelBottom, PictureInPicture2, Plus } from 'lucide-react';
+import { ArrowLeft, ExternalLink, List, MessagesSquare, Minus, PanelBottom, Pencil, PictureInPicture2, Plus } from 'lucide-react';
 import { CREATE_CHAT_SESSION } from '../graphql/mutations';
 import { GET_CHAT_MESSAGES, GET_CHAT_SESSION, GET_CHAT_SESSIONS } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import { EmptyState } from '../components/EmptyState';
 import { FloatingScene } from '../components/empty/scenes/FloatingScene';
+import { AgentThreadPane } from './AgentThreadPane';
 import { ChatThread } from './ChatThread';
+import { PhoneChatHeader, type PhoneMenuItem } from './PhoneChatHeader';
+import { PHONE_PANEL_QUERY, sessionStateLine, sessionsLine } from './phonePanel';
+import { SessionHeader } from './SessionHeader';
+import { sessionUrl } from './sessionRoute';
 import { useFullViewport } from './useFullViewport';
 import { SLOW_POLL_MS, machineOf, newestAssistantId, sessionTitle, type ChatMessage, type ChatSession } from './messages';
 import { useNow } from './activity/useNow';
@@ -17,7 +22,16 @@ import { chatStore, useChatState } from './store';
 interface ChatDockProps {
   /** Space the navigation takes on screens of 761 px and wider, in pixels. */
   inset: { left: number; right: number; bottom: number };
+  onNavigate?: (path: string) => void;
 }
+
+const subscribePhone = (onChange: () => void) => {
+  const media = window.matchMedia(PHONE_PANEL_QUERY);
+  media.addEventListener('change', onChange);
+  return () => media.removeEventListener('change', onChange);
+};
+
+const usePhonePanel = () => useSyncExternalStore(subscribePhone, () => window.matchMedia(PHONE_PANEL_QUERY).matches);
 
 const control = 'grid size-7 flex-none place-items-center max-[699px]:size-11 rounded-xs border border-transparent bg-transparent text-secondary-foreground transition-colors duration-150 hover:border-border hover:bg-surface-1 hover:text-foreground';
 
@@ -36,13 +50,16 @@ const UnreadProbe: React.FC<{ sessionId: string; lastSeen: number; onChange: (se
   return null;
 };
 
-export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
+export const ChatDock: React.FC<ChatDockProps> = ({ inset, onNavigate }) => {
   const state = useChatState();
   const { data: activeData } = useQuery<{ chatSession: ChatSession | null }>(GET_CHAT_SESSION, { variables: { id: state.active }, skip: !state.active, fetchPolicy: 'cache-first' });
   const [createSession, { loading: creating }] = useMutation<{ createChatSession: ChatSession }>(CREATE_CHAT_SESSION);
   const [unread, setUnread] = useState<Record<string, boolean>>({});
   const [showList, setShowList] = useState(true);
   const [error, setError] = useState('');
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const phone = usePhonePanel();
   const panelRef = useRef<HTMLElement>(null);
   const launcherRef = useRef<HTMLButtonElement>(null);
   const refocusLauncher = useRef(false);
@@ -51,7 +68,7 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
   useFullViewport(open, '(max-width: 699px)');
   const anyUnread = state.tabs.some((id) => unread[id]);
   const listing = showList || !state.active;
-  const now = useNow(open && listing);
+  const now = useNow(open && (listing || phone));
   const { data: listData } = useQuery<{ chatSessions: ChatSession[] }>(GET_CHAT_SESSIONS, { variables: { limit: 300 }, skip: !open || !listing, pollInterval: SLOW_POLL_MS });
   const sessions = listData?.chatSessions ?? [];
 
@@ -62,6 +79,10 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
   const previousActive = useRef(state.active);
   useEffect(() => {
     if (state.active && state.active !== previousActive.current) setShowList(false);
+    if (state.active !== previousActive.current) {
+      setThreadId(null);
+      setRenaming(false);
+    }
     previousActive.current = state.active;
   }, [state.active]);
 
@@ -155,7 +176,8 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
               onKeyDown={handleResizeKey}
             />
           )}
-          <header className="flex flex-none items-center gap-1 border-b border-border bg-surface-0 px-2 py-1.5 max-[699px]:pt-[max(0.375rem,env(safe-area-inset-top))]">
+          {phone && listing && <PhoneChatHeader title="Sessions" line={sessionsLine(sessions)} onMinimise={minimise} />}
+          {!phone && <header className="flex flex-none items-center gap-1 border-b border-border bg-surface-0 px-2 py-1.5 max-[699px]:pt-[max(0.375rem,env(safe-area-inset-top))]">
             {!listing && <button type="button" className={control} aria-label="Back to sessions" title="Back to sessions" onClick={() => setShowList(true)}><ArrowLeft size={14} aria-hidden="true" /></button>}
             <span className="min-w-0 flex-1 truncate px-1.5 font-display text-xs font-bold">{listing || !activeData?.chatSession ? 'Sessions' : sessionTitle(activeData.chatSession)}</span>
             <button type="button" className={control} aria-label="New session" title="New session" disabled={creating} onClick={() => void newSession()}><Plus size={14} aria-hidden="true" /></button>
@@ -163,25 +185,65 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
               {drawer ? <PictureInPicture2 size={14} aria-hidden="true" /> : <PanelBottom size={14} aria-hidden="true" />}
             </button>
             <button type="button" className={control} aria-label="Minimise chat" title="Minimise" onClick={minimise}><Minus size={14} aria-hidden="true" /></button>
-          </header>
-          <LimitsLine machine={activeData?.chatSession ? machineOf(activeData.chatSession) : undefined} className="flex-none border-b border-border bg-surface-0 px-3.5 py-1.5" />
+          </header>}
+          {!phone && <LimitsLine machine={activeData?.chatSession ? machineOf(activeData.chatSession) : undefined} className="flex-none border-b border-border bg-surface-0 px-3.5 py-1.5" />}
           {error && <p className="flex-none border-b border-border px-3.5 py-1.5 text-pretty text-xs break-words text-status-conflict" role="alert">A new session could not be started: {error}</p>}
           {!listing && state.active
-            ? <ChatThread key={state.active} sessionId={state.active} className="min-h-0 flex-1" />
+            ? phone
+              ? (
+                <ChatThread
+                  key={state.active}
+                  sessionId={state.active}
+                  className="min-h-0 flex-1"
+                  compact
+                  threadId={threadId}
+                  onOpenThread={setThreadId}
+                  renderHeader={({ dot, session, busy, turnStartedAt }) => {
+                    const menu: PhoneMenuItem[] = [
+                      ...(session.source === 'dock' ? [{ label: 'Rename', icon: Pencil, onSelect: () => setRenaming(true) }] : []),
+                      { label: 'New session', icon: Plus, onSelect: () => void newSession(), disabled: creating },
+                      ...(onNavigate ? [{ label: 'Open full page', icon: ExternalLink, onSelect: () => onNavigate(sessionUrl(session.id)) }] : []),
+                      { label: 'All sessions', icon: List, onSelect: () => setShowList(true) },
+                    ];
+                    return (
+                      <PhoneChatHeader
+                        title={sessionTitle(session)}
+                        line={sessionStateLine({ status: session.status, busy, waiting: dot === 'needs', messageCount: session.messageCount, turnStartedAt, now })}
+                        dot={dot}
+                        machine={machineOf(session)}
+                        menu={menu}
+                        onBack={() => setShowList(true)}
+                        onMinimise={minimise}
+                      >
+                        {renaming && <SessionHeader session={session} showTitle startEditing onDone={() => setRenaming(false)} />}
+                      </PhoneChatHeader>
+                    );
+                  }}
+                />
+              )
+              : <ChatThread key={state.active} sessionId={state.active} className="min-h-0 flex-1" />
             : sessions.length > 0
               ? (
-                <div className="min-h-0 flex-1 overflow-y-auto p-2" role="list" aria-label="Sessions">
-                  {sessions.map((session) => (
-                    <div key={session.id} role="listitem">
-                      <SessionRow
-                        session={session}
-                        selected={session.id === state.active}
-                        now={now}
-                        onSelect={() => { chatStore.openSession(session.id); setShowList(false); }}
-                      />
+                <>
+                  <div className="min-h-0 flex-1 overflow-y-auto p-2" role="list" aria-label="Sessions">
+                    {sessions.map((session) => (
+                      <div key={session.id} role="listitem">
+                        <SessionRow
+                          session={session}
+                          selected={session.id === state.active}
+                          now={now}
+                          phone={phone}
+                          onSelect={() => { chatStore.openSession(session.id); setShowList(false); }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  {phone && (
+                    <div className="flex-none border-t border-border px-3 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+                      <button type="button" className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-sm border border-accent bg-accent font-display text-sm font-semibold text-black hover:bg-accent-hover disabled:opacity-50" disabled={creating} onClick={() => void newSession()}><Plus size={16} aria-hidden="true" />New session</button>
                     </div>
-                  ))}
-                </div>
+                  )}
+                </>
               )
               : (
                 <div className="grid min-h-0 flex-1 place-items-center p-6">
@@ -194,6 +256,9 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset }) => {
                   />
                 </div>
               )}
+          {phone && !listing && state.active && threadId && (
+            <AgentThreadPane sessionId={state.active} threadId={threadId} onOpen={setThreadId} onClose={() => setThreadId(null)} className="absolute inset-0 z-20" />
+          )}
         </section>
       )}
 
