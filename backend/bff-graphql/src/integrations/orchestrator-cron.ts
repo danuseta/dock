@@ -666,6 +666,23 @@ export class OrchestratorCron {
     }
   }
 
+  /**
+   * A `Review-<key>` session on the cron's machine with the cron's options, so it waits for a cron slot like a ticket
+   * does. Removed again when its first message is refused. Resolves to the session id.
+   */
+  async openReview(key: string, prompt: string): Promise<string> {
+    const settings = await this.settings();
+    const options = await this.deps.machineOptions(settings.machine, this.turnOptions(settings));
+    const session = await this.deps.openSession({ ticketKey: key, machine: settings.machine, title: ticketSessionTitle('Review', key), origin: 'cron', options });
+    try {
+      await this.deps.send(session.id, prompt, options);
+    } catch (error) {
+      await this.deps.deleteSession(session.id).catch(() => undefined);
+      throw error;
+    }
+    return session.id;
+  }
+
   async stopAll(): Promise<number> {
     const sessions = await this.deps.runningSessions();
     await Promise.all(sessions.map((id) => this.deps.stopTurn(id).catch(() => undefined)));

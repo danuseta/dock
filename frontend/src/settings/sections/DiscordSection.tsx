@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { useMutation } from '@apollo/client';
 import { Zap } from 'lucide-react';
 import { TEST_DISCORD_READER, VALIDATE_DISCORD } from '../../graphql/mutations';
-import { Badge, Button, Input, Textarea } from '../../components/ui';
+import { Badge, Button, Checkbox, Input, Textarea } from '../../components/ui';
 import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, renderDiscordMessageTemplate } from '../../lib/discordTemplate';
 import { sectionErrors, type SavedSettings, type SectionValues, type TestResult } from '../sections';
 import { ConnectionStatus, Field, SecretInput, SettingsCard, TestResultText } from '../SettingsParts';
@@ -80,6 +80,19 @@ export const DiscordSection = ({ values, set, settings, test, onTested }: {
           <Field label="Server id" hint="Developer Mode on, right click the server name, Copy Server ID."><Input className="font-mono text-xs" inputMode="numeric" value={values.discordGuildId} onChange={(event) => set('discordGuildId', event.target.value.trim())} placeholder="1389235158414000200" /></Field>
           <Field label="Your Discord user id" hint="Right click your name, Copy User ID. Threads that mention you or that you wrote in are sorted with it."><Input className="font-mono text-xs" inputMode="numeric" value={values.discordUserId} onChange={(event) => set('discordUserId', event.target.value.trim())} placeholder="123456789012345678" /></Field>
           <div className="flex flex-wrap items-center gap-3"><Button onClick={handleReaderTest} disabled={testingReader || !settings.hasDiscordBotToken}><Zap size={16} aria-hidden="true" />Test saved reader</Button><TestResultText busy={testingReader} result={readerTest} /></div>
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="Auto review" caption="When you say on it in a pr-review thread, DOCK opens a Review session that runs the sous review of its pull request. Nothing is posted to the PR, Jira or Discord by the review.">
+        <div className="flex flex-col gap-3">
+          <label className="flex items-start gap-3 text-sm">
+            <Checkbox checked={values.autoReviewOnIt === 'true'} onChange={(event) => set('autoReviewOnIt', String(event.target.checked))} />
+            <span><b className="font-semibold text-foreground">Review when I say on it</b><span className="block text-xs text-muted-foreground">Once per pull request head commit; it waits for a cron slot. Needs your Discord user id above.</span></span>
+          </label>
+          <label className={`flex items-start gap-3 text-sm ${values.autoReviewOnIt === 'true' ? '' : 'opacity-50'}`}>
+            <Checkbox checked={values.autoLgtm === 'true'} disabled={values.autoReviewOnIt !== 'true'} onChange={(event) => set('autoLgtm', String(event.target.checked))} />
+            <span><b className="font-semibold text-foreground">LGTM when the review is clean</b><span className="block text-xs text-muted-foreground">An approve verdict with no open blocker gets the same LGTM as the button on Agents: your Pass label in Jira and a GitHub approval. You are told, so you can say it in the thread.</span></span>
+          </label>
         </div>
       </SettingsCard>
 

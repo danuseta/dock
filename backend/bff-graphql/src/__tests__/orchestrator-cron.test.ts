@@ -685,3 +685,15 @@ test('a ticket session is titled Task-KEY, the next one Task-KEY (2); a review R
   assert.ok(TICKET_TITLE.test('Review-QRD-7') && !TICKET_TITLE.test('Task-QRD-7 (2)') && !TICKET_TITLE.test('QRD-7 (cron)'));
   assert.ok(isTaskTitle('Task-QRD-7 (2)', 'QRD-7') && !isTaskTitle('Task-QRD-70', 'QRD-7') && !isTaskTitle('Review-QRD-7', 'QRD-7'));
 });
+
+test('an auto review opens a Review-KEY session on the cron machine with the cron options; a refused first message removes it', async () => {
+  const w = world({ config: { machine: 'workspace' } });
+  const id = await w.cron.openReview('QRD-1473', 'review it');
+  const session = w.state.sessions.find((item) => item.id === id)!;
+  assert.deepStrictEqual([session.ticketKey, session.machine, session.title, session.origin], ['QRD-1473', 'workspace', 'Review-QRD-1473', 'cron']);
+  assert.strictEqual(w.state.sent[0].text, 'review it');
+  const refused = world();
+  refused.state.failSend = true;
+  await assert.rejects(refused.cron.openReview('QRD-1473', 'review it'), /send refused/);
+  assert.strictEqual(refused.state.sessions.length, 0);
+});

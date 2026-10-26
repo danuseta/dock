@@ -686,6 +686,8 @@ function defaultTranscriptDirectory(): string {
 export class OrchestratorService {
   /** Told when a run's ledger reaches the done stage, for the phone notification. It must not throw. */
   onFinished: (run: { key: string; title: string }) => void = () => undefined;
+  /** Every ledger DOCK keeps, after it is stored; the auto review acts on a review verdict here. */
+  onLedger: (run: Orchestration) => void = () => undefined;
 
   constructor(
     private readonly storage = new StorageService(),
@@ -805,7 +807,9 @@ export class OrchestratorService {
     } else if (!ledger.waiting && previous?.waiting) {
       await this.storage.addOrchestratorEvent(ledger.key, 'RESUMED', null, MAX_EVENTS_KEPT);
     }
-    return { ...toOrchestration(row, now), ignored: false };
+    const stored = toOrchestration(row, now);
+    this.onLedger(stored);
+    return { ...stored, ignored: false };
   }
 
   /**
