@@ -939,6 +939,23 @@ test('the owner LGTM moves a review ledger to done and keeps the rest of it', as
   assert.strictEqual(await service.finishReview('ZED-999', later), null, 'no run, nothing to finish');
 });
 
+test('a review the owner finished stays done when the agent pushes its evidence ledger again; a new request-change reopens it', async () => {
+  const { storage } = memoryStorage();
+  const service = new OrchestratorService(storage, os.tmpdir());
+  const now = new Date();
+  const review = { ...ledger, key: 'ZED-453', kind: 'review', stage: 'evidence', waiting: 'Review approve: sampaikan ke author', verdict: { at: now.toISOString(), value: 'approve' } };
+  await service.ingestLedger({ ...review, updatedAt: now.toISOString() }, now, 'workspace');
+  await service.finishReview('ZED-453', new Date(now.getTime() + 60_000));
+  const pushed = await service.ingestLedger({ ...review, updatedAt: new Date(now.getTime() + 120_000).toISOString() }, new Date(now.getTime() + 120_000), 'workspace');
+  assert.deepStrictEqual([pushed.stage, pushed.waiting], ['done', null], 'the old evidence ledger does not undo the LGTM');
+  const reopened = await service.ingestLedger({ ...review, waiting: 'Review request-change', verdict: { at: now.toISOString(), value: 'request-change' }, updatedAt: new Date(now.getTime() + 180_000).toISOString() }, new Date(now.getTime() + 180_000), 'workspace');
+  assert.strictEqual(reopened.stage, 'evidence', 'a new round that finds a problem opens the review again');
+  const build = { ...ledger, key: 'ZED-454', stage: 'done', updatedAt: now.toISOString() };
+  await service.ingestLedger(build, now, 'workspace');
+  const back = await service.ingestLedger({ ...build, stage: 'verify', updatedAt: new Date(now.getTime() + 60_000).toISOString() }, new Date(now.getTime() + 60_000), 'workspace');
+  assert.strictEqual(back.stage, 'verify', 'a build run still follows its ledger');
+});
+
 test('the doctor route keeps the report under the machine of its token; a ledger with a pull request asks for the automatic broadcast', async (t) => {
   const { storage } = memoryStorage();
   const service = new OrchestratorService(storage, os.tmpdir());

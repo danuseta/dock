@@ -753,8 +753,12 @@ export class OrchestratorService {
   }
 
   async ingestLedger(input: unknown, now: Date, machine: string) {
-    const ledger = parseLedger(input, now);
-    const previous = await this.storage.getOrchestratorRun(ledger.key);
+    const parsed = parseLedger(input, now);
+    const previous = await this.storage.getOrchestratorRun(parsed.key);
+    // The owner's LGTM finished this review in DOCK only; the agent's ledger still says evidence. A later push of
+    // that ledger keeps the review done, unless it carries a request-change from a new round.
+    const ownerFinished = previous?.stage === 'done' && !previous.dismissedAt && parsed.kind === 'review' && parsed.stage !== 'done' && parsed.verdict !== 'request-change';
+    const ledger = ownerFinished ? { ...parsed, stage: 'done' as OrchestratorStage, waiting: '' } : parsed;
     if (!previous) {
       const reset = await this.storage.getOrchestratorReset(ledger.key);
       const createdAt = Date.parse(String((input as Record<string, unknown>).createdAt ?? ''));
