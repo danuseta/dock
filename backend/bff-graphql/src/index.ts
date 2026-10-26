@@ -8,6 +8,7 @@ import { startOrchestratorCron } from './integrations/orchestrator-cron';
 import { orchestratorCron } from './integrations/orchestrator-cron-live';
 import { orchestratorService } from './integrations/orchestrator';
 import { JiraAPI } from './datasources/JiraAPI';
+import { liveApprovalDeps } from './integrations/review-approval';
 import { discordGateway, discordReader } from './integrations/discord-reader-live';
 import { dockMode } from './mode';
 import { useWriteAheadLog } from './storage/client';
@@ -38,6 +39,10 @@ export async function startServer(): Promise<void> {
       .then((tickets) => orchestratorService.syncJira(dockMode(), tickets))
       .catch((error) => console.warn('[Orchestrator] Jira sync failed:', error instanceof Error ? error.message : 'unknown error'));
     setInterval(syncJira, JIRA_SYNC_MS).unref();
+    // A review the owner passed in Jira (their Pass label) is done on the Agents page too.
+    const syncReviewPasses = () => orchestratorService.syncReviewPasses(dockMode(), { passLabel: liveApprovalDeps.passLabel, labels: async (key) => (await jira.getTicket(key))?.labels ?? null })
+      .catch((error) => console.warn('[Orchestrator] Review pass sync failed:', error instanceof Error ? error.message : 'unknown error'));
+    setInterval(syncReviewPasses, JIRA_SYNC_MS).unref();
     // One DOCK reads Discord, so the bot does not read the forums twice. Discord pushes changes over the Gateway; each
     // new session reads everything once.
     if (dockMode() === 'workspace') {
