@@ -413,6 +413,10 @@ export class StorageService {
     return this.db.chatSession.findMany({ where: { id: { in: ids } } });
   }
 
+  getChatSessionTitles(prefix: string) {
+    return this.db.chatSession.findMany({ where: { title: { startsWith: prefix } }, select: { title: true } }).then((rows) => rows.map((row) => row.title));
+  }
+
   getChatSessionsWithTicket(source: string, since: Date) {
     return this.db.chatSession.findMany({ where: { source, ticketKey: { not: null }, lastMessageAt: { gte: since } } });
   }

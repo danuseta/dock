@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { finishedSessions, newAttention, newDiscordPosts, soundForPush } from '../lib/notificationEvents';
+import { finishedSessions, newAttention, newDiscordPosts, pushWanted, soundForPush } from '../lib/notificationEvents';
+import { noticeFromPush, useNotices } from '../lib/notices';
 import { DEFAULT_NOTIFICATION_PREFS, NOTIFICATION_EVENTS, NOTIFICATION_SOUNDS, parseNotificationPrefs, prefsToValues, valuesToPrefs } from '../lib/notificationPrefs';
 import { savedValues, sectionInput, visibleSections } from '../settings/sections';
 
@@ -106,6 +107,27 @@ test('a push told to a page in view plays the sound of its event, only if that e
   const prefs = parseNotificationPrefs(JSON.stringify({ volume: 0.3, events: { discordPost: { enabled: false, sound: 'bong_001' }, needsYou: { enabled: true, sound: 'pluck_001' } } }));
   assert.deepStrictEqual(soundForPush({ type: 'dock-push', event: 'needsYou' }, prefs), { sound: 'pluck_001', volume: 0.3 });
   for (const message of [{ type: 'dock-push', event: 'discordPost' }, { type: 'dock-push', event: 'nope' }, { type: 'other', event: 'needsYou' }, { type: 'dock-push' }, null, 'x']) assert.strictEqual(soundForPush(message, prefs), null);
+});
+
+test('a page in view shows the notification itself: the push names title, text and link, and an event turned off shows nothing', () => {
+  const prefs = parseNotificationPrefs(JSON.stringify({ events: { discordPost: { enabled: false, sound: 'bong_001' } } }));
+  const push = { type: 'dock-push', event: 'needsYou', title: 'QRD-7 waits on you', body: 'Keep it?', url: '/detail/QRD-7' };
+  assert.deepStrictEqual(noticeFromPush(push), { title: 'QRD-7 waits on you', body: 'Keep it?', url: '/detail/QRD-7' });
+  assert.deepStrictEqual(noticeFromPush({ ...push, url: 'https://evil.example' }), { title: 'QRD-7 waits on you', body: 'Keep it?', url: '/' }, 'only a link inside DOCK');
+  for (const message of [{ ...push, title: '' }, { ...push, type: 'other' }, null, 'x']) assert.strictEqual(noticeFromPush(message), null);
+  assert.strictEqual(pushWanted(push, prefs), true);
+  assert.strictEqual(pushWanted({ ...push, event: 'discordPost' }, prefs), false);
+  assert.strictEqual(pushWanted({ type: 'dock-push', title: 'A session asks' }, prefs), true, 'an ask names no event');
+});
+
+test('at most three notices stay on the page, newest last, and one can be dismissed', () => {
+  for (const n of [1, 2, 3, 4]) useNotices.getState().show({ title: `n${n}`, body: '', url: '/' });
+  assert.deepStrictEqual(useNotices.getState().notices.map((notice) => notice.title), ['n2', 'n3', 'n4']);
+  useNotices.getState().dismiss(useNotices.getState().notices[0].id);
+  assert.deepStrictEqual(useNotices.getState().notices.map((notice) => notice.title), ['n3', 'n4']);
+  const layout = source('components/AppLayout.tsx');
+  assert.ok(layout.includes('<NoticeToasts onNavigate={onNavigate} />'));
+  assert.ok(/visibilityState === 'visible'\) showPageNotice/.test(source('lib/notificationEvents.ts')), 'in view: inside the page, not the system');
 });
 
 test('a notification is shown through the service worker and never throws out of the page', () => {

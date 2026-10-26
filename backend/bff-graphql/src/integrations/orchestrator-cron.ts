@@ -2,6 +2,7 @@ import type { PushMessage } from './push';
 import { stalledNotice, waitingNotice } from './push-notices';
 import { isSettledStatus } from './attention';
 import { REVIEW_STATUS } from './broadcast-review';
+import { ticketSessionTitle } from './session-titles';
 
 export class CronInputError extends Error {}
 
@@ -318,8 +319,7 @@ export interface OwnerChange { n: number; choice: string }
 
 const CHANGEABLE = new Set(['SHOV', 'USULAN']);
 const MAX_OWNER_TEXT = 4000;
-export const OWNER_BUSY_TEXT = 'The previous owner reply on this ticket has not finished its first turn yet. Wait for it, then send again.';
-export const ownerSessionTitle = (key: string) => `${key} (owner)`;
+export const OWNER_BUSY_TEXT = 'A session on this ticket has not finished its turn yet. Wait for it, then send again.';
 
 export interface CronDeps {
   now(): Date;
@@ -582,7 +582,7 @@ export class OrchestratorCron {
     const options = this.turnOptions(settings);
     await this.resetResumes(ticket.key);
     await this.deps.cacheDelete(`quietResumes:${ticket.key}`);
-    const session = await this.deps.openSession({ ticketKey: ticket.key, machine: settings.machine, title: `${ticket.key} (cron)`, origin: 'cron', options });
+    const session = await this.deps.openSession({ ticketKey: ticket.key, machine: settings.machine, title: ticketSessionTitle('Task', ticket.key), origin: 'cron', options });
     await this.deps.send(session.id, prompt, options);
     await this.saveRun(ticket, settings.machine, now, '', settings.engine);
     return this.deps.moveTicket(ticket.key, settings.inProgressStatus);
@@ -654,7 +654,7 @@ export class OrchestratorCron {
     try {
       if (await this.deps.ownerSessionBusy(run.key)) throw new CronInputError(OWNER_BUSY_TEXT);
       const options = await this.deps.machineOptions(run.machine, this.turnOptions(await this.settings()));
-      const session = await this.deps.openSession({ ticketKey: run.key, machine: run.machine, title: ownerSessionTitle(run.key), origin: 'cron', options });
+      const session = await this.deps.openSession({ ticketKey: run.key, machine: run.machine, title: ticketSessionTitle('Task', run.key), origin: 'cron', options });
       try {
         await this.deps.send(session.id, prompt, options);
       } catch (error) {

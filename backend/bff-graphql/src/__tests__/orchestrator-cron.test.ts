@@ -1,5 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
+import { TICKET_TITLE, isTaskTitle, nextSessionTitle, ticketSessionTitle } from '../integrations/session-titles';
 import {
   CronInputError, DEFAULT_CRON_SETTINGS, MAX_RESUMES, OrchestratorCron, PARKED_TEXT, RESUME_GAVE_UP_TEXT, START_FAILED_TEXT, candidates, hasAcceptanceCriteria, labelOrder, ticketHasAcceptanceCriteria, outsideWindow, parseCronSettings,
   OWNER_BUSY_TEXT, confirmedPrompt, isStackable, stackLine, ownerReplyPrompt, resumePrompt, sousConfirmedPrompt, sousStartPrompt, startPrompt, wib, type CronDeps, type CronRun, type CronSettings, type CronTicket,
@@ -171,7 +172,7 @@ function world(start: Start = {}) {
     },
     machineOptions: async (_machine, options) => state.machineOptions(options),
     deleteSession: async (sessionId) => { state.sessions = state.sessions.filter((session) => session.id !== sessionId); },
-    ownerSessionBusy: async (key) => state.sessions.some((s) => s.ticketKey === key && s.title === `${key} (owner)` && (s.state === 'queued' || s.state === 'running')),
+    ownerSessionBusy: async (key) => state.sessions.some((s) => s.ticketKey === key && isTaskTitle(s.title ?? '', key) && (s.state === 'queued' || s.state === 'running')),
     runningSessions: async () => ['s-1', 's-2'],
     stopTurn: async (sessionId) => { state.stopped.push(sessionId); },
     hasPushDevices: async () => start.pushDevices ?? false,
@@ -673,4 +674,14 @@ test('a parent is stackable while its PR is open or it is in PR Review, not once
   assert.strictEqual(isStackable('In Progress', { prFe: 'https://github.com/o/fe/pull/2', review: 'open' }), true);
   assert.strictEqual(isStackable('In Progress', { prFe: 'https://github.com/o/fe/pull/2', review: 'merged' }), false);
   assert.strictEqual(isStackable('In Progress', {}), false);
+});
+
+test('a ticket session is titled Task-KEY, the next one Task-KEY (2); a review Review-KEY', () => {
+  assert.strictEqual(ticketSessionTitle('Task', 'QRD-1230'), 'Task-QRD-1230');
+  assert.strictEqual(nextSessionTitle('Task-QRD-1230', []), 'Task-QRD-1230');
+  assert.strictEqual(nextSessionTitle('Task-QRD-1230', ['Task-QRD-1230']), 'Task-QRD-1230 (2)');
+  assert.strictEqual(nextSessionTitle('Task-QRD-1230', ['Task-QRD-1230', 'Task-QRD-1230 (3)', 'Task-QRD-12300', 'Task-QRD-1230 copy']), 'Task-QRD-1230 (4)');
+  assert.strictEqual(nextSessionTitle('Review-QRD-7', ['Task-QRD-7']), 'Review-QRD-7');
+  assert.ok(TICKET_TITLE.test('Review-QRD-7') && !TICKET_TITLE.test('Task-QRD-7 (2)') && !TICKET_TITLE.test('QRD-7 (cron)'));
+  assert.ok(isTaskTitle('Task-QRD-7 (2)', 'QRD-7') && !isTaskTitle('Task-QRD-70', 'QRD-7') && !isTaskTitle('Review-QRD-7', 'QRD-7'));
 });
