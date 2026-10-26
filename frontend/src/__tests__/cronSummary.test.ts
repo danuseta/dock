@@ -30,19 +30,19 @@ test('deferred tickets are grouped by their reason', () => {
   assert.deepStrictEqual(deferredLines(null), []);
 });
 
-test('the settings form round-trips the config and turns its text fields back into lists and numbers', async () => {
+test('the settings form round-trips the config, always saves sous on the workspace and leaves mode, model and effort to System Settings', async () => {
   const { configFromForm, formFromConfig } = await import('../agents/cronRound');
   const config = {
-    enabled: true, machine: 'workspace', parallel: 2, workStart: 9, workEnd: 17, workDays: [1, 2, 3, 4, 5], activeFrom: null, activeUntil: '2026-12-31',
-    maxPerDay: 6, mode: 'auto', sprint: 'active', labels: ['be', 'fe'], todoStatuses: ['To Do'],
-    inProgressStatus: 'In Progress', model: null, effort: 'high', usageBrakePercent: 70, engine: 'omc',
+    enabled: true, machine: 'laptop', parallel: 2, workStart: 9, workEnd: 17, workDays: [1, 2, 3, 4, 5], activeFrom: null, activeUntil: '2026-12-31',
+    maxPerDay: 6, mode: 'manual', sprint: 'active', labels: ['be', 'fe'], todoStatuses: ['To Do'],
+    inProgressStatus: 'In Progress', model: 'opus', effort: 'high', usageBrakePercent: 70, engine: 'omc',
   };
+  const saved = { ...config, machine: 'workspace', mode: null, model: null, effort: null, engine: 'sous' };
   const form = formFromConfig(JSON.stringify(config));
-  assert.deepStrictEqual([form.labels, form.model, form.parallel, form.activeFrom, form.engine], ['be, fe', '', '2', '', 'omc']);
-  assert.strictEqual(formFromConfig(JSON.stringify({ ...config, engine: undefined })).engine, 'sous', 'a config from before engines shows the default');
-  assert.deepStrictEqual(JSON.parse(configFromForm(form)), config);
+  assert.deepStrictEqual([form.labels, form.parallel, form.activeFrom], ['be, fe', '2', '']);
+  assert.deepStrictEqual(JSON.parse(configFromForm(form)), saved);
   assert.deepStrictEqual(
     JSON.parse(configFromForm({ ...form, workDays: [6, 1], labels: '', parallel: 'two' })),
-    { ...config, workDays: [1, 6], labels: [], parallel: 'two' },
+    { ...saved, workDays: [1, 6], labels: [], parallel: 'two' },
   );
 });

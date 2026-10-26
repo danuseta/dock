@@ -6,7 +6,7 @@ import { ticketAttention, ticketQuestions } from '../lib/attention';
 import { questionCount } from '../decisions/questions';
 import { discordAttention, needsYou, type DiscordThread } from '../lib/discordThreads';
 import { NAVIGATION_PREFERENCES_EVENT, NavigationPreferences, readNavigationPreferences, saveNavigationPreferences } from '../lib/navigationPreferences';
-import { applyUpdate, checkForUpdate } from '../lib/appUpdate';
+import { UPDATE_CHECK_MS, applyUpdate, checkForUpdate } from '../lib/appUpdate';
 import { cn } from '../lib/cn';
 import { PHONE_PRIMARY_PATHS, phoneMore } from '../lib/phoneNavigation';
 import { useNotificationEvents } from '../lib/useNotificationEvents';
@@ -42,11 +42,20 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
   const [updateOffered, setUpdateOffered] = useState(false);
   const [reporting, setReporting] = useState(false);
 
-  // A phone keeps the app alive in the background for days, so a deploy is looked for each time it comes back.
+  // A phone keeps the app alive in the background for days, so a deploy is looked for each time it comes back,
+  // and a tab that stays open on a desk looks again every minute.
   useEffect(() => {
     const check = () => { if (document.visibilityState === 'visible') void checkForUpdate().then(setUpdateOffered); };
+    const timer = window.setInterval(check, UPDATE_CHECK_MS);
     document.addEventListener('visibilitychange', check);
-    return () => document.removeEventListener('visibilitychange', check);
+    window.addEventListener('focus', check);
+    window.addEventListener('online', check);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', check);
+      window.removeEventListener('focus', check);
+      window.removeEventListener('online', check);
+    };
   }, []);
 
   useEffect(() => {
