@@ -10,6 +10,7 @@ import { orchestratorService } from './integrations/orchestrator';
 import { JiraAPI } from './datasources/JiraAPI';
 import { liveApprovalDeps } from './integrations/review-approval';
 import { discordGateway, discordReader } from './integrations/discord-reader-live';
+import { autoReview } from './integrations/auto-review-live';
 import { dockMode } from './mode';
 import { useWriteAheadLog } from './storage/client';
 import { StorageService } from './storage/service';
@@ -18,6 +19,8 @@ const port = Number(process.env.PORT || 4000);
 const JIRA_SYNC_MS = 5 * 60 * 1000;
 /** How often the saved bot token is checked, so the Gateway starts, stops or switches tokens after a Settings change. */
 const DISCORD_TOKEN_CHECK_MS = 60 * 1000;
+/** How often the stored pr-review threads are looked at for a new "on it" of the owner. */
+const AUTO_REVIEW_MS = 60 * 1000;
 
 export async function startServer(): Promise<void> {
   const journal = await useWriteAheadLog().catch((error) => `unchanged (${error instanceof Error ? error.message : 'unknown error'})`);
@@ -51,6 +54,9 @@ export async function startServer(): Promise<void> {
         .catch((error) => console.warn('[Discord] Gateway check failed:', error instanceof Error ? error.message : 'unknown error'));
       void followToken();
       setInterval(followToken, DISCORD_TOKEN_CHECK_MS).unref();
+      const reviewOnIt = () => autoReview.tick()
+        .catch((error) => console.warn('[AutoReview] check failed:', error instanceof Error ? error.message : 'unknown error'));
+      setInterval(reviewOnIt, AUTO_REVIEW_MS).unref();
     }
   });
 }

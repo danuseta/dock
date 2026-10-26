@@ -272,6 +272,8 @@ export const GET_SETTINGS = gql`
       hasDiscordBotToken
       discordGuildId
       discordUserId
+      autoReviewOnIt
+      autoLgtm
       discordMessageTemplate
       hasGoogleClientSecret
       googleCalendarConnected
@@ -1115,5 +1117,11 @@ export const GET_CLAUDE_USAGE = gql`
       days { date totalTokens cost }
       models { model inputTokens outputTokens cacheCreationTokens cacheReadTokens totalTokens cost }
     }
+  }
+`;
+
+export const GET_AUTO_REVIEWS = gql`
+  query GetAutoReviews {
+    autoReviews { id ticketKey prUrl headSha threadUrl sessionId status detail startedAt finishedAt }
   }
 `;

@@ -149,6 +149,10 @@ export class StorageAPI {
     return formatted;
   }
 
+  async getAutoReviews(take = 30) {
+    return (await this.storage.getAutoReviews(take)).map((row) => ({ ...row, startedAt: row.startedAt.toISOString(), finishedAt: row.finishedAt?.toISOString() ?? null }));
+  }
+
   hasMasterPin() {
     return this.storage.hasMasterPin();
   }
@@ -169,6 +173,8 @@ export class StorageAPI {
       hasDiscordBotToken: Boolean(settings.discordBotToken),
       discordGuildId: settings.discordGuildId || null,
       discordUserId: settings.discordUserId || null,
+      autoReviewOnIt: settings.autoReviewOnIt === 'true',
+      autoLgtm: settings.autoLgtm === 'true',
       hasGoogleClientSecret: Boolean(settings.googleClientSecret),
       googleCalendarConnected: Boolean(settings.googleRefreshToken),
       serviceHealthRefreshSeconds: isValidServiceHealthRefreshSeconds(settings.serviceHealthRefreshSeconds)
@@ -199,6 +205,9 @@ export class StorageAPI {
       if (input.chatCaveman != null && !(CAVEMAN_LEVELS as readonly string[]).includes(String(input.chatCaveman))) throw new Error('Invalid caveman level');
       if (input.chatParallelTurns != null && input.chatParallelTurns !== '' && parallelTurns(input.chatParallelTurns) === null) throw new Error('Invalid turn count');
       if (input.discordMessageTemplate != null) normalizeDiscordMessageTemplate(String(input.discordMessageTemplate));
+      for (const key of ['autoReviewOnIt', 'autoLgtm'] as const) {
+        if (input[key] != null && input[key] !== 'true' && input[key] !== 'false') throw new Error('Invalid auto review setting');
+      }
       if (input.discordUserId != null && input.discordUserId !== '' && !/^\d{5,25}$/.test(String(input.discordUserId).trim())) throw new Error('Invalid Discord user id');
       const saved = input.notificationPrefs == null ? input : { ...input, notificationPrefs: JSON.stringify(validateNotificationPrefs(String(input.notificationPrefs))) };
       await Promise.all(Object.entries(saved)

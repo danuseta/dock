@@ -413,6 +413,26 @@ export class StorageService {
     return this.db.chatSession.findMany({ where: { id: { in: ids } } });
   }
 
+  getAutoReviews(take: number) {
+    return this.db.autoReview.findMany({ orderBy: { startedAt: 'desc' }, take });
+  }
+
+  getLatestAutoReview(prUrl: string) {
+    return this.db.autoReview.findFirst({ where: { prUrl }, orderBy: { startedAt: 'desc' } });
+  }
+
+  getRunningAutoReview(ticketKey: string) {
+    return this.db.autoReview.findFirst({ where: { ticketKey, status: 'running' }, orderBy: { startedAt: 'desc' } });
+  }
+
+  createAutoReview(data: { prUrl: string; headSha: string; ticketKey: string; threadUrl: string; startedAt: Date }) {
+    return this.db.autoReview.create({ data });
+  }
+
+  updateAutoReview(id: string, data: { sessionId?: string | null; status?: string; detail?: string | null; finishedAt?: Date | null }) {
+    return this.db.autoReview.update({ where: { id }, data });
+  }
+
   getChatSessionTitles(prefix: string) {
     return this.db.chatSession.findMany({ where: { title: { startsWith: prefix } }, select: { title: true } }).then((rows) => rows.map((row) => row.title));
   }
