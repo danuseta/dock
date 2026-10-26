@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useQuery } from '@apollo/client';
 import { GET_CHAT_SESSION_STATES, GET_SETTINGS } from '../graphql/queries';
 import { hasPage, useDockMode } from './dockMode';
-import { announce, finishedSessions, newAttention, newDiscordPosts, playSound, soundForPush, type AttentionSignal, type DiscordPostRow, type SessionStatus } from './notificationEvents';
+import { announce, finishedSessions, newAttention, newDiscordPosts, playSound, pushWanted, soundForPush, type AttentionSignal, type DiscordPostRow, type SessionStatus } from './notificationEvents';
+import { noticeFromPush, showNotice } from './notices';
 import { parseNotificationPrefs } from './notificationPrefs';
 import { CACHED_QUERY_OPTIONS } from './queryPolicy';
 
@@ -52,8 +53,11 @@ export function useNotificationEvents(attention: AttentionSignal[] | undefined, 
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return undefined;
     const heard = (message: MessageEvent) => {
-      const play = document.visibilityState === 'visible' ? soundForPush(message.data, latest.current) : null;
+      if (document.visibilityState !== 'visible') return;
+      const play = soundForPush(message.data, latest.current);
       if (play) playSound(play.sound, play.volume);
+      const notice = noticeFromPush(message.data);
+      if (notice && pushWanted(message.data, latest.current)) showNotice(notice);
     };
     navigator.serviceWorker.addEventListener('message', heard);
     return () => navigator.serviceWorker.removeEventListener('message', heard);

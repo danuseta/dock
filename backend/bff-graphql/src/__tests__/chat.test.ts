@@ -43,6 +43,7 @@ function memoryStorage() {
       .slice(0, take),
     getChatSession: async (id: string) => sessions.get(id) ?? null,
     getChatSessionsByIds: async (ids: string[]) => ids.flatMap((id) => (sessions.has(id) ? [sessions.get(id)] : [])),
+    getChatSessionTitles: async (prefix: string) => [...sessions.values()].map((session) => session.title as string).filter((title) => title.startsWith(prefix)),
     getChatSessionsWithTicket: async (source: string, since: Date) => [...sessions.values()]
       .filter((session) => session.source === source && session.ticketKey && session.lastMessageAt >= since),
     getStaleChatSessions: async (before: Date) => [...sessions.values()]
@@ -890,6 +891,14 @@ test('a cron session keeps the options the cron sends, so it shows Auto; a manua
   assert.deepStrictEqual(cron.options, { model: null, effort: 'high', permissionMode: 'auto', fast: null });
   assert.strictEqual((await chat.createSession({ machine: 'workspace', ticketKey: 'QRD-2', title: 'QRD-2 (cron)', origin: 'cron' })).options, null);
   assert.deepStrictEqual((await chat.createSession({ machine: 'workspace', title: 'Manual' })).options, null);
+});
+
+test('a second session on a ticket gets a numbered title; other titles are kept as typed', async () => {
+  const memory = memoryStorage();
+  const chat = new ChatService(memory.storage, () => new Date('2026-10-14T03:00:00.000Z'), async () => undefined);
+  const titles = [];
+  for (const title of ['Task-QRD-1', 'Task-QRD-1', 'Review-QRD-1', 'Task-QRD-1', 'Manual', 'Manual']) titles.push((await chat.createSession({ machine: 'workspace', ticketKey: 'QRD-1', title })).title);
+  assert.deepStrictEqual(titles, ['Task-QRD-1', 'Task-QRD-1 (2)', 'Review-QRD-1', 'Task-QRD-1 (3)', 'Manual', 'Manual']);
 });
 
 test('a cron turn clears the stalled reason when it starts and reports the subagents its lead left running when it ends', async () => {
