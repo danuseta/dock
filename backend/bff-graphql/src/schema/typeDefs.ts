@@ -672,6 +672,8 @@ export const typeDefs = gql`
     at: String!
     severity: String!
     text: String!
+    resolvedAt: String
+    resolvedWhy: String
   }
 
   type OrchestrationLgtm {
