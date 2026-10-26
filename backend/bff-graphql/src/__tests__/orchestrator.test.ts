@@ -956,6 +956,27 @@ test('a review the owner finished stays done when the agent pushes its evidence 
   assert.strictEqual(back.stage, 'verify', 'a build run still follows its ledger');
 });
 
+test('a review whose ticket has the owner Pass label in Jira is done, blockers or not; other runs are left alone', async () => {
+  const { storage, events } = memoryStorage();
+  const service = new OrchestratorService(storage, os.tmpdir());
+  const now = new Date();
+  const at = now.toISOString();
+  await service.ingestLedger({ ...ledger, key: 'ZED-460', kind: 'review', stage: 'evidence', waiting: 'Review request-change', updatedAt: at, findings: [{ at, severity: 'blocker', text: 'CI red' }], verdict: { at, value: 'request-change' } }, now, 'workspace');
+  await service.ingestLedger({ ...ledger, key: 'ZED-461', kind: 'review', stage: 'evidence', waiting: 'Review approve', updatedAt: at, verdict: { at, value: 'approve' } }, now, 'workspace');
+  await service.ingestLedger({ ...ledger, key: 'ZED-462', stage: 'verify', updatedAt: at }, now, 'workspace');
+  const asked: string[] = [];
+  const labels: Record<string, string[]> = { 'ZED-460': ['QRD25', 'danuPass'], 'ZED-461': ['alvinPass'], 'ZED-462': ['danuPass'] };
+  const finished = await service.syncReviewPasses('workspace', { passLabel: async () => 'danuPass', labels: async (key) => { asked.push(key); return labels[key] ?? null; } }, new Date(now.getTime() + 60_000));
+  assert.strictEqual(finished, 1);
+  assert.deepStrictEqual(asked.sort(), ['ZED-460', 'ZED-461'], 'only live review runs are looked up');
+  const runs = await service.list();
+  const stageOf = (key: string) => runs.find((run: { key: string }) => run.key === key)?.stage;
+  assert.deepStrictEqual([stageOf('ZED-460'), stageOf('ZED-461'), stageOf('ZED-462')], ['done', 'evidence', 'verify']);
+  assert.ok(events.some((event) => event.ticketKey === 'ZED-460' && event.kind === 'JIRA' && event.detail === 'danuPass on ZED-460'));
+  const empty = new OrchestratorService(memoryStorage().storage, os.tmpdir());
+  assert.strictEqual(await empty.syncReviewPasses('workspace', { passLabel: async () => { throw new Error('not asked'); }, labels: async () => null }), 0, 'no live review: Jira is not asked at all');
+});
+
 test('the doctor route keeps the report under the machine of its token; a ledger with a pull request asks for the automatic broadcast', async (t) => {
   const { storage } = memoryStorage();
   const service = new OrchestratorService(storage, os.tmpdir());

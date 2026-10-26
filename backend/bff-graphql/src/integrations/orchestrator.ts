@@ -916,6 +916,27 @@ export class OrchestratorService {
     return changed;
   }
 
+  /**
+   * Every few minutes: a live review run whose ticket carries the owner's Pass label in Jira is done, whatever its
+   * ledger still lists; the owner passed it in Jira instead of with the LGTM button. Returns how many were finished.
+   */
+  async syncReviewPasses(machine: string, deps: { passLabel(): Promise<string>; labels(key: string): Promise<string[] | null> }, now = new Date()) {
+    const reviews = (await this.storage.getOrchestratorRuns())
+      .filter((row) => (row.machine ?? DEFAULT_MACHINE) === machine && !row.dismissedAt && row.stage !== 'done' && toOrchestration(row, now).kind === 'review');
+    if (!reviews.length) return 0;
+    const label = await deps.passLabel();
+    let finished = 0;
+    for (const row of reviews) {
+      const ticket = toOrchestration(row, now).reviewTicket ?? row.key;
+      const labels = await deps.labels(ticket).catch(() => null);
+      if (!labels?.includes(label)) continue;
+      await this.recordEvent(row.key, 'JIRA', `${label} on ${ticket}`);
+      await this.finishReview(row.key, now);
+      finished += 1;
+    }
+    return finished;
+  }
+
   // The first status seen is only recorded: a run the cron just started is still To Do until Jira moves it.
   private async applyJiraStatus(row: RunRow, status: string, now: Date) {
     if (status.toLowerCase() === TODO_STATUS && row.jiraStatus) {
