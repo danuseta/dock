@@ -25,7 +25,8 @@ export interface CronSettings {
   activeUntil: string | null;
   /** New tickets started per WIB day; the same number caps the tickets parked per day. */
   maxPerDay: number;
-  mode: CronMode;
+  /** Null follows the chat default permission mode in System Settings. */
+  mode: CronMode | null;
   /** Epic key → the base branch its tickets open their pull request against. */
   sprint: 'active' | 'any';
   labels: string[];
@@ -47,7 +48,7 @@ export const DEFAULT_CRON_SETTINGS: CronSettings = {
   activeFrom: null,
   activeUntil: null,
   maxPerDay: 6,
-  mode: 'auto',
+  mode: null,
   sprint: 'active',
   labels: [],
   todoStatuses: ['To Do'],
@@ -120,7 +121,7 @@ export function parseCronSettings(raw: string | null | undefined): CronSettings 
   const activeFrom = optionalDate(merged.activeFrom, 'activeFrom');
   const activeUntil = optionalDate(merged.activeUntil, 'activeUntil');
   if (activeFrom && activeUntil && activeFrom > activeUntil) throw new CronInputError('activeFrom must not be after activeUntil');
-  if (!CRON_MODES.includes(merged.mode as CronMode)) throw new CronInputError(`mode must be one of ${CRON_MODES.join(', ')}`);
+  if (merged.mode !== null && !CRON_MODES.includes(merged.mode as CronMode)) throw new CronInputError(`mode must be one of ${CRON_MODES.join(', ')}`);
   if (merged.sprint !== 'active' && merged.sprint !== 'any') throw new CronInputError('sprint must be active or any');
   const todoStatuses = words(merged.todoStatuses, 'todoStatuses');
   if (todoStatuses.length === 0) throw new CronInputError('todoStatuses needs at least one status');
@@ -137,7 +138,7 @@ export function parseCronSettings(raw: string | null | undefined): CronSettings 
     activeFrom,
     activeUntil,
     maxPerDay: integer(merged.maxPerDay, 'maxPerDay', 1, 50),
-    mode: merged.mode as CronMode,
+    mode: merged.mode as CronMode | null,
     sprint: merged.sprint,
     labels: words(merged.labels, 'labels'),
     todoStatuses,
@@ -540,7 +541,8 @@ export class OrchestratorCron {
   }
 
   private turnOptions(settings: CronSettings): Record<string, string> {
-    const options: Record<string, string> = { permissionMode: BRIDGE_MODE[settings.mode] };
+    const options: Record<string, string> = {};
+    if (settings.mode) options.permissionMode = BRIDGE_MODE[settings.mode];
     if (settings.model) options.model = settings.model;
     if (settings.effort) options.effort = settings.effort;
     return options;

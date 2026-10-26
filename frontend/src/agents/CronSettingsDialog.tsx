@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { X } from 'lucide-react';
-import { GET_CHAT_MACHINES, GET_ORCHESTRATIONS, GET_ORCHESTRATOR_CRON_SETTINGS, GET_ORCHESTRATOR_CRON_STATUS } from '../graphql/queries';
+import { GET_ORCHESTRATIONS, GET_ORCHESTRATOR_CRON_SETTINGS, GET_ORCHESTRATOR_CRON_STATUS } from '../graphql/queries';
 import { RUN_ORCHESTRATOR_CRON_NOW, UPDATE_ORCHESTRATOR_CRON_SETTINGS } from '../graphql/mutations';
 import { Button, Card, Checkbox, Dialog, Input, Select } from '../components/ui';
 import { cn } from '../lib/cn';
-import { ENGINE_HINT, ENGINE_OPTIONS, MODE_HINT, MODE_OPTIONS, WEEK_DAYS, configFromForm, fillSummary, formFromConfig, type CronForm } from './cronRound';
+import { WEEK_DAYS, configFromForm, fillSummary, formFromConfig, type CronForm } from './cronRound';
 
 const SPRINT_OPTIONS = [{ value: 'active', label: 'Active sprint only' }, { value: 'any', label: 'Any sprint' }];
 
@@ -27,7 +27,6 @@ const Section = ({ title, children }: { title: string; children: React.ReactNode
 /** The orchestrator cron settings, in a modal opened from the Agents page header. */
 export const CronSettingsDialog = ({ open, onClose }: { open: boolean; onClose: () => void }) => {
   const { data, loading, refetch } = useQuery(GET_ORCHESTRATOR_CRON_SETTINGS, { fetchPolicy: 'network-only', skip: !open });
-  const { data: machineData } = useQuery<{ chatMachines: Array<{ name: string; online: boolean }> }>(GET_CHAT_MACHINES, { skip: !open });
   const [save, { loading: saving }] = useMutation(UPDATE_ORCHESTRATOR_CRON_SETTINGS, { refetchQueries: [GET_ORCHESTRATOR_CRON_STATUS] });
   const [runNow, { loading: running }] = useMutation(RUN_ORCHESTRATOR_CRON_NOW, { refetchQueries: [GET_ORCHESTRATIONS, GET_ORCHESTRATOR_CRON_STATUS] });
   const [form, setForm] = useState<CronForm | null>(null);
@@ -43,9 +42,7 @@ export const CronSettingsDialog = ({ open, onClose }: { open: boolean; onClose: 
   }, [open]);
 
   const set = <K extends keyof CronForm>(key: K, value: CronForm[K]) => form && setForm({ ...form, [key]: value });
-  const text = (key: Exclude<keyof CronForm, 'enabled' | 'workDays' | 'engine'>) => ({ id: `cron-${key}`, value: form ? form[key] : '', onChange: (event: React.ChangeEvent<HTMLInputElement>) => set(key, event.target.value) });
-  const machines = (machineData?.chatMachines || []).map((machine) => ({ value: machine.name, label: machine.online ? machine.name : `${machine.name} (offline)` }));
-  const machineOptions = form && !machines.some((machine) => machine.value === form.machine) ? [...machines, { value: form.machine, label: form.machine }] : machines;
+  const text = (key: Exclude<keyof CronForm, 'enabled' | 'workDays'>) => ({ id: `cron-${key}`, value: form ? form[key] : '', onChange: (event: React.ChangeEvent<HTMLInputElement>) => set(key, event.target.value) });
   const toggleDay = (day: number) => form && set('workDays', form.workDays.includes(day) ? form.workDays.filter((item) => item !== day) : [...form.workDays, day]);
 
   const act = async (work: () => Promise<string>, close = false) => {
@@ -98,16 +95,15 @@ export const CronSettingsDialog = ({ open, onClose }: { open: boolean; onClose: 
                   Cron on
                 </label>
 
+                <p className="text-pretty text-xs text-muted-foreground">Each ticket runs with sous on this workspace. Model, effort and permission mode follow the chat defaults in System Settings.</p>
+
                 <Section title="Slots">
-                  <div className="grid grid-cols-3 gap-4 max-[640px]:grid-cols-1">
+                  <div className="grid grid-cols-2 gap-4 max-[640px]:grid-cols-1">
                     <Field id="cron-parallel" label="Agents at once" hint="1 to 5. One ticket per agent; manual chats are not counted.">
                       <Input {...text('parallel')} inputMode="numeric" />
                     </Field>
                     <Field id="cron-maxPerDay" label="New tickets per day" hint="1 to 50. Parked tickets have the same cap.">
                       <Input {...text('maxPerDay')} inputMode="numeric" />
-                    </Field>
-                    <Field id="cron-machine" label="Machine">
-                      <Select id="cron-machine" aria-label="Machine" value={form.machine} onValueChange={(value) => set('machine', value)} options={machineOptions} container={portal} />
                     </Field>
                   </div>
                 </Section>
@@ -144,23 +140,6 @@ export const CronSettingsDialog = ({ open, onClose }: { open: boolean; onClose: 
                     })}
                   </div>
                   <p className="text-xs text-muted-foreground">Outside these hours no new ticket is taken. A running turn finishes, and an answer you give still runs when a slot is free.</p>
-                </Section>
-
-                <Section title="How the agent works">
-                  <div className="grid grid-cols-3 gap-4 max-[640px]:grid-cols-1">
-                    <Field id="cron-engine" label="Engine" hint={ENGINE_HINT[form.engine]}>
-                      <Select id="cron-engine" aria-label="Engine" value={form.engine} onValueChange={(value) => set('engine', value)} options={ENGINE_OPTIONS} container={portal} />
-                    </Field>
-                    <Field id="cron-mode" label="Permission mode" hint={MODE_HINT[form.mode]}>
-                      <Select id="cron-mode" aria-label="Permission mode" value={form.mode} onValueChange={(value) => set('mode', value)} options={MODE_OPTIONS} container={portal} />
-                    </Field>
-                    <Field id="cron-model" label="Model" hint="Empty uses the machine's default.">
-                      <Input {...text('model')} placeholder="default" />
-                    </Field>
-                    <Field id="cron-effort" label="Effort" hint="Empty uses the machine's default.">
-                      <Input {...text('effort')} placeholder="default" />
-                    </Field>
-                  </div>
                 </Section>
 
                 <Section title="Which tickets">
