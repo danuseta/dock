@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowDown, ArrowUp, Building2, Check, ChevronLeft, ChevronRight, Clock, ExternalLink, EyeOff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Square, Table2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Building2, Check, ChevronLeft, ChevronRight, ClipboardList, Clock, ExternalLink, EyeOff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Square, Table2, X } from 'lucide-react';
 import { GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
 import { APPROVE_REVIEW, CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
@@ -13,6 +13,7 @@ import { isPhone } from '../lib/phone';
 import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
 import { hasPage, monitorsOnly, useDockMode } from '../lib/dockMode';
+import { blackboardFileHref, blackboardHref, folderOf, sortFiles, useBlackboardFiles } from '../lib/blackboard';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { openIssues } from '../lib/sousReport';
 import { RUN_STATE_LABEL, isLongDescription, runState } from '../lib/ticketDetail';
@@ -187,6 +188,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
     ? (selected?.key === 'SAMPLE-2' ? sampleTimeline(sampleTick) : null)
     : (detailData?.orchestration?.key === selected?.key ? detailData?.orchestration?.timeline || null : null);
   const actions = selected ? runActions(selected, monitorsOnly(mode)) : null;
+  const blackboardFiles = useBlackboardFiles(selected?.key, hasPage(mode, '/blackboard'));
   // Failing criteria first, so the fold never hides one.
   const acList = selected ? [...selected.ac].sort((first, second) => Number(second.state === 'FAIL') - Number(first.state === 'FAIL')) : [];
 
@@ -642,6 +644,29 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                   )}
                 </div>
               )}
+
+              {blackboardFiles && blackboardFiles.length > 0 && (() => {
+                const top = sortFiles(blackboardFiles).filter((file) => !folderOf(file.path)).slice(0, 3);
+                const folders = [...new Set(blackboardFiles.map((file) => folderOf(file.path)).filter(Boolean))];
+                return (
+                  <div>
+                    <p className={cn(sectionLabel, 'mb-1 flex items-center gap-1.5')}><ClipboardList size={12} aria-hidden="true" />Blackboard</p>
+                    <ul className="flex flex-col overflow-hidden rounded-xs border border-border">
+                      {top.map((file) => (
+                        <li key={file.path} className="border-b border-border last:border-b-0">
+                          <button type="button" onClick={() => onNavigate(blackboardFileHref(selected.key, file.path))} className="w-full border-0 bg-transparent px-2.5 py-1.5 text-left font-mono text-[0.72rem] text-secondary-foreground hover:bg-surface-1 hover:text-foreground">{file.path}</button>
+                        </li>
+                      ))}
+                      {folders.map((folder) => (
+                        <li key={folder} className="border-b border-border last:border-b-0">
+                          <button type="button" onClick={() => onNavigate(blackboardFileHref(selected.key, folder))} className="w-full border-0 bg-transparent px-2.5 py-1.5 text-left font-mono text-[0.72rem] text-secondary-foreground hover:bg-surface-1 hover:text-foreground">{folder} · {blackboardFiles.filter((file) => folderOf(file.path) === folder).length}</button>
+                        </li>
+                      ))}
+                    </ul>
+                    <button type="button" onClick={() => onNavigate(blackboardHref(selected.key))} className="mt-1.5 border-0 bg-transparent p-0 text-xs text-secondary-foreground hover:text-foreground">All {blackboardFiles.length} files</button>
+                  </div>
+                );
+              })()}
 
               {!!selected.failures?.length && (
                 <div>

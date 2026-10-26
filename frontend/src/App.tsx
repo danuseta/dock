@@ -6,6 +6,7 @@ import { SET_MASTER_PIN, VERIFY_MASTER_PIN } from './graphql/mutations';
 import { AppLayout } from './components/AppLayout';
 import DashboardPage from './pages/DashboardPage';
 import TicketDetailPage from './pages/TicketDetailPage';
+import BlackboardPage from './pages/BlackboardPage';
 import DecisionsPage from './pages/DecisionsPage';
 import DiscordPage from './pages/DiscordPage';
 import DockIssuesPage from './pages/DockIssuesPage';
@@ -57,7 +58,7 @@ function App() {
       const key = decodeURIComponent(path.split('/').pop() || '');
       return { path: '/ticket', key: key || null };
     }
-    if (path === '/dashboard' || path === '/agents' || path === '/sessions' || path === '/calendar' || path === '/sprint' || path === '/monitoring' || path === '/docker' || path === '/demo-videos' || path === '/dev-servers' || path === '/machines' || path === '/decisions' || path === '/discord' || path === '/issues' || path === '/settings') {
+    if (path === '/dashboard' || path === '/agents' || path === '/blackboard' || path === '/sessions' || path === '/calendar' || path === '/sprint' || path === '/monitoring' || path === '/docker' || path === '/demo-videos' || path === '/dev-servers' || path === '/machines' || path === '/decisions' || path === '/discord' || path === '/issues' || path === '/settings') {
       return { path, key: null };
     }
     return { path: '/', key: null };
@@ -125,6 +126,7 @@ function App() {
       case '/': return <HomePage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;
       case '/dashboard': return <DashboardPage onTicketClick={navigateToTicket} />;
       case '/agents': return <Suspense fallback={<Page width="full"><LoadingSkeleton /></Page>}><AgentsPage onTicketClick={navigateToTicket} onNavigate={handleNavigate} /></Suspense>;
+      case '/blackboard': return <BlackboardPage />;
       case '/sessions': return <SessionsPage onTicketClick={navigateToTicket} />;
       case '/calendar': return <CalendarPage onNavigate={handleNavigate} />;
       case '/sprint': return <SprintPage />;
