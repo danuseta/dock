@@ -50,6 +50,25 @@ const LimitMeter: React.FC<{ label: string; limit: ChatLimit | null | undefined;
   );
 };
 
+/** The 5h and 7d limits as two thin bars, for a header with no room for the numbers. */
+export const LimitBars: React.FC<{ machine?: string | null }> = ({ machine }) => {
+  const { status } = useChatStatus(machine);
+  const limits = status?.limits;
+  if (!limits || (!limits.fiveHour && !limits.sevenDay)) return null;
+  return (
+    <span className="flex w-8 flex-col gap-[3px]" aria-hidden="true">
+      {[limits.fiveHour, limits.sevenDay].map((limit, index) => {
+        const used = Math.min(100, Math.max(0, Math.round(limit?.usedPercentage ?? 0)));
+        return (
+          <span key={index} className="block h-1 overflow-hidden rounded-pill bg-surface-2">
+            <span className={cn('block h-full', limits.stale ? 'bg-muted-foreground' : meterClass[limitTone(used)])} style={{ width: `${used}%` }} />
+          </span>
+        );
+      })}
+    </span>
+  );
+};
+
 export const LimitMeters: React.FC<{ machine?: string | null }> = ({ machine }) => {
   const { status, now } = useChatStatus(machine);
   const limits = status?.limits;

@@ -30,6 +30,8 @@ export interface ComposerProps {
   onSend: (payload: SendPayload) => Promise<void>;
   onStop: () => void;
   seed?: { text: string } | null;
+  /** The chat panel on a phone: expand sits in the box, Stop takes the place of Send while the box is empty, and the model and Queue/Steer sit under it. */
+  compact?: { modelLabel: string } | null;
 }
 
 export interface ChatCommand {
