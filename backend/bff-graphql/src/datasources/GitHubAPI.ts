@@ -111,6 +111,14 @@ export class GitHubAPI {
     }
   }
 
+  /** Whether a pull request is still open, and its head commit; throws when there is no token or GitHub refuses. */
+  async pullState(owner: string, repo: string, pullNumber: number): Promise<{ open: boolean; headSha: string }> {
+    const auth = await this.getAuth();
+    if (!auth.hasToken) throw new Error('GitHub token is not configured in Settings');
+    const pull = await new GitHubClient(auth.headers.Authorization.replace('Bearer ', '')).getPRStatus(owner, repo, pullNumber);
+    return { open: pull?.state === 'open' && !pull?.merged_at, headSha: String(pull?.head?.sha ?? '') };
+  }
+
   /** Submits an APPROVE review; throws when there is no token or GitHub refuses. */
   async approvePullRequest(owner: string, repo: string, pullNumber: number) {
     const auth = await this.getAuth();

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ticketAttention } from '../lib/attention';
-import { NO_SPRINT, ago, channelLabel, channelTabs, countFor, discordAttention, discordMarkdown, kindLabel, matchesSearch, progressOf, slotsOf, sprintGroups, threadsFor, titleParts, wib, wibDay, wibTime, type DiscordThread } from '../lib/discordThreads';
+import { readFileSync } from 'node:fs';
+import { NO_SPRINT, ago, channelLabel, channelTabs, countFor, discordAttention, discordFileUrl, discordMarkdown, fileOpening, kindLabel, matchesSearch, progressOf, slotsOf, sprintGroups, threadsFor, titleParts, wib, wibDay, wibTime, type DiscordThread } from '../lib/discordThreads';
 
 const thread = (id: string, extra: Partial<DiscordThread>): DiscordThread => ({
   id, channelId: 'cb', channel: 'bug-report', kind: 'bug', title: `Thread ${id}`, url: `https://discord.com/channels/g/${id}`, state: 'FLOW_1', why: 'New bug; nobody said on it',
@@ -115,4 +116,14 @@ test('a pull request fills two reviewer slots: Pass is green, on it is yellow, a
   assert.strictEqual(progressOf(thread('b', { state: 'FIXED' })), 'done', 'a fixed bug is done');
   assert.deepStrictEqual(threadsFor([pr(['Alvin', 'Bima'], ['alvinPass', 'bimaPass'], { state: 'NOT_YOURS', needsYou: false })], 'all', 'done').map((row) => row.id), ['pr'], 'two Pass labels put it under Done');
   assert.deepStrictEqual([slotsOf(pr(['Bima'], [], { slots: 1 })), progressOf(pr(['Bima'], [], { slots: 1 })), progressOf(pr(['Bima'], ['bimaPass'], { slots: 1 }))], [['onit'], 'progress', 'done'], 'a -1 pull request has one slot');
+});
+
+test('a text file opens in the viewer, a PDF in a tab, through DOCK; any other file only downloads; the page starts on All', () => {
+  assert.equal(fileOpening({ name: 'log.txt', type: 'text/plain; charset=utf-8' }), 'text');
+  assert.equal(fileOpening({ name: 'data.json', type: null }), 'text');
+  assert.equal(fileOpening({ name: 'bukti.PDF', type: null }), 'pdf');
+  assert.equal(fileOpening({ name: 'x', type: 'application/pdf' }), 'pdf');
+  assert.equal(fileOpening({ name: 'app.zip', type: 'application/zip' }), null);
+  assert.equal(discordFileUrl('https://cdn.discordapp.com/attachments/1/2/a b.pdf?ex=1', 'a b.pdf', true), '/api/discord/file?url=https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1%2F2%2Fa%20b.pdf%3Fex%3D1&name=a%20b.pdf&download=1');
+  assert.match(readFileSync(new URL('../pages/DiscordPage.tsx', import.meta.url), 'utf8'), /useState<ThreadView>\('all'\)/);
 });

@@ -12,6 +12,7 @@ import { PHONE_PRIMARY_PATHS, phoneMore } from '../lib/phoneNavigation';
 import { useNotificationEvents } from '../lib/useNotificationEvents';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 import { ChatDock } from '../chat/ChatDock';
+import { NoticeToasts } from './NoticeToasts';
 import { ReportDockIssue } from './ReportDockIssue';
 import { IconButton } from './ui';
 import { hasPage, showsChatDock, useDockMode } from '../lib/dockMode';
@@ -267,6 +268,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
       </main>
       <ReportDockIssue open={reporting} onClose={() => setReporting(false)} onNavigate={onNavigate} />
       {showsChatDock(mode, currentPath) && <ChatDock inset={chatInset} onNavigate={onNavigate} />}
+      <NoticeToasts onNavigate={onNavigate} />
     </div>
   );
 };

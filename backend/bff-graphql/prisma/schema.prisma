@@ -351,3 +351,22 @@ model DiscordChannel {
   enabled Boolean
   addedAt DateTime
 }
+
+/// A review DOCK started on its own when the owner said "on it" in a pr-review thread: one per pull request head commit.
+model AutoReview {
+  id         String    @id @default(uuid())
+  prUrl      String
+  headSha    String
+  ticketKey  String
+  threadUrl  String
+  sessionId  String?
+  /// running, deciding, lgtm (approved by DOCK), clean (approve verdict, owner to LGTM), blockers, failed
+  status     String    @default("running")
+  detail     String?
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@unique([prUrl, headSha])
+  @@index([ticketKey, startedAt])
+  @@index([status])
+}

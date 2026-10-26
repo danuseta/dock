@@ -82,6 +82,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
     assert.deepStrictEqual(queryFields, [
       'agentLooks',
       'authStatus',
+      'autoReviews',
       'calendarEvents',
       'chatActivity',
       'chatActivityDetail',

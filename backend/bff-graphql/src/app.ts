@@ -17,6 +17,7 @@ import { createAgentLookRouter } from './routes/agent-looks';
 import { createBrainProxyRouter } from './routes/brain';
 import { createChatAttachmentRouter } from './routes/chat-attachments';
 import { createBlackboardRouter } from './routes/blackboard';
+import { createDiscordFilesRouter } from './routes/discord-files';
 import { createDemoVideoRouter } from './routes/demo-videos';
 import { createOrchestratorApiRouter, createOrchestratorIngestRouter } from './routes/orchestrator';
 import { dockMode } from './mode';
@@ -67,6 +68,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<JidisAp
   app.use('/ingest/brain', createBrainProxyRouter());
   if (mode === 'workspace') app.use('/api/chat/attachments', createChatAttachmentRouter());
   if (mode === 'workspace') app.use('/api/blackboard', createBlackboardRouter());
+  if (mode === 'workspace') app.use('/api/discord', createDiscordFilesRouter());
   if (mode === 'workspace') app.use('/api/demo-videos', createDemoVideoRouter());
   if (mode === 'workspace') app.use('/api/agent-looks', createAgentLookRouter());
   app.use(express.json());

@@ -111,13 +111,13 @@ test('a push becomes a notification, and tapping it opens the page it names', as
   assert.deepStrictEqual(sw.opened, ['/agents']);
 });
 
-test('a push shows no notification while a page is in view; the page is told which event it was', async () => {
+test('a push shows no notification while a page is in view; the page is told the event, title, text and link', async () => {
   const told: unknown[] = [];
   const view = { visibilityState: 'visible', postMessage: (message: unknown) => { told.push(message); } };
   const sw = worker(() => null, [{ visibilityState: 'hidden', postMessage: (message: unknown) => { told.push(message); } }, view]);
   await sw.run('push', { data: { json: () => ({ title: 'QRD-7 waits on you', body: 'Keep it?', url: '/detail/QRD-7', data: { event: 'needsYou' } }) } });
   assert.deepStrictEqual(sw.shown, []);
-  assert.deepStrictEqual(JSON.parse(JSON.stringify(told)), [{ type: 'dock-push', event: 'needsYou' }, { type: 'dock-push', event: 'needsYou' }]);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(told)), Array(2).fill({ type: 'dock-push', event: 'needsYou', title: 'QRD-7 waits on you', body: 'Keep it?', url: '/detail/QRD-7' }));
   const hidden = worker(() => null, [{ visibilityState: 'hidden', postMessage: () => undefined }]);
   await hidden.run('push', { data: { json: () => ({ title: 'a', body: 'b', url: '/' }) } });
   assert.strictEqual(hidden.shown.length, 1, 'a page out of view does not stand in for the notification');

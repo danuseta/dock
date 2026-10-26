@@ -162,6 +162,8 @@ export const typeDefs = gql`
     hasDiscordBotToken: Boolean!
     discordGuildId: String
     discordUserId: String
+    autoReviewOnIt: Boolean!
+    autoLgtm: Boolean!
     hasGoogleClientSecret: Boolean!
     googleCalendarConnected: Boolean!
     googleCalendarError: String
@@ -987,6 +989,8 @@ export const typeDefs = gql`
     discordBotToken: String
     discordGuildId: String
     discordUserId: String
+    autoReviewOnIt: String
+    autoLgtm: String
     googleClientId: String
     googleClientSecret: String
     googleCalendarId: String
@@ -1101,6 +1105,20 @@ export const typeDefs = gql`
     MINE
   }
 
+  "A review DOCK started when the owner said on it in a pr-review thread."
+  type AutoReview {
+    id: ID!
+    ticketKey: String!
+    prUrl: String!
+    headSha: String!
+    threadUrl: String!
+    sessionId: String
+    status: String!
+    detail: String
+    startedAt: String!
+    finishedAt: String
+  }
+
   type Query {
     authStatus: AuthStatus!
     dockMode: String!
@@ -1110,6 +1128,7 @@ export const typeDefs = gql`
     ticketRelationGroup(ticketKey: String!): TicketRelationGroup!
     needsAttention: [NeedsAttentionItem!]!
     discordThreads: DiscordThreads!
+    autoReviews: [AutoReview!]!
     settings: Settings
     jiraProjects(url: String, email: String, token: String): [JiraProject!]!
     githubRepos(token: String): [GitHubRepo!]!

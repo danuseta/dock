@@ -104,3 +104,21 @@ export const liveApprovalDeps: ApprovalDeps = {
   approve: (owner, repo, pullNumber) => githubAPI.approvePullRequest(owner, repo, pullNumber),
   event: (key, kind, detail) => orchestratorService.recordEvent(key, kind, detail),
 };
+
+export class ReviewApprovalError extends Error {}
+
+/**
+ * The LGTM of a review run, as the Agents page button sends it: the Pass label and the GitHub approvals on the reviewed
+ * ticket, the outcome kept, and the run finished when every step went through. A failed step leaves the run as it is.
+ */
+export async function lgtmReview(ticketKey: string, deps: ApprovalDeps = liveApprovalDeps): Promise<ApprovalStep[]> {
+  const run = await orchestratorService.get(ticketKey);
+  if (!run || run.kind !== 'review') throw new ReviewApprovalError('Only a review run can be approved here');
+  // The verdict names the reviewed ticket and its pull requests; an older ledger falls back to its own key.
+  const target = run.reviewTicket ?? run.key;
+  const steps = await approveReview(target, deps, run.reviewPrs);
+  await approvalRecords.save(run.key, steps);
+  if (target !== run.key) await Promise.all(steps.map((step) => orchestratorService.recordEvent(run.key, step.ok ? 'APPROVED' : 'APPROVE_FAILED', `${target} ${step.name}: ${step.detail}`)));
+  if (steps.length > 0 && steps.every((step) => step.ok)) await orchestratorService.finishReview(run.key);
+  return steps;
+}

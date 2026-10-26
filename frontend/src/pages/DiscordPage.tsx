@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import type { Components } from 'react-markdown';
-import { ChevronLeft, ChevronRight, ExternalLink, RefreshCw, Settings2, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, ExternalLink, Eye, FileText, RefreshCw, Settings2, Trash2, X } from 'lucide-react';
 import { GET_DISCORD_THREADS } from '../graphql/queries';
 import { ADD_DISCORD_CHANNEL, DISMISS_DISCORD_THREAD, REFRESH_DISCORD, REMOVE_DISCORD_CHANNEL, UPDATE_DISCORD_CHANNEL } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
@@ -10,7 +10,7 @@ import { Markdown } from '../chat/Markdown';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import {
-  ALL, KINDS, MENTION_LINK, STATE_LABEL, VIEWS, ago, channelLabel, channelTabs, countFor, discordMarkdown, fileSize, isDone, kindLabel, matchesSearch, needsYou, progressOf, slotsOf, sprintGroups, threadsFor, titleParts, wib, wibDay, wibTime,
+  ALL, KINDS, MENTION_LINK, STATE_LABEL, VIEWS, ago, channelLabel, channelTabs, countFor, discordFileUrl, discordMarkdown, fileOpening, fileSize, isDone, kindLabel, matchesSearch, needsYou, progressOf, slotsOf, sprintGroups, threadsFor, titleParts, wib, wibDay, wibTime,
   type ChannelKind, type ChannelTab, type DiscordChannel, type DiscordMessage, type DiscordThread, type MentionKind, type Progress, type Slot, type ThreadView,
 } from '../lib/discordThreads';
 
@@ -58,7 +58,7 @@ const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) 
   const [dismiss] = useMutation(DISMISS_DISCORD_THREAD, { refetchQueries: ['GetDiscordThreads'] });
   const [chosenTab, setTab] = useState<ChannelTab>(ALL);
   const [managing, setManaging] = useState(false);
-  const [view, setView] = useState<ThreadView>('needs');
+  const [view, setView] = useState<ThreadView>('all');
   const [query, setQuery] = useState('');
   const [folded, setFolded] = useState<string[]>([]);
   const [picked, setPicked] = useState<string | null>(selectedFromUrl);
@@ -173,8 +173,11 @@ const ThreadRow: React.FC<{ row: DiscordThread; now: Date; selected: boolean; on
 type DiscordFile = DiscordMessage['attachments'][number];
 const isImage = (file: DiscordFile) => file.type?.split('/')[0] === 'image';
 
-/** A picture or a video as a thumbnail; anything else, or a link that stopped working, as its name and size. A picture opens in the viewer. */
-const Attachment: React.FC<{ file: DiscordFile; onView: () => void }> = ({ file, onView }) => {
+/**
+ * A picture or a video as a thumbnail; anything else, or a link that stopped working, as its name and size. A picture
+ * and a text file open in a viewer, a PDF in a new tab, and every other file can be downloaded.
+ */
+const Attachment: React.FC<{ file: DiscordFile; onView: () => void; onRead: () => void }> = ({ file, onView, onRead }) => {
   const [broken, setBroken] = useState(false);
   const kind = file.type?.split('/')[0];
   const caption = <span className="flex justify-between gap-2 px-2 py-1 text-[0.64rem] text-muted-foreground"><b className="truncate font-medium text-secondary-foreground">{file.name}</b><span className="whitespace-nowrap">{file.width && file.height ? `${file.width}×${file.height} · ` : ''}{fileSize(file.size)}</span></span>;
@@ -194,7 +197,50 @@ const Attachment: React.FC<{ file: DiscordFile; onView: () => void }> = ({ file,
       </span>
     );
   }
-  return <p className="inline-flex gap-2.5 self-start rounded-sm border border-border bg-surface-0 px-2.5 py-1.5 text-[0.7rem] text-secondary-foreground"><b className="font-medium text-foreground">{file.name}</b>{fileSize(file.size)}{file.type ? ` · ${file.type.split('/')[0]}` : ''}</p>;
+  const opening = fileOpening(file);
+  const action = 'inline-flex h-7 items-center gap-1 rounded-xs px-2 font-medium text-accent hover:bg-surface-1 max-[900px]:h-11';
+  return (
+    <span className="inline-flex max-w-full flex-wrap items-center gap-x-2.5 gap-y-1 self-start rounded-sm border border-border bg-surface-0 py-1 pr-1 pl-2.5 text-[0.7rem] text-secondary-foreground">
+      <FileText size={14} aria-hidden="true" className="flex-none text-muted-foreground" />
+      <b className="min-w-0 truncate font-medium text-foreground">{file.name}</b>
+      <span className="whitespace-nowrap">{fileSize(file.size)}{file.type ? ` · ${file.type.split('/')[1]?.split(';')[0] ?? file.type}` : ''}</span>
+      <span className="flex items-center">
+        {opening === 'text' && <button type="button" className={action} onClick={onRead}><Eye size={13} aria-hidden="true" />View</button>}
+        {opening === 'pdf' && <a href={discordFileUrl(file.url, file.name)} target="_blank" rel="noopener noreferrer" className={action}><ExternalLink size={13} aria-hidden="true" />Open</a>}
+        <a href={opening ? discordFileUrl(file.url, file.name, true) : file.url} download={file.name} target="_blank" rel="noopener noreferrer" className={action} aria-label={`Download ${file.name}`}><Download size={13} aria-hidden="true" />Download</a>
+      </span>
+    </span>
+  );
+};
+
+/** A text file of a message over the page, read through DOCK; shown as text, never rendered. */
+const TextViewer: React.FC<{ file: DiscordFile; onClose: () => void }> = ({ file, onClose }) => {
+  const [text, setText] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  useEffect(() => {
+    let gone = false;
+    fetch(discordFileUrl(file.url, file.name), { credentials: 'same-origin', cache: 'no-store' })
+      .then(async (response) => (response.ok ? response.text() : Promise.reject(new Error(((await response.json().catch(() => ({}))) as { error?: string }).error || `DOCK answered ${response.status}`))))
+      .then((body) => { if (!gone) setText(body); }, (error: Error) => { if (!gone) setFailed(error.message); });
+    return () => { gone = true; };
+  }, [file]);
+  return (
+    <Dialog open onClose={onClose} labelledBy="discord-text-name" className="h-dvh w-[min(980px,100%)] max-[760px]:p-0">
+      <div className="flex h-full max-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-md border border-border-glow bg-surface-0 max-[760px]:max-h-dvh max-[760px]:rounded-none max-[760px]:border-0">
+        <div className="flex min-w-0 flex-none items-center gap-1.5 border-b border-border px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2">
+          <h2 id="discord-text-name" className="min-w-0 flex-1 truncate font-mono text-[0.78rem] font-semibold">{file.name}</h2>
+          <span className="flex-none font-mono text-[0.68rem] text-muted-foreground max-[760px]:hidden">{fileSize(file.size)}</span>
+          <a href={discordFileUrl(file.url, file.name, true)} download={file.name} aria-label="Download" title="Download" className="inline-grid size-8 flex-none place-items-center rounded-xs text-secondary-foreground hover:bg-surface-1 hover:text-foreground max-[900px]:size-11"><Download size={14} aria-hidden="true" /></a>
+          <IconButton variant="ghost" aria-label="Close" className="max-[900px]:size-11" onClick={onClose}><X size={15} aria-hidden="true" /></IconButton>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto bg-surface-1/40 p-4">
+          {failed ? <p className="text-sm text-status-conflict" role="alert">{failed}</p>
+            : text === null ? <p className="text-sm text-muted-foreground">Loading...</p>
+              : <pre className="m-0 font-mono text-[0.74rem] leading-relaxed whitespace-pre-wrap text-secondary-foreground [overflow-wrap:anywhere]">{text}</pre>}
+        </div>
+      </div>
+    </Dialog>
+  );
 };
 
 /** The pictures of one message over the page, like a file in a session; the arrows step through the others. */
@@ -287,6 +333,7 @@ const ChannelManager: React.FC<{ channels: DiscordChannel[]; configured: boolean
 
 const ThreadPane: React.FC<{ thread: DiscordThread; picked: boolean; onBack: () => void; onTicketClick: (key: string) => void; onDismiss: () => void }> = ({ thread, picked, onBack, onTicketClick, onDismiss }) => {
   const [viewing, setViewing] = useState<{ files: DiscordFile[]; index: number } | null>(null);
+  const [reading, setReading] = useState<DiscordFile | null>(null);
   const earlier = Math.max(0, thread.messageCount - thread.messages.length);
   const ticket = thread.tickets[0];
   const pr = thread.prs[0];
@@ -329,7 +376,7 @@ const ThreadPane: React.FC<{ thread: DiscordThread; picked: boolean; onBack: () 
                   <div className="mt-0.5 break-words text-[0.8rem] leading-relaxed text-secondary-foreground"><Markdown text={discordMarkdown(message)} overrides={MESSAGE_MARKDOWN} /></div>
                   {message.attachments.length > 0 && <div className="mt-2 flex flex-wrap gap-2">{message.attachments.map((file) => {
                     const images = message.attachments.filter(isImage);
-                    return <Attachment key={file.url} file={file} onView={() => setViewing({ files: images, index: images.indexOf(file) })} />;
+                    return <Attachment key={file.url} file={file} onView={() => setViewing({ files: images, index: images.indexOf(file) })} onRead={() => setReading(file)} />;
                   })}</div>}
                 </div>
               </div>
@@ -347,6 +394,7 @@ const ThreadPane: React.FC<{ thread: DiscordThread; picked: boolean; onBack: () 
           <Button size="sm" variant="primary" onClick={() => window.open(thread.url, '_blank', 'noopener')}>Open in Discord<ExternalLink size={13} aria-hidden="true" /></Button>
         </div>
       </div>
+      {reading && <TextViewer file={reading} onClose={() => setReading(null)} />}
       {viewing && <ImageViewer files={viewing.files} index={viewing.index} onIndex={(index) => setViewing({ ...viewing, index })} onClose={() => setViewing(null)} />}
     </section>
   );

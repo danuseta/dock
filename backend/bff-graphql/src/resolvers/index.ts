@@ -22,7 +22,7 @@ import { demoStorage, type DemoStorageInput } from '../integrations/demo-storage
 import { DevServerError, devServers } from '../integrations/dev-servers';
 import { elevenLabsKeys } from '../integrations/elevenlabs-keys';
 import { broadcastDeps, sendBroadcast } from '../integrations/broadcast';
-import { approvalRecords, approveReview, liveApprovalDeps } from '../integrations/review-approval';
+import { ReviewApprovalError, approvalRecords, lgtmReview } from '../integrations/review-approval';
 import { decisionGate } from '../integrations/decision-gate';
 import { doctorReports } from '../integrations/doctor';
 import { claudeUsage } from '../integrations/claude-usage';
@@ -226,6 +226,7 @@ export const resolvers = {
       return storageAPI.getTicketRelationGroup(ticketKey);
     },
     discordThreads: () => discordThreadsView(),
+    autoReviews: () => storageAPI.getAutoReviews(),
     needsAttention: async () => {
       const [agentItems, pullRequestItems] = await Promise.all([
         orchestratorService.list().then((runs) => attentionItems(ownRuns(runs))).catch((error) => {
@@ -599,16 +600,12 @@ export const resolvers = {
       return confirmed;
     },
     approveReview: async (_: unknown, { ticketKey }: { ticketKey: string }) => {
-      const run = await orchestratorService.get(ticketKey);
-      if (!run || run.kind !== 'review') throw new GraphQLError('Only a review run can be approved here', { extensions: { code: 'BAD_USER_INPUT' } });
-      // The verdict names the reviewed ticket and its pull requests; an older ledger falls back to its own key.
-      const target = run.reviewTicket ?? run.key;
-      const steps = await approveReview(target, liveApprovalDeps, run.reviewPrs);
-      await approvalRecords.save(run.key, steps);
-      if (target !== run.key) await Promise.all(steps.map((step) => orchestratorService.recordEvent(run.key, step.ok ? 'APPROVED' : 'APPROVE_FAILED', `${target} ${step.name}: ${step.detail}`)));
-      // A failed step leaves the run where it is, so the LGTM can be sent again.
-      if (steps.length > 0 && steps.every((step) => step.ok)) await orchestratorService.finishReview(run.key);
-      return steps;
+      try {
+        return await lgtmReview(ticketKey);
+      } catch (error) {
+        if (error instanceof ReviewApprovalError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+        throw error;
+      }
     },
     answerChatInteraction: async (
       _: unknown,
@@ -694,7 +691,7 @@ export const resolvers = {
 };
 
 export const protectedQueries = [
-  'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
+  'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'autoReviews', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatSessionStates', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'agentLooks', 'libraryAgents', 'libraryAgent',
