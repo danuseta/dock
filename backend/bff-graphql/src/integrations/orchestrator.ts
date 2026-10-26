@@ -90,7 +90,8 @@ export const FINDING_SEVERITIES = ['blocker', 'non-blocking', 'nit'] as const;
 export type FindingSeverity = typeof FINDING_SEVERITIES[number];
 export const REVIEW_VERDICTS = ['approve', 'request-change'] as const;
 export type ReviewVerdict = typeof REVIEW_VERDICTS[number];
-export interface LedgerFinding { at: string; severity: FindingSeverity; text: string }
+/** resolvedAt and resolvedWhy are set once the reviewer marks the finding as no longer applying; it is kept, not counted. */
+export interface LedgerFinding { at: string; severity: FindingSeverity; text: string; resolvedAt: string | null; resolvedWhy: string | null }
 export interface LedgerLgtm { at: string; text: string }
 const MAX_FINDINGS = 50;
 
@@ -322,7 +323,14 @@ export function parseLedger(input: unknown, now = new Date()): Ledger {
     .filter(isRecord)
     .map((item): LedgerFinding => {
       const severity = text(item.severity, 20) as FindingSeverity;
-      return { at: text(item.at, 40), severity: FINDING_SEVERITIES.includes(severity) ? severity : 'non-blocking', text: text(item.text, 1000) };
+      const resolved = isRecord(item.resolved) ? item.resolved : null;
+      return {
+        at: text(item.at, 40),
+        severity: FINDING_SEVERITIES.includes(severity) ? severity : 'non-blocking',
+        text: text(item.text, 1000),
+        resolvedAt: resolved ? text(resolved.at, 40) || null : null,
+        resolvedWhy: resolved ? text(resolved.why, 1000) || null : null,
+      };
     })
     .filter((item) => item.text)
     .slice(-MAX_FINDINGS);
@@ -622,7 +630,7 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     productionData: ledger.productionData === true,
     draft: ledger.draft === true,
     issues: normalizeIssues(ledger.issues),
-    blockers: Array.isArray(ledger.findings) ? ledger.findings.filter((item) => item.severity === 'blocker').length : 0,
+    blockers: Array.isArray(ledger.findings) ? ledger.findings.filter((item) => item.severity === 'blocker' && !item.resolvedAt).length : 0,
     activity,
     activityDetail,
     idleSeconds: Math.floor(idleMs / 1000),

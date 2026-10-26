@@ -620,8 +620,11 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                   <ol className="flex flex-col">
                     {reviewFindings(selected.findings ?? []).map((finding, index) => (
                       <li className="grid grid-cols-[1fr_auto] gap-2 border-b border-border py-1.5 text-[0.78rem] last:border-b-0" key={`${finding.at}-${index}`}>
-                        <span className="min-w-0 break-words">{finding.text}</span>
-                        <span className={cn('font-mono text-[0.68rem] font-semibold', finding.severity === 'blocker' ? 'text-status-conflict' : 'text-muted-foreground')}>{finding.severity}</span>
+                        <span className="min-w-0 break-words">
+                          <span className={cn(finding.resolvedAt && 'text-muted-foreground line-through')}>{finding.text}</span>
+                          {finding.resolvedAt && <span className="mt-0.5 block text-[0.72rem] text-muted-foreground">Resolved: {finding.resolvedWhy}</span>}
+                        </span>
+                        <span className={cn('font-mono text-[0.68rem] font-semibold', finding.resolvedAt ? 'text-status-merged' : finding.severity === 'blocker' ? 'text-status-conflict' : 'text-muted-foreground')}>{finding.resolvedAt ? 'resolved' : finding.severity}</span>
                       </li>
                     ))}
                     {(selected.lgtm ?? []).map((part, index) => (

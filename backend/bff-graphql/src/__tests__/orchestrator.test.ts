@@ -906,6 +906,23 @@ test('a review ledger brings its findings with severities, the lgtm parts and th
   assert.deepStrictEqual([plain.findings, plain.lgtm, plain.verdict, plain.blockers], [[], [], null, 0]);
 });
 
+test('a resolved blocker stays in the review and no longer counts as a blocker', async () => {
+  const { storage } = memoryStorage();
+  const service = new OrchestratorService(storage, os.tmpdir());
+  const now = new Date();
+  const run = await service.ingestLedger({
+    ...ledger, key: 'ZED-452', kind: 'review', waiting: '', updatedAt: now.toISOString(),
+    findings: [
+      { at: now.toISOString(), severity: 'blocker', text: 'old AC', resolved: { at: now.toISOString(), why: 'AC changed (D-1)' } },
+      { at: now.toISOString(), severity: 'blocker', text: 'still open' },
+      { at: now.toISOString(), severity: 'blocker', text: 'bad shape', resolved: 'yes' },
+    ],
+    verdict: { at: now.toISOString(), value: 'request-change' },
+  }, now, 'laptop');
+  assert.deepStrictEqual(run.findings.map((item: { text: string; resolvedAt: string | null; resolvedWhy: string | null }) => [item.text, item.resolvedAt !== null, item.resolvedWhy]), [['old AC', true, 'AC changed (D-1)'], ['still open', false, null], ['bad shape', false, null]]);
+  assert.strictEqual(run.blockers, 2);
+});
+
 test('the owner LGTM moves a review ledger to done and keeps the rest of it', async () => {
   const { storage, events } = memoryStorage();
   const service = new OrchestratorService(storage, os.tmpdir());
