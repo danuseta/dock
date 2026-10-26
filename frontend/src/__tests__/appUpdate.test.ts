@@ -14,3 +14,15 @@ test('a newer build on the server reloads the app, unless that would lose typed 
   assert.strictEqual(updateStep(null, NEW, false, null), 'none', 'development: the page has no build');
   assert.strictEqual(updateStep(OLD, null, false, null), 'none', 'the server could not be asked');
 });
+
+test('an open tab looks for a deploy every minute and when it gets focus or comes back online, not only when it is shown again', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { UPDATE_CHECK_MS } = await import('../lib/appUpdate');
+  assert.strictEqual(UPDATE_CHECK_MS, 60_000);
+  const layout = readFileSync(new URL('../components/AppLayout.tsx', import.meta.url), 'utf8');
+  assert.match(layout, /setInterval\(check, UPDATE_CHECK_MS\)/);
+  for (const event of ["'visibilitychange'", "'focus'", "'online'"]) assert.ok(layout.includes(`addEventListener(${event}, check)`), event);
+  const update = readFileSync(new URL('../lib/appUpdate.ts', import.meta.url), 'utf8');
+  assert.match(update, /\[role="dialog"\]/, 'an open dialog is offered the update, not reloaded');
+  assert.match(update, /box\.getClientRects\(\)\.length > 0 && box\.value\.trim\(\) !== ''/, 'the hidden prefilled Report bug box does not block the reload');
+});
