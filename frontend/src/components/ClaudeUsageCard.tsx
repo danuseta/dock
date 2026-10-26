@@ -3,6 +3,7 @@ import { useQuery } from '@apollo/client';
 import { Gauge } from 'lucide-react';
 import { GET_CLAUDE_USAGE } from '../graphql/queries';
 import { Input } from './ui';
+import { UsageLineChart } from './UsageLineChart';
 import { cn } from '../lib/cn';
 import { fillDays, formatCost, formatTokens, localDate, periodRange, USAGE_PERIODS, validCustomRange, type ClaudeUsage, type UsagePeriod } from '../lib/claudeUsage';
 
@@ -15,8 +16,6 @@ export const ClaudeUsageCard = () => {
   const { data, loading, error } = useQuery<{ claudeUsage: ClaudeUsage }>(GET_CLAUDE_USAGE, { variables: range, skip: period === 'custom' && !customOk, fetchPolicy: 'network-only' });
   const usage = data?.claudeUsage;
   const days = useMemo(() => fillDays(range.from, range.to, usage?.days ?? []), [range.from, range.to, usage?.days]);
-  const peak = Math.max(1, ...days.map((day) => day.totalTokens));
-  const labelEvery = Math.max(1, Math.ceil(days.length / 10));
 
   return (
     <article className="min-w-0 rounded-md border border-border bg-surface-0">
@@ -47,17 +46,7 @@ export const ClaudeUsageCard = () => {
             <div className="px-4 py-2.5"><strong className="block font-mono text-base tabular-nums">{formatCost(usage.totals.cost)}</strong><span className="text-[0.65rem] text-muted-foreground">Cost</span></div>
           </div>
           {usage.days.length === 0 ? <div className="px-4 py-5 text-sm text-muted-foreground">No Claude usage in this period.</div> : <>
-            <figure className="border-b border-border px-4 pb-2 pt-3">
-              <figcaption className="mb-1.5 flex justify-between font-mono text-[0.62rem] text-muted-foreground tabular-nums"><span>Tokens per day</span><span>peak {formatTokens(peak)}</span></figcaption>
-              <ol className="flex h-36 items-end gap-[3px]" aria-label="Usage per day">
-                {days.map((day) => <li className="group relative flex h-full min-w-[3px] flex-1 items-end" key={day.date} title={`${day.date}: ${formatTokens(day.totalTokens)} tokens, ${formatCost(day.cost)}`}>
-                  <span className={cn('block w-full rounded-t-[2px]', day.totalTokens ? 'bg-accent group-hover:bg-foreground' : 'bg-surface-2')} style={{ height: `${day.totalTokens ? Math.max(3, (day.totalTokens / peak) * 100) : 1.5}%` }} />
-                </li>)}
-              </ol>
-              <div className="mt-1 flex gap-[3px] font-mono text-[0.58rem] text-muted-foreground tabular-nums" aria-hidden="true">
-                {days.map((day, index) => <span className="min-w-[3px] flex-1 overflow-visible whitespace-nowrap" key={day.date}>{index % labelEvery === 0 ? day.date.slice(5) : ''}</span>)}
-              </div>
-            </figure>
+            <UsageLineChart days={days} />
             <div className="overflow-x-auto"><table className="w-full text-[0.68rem]">
               <thead><tr className="text-left text-muted-foreground"><th className="px-4 py-2 font-medium">Model</th><th className="px-2 py-2 text-right font-medium">Input</th><th className="px-2 py-2 text-right font-medium">Output</th><th className="px-2 py-2 text-right font-medium">Cache</th><th className="px-4 py-2 text-right font-medium">Cost</th></tr></thead>
               <tbody>{usage.models.map((model) => <tr className="border-t border-border" key={model.model}>
