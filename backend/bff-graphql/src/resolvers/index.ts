@@ -26,6 +26,7 @@ import { ReviewApprovalError, approvalRecords, lgtmReview } from '../integration
 import { decisionGate } from '../integrations/decision-gate';
 import { doctorReports } from '../integrations/doctor';
 import { claudeUsage } from '../integrations/claude-usage';
+import { claudeAccounts, claudeAccountsState, cycleAvailable } from '../integrations/claude-accounts-live';
 import { agentLooks } from '../integrations/agent-looks';
 import { agentBridge } from '../integrations/agents-live';
 import type { AnswerInput } from '../integrations/chat-interactions';
@@ -227,6 +228,7 @@ export const resolvers = {
     },
     discordThreads: () => discordThreadsView(),
     autoReviews: () => storageAPI.getAutoReviews(),
+    claudeAccounts: () => claudeAccountsState(),
     needsAttention: async () => {
       const [agentItems, pullRequestItems] = await Promise.all([
         orchestratorService.list().then((runs) => attentionItems(ownRuns(runs))).catch((error) => {
@@ -599,6 +601,21 @@ export const resolvers = {
       }
       return confirmed;
     },
+    useClaudeAccount: async (_: unknown, { name }: { name: string }) => {
+      if (!cycleAvailable()) throw new GraphQLError('This machine has no /cycle', { extensions: { code: 'BAD_USER_INPUT' } });
+      try {
+        return { available: true, ...(await claudeAccounts.use(name)) };
+      } catch (error) {
+        throw new GraphQLError(error instanceof Error ? error.message : 'The switch failed', { extensions: { code: 'BAD_USER_INPUT' } });
+      }
+    },
+    setClaudeRotation: async (_: unknown, rule: { enabled: boolean; fiveHour: number; sevenDay: number; backToMain: boolean }) => {
+      try {
+        return { available: cycleAvailable(), ...(await claudeAccounts.setRotation(rule)) };
+      } catch (error) {
+        throw new GraphQLError(error instanceof Error ? error.message : 'The rotation was not saved', { extensions: { code: 'BAD_USER_INPUT' } });
+      }
+    },
     approveReview: async (_: unknown, { ticketKey }: { ticketKey: string }) => {
       try {
         return await lgtmReview(ticketKey);
@@ -691,7 +708,7 @@ export const resolvers = {
 };
 
 export const protectedQueries = [
-  'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'autoReviews', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
+  'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'autoReviews', 'claudeAccounts', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatSessionStates', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'agentLooks', 'libraryAgents', 'libraryAgent',
@@ -728,6 +745,8 @@ export const protectedMutations = [
   'removeMonitor',
   'checkMonitors',
   'createIngestToken',
+  'useClaudeAccount',
+  'setClaudeRotation',
   'revokeIngestToken',
   'deleteDemoVideo',
   'saveDemoStorage',

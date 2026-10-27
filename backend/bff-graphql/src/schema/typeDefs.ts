@@ -1119,6 +1119,43 @@ export const typeDefs = gql`
     finishedAt: String
   }
 
+  type ClaudeUsageWindow {
+    usedPercentage: Float!
+    resetsAt: String
+  }
+
+  "One account of /cycle on this machine, with the last usage seen while it was in use."
+  type ClaudeAccount {
+    name: String!
+    active: Boolean!
+    fiveHour: ClaudeUsageWindow
+    sevenDay: ClaudeUsageWindow
+    seenAt: String
+  }
+
+  type ClaudeRotation {
+    enabled: Boolean!
+    fiveHour: Int!
+    sevenDay: Int!
+    backToMain: Boolean!
+  }
+
+  type ClaudeRotationEntry {
+    at: String!
+    from: String!
+    to: String!
+    reason: String!
+    auto: Boolean!
+  }
+
+  type ClaudeAccounts {
+    "False when this machine has no /cycle: a laptop DOCK, or a workspace without it."
+    available: Boolean!
+    accounts: [ClaudeAccount!]!
+    rotation: ClaudeRotation!
+    log: [ClaudeRotationEntry!]!
+  }
+
   type Query {
     authStatus: AuthStatus!
     dockMode: String!
@@ -1129,6 +1166,7 @@ export const typeDefs = gql`
     needsAttention: [NeedsAttentionItem!]!
     discordThreads: DiscordThreads!
     autoReviews: [AutoReview!]!
+    claudeAccounts: ClaudeAccounts!
     settings: Settings
     jiraProjects(url: String, email: String, token: String): [JiraProject!]!
     githubRepos(token: String): [GitHubRepo!]!
@@ -1240,6 +1278,8 @@ export const typeDefs = gql`
     """
     submitDecisions(ticketKey: String!, answers: [IssueAnswerInput!]!, changes: [DecisionChangeInput!]!, confirms: [Int!]!): [Int!]!
     approveReview(ticketKey: String!): [ApprovalStep!]!
+    useClaudeAccount(name: String!): ClaudeAccounts!
+    setClaudeRotation(enabled: Boolean!, fiveHour: Int!, sevenDay: Int!, backToMain: Boolean!): ClaudeAccounts!
     stopChatTurn(sessionId: ID!): ChatSession!
     requestDoctorRun(machine: String!): Boolean!
     saveAgentLook(input: AgentLookInput!): AgentLook!
