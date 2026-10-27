@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@apollo/client';
-import { ArrowLeft, ClipboardList, Download, File, FileCheck2, Folder, Image as ImageIcon, Info, List, Lock, MapPin, HelpCircle, Scale, Video } from 'lucide-react';
-import { Input, Page } from '../components/ui';
+import { ArrowLeft, ClipboardList, Download, File, FileCheck2, Folder, Image as ImageIcon, Info, List, Lock, MapPin, HelpCircle, Scale, ScrollText, Video } from 'lucide-react';
+import { Checkbox, Input, Page } from '../components/ui';
 import { Markdown } from '../chat/Markdown';
-import { GET_ORCHESTRATIONS } from '../graphql/queries';
+import { GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
 import { stageLabel } from '../agents/runs';
 import { cn } from '../lib/cn';
-import { fetchFiles, fetchText, fetchTickets, fileUrl, formatSize, groupFiles, withoutComments, type BlackboardFile, type BlackboardTicket } from '../lib/blackboard';
+import { LOG_ENTRY, executionLog, fetchFiles, fetchText, fetchTickets, fileUrl, formatSize, groupFiles, withoutComments, type BlackboardFile, type BlackboardTicket, type ExecutionLogEntry } from '../lib/blackboard';
 
 interface RunInfo { key: string; title: string | null; stage: string }
 
@@ -89,6 +89,34 @@ const FileView: React.FC<{ ticket: string; file: BlackboardFile | null; folder: 
   );
 };
 
+const LOG_TONE: Record<string, string> = { stage: 'text-accent', gate: 'text-status-warn', ok: 'text-status-merged', fail: 'text-status-conflict' };
+
+const logTime = (iso: string) => new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+/** The execution log of the ticket's run on this DOCK: stages, gates, agents, tools and the owner's actions, newest first. */
+const LogView: React.FC<{ ticket: string }> = ({ ticket }) => {
+  const { data, loading, error } = useQuery<{ orchestration: { events: Array<{ id: string; kind: string; detail: string | null; at: string }>; timeline: { log: ExecutionLogEntry[] } | null } | null }>(
+    GET_ORCHESTRATION, { variables: { key: ticket }, fetchPolicy: 'cache-and-network', pollInterval: 30000 },
+  );
+  if (error) return <p className="p-6 text-sm text-status-conflict" role="alert">{error.message}</p>;
+  if (!data && loading) return <p className="p-6 text-sm text-muted-foreground" role="status">Loading the log...</p>;
+  const run = data?.orchestration;
+  if (!run) return <p className="p-6 text-sm text-muted-foreground">No run recorded for this ticket on this DOCK.</p>;
+  const entries = executionLog(run.timeline?.log ?? [], run.events);
+  if (entries.length === 0) return <p className="p-6 text-sm text-muted-foreground">The run has no log yet.</p>;
+  return (
+    <ol className="m-0 list-none px-4 py-3 font-mono text-[0.72rem]">
+      {entries.map((entry, index) => (
+        <li key={`${entry.at}-${index}`} className="grid grid-cols-[9.5rem_8rem_minmax(0,1fr)] gap-x-3 border-b border-border py-1.5 max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:gap-y-0.5">
+          <span className="text-muted-foreground">{logTime(entry.at)}</span>
+          <span className={cn('truncate font-semibold', LOG_TONE[entry.kind] ?? 'text-secondary-foreground')}>{entry.head}</span>
+          <span className="text-secondary-foreground [overflow-wrap:anywhere]">{entry.text}</span>
+        </li>
+      ))}
+    </ol>
+  );
+};
+
 /** The agents' per-ticket blackboard on this workspace, read-only: tickets, their files, and one file at a time. */
 const BlackboardPage: React.FC = () => {
   const [initial] = useState(readQuery);
@@ -142,7 +170,7 @@ const BlackboardPage: React.FC = () => {
         <section className={cn('flex min-w-0 flex-col border-r border-border', picked && 'max-[760px]:hidden')} aria-label="Tickets">
           <div className="flex flex-col gap-2 border-b border-border px-3 py-2.5">
             <Input type="search" aria-label="Search tickets" className="h-8 text-xs max-[760px]:h-11" placeholder="Search key or title" value={query} onChange={(event) => setQuery(event.target.value)} />
-            <label className="flex items-center gap-2 text-[0.7rem] text-muted-foreground"><input type="checkbox" checked={hideDone} onChange={(event) => setHideDone(event.target.checked)} />Hide done</label>
+            <label className="flex items-center gap-2 text-[0.7rem] text-muted-foreground"><Checkbox checked={hideDone} onChange={(event) => setHideDone(event.target.checked)} />Hide done</label>
           </div>
           <div className="max-h-[calc(100dvh-16rem)] min-h-[320px] flex-1 overflow-y-auto max-[760px]:max-h-none">
             {tickets === null && !error && <p className="px-4 py-6 text-sm text-muted-foreground" role="status">Loading tickets...</p>}
@@ -169,6 +197,11 @@ const BlackboardPage: React.FC = () => {
           <div className="max-h-[calc(100dvh-16rem)] flex-1 overflow-y-auto py-1.5 max-[760px]:max-h-none">
             {picked && files === null && <p className="px-4 py-4 text-sm text-muted-foreground" role="status">Loading files...</p>}
             {!picked && <p className="px-4 py-4 text-sm text-muted-foreground">Pick a ticket.</p>}
+            {picked && (
+              <button type="button" onClick={() => setSelected(LOG_ENTRY)} aria-current={selected === LOG_ENTRY ? 'true' : undefined} className={cn('flex w-full items-center gap-2 border-0 border-b border-border bg-transparent px-3.5 py-1.5 text-left text-[0.76rem] text-secondary-foreground hover:bg-surface-1', selected === LOG_ENTRY && 'bg-surface-1 text-foreground')}>
+                <ScrollText size={14} aria-hidden="true" className="flex-none" /><span>Log</span><span className="ml-auto font-mono text-[0.6rem] text-muted-foreground">execution</span>
+              </button>
+            )}
             {groups.map((group) => group.folder === ''
               ? group.files.map((entry) => {
                   const Icon = iconFor(entry);
@@ -193,7 +226,7 @@ const BlackboardPage: React.FC = () => {
           <div className="flex items-center justify-between gap-3 border-b border-border px-3.5 py-2">
             <span className="flex min-w-0 items-center gap-1.5 font-mono text-[0.72rem]">
               <button type="button" onClick={() => setSelected(null)} className="hidden border-0 bg-transparent p-0 text-muted-foreground max-[760px]:inline"><ArrowLeft size={12} aria-hidden="true" /></button>
-              {picked && <span className="text-muted-foreground">{picked} /</span>}<span className="truncate">{selected ?? ''}</span>
+              {picked && <span className="text-muted-foreground">{picked} /</span>}<span className="truncate">{selected === LOG_ENTRY ? 'Log' : selected ?? ''}</span>
             </span>
             <span className="flex items-center gap-3 font-mono text-[0.62rem] text-muted-foreground">
               {file && <span>changed {when(file.updatedAt)}</span>}
@@ -201,7 +234,9 @@ const BlackboardPage: React.FC = () => {
             </span>
           </div>
           <div className="max-h-[calc(100dvh-16rem)] min-h-[320px] flex-1 overflow-y-auto max-[760px]:max-h-none">
-            {picked
+            {picked && selected === LOG_ENTRY
+              ? <LogView ticket={picked} />
+              : picked
               ? <FileView ticket={picked} file={file} folder={folder ? { name: folder.folder, files: folder.files } : null} onPick={setSelected} />
               : (
                 <div className="grid h-full min-h-[320px] place-items-center text-center text-muted-foreground">

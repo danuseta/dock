@@ -594,6 +594,10 @@ test('status keeps the latest line per session and the latest account limits, an
   const later = service.statusSnapshot();
   assert.deepStrictEqual(later.sessions.map((status) => [status.sessionId, status.stale]), [[CLI_ID, true], ['other-session', false]]);
   assert.strictEqual(later.limits?.stale, true, 'a push without limits does not refresh them');
+  assert.deepStrictEqual([later.limits?.fiveHour, later.limits?.sevenDay?.usedPercentage], [null, 20], 'a 5h window past its reset is left out');
+  advance(7 * 24 * 60 * 60 * 1000);
+  assert.strictEqual(service.statusSnapshot().limits, null, 'both windows past their reset: no limits at all');
+  advance(-7 * 24 * 60 * 60 * 1000);
 
   await service.ingestStatus({ sessionId: 'bare' }, 'laptop');
   assert.deepStrictEqual(service.statusSnapshot().sessions.at(-1), {
@@ -684,9 +688,9 @@ test('bridge online and status limits are tracked per machine', async () => {
   assert.deepStrictEqual(service.machines(['laptop', 'workspace']).map((machine) => machine.online), [true, false]);
   assert.deepStrictEqual(service.bridge(), { online: true, lastSeenAt: '2026-10-08T00:01:01.000Z' });
 
-  await service.ingestStatus(statusBody({ fiveHour: { usedPercentage: 10, resetsAt: 1791417600 }, sevenDay: undefined }), 'workspace');
+  await service.ingestStatus(statusBody({ fiveHour: { usedPercentage: 10, resetsAt: 1791421200 }, sevenDay: undefined }), 'workspace');
   advance(1000);
-  await service.ingestStatus(statusBody({ sessionId: 'laptop-line', fiveHour: { usedPercentage: 90, resetsAt: 1791417600 }, sevenDay: undefined }), 'laptop');
+  await service.ingestStatus(statusBody({ sessionId: 'laptop-line', fiveHour: { usedPercentage: 90, resetsAt: 1791421200 }, sevenDay: undefined }), 'laptop');
   assert.strictEqual(service.statusSnapshot('workspace').limits?.fiveHour?.usedPercentage, 10);
   assert.strictEqual(service.statusSnapshot('laptop').limits?.fiveHour?.usedPercentage, 90);
   assert.strictEqual(service.statusSnapshot().limits?.fiveHour?.usedPercentage, 90, 'without a machine the newest limits win');

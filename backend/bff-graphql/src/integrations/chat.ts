@@ -833,13 +833,17 @@ export class ChatService {
     const limits = machine === undefined
       ? [...this.limitsSeen.values()].reduce<LimitsSeen | null>((newest, seen) => (!newest || seen.receivedAt > newest.receivedAt ? seen : newest), null)
       : this.limitsSeen.get(machine) ?? null;
+    // A window past its reset time no longer says anything about the usage: it is left out until a turn reports the new one.
+    const current = (window: LimitWindow | null) => (window?.resetsAt && window.resetsAt.getTime() < now ? null : window);
+    const fiveHour = limits && current(limits.fiveHour);
+    const sevenDay = limits && current(limits.sevenDay);
     return {
-      limits: limits && {
-        fiveHour: presentWindow(limits.fiveHour),
-        sevenDay: presentWindow(limits.sevenDay),
+      limits: limits && (fiveHour || sevenDay) ? {
+        fiveHour: presentWindow(fiveHour),
+        sevenDay: presentWindow(sevenDay),
         receivedAt: limits.receivedAt.toISOString(),
         stale: stale(limits.receivedAt),
-      },
+      } : null,
       sessions: [...this.sessionStatus]
         .filter(([name]) => machine === undefined || name === machine)
         .flatMap(([name, byId]) => [...byId.values()].map(({ fiveHour, sevenDay, receivedAt, ...status }) => ({

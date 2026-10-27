@@ -33,6 +33,22 @@ export function groupFiles(files: BlackboardFile[]): Array<{ folder: string; fil
 /** The "generated, do not edit" marker status.cjs puts on top is an HTML comment; the page says it in its own note. */
 export const withoutComments = (text: string) => text.replace(/<!--[\s\S]*?-->\s*/g, '');
 
+/** The Log entry of the file list: the run's execution log, not a file on the board. */
+export const LOG_ENTRY = '@log';
+
+export interface ExecutionLogEntry { at: string; kind: string; head: string; text: string }
+interface RunEvent { id: string; kind: string; detail: string | null; at: string }
+
+/** The kinds the run's timeline log already carries; every other event (LGTM, Jira, a reset) is added from the event list. */
+const LOGGED_KINDS = new Set(['STAGE', 'WAITING', 'RESUMED', 'MACHINE']);
+
+/** The execution log of one ticket: the timeline log (stages, gates, agents and tools) and the other events, newest first. */
+export function executionLog(log: ExecutionLogEntry[], events: RunEvent[]): ExecutionLogEntry[] {
+  const extra = events.filter((event) => !LOGGED_KINDS.has(event.kind))
+    .map((event) => ({ at: event.at, kind: event.kind.includes('FAIL') ? 'fail' : event.kind === 'APPROVED' ? 'ok' : 'event', head: event.kind.toLowerCase().replace(/_/g, ' '), text: event.detail ?? '' }));
+  return [...log, ...extra].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+}
+
 export const formatSize =(bytes: number) => (bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`);
 
 async function getJson<T>(url: string): Promise<T> {
