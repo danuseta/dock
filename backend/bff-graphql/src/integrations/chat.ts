@@ -878,6 +878,11 @@ export class ChatService {
     return { sessionId: status.sessionId };
   }
 
+  /** The machine's last usage report as it came in, windows past their reset included. */
+  lastLimits(machine: string) {
+    return this.limitsSeen.get(machine) ?? null;
+  }
+
   /** The machine's last usage belonged to the account it just switched away from. */
   async forgetLimits(machine: string) {
     this.limitsSeen.delete(machine);

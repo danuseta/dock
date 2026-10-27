@@ -80,6 +80,7 @@ export const claudeAccounts = new ClaudeAccounts({
   log,
   saveLog: async (value) => { await storage.upsertCache(CACHE, 'log', value, 0); },
   switched: () => { void chatService.forgetLimits(dockMode()); },
+  machineUsage: () => chatService.lastLimits(dockMode()),
   push: (message) => eventPush.send('needsYou', message),
   now: () => new Date(),
 });
