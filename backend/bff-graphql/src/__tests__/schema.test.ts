@@ -128,6 +128,8 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'orchestratorCronSettings',
       'orchestratorCronStatus',
       'ownerName',
+      'pullFileLines',
+      'pullFilePatch',
       'pushPublicKey',
       'quickLinks',
       'settings',
@@ -136,6 +138,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'sprintIssueEvents',
       'sprintList',
       'sprintTrend',
+      'ticketChanges',
       'ticketDetail',
       'ticketRelationGroup',
     ]);

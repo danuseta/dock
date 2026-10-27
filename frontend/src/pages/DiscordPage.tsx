@@ -7,6 +7,7 @@ import { ADD_DISCORD_CHANNEL, DISMISS_DISCORD_THREAD, REFRESH_DISCORD, REMOVE_DI
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Button, Dialog, IconButton, Input, Page, Select } from '../components/ui';
 import { Markdown } from '../chat/Markdown';
+import { changesHref } from '../changes/href';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import {
@@ -141,7 +142,7 @@ const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) 
           </div>
         </section>
 
-        {selected ? <ThreadPane key={selected.id} thread={selected} onBack={back} picked={Boolean(picked)} onTicketClick={onTicketClick} onDismiss={() => void dismiss({ variables: { id: selected.id, lastActivity: selected.lastActivity } })} />
+        {selected ? <ThreadPane key={selected.id} thread={selected} onBack={back} picked={Boolean(picked)} onTicketClick={onTicketClick} onNavigate={onNavigate} onDismiss={() => void dismiss({ variables: { id: selected.id, lastActivity: selected.lastActivity } })} />
           : <p className="p-6 text-sm text-muted-foreground max-[960px]:hidden">Pick a thread.</p>}
       </div>
     </Page>
@@ -331,7 +332,7 @@ const ChannelManager: React.FC<{ channels: DiscordChannel[]; configured: boolean
   );
 };
 
-const ThreadPane: React.FC<{ thread: DiscordThread; picked: boolean; onBack: () => void; onTicketClick: (key: string) => void; onDismiss: () => void }> = ({ thread, picked, onBack, onTicketClick, onDismiss }) => {
+const ThreadPane: React.FC<{ thread: DiscordThread; picked: boolean; onBack: () => void; onTicketClick: (key: string) => void; onNavigate: (path: string) => void; onDismiss: () => void }> = ({ thread, picked, onBack, onTicketClick, onNavigate, onDismiss }) => {
   const [viewing, setViewing] = useState<{ files: DiscordFile[]; index: number } | null>(null);
   const [reading, setReading] = useState<DiscordFile | null>(null);
   const earlier = Math.max(0, thread.messageCount - thread.messages.length);
@@ -344,7 +345,7 @@ const ThreadPane: React.FC<{ thread: DiscordThread; picked: boolean; onBack: () 
     ['Tags', thread.tags.length ? thread.tags.join(', ') : 'None'],
     ['Ticket', thread.tickets.length ? thread.tickets.map((item) => <span key={item.key} className="mr-2"><span className="font-mono text-accent">{item.key}</span>{item.status ? ` · ${item.status}` : ''}{item.assignee ? ` · ${item.assignee}` : ''}</span>) : 'None in the title or tags'],
     ['Sprint', thread.tickets.find((item) => item.sprint)?.sprint ?? 'None'],
-    ['Pull request', pr ? <a href={pr} target="_blank" rel="noreferrer" className="text-foreground hover:underline">{pr.replace('https://github.com/', '')}</a> : '—'],
+    ['Pull request', pr ? <span className="flex items-center gap-2"><a href={pr} target="_blank" rel="noreferrer" className="truncate text-foreground hover:underline">{pr.replace('https://github.com/', '')}</a>{ticket && <button type="button" onClick={() => onNavigate(changesHref(ticket.key, pr, 'discord'))} className="flex-none border-0 bg-transparent p-0 font-semibold text-accent hover:underline">Changes</button>}</span> : '—'],
     thread.kind === 'pr'
       ? ['Reviewers', <span key="slots" className="flex flex-col gap-1"><Slots thread={thread} large /><span className="text-[0.66rem] whitespace-normal text-muted-foreground">{thread.onIt.length ? `On it: ${thread.onIt.join(', ')}` : 'Nobody on it'}</span>{thread.passes.length > 0 && <span className="text-[0.66rem] whitespace-normal text-muted-foreground">Pass: {thread.passes.join(', ')}</span>}</span>]
       : ['On it', thread.claim ? `${thread.claim.mine ? 'You' : thread.claim.author} · ${wib(thread.claim.at)}${thread.claimerRepliedAt ? '' : ' · no update since'}` : 'Nobody yet'],

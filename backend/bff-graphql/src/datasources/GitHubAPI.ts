@@ -111,6 +111,12 @@ export class GitHubAPI {
     }
   }
 
+  /** A client with the Settings token, or null when there is none. */
+  async client(): Promise<GitHubClient | null> {
+    const auth = await this.getAuth();
+    return auth.hasToken ? new GitHubClient(auth.headers.Authorization.replace('Bearer ', '')) : null;
+  }
+
   /** Whether a pull request is still open, and its head commit; throws when there is no token or GitHub refuses. */
   async pullState(owner: string, repo: string, pullNumber: number): Promise<{ open: boolean; headSha: string }> {
     const auth = await this.getAuth();

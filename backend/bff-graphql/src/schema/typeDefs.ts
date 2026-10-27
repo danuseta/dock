@@ -270,6 +270,74 @@ export const typeDefs = gql`
     messages: [DiscordMessage!]!
   }
 
+  """A file of a pull request; a binary or very large one has no patch and is tooLarge."""
+  type PullChangeFile {
+    path: String!
+    previousPath: String
+    status: String!
+    additions: Int!
+    deletions: Int!
+    """Null when GitHub sent none, or past the size guard; pullFilePatch loads it then."""
+    patch: String
+    tooLarge: Boolean!
+  }
+
+  """One pull request of a ticket on the Changes page."""
+  type PullChanges {
+    url: String!
+    owner: String!
+    repo: String!
+    number: Int!
+    """The repository, or repository#number when the ticket has two pull requests in one repository."""
+    tab: String!
+    title: String!
+    state: String!
+    author: String
+    headRef: String!
+    baseRef: String!
+    headSha: String!
+    """When the head commit was made; read with the files."""
+    headDate: String
+    additions: Int!
+    deletions: Int!
+    changedFiles: Int!
+    """Null for the tabs not asked for."""
+    files: [PullChangeFile!]
+    """Some files came without their patch because the pull request is big."""
+    partial: Boolean!
+    """GitHub could not be asked, so this is the last answer DOCK kept."""
+    stale: Boolean!
+    retryAt: String
+    """GITHUB_NOT_CONNECTED, NO_ACCESS, NOT_FOUND, RATE_LIMITED or UNAVAILABLE."""
+    error: String
+  }
+
+  type ChangesFinding {
+    at: String!
+    severity: String!
+    text: String!
+    resolvedAt: String
+    resolvedWhy: String
+  }
+
+  """The newest review run of the ticket."""
+  type ChangesReview {
+    runKey: String!
+    verdict: String
+    roundsUsed: Int
+    roundsMax: Int
+    updatedAt: String!
+    findings: [ChangesFinding!]!
+  }
+
+  type TicketChanges {
+    ticketKey: String!
+    title: String
+    pulls: [PullChanges!]!
+    review: ChangesReview
+    error: String
+  }
+
   type DiscordThreads {
     configured: Boolean!
     """The Gateway is connected, so Discord pushes changes as they happen."""
@@ -1165,6 +1233,12 @@ export const typeDefs = gql`
     ticketRelationGroup(ticketKey: String!): TicketRelationGroup!
     needsAttention: [NeedsAttentionItem!]!
     discordThreads: DiscordThreads!
+    """The ticket's pull requests with the files of the one in tab (the first when not given) and its review findings."""
+    ticketChanges(ticketKey: String!, tab: String): TicketChanges!
+    """One file with its patch, for a file the size guard sent without one."""
+    pullFilePatch(ticketKey: String!, url: String!, path: String!): PullChangeFile
+    """Lines from..to (1-based, at most 500) of a file at a commit, for Expand."""
+    pullFileLines(ticketKey: String!, url: String!, path: String!, ref: String!, from: Int!, to: Int!): [String!]!
     autoReviews: [AutoReview!]!
     claudeAccounts: ClaudeAccounts!
     settings: Settings

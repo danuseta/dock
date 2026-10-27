@@ -33,6 +33,8 @@ import type { AnswerInput } from '../integrations/chat-interactions';
 import { SprintBusyError, SprintInputError, sprintDashboardService } from '../integrations/sprint-dashboard';
 import { dockMode, ownRuns } from '../mode';
 import { buildIssueBody, currentBuild, dockIssueError, draftUrl, issueEnvironment, issueTitle, issuesRepo, reporterName, type IssueDraft } from '../integrations/dock-issues';
+import { ChangesInputError } from '../integrations/pull-changes';
+import { pullChangesService } from '../integrations/pull-changes-live';
 
 const jiraAPI = new JiraAPI();
 const githubAPI = new GitHubAPI();
@@ -63,6 +65,11 @@ function channelKind(kind: string) {
   if (!isChannelKind(kind)) throw new GraphQLError('kind must be bug, uat, pr or follow', { extensions: { code: 'BAD_USER_INPUT' } });
   return kind;
 }
+
+const changesInputError = (error: unknown): never => {
+  if (error instanceof ChangesInputError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+  throw error;
+};
 
 const discordInputError = (error: unknown): never => {
   if (error instanceof ChannelInputError || error instanceof DiscordReaderError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
@@ -227,6 +234,10 @@ export const resolvers = {
       return storageAPI.getTicketRelationGroup(ticketKey);
     },
     discordThreads: () => discordThreadsView(),
+    ticketChanges: (_: unknown, { ticketKey, tab }: { ticketKey: string; tab?: string | null }) => pullChangesService.changes(ticketKey, tab).catch(changesInputError),
+    pullFilePatch: (_: unknown, { ticketKey, url, path }: { ticketKey: string; url: string; path: string }) => pullChangesService.filePatch(ticketKey, url, path).catch(changesInputError),
+    pullFileLines: (_: unknown, args: { ticketKey: string; url: string; path: string; ref: string; from: number; to: number }) =>
+      pullChangesService.fileLines(args.ticketKey, args.url, args.path, args.ref, args.from, args.to).catch(changesInputError),
     autoReviews: () => storageAPI.getAutoReviews(),
     claudeAccounts: () => claudeAccountsState(),
     needsAttention: async () => {
@@ -708,7 +719,7 @@ export const resolvers = {
 };
 
 export const protectedQueries = [
-  'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'autoReviews', 'claudeAccounts', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
+  'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'claudeAccounts', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatSessionStates', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'agentLooks', 'libraryAgents', 'libraryAgent',

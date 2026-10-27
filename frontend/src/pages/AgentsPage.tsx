@@ -34,6 +34,7 @@ import { LimitsLine } from '../chat/StatusLine';
 import { useOpenForTicket } from '../chat/useOpenForTicket';
 import { AgentsLibrary } from '../agents/library/AgentsLibrary';
 import { questionsOf } from '../decisions/questions';
+import { changesHref } from '../changes/href';
 
 const AgentsOffice = lazy(() => import('../components/AgentsOffice'));
 
@@ -180,6 +181,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
   const runs = useMemo(() => allRuns.filter((run) => matchesRunFilter(run, filter)), [allRuns, filter]);
   // Nothing picked yet: show a run that is still going, never one from the archive.
   const selected = runs.find((run) => run.key === selectedKey) || runs.find((run) => run.waiting && !isArchived(run)) || runs.find((run) => !isArchived(run)) || null;
+  const openFindings = selected?.kind === 'review' ? (selected.findings ?? []).filter((finding) => !finding.resolvedAt).length : 0;
 
   const { data: detailData } = useQuery(GET_ORCHESTRATION, {
     ...CACHED_QUERY_OPTIONS,
@@ -599,10 +601,10 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                   {selected.testsBe && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Tests BE</dt><dd className="break-words">{selected.testsBe}</dd></>}
                   {selected.testsFe && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Tests FE</dt><dd className="break-words">{selected.testsFe}</dd></>}
                   {selected.pullRequests?.map((pr) => (
-                    <React.Fragment key={pr.url}><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">{pr.status}</dt><dd className="min-w-0"><a className="flex items-center gap-1 font-mono text-xs text-accent hover:underline" href={pr.url} target="_blank" rel="noreferrer"><span className="truncate">{pr.repo}#{pr.number}</span><ExternalLink className="size-3.5 shrink-0" aria-hidden="true" /></a>{(pr.reviewDecision === 'changes_requested' || pr.reviewDecision === 'approved' || (pr.checks && pr.checks !== 'none')) && <span className="font-mono text-[0.68rem] text-muted-foreground">{[pr.reviewDecision === 'changes_requested' && 'changes requested', pr.reviewDecision === 'approved' && 'approved', pr.checks === 'failing' && 'CI failing', pr.checks === 'pending' && 'checks running', pr.checks === 'passing' && 'CI passing'].filter(Boolean).join(' · ')}</span>}</dd></React.Fragment>
+                    <React.Fragment key={pr.url}><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">{pr.status}</dt><dd className="min-w-0"><a className="flex items-center gap-1 font-mono text-xs text-accent hover:underline" href={pr.url} target="_blank" rel="noreferrer"><span className="truncate">{pr.repo}#{pr.number}</span><ExternalLink className="size-3.5 shrink-0" aria-hidden="true" /></a><button type="button" onClick={() => onNavigate(changesHref(selected.key, pr.repo, 'agents'))} className="mt-0.5 flex items-center gap-1.5 border-0 bg-transparent p-0 text-xs font-semibold text-secondary-foreground hover:text-foreground">Changes{openFindings > 0 && <span className="rounded-full bg-status-warn/20 px-1.5 font-mono text-[0.62rem] font-bold text-status-warn" aria-label={`${openFindings} open findings`}>{openFindings}</span>}</button>{(pr.reviewDecision === 'changes_requested' || pr.reviewDecision === 'approved' || (pr.checks && pr.checks !== 'none')) && <span className="font-mono text-[0.68rem] text-muted-foreground">{[pr.reviewDecision === 'changes_requested' && 'changes requested', pr.reviewDecision === 'approved' && 'approved', pr.checks === 'failing' && 'CI failing', pr.checks === 'pending' && 'checks running', pr.checks === 'passing' && 'CI passing'].filter(Boolean).join(' · ')}</span>}</dd></React.Fragment>
                   ))}
                   {!selected.pullRequests?.length && [['PR BE', selected.prBe], ['PR FE', selected.prFe]].map(([label, url]) => url && (
-                    <React.Fragment key={label}><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">{label}</dt><dd className="min-w-0"><a className="flex items-center gap-1 font-mono text-xs text-accent hover:underline" href={url} target="_blank" rel="noreferrer"><span className="truncate">{url}</span><ExternalLink className="size-3.5 shrink-0" aria-hidden="true" /></a></dd></React.Fragment>
+                    <React.Fragment key={label}><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">{label}</dt><dd className="min-w-0"><a className="flex items-center gap-1 font-mono text-xs text-accent hover:underline" href={url} target="_blank" rel="noreferrer"><span className="truncate">{url}</span><ExternalLink className="size-3.5 shrink-0" aria-hidden="true" /></a><button type="button" onClick={() => onNavigate(changesHref(selected.key, url, 'agents'))} className="mt-0.5 border-0 bg-transparent p-0 text-xs font-semibold text-secondary-foreground hover:text-foreground">Changes</button></dd></React.Fragment>
                   ))}
                   {selected.note && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Note</dt><dd className="break-words">{selected.note}</dd></>}
                 </dl>
