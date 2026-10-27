@@ -32,9 +32,10 @@ export function passLabelOf(displayName: string, roster: RosterMember[]): string
 
 /**
  * The owner approves a review run: the reviewed Jira ticket gets the signed-in account's Pass label and each of its open
- * pull requests an APPROVE review on GitHub. Every step reports its own result and lands in the ticket's event list; nothing is retried.
+ * pull requests an APPROVE review on GitHub. A pull request that already merged needs only the label, so it is skipped.
+ * Every step reports its own result and lands in the ticket's event list; nothing is retried.
  */
-export async function approveReview(key: string, deps: ApprovalDeps, prUrls: string[] = []): Promise<ApprovalStep[]> {
+export async function approveReview(key: string, deps: ApprovalDeps, prUrls: string[] = [], mergedUrls: string[] = []): Promise<ApprovalStep[]> {
   const steps: ApprovalStep[] = [];
   let label = '';
   try {
@@ -49,9 +50,12 @@ export async function approveReview(key: string, deps: ApprovalDeps, prUrls: str
   try {
     // The verdict names the pull requests it reviewed; without them the ticket's open ones are looked up.
     const named = prUrls.map((url) => /github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/.exec(url)).filter((match): match is RegExpExecArray => Boolean(match))
-      .map((match) => ({ owner: match[1], repo: match[2], number: Number(match[3]), status: 'open', url: match[0] }));
-    open = named.length > 0 ? named : (await deps.pullRequests(key)).filter((pr) => pr.status === 'open' || pr.status === 'draft');
-    if (open.length === 0) steps.push({ name: 'GitHub approve', ok: false, detail: `no open pull request found for ${key}` });
+      .map((match) => ({ owner: match[1], repo: match[2], number: Number(match[3]), status: mergedUrls.some((url) => url.endsWith(match[0])) ? 'merged' : 'open', url: match[0] }));
+    const found = named.length > 0 ? named : await deps.pullRequests(key);
+    open = found.filter((pr) => pr.status === 'open' || pr.status === 'draft');
+    const merged = found.filter((pr) => pr.status === 'merged');
+    if (open.length === 0 && merged.length > 0) steps.push({ name: 'GitHub approve', ok: true, detail: `already merged, skipped: ${merged.map((pr) => pr.url).join(', ')}` });
+    else if (open.length === 0) steps.push({ name: 'GitHub approve', ok: false, detail: `no open pull request found for ${key}` });
   } catch (error) {
     steps.push({ name: 'GitHub approve', ok: false, detail: reason(error) });
   }
@@ -116,7 +120,8 @@ export async function lgtmReview(ticketKey: string, deps: ApprovalDeps = liveApp
   if (!run || run.kind !== 'review') throw new ReviewApprovalError('Only a review run can be approved here');
   // The verdict names the reviewed ticket and its pull requests; an older ledger falls back to its own key.
   const target = run.reviewTicket ?? run.key;
-  const steps = await approveReview(target, deps, run.reviewPrs);
+  const merged = run.pullRequests.filter((pr) => pr.status === 'merged').map((pr) => pr.url);
+  const steps = await approveReview(target, deps, run.reviewPrs, merged);
   await approvalRecords.save(run.key, steps);
   if (target !== run.key) await Promise.all(steps.map((step) => orchestratorService.recordEvent(run.key, step.ok ? 'APPROVED' : 'APPROVE_FAILED', `${target} ${step.name}: ${step.detail}`)));
   if (steps.length > 0 && steps.every((step) => step.ok)) await orchestratorService.finishReview(run.key);

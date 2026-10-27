@@ -586,6 +586,8 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     ? githubPullRequests
     : [ledger.prBe, ledger.prFe].filter((url): url is string => typeof url === 'string' && url.length > 0).map(ledgerPullRequest);
   const review = FINISHED_STAGES.has(row.stage) ? null : reviewState(pullRequests);
+  // A review whose pull request merged before the owner's LGTM still waits on the owner: follow-ups and the Pass label.
+  const followUp = review === 'merged' && runKind(ledger.kind, row.key) === 'review' && Boolean(row.waiting);
   if (review && activity === 'ACTIVE' && idleMs > STALE_ACTIVE_MS) { activity = 'IDLE'; activityDetail = null; endedMs = null; }
 
   const stalled = !FINISHED_STAGES.has(row.stage)
@@ -613,7 +615,7 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     pullRequests,
     review,
     reviewSignal: review === 'open' ? reviewSignalOf(pullRequests) : null,
-    finished: row.stage === 'done' || review === 'merged',
+    finished: row.stage === 'done' || (review === 'merged' && !followUp),
     note: ledger.note ?? null,
     brief: ledger.brief ?? null,
     decisions: normalizeDecisions(ledger.decisions),
@@ -652,7 +654,7 @@ function minutes(seconds: number): string {
 export function attentionItems(runs: Orchestration[]) {
   return runs.flatMap((run) => {
     const items: Array<{ id: string; type: string; message: string; ticketKey: string }> = [];
-    if (run.review === 'merged') return items;
+    if (run.review === 'merged' && run.finished) return items;
     if (run.waiting) {
       items.push({ id: `agent-waiting-${run.key}`, type: 'AGENT_WAITING', message: `Waiting on you: ${run.waiting}`, ticketKey: run.key });
     }

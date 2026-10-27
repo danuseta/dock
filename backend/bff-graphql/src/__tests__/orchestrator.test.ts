@@ -456,6 +456,11 @@ test('a run with a pull request is waiting for review, not stalled', async () =>
   const mergedRun = toOrchestration({ ...row('pr'), waiting: 'Approve?', payload: JSON.stringify({ ac: [{ n: 1, state: 'FAIL', text: 'x' }] }) }, later, [pr('merged')]);
   assert.deepStrictEqual(attentionItems([mergedRun]), [], 'a merged run produces no attention item');
 
+  const mergedReview = toOrchestration({ ...row('evidence', { kind: 'review' }), waiting: 'Follow-up to the author' }, later, [pr('merged')]);
+  assert.deepStrictEqual([mergedReview.finished, mergedReview.review], [false, 'merged'], 'a review merged before the owner LGTM stays live while it waits on the owner');
+  assert.deepStrictEqual(attentionItems([mergedReview]).map((item) => item.type), ['AGENT_WAITING']);
+  assert.strictEqual(toOrchestration(row('evidence', { kind: 'review' }), later, [pr('merged')]).finished, true, 'nothing waiting: finished');
+
   const active = { ...row('pr'), activity: 'ACTIVE', activityDetail: 'Bash' };
   const at = (minutes: number) => new Date(lastEventAt.getTime() + minutes * 60 * 1000);
   const silent = toOrchestration(active, at(11), [pr('open')]);
