@@ -13,7 +13,7 @@ export const CHANNEL_KINDS = ['bug', 'uat', 'pr', 'follow'] as const;
 export type ChannelKind = typeof CHANNEL_KINDS[number];
 
 /** A forum or text channel whose threads DOCK reads, or one thread followed on its own. */
-export interface Channel { id: string; name: string | null; kind: ChannelKind; thread: boolean; enabled: boolean }
+export interface Channel { id: string; name: string | null; kind: ChannelKind; thread: boolean; enabled: boolean; team?: boolean }
 
 export const THREAD_STATES = [
   'FLOW_1', 'FLOW_2', 'FLOW_3', 'FLOW_4', 'YOUR_TURN', 'FLOW_5', 'REVIEW_ASKED',
@@ -218,9 +218,9 @@ export interface ChannelStore {
 
 export function prismaChannelStore(db: PrismaClient): ChannelStore {
   return {
-    list: async () => (await db.discordChannel.findMany({ orderBy: { addedAt: 'asc' } })).map((row) => ({ id: row.id, name: row.name, kind: row.kind as ChannelKind, thread: row.thread, enabled: row.enabled })),
+    list: async () => (await db.discordChannel.findMany({ orderBy: { addedAt: 'asc' } })).map((row) => ({ id: row.id, name: row.name, kind: row.kind as ChannelKind, thread: row.thread, enabled: row.enabled, team: row.team })),
     save: async (channel) => {
-      const data = { name: channel.name, kind: channel.kind, thread: channel.thread, enabled: channel.enabled };
+      const data = { name: channel.name, kind: channel.kind, thread: channel.thread, enabled: channel.enabled, team: channel.team ?? false };
       await db.discordChannel.upsert({ where: { id: channel.id }, create: { id: channel.id, ...data, addedAt: new Date() }, update: data });
     },
     remove: async (id) => { await db.discordChannel.deleteMany({ where: { id } }); },

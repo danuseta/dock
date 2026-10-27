@@ -35,6 +35,9 @@ export interface SavedSettings {
   hasDiscordWebhookUrl?: boolean | null;
   discordMessageTemplate?: string | null;
   hasDiscordBotToken?: boolean | null;
+  discordManagedToken?: boolean | null;
+  discordManagedGuild?: string | null;
+  discordTeamChannels?: number | null;
   discordGuildId?: string | null;
   discordUserId?: string | null;
   autoReviewOnIt?: boolean | null;

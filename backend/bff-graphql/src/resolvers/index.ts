@@ -11,6 +11,7 @@ import { OrchestratorInputError, attentionItems, normalizeTicketKey, orchestrato
 import { CHAT_MACHINE, chatService } from '../integrations/chat';
 import { isSettledStatus, mergeAttention, withoutSettledTickets } from '../integrations/attention';
 import { discordGateway, discordReader } from '../integrations/discord-reader-live';
+import { isTeamChannel } from '../integrations/discord-team';
 import { ChannelInputError, channelStore, isChannelKind, threadService, withJira } from '../integrations/discord-threads';
 import { DiscordReaderError, ROW_VERSION } from '../integrations/discord-reader';
 import { CronInputError, type OwnerAnswer, type OwnerChange } from '../integrations/orchestrator-cron';
@@ -41,7 +42,7 @@ const storageAPI = new StorageAPI();
 const isPresent = <T>(value: T | null | undefined): value is T => value != null;
 
 async function discordThreadsView() {
-  const [config, status, channels, stored] = await Promise.all([discordReader.config(), discordReader.status(), channelStore.list(), threadService.list()]);
+  const [config, status, channels, stored, owner] = await Promise.all([discordReader.config(), discordReader.status(), channelStore.list(), threadService.list(), storageAPI.getDiscordUserId()]);
   // A channel turned off or removed hides its threads now; the next sync drops them. A row of an older shape waits for
   // the sync that builds it again.
   const on = new Set(channels.filter((channel) => channel.enabled).map((channel) => channel.id));
@@ -56,7 +57,7 @@ async function discordThreadsView() {
     labels: Array.isArray(ticket.labels) ? ticket.labels.map(String) : [],
   }]));
   const error = status.error ?? discordGateway.error;
-  return { configured: Boolean(config), live: discordGateway.live, syncedAt: status.syncedAt, error, channels, rows: withJira(await discordReader.freshen(rows), jira, isSettledStatus, new Date()) };
+  return { configured: Boolean(config), ownerSet: Boolean(owner), live: discordGateway.live, syncedAt: status.syncedAt, error, channels, rows: withJira(await discordReader.freshen(rows), jira, isSettledStatus, new Date()) };
 }
 
 function channelKind(kind: string) {
@@ -466,6 +467,9 @@ export const resolvers = {
       return discordThreadsView();
     },
     removeDiscordChannel: async (_: unknown, { id }: { id: string }) => {
+      if (isTeamChannel(await channelStore.list(), id)) {
+        throw new GraphQLError('This channel comes with the workspace. Switch it off instead.', { extensions: { code: 'BAD_USER_INPUT' } });
+      }
       await channelStore.remove(id);
       await discordReader.sync();
       return discordThreadsView();
@@ -701,6 +705,9 @@ export const resolvers = {
   ChatSession: {
     pending: async (session: { id: string; status: string; machine: string }) => chatService.pending(session.id, session.status, session.machine),
     settled: async (session: { id: string; status: string; machine: string }) => chatService.settled(session.id, session.status, session.machine),
+  },
+  DiscordChannel: {
+    team: (channel: { team?: boolean }) => Boolean(channel.team),
   },
   ChatMessage: {
     attachments: (message: { attachments?: unknown[] }) => message.attachments ?? [],

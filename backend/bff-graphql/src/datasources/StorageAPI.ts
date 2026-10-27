@@ -1,4 +1,5 @@
 import { StorageService } from '../storage/service';
+import { discordTeam, workspaceDiscordSetting } from '../integrations/discord-team';
 import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, normalizeDiscordMessageTemplate } from '../integrations/discord';
 import { forgetNotificationPrefs, parseNotificationPrefs, validateNotificationPrefs } from '../integrations/notification-prefs';
 
@@ -157,6 +158,10 @@ export class StorageAPI {
     return this.storage.hasMasterPin();
   }
 
+  async getDiscordUserId() {
+    return (await this.storage.getSettingValues(['discordUserId']))[0]?.value || null;
+  }
+
   async getPublicSettings() {
     const settings: any = await this.getSettings();
     return {
@@ -171,6 +176,9 @@ export class StorageAPI {
       hasDiscordWebhookUrl: Boolean(settings.discordWebhookUrl),
       discordMessageTemplate: settings.discordMessageTemplate || DEFAULT_DISCORD_MESSAGE_TEMPLATE,
       hasDiscordBotToken: Boolean(settings.discordBotToken),
+      discordManagedToken: !settings.discordBotToken && Boolean(workspaceDiscordSetting('discordBotToken')),
+      discordManagedGuild: settings.discordGuildId ? null : workspaceDiscordSetting('discordGuildId'),
+      discordTeamChannels: discordTeam()?.channels.length ?? 0,
       discordGuildId: settings.discordGuildId || null,
       discordUserId: settings.discordUserId || null,
       autoReviewOnIt: settings.autoReviewOnIt === 'true',

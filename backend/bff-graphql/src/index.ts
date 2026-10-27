@@ -10,6 +10,8 @@ import { orchestratorService } from './integrations/orchestrator';
 import { JiraAPI } from './datasources/JiraAPI';
 import { liveApprovalDeps } from './integrations/review-approval';
 import { discordGateway, discordReader } from './integrations/discord-reader-live';
+import { discordTeam, ensureTeamChannels } from './integrations/discord-team';
+import { channelStore } from './integrations/discord-threads';
 import { autoReview } from './integrations/auto-review-live';
 import { claudeAccounts, cycleAvailable } from './integrations/claude-accounts-live';
 import { dockMode } from './mode';
@@ -52,7 +54,8 @@ export async function startServer(): Promise<void> {
     // One DOCK reads Discord, so the bot does not read the forums twice. Discord pushes changes over the Gateway; each
     // new session reads everything once.
     if (dockMode() === 'workspace') {
-      const followToken = () => discordReader.config()
+      const followToken = () => ensureTeamChannels(channelStore, discordTeam())
+        .then(() => discordReader.config())
         .then((config) => discordGateway.ensure(config?.token ?? null))
         .catch((error) => console.warn('[Discord] Gateway check failed:', error instanceof Error ? error.message : 'unknown error'));
       void followToken();

@@ -6,6 +6,7 @@ import type { SyncStatus } from './discord-threads';
 import { channelStore, threadService } from './discord-threads';
 import { eventPush } from './push';
 import { discordPostNotice } from './push-notices';
+import { workspaceDiscordSetting } from './discord-team';
 
 const storage = new StorageService();
 const API = 'https://discord.com/api/v10';
@@ -15,7 +16,8 @@ const EMPTY: SyncStatus = { syncedAt: null, error: null, requests: 0 };
 /** The reader wired to Discord, the settings and the thread store. */
 export const discordReader = new DiscordReader({
   now: () => new Date(),
-  setting: async (key) => (await storage.getSettings()).find((setting) => setting.key === key)?.value || null,
+  // A setting left empty falls back to what the workspace brings: the template's bot token, the team file's server.
+  setting: async (key) => (await storage.getSettings()).find((setting) => setting.key === key)?.value || workspaceDiscordSetting(key),
   ownerId: async () => (await storage.getSettingValues(['discordUserId']))[0]?.value || '',
   request: async (path, token, body) => {
     const response = await fetch(`${API}${path}`, {
