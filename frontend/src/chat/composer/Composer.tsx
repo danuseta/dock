@@ -176,7 +176,7 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
           )}
           <span className="flex-1" />
           {compact && (
-            <button type="button" className={cn(iconButton, 'border-transparent text-secondary-foreground hover:bg-surface-hover hover:text-foreground')} aria-pressed={full} aria-label={full ? 'Back to the small message box' : 'Write in full screen'} title={full ? 'Back to the small message box' : 'Write in full screen'} onClick={() => setFull((current) => !current)}>
+            <button type="button" className={cn(iconButton, 'border-transparent text-secondary-foreground hover:bg-surface-hover hover:text-foreground min-[901px]:hidden')} aria-pressed={full} aria-label={full ? 'Back to the small message box' : 'Write in full screen'} title={full ? 'Back to the small message box' : 'Write in full screen'} onClick={() => setFull((current) => !current)}>
               {full ? <Minimize2 size={15} aria-hidden="true" /> : <Maximize2 size={15} aria-hidden="true" />}
             </button>
           )}
