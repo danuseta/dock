@@ -6,6 +6,7 @@ import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { IngestTokensSection } from '../components/IngestTokensSection';
 import { ElevenLabsKeysSection } from '../components/ElevenLabsKeysSection';
 import { DemoStorageSection } from '../components/DemoStorageSection';
+import { ClaudeAccountSection } from '../components/ClaudeAccountSection';
 import { ChatDefaultsSection } from '../components/ChatDefaultsSection';
 import { normalizeCaveman, normalizeRtk } from '../chat/chatDefaults';
 import { Card, Page, Select } from '../components/ui';
@@ -195,6 +196,7 @@ const SettingsPage: React.FC = () => {
           {active === 'calendar' && <CalendarSection values={valuesOf('calendar')} set={setter('calendar')} settings={settings} dirty={changesOf('calendar') > 0} googleReturn={googleReturn} />}
           {active === 'tokens' && <IngestTokensSection />}
           {active === 'demo' && <div className="flex flex-col gap-5"><ElevenLabsKeysSection /><DemoStorageSection /></div>}
+          {active === 'claude' && <ClaudeAccountSection />}
         </main>
       </div>
 
