@@ -160,6 +160,12 @@ export const typeDefs = gql`
     hasDiscordWebhookUrl: Boolean!
     discordMessageTemplate: String!
     hasDiscordBotToken: Boolean!
+    "True when the bot token comes from the workspace template, not from these settings."
+    discordManagedToken: Boolean!
+    "The server id the workspace's team file gives, when these settings have none."
+    discordManagedGuild: String
+    "How many forums the workspace's team file brings."
+    discordTeamChannels: Int!
     discordGuildId: String
     discordUserId: String
     autoReviewOnIt: Boolean!
@@ -232,6 +238,8 @@ export const typeDefs = gql`
     kind: String!
     thread: Boolean!
     enabled: Boolean!
+    """Brought by the workspace's team file: it can be switched off, not removed."""
+    team: Boolean!
   }
 
   """A thread of a followed channel, as the Discord reader sorted it."""
@@ -340,6 +348,8 @@ export const typeDefs = gql`
 
   type DiscordThreads {
     configured: Boolean!
+    """The owner's Discord user id is set, so threads that are theirs can be told apart."""
+    ownerSet: Boolean!
     """The Gateway is connected, so Discord pushes changes as they happen."""
     live: Boolean!
     syncedAt: String

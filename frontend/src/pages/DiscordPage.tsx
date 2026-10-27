@@ -107,6 +107,13 @@ const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) 
         </div>
       </header>
 
+      {feed?.configured && feed.ownerSet === false && (
+        <p className="mb-4 flex flex-wrap items-center gap-2 rounded-sm border border-status-warn/40 bg-status-warn/10 px-3 py-2 text-xs text-status-warn" role="status">
+          Add your Discord user id in Settings to see which threads are yours.
+          <button type="button" className="border-0 bg-transparent p-0 font-semibold underline" onClick={() => onNavigate('/settings?section=discord')}>Open Settings</button>
+        </p>
+      )}
+
       {(managing || channels.length === 0) && <ChannelManager channels={channels} configured={Boolean(feed?.configured)} />}
 
       <div className="grid min-h-[640px] grid-cols-[400px_minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-background max-[960px]:grid-cols-1">
@@ -315,10 +322,12 @@ const ChannelManager: React.FC<{ channels: DiscordChannel[]; configured: boolean
       </div>
       {channels.map((channel) => (
         <div key={channel.id} className="grid grid-cols-[minmax(0,1fr)_170px_auto_auto] items-center gap-3 border-b border-border px-4 py-2 text-xs max-[760px]:grid-cols-[minmax(0,1fr)_auto]">
-          <span className="min-w-0"><strong className={cn('block truncate font-medium', !channel.enabled && 'text-muted-foreground line-through')}>{channelLabel(channel)}</strong><small className="font-mono text-[0.62rem] text-muted-foreground">{channel.id}{channel.thread ? ' · thread' : ''}</small></span>
+          <span className="min-w-0"><strong className={cn('block truncate font-medium', !channel.enabled && 'text-muted-foreground line-through')}>{channelLabel(channel)}</strong><small className="font-mono text-[0.62rem] text-muted-foreground">{channel.id}{channel.thread ? ' · thread' : ''}{channel.team ? ' · team' : ''}</small></span>
           <Select aria-label={`Kind of ${channelLabel(channel)}`} className="h-8 text-xs max-[760px]:col-span-2 max-[760px]:h-11" value={channel.kind} onValueChange={(value) => void change({ variables: { id: channel.id, kind: value, enabled: channel.enabled } })} options={kindOptions} />
           <Button size="sm" variant="ghost" onClick={() => void change({ variables: { id: channel.id, kind: channel.kind, enabled: !channel.enabled } })}>{channel.enabled ? 'Turn off' : 'Turn on'}</Button>
-          <Button size="sm" variant="ghost" aria-label={`Remove ${channelLabel(channel)}`} onClick={() => void remove({ variables: { id: channel.id } })}><Trash2 size={14} aria-hidden="true" /></Button>
+          {channel.team
+            ? <span className="size-8" title="Comes with the workspace: turn it off instead" aria-hidden="true" />
+            : <Button size="sm" variant="ghost" aria-label={`Remove ${channelLabel(channel)}`} onClick={() => void remove({ variables: { id: channel.id } })}><Trash2 size={14} aria-hidden="true" /></Button>}
         </div>
       ))}
       <form className="flex flex-wrap items-end gap-3 px-4 py-3" onSubmit={submit}>

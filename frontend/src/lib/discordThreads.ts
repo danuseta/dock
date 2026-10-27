@@ -5,7 +5,7 @@ export type ChannelKind = 'bug' | 'uat' | 'pr' | 'follow';
 export type ChannelTab = string;
 export type ThreadView = 'needs' | 'open' | 'done' | 'all';
 
-export interface DiscordChannel { id: string; name: string | null; kind: ChannelKind; thread: boolean; enabled: boolean }
+export interface DiscordChannel { id: string; name: string | null; kind: ChannelKind; thread: boolean; enabled: boolean; team?: boolean }
 
 export interface DiscordMessage {
   id: string;
