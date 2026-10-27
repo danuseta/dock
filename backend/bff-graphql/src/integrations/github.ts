@@ -108,6 +108,34 @@ export class GitHubClient {
     return response.data;
   }
 
+  /** One page of a pull request's files, 100 per page. */
+  async getPullFiles(owner: string, repo: string, pullNumber: number, page: number): Promise<any[]> {
+    const response = await this.client.get(`/repos/${owner}/${repo}/pulls/${pullNumber}/files`, { params: { per_page: 100, page } });
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
+  /** When a commit was made, for telling a review made before the last push. */
+  async getCommitDate(owner: string, repo: string, sha: string): Promise<string | null> {
+    const response = await this.client.get(`/repos/${owner}/${repo}/commits/${sha}`);
+    return response.data?.commit?.committer?.date ?? null;
+  }
+
+  /** A file at a commit as plain text. */
+  async getRawFile(owner: string, repo: string, filePath: string, ref: string): Promise<string> {
+    const response = await this.client.get(`/repos/${owner}/${repo}/contents/${filePath.split('/').map(encodeURIComponent).join('/')}`, {
+      params: { ref },
+      headers: { Accept: 'application/vnd.github.raw' },
+      responseType: 'text',
+      transformResponse: (data) => data,
+    });
+    return String(response.data ?? '');
+  }
+
+  async getRepo(owner: string, repo: string) {
+    const response = await this.client.get(`/repos/${owner}/${repo}`);
+    return response.data;
+  }
+
   async getPRSignal(owner: string, repo: string, pullNumber: number, headSha?: string): Promise<PullRequestSignal> {
     const sha = headSha || (await this.getPRStatus(owner, repo, pullNumber)).head?.sha;
     const [reviews, checkRuns, status] = await Promise.all([
