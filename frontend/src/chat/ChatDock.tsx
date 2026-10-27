@@ -65,10 +65,12 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset, onNavigate }) => {
   const refocusLauncher = useRef(false);
   const open = state.mode !== 'closed';
   const drawer = state.mode === 'drawer';
+  // The floating panel uses the one-header layout of the phone too; the drawer across the bottom keeps its own.
+  const compact = phone || !drawer;
   useFullViewport(open, '(max-width: 699px)');
   const anyUnread = state.tabs.some((id) => unread[id]);
   const listing = showList || !state.active;
-  const now = useNow(open && (listing || phone));
+  const now = useNow(open && (listing || compact));
   const { data: listData } = useQuery<{ chatSessions: ChatSession[] }>(GET_CHAT_SESSIONS, { variables: { limit: 300 }, skip: !open || !listing, pollInterval: SLOW_POLL_MS });
   const sessions = listData?.chatSessions ?? [];
 
@@ -139,6 +141,8 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset, onNavigate }) => {
     chatStore.setDrawerHeight(state.drawerHeight + (event.key === 'ArrowUp' ? 24 : -24));
   };
 
+  const dockItem: PhoneMenuItem = { label: 'Dock to bottom', icon: PanelBottom, onSelect: () => chatStore.setMode('drawer') };
+
   const vars = {
     '--chat-left': `${inset.left}px`,
     '--chat-right': `${inset.right}px`,
@@ -159,7 +163,7 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset, onNavigate }) => {
             'max-[699px]:inset-x-0 max-[699px]:top-[var(--vv-top,0px)] max-[699px]:z-[45] max-[699px]:h-[var(--vv-h,100dvh)] max-[699px]:rounded-none max-[699px]:border-0',
             drawer
               ? 'min-[700px]:inset-x-0 min-[700px]:bottom-[82px] min-[700px]:h-[min(var(--chat-height),80dvh)] min-[700px]:rounded-t-md min-[700px]:border-b-0 min-[761px]:right-[var(--chat-right)] min-[761px]:bottom-[var(--chat-bottom)] min-[761px]:left-[var(--chat-left)]'
-              : 'min-[700px]:right-5 min-[700px]:bottom-[150px] min-[700px]:h-[min(520px,calc(100dvh-170px))] min-[700px]:w-[420px] min-[700px]:rounded-md min-[761px]:right-[calc(var(--chat-right)+20px)] min-[761px]:bottom-[calc(var(--chat-bottom)+84px)] min-[761px]:h-[min(520px,calc(100dvh-104px-var(--chat-bottom)))]',
+              : 'min-[700px]:right-5 min-[700px]:bottom-[150px] min-[700px]:h-[min(680px,calc(100dvh-170px))] min-[700px]:w-[440px] min-[700px]:rounded-md min-[761px]:right-[calc(var(--chat-right)+20px)] min-[761px]:bottom-[calc(var(--chat-bottom)+84px)] min-[761px]:h-[min(680px,calc(100dvh-104px-var(--chat-bottom)))]',
           )}
           aria-label="Chat with Claude Code"
           onKeyDown={handleKeyDown}
@@ -176,8 +180,8 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset, onNavigate }) => {
               onKeyDown={handleResizeKey}
             />
           )}
-          {phone && listing && <PhoneChatHeader title="Sessions" line={sessionsLine(sessions)} onMinimise={minimise} />}
-          {!phone && <header className="flex flex-none items-center gap-1 border-b border-border bg-surface-0 px-2 py-1.5 max-[699px]:pt-[max(0.375rem,env(safe-area-inset-top))]">
+          {compact && listing && <PhoneChatHeader title="Sessions" line={sessionsLine(sessions)} menu={phone ? undefined : [dockItem]} onMinimise={minimise} />}
+          {!compact && <header className="flex flex-none items-center gap-1 border-b border-border bg-surface-0 px-2 py-1.5 max-[699px]:pt-[max(0.375rem,env(safe-area-inset-top))]">
             {!listing && <button type="button" className={control} aria-label="Back to sessions" title="Back to sessions" onClick={() => setShowList(true)}><ArrowLeft size={14} aria-hidden="true" /></button>}
             <span className="min-w-0 flex-1 truncate px-1.5 font-display text-xs font-bold">{listing || !activeData?.chatSession ? 'Sessions' : sessionTitle(activeData.chatSession)}</span>
             <button type="button" className={control} aria-label="New session" title="New session" disabled={creating} onClick={() => void newSession()}><Plus size={14} aria-hidden="true" /></button>
@@ -186,10 +190,10 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset, onNavigate }) => {
             </button>
             <button type="button" className={control} aria-label="Minimise chat" title="Minimise" onClick={minimise}><Minus size={14} aria-hidden="true" /></button>
           </header>}
-          {!phone && <LimitsLine machine={activeData?.chatSession ? machineOf(activeData.chatSession) : undefined} className="flex-none border-b border-border bg-surface-0 px-3.5 py-1.5" />}
+          {!compact && <LimitsLine machine={activeData?.chatSession ? machineOf(activeData.chatSession) : undefined} className="flex-none border-b border-border bg-surface-0 px-3.5 py-1.5" />}
           {error && <p className="flex-none border-b border-border px-3.5 py-1.5 text-pretty text-xs break-words text-status-conflict" role="alert">A new session could not be started: {error}</p>}
           {!listing && state.active
-            ? phone
+            ? compact
               ? (
                 <ChatThread
                   key={state.active}
@@ -204,6 +208,7 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset, onNavigate }) => {
                       { label: 'New session', icon: Plus, onSelect: () => void newSession(), disabled: creating },
                       ...(onNavigate ? [{ label: 'Open full page', icon: ExternalLink, onSelect: () => onNavigate(sessionUrl(session.id)) }] : []),
                       { label: 'All sessions', icon: List, onSelect: () => setShowList(true) },
+                      ...(phone ? [] : [dockItem]),
                     ];
                     return (
                       <PhoneChatHeader
@@ -232,13 +237,13 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset, onNavigate }) => {
                           session={session}
                           selected={session.id === state.active}
                           now={now}
-                          phone={phone}
+                          phone={compact}
                           onSelect={() => { chatStore.openSession(session.id); setShowList(false); }}
                         />
                       </div>
                     ))}
                   </div>
-                  {phone && (
+                  {compact && (
                     <div className="flex-none border-t border-border px-3 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
                       <button type="button" className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-sm border border-accent bg-accent font-display text-sm font-semibold text-black hover:bg-accent-hover disabled:opacity-50" disabled={creating} onClick={() => void newSession()}><Plus size={16} aria-hidden="true" />New session</button>
                     </div>
@@ -256,7 +261,7 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset, onNavigate }) => {
                   />
                 </div>
               )}
-          {phone && !listing && state.active && threadId && (
+          {compact && !listing && state.active && threadId && (
             <AgentThreadPane sessionId={state.active} threadId={threadId} onOpen={setThreadId} onClose={() => setThreadId(null)} className="absolute inset-0 z-20" />
           )}
         </section>

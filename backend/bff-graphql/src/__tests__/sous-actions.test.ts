@@ -147,6 +147,13 @@ test('each approval step reports its own failure and the others still run', asyn
   assert.deepStrictEqual(named.calls, ['label QRD-77 danuPass', 'approve o/fe#9']);
   assert.ok(steps2.every((step) => step.ok));
 
+  const mergedNamed = approvalWorld();
+  const steps4 = await approveReview('QRD-78', mergedNamed.deps, ['https://github.com/o/fe/pull/9'], ['https://github.com/o/fe/pull/9']);
+  assert.deepStrictEqual(mergedNamed.calls, ['label QRD-78 danuPass'], 'a merged pull request gets only the label');
+  assert.deepStrictEqual(steps4.map((step) => [step.name, step.ok, step.detail]), [['Jira label danuPass', true, 'added to QRD-78'], ['GitHub approve', true, 'already merged, skipped: github.com/o/fe/pull/9']]);
+  const mergedFound = await approveReview('QRD-79', approvalWorld({ pullRequests: async () => [{ owner: 'o', repo: 'be', number: 4, status: 'merged', url: 'https://github.com/o/be/pull/4' }] }).deps);
+  assert.ok(mergedFound.every((step) => step.ok));
+
   const none = await approveReview('QRD-8', approvalWorld({ pullRequests: async () => [] }).deps);
   assert.deepStrictEqual(none.map((step) => [step.name, step.ok, step.detail]), [['Jira label danuPass', true, 'added to QRD-8'], ['GitHub approve', false, 'no open pull request found for QRD-8']]);
 

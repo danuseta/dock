@@ -350,6 +350,8 @@ model DiscordChannel {
   thread  Boolean
   enabled Boolean
   addedAt DateTime
+  /// Brought by the workspace's team file: it cannot be removed, only switched off.
+  team    Boolean  @default(false)
 }
 
 /// A review DOCK started on its own when the owner said "on it" in a pr-review thread: one per pull request head commit.

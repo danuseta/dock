@@ -10,7 +10,10 @@ import { orchestratorService } from './integrations/orchestrator';
 import { JiraAPI } from './datasources/JiraAPI';
 import { liveApprovalDeps } from './integrations/review-approval';
 import { discordGateway, discordReader } from './integrations/discord-reader-live';
+import { discordTeam, ensureTeamChannels } from './integrations/discord-team';
+import { channelStore } from './integrations/discord-threads';
 import { autoReview } from './integrations/auto-review-live';
+import { claudeAccounts, cycleAvailable } from './integrations/claude-accounts-live';
 import { dockMode } from './mode';
 import { useWriteAheadLog } from './storage/client';
 import { StorageService } from './storage/service';
@@ -21,6 +24,8 @@ const JIRA_SYNC_MS = 5 * 60 * 1000;
 const DISCORD_TOKEN_CHECK_MS = 60 * 1000;
 /** How often the stored pr-review threads are looked at for a new "on it" of the owner. */
 const AUTO_REVIEW_MS = 60 * 1000;
+/** How often auto rotate looks again without a turn, so back to main follows a reset. */
+const CLAUDE_ROTATE_MS = 5 * 60 * 1000;
 
 export async function startServer(): Promise<void> {
   const journal = await useWriteAheadLog().catch((error) => `unchanged (${error instanceof Error ? error.message : 'unknown error'})`);
@@ -49,7 +54,8 @@ export async function startServer(): Promise<void> {
     // One DOCK reads Discord, so the bot does not read the forums twice. Discord pushes changes over the Gateway; each
     // new session reads everything once.
     if (dockMode() === 'workspace') {
-      const followToken = () => discordReader.config()
+      const followToken = () => ensureTeamChannels(channelStore, discordTeam())
+        .then(() => discordReader.config())
         .then((config) => discordGateway.ensure(config?.token ?? null))
         .catch((error) => console.warn('[Discord] Gateway check failed:', error instanceof Error ? error.message : 'unknown error'));
       void followToken();
@@ -57,6 +63,9 @@ export async function startServer(): Promise<void> {
       const reviewOnIt = () => autoReview.tick()
         .catch((error) => console.warn('[AutoReview] check failed:', error instanceof Error ? error.message : 'unknown error'));
       setInterval(reviewOnIt, AUTO_REVIEW_MS).unref();
+      const rotateClaude = () => (cycleAvailable() ? claudeAccounts.tick() : Promise.resolve())
+        .catch((error) => console.warn('[ClaudeAccounts] rotate check failed:', error instanceof Error ? error.message : 'unknown error'));
+      setInterval(rotateClaude, CLAUDE_ROTATE_MS).unref();
     }
   });
 }

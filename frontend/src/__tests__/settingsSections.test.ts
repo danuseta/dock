@@ -12,6 +12,12 @@ test('the rail has three groups, and a workspace DOCK has no calendar', () => {
   assert.ok(!workspace.some((section) => section.id === 'calendar'));
 });
 
+test('Claude account sits in Agents on a workspace DOCK, which runs the turns; a laptop DOCK has none', () => {
+  assert.deepStrictEqual(workspace.filter((section) => section.group === 'Agents').map((section) => section.id), ['tokens', 'demo', 'claude']);
+  assert.ok(!laptop.some((section) => section.id === 'claude'));
+  assert.strictEqual(sectionFromSearch('?section=claude', workspace), 'claude');
+});
+
 test('?section= opens a section, the Google redirect opens Calendar, anything else opens General', () => {
   assert.strictEqual(sectionFromSearch('?section=discord', laptop), 'discord');
   assert.strictEqual(sectionFromSearch('?google=connected', laptop), 'calendar');

@@ -11,6 +11,7 @@ import { OrchestratorInputError, attentionItems, normalizeTicketKey, orchestrato
 import { CHAT_MACHINE, chatService } from '../integrations/chat';
 import { isSettledStatus, mergeAttention, withoutSettledTickets } from '../integrations/attention';
 import { discordGateway, discordReader } from '../integrations/discord-reader-live';
+import { isTeamChannel } from '../integrations/discord-team';
 import { ChannelInputError, channelStore, isChannelKind, threadService, withJira } from '../integrations/discord-threads';
 import { DiscordReaderError, ROW_VERSION } from '../integrations/discord-reader';
 import { CronInputError, type OwnerAnswer, type OwnerChange } from '../integrations/orchestrator-cron';
@@ -26,12 +27,15 @@ import { ReviewApprovalError, approvalRecords, lgtmReview } from '../integration
 import { decisionGate } from '../integrations/decision-gate';
 import { doctorReports } from '../integrations/doctor';
 import { claudeUsage } from '../integrations/claude-usage';
+import { claudeAccounts, claudeAccountsState, cycleAvailable } from '../integrations/claude-accounts-live';
 import { agentLooks } from '../integrations/agent-looks';
 import { agentBridge } from '../integrations/agents-live';
 import type { AnswerInput } from '../integrations/chat-interactions';
 import { SprintBusyError, SprintInputError, sprintDashboardService } from '../integrations/sprint-dashboard';
 import { dockMode, ownRuns } from '../mode';
 import { buildIssueBody, currentBuild, dockIssueError, draftUrl, issueEnvironment, issueTitle, issuesRepo, reporterName, type IssueDraft } from '../integrations/dock-issues';
+import { ChangesInputError } from '../integrations/pull-changes';
+import { pullChangesService } from '../integrations/pull-changes-live';
 
 const jiraAPI = new JiraAPI();
 const githubAPI = new GitHubAPI();
@@ -40,7 +44,7 @@ const storageAPI = new StorageAPI();
 const isPresent = <T>(value: T | null | undefined): value is T => value != null;
 
 async function discordThreadsView() {
-  const [config, status, channels, stored] = await Promise.all([discordReader.config(), discordReader.status(), channelStore.list(), threadService.list()]);
+  const [config, status, channels, stored, owner] = await Promise.all([discordReader.config(), discordReader.status(), channelStore.list(), threadService.list(), storageAPI.getDiscordUserId()]);
   // A channel turned off or removed hides its threads now; the next sync drops them. A row of an older shape waits for
   // the sync that builds it again.
   const on = new Set(channels.filter((channel) => channel.enabled).map((channel) => channel.id));
@@ -55,13 +59,18 @@ async function discordThreadsView() {
     labels: Array.isArray(ticket.labels) ? ticket.labels.map(String) : [],
   }]));
   const error = status.error ?? discordGateway.error;
-  return { configured: Boolean(config), live: discordGateway.live, syncedAt: status.syncedAt, error, channels, rows: withJira(await discordReader.freshen(rows), jira, isSettledStatus, new Date()) };
+  return { configured: Boolean(config), ownerSet: Boolean(owner), live: discordGateway.live, syncedAt: status.syncedAt, error, channels, rows: withJira(await discordReader.freshen(rows), jira, isSettledStatus, new Date()) };
 }
 
 function channelKind(kind: string) {
   if (!isChannelKind(kind)) throw new GraphQLError('kind must be bug, uat, pr or follow', { extensions: { code: 'BAD_USER_INPUT' } });
   return kind;
 }
+
+const changesInputError = (error: unknown): never => {
+  if (error instanceof ChangesInputError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+  throw error;
+};
 
 const discordInputError = (error: unknown): never => {
   if (error instanceof ChannelInputError || error instanceof DiscordReaderError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
@@ -226,7 +235,12 @@ export const resolvers = {
       return storageAPI.getTicketRelationGroup(ticketKey);
     },
     discordThreads: () => discordThreadsView(),
+    ticketChanges: (_: unknown, { ticketKey, tab }: { ticketKey: string; tab?: string | null }) => pullChangesService.changes(ticketKey, tab).catch(changesInputError),
+    pullFilePatch: (_: unknown, { ticketKey, url, path }: { ticketKey: string; url: string; path: string }) => pullChangesService.filePatch(ticketKey, url, path).catch(changesInputError),
+    pullFileLines: (_: unknown, args: { ticketKey: string; url: string; path: string; ref: string; from: number; to: number }) =>
+      pullChangesService.fileLines(args.ticketKey, args.url, args.path, args.ref, args.from, args.to).catch(changesInputError),
     autoReviews: () => storageAPI.getAutoReviews(),
+    claudeAccounts: () => claudeAccountsState(),
     needsAttention: async () => {
       const [agentItems, pullRequestItems] = await Promise.all([
         orchestratorService.list().then((runs) => attentionItems(ownRuns(runs))).catch((error) => {
@@ -464,6 +478,9 @@ export const resolvers = {
       return discordThreadsView();
     },
     removeDiscordChannel: async (_: unknown, { id }: { id: string }) => {
+      if (isTeamChannel(await channelStore.list(), id)) {
+        throw new GraphQLError('This channel comes with the workspace. Switch it off instead.', { extensions: { code: 'BAD_USER_INPUT' } });
+      }
       await channelStore.remove(id);
       await discordReader.sync();
       return discordThreadsView();
@@ -599,6 +616,21 @@ export const resolvers = {
       }
       return confirmed;
     },
+    useClaudeAccount: async (_: unknown, { name }: { name: string }) => {
+      if (!cycleAvailable()) throw new GraphQLError('This machine has no /cycle', { extensions: { code: 'BAD_USER_INPUT' } });
+      try {
+        return { available: true, ...(await claudeAccounts.use(name)) };
+      } catch (error) {
+        throw new GraphQLError(error instanceof Error ? error.message : 'The switch failed', { extensions: { code: 'BAD_USER_INPUT' } });
+      }
+    },
+    setClaudeRotation: async (_: unknown, rule: { enabled: boolean; fiveHour: number; sevenDay: number; backToMain: boolean }) => {
+      try {
+        return { available: cycleAvailable(), ...(await claudeAccounts.setRotation(rule)) };
+      } catch (error) {
+        throw new GraphQLError(error instanceof Error ? error.message : 'The rotation was not saved', { extensions: { code: 'BAD_USER_INPUT' } });
+      }
+    },
     approveReview: async (_: unknown, { ticketKey }: { ticketKey: string }) => {
       try {
         return await lgtmReview(ticketKey);
@@ -685,13 +717,16 @@ export const resolvers = {
     pending: async (session: { id: string; status: string; machine: string }) => chatService.pending(session.id, session.status, session.machine),
     settled: async (session: { id: string; status: string; machine: string }) => chatService.settled(session.id, session.status, session.machine),
   },
+  DiscordChannel: {
+    team: (channel: { team?: boolean }) => Boolean(channel.team),
+  },
   ChatMessage: {
     attachments: (message: { attachments?: unknown[] }) => message.attachments ?? [],
   },
 };
 
 export const protectedQueries = [
-  'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'autoReviews', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
+  'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'claudeAccounts', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatSessionStates', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'agentLooks', 'libraryAgents', 'libraryAgent',
@@ -728,6 +763,8 @@ export const protectedMutations = [
   'removeMonitor',
   'checkMonitors',
   'createIngestToken',
+  'useClaudeAccount',
+  'setClaudeRotation',
   'revokeIngestToken',
   'deleteDemoVideo',
   'saveDemoStorage',

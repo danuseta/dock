@@ -270,6 +270,9 @@ export const GET_SETTINGS = gql`
       hasGithubToken
       hasDiscordWebhookUrl
       hasDiscordBotToken
+      discordManagedToken
+      discordManagedGuild
+      discordTeamChannels
       discordGuildId
       discordUserId
       autoReviewOnIt
@@ -1025,10 +1028,11 @@ export const GET_LIBRARY_AGENT = gql`
 export const DISCORD_THREAD_FIELDS = gql`
   fragment DiscordThreadFields on DiscordThreads {
     configured
+    ownerSet
     live
     syncedAt
     error
-    channels { id name kind thread enabled }
+    channels { id name kind thread enabled team }
     rows {
       id
       channelId
@@ -1123,5 +1127,84 @@ export const GET_CLAUDE_USAGE = gql`
 export const GET_AUTO_REVIEWS = gql`
   query GetAutoReviews {
     autoReviews { id ticketKey prUrl headSha threadUrl sessionId status detail startedAt finishedAt }
+  }
+`;
+
+export const CLAUDE_ACCOUNTS_FIELDS = `
+  available
+  accounts { name active seenAt fiveHour { usedPercentage resetsAt } sevenDay { usedPercentage resetsAt } }
+  rotation { enabled fiveHour sevenDay backToMain }
+  log { at from to reason auto }
+`;
+
+export const GET_CLAUDE_ACCOUNTS = gql`
+  query GetClaudeAccounts {
+    claudeAccounts { ${CLAUDE_ACCOUNTS_FIELDS} }
+  }
+`;
+
+export const PULL_CHANGE_FILE_FIELDS = gql`
+  fragment PullChangeFileFields on PullChangeFile {
+    path
+    previousPath
+    status
+    additions
+    deletions
+    patch
+    tooLarge
+  }
+`;
+
+export const GET_TICKET_CHANGES = gql`
+  ${PULL_CHANGE_FILE_FIELDS}
+  query GetTicketChanges($ticketKey: String!, $tab: String) {
+    ticketChanges(ticketKey: $ticketKey, tab: $tab) {
+      ticketKey
+      title
+      error
+      pulls {
+        url
+        owner
+        repo
+        number
+        tab
+        title
+        state
+        author
+        headRef
+        baseRef
+        headSha
+        headDate
+        additions
+        deletions
+        changedFiles
+        partial
+        stale
+        retryAt
+        error
+        files { ...PullChangeFileFields }
+      }
+      review {
+        runKey
+        verdict
+        roundsUsed
+        roundsMax
+        updatedAt
+        findings { at severity text resolvedAt resolvedWhy }
+      }
+    }
+  }
+`;
+
+export const GET_PULL_FILE_PATCH = gql`
+  ${PULL_CHANGE_FILE_FIELDS}
+  query GetPullFilePatch($ticketKey: String!, $url: String!, $path: String!) {
+    pullFilePatch(ticketKey: $ticketKey, url: $url, path: $path) { ...PullChangeFileFields }
+  }
+`;
+
+export const GET_PULL_FILE_LINES = gql`
+  query GetPullFileLines($ticketKey: String!, $url: String!, $path: String!, $ref: String!, $from: Int!, $to: Int!) {
+    pullFileLines(ticketKey: $ticketKey, url: $url, path: $path, ref: $ref, from: $from, to: $to)
   }
 `;

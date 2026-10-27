@@ -7,6 +7,7 @@ import { ADD_DISCORD_CHANNEL, DISMISS_DISCORD_THREAD, REFRESH_DISCORD, REMOVE_DI
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Button, Dialog, IconButton, Input, Page, Select } from '../components/ui';
 import { Markdown } from '../chat/Markdown';
+import { changesHref } from '../changes/href';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import {
@@ -106,6 +107,13 @@ const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) 
         </div>
       </header>
 
+      {feed?.configured && feed.ownerSet === false && (
+        <p className="mb-4 flex flex-wrap items-center gap-2 rounded-sm border border-status-warn/40 bg-status-warn/10 px-3 py-2 text-xs text-status-warn" role="status">
+          Add your Discord user id in Settings to see which threads are yours.
+          <button type="button" className="border-0 bg-transparent p-0 font-semibold underline" onClick={() => onNavigate('/settings?section=discord')}>Open Settings</button>
+        </p>
+      )}
+
       {(managing || channels.length === 0) && <ChannelManager channels={channels} configured={Boolean(feed?.configured)} />}
 
       <div className="grid min-h-[640px] grid-cols-[400px_minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-background max-[960px]:grid-cols-1">
@@ -141,7 +149,7 @@ const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) 
           </div>
         </section>
 
-        {selected ? <ThreadPane key={selected.id} thread={selected} onBack={back} picked={Boolean(picked)} onTicketClick={onTicketClick} onDismiss={() => void dismiss({ variables: { id: selected.id, lastActivity: selected.lastActivity } })} />
+        {selected ? <ThreadPane key={selected.id} thread={selected} onBack={back} picked={Boolean(picked)} onTicketClick={onTicketClick} onNavigate={onNavigate} onDismiss={() => void dismiss({ variables: { id: selected.id, lastActivity: selected.lastActivity } })} />
           : <p className="p-6 text-sm text-muted-foreground max-[960px]:hidden">Pick a thread.</p>}
       </div>
     </Page>
@@ -314,10 +322,12 @@ const ChannelManager: React.FC<{ channels: DiscordChannel[]; configured: boolean
       </div>
       {channels.map((channel) => (
         <div key={channel.id} className="grid grid-cols-[minmax(0,1fr)_170px_auto_auto] items-center gap-3 border-b border-border px-4 py-2 text-xs max-[760px]:grid-cols-[minmax(0,1fr)_auto]">
-          <span className="min-w-0"><strong className={cn('block truncate font-medium', !channel.enabled && 'text-muted-foreground line-through')}>{channelLabel(channel)}</strong><small className="font-mono text-[0.62rem] text-muted-foreground">{channel.id}{channel.thread ? ' · thread' : ''}</small></span>
+          <span className="min-w-0"><strong className={cn('block truncate font-medium', !channel.enabled && 'text-muted-foreground line-through')}>{channelLabel(channel)}</strong><small className="font-mono text-[0.62rem] text-muted-foreground">{channel.id}{channel.thread ? ' · thread' : ''}{channel.team ? ' · team' : ''}</small></span>
           <Select aria-label={`Kind of ${channelLabel(channel)}`} className="h-8 text-xs max-[760px]:col-span-2 max-[760px]:h-11" value={channel.kind} onValueChange={(value) => void change({ variables: { id: channel.id, kind: value, enabled: channel.enabled } })} options={kindOptions} />
           <Button size="sm" variant="ghost" onClick={() => void change({ variables: { id: channel.id, kind: channel.kind, enabled: !channel.enabled } })}>{channel.enabled ? 'Turn off' : 'Turn on'}</Button>
-          <Button size="sm" variant="ghost" aria-label={`Remove ${channelLabel(channel)}`} onClick={() => void remove({ variables: { id: channel.id } })}><Trash2 size={14} aria-hidden="true" /></Button>
+          {channel.team
+            ? <span className="size-8" title="Comes with the workspace: turn it off instead" aria-hidden="true" />
+            : <Button size="sm" variant="ghost" aria-label={`Remove ${channelLabel(channel)}`} onClick={() => void remove({ variables: { id: channel.id } })}><Trash2 size={14} aria-hidden="true" /></Button>}
         </div>
       ))}
       <form className="flex flex-wrap items-end gap-3 px-4 py-3" onSubmit={submit}>
@@ -331,7 +341,7 @@ const ChannelManager: React.FC<{ channels: DiscordChannel[]; configured: boolean
   );
 };
 
-const ThreadPane: React.FC<{ thread: DiscordThread; picked: boolean; onBack: () => void; onTicketClick: (key: string) => void; onDismiss: () => void }> = ({ thread, picked, onBack, onTicketClick, onDismiss }) => {
+const ThreadPane: React.FC<{ thread: DiscordThread; picked: boolean; onBack: () => void; onTicketClick: (key: string) => void; onNavigate: (path: string) => void; onDismiss: () => void }> = ({ thread, picked, onBack, onTicketClick, onNavigate, onDismiss }) => {
   const [viewing, setViewing] = useState<{ files: DiscordFile[]; index: number } | null>(null);
   const [reading, setReading] = useState<DiscordFile | null>(null);
   const earlier = Math.max(0, thread.messageCount - thread.messages.length);
@@ -344,7 +354,7 @@ const ThreadPane: React.FC<{ thread: DiscordThread; picked: boolean; onBack: () 
     ['Tags', thread.tags.length ? thread.tags.join(', ') : 'None'],
     ['Ticket', thread.tickets.length ? thread.tickets.map((item) => <span key={item.key} className="mr-2"><span className="font-mono text-accent">{item.key}</span>{item.status ? ` · ${item.status}` : ''}{item.assignee ? ` · ${item.assignee}` : ''}</span>) : 'None in the title or tags'],
     ['Sprint', thread.tickets.find((item) => item.sprint)?.sprint ?? 'None'],
-    ['Pull request', pr ? <a href={pr} target="_blank" rel="noreferrer" className="text-foreground hover:underline">{pr.replace('https://github.com/', '')}</a> : '—'],
+    ['Pull request', pr ? <span className="flex items-center gap-2"><a href={pr} target="_blank" rel="noreferrer" className="truncate text-foreground hover:underline">{pr.replace('https://github.com/', '')}</a>{ticket && <button type="button" onClick={() => onNavigate(changesHref(ticket.key, pr, 'discord'))} className="flex-none border-0 bg-transparent p-0 font-semibold text-accent hover:underline">Changes</button>}</span> : '—'],
     thread.kind === 'pr'
       ? ['Reviewers', <span key="slots" className="flex flex-col gap-1"><Slots thread={thread} large /><span className="text-[0.66rem] whitespace-normal text-muted-foreground">{thread.onIt.length ? `On it: ${thread.onIt.join(', ')}` : 'Nobody on it'}</span>{thread.passes.length > 0 && <span className="text-[0.66rem] whitespace-normal text-muted-foreground">Pass: {thread.passes.join(', ')}</span>}</span>]
       : ['On it', thread.claim ? `${thread.claim.mine ? 'You' : thread.claim.author} · ${wib(thread.claim.at)}${thread.claimerRepliedAt ? '' : ' · no update since'}` : 'Nobody yet'],

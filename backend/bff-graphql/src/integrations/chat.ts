@@ -447,6 +447,8 @@ export class ChatService {
   private activityWrites: Promise<unknown> = Promise.resolve();
   private readonly sessionStatus = new Map<string, Map<string, SavedStatus>>();
   private readonly limitsSeen = new Map<string, LimitsSeen>();
+  /** Each usage report of a machine's turn, for the Claude account rotation. */
+  onLimits: (machine: string, limits: { fiveHour: LimitWindow | null; sevenDay: LimitWindow | null }) => void = () => undefined;
   private lastActivityPruneAt = 0;
   private lastAttachmentPruneAt = 0;
   private readonly notifier = new TurnNotifier();
@@ -833,13 +835,17 @@ export class ChatService {
     const limits = machine === undefined
       ? [...this.limitsSeen.values()].reduce<LimitsSeen | null>((newest, seen) => (!newest || seen.receivedAt > newest.receivedAt ? seen : newest), null)
       : this.limitsSeen.get(machine) ?? null;
+    // A window past its reset time no longer says anything about the usage: it is left out until a turn reports the new one.
+    const current = (window: LimitWindow | null) => (window?.resetsAt && window.resetsAt.getTime() < now ? null : window);
+    const fiveHour = limits && current(limits.fiveHour);
+    const sevenDay = limits && current(limits.sevenDay);
     return {
-      limits: limits && {
-        fiveHour: presentWindow(limits.fiveHour),
-        sevenDay: presentWindow(limits.sevenDay),
+      limits: limits && (fiveHour || sevenDay) ? {
+        fiveHour: presentWindow(fiveHour),
+        sevenDay: presentWindow(sevenDay),
         receivedAt: limits.receivedAt.toISOString(),
         stale: stale(limits.receivedAt),
-      },
+      } : null,
       sessions: [...this.sessionStatus]
         .filter(([name]) => machine === undefined || name === machine)
         .flatMap(([name, byId]) => [...byId.values()].map(({ fiveHour, sevenDay, receivedAt, ...status }) => ({
@@ -867,8 +873,20 @@ export class ChatService {
     if (status.fiveHour || status.sevenDay) {
       this.limitsSeen.set(machine, { fiveHour: status.fiveHour, sevenDay: status.sevenDay, receivedAt });
       await this.storage.upsertCache('chat', 'limits', Object.fromEntries(this.limitsSeen), LIMITS_KEEP_SECONDS).catch(() => undefined);
+      this.onLimits(machine, { fiveHour: status.fiveHour, sevenDay: status.sevenDay });
     }
     return { sessionId: status.sessionId };
+  }
+
+  /** The machine's last usage report as it came in, windows past their reset included. */
+  lastLimits(machine: string) {
+    return this.limitsSeen.get(machine) ?? null;
+  }
+
+  /** The machine's last usage belonged to the account it just switched away from. */
+  async forgetLimits(machine: string) {
+    this.limitsSeen.delete(machine);
+    await this.storage.upsertCache('chat', 'limits', Object.fromEntries(this.limitsSeen), LIMITS_KEEP_SECONDS).catch(() => undefined);
   }
 
   /** A DOCK turn reports only what changed: a field it leaves out keeps its last value, and the turn's cost adds to the total. */
