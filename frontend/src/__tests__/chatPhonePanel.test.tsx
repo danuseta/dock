@@ -69,11 +69,13 @@ test('the worker strip is one line with the running and finished counts, closed 
   assert.doesNotMatch(html, /Workers of this session/);
 });
 
-test('the phone panel has one header, no limits line or Runs on row, and opens worker threads inside the panel', () => {
+test('the phone and the floating panel share one header, no limits line or Runs on row, and open worker threads inside the panel', () => {
   const dock = read('ChatDock.tsx');
-  assert.match(dock, /\{phone && listing && <PhoneChatHeader title="Sessions"/);
-  assert.match(dock, /\{!phone && <header/);
-  assert.match(dock, /\{!phone && <LimitsLine/);
+  assert.match(dock, /const compact = phone \|\| !drawer;/, 'the floating panel on a computer follows the phone layout; the drawer keeps its own');
+  assert.match(dock, /\{compact && listing && <PhoneChatHeader title="Sessions"/);
+  assert.match(dock, /\{!compact && <header/);
+  assert.match(dock, /\{!compact && <LimitsLine/);
+  assert.match(dock, /label: 'Dock to bottom'[\s\S]*\.\.\.\(phone \? \[\] : \[dockItem\]\)/, 'a computer can still dock it from the menu');
   assert.match(dock, /compact\s+threadId=\{threadId\}\s+onOpenThread=\{setThreadId\}/);
   assert.match(dock, /<AgentThreadPane sessionId=\{state\.active\} threadId=\{threadId\}[\s\S]*?className="absolute inset-0 z-20"/);
   assert.match(dock, /label: 'Rename'[\s\S]*label: 'New session'[\s\S]*label: 'Open full page'[\s\S]*label: 'All sessions'/);

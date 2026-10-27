@@ -20,7 +20,7 @@ interface PhoneChatHeaderProps {
   children?: React.ReactNode;
 }
 
-const iconButton = 'grid size-11 flex-none place-items-center rounded-xs text-secondary-foreground hover:bg-surface-1 hover:text-foreground';
+const iconButton = 'grid size-11 min-[700px]:size-9 flex-none place-items-center rounded-xs text-secondary-foreground hover:bg-surface-1 hover:text-foreground';
 
 /** The chat panel's one header on a phone: back, title with its state, the usage limits, a menu and minimise. */
 export const PhoneChatHeader: React.FC<PhoneChatHeaderProps> = ({ title, line, dot, machine, menu, onBack, onMinimise, children }) => {
