@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, BarChart3, Bot, Box, Bug, CalendarDays, ClipboardList, ChevronLeft, ChevronRight, History, Home as HomeIcon, LayoutDashboard, ListChecks, MessagesSquare, MoreHorizontal, Settings as SettingsIcon, Clapperboard, Server, Stethoscope } from 'lucide-react';
+import { Activity, BarChart3, BookOpen, Bot, Box, Bug, CalendarDays, ClipboardList, ChevronLeft, ChevronRight, History, Home as HomeIcon, LayoutDashboard, ListChecks, MessagesSquare, MoreHorizontal, Settings as SettingsIcon, Clapperboard, Server, Stethoscope } from 'lucide-react';
 import { useQuery } from '@apollo/client';
 import { GET_DISCORD_THREADS, GET_NEEDS_ATTENTION, GET_OWNER_QUESTIONS } from '../graphql/queries';
 import { ticketAttention, ticketQuestions } from '../lib/attention';
@@ -212,7 +212,10 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
             {more.badge > 0 && <span className="absolute right-1 top-0 min-w-[18px] rounded-pill bg-status-conflict px-[5px] py-px text-center font-mono text-[0.6rem] font-extrabold text-black tabular-nums">{more.badge}</span>}
           </button>
         </nav>
-        <IconButton variant="ghost" className="hidden size-8 min-[761px]:inline-flex" aria-label="Report bug" title="Report a DOCK bug (opens a GitHub issue on danuseta/dock)" onClick={() => setReporting(true)}><Bug size={16} aria-hidden="true" /></IconButton>
+        <span className={cn('hidden items-center gap-1 min-[761px]:flex', isSidebar && !preferences.collapsed ? 'min-[761px]:flex-row' : 'min-[761px]:flex-col')}>
+          <IconButton variant="ghost" className={cn('size-8', currentPath === '/guide' && 'text-accent')} aria-label="How to use DOCK" title="How to use DOCK" aria-current={currentPath === '/guide' ? 'page' : undefined} onClick={() => onNavigate('/guide')}><BookOpen size={16} aria-hidden="true" /></IconButton>
+          <IconButton variant="ghost" className="size-8" aria-label="Report bug" title="Report a DOCK bug (opens a GitHub issue on danuseta/dock)" onClick={() => setReporting(true)}><Bug size={16} aria-hidden="true" /></IconButton>
+        </span>
         <span className={cn(
           'hidden whitespace-nowrap font-mono text-[0.67rem] font-bold text-muted-foreground min-[761px]:block',
           isSidebar ? 'min-[761px]:w-full min-[761px]:border-t min-[761px]:border-border min-[761px]:px-2 min-[761px]:pt-[13px] min-[761px]:pb-0.5 min-[761px]:text-center' : 'min-[761px]:border-l min-[761px]:border-border min-[761px]:pl-2',
@@ -247,6 +250,10 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
                 </button>
               );
             })}
+            <button type="button" className={cn('flex h-12 w-full items-center gap-3 border-0 border-t border-border bg-transparent px-2.5 text-left font-display text-[0.92rem] font-semibold text-foreground', currentPath === '/guide' && 'text-accent')} aria-current={currentPath === '/guide' ? 'page' : undefined} onClick={() => go('/guide')}>
+              <BookOpen size={19} aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate">How to use DOCK</span>
+            </button>
           </nav>
         </div>
       )}
