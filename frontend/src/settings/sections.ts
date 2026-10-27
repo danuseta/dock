@@ -1,11 +1,11 @@
-import { Bell, CalendarDays, Film, GitBranch, KeyRound, LayoutPanelLeft, Lock, MessageSquare, MessagesSquare, ShieldCheck, type LucideIcon } from 'lucide-react';
+import { Bell, CalendarDays, Film, GitBranch, KeyRound, LayoutPanelLeft, Lock, MessageSquare, MessagesSquare, ShieldCheck, Users, type LucideIcon } from 'lucide-react';
 import { normalizeCaveman, normalizeRtk } from '../chat/chatDefaults';
 import { hasPage, type DockMode } from '../lib/dockMode';
 import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, getDiscordTemplateError } from '../lib/discordTemplate';
 import { parseNotificationPrefs, prefsToValues, valuesToPrefs } from '../lib/notificationPrefs';
 import { isValidServiceHealthRefreshSeconds, normalizeServiceHealthRefreshSeconds } from '../lib/serviceHealthRefresh';
 
-export type SectionId = 'general' | 'chat' | 'notifications' | 'security' | 'jira' | 'github' | 'discord' | 'calendar' | 'tokens' | 'demo';
+export type SectionId = 'general' | 'chat' | 'notifications' | 'security' | 'jira' | 'github' | 'discord' | 'calendar' | 'tokens' | 'demo' | 'claude';
 export type DraftSectionId = 'general' | 'chat' | 'notifications' | 'jira' | 'github' | 'discord' | 'calendar';
 export type SectionGroup = 'Preferences' | 'Integrations' | 'Agents';
 export type SectionValues = Record<string, string>;
@@ -66,6 +66,7 @@ export const SETTINGS_SECTIONS: SectionInfo[] = [
   { id: 'calendar', label: 'Calendar', title: 'Google Calendar', description: 'Read-only access for the Calendar page.', icon: CalendarDays, group: 'Integrations' },
   { id: 'tokens', label: 'Ingest tokens', title: 'Ingest tokens', description: "What lets a machine's kit report to DOCK. Every action here saves immediately.", icon: KeyRound, group: 'Agents' },
   { id: 'demo', label: 'Demo videos', title: 'Demo videos', description: 'The narration keys and the bucket a demo video goes to, shared by both DOCKs. Every action here saves immediately.', icon: Film, group: 'Agents' },
+  { id: 'claude', label: 'Claude account', title: 'Claude account', description: "Which Claude account this workspace's chat and cron turns use, and when to move to the next one. Every action here saves immediately.", icon: Users, group: 'Agents' },
 ];
 
 export const DRAFT_SECTIONS: DraftSectionId[] = ['general', 'chat', 'notifications', 'jira', 'github', 'discord', 'calendar'];
@@ -74,7 +75,7 @@ export const isDraftSection = (id: SectionId): id is DraftSectionId => (DRAFT_SE
 
 /** A section shows only when its page does: a workspace DOCK has no calendar to connect. */
 export const visibleSections = (mode: DockMode) => SETTINGS_SECTIONS.filter((section) => (
-  (section.id !== 'chat' || hasPage(mode, '/sessions')) && (section.id !== 'calendar' || hasPage(mode, '/calendar'))
+  (section.id !== 'chat' || hasPage(mode, '/sessions')) && (section.id !== 'calendar' || hasPage(mode, '/calendar')) && (section.id !== 'claude' || hasPage(mode, '/sessions'))
 ));
 
 /** `?section=` picks the section; the Google OAuth redirect (`?google=`) lands on Calendar. */

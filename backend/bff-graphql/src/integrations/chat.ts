@@ -447,6 +447,8 @@ export class ChatService {
   private activityWrites: Promise<unknown> = Promise.resolve();
   private readonly sessionStatus = new Map<string, Map<string, SavedStatus>>();
   private readonly limitsSeen = new Map<string, LimitsSeen>();
+  /** Each usage report of a machine's turn, for the Claude account rotation. */
+  onLimits: (machine: string, limits: { fiveHour: LimitWindow | null; sevenDay: LimitWindow | null }) => void = () => undefined;
   private lastActivityPruneAt = 0;
   private lastAttachmentPruneAt = 0;
   private readonly notifier = new TurnNotifier();
@@ -871,8 +873,15 @@ export class ChatService {
     if (status.fiveHour || status.sevenDay) {
       this.limitsSeen.set(machine, { fiveHour: status.fiveHour, sevenDay: status.sevenDay, receivedAt });
       await this.storage.upsertCache('chat', 'limits', Object.fromEntries(this.limitsSeen), LIMITS_KEEP_SECONDS).catch(() => undefined);
+      this.onLimits(machine, { fiveHour: status.fiveHour, sevenDay: status.sevenDay });
     }
     return { sessionId: status.sessionId };
+  }
+
+  /** The machine's last usage belonged to the account it just switched away from. */
+  async forgetLimits(machine: string) {
+    this.limitsSeen.delete(machine);
+    await this.storage.upsertCache('chat', 'limits', Object.fromEntries(this.limitsSeen), LIMITS_KEEP_SECONDS).catch(() => undefined);
   }
 
   /** A DOCK turn reports only what changed: a field it leaves out keeps its last value, and the turn's cost adds to the total. */

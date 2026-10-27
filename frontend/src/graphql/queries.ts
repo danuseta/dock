@@ -1125,3 +1125,16 @@ export const GET_AUTO_REVIEWS = gql`
     autoReviews { id ticketKey prUrl headSha threadUrl sessionId status detail startedAt finishedAt }
   }
 `;
+
+export const CLAUDE_ACCOUNTS_FIELDS = `
+  available
+  accounts { name active seenAt fiveHour { usedPercentage resetsAt } sevenDay { usedPercentage resetsAt } }
+  rotation { enabled fiveHour sevenDay backToMain }
+  log { at from to reason auto }
+`;
+
+export const GET_CLAUDE_ACCOUNTS = gql`
+  query GetClaudeAccounts {
+    claudeAccounts { ${CLAUDE_ACCOUNTS_FIELDS} }
+  }
+`;
