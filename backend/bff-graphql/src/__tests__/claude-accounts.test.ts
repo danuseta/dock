@@ -48,7 +48,7 @@ test('auto rotate moves past an account over its limit, stays when all are over,
   assert.strictEqual(decide({ ...base, rule: { ...ON, backToMain: false }, active: 'account2', usage: mainReset, last: moved }), null);
 });
 
-function world(options: { active?: string; rule?: Rotation; usage?: Record<string, AccountUsage> } = {}) {
+function world(options: { active?: string; rule?: Rotation; usage?: Record<string, AccountUsage>; machine?: AccountUsage } = {}) {
   let active = options.active ?? 'main';
   let usage = options.usage ?? {};
   let log: RotationEntry[] = [];
@@ -66,6 +66,7 @@ function world(options: { active?: string; rule?: Rotation; usage?: Record<strin
     log: async () => log,
     saveLog: async (value) => { log = value; },
     switched: () => { forgot += 1; },
+    machineUsage: () => options.machine ?? null,
     push: async (message) => { pushes.push(message.title); },
     now: () => NOW,
   };
@@ -108,4 +109,15 @@ test('the state hides a window past its reset', async () => {
   const w = world({ usage: { main: seen(70, 30, later(80), later(-1)) } });
   const [main] = (await w.accounts.state()).accounts;
   assert.deepStrictEqual([main.fiveHour, main.sevenDay?.usedPercentage], [null, 30]);
+});
+
+test('before any switch, the machine\'s last snapshot starts the active account\'s usage; after a switch it does not', async () => {
+  const fresh = world({ machine: seen(17, 39) });
+  const [main, account2] = (await fresh.accounts.state()).accounts;
+  assert.deepStrictEqual([main.fiveHour?.usedPercentage, main.seenAt, account2.seenAt], [17, NOW.toISOString(), null]);
+  assert.strictEqual(fresh.usage.main.sevenDay?.usedPercentage, 39);
+
+  const moved = world({ machine: seen(17, 39), rule: ROTATION_DEFAULTS });
+  await moved.accounts.use('account2');
+  assert.strictEqual((await moved.accounts.state()).accounts[1].seenAt, null, 'the snapshot may be main\'s: account2 waits for its own turn');
 });

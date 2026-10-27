@@ -83,6 +83,8 @@ export interface ClaudeAccountsDeps {
   saveLog(log: RotationEntry[]): Promise<void>;
   /** A switch makes the machine's last usage snapshot belong to the old account. */
   switched(): void;
+  /** The machine's last usage snapshot from before the accounts were tracked. */
+  machineUsage(): AccountUsage | null;
   push(message: { title: string; body: string; url: string; tag: string }): Promise<unknown>;
   now(): Date;
 }
@@ -97,6 +99,12 @@ export class ClaudeAccounts {
   async state() {
     const [list, usage, rule, log] = await Promise.all([this.deps.list(), this.deps.usage(), this.deps.rotation(), this.deps.log()]);
     const now = this.deps.now();
+    // Before the first switch, the machine's last snapshot can only be the active account's: it starts the tracking.
+    const seed = list.active && !usage[list.active] && log.length === 0 ? this.deps.machineUsage() : null;
+    if (seed && list.active) {
+      usage[list.active] = seed;
+      await this.deps.saveUsage(usage);
+    }
     const window = (value: UsageWindow | null) => {
       const live = current(value, now);
       return live && { usedPercentage: live.usedPercentage, resetsAt: live.resetsAt?.toISOString() ?? null };
