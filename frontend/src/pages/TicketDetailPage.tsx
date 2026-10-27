@@ -33,6 +33,7 @@ import { DiscordPreviewModal } from '../components/DiscordPreviewModal';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { Toast } from '../components/Toast';
 import { Button, Card, ConfirmDialog, Input, Page } from '../components/ui';
+import { changesHref } from '../changes/href';
 import { cn } from '../lib/cn';
 import { monitorsOnly, useDockMode } from '../lib/dockMode';
 import { CACHED_QUERY_OPTIONS, DETAIL_QUERY_OPTIONS, displayAssignee } from '../lib/queryPolicy';
@@ -533,9 +534,12 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
                 <li key={pr.id} className={cn('-mx-2 rounded-xs px-2 py-1.5', isConflict ? 'bg-status-conflict-bg' : 'hover:bg-surface-2')}>
                   <div className="flex items-center justify-between gap-2">
                     <a href={pr.url} target="_blank" rel="noreferrer" className="truncate font-mono text-xs font-bold text-accent hover:underline" title={pr.title}>{pr.repo}#{pr.pullNumber || pr.number}</a>
-                    {isConflict
-                      ? <Button size="sm" variant="danger" onClick={() => void handleInspect(pr.owner, pr.repo, pr.pullNumber || pr.number)}><AlertTriangle size={12} aria-hidden="true" />Inspect</Button>
-                      : <PRBadge status={pr.status} />}
+                    <span className="flex flex-none items-center gap-1.5">
+                      <Button size="sm" variant="ghost" onClick={() => onNavigate(changesHref(ticket.key, pr.repo, 'ticket'))}>Changes</Button>
+                      {isConflict
+                        ? <Button size="sm" variant="danger" onClick={() => void handleInspect(pr.owner, pr.repo, pr.pullNumber || pr.number)}><AlertTriangle size={12} aria-hidden="true" />Inspect</Button>
+                        : <PRBadge status={pr.status} />}
+                    </span>
                   </div>
                   <p className="mt-0.5 flex items-center gap-1 truncate font-mono text-[0.68rem] text-muted-foreground" title={`${pr.headBranch} → ${pr.baseBranch}`}>
                     <GitBranch size={11} className="shrink-0" aria-hidden="true" />
@@ -545,6 +549,11 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
               );
             })}
           </ul>
+          {(ticket.pullRequests?.length ?? 0) > 1 && (
+            <Button size="sm" className="mt-2 self-start" onClick={() => onNavigate(changesHref(ticket.key, ticket.pullRequests[0].repo, 'ticket'))}>
+              All changes · {new Set(ticket.pullRequests.map((pr: { repo: string }) => pr.repo)).size} repos
+            </Button>
+          )}
 
           {blackboardFiles && (() => {
             const latest = blackboardFiles.reduce((at, file) => (file.updatedAt > at ? file.updatedAt : at), '');

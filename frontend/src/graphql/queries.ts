@@ -1138,3 +1138,69 @@ export const GET_CLAUDE_ACCOUNTS = gql`
     claudeAccounts { ${CLAUDE_ACCOUNTS_FIELDS} }
   }
 `;
+
+export const PULL_CHANGE_FILE_FIELDS = gql`
+  fragment PullChangeFileFields on PullChangeFile {
+    path
+    previousPath
+    status
+    additions
+    deletions
+    patch
+    tooLarge
+  }
+`;
+
+export const GET_TICKET_CHANGES = gql`
+  ${PULL_CHANGE_FILE_FIELDS}
+  query GetTicketChanges($ticketKey: String!, $tab: String) {
+    ticketChanges(ticketKey: $ticketKey, tab: $tab) {
+      ticketKey
+      title
+      error
+      pulls {
+        url
+        owner
+        repo
+        number
+        tab
+        title
+        state
+        author
+        headRef
+        baseRef
+        headSha
+        headDate
+        additions
+        deletions
+        changedFiles
+        partial
+        stale
+        retryAt
+        error
+        files { ...PullChangeFileFields }
+      }
+      review {
+        runKey
+        verdict
+        roundsUsed
+        roundsMax
+        updatedAt
+        findings { at severity text resolvedAt resolvedWhy }
+      }
+    }
+  }
+`;
+
+export const GET_PULL_FILE_PATCH = gql`
+  ${PULL_CHANGE_FILE_FIELDS}
+  query GetPullFilePatch($ticketKey: String!, $url: String!, $path: String!) {
+    pullFilePatch(ticketKey: $ticketKey, url: $url, path: $path) { ...PullChangeFileFields }
+  }
+`;
+
+export const GET_PULL_FILE_LINES = gql`
+  query GetPullFileLines($ticketKey: String!, $url: String!, $path: String!, $ref: String!, $from: Int!, $to: Int!) {
+    pullFileLines(ticketKey: $ticketKey, url: $url, path: $path, ref: $ref, from: $from, to: $to)
+  }
+`;
