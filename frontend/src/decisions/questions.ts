@@ -20,8 +20,8 @@ export interface Question {
   options: QuestionOption[];
 }
 
-/** The owner's draft for one question: the picked option, or OWN with the text written. `sent` once it went to sous. */
-export interface Draft { choice: string | null; text: string; unsure: boolean; sent?: boolean }
+/** The owner's draft for one question: the picked option, or OWN with the text written. `sent` once it went to sous, at `sentAt`. */
+export interface Draft { choice: string | null; text: string; unsure: boolean; sent?: boolean; sentAt?: string }
 
 export const OWN = 'own';
 export const KEEP = 'keep';
@@ -67,6 +67,36 @@ export function questionsOf(run: QuestionFacts): Question[] {
     ],
   }));
   return [...issues, ...guesses];
+}
+
+/**
+ * A sent answer sous already had its turn on: the question is still open, the run is not working, and its ledger changed
+ * after the send. An answer sent before DOCK kept the time counts as old. It can be answered again.
+ */
+export function staleSent(draft: Draft | undefined, run: Pick<AgentRun, 'activity' | 'updatedAt'>): boolean {
+  if (!draft?.sent || run.activity === 'ACTIVE') return false;
+  return !draft.sentAt || Date.parse(run.updatedAt) > Date.parse(draft.sentAt);
+}
+
+/** The drafts with every stale send opened again, so a question sous still asks can be answered. */
+export function liveDrafts(drafts: Record<string, Draft>, run: Pick<AgentRun, 'activity' | 'updatedAt'>): Record<string, Draft> {
+  return Object.fromEntries(Object.entries(drafts).map(([id, draft]) => {
+    return [id, staleSent(draft, run) ? unsent(draft) : draft];
+  }));
+}
+
+/** Every question answered and at least one answer still to send: the ticket's sheet can be submitted. */
+export function readyToSubmit(questions: Question[], drafts: Record<string, Draft>): boolean {
+  return questions.every((question) => isAnswered(drafts[question.id]))
+    && questions.some((question) => isAnswered(drafts[question.id]) && !drafts[question.id]?.sent);
+}
+
+/** The draft as it was before it was sent. */
+export function unsent(draft: Draft): Draft {
+  const next = { ...draft };
+  delete next.sent;
+  delete next.sentAt;
+  return next;
 }
 
 /** True when the draft holds an answer that can be sent. */

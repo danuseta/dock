@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { AgentRun } from '../agents/runs';
 import { cn } from '../lib/cn';
-import { isAnswered, type Draft, type Question } from './questions';
+import { isAnswered, liveDrafts, readyToSubmit, type Draft, type Question } from './questions';
 import { read } from './useDraft';
 
 export interface TicketQuestions { run: AgentRun; questions: Question[] }
@@ -50,15 +50,15 @@ export const TicketList: React.FC<TicketListProps> = ({ tickets, openKey, drafts
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const rows = tickets.map((ticket) => {
-    const saved = ticket.run.key === openKey ? drafts : read(ticket.run.key);
+    const saved = ticket.run.key === openKey ? drafts : liveDrafts(read(ticket.run.key), ticket.run);
     const answered = ticket.questions.filter((question) => isAnswered(saved[question.id])).length;
-    return { ...ticket, saved, answered, waits: ticket.questions.some((question) => question.blocking && !saved[question.id]?.sent) };
+    return { ...ticket, saved, answered, ready: readyToSubmit(ticket.questions, saved), waits: ticket.questions.some((question) => question.blocking && !saved[question.id]?.sent) };
   });
   const needle = query.trim().toLowerCase();
   const shown = rows.filter((row) => {
     if (needle && !`${row.run.key} ${row.run.title}`.toLowerCase().includes(needle)) return false;
     if (filter === 'waits') return row.waits;
-    if (filter === 'ready') return row.answered === row.questions.length;
+    if (filter === 'ready') return row.ready;
     return true;
   });
 

@@ -1,4 +1,5 @@
 import { JiraAPI } from '../datasources/JiraAPI';
+import { ownerReplySession } from '../datasources/StorageAPI';
 import { StorageService } from '../storage/service';
 import { STOPPED_QUEUED_TEXT, STOPPED_TEXT, chatService } from './chat';
 import { ledgerPeer } from './ledger-peer';
@@ -58,7 +59,13 @@ export const orchestratorCron = new OrchestratorCron({
   deleteSession: (sessionId) => chatService.deleteSession(sessionId),
   ownerSessionBusy: async (key) => (await chatService.sessions('dock', SESSIONS_LOOKED_AT))
     .some((session) => session.ticketKey === key && isTaskTitle(session.title, key) && (session.status === 'queued' || session.status === 'running')),
-  send: async (sessionId, text, options) => chatService.sendMessage(sessionId, text, await orchestratorService.machines(), { options }),
+  send: async (sessionId, text, options, extra = {}) => chatService.sendMessage(sessionId, text, await orchestratorService.machines(), {
+    options, ...(extra.cronSlot === false ? { cronSlot: false } : {}), ...(extra.queue ? { mode: 'queue' } : {}),
+  }),
+  ownerReplySession: async () => ownerReplySession((await storage.getSettings()).find((setting) => setting.key === 'ownerReplySession')?.value),
+  lastTaskSession: async (key) => (await storage.getChatSessions('dock', SESSIONS_LOOKED_AT))
+    .filter((session) => session.ticketKey === key && isTaskTitle(session.title, key))
+    .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())[0] ?? null,
   runningSessions: async () => (await chatService.sessions('dock', SESSIONS_LOOKED_AT)).filter((session) => session.status !== 'idle').map((session) => session.id),
   stopTurn: (sessionId) => chatService.stopTurn(sessionId),
   hasPushDevices: async () => (await pushService.subscriptions()).length > 0,

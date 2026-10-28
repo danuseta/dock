@@ -28,7 +28,8 @@ function summary(questions: Question[], drafts: Record<string, Draft>): string {
   const rest = open
     ? `${open === 1 ? 'One question stays' : `${open} questions stay`} open, so the pull requests stay draft.`
     : 'Nothing stays open, so the pull requests go up for review once sous is done.';
-  return parts.length ? `If you submit now, ${parts.join(' and ')}. ${rest}` : 'Answer at least one question to submit.';
+  if (parts.length) return `If you submit now, ${parts.join(' and ')}. ${rest}`;
+  return waiting ? `Nothing new to submit: ${waiting === 1 ? 'one answer was' : `${waiting} answers were`} sent and sous has not settled ${waiting === 1 ? 'it' : 'them'} yet.` : 'Answer at least one question to submit.';
 }
 
 /** The ticket's answers on one page before they are sent together. */

@@ -12,7 +12,7 @@ import { monitorsOnly, useDockMode } from '../lib/dockMode';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { AnswerSheet } from '../decisions/AnswerSheet';
 import { QuestionView } from '../decisions/QuestionView';
-import { KEEP, isAnswered, questionsOf, submissionOf, unansweredGuesses, type Question } from '../decisions/questions';
+import { KEEP, isAnswered, questionsOf, staleSent, submissionOf, unansweredGuesses, type Question } from '../decisions/questions';
 import { useDraft } from '../decisions/useDraft';
 import { TicketList } from '../decisions/TicketList';
 
@@ -45,7 +45,7 @@ const DecisionsPage: React.FC = () => {
     .sort((a, b) => Number(b.questions.some((q) => q.blocking)) - Number(a.questions.some((q) => q.blocking))), [data]);
   const current = tickets.find((item) => item.run.key === place.ticket) ?? tickets[0] ?? null;
   const questions: Question[] = current?.questions ?? [];
-  const { drafts, update, clear, markSent } = useDraft(current?.run.key ?? null);
+  const { drafts, update, clear, markSent, reopen } = useDraft(current?.run.key ?? null);
   const q = place.ticket === current?.run.key && place.q <= questions.length ? place.q : 1;
 
   const go = (ticket: string, next: number) => {
@@ -60,6 +60,13 @@ const DecisionsPage: React.FC = () => {
     const stale = Object.keys(drafts).filter((id) => !questions.some((question) => question.id === id));
     if (stale.length) clear(stale);
   }, [current, drafts, questions, clear]);
+
+  // A sent answer to a question sous still asks after its turn can be answered again.
+  useEffect(() => {
+    if (!current) return;
+    const stale = Object.keys(drafts).filter((id) => staleSent(drafts[id], current.run));
+    if (stale.length) reopen(stale);
+  }, [current, drafts, reopen]);
 
   // A, B, C… picks an option, Enter saves and goes on, J and K move between questions; typing in a box is left alone.
   useEffect(() => {

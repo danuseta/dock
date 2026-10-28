@@ -25,9 +25,9 @@ export interface AutoReviewDeps {
   now(): Date;
 }
 
-/** The prompt of an auto review: the sous review of the pull request, with the thread as context. Nothing is posted anywhere. */
-export const reviewPrompt = (key: string, prUrl: string, threadUrl: string) => [
-  `Pakai skill sous. review ${key}: ${prUrl}`,
+/** The prompt of an auto review: one sous review of every pull request of the ticket, with the thread as context. Nothing is posted anywhere. */
+export const reviewPrompt = (key: string, prUrls: string[], threadUrl: string) => [
+  `Pakai skill sous. review ${key}: ${prUrls.join(' ')}`,
   `Thread Discord pr-review: ${threadUrl} (baca dulu lewat discord-files.cjs).`,
   'Ini auto review dari DOCK karena owner bilang on it di thread itu. Jangan komentar di PR, Jira, atau Discord; tulis verdict dan temuan ke ledger seperti biasa.',
 ].join('\n');
@@ -60,17 +60,20 @@ export class AutoReview {
     }
   }
 
-  /** The pull requests of a thread the owner just said on it in, each reviewed once per head commit and once per "on it". */
+  /**
+   * The pull requests of a thread the owner just said on it in, each reviewed once per head commit and once per "on it".
+   * The ones due go in one Review session for the ticket, BE and FE together, with one record per pull request.
+   */
   private async consider(row: ThreadRow): Promise<number> {
     if (row.kind !== 'pr' || !row.claim?.mine) return 0;
     const saidAt = Date.parse(row.claim.at);
     if (!(this.deps.now().getTime() - saidAt <= ON_IT_WINDOW_MS)) return 0;
     const key = ticketOf(row);
     if (!key) return 0;
-    let started = 0;
+    const due: Array<{ url: string; headSha: string }> = [];
     for (const prUrl of row.prs) {
       const match = PULL.exec(prUrl);
-      if (!match) continue;
+      if (!match || due.some((pull) => pull.url === match[0])) continue;
       const url = match[0];
       const last = await this.deps.latest(url);
       if (last && last.startedAt.getTime() >= saidAt) continue;
@@ -81,16 +84,20 @@ export class AutoReview {
         continue;
       }
       if (!state.open || (last && last.headSha === state.headSha)) continue;
-      const record = await this.deps.create({ prUrl: url, headSha: state.headSha, ticketKey: key, threadUrl: row.url, startedAt: this.deps.now() });
-      try {
-        const sessionId = await this.deps.openReview(key, reviewPrompt(key, url, row.url));
-        await this.deps.update(record.id, { sessionId });
-        started += 1;
-      } catch (error) {
-        await this.deps.update(record.id, { status: 'failed', detail: error instanceof Error ? error.message.slice(0, 300) : 'the session did not start', finishedAt: this.deps.now() });
-      }
+      due.push({ url, headSha: state.headSha });
     }
-    return started;
+    if (!due.length) return 0;
+    const records: AutoReviewRecord[] = [];
+    for (const pull of due) records.push(await this.deps.create({ prUrl: pull.url, headSha: pull.headSha, ticketKey: key, threadUrl: row.url, startedAt: this.deps.now() }));
+    try {
+      const sessionId = await this.deps.openReview(key, reviewPrompt(key, due.map((pull) => pull.url), row.url));
+      for (const record of records) await this.deps.update(record.id, { sessionId });
+      return 1;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message.slice(0, 300) : 'the session did not start';
+      for (const record of records) await this.deps.update(record.id, { status: 'failed', detail, finishedAt: this.deps.now() });
+      return 0;
+    }
   }
 
   /** A review ledger with a verdict, for the auto review running on that ticket. */
@@ -106,27 +113,33 @@ export class AutoReview {
     }
   }
 
-  private async decide(run: Orchestration, record: AutoReviewRecord): Promise<void> {
+  private async decide(run: Orchestration, first: AutoReviewRecord): Promise<void> {
     const blockers = (run.findings ?? []).filter((finding) => finding.severity === 'blocker' && !finding.resolvedAt).length;
     const clean = run.verdict === 'approve' && blockers === 0;
     // Taken off running first: the LGTM finishes the review run, which pushes its ledger through here again.
-    await this.deps.update(record.id, { status: 'deciding' });
+    await this.deps.update(first.id, { status: 'deciding' });
+    const group = [first];
+    for (let next = await this.deps.running(run.key); next && first.sessionId && next.sessionId === first.sessionId; next = await this.deps.running(run.key)) {
+      await this.deps.update(next.id, { status: 'deciding' });
+      group.push(next);
+    }
+    const finish = (status: string, detail: string) => Promise.all(group.map((item) => this.finish(item, status, detail)));
     const settings = await this.deps.settings();
     const url = '/agents';
     if (clean && settings.autoLgtm) {
       const ok = await this.deps.approve(run.key);
-      await this.finish(record, ok ? 'lgtm' : 'clean', ok ? 'LGTM by DOCK' : 'Clean, but the LGTM steps failed; LGTM it on Agents');
-      await this.deps.push({ title: ok ? `${run.key}: auto LGTM` : `${run.key}: LGTM failed`, body: ok ? 'The review was clean; DOCK sent the LGTM. Say it in the thread.' : 'The review was clean but a LGTM step failed. Open Agents.', url, tag: `auto-review-${record.id}` });
+      await finish(ok ? 'lgtm' : 'clean', ok ? 'LGTM by DOCK' : 'Clean, but the LGTM steps failed; LGTM it on Agents');
+      await this.deps.push({ title: ok ? `${run.key}: auto LGTM` : `${run.key}: LGTM failed`, body: ok ? 'The review was clean; DOCK sent the LGTM. Say it in the thread.' : 'The review was clean but a LGTM step failed. Open Agents.', url, tag: `auto-review-${first.id}` });
       return;
     }
     if (clean) {
-      await this.finish(record, 'clean', 'Clean; waiting for your LGTM');
-      await this.deps.push({ title: `${run.key}: review clean`, body: 'Approve verdict, no blocker. LGTM it on Agents.', url, tag: `auto-review-${record.id}` });
+      await finish('clean', 'Clean; waiting for your LGTM');
+      await this.deps.push({ title: `${run.key}: review clean`, body: 'Approve verdict, no blocker. LGTM it on Agents.', url, tag: `auto-review-${first.id}` });
       return;
     }
     const detail = blockers > 0 ? `${blockers} blocker${blockers === 1 ? '' : 's'}` : 'Request change';
-    await this.finish(record, 'blockers', detail);
-    await this.deps.push({ title: `${run.key}: ${detail}`, body: 'The auto review needs you. Open Agents.', url, tag: `auto-review-${record.id}` });
+    await finish('blockers', detail);
+    await this.deps.push({ title: `${run.key}: ${detail}`, body: 'The auto review needs you. Open Agents.', url, tag: `auto-review-${first.id}` });
   }
 
   private finish(record: AutoReviewRecord, status: string, detail: string) {

@@ -182,6 +182,8 @@ export const typeDefs = gql`
     chatCaveman: String!
     """How many chat turns a bridge runs at once; null leaves it to the bridge's own file."""
     chatParallelTurns: String
+    """Where an answer to an I-n or D-n goes: new (a new session) or last (the ticket's last Task session)."""
+    ownerReplySession: String!
     """JSON: the volume and, per event, whether it notifies and with which bundled sound."""
     notificationPrefs: String!
   }
@@ -1079,6 +1081,7 @@ export const typeDefs = gql`
     chatRtk: String
     chatCaveman: String
     chatParallelTurns: String
+    ownerReplySession: String
     notificationPrefs: String
   }
 
@@ -1234,6 +1237,39 @@ export const typeDefs = gql`
     log: [ClaudeRotationEntry!]!
   }
 
+  """One item of a home folder on the workspace. A masked item holds secrets: it is listed but never opened."""
+  type WorkspaceEntry {
+    name: String!
+    """Relative to the home folder, with forward slashes."""
+    path: String!
+    """dir, file, link (a link whose target is gone) or other"""
+    kind: String!
+    size: Float
+    modifiedAt: String
+    masked: Boolean!
+  }
+
+  type WorkspaceDir {
+    path: String!
+    """The folder above; null at the home folder."""
+    parent: String
+    entries: [WorkspaceEntry!]!
+    """More items than the page lists."""
+    truncated: Boolean!
+  }
+
+  type WorkspaceFile {
+    path: String!
+    size: Float!
+    modifiedAt: String!
+    """A secret: its text is never sent."""
+    masked: Boolean!
+    binary: Boolean!
+    """Only the first 512 KB is sent."""
+    truncated: Boolean!
+    text: String
+  }
+
   type Query {
     authStatus: AuthStatus!
     dockMode: String!
@@ -1301,6 +1337,10 @@ export const typeDefs = gql`
     dockIssue(number: Int!): DockIssueDetail
     """The GitHub new-issue address filled with the same title and body that reportDockIssue posts."""
     dockIssueDraftUrl(title: String!, happened: String!, steps: String, expected: String, imageLinks: [String!], page: String!): String!
+    """A folder under the home of the workspace, read only; no path is the home itself."""
+    workspaceDir(path: String): WorkspaceDir!
+    """The text of a file under the home of the workspace, read only."""
+    workspaceFile(path: String!): WorkspaceFile!
   }
 
   type Mutation {

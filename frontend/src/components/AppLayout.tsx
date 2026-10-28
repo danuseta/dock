@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, BarChart3, BookOpen, Bot, Box, Bug, CalendarDays, ClipboardList, ChevronLeft, ChevronRight, History, Home as HomeIcon, LayoutDashboard, ListChecks, MessagesSquare, MoreHorizontal, Settings as SettingsIcon, Clapperboard, Server, Stethoscope } from 'lucide-react';
+import { Activity, BarChart3, BookOpen, Bot, Box, Bug, CalendarDays, ClipboardList, ChevronLeft, ChevronRight, History, Home as HomeIcon, LayoutDashboard, ListChecks, MessagesSquare, MoreHorizontal, Settings as SettingsIcon, Clapperboard, FolderTree, Server, Stethoscope } from 'lucide-react';
 import { useQuery } from '@apollo/client';
 import { GET_DISCORD_THREADS, GET_NEEDS_ATTENTION, GET_OWNER_QUESTIONS } from '../graphql/queries';
 import { ticketAttention, ticketQuestions } from '../lib/attention';
@@ -84,6 +84,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
     { path: '/monitoring', label: 'Monitoring', icon: Activity, badge: 0, group: 'System' },
     { path: '/docker', label: 'Docker Services', icon: Box, badge: 0, group: 'System' },
     { path: '/dev-servers', label: 'Dev Servers', icon: Server, badge: 0, group: 'System' },
+    { path: '/workspace', label: 'Workspace', icon: FolderTree, badge: 0, group: 'System' },
     // Not /health: the server answers that path itself for its health check.
     { path: '/machines', label: 'Health', icon: Stethoscope, badge: 0, group: 'System' },
     { path: '/issues', label: 'DOCK Issues', icon: Bug, badge: 0, group: 'System' },
