@@ -291,7 +291,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
       {session && !hideMachine && !compact && <div className="flex flex-none items-center gap-2 border-b border-border bg-surface-0 px-3.5 py-1.5 font-mono text-[0.66rem] text-muted-foreground"><span>Runs on</span><MachineChip name={machine} online={machineUp} /></div>}
       {session && !compact && <SessionHeader session={session} showTitle={!hideMachine} />}
       {session && renderHeader?.({ control, dot, status: ownStatus, session, busy, turnStartedAt })}
-      <div ref={scrollRef} onScroll={handleScroll} className="min-h-[6.5rem] flex-1 overflow-y-auto overscroll-contain px-3.5 py-3" role="log" aria-label="Conversation">
+      <div ref={scrollRef} onScroll={handleScroll} className={cn('flex-1 overflow-y-auto overscroll-contain px-3.5 py-3', interactions.cards.length > 0 ? 'min-h-0' : 'min-h-[6.5rem]')} role="log" aria-label="Conversation">
         {loadingOlder && <p className="pb-2 text-center font-mono text-[0.66rem] text-muted-foreground" role="status">Loading older messages...</p>}
         {!loaded && !loadError && !missing && <p className="py-6 text-center text-sm text-muted-foreground" role="status">Loading the conversation...</p>}
         {missing && <p className="py-6 text-center text-pretty text-sm text-muted-foreground">This session no longer exists. Close this tab or pick another session.</p>}

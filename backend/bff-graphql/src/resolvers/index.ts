@@ -7,7 +7,7 @@ import { shouldRequirePin, type AuthContext } from '../auth/session';
 import { CalendarUnavailableError, googleCalendarService } from '../integrations/google-calendar';
 import { upstreamMonitorService } from '../integrations/upstream-monitor';
 import { dockerRuntimeService } from '../integrations/docker-runtime';
-import { OrchestratorInputError, attentionItems, normalizeTicketKey, orchestratorService } from '../integrations/orchestrator';
+import { OrchestratorInputError, attentionItems, normalizeTicketKey, orchestratorService, type Orchestration } from '../integrations/orchestrator';
 import { CHAT_MACHINE, chatService } from '../integrations/chat';
 import { isSettledStatus, mergeAttention, withoutSettledTickets } from '../integrations/attention';
 import { discordGateway, discordReader } from '../integrations/discord-reader-live';
@@ -25,7 +25,7 @@ import { WorkspaceFilesError, workspaceFiles } from '../integrations/workspace-f
 import { elevenLabsKeys } from '../integrations/elevenlabs-keys';
 import { broadcastDeps, sendBroadcast } from '../integrations/broadcast';
 import { ReviewApprovalError, approvalRecords, lgtmReview } from '../integrations/review-approval';
-import { decisionGate } from '../integrations/decision-gate';
+import { decisionGate, heldWaiting } from '../integrations/decision-gate';
 import { doctorReports } from '../integrations/doctor';
 import { claudeUsage } from '../integrations/claude-usage';
 import { claudeAccounts, claudeAccountsState, cycleAvailable } from '../integrations/claude-accounts-live';
@@ -402,6 +402,7 @@ export const resolvers = {
   Orchestration: {
     approved: async (parent: { key: string }) => approvalRecords.approved(parent.key).catch(() => false),
     confirmedDecisions: async (parent: { key: string }) => decisionGate.confirmed(parent.key).catch(() => []),
+    waiting: async (parent: Orchestration) => heldWaiting(parent, await decisionGate.confirmed(parent.key).catch(() => [])),
     events: async (parent: { key: string }) => orchestratorService.events(parent.key),
     timeline: async (parent: { key: string }) => orchestratorService.timeline(parent.key),
     members: async (parent: { key: string }) => orchestratorService.members(parent.key).catch(() => []),

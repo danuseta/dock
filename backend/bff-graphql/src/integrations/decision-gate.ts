@@ -22,6 +22,15 @@ export function ownerPending(run: Pick<Orchestration, 'issues' | 'decisions'>, c
   };
 }
 
+/** A build on production data whose draft pull requests wait only on the owner marking them ready: the gate never does. */
+export const PRODUCTION_DATA_HELD = 'Production data: nothing waits on sous. Mark the draft pull requests ready yourself.';
+
+export function heldWaiting(run: Pick<Orchestration, 'kind' | 'productionData' | 'draft' | 'prBe' | 'prFe' | 'issues' | 'decisions' | 'waiting'>, confirmed: number[]): string | null {
+  if (run.kind !== 'build' || !run.productionData || !run.draft || (!run.prBe && !run.prFe)) return run.waiting;
+  const pending = ownerPending(run, confirmed);
+  return pending.issues.length || pending.decisions.length ? run.waiting : PRODUCTION_DATA_HELD;
+}
+
 export interface GateDeps {
   getCache(namespace: string, key: string): Promise<unknown>;
   upsertCache(namespace: string, key: string, value: unknown, ttlSeconds?: number): PromiseLike<unknown>;
