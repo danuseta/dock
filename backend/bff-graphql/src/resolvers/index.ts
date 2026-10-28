@@ -21,6 +21,7 @@ import { pushService } from '../integrations/push';
 import { demoVideos, withTitles } from '../integrations/demo-videos';
 import { demoStorage, type DemoStorageInput } from '../integrations/demo-storage';
 import { DevServerError, devServers } from '../integrations/dev-servers';
+import { WorkspaceFilesError, workspaceFiles } from '../integrations/workspace-files';
 import { elevenLabsKeys } from '../integrations/elevenlabs-keys';
 import { broadcastDeps, sendBroadcast } from '../integrations/broadcast';
 import { ReviewApprovalError, approvalRecords, lgtmReview } from '../integrations/review-approval';
@@ -127,6 +128,17 @@ function requireWorkspace(): void {
   }
 }
 
+function requireWorkspaceFiles(): void {
+  if (dockMode() !== 'workspace') {
+    throw new GraphQLError('The workspace folders are browsed on the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });
+  }
+}
+
+function workspaceFilesError(error: unknown): never {
+  if (error instanceof WorkspaceFilesError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+  throw error;
+}
+
 function devServerError(error: unknown): never {
   if (error instanceof DevServerError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
   throw error;
@@ -171,6 +183,14 @@ export const resolvers = {
     dockIssues: async (_: unknown, { filter }: { filter: 'OPEN' | 'CLOSED' | 'MINE' }) => githubAPI.listDockIssues(filter),
     dockIssue: async (_: unknown, { number }: { number: number }) => githubAPI.getDockIssue(number),
     dockIssueDraftUrl: (_: unknown, draft: IssueDraft) => draftUrl(issuesRepo(), draft, issueEnvironment(draft.page)),
+    workspaceDir: async (_: unknown, { path }: { path?: string | null }) => {
+      requireWorkspaceFiles();
+      return workspaceFiles.dir(path).catch(workspaceFilesError);
+    },
+    workspaceFile: async (_: unknown, { path }: { path: string }) => {
+      requireWorkspaceFiles();
+      return workspaceFiles.file(path).catch(workspaceFilesError);
+    },
     ownerName: () => reporterName(),
     dashboard: async () => {
       // Scatter-gather parallel fetching
@@ -731,7 +751,7 @@ export const protectedQueries = [
   'chatSessions', 'chatSession', 'chatSessionStates', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'agentLooks', 'libraryAgents', 'libraryAgent',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
-  'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl',
+  'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile',
 ] as const;
 export const protectedMutations = [
   'saveDemoLink',

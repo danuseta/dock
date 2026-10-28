@@ -21,6 +21,7 @@ import DevServersPage from './pages/DevServersPage';
 import HealthPage from './pages/HealthPage';
 import SessionsPage from './pages/SessionsPage';
 import SprintPage from './pages/SprintPage';
+import WorkspacePage from './pages/WorkspacePage';
 import { PageBoundary } from './components/PageBoundary';
 import { PinLockModal } from './components/PinLockModal';
 import { SetPinScreen } from './components/SetPinScreen';
@@ -60,7 +61,7 @@ function App() {
       const key = decodeURIComponent(path.split('/').pop() || '');
       return { path: '/ticket', key: key || null };
     }
-    if (path === '/dashboard' || path === '/agents' || path === '/blackboard' || path === '/guide' || path === '/sessions' || path === '/calendar' || path === '/sprint' || path === '/monitoring' || path === '/docker' || path === '/demo-videos' || path === '/dev-servers' || path === '/machines' || path === '/decisions' || path === '/discord' || path === '/issues' || path === '/changes' || path === '/settings') {
+    if (path === '/dashboard' || path === '/agents' || path === '/blackboard' || path === '/guide' || path === '/sessions' || path === '/calendar' || path === '/sprint' || path === '/monitoring' || path === '/docker' || path === '/demo-videos' || path === '/dev-servers' || path === '/machines' || path === '/decisions' || path === '/discord' || path === '/issues' || path === '/changes' || path === '/workspace' || path === '/settings') {
       return { path, key: null };
     }
     return { path: '/', key: null };
@@ -142,6 +143,7 @@ function App() {
       case '/discord': return <DiscordPage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;
       case '/issues': return <DockIssuesPage onNavigate={handleNavigate} />;
       case '/changes': return <Suspense fallback={<Page width="full"><LoadingSkeleton /></Page>}><ChangesPage onNavigate={handleNavigate} onTicketClick={navigateToTicket} /></Suspense>;
+      case '/workspace': return <WorkspacePage />;
       case '/settings': return <SettingsPage />;
       case '/ticket': return selectedTicketKey ? <TicketDetailPage ticketKey={selectedTicketKey} onBack={() => handleNavigate('/dashboard')} onNavigate={handleNavigate} /> : <DashboardPage onTicketClick={navigateToTicket} />;
       default: return <HomePage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;

@@ -6,7 +6,7 @@ import type { AgentRun } from '../agents/runs';
 import { AnswerSheet } from '../decisions/AnswerSheet';
 import { QuestionView } from '../decisions/QuestionView';
 import { TicketList } from '../decisions/TicketList';
-import { KEEP, KEEP_EFFECT, OWN, answerText, questionCount, questionsOf, submissionOf, unansweredGuesses, type Draft } from '../decisions/questions';
+import { KEEP, KEEP_EFFECT, OWN, answerText, liveDrafts, questionCount, readyToSubmit, questionsOf, staleSent, submissionOf, unansweredGuesses, type Draft } from '../decisions/questions';
 import { homeAttention, ticketAttention, ticketQuestions } from '../lib/attention';
 
 const issue = (n: number, level: string, status = 'open', options: string[] = [], effects?: Array<string | null>) => ({ n, at: '', type: 'QUESTION', text: `Issue ${n}`, level, status, options, effects });
@@ -145,4 +145,28 @@ test('the ticket list is one line per ticket and lays out the open ticket like a
   assert.match(html, /aria-current="step"[^>]*>2</);
   assert.match(html, />1\/3</);
   assert.match(html, />0\/1</);
+});
+
+test('a sent answer opens again once sous had its turn and still asks the question, and the sheet says why Submit waits', () => {
+  const sent: Draft = { choice: 'o0', text: '', unsure: false, sent: true, sentAt: '2026-10-28T04:52:00.000Z' };
+  const after = { activity: 'IDLE', updatedAt: '2026-10-28T05:10:00.000Z' };
+  assert.strictEqual(staleSent(sent, after), true, 'the ledger changed after the send and sous is idle');
+  assert.strictEqual(staleSent(sent, { ...after, activity: 'ACTIVE' }), false, 'sous is still working on it');
+  assert.strictEqual(staleSent(sent, { activity: 'IDLE', updatedAt: '2026-10-28T04:50:00.000Z' }), false, 'sous has not had its turn yet');
+  assert.strictEqual(staleSent({ ...sent, sentAt: undefined }, { activity: 'IDLE', updatedAt: '' }), true, 'a send without a time is old');
+  assert.strictEqual(staleSent({ choice: 'o0', text: '', unsure: false }, after), false, 'an unsent draft');
+  assert.deepStrictEqual(liveDrafts({ 'I-3': sent }, after), { 'I-3': { choice: 'o0', text: '', unsure: false } }, 'the answer stays, ready to send again');
+
+  const questions = questionsOf(run).slice(0, 1);
+  const html = renderToStaticMarkup(<AnswerSheet run={run} questions={questions} drafts={{ 'I-3': sent }} submitting={false} error={null} readOnly={null} onOpen={() => undefined} onKeepAll={() => undefined} onSubmit={() => undefined} />);
+  assert.match(html, /Nothing new to submit: one answer was sent and sous has not settled it yet\./);
+});
+
+test('Ready to submit needs every question answered and at least one answer not sent yet', () => {
+  const questions = questionsOf(run).slice(0, 2);
+  const keep: Draft = { choice: KEEP, text: '', unsure: false };
+  const refresh: Draft = { choice: 'o0', text: '', unsure: false };
+  assert.strictEqual(readyToSubmit(questions, { 'I-3': refresh, 'D-4': keep }), true);
+  assert.strictEqual(readyToSubmit(questions, { 'I-3': refresh }), false, 'one question is open');
+  assert.strictEqual(readyToSubmit(questions, { 'I-3': { ...refresh, sent: true }, 'D-4': { ...keep, sent: true } }), false, 'everything was sent already');
 });

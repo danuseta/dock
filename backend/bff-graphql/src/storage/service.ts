@@ -481,7 +481,7 @@ export class StorageService {
     return this.db.chatMessage.deleteMany({ where: { sessionId } });
   }
 
-  createChatMessage(data: { sessionId: string; role: string; text: string; state: string; at: Date; options?: string | null }) {
+  createChatMessage(data: { sessionId: string; role: string; text: string; state: string; at: Date; options?: string | null; cronSlot?: boolean }) {
     return this.db.chatMessage.create({ data });
   }
 
@@ -681,15 +681,18 @@ export class StorageService {
   }
 
   async getQueuedChatMessages(machine: string, take: number) {
-    const rows = await this.db.$queryRaw<Array<{ id: number | bigint; sessionId: string; text: string; options: string | null; origin: string }>>(Prisma.sql`
-      SELECT m."id", m."sessionId", m."text", m."options", s."origin" FROM "ChatMessage" m
+    const rows = await this.db.$queryRaw<Array<{ id: number | bigint; sessionId: string; text: string; options: string | null; origin: string; cronSlot: number | bigint | boolean }>>(Prisma.sql`
+      SELECT m."id", m."sessionId", m."text", m."options", s."origin", m."cronSlot" FROM "ChatMessage" m
       JOIN "ChatSession" s ON s."id" = m."sessionId"
       WHERE m."state" = 'queued' AND m."role" = 'user' AND s."source" = 'dock' AND s."machine" = ${machine}
       ORDER BY m."id" ASC LIMIT ${take}`);
-    return rows.map((row) => ({ id: Number(row.id), sessionId: row.sessionId, text: row.text, options: row.options, origin: row.origin }));
+    return rows.map((row) => ({ id: Number(row.id), sessionId: row.sessionId, text: row.text, options: row.options, origin: row.origin, cronSlot: Boolean(Number(row.cronSlot)) }));
   }
 
-  /** Cron sessions on a machine with a running turn (busy), and those with a user message queued and no running turn (waiting). */
+  /**
+   * Cron sessions on a machine with a running turn (busy), and those with a user message queued and no running turn (waiting).
+   * Only messages that take a cron slot count: an owner reply or a review waits for Turns at once instead.
+   */
   async countCronSlots(machine: string): Promise<{ busy: number; waiting: number }> {
     const [row] = await this.db.$queryRaw<Array<{ busy: number | bigint; waiting: number | bigint }>>(Prisma.sql`
       SELECT
@@ -697,7 +700,7 @@ export class StorageService {
         COUNT(DISTINCT CASE WHEN m."state" = 'queued' AND m."role" = 'user'
           AND NOT EXISTS (SELECT 1 FROM "ChatMessage" t WHERE t."sessionId" = s."id" AND t."state" = 'taken') THEN s."id" END) AS "waiting"
       FROM "ChatSession" s JOIN "ChatMessage" m ON m."sessionId" = s."id"
-      WHERE s."origin" = 'cron' AND s."source" = 'dock' AND s."machine" = ${machine} AND m."state" IN ('taken', 'queued')`);
+      WHERE s."origin" = 'cron' AND s."source" = 'dock' AND s."machine" = ${machine} AND m."state" IN ('taken', 'queued') AND m."cronSlot" = 1`);
     return { busy: Number(row?.busy ?? 0), waiting: Number(row?.waiting ?? 0) };
   }
 

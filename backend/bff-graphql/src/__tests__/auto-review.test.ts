@@ -46,7 +46,7 @@ test('the owner\'s on it in a pr-review thread starts one Review session for the
   assert.strictEqual(await on.review.tick(), 1);
   assert.deepStrictEqual(on.records.map((record) => [record.prUrl, record.headSha, record.ticketKey, record.sessionId]), [[PR, 'abc1234', 'QRD-1473', 's1']]);
   assert.strictEqual(on.opened[0].key, 'QRD-1473');
-  assert.strictEqual(on.opened[0].prompt, reviewPrompt('QRD-1473', PR, 'https://discord.com/channels/g/t1'));
+  assert.strictEqual(on.opened[0].prompt, reviewPrompt('QRD-1473', [PR], 'https://discord.com/channels/g/t1'));
   assert.match(on.opened[0].prompt, /Jangan komentar di PR, Jira, atau Discord/);
   assert.strictEqual(await on.review.tick(), 0, 'a second look, or the same on it again, starts nothing');
 
@@ -131,4 +131,22 @@ test('a blocker or a request change is handed to the owner; a resolved blocker d
   await ignored.review.ledger(verdict({ key: 'QRD-9' }));
   assert.strictEqual(ignored.records[0].status, 'running');
   assert.deepStrictEqual(ignored.approved, []);
+});
+
+const FE = 'https://github.com/qonekid/ms-client-dashboard-frontend/pull/88';
+
+test('a thread with a BE and an FE pull request starts one Review session for both, and its verdict settles both records', async () => {
+  const w = world({ autoLgtm: true, rows: [row({ prs: [`${PR}/files`, FE, PR] })] });
+  assert.strictEqual(await w.review.tick(), 1);
+  assert.strictEqual(w.opened.length, 1, 'one session for the ticket');
+  assert.strictEqual(w.opened[0].prompt, reviewPrompt('QRD-1473', [PR, FE], 'https://discord.com/channels/g/t1'));
+  assert.deepStrictEqual(w.records.map((record) => [record.prUrl, record.sessionId]), [[PR, 's1'], [FE, 's1']]);
+  await w.review.ledger(verdict());
+  assert.deepStrictEqual(w.approved, ['QRD-1473'], 'one LGTM for the ticket');
+  assert.deepStrictEqual(w.records.map((record) => record.status), ['lgtm', 'lgtm']);
+  assert.strictEqual(w.pushes.length, 1);
+
+  const failing = world({ failOpen: true, rows: [row({ prs: [PR, FE] })] });
+  assert.strictEqual(await failing.review.tick(), 0);
+  assert.deepStrictEqual(failing.records.map((record) => record.status), ['failed', 'failed']);
 });

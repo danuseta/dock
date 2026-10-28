@@ -141,6 +141,8 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'ticketChanges',
       'ticketDetail',
       'ticketRelationGroup',
+      'workspaceDir',
+      'workspaceFile',
     ]);
     assert.deepStrictEqual(mutationFields, [
       'addDiscordChannel',

@@ -16,7 +16,10 @@ export interface ChatDefaultsValue {
   rtk: RtkSetting;
   caveman: CavemanLevel;
   turns: string;
+  ownerReply: string;
 }
+
+const OWNER_REPLY_CHOICES: Choice[] = [{ value: 'new', label: 'A new session' }, { value: 'last', label: "The ticket's last Task session" }];
 
 const TURN_CHOICES: Choice[] = [{ value: '', label: "The bridge's own setting" }, ...['1', '2', '3', '4', '5', '6'].map((n) => ({ value: n, label: n }))];
 
@@ -54,6 +57,7 @@ export const ChatDefaultsSection: React.FC<ChatDefaultsSectionProps> = ({ value,
       </SettingRow>
       <ChoiceField label="Caveman" help="How terse the agent writes." value={value.caveman} choices={cavemanChoices()} onPick={(caveman) => onChange({ ...value, caveman: normalizeCaveman(caveman) })} />
       <ChoiceField label="Turns at once" help="How many chat turns a bridge runs together. A message past that waits in the queue. Applies within 15 seconds; a running turn is never stopped." value={value.turns} choices={TURN_CHOICES} onPick={(turns) => onChange({ ...value, turns })} />
+      <ChoiceField label="Answers to sous" help="Where an answer to an I-n or a changed D-n goes. The last Task session queues it behind its running turn; with no Task session yet, a new one opens. Owner answers and reviews wait only for Turns at once, never for a cron slot." value={value.ownerReply} choices={OWNER_REPLY_CHOICES} onPick={(ownerReply) => onChange({ ...value, ownerReply })} />
     </SettingsCard>
   );
 };

@@ -224,6 +224,8 @@ model ChatMessage {
   options         String?
   takenAt         DateTime?
   stopRequestedAt DateTime?
+  /// False for an owner reply or a review in a cron session: it waits only for Turns at once, not for a cron slot.
+  cronSlot        Boolean   @default(true)
 
   @@index([sessionId, id])
   @@index([state])

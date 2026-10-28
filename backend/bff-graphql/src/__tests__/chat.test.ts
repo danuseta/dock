@@ -93,10 +93,10 @@ function memoryStorage() {
         const session = sessions.get(message.sessionId);
         return message.state === 'queued' && message.role === 'user' && session?.source === 'dock' && session.machine === machine;
       })
-      .slice(0, take).map((message) => ({ id: message.id, sessionId: message.sessionId, text: message.text, origin: sessions.get(message.sessionId)?.origin ?? 'manual' })),
+      .slice(0, take).map((message) => ({ id: message.id, sessionId: message.sessionId, text: message.text, origin: sessions.get(message.sessionId)?.origin ?? 'manual', cronSlot: message.cronSlot !== false })),
     countCronSlots: async (machine: string) => {
       const cron = [...sessions.values()].filter((session) => session.origin === 'cron' && session.source === 'dock' && session.machine === machine);
-      const has = (id: string, state: string) => ofSession(id).some((message) => message.state === state);
+      const has = (id: string, state: string) => ofSession(id).some((message) => message.state === state && message.cronSlot !== false);
       return { busy: cron.filter((session) => has(session.id, 'taken')).length, waiting: cron.filter((session) => has(session.id, 'queued') && !has(session.id, 'taken')).length };
     },
     moveChatMessage: async (id: number, sessionId: string, from: string, to: string) => {
@@ -886,6 +886,21 @@ test('claim: a cron message waits while every cron slot is in use and runs in th
 
   for (const message of memory.messages()) if (message.sessionId === a.id && message.state === 'taken') message.state = 'done';
   assert.strictEqual((await chat.claim({ wait: 0 }, undefined, 'workspace')).message?.sessionId, answered.id, 'the first free slot goes to the answer');
+});
+
+test('claim: an owner reply or a review in a cron session takes no cron slot, and does not fill one', async () => {
+  const memory = memoryStorage();
+  const chat = new ChatService(memory.storage, () => new Date('2026-10-14T03:00:00.000Z'), async () => undefined);
+  chat.cronLimit = async () => 1;
+  const open = (ticketKey: string) => chat.createSession({ machine: 'workspace', ticketKey, title: ticketKey, origin: 'cron' });
+  const [build, reply, next] = await Promise.all([open('QRD-1'), open('QRD-2'), open('QRD-3')]);
+  await chat.sendMessage(build.id, 'build', ['workspace']);
+  assert.strictEqual((await chat.claim({ wait: 0 }, undefined, 'workspace')).message?.sessionId, build.id);
+  await chat.sendMessage(reply.id, 'Jawaban owner untuk I-2: Drop', ['workspace'], { cronSlot: false });
+  assert.strictEqual((await chat.claim({ wait: 0 }, undefined, 'workspace')).message?.sessionId, reply.id, 'the reply runs beside the full cron');
+  for (const message of memory.messages()) if (message.sessionId === build.id && message.state === 'taken') message.state = 'done';
+  await chat.sendMessage(next.id, 'build', ['workspace']);
+  assert.strictEqual((await chat.claim({ wait: 0 }, undefined, 'workspace')).message?.sessionId, next.id, 'the running reply leaves the cron slot free');
 });
 
 test('a cron session keeps the options the cron sends, so it shows Auto; a manual session keeps its defaults', async () => {

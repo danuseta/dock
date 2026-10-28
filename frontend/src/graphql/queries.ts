@@ -289,6 +289,7 @@ export const GET_SETTINGS = gql`
       chatRtk
       chatCaveman
       chatParallelTurns
+      ownerReplySession
       notificationPrefs
     }
   }
@@ -1206,5 +1207,22 @@ export const GET_PULL_FILE_PATCH = gql`
 export const GET_PULL_FILE_LINES = gql`
   query GetPullFileLines($ticketKey: String!, $url: String!, $path: String!, $ref: String!, $from: Int!, $to: Int!) {
     pullFileLines(ticketKey: $ticketKey, url: $url, path: $path, ref: $ref, from: $from, to: $to)
+  }
+`;
+
+export const GET_WORKSPACE_DIR = gql`
+  query GetWorkspaceDir($path: String) {
+    workspaceDir(path: $path) {
+      path
+      parent
+      truncated
+      entries { name path kind size modifiedAt masked }
+    }
+  }
+`;
+
+export const GET_WORKSPACE_FILE = gql`
+  query GetWorkspaceFile($path: String!) {
+    workspaceFile(path: $path) { path size modifiedAt masked binary truncated text }
   }
 `;
