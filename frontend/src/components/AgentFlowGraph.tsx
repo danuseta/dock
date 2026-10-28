@@ -5,6 +5,7 @@ import { formatDuration } from '../chat/activity/activity';
 import { useNow } from '../chat/activity/useNow';
 import { cn } from '../lib/cn';
 import '../agents/flow/flow.css';
+import { ThinkingColumn } from '../agents/ThinkingColumn';
 
 const NAMES_Y = 50;
 const FIRST_ROW_Y = 90;
@@ -17,7 +18,6 @@ const AHEAD_STROKE = 'oklch(0.30 0 0)';
 const BACK_STROKE = 'oklch(0.65 0.16 25)';
 
 const stateLabel: Record<string, string> = { active: 'working', waiting: 'waiting on you', idle: 'idle', done: 'done' };
-const logTone: Record<string, string> = { stage: 'text-accent', gate: 'text-amber-200', ok: 'text-status-merged', tool: 'text-[oklch(0.75_0.11_220)]' };
 
 const footerText = (agent: TimelineAgent, supervising?: boolean) => {
   if (agent.tool) return agent.tool;
@@ -26,8 +26,17 @@ const footerText = (agent: TimelineAgent, supervising?: boolean) => {
   return stateLabel[agent.state] || agent.state;
 };
 
-const AgentBox: React.FC<{ agent: TimelineAgent; x: number; y: number; small: boolean; supervising?: boolean }> = ({ agent, x, y, small, supervising }) => (
-  <div className={cn('dock-flow-node dock-flow-agent', `is-${agent.state}`, small && 'is-small')} style={{ left: `${x / 10}%`, top: y }}>
+const AgentBox: React.FC<{ agent: TimelineAgent; x: number; y: number; small: boolean; supervising?: boolean; picked?: boolean; onPick?: (name: string) => void }> = ({ agent, x, y, small, supervising, picked, onPick }) => (
+  <div
+    className={cn('dock-flow-node dock-flow-agent', `is-${agent.state}`, small && 'is-small', onPick && 'cursor-pointer', picked && 'is-picked-agent')}
+    style={{ left: `${x / 10}%`, top: y }}
+    role={onPick ? 'button' : undefined}
+    tabIndex={onPick ? 0 : undefined}
+    aria-pressed={onPick ? Boolean(picked) : undefined}
+    aria-label={onPick ? `Show only ${agent.name} in Thinking` : undefined}
+    onClick={onPick ? () => onPick(agent.name) : undefined}
+    onKeyDown={onPick ? (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onPick(agent.name); } } : undefined}
+  >
     <header><i aria-hidden="true" /><span>{agent.name}</span></header>
     <p>{agent.detail || (agent.parentId ? 'team member' : 'main session')}</p>
     <footer><span>{footerText(agent, supervising)}</span><span>{agent.tools} {agent.tools === 1 ? 'tool' : 'tools'}</span></footer>
@@ -44,6 +53,8 @@ interface AgentFlowGraphProps { run: AgentRun; timeline: AgentTimeline }
 export const AgentFlowGraph: React.FC<AgentFlowGraphProps> = ({ run, timeline }) => {
   const [picked, setPicked] = useState<number | null>(null);
   const [allRounds, setAllRounds] = useState(false);
+  const [agentPick, setAgentPick] = useState<string | null>(null);
+  const pickAgent = (name: string) => setAgentPick((current) => (current === name ? null : name));
   // A cron run never stops at GATE 1, so its rail starts at Plan.
   const skip = timeline.hasGate ? 0 : 1;
   const stops = FLOW_RAIL.slice(skip);
@@ -93,7 +104,7 @@ export const AgentFlowGraph: React.FC<AgentFlowGraphProps> = ({ run, timeline })
   const children = agents.filter((agent) => agent.parentId && agent.parentId === root?.id);
   const leaves = children.flatMap((child) => agents.filter((agent) => agent.parentId === child.id));
   const spread = (count: number, centre: number) => {
-    const span = count > 3 ? Math.min(172, 810 / Math.max(1, count - 1)) : 190;
+    const span = count > 3 ? Math.min(200, 810 / Math.max(1, count - 1)) : 250;
     const first = Math.max(95, Math.min(905 - (count - 1) * span, centre - ((count - 1) * span) / 2));
     return (index: number) => first + index * span;
   };
@@ -112,13 +123,12 @@ export const AgentFlowGraph: React.FC<AgentFlowGraphProps> = ({ run, timeline })
   const parentX = (agent: TimelineAgent) => childX(Math.max(0, children.findIndex((child) => child.id === agent.parentId)));
   const maxBucket = Math.max(3, ...timeline.buckets.map((bucket) => bucket.n));
   const busy = root?.state === 'active' && !looking;
-  const log = looking ? timeline.log.filter((entry) => inVisit(entry.at, shown)) : timeline.log;
   const shownWhen = [shown.from, shown.to].every(Boolean)
     ? `${new Date(shown.from as string).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}–${new Date(shown.to as string).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`
     : null;
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_300px] max-[1120px]:grid-cols-1">
+    <div className="grid grid-cols-[minmax(0,3fr)_minmax(0,2fr)] max-[1120px]:grid-cols-1">
       <div className="dock-flow-wrap">
         <div className="dock-flow" style={{ height }} role="group" aria-label={`Flow of ${run.key}: stage ${stopName(current)}, round ${last.round}, ${timeline.agents.length} agents, ${timeline.totalTools} tool calls`}>
           <svg viewBox={`0 0 1000 ${height}`} preserveAspectRatio="none" aria-hidden="true">
@@ -229,9 +239,9 @@ export const AgentFlowGraph: React.FC<AgentFlowGraphProps> = ({ run, timeline })
             </div>
           )}
 
-          {root && <AgentBox agent={root} x={rootX} y={rootY} small={false} />}
-          {children.map((child, index) => <AgentBox key={child.id} agent={child} x={childX(index)} y={childY} small={small} supervising={leaves.some((leaf) => leaf.parentId === child.id && leaf.state === 'active')} />)}
-          {leaves.map((leaf, index) => <AgentBox key={leaf.id} agent={leaf} x={leafX(index)} y={leafY(index)} small={small} />)}
+          {root && <AgentBox agent={root} x={rootX} y={rootY} small={false} picked={agentPick === root.name} onPick={pickAgent} />}
+          {children.map((child, index) => <AgentBox key={child.id} agent={child} x={childX(index)} y={childY} small={small} supervising={leaves.some((leaf) => leaf.parentId === child.id && leaf.state === 'active')} picked={agentPick === child.name} onPick={pickAgent} />)}
+          {leaves.map((leaf, index) => <AgentBox key={leaf.id} agent={leaf} x={leafX(index)} y={leafY(index)} small={small} picked={agentPick === leaf.name} onPick={pickAgent} />)}
 
           <div className="dock-flow-strip">
             <div><span>tool activity · 5 s per bar</span><span>{timeline.totalTools} tool calls</span></div>
@@ -244,22 +254,15 @@ export const AgentFlowGraph: React.FC<AgentFlowGraphProps> = ({ run, timeline })
         </div>
       </div>
 
-      <div style={{ maxHeight: height }} className="overflow-y-auto border-l border-border bg-surface-0 p-4 max-[1120px]:max-h-none max-[1120px]:border-t max-[1120px]:border-l-0">
-        <p className="mb-1 font-mono text-[0.66rem] font-bold uppercase tracking-[0.1em] text-muted-foreground">{looking ? `Events in ${stopName(shown.stageIndex)} · R${shown.round}` : 'Latest events'}</p>
-        {log.length === 0 && (
-          <p className="text-pretty text-sm text-muted-foreground">
-            {looking ? 'The log keeps only the newest events, so none from this stop are left. The team is still shown on the left.' : 'Nothing reported yet. Tool calls appear here once the hook on your laptop is running for this ticket.'}
-          </p>
-        )}
-        <ol className="flex flex-col">
-          {log.map((entry, index) => (
-            <li className="grid grid-cols-[58px_1fr] gap-2 border-b border-border py-[5px] text-[0.78rem] last:border-b-0" key={`${entry.at}-${index}`}>
-              <time className="pt-px font-mono text-[0.68rem] text-muted-foreground tabular-nums" dateTime={entry.at}>{new Date(entry.at).toLocaleTimeString('en-GB')}</time>
-              <span className="min-w-0 break-words"><b className={cn('font-mono text-[0.72rem] font-bold', logTone[entry.kind])}>{entry.head}</b> {entry.text}</span>
-            </li>
-          ))}
-        </ol>
-      </div>
+      <ThinkingColumn
+        runKey={run.key}
+        review={run.kind === 'review'}
+        visit={looking ? { stageIndex: shown.stageIndex, round: shown.round } : null}
+        agent={agentPick}
+        onClearVisit={() => setPicked(null)}
+        onClearAgent={() => setAgentPick(null)}
+        maxHeight={height}
+      />
     </div>
   );
 };

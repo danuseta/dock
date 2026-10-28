@@ -666,6 +666,45 @@ export const GET_ORCHESTRATIONS = gql`
   }
 `;
 
+export const GET_RUN_THINKING = gql`
+  query GetRunThinking($key: String!) {
+    runThinking(key: $key) { id at stageIndex round agent kind topic text answer options { label why chosen } flag }
+  }
+`;
+
+export const GET_RUN_THINKING_RAW = gql`
+  query GetRunThinkingRaw($key: String!, $at: String!, $until: String) {
+    runThinkingRaw(key: $key, at: $at, until: $until) { at agent kind text }
+  }
+`;
+
+export const GET_RETRO = gql`
+  query GetRetro($sprintId: Int) {
+    retro(sprintId: $sprintId) {
+      sprint
+      sprintId
+      previous
+      numbers { tickets medianHours fixRounds replans ownerIssues medianOwnerWaitHours reviews requestChanges }
+      previousNumbers { tickets medianHours fixRounds replans ownerIssues medianOwnerWaitHours reviews requestChanges }
+      problems { label count tickets }
+      tickets { key title kind hours rounds issues ownerWaitHours result }
+      items { id kind text evidence dest status sessionId updatedAt }
+    }
+  }
+`;
+
+export const RETRO_BUILD = gql`
+  mutation RetroBuild($sprintId: Int!) {
+    retroBuild(sprintId: $sprintId)
+  }
+`;
+
+export const RETRO_ITEM_ACTION = gql`
+  mutation RetroItemAction($id: ID!, $action: String!, $text: String) {
+    retroItemAction(id: $id, action: $action, text: $text) { id kind text evidence dest status sessionId updatedAt }
+  }
+`;
+
 export const GET_ORCHESTRATION = gql`
   query GetOrchestration($key: String!) {
     orchestration(key: $key) {

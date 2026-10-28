@@ -130,7 +130,7 @@ test('orchestrator ledger parsing keeps only what DOCK shows', () => {
   assert.deepStrictEqual(parsed.decisions, []);
   const withBrief = parseLedger({ ...ledger, brief: 'line 1\nline 2', decisions: [{ at: '2026-10-04T08:00:00.000Z', text: 'use X' }, 'bad', { at: 'x' }, null] });
   assert.strictEqual(withBrief.brief, 'line 1\nline 2');
-  assert.deepStrictEqual(withBrief.decisions, [{ n: 1, at: '2026-10-04T08:00:00.000Z', text: 'use X', status: 'DECIDED', by: null, issue: null, cancelNote: null, effect: null, alts: [], replaces: null, supersededBy: null }], 'an old decision reads as D-1 with no author');
+  assert.deepStrictEqual(withBrief.decisions, [{ n: 1, at: '2026-10-04T08:00:00.000Z', text: 'use X', status: 'DECIDED', by: null, issue: null, cancelNote: null, effect: null, alts: [], replaces: null, supersededBy: null, author: null, question: null, rejected: [] }], 'an old decision reads as D-1 with no author');
   assert.deepStrictEqual(parsed.assumptions, []);
   assert.deepStrictEqual(parsed.failures, []);
   assert.strictEqual(parsed.closing, null);

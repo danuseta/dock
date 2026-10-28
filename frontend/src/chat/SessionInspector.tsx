@@ -1,6 +1,6 @@
 import React from 'react';
 import { useQuery } from '@apollo/client';
-import { ArrowRight, FileCode, FileDiff } from 'lucide-react';
+import { ArrowRight, FileCode, FileDiff, Workflow } from 'lucide-react';
 import type { AgentRun } from '../agents/runs';
 import { changesHref } from '../changes/href';
 import { GET_CHAT_SESSION, GET_ORCHESTRATION } from '../graphql/queries';
@@ -101,6 +101,7 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, cos
         </div>
       </section>
       <div className="mt-auto flex flex-col gap-4">
+        {ticketKey && onNavigate && run && <Button size="sm" variant="ghost" className="w-full max-[900px]:h-11" onClick={() => onNavigate(`/agents?run=${encodeURIComponent(ticketKey)}`)}><Workflow size={13} aria-hidden="true" />View flow</Button>}
         {ticketKey && onNavigate && changesRepo && <Button size="sm" variant="ghost" className="w-full max-[900px]:h-11" onClick={() => onNavigate(changesHref(ticketKey, changesRepo, 'sessions', session.id))}><FileDiff size={13} aria-hidden="true" />View changes</Button>}
         {ticketKey && onTicketClick && <Button size="sm" className="w-full max-[900px]:h-11" onClick={() => onTicketClick(ticketKey)}>Open ticket<ArrowRight size={13} aria-hidden="true" /></Button>}
       </div>

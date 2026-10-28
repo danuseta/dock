@@ -9,6 +9,8 @@ import { upstreamMonitorService } from '../integrations/upstream-monitor';
 import { dockerRuntimeService } from '../integrations/docker-runtime';
 import { OrchestratorInputError, attentionItems, normalizeTicketKey, orchestratorService, type Orchestration } from '../integrations/orchestrator';
 import { CHAT_MACHINE, chatService } from '../integrations/chat';
+import { retroApplyPrompt, retroNumbers, retroProblems, retroTickets } from '../integrations/retro';
+import { StorageService } from '../storage/service';
 import { isSettledStatus, mergeAttention, withoutSettledTickets } from '../integrations/attention';
 import { discordGateway, discordReader } from '../integrations/discord-reader-live';
 import { isTeamChannel } from '../integrations/discord-team';
@@ -42,6 +44,7 @@ const jiraAPI = new JiraAPI();
 const githubAPI = new GitHubAPI();
 const discordAPI = new DiscordAPI();
 const storageAPI = new StorageAPI();
+const storageService = new StorageService();
 const isPresent = <T>(value: T | null | undefined): value is T => value != null;
 
 async function discordThreadsView() {
@@ -77,6 +80,47 @@ const discordInputError = (error: unknown): never => {
   if (error instanceof ChannelInputError || error instanceof DiscordReaderError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
   throw error;
 };
+
+const retroItemView = (row: { id: string; kind: string; text: string; evidence: string; dest: string; status: string; sessionId: string | null; updatedAt: Date }) => {
+  let evidence: string[] = [];
+  try { evidence = JSON.parse(row.evidence); } catch { evidence = []; }
+  return { ...row, evidence: Array.isArray(evidence) ? evidence.map(String) : [], updatedAt: row.updatedAt.toISOString() };
+};
+
+/** The runs of one sprint, read from the sprint dashboard's issue list. */
+async function sprintRuns(sprintId: number) {
+  let keys: string[] = [];
+  try { keys = (JSON.parse(await sprintDashboardService.issueEvents(sprintId)) as Array<{ key?: unknown }>).map((issue) => String(issue.key)); } catch { keys = []; }
+  const wanted = new Set(keys);
+  return (await orchestratorService.list()).filter((run) => wanted.has(run.key));
+}
+
+async function retroView(sprintId?: number | null) {
+  const sprints = [...await sprintDashboardService.listSprints()].sort((a, b) => a.startDate.localeCompare(b.startDate));
+  const sprint = sprintId != null ? sprints.find((item) => item.id === sprintId) : sprints.find((item) => item.state === 'active') ?? sprints[sprints.length - 1];
+  if (!sprint) return null;
+  const previous = sprints[sprints.indexOf(sprint) - 1] ?? null;
+  const [runs, before, items] = await Promise.all([sprintRuns(sprint.id), previous ? sprintRuns(previous.id) : Promise.resolve(null), storageService.getRetroItems(sprint.name)]);
+  return {
+    sprint: sprint.name,
+    sprintId: sprint.id,
+    previous: previous?.name ?? null,
+    numbers: retroNumbers(runs),
+    previousNumbers: before ? retroNumbers(before) : null,
+    problems: retroProblems(runs),
+    tickets: retroTickets(runs),
+    items: items.map(retroItemView),
+  };
+}
+
+/** A new session on the workspace that runs one sous prompt, for the retro draft and for an accepted line. */
+async function runSousPrompt(title: string, text: string) {
+  requireAgentControls();
+  if (!(await orchestratorService.machines()).includes(CHAT_MACHINE)) throw new GraphQLError('The workspace is not connected', { extensions: { code: 'BAD_USER_INPUT' } });
+  const session = await chatService.createSession({ title, machine: CHAT_MACHINE }).catch(orchestratorInputError);
+  await chatService.sendMessage(session.id, text, await orchestratorService.machines()).catch(orchestratorInputError);
+  return session.id;
+}
 
 function orchestratorInputError(error: unknown): never {
   if (error instanceof OrchestratorInputError) {
@@ -183,6 +227,9 @@ export const resolvers = {
     dockIssues: async (_: unknown, { filter }: { filter: 'OPEN' | 'CLOSED' | 'MINE' }) => githubAPI.listDockIssues(filter),
     dockIssue: async (_: unknown, { number }: { number: number }) => githubAPI.getDockIssue(number),
     dockIssueDraftUrl: (_: unknown, draft: IssueDraft) => draftUrl(issuesRepo(), draft, issueEnvironment(draft.page)),
+    retro: (_: unknown, { sprintId }: { sprintId?: number | null }) => retroView(sprintId),
+    runThinking: async (_: unknown, { key }: { key: string }) => (await orchestratorService.thinking(key).catch(orchestratorInputError)) ?? [],
+    runThinkingRaw: (_: unknown, { key, at, until }: { key: string; at: string; until?: string | null }) => orchestratorService.thinkingRaw(key, at, until).catch(orchestratorInputError),
     workspaceDir: async (_: unknown, { path }: { path?: string | null }) => {
       requireWorkspaceFiles();
       return workspaceFiles.dir(path).catch(workspaceFilesError);
@@ -424,6 +471,25 @@ export const resolvers = {
   },
 
   Mutation: {
+    retroBuild: async (_: unknown, { sprintId }: { sprintId: number }) => {
+      const sprint = (await sprintDashboardService.listSprints()).find((item) => item.id === sprintId);
+      if (!sprint) throw new GraphQLError('Unknown sprint', { extensions: { code: 'BAD_USER_INPUT' } });
+      return runSousPrompt(`Retro-${sprint.name}`, `Pakai skill sous: retro ${sprint.name}`);
+    },
+    retroItemAction: async (_: unknown, { id, action, text }: { id: string; action: string; text?: string | null }) => {
+      const item = await storageService.getRetroItem(id);
+      if (!item) throw new GraphQLError('No such retro line', { extensions: { code: 'BAD_USER_INPUT' } });
+      if (action === 'edit') {
+        const next = (text ?? '').trim();
+        if (!next) throw new GraphQLError('The line needs text', { extensions: { code: 'BAD_USER_INPUT' } });
+        return retroItemView(await storageService.updateRetroItem(id, { text: next.slice(0, 1000) }));
+      }
+      if (action === 'close' || action === 'reopen') return retroItemView(await storageService.updateRetroItem(id, { status: action === 'close' ? 'closed' : 'open' }));
+      if (action !== 'accept') throw new GraphQLError('action must be accept, close, reopen or edit', { extensions: { code: 'BAD_USER_INPUT' } });
+      const view = retroItemView(item);
+      const sessionId = item.dest === 'note' ? null : await runSousPrompt(`Retro-apply-${item.sprint}`, retroApplyPrompt(view));
+      return retroItemView(await storageService.updateRetroItem(id, { status: 'accepted', sessionId }));
+    },
     workspaceMkdir: async (_: unknown, { path }: { path: string }) => {
       requireWorkspaceFiles();
       return workspaceFiles.mkdir(path).catch(workspaceFilesError);
@@ -764,9 +830,11 @@ export const protectedQueries = [
   'chatSessions', 'chatSession', 'chatSessionStates', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'agentLooks', 'libraryAgents', 'libraryAgent',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
-  'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile',
+  'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro',
 ] as const;
 export const protectedMutations = [
+  'retroBuild',
+  'retroItemAction',
   'workspaceMkdir',
   'workspaceRename',
   'workspaceDelete',
