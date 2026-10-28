@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { DecisionGate, PRODUCTION_DATA_HELD, heldWaiting, ownerPending, type GateDeps } from '../integrations/decision-gate';
+import { DecisionGate, PRODUCTION_DATA_HELD, heldWaiting, ownerPending, stillWorking, type GateDeps } from '../integrations/decision-gate';
 import { normalizeDecisions } from '../integrations/orchestrator';
 
 const decision = (n: number, status: string) => ({ n, at: '', text: `D${n}`, status, by: 'sous', issue: null, cancelNote: null, effect: null, alts: [], replaces: null, supersededBy: null }) as never;
@@ -107,4 +107,13 @@ test('a production-data build that waits on nobody but the owner says so, instea
   assert.strictEqual(heldWaiting({ ...run, issues: [{ n: 17, status: 'open' }] } as typeof run, [39]), run.waiting);
   assert.strictEqual(heldWaiting({ ...run, productionData: false }, [39]), run.waiting);
   assert.strictEqual(heldWaiting({ ...run, draft: false }, [39]), run.waiting);
+});
+
+test('nothing is released while sous works on the build: an answer just reopened it, or a permission prompt is open', async () => {
+  const w = world();
+  await w.gate.confirm(build(), [2, 3]);
+  assert.deepStrictEqual(await w.gate.settle(build({ activity: 'ACTIVE', activityDetail: 'Bash' })), [], 'a turn is under way');
+  assert.deepStrictEqual(await w.gate.settle(build({ activity: 'WAITING', activityDetail: 'notification' })), [], 'a prompt mid-turn');
+  assert.deepStrictEqual(await w.gate.settle(build({ activity: 'WAITING', activityDetail: 'gate' })), ['https://github.com/o/be/pull/1', 'https://github.com/o/fe/pull/2'], 'the ledger waits on the owner');
+  assert.strictEqual(stillWorking({ activity: 'IDLE', activityDetail: null }), false);
 });

@@ -9,7 +9,11 @@ const GUESSED = new Set(['GUESS', 'USULAN']);
 const GATE_CACHE = 'decision-gate';
 const PR_URL = /github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/;
 
-type GateRun = Pick<Orchestration, 'key' | 'kind' | 'productionData' | 'prBe' | 'prFe' | 'issues' | 'decisions'>;
+type GateRun = Pick<Orchestration, 'key' | 'kind' | 'productionData' | 'prBe' | 'prFe' | 'issues' | 'decisions'> & Partial<Pick<Orchestration, 'activity' | 'activityDetail'>>;
+
+/** A run sous is still working on: an owner's answer just reopened it, or a turn is under way. Its pull requests are not released. */
+export const stillWorking = (run: Partial<Pick<Orchestration, 'activity' | 'activityDetail'>>) =>
+  run.activity === 'ACTIVE' || (run.activity === 'WAITING' && run.activityDetail !== 'gate');
 interface GateRecord { confirmed: number[]; ready: string[] }
 
 export interface OwnerPending { issues: number[]; decisions: number[] }
@@ -49,7 +53,8 @@ const reason = (error: unknown) => {
 
 /**
  * The owner's confirmations of guessed decisions, and the gate that marks a build's draft pull requests ready once
- * every issue is answered and every guessed decision confirmed. A confirmation is only recorded: no session runs.
+* every issue is answered and every guessed decision confirmed, and only while sous is not working on the build. A
+ * confirmation is only recorded: no session runs.
  */
 export class DecisionGate {
   constructor(private readonly deps: GateDeps) {}
@@ -78,7 +83,7 @@ export class DecisionGate {
 
   /** Marks the build's draft pull requests ready when nothing waits on the owner. Returns the pull requests it marked. */
   async settle(run: GateRun): Promise<string[]> {
-    if (run.kind !== 'build' || run.productionData) return [];
+    if (run.kind !== 'build' || run.productionData || stillWorking(run)) return [];
     const record = await this.record(run.key);
     const urls = [run.prBe, run.prFe].filter((url): url is string => Boolean(url) && !record.ready.includes(url!));
     if (!urls.length) return [];

@@ -14,7 +14,7 @@ import {
 import { MachineChip } from './MachineControls';
 import { SessionHeader } from './SessionHeader';
 import { recallMessages, rememberMessages } from './messageCache';
-import type { ChatActivity } from './activity/activity';
+import { currentWorker, type ChatActivity } from './activity/activity';
 import { TranscriptList } from './activity/TranscriptList';
 import { useTurnActivity } from './activity/useTurnActivity';
 import { WorkerStrip, WorkerTray } from './activity/WorkerTray';
@@ -108,6 +108,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     onActivityRef.current = onActivity;
   }, [onActivity]);
   const allEvents = useMemo(() => [...activity.byTurn.values()].flat(), [activity.byTurn]);
+  const worker = useMemo(() => currentWorker(allEvents), [allEvents]);
   useEffect(() => {
     onActivityRef.current?.(allEvents);
   }, [allEvents]);
@@ -317,7 +318,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
 
       <div className="flex flex-col gap-1.5 border-t border-border bg-surface-0 px-3.5 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))]">
         {status === 'queued' && <p className="flex items-start gap-1.5 font-mono text-[0.68rem] text-amber-200" role="status"><Loader2 size={12} className="mt-0.5 flex-none animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">{queuedText(machine, queuedBehind)}</span></p>}
-        {status === 'running' && !renderHeader && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-status-merged" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">Running{interactions.cards.length > 0 ? ' · waiting for your answer' : session?.statusDetail ? ` · ${session.statusDetail}` : ''}</span></p>}
+        {status === 'running' && (!renderHeader || worker) && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-status-merged" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">Running{interactions.cards.length > 0 ? ' · waiting for your answer' : worker ? ` · ${worker}` : session?.statusDetail ? ` · ${session.statusDetail}` : ''}</span></p>}
         {status === 'error' && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The last turn failed{session?.statusDetail ? `: ${session.statusDetail}` : '.'}</p>}
         {sendError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">Not sent: {sendError}</p>}
         {loadError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">{loadError}</p>}
