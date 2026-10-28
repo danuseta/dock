@@ -4,6 +4,7 @@ import { generateIngestToken, hashIngestToken } from '../auth/ingest-token';
 import { GitHubAPI } from '../datasources/GitHubAPI';
 import { StorageService } from '../storage/service';
 import { buildTimeline } from './orchestrator-timeline';
+import { buildThinking } from './run-thinking';
 import { reviewSignalOf, type ChecksState, type ReviewDecision } from './pr-signals';
 
 export const ORCHESTRATOR_STAGES = [
@@ -59,9 +60,16 @@ export const DECISION_BY = ['owner', 'arbiter', 'sous', 'agent'] as const;
 export type DecisionBy = typeof DECISION_BY[number];
 /** An option sous did not build, and what choosing it would change. */
 export interface DecisionAlternative { label: string; effect: string | null }
+/** An option the agent weighed and dropped, with why. */
+export interface DecisionRejected { option: string; why: string }
 export interface LedgerDecision {
   n: number; at: string; text: string; status: DecisionStatus; by: DecisionBy | null; issue: number | null; cancelNote: string | null;
   effect: string | null; alts: DecisionAlternative[]; replaces: number | null; supersededBy: number | null;
+  /** The agent that decided, as the kit names it (sous-ticket-runner, sous-reviewer, owner, ...). */
+  author: string | null;
+  /** What was unclear when the agent decided. */
+  question: string | null;
+  rejected: DecisionRejected[];
 }
 export const ISSUE_TYPES = ['BLOCKER', 'QUESTION', 'RISK', 'DISPUTE'] as const;
 export type IssueType = typeof ISSUE_TYPES[number];
@@ -198,6 +206,11 @@ export function normalizeDecisions(input: unknown): LedgerDecision[] {
           .filter((alt) => alt.label).slice(0, MAX_OPTIONS),
         replaces: positive(item.replaces),
         supersededBy: positive(item.supersededBy),
+        author: optionalText(item.author ?? item.by, 60),
+        question: optionalText(item.question, 1000),
+        rejected: (Array.isArray(item.rejected) ? item.rejected : []).filter(isRecord)
+          .map((entry) => ({ option: text(entry.option, 300), why: text(entry.why, 500) }))
+          .filter((entry) => entry.option).slice(0, MAX_OPTIONS),
       };
     })
     .filter((item) => item.text)
@@ -734,6 +747,37 @@ export class OrchestratorService {
     ]);
     const stageEvents = [...new Map([...recent, ...history].map((event) => [event.id, event])).values()];
     return buildTimeline(run, stageEvents, toolEvents, now);
+  }
+
+  /** What each agent of the run asked, decided and did, with the events around it, newest first. */
+  async thinking(keyInput: string, now = new Date()) {
+    const run = await this.get(keyInput, now);
+    if (!run) return null;
+    const [timeline, events, tools, git] = await Promise.all([
+      this.timeline(run.key, now),
+      this.storage.getOrchestratorEvents(run.key, 600),
+      this.storage.getOrchestratorToolEvents(run.key, 0),
+      this.storage.getTicketGitActivity(run.key).catch(() => []),
+    ]);
+    return buildThinking({
+      decisions: run.decisions,
+      issues: run.issues,
+      findings: run.findings,
+      events,
+      tools,
+      git: git.map((row) => ({ at: row.startedAt, agent: row.agent === 'main' ? 'lead' : row.agent, text: row.label || row.summary })),
+      visits: timeline?.visits ?? [],
+    });
+  }
+
+  /** The raw activity behind one Thinking row: tools, agents and thinking notes from two minutes before it to the next row. */
+  async thinkingRaw(keyInput: string, atInput: string, untilInput?: string | null) {
+    const key = normalizeTicketKey(keyInput);
+    const at = new Date(atInput);
+    if (!Number.isFinite(at.getTime())) throw new OrchestratorInputError('at must be a date');
+    const until = untilInput && Number.isFinite(Date.parse(untilInput)) ? new Date(untilInput) : new Date(at.getTime() + 2 * 60 * 1000);
+    const rows = await this.storage.getTicketActivityWindow(key, new Date(at.getTime() - 2 * 60 * 1000), until);
+    return rows.map((row) => ({ at: row.startedAt.toISOString(), agent: row.agent === 'main' ? 'lead' : row.agent, kind: row.kind, text: [row.label || row.name, row.summary].filter(Boolean).join(' · ').slice(0, 400) }));
   }
 
   /** The agents the main session has spawned for the stage the ticket is in. */

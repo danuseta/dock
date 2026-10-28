@@ -474,6 +474,100 @@ export const typeDefs = gql`
     alts: [OrchestrationDecisionAlt!]!
     replaces: Int
     supersededBy: Int
+    """The agent that decided, as the kit names it: sous-ticket-runner, sous-reviewer, owner, ..."""
+    author: String
+    """What was unclear when the agent decided."""
+    question: String
+    """Options the agent weighed and dropped, each with why."""
+    rejected: [OrchestrationDecisionRejected!]!
+  }
+
+  type ThinkingOption {
+    label: String!
+    why: String
+    chosen: Boolean!
+  }
+
+  """One row of a run's Thinking column and log: what an agent asked, decided or did, or an event around it."""
+  type ThinkingRow {
+    id: String!
+    at: String!
+    stageIndex: Int!
+    round: Int!
+    """The agent or worker the row belongs to: lead, sous-ticket-runner, sous-video, DOCK, owner, ..."""
+    agent: String!
+    """ask, decide, did or event."""
+    kind: String!
+    """thinking, owner, agent, git or stage: what the log filters on."""
+    topic: String!
+    text: String!
+    answer: String
+    options: [ThinkingOption!]!
+    """Something went wrong here, in words: "while sous was still working", "failed"."""
+    flag: String
+  }
+
+  type RetroNumbers {
+    tickets: Int!
+    medianHours: Float
+    fixRounds: Float!
+    replans: Float!
+    ownerIssues: Int!
+    medianOwnerWaitHours: Float
+    reviews: Int!
+    requestChanges: Int!
+  }
+
+  type RetroProblem {
+    label: String!
+    count: Int!
+    tickets: [String!]!
+  }
+
+  type RetroTicket {
+    key: String!
+    title: String!
+    kind: String!
+    hours: Float
+    rounds: Int!
+    issues: Int!
+    ownerWaitHours: Float
+    result: String!
+  }
+
+  """A Keep / Problem / Try line: kind keep, problem or try; dest kit, memory, dock or note; status open, accepted or closed."""
+  type RetroItem {
+    id: ID!
+    kind: String!
+    text: String!
+    evidence: [String!]!
+    dest: String!
+    status: String!
+    sessionId: String
+    updatedAt: String!
+  }
+
+  type Retro {
+    sprint: String!
+    sprintId: Int!
+    previous: String
+    numbers: RetroNumbers!
+    previousNumbers: RetroNumbers
+    problems: [RetroProblem!]!
+    tickets: [RetroTicket!]!
+    items: [RetroItem!]!
+  }
+
+  type ThinkingRawLine {
+    at: String!
+    agent: String!
+    kind: String!
+    text: String!
+  }
+
+  type OrchestrationDecisionRejected {
+    option: String!
+    why: String!
   }
 
   type OrchestrationDecisionAlt {
@@ -1337,6 +1431,12 @@ export const typeDefs = gql`
     dockIssue(number: Int!): DockIssueDetail
     """The GitHub new-issue address filled with the same title and body that reportDockIssue posts."""
     dockIssueDraftUrl(title: String!, happened: String!, steps: String, expected: String, imageLinks: [String!], page: String!): String!
+    """What each agent of the run asked, decided and did, with the events around it, newest first."""
+    runThinking(key: String!): [ThinkingRow!]!
+    """The retro of a sprint from the sprint dashboard's list; no id is the active sprint."""
+    retro(sprintId: Int): Retro
+    """The tools, agents and thinking notes behind one Thinking row, from two minutes before it to until."""
+    runThinkingRaw(key: String!, at: String!, until: String): [ThinkingRawLine!]!
     """A folder under the home of the workspace; no path is the home itself."""
     workspaceDir(path: String): WorkspaceDir!
     """The text of a file under the home of the workspace."""
@@ -1345,6 +1445,10 @@ export const typeDefs = gql`
 
   type Mutation {
     lockSession: Boolean!
+    """Asks sous for a new Keep / Problem / Try draft of the sprint, in a new session. Returns the session id."""
+    retroBuild(sprintId: Int!): String!
+    """accept, close, reopen or edit (with text). Accepting a line that goes to kit, memory or dock asks sous to apply it."""
+    retroItemAction(id: ID!, action: String!, text: String): RetroItem!
     """A new folder under the home of the workspace. Secrets stay read only; file content goes through PUT /api/workspace/file."""
     workspaceMkdir(path: String!): WorkspaceEntry!
     """Renames or moves a file or folder to a path that does not exist yet."""

@@ -338,6 +338,58 @@ export class StorageService {
     return [...tools, ...members].sort((a, b) => b.id - a.id);
   }
 
+  getRetroItems(sprint: string) {
+    return this.db.retroItem.findMany({ where: { sprint }, orderBy: { createdAt: 'asc' } });
+  }
+
+  getRetroItem(id: string) {
+    return this.db.retroItem.findUnique({ where: { id } });
+  }
+
+  /** A new draft replaces the lines still open; lines the owner accepted or closed stay. */
+  async replaceRetroDraft(sprint: string, items: Array<{ kind: string; text: string; evidence: string[]; dest: string }>) {
+    await this.db.$transaction([
+      this.db.retroItem.deleteMany({ where: { sprint, status: 'open' } }),
+      ...items.map((item) => this.db.retroItem.create({ data: { sprint, kind: item.kind, text: item.text, evidence: JSON.stringify(item.evidence), dest: item.dest } })),
+    ]);
+    return items.length;
+  }
+
+  updateRetroItem(id: string, data: { status?: string; text?: string; sessionId?: string | null }) {
+    return this.db.retroItem.update({ where: { id }, data });
+  }
+
+  /** The ticket's chat sessions, so their activity can join the run's log. */
+  private async ticketSessionIds(ticketKey: string): Promise<string[]> {
+    const sessions = await this.db.chatSession.findMany({ where: { ticketKey }, select: { id: true } });
+    return sessions.map((session) => session.id);
+  }
+
+  /** Commits, pushes and pull request commands the ticket's sessions ran, newest first. */
+  async getTicketGitActivity(ticketKey: string, take = 200) {
+    const ids = await this.ticketSessionIds(ticketKey);
+    if (ids.length === 0) return [];
+    const rows = await this.db.chatActivity.findMany({
+      where: { sessionId: { in: ids }, kind: 'tool', name: 'Bash', OR: ['git commit', 'git push', 'gh pr create', 'gh pr edit', 'gh pr ready', 'gh pr merge'].map((command) => ({ label: { contains: command } })) },
+      orderBy: { startedAt: 'desc' },
+      take,
+      select: { agent: true, label: true, summary: true, startedAt: true },
+    });
+    return rows;
+  }
+
+  /** What the ticket's sessions did in a window: the raw layer behind one row of the Thinking column. */
+  async getTicketActivityWindow(ticketKey: string, from: Date, to: Date, take = 60) {
+    const ids = await this.ticketSessionIds(ticketKey);
+    if (ids.length === 0) return [];
+    return this.db.chatActivity.findMany({
+      where: { sessionId: { in: ids }, startedAt: { gte: from, lte: to }, kind: { in: ['tool', 'agent', 'note', 'skill'] } },
+      orderBy: { startedAt: 'asc' },
+      take,
+      select: { kind: true, agent: true, name: true, label: true, summary: true, startedAt: true },
+    });
+  }
+
   async addOrchestratorToolEvents(
     ticketKey: string,
     events: Array<{ kind: string; agentId: string; agentType: string | null; name: string; detail: string | null; at: Date }>,

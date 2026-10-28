@@ -1,12 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@apollo/client';
 import { ArrowLeft, ClipboardList, Download, File, FileCheck2, Folder, Image as ImageIcon, Info, List, Lock, MapPin, HelpCircle, Scale, ScrollText, Video } from 'lucide-react';
-import { Checkbox, Input, Page } from '../components/ui';
+import { Button, Checkbox, Input, Page } from '../components/ui';
 import { Markdown } from '../chat/Markdown';
-import { GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
+import { GET_ORCHESTRATIONS, GET_RUN_THINKING } from '../graphql/queries';
+import { ThinkingList } from '../agents/ThinkingList';
+import { filterRows, rowsMarkdown, type RowFilter, type ThinkingRow } from '../agents/thinking';
 import { stageLabel } from '../agents/runs';
 import { cn } from '../lib/cn';
-import { LOG_ENTRY, executionLog, fetchFiles, fetchText, fetchTickets, fileUrl, formatSize, groupFiles, withoutComments, type BlackboardFile, type BlackboardTicket, type ExecutionLogEntry } from '../lib/blackboard';
+import { LOG_ENTRY, fetchFiles, fetchText, fetchTickets, fileUrl, formatSize, groupFiles, withoutComments, type BlackboardFile, type BlackboardTicket } from '../lib/blackboard';
 
 interface RunInfo { key: string; title: string | null; stage: string }
 
@@ -89,31 +91,43 @@ const FileView: React.FC<{ ticket: string; file: BlackboardFile | null; folder: 
   );
 };
 
-const LOG_TONE: Record<string, string> = { stage: 'text-accent', gate: 'text-status-warn', ok: 'text-status-merged', fail: 'text-status-conflict' };
 
-const logTime = (iso: string) => new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
 /** The execution log of the ticket's run on this DOCK: stages, gates, agents, tools and the owner's actions, newest first. */
+const LOG_FILTERS: Array<[RowFilter, string]> = [['all', 'All'], ['owner', 'Owner'], ['agents', 'Agents'], ['git', 'Git / PR'], ['problems', 'Problems']];
+
+/** The ticket's audit log: every agent's asks, decisions and actions, the owner's answers, git and PR steps, across every round. */
 const LogView: React.FC<{ ticket: string }> = ({ ticket }) => {
-  const { data, loading, error } = useQuery<{ orchestration: { events: Array<{ id: string; kind: string; detail: string | null; at: string }>; timeline: { log: ExecutionLogEntry[] } | null } | null }>(
-    GET_ORCHESTRATION, { variables: { key: ticket }, fetchPolicy: 'cache-and-network', pollInterval: 30000 },
-  );
-  if (error) return <p className="p-6 text-sm text-status-conflict" role="alert">{error.message}</p>;
+  const [filter, setFilter] = useState<RowFilter>('all');
+  const { data, loading, error } = useQuery<{ runThinking: ThinkingRow[] }>(GET_RUN_THINKING, { variables: { key: ticket }, fetchPolicy: 'cache-and-network', pollInterval: 30000 });
+  if (error && !data) return <p className="p-6 text-sm text-status-conflict" role="alert">{error.message}</p>;
   if (!data && loading) return <p className="p-6 text-sm text-muted-foreground" role="status">Loading the log...</p>;
-  const run = data?.orchestration;
-  if (!run) return <p className="p-6 text-sm text-muted-foreground">No run recorded for this ticket on this DOCK.</p>;
-  const entries = executionLog(run.timeline?.log ?? [], run.events);
-  if (entries.length === 0) return <p className="p-6 text-sm text-muted-foreground">The run has no log yet.</p>;
+  const all = data?.runThinking ?? [];
+  if (all.length === 0) return <p className="p-6 text-sm text-muted-foreground">No run recorded for this ticket on this DOCK, or it has no log yet.</p>;
+  const rows = filterRows(all, filter, null);
+  const exportMarkdown = () => {
+    const blob = new Blob([rowsMarkdown(ticket, rows)], { type: 'text/markdown' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${ticket}-log${filter === 'all' ? '' : `-${filter}`}.md`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
   return (
-    <ol className="m-0 list-none px-4 py-3 font-mono text-[0.72rem]">
-      {entries.map((entry, index) => (
-        <li key={`${entry.at}-${index}`} className="grid grid-cols-[9.5rem_8rem_minmax(0,1fr)] gap-x-3 border-b border-border py-1.5 max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:gap-y-0.5">
-          <span className="text-muted-foreground">{logTime(entry.at)}</span>
-          <span className={cn('truncate font-semibold', LOG_TONE[entry.kind] ?? 'text-secondary-foreground')}>{entry.head}</span>
-          <span className="text-secondary-foreground [overflow-wrap:anywhere]">{entry.text}</span>
-        </li>
-      ))}
-    </ol>
+    <div className="flex min-h-full flex-col">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+        <div className="inline-flex flex-wrap rounded-sm border border-border bg-surface-1 p-0.5" role="group" aria-label="Log filter">
+          {LOG_FILTERS.map(([id, label]) => {
+            const count = filterRows(all, id, null).length;
+            return <button key={id} type="button" aria-pressed={filter === id} onClick={() => setFilter(id)} className={cn('h-6 rounded-xs px-2.5 font-display text-[0.68rem] font-semibold text-secondary-foreground max-[760px]:h-9', filter === id && 'bg-accent text-black')}>{label} <span className="font-mono font-medium opacity-70">{count}</span></button>;
+          })}
+        </div>
+        <Button size="sm" className="ml-auto" onClick={exportMarkdown}><Download size={13} aria-hidden="true" />Export .md</Button>
+      </div>
+      <div className="bg-surface-0 px-4 pb-4">
+        <ThinkingList runKey={ticket} rows={rows} allRows={all} empty="Nothing matches this filter." />
+      </div>
+    </div>
   );
 };
 

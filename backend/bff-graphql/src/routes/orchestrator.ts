@@ -12,6 +12,7 @@ import { DEMO_STORAGE_ROUTES, demoStorage, demoStorageRoute, type DemoStorage } 
 import { receiveDemoVideo } from './demo-videos';
 import { autoBroadcast, type AutoBroadcast } from '../integrations/broadcast';
 import { decisionGate, stillWorking, type DecisionGate } from '../integrations/decision-gate';
+import { parseRetroDraft } from '../integrations/retro';
 import { doctorReports, type DoctorReports } from '../integrations/doctor';
 import { DiscordReaderError, type DiscordReader } from '../integrations/discord-reader';
 import { discordReader } from '../integrations/discord-reader-live';
@@ -66,6 +67,8 @@ export function createOrchestratorIngestRouter(
   // A ledger push can answer the last issue: the gate then marks the draft pull requests ready.
   gate: Pick<DecisionGate, 'settle'> | null = decisionGate,
   discord: Pick<DiscordReader, 'threadFiles'> = discordReader,
+  // The sprint retro draft the kit writes for the owner to accept.
+  retroStore: Pick<StorageService, 'replaceRetroDraft'> = new StorageService(),
 ): Router {
   const router = Router();
 
@@ -105,6 +108,10 @@ export function createOrchestratorIngestRouter(
     const run = await service.ingestLedger(body, new Date(), machine);
     if (!run.ignored) settled(run);
     return run.ignored ? { key: run.key, ignored: true, owner: run.machine } : { key: run.key, stage: run.stage };
+  }));
+  router.post('/retro', small, handle(async (body) => {
+    const draft = parseRetroDraft(body);
+    return { sprint: draft.sprint, items: await retroStore.replaceRetroDraft(draft.sprint, draft.items) };
   }));
   router.post('/ledger/list', small, handle((_body, _signal, machine) => service.ledgerList(machine)));
   router.post('/ledger/get', small, handle((body, _signal, machine) => service.ledgerGet(body, machine)));

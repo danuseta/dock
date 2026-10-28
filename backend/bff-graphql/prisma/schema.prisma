@@ -374,3 +374,19 @@ model AutoReview {
   @@index([ticketKey, startedAt])
   @@index([status])
 }
+
+/// A Keep / Problem / Try line of a sprint retro, drafted by sous and accepted, edited or closed by the owner.
+model RetroItem {
+  id        String   @id @default(uuid())
+  sprint    String
+  kind      String
+  text      String
+  evidence  String   @default("[]")
+  dest      String   @default("note")
+  status    String   @default("open")
+  sessionId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sprint])
+}

@@ -2,7 +2,7 @@
    SVG that only draws the connecting lines. */
 
 .dock-flow-wrap { overflow-x: auto; background: #0d0d0f; }
-.dock-flow { position: relative; min-width: 860px; height: 540px; }
+.dock-flow { position: relative; min-width: 640px; height: 540px; }
 .dock-flow svg { position: absolute; inset: 0; width: 100%; height: 100%; }
 
 .dock-flow-head { position: absolute; top: 12px; left: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -41,6 +41,7 @@ button.dock-flow-visit:focus-visible b { outline: 2px solid var(--color-accent);
 
 .dock-flow-agent { width: 168px; padding: 8px 10px; border: 1px solid var(--color-border-glow); border-radius: 8px; background: rgb(22 22 24 / 0.96); box-shadow: 0 4px 16px rgb(0 0 0 / 0.5); }
 .dock-flow-agent.is-small { width: 150px; padding: 7px 9px; }
+.dock-flow-agent.is-picked-agent { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .dock-flow-agent header { display: flex; align-items: center; gap: 7px; font: 800 0.74rem var(--font-mono); }
 .dock-flow-agent header i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--color-muted-foreground); }
 .dock-flow-agent header span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
