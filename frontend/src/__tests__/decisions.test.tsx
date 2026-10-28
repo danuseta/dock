@@ -17,8 +17,8 @@ const run = {
   issues: [issue(3, 'owner', 'open', ['Refresh', 'Log in again'], ['FE calls /auth/refresh first', null]), issue(1, 'arbiter'), issue(2, 'owner', 'resolved')],
   decisions: [
     { n: 1, at: '', text: 'Use the new table', status: 'DECIDED', by: 'owner' },
-    { n: 4, at: '', text: 'Backoff 1s to 30s', status: 'SHOV', by: 'sous', effect: 'Reconnects slow down', alts: [{ label: 'Fixed 5s', effect: 'One constant changes' }] },
-    { n: 5, at: '', text: 'Name the event workflow:sync', status: 'SHOV', by: 'sous' },
+    { n: 4, at: '', text: 'Backoff 1s to 30s', status: 'GUESS', by: 'sous', effect: 'Reconnects slow down', alts: [{ label: 'Fixed 5s', effect: 'One constant changes' }] },
+    { n: 5, at: '', text: 'Name the event workflow:sync', status: 'GUESS', by: 'sous' },
     { n: 6, at: '', text: 'Keep the last state in sessionStorage', status: 'USULAN', by: 'sous' },
   ],
 } as AgentRun;
@@ -130,7 +130,7 @@ test('the answer sheet lists what needs a look first and folds the answers alrea
 });
 
 test('the ticket list is one line per ticket and lays out the open ticket like a calendar', () => {
-  const other = { ...run, key: 'QRD-7', title: 'Other ticket', issues: [], decisions: [{ n: 1, at: '', text: 'Guess', status: 'SHOV', by: 'sous' }] } as AgentRun;
+  const other = { ...run, key: 'QRD-7', title: 'Other ticket', issues: [], decisions: [{ n: 1, at: '', text: 'Guess', status: 'GUESS', by: 'sous' }] } as AgentRun;
   const tickets = [run, other].map((item) => ({ run: item, questions: questionsOf(item) }));
   const html = renderToStaticMarkup(<TicketList tickets={tickets} openKey="QRD-9" drafts={{ 'I-3': { choice: 'o0', text: '', unsure: false } }} q={2} onOpen={() => undefined} />);
   assert.match(html, /2 tickets/);

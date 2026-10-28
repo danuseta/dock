@@ -18,7 +18,7 @@ const run = {
   issues: [issue(3, 'owner'), issue(1, 'arbiter'), issue(2, 'owner', 'resolved'), { ...issue(4, 'owner'), options: ['Keep', 'Drop'] }],
   decisions: [
     { n: 1, at: '', text: 'Use the new table', status: 'DECIDED', by: 'owner' },
-    { n: 2, at: '', text: 'Keep the export', status: 'SHOV', by: 'arbiter', issue: 1 },
+    { n: 2, at: '', text: 'Keep the export', status: 'GUESS', by: 'arbiter', issue: 1 },
     { n: 3, at: '', text: 'Drop the cache', status: 'CANCELLED', by: 'sous', cancelNote: 'needed by QRD-8' },
     { n: 4, at: '', text: 'Rename the field', status: 'USULAN', by: 'sous' },
   ],
@@ -29,13 +29,13 @@ test('the sous report lists owner issues first, oldest first, and decisions newe
   assert.deepStrictEqual([owner.map((item) => item.n), others.map((item) => item.n)], [[3, 4], [1]]);
   assert.deepStrictEqual(reportDecisions(run).map((item) => item.n), [4, 3, 2, 1]);
   assert.deepStrictEqual(reportDecisions({ decisions: [{ at: '', text: 'old' }, { at: '', text: 'older' }] }).map((item) => item.n), [2, 1], 'old entries count by their place');
-  assert.deepStrictEqual(run.decisions!.map(isGuess), [false, true, false, true], 'only SHOV and USULAN are guesses the owner settles');
+  assert.deepStrictEqual(run.decisions!.map(isGuess), [false, true, false, true], 'only GUESS and USULAN are guesses the owner settles');
 });
 
 test('decisions read in plain English, fold at three, and only list what waits: the owner answers on Decisions', () => {
   const html = renderToStaticMarkup(<RunDecisions run={run} />);
-  assert.doesNotMatch(html, />(SHOV|USULAN|DECIDED)</, 'the raw ledger status stays in the tooltip');
-  assert.match(html, /title="Ledger status SHOV"[^>]*>Sous guess</);
+  assert.doesNotMatch(html, />(GUESS|USULAN|DECIDED)</, 'the raw ledger status stays in the tooltip');
+  assert.match(html, /title="Ledger status GUESS"[^>]*>Sous guess</);
   assert.match(html, /title="Ledger status USULAN"[^>]*>Sous proposal</);
   assert.doesNotMatch(html, />(Confirm|Change)</);
   assert.match(html, /2 to confirm/);
@@ -49,7 +49,7 @@ test('decisions read in plain English, fold at three, and only list what waits: 
 });
 
 test('a confirmed guess is marked, and the effect and the other options are shown', () => {
-  const settled = { ...run, kind: 'build', confirmedDecisions: [2], decisions: [run.decisions![1], { n: 5, at: '', text: 'Disable Save on an empty form', status: 'SHOV', by: 'sous', effect: 'Save stays grey until a field is filled', alts: [{ label: 'Show an error on Save', effect: 'the button stays active' }] }] } as AgentRun;
+  const settled = { ...run, kind: 'build', confirmedDecisions: [2], decisions: [run.decisions![1], { n: 5, at: '', text: 'Disable Save on an empty form', status: 'GUESS', by: 'sous', effect: 'Save stays grey until a field is filled', alts: [{ label: 'Show an error on Save', effect: 'the button stays active' }] }] } as AgentRun;
   const html = renderToStaticMarkup(<RunDecisions run={settled} />);
   assert.match(html, /D-2<\/span>.*Confirmed by you/);
   assert.match(html, /1 to confirm/);

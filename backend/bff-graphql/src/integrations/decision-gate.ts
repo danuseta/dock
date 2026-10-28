@@ -5,7 +5,7 @@ import { autoBroadcast } from './broadcast';
 import { orchestratorService, type Orchestration } from './orchestrator';
 
 /** Decisions sous took on the owner's behalf: the owner confirms or changes each one before the pull requests are reviewed. */
-const GUESSED = new Set(['SHOV', 'USULAN']);
+const GUESSED = new Set(['GUESS', 'USULAN']);
 const GATE_CACHE = 'decision-gate';
 const PR_URL = /github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/;
 

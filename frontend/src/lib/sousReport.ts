@@ -14,15 +14,15 @@ export const reportDecisions = (run?: ReportFacts | null): Array<AgentDecision &
 );
 
 /** What the arbiter or sous decided on the owner's behalf: the owner confirms or changes it before the pull requests are reviewed. */
-export const isGuess = (decision: Pick<AgentDecision, 'status'>): boolean => decision.status === 'SHOV' || decision.status === 'USULAN';
+export const isGuess = (decision: Pick<AgentDecision, 'status'>): boolean => decision.status === 'GUESS' || decision.status === 'USULAN';
 
 export const DECISION_TONE: Record<string, 'success' | 'warn' | 'neutral' | 'danger'> = {
-  DECIDED: 'success', SHOV: 'warn', USULAN: 'warn', SUPERSEDED: 'neutral', CANCELLED: 'danger',
+  DECIDED: 'success', GUESS: 'warn', USULAN: 'warn', SUPERSEDED: 'neutral', CANCELLED: 'danger',
 };
 
 /** A ledger status as the owner reads it; the raw value stays in the tooltip. */
 export const DECISION_LABEL: Record<string, string> = {
-  DECIDED: 'Your decision', SHOV: 'Sous guess', USULAN: 'Sous proposal', SUPERSEDED: 'Superseded', CANCELLED: 'Cancelled',
+  DECIDED: 'Your decision', GUESS: 'Sous guess', USULAN: 'Sous proposal', SUPERSEDED: 'Superseded', CANCELLED: 'Cancelled',
 };
 
 /** A report age as people say it: "just now", "5 min ago", "3 h ago", "2 days ago". */

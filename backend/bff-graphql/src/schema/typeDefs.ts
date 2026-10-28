@@ -797,7 +797,7 @@ export const typeDefs = gql`
     issues: [OrchestrationIssue!]!
     """Every step of the owner's last review approval succeeded (Jira Pass label and GitHub approve)."""
     approved: Boolean!
-    """The guessed decisions (SHOV, USULAN) the owner confirmed in DOCK."""
+    """The guessed decisions (GUESS, USULAN) the owner confirmed in DOCK."""
     confirmedDecisions: [Int!]!
     blockers: Int!
     activity: String!

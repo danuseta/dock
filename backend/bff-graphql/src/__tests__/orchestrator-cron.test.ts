@@ -559,7 +559,7 @@ test('a stalled sous run is resumed with the sous prompt even when the cron is s
 const sousRun = (overrides: Partial<CronRun> = {}): CronRun => ({
   key: 'QRD-9', machine: 'laptop', title: 'Sous ticket', waiting: 'I-2: Keep the old export? [Keep|Drop]', activity: 'IDLE', engine: 'sous',
   issues: [{ n: 1, level: 'arbiter', status: 'resolved' }, { n: 2, level: 'owner', status: 'open' }, { n: 3, level: 'owner', status: 'open' }],
-  decisions: [{ n: 1, status: 'DECIDED' }, { n: 2, status: 'SHOV' }, { n: 3, status: 'CANCELLED' }, { n: 4, status: 'USULAN' }],
+  decisions: [{ n: 1, status: 'DECIDED' }, { n: 2, status: 'GUESS' }, { n: 3, status: 'CANCELLED' }, { n: 4, status: 'USULAN' }],
   ...overrides,
 });
 
