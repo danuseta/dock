@@ -4,7 +4,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Markdown } from '../chat/Markdown';
 import { CACHED_MESSAGES, CACHED_SESSIONS, recallMessages, rememberMessages } from '../chat/messageCache';
-import type { ChatMessage, ChatSession } from '../chat/messages';
+import { opensTurn, type ChatMessage, type ChatSession } from '../chat/messages';
 import { SessionRow } from '../chat/SessionRow';
 import {
   appliedOptions, appliedText, defaultLabel, effortChoicesFor, keepChoice, modeChoices, modelChoices, withChoice,
@@ -90,6 +90,19 @@ test('a reopened session is seeded from the last thread, without unsent messages
   for (let n = 0; n < CACHED_SESSIONS + 3; n += 1) rememberMessages(`cache-fill-${n}`, [message(1)], false);
   assert.strictEqual(recallMessages('cache-a'), undefined, 'the least recently used session goes first');
   assert.ok(recallMessages(`cache-fill-${CACHED_SESSIONS + 2}`));
+});
+
+test('a long turn is cached from its own user message, so a reopened thread never starts in the middle of a turn', () => {
+  const ask = (id: number): ChatMessage => ({ ...message(id), role: 'user' });
+  const turn = [ask(1), ...Array.from({ length: 10 }, (_, index) => message(index + 2)), ask(12), ...Array.from({ length: CACHED_MESSAGES + 40 }, (_, index) => message(index + 13))];
+  rememberMessages('cache-long-turn', turn, false);
+  const kept = recallMessages('cache-long-turn');
+  assert.strictEqual(kept?.messages[0].id, 12, 'the turn is kept whole, past the usual bound');
+  assert.strictEqual(kept?.messages.length, CACHED_MESSAGES + 41);
+  assert.strictEqual(kept?.hasOlder, true);
+  assert.strictEqual(opensTurn(kept!.messages), true);
+  assert.strictEqual(opensTurn(turn.slice(2)), false);
+  assert.strictEqual(opensTurn([{ ...ask(-3), state: 'queued' }, message(5)]), false, 'an unsent message does not open a loaded turn');
 });
 
 test('assistant text renders as markdown with tables, lists, code and safe links', () => {

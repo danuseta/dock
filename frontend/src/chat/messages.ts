@@ -92,6 +92,10 @@ export function oldestId(messages: ChatMessage[]): number | undefined {
   return messages.find((message) => !isOptimistic(message))?.id;
 }
 
+export function opensTurn(messages: ChatMessage[]): boolean {
+  return messages.find((message) => !isOptimistic(message))?.role === 'user';
+}
+
 export function newestAssistantId(messages: ChatMessage[]): number {
   let newest = 0;
   for (const message of messages) if (message.role === 'assistant' && message.id > newest) newest = message.id;

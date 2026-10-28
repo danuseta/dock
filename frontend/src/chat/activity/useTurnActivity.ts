@@ -7,7 +7,7 @@ import { transcriptItems, type TranscriptItem } from './transcript';
 import { createDetailStore, type DetailStore } from './detailStore';
 
 const PAGE = 500;
-const MAX_PAGES = 6;
+const MAX_PAGES = 24;
 const FIRST_TURNS = 8;
 const NEAR_TOP_PX = 600;
 const MAX_POLL_FAILURES = 3;

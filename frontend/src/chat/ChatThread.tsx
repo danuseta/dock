@@ -8,7 +8,7 @@ import { EmptyState } from '../components/EmptyState';
 import { TerminalScene } from '../components/empty/scenes/TerminalScene';
 import { cn } from '../lib/cn';
 import {
-  isStopping, isTurnInProgress, machineCapabilities, machineOf, machineOnline, machinePlace, mergeMessages, newestAssistantId, oldestId, optimisticMessage, pollCursor, pollInterval, queuedText, sendBlocker, sessionTurnOptions,
+  isStopping, isTurnInProgress, machineCapabilities, machineOf, machineOnline, machinePlace, mergeMessages, newestAssistantId, oldestId, opensTurn, optimisticMessage, pollCursor, pollInterval, queuedText, sendBlocker, sessionTurnOptions,
   type ChatMachine, type ChatMessage, type ChatSession,
 } from './messages';
 import { MachineChip } from './MachineControls';
@@ -54,6 +54,8 @@ export interface HeaderContext { control: TurnOptionsControl; dot: DotState; sta
 
 const NEWEST_PAGE = 200;
 const OLDER_PAGE = 100;
+const TURN_START_PAGE = 500;
+const TURN_START_PAGES = 10;
 const NEAR_BOTTOM_PX = 80;
 const PROMPT_EXAMPLES = [
   { label: 'Build QRD-…', text: 'Pakai skill sous: kerjakan QRD-' },
@@ -140,6 +142,19 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     return result.data.chatMessages;
   }, [client, sessionId]);
 
+  const backToTurnStart = useCallback(async (batch: ChatMessage[], older: boolean) => {
+    let all = batch;
+    let more = older;
+    for (let page = 0; more && !opensTurn(all) && page < TURN_START_PAGES; page += 1) {
+      const before = oldestId(all);
+      if (before === undefined) break;
+      const earlier = await fetchMessages({ beforeId: before, limit: TURN_START_PAGE });
+      more = earlier.length >= TURN_START_PAGE;
+      all = mergeMessages(all, earlier);
+    }
+    return { messages: all, hasOlder: more };
+  }, [fetchMessages]);
+
   useEffect(() => {
     sessionRef.current = sessionId;
     return () => {
@@ -155,9 +170,11 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
       const requested = sessionId;
       try {
         const cursor = pollCursor(messagesRef.current, statusRef.current);
-        const batch = await fetchMessages(cursor === undefined ? { limit: NEWEST_PAGE } : { afterId: cursor });
+        const fetched = await fetchMessages(cursor === undefined ? { limit: NEWEST_PAGE } : { afterId: cursor });
+        const start = cursor === undefined ? await backToTurnStart(fetched, fetched.length >= NEWEST_PAGE) : null;
         if (sessionRef.current !== requested) return;
-        if (cursor === undefined) setHasOlder(batch.length >= NEWEST_PAGE);
+        if (start) setHasOlder(start.hasOlder);
+        const batch = start ? start.messages : fetched;
         setMessages((current) => mergeMessages(current, batch));
         setLoaded(true);
         setLoadError('');
@@ -171,7 +188,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     void poll();
     const timer = window.setInterval(() => void poll(), pollMs);
     return () => window.clearInterval(timer);
-  }, [fetchMessages, pollMs, sessionId]);
+  }, [backToTurnStart, fetchMessages, pollMs, sessionId]);
 
   // The session's status changed: poll at once, so the last lines of a turn do not wait for the slow poll.
   useEffect(() => {
@@ -183,10 +200,11 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     if (before === undefined || loadingOlder || !hasOlder) return;
     setLoadingOlder(true);
     try {
-      const batch = await fetchMessages({ beforeId: before, limit: OLDER_PAGE });
+      const fetched = await fetchMessages({ beforeId: before, limit: OLDER_PAGE });
+      const start = await backToTurnStart(fetched, fetched.length >= OLDER_PAGE);
       heightBeforeOlder.current = scrollRef.current?.scrollHeight ?? null;
-      setHasOlder(batch.length >= OLDER_PAGE);
-      setMessages((current) => mergeMessages(current, batch));
+      setHasOlder(start.hasOlder);
+      setMessages((current) => mergeMessages(current, start.messages));
       setLoadError('');
     } catch (error) {
       setLoadError(messageOf(error, 'Older messages could not be loaded'));
