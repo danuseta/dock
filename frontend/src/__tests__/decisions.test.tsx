@@ -50,7 +50,7 @@ test('the answer sheet sends answers, confirms what was kept and changes the res
 
 test('the effect is written under the picked option only', () => {
   const [, guess] = questionsOf(run);
-  const render = (draft?: Draft) => renderToStaticMarkup(<QuestionView run={run} question={guess} number={2} total={3} draft={draft} sentCount={0} readOnly={null} onChange={() => undefined} onPrevious={() => undefined} onNext={() => undefined} />);
+  const render = (draft?: Draft) => renderToStaticMarkup(<QuestionView run={run} question={guess} number={2} total={3} draft={draft} sentCount={0} readOnly={null} guessesLeft={0} onKeepAll={() => undefined} onChange={() => undefined} onPrevious={() => undefined} onNext={() => undefined} />);
   const none = render();
   assert.doesNotMatch(none, new RegExp(KEEP_EFFECT), 'nothing picked, no effect');
   const kept = render({ choice: KEEP, text: '', unsure: false });
@@ -118,6 +118,11 @@ test('Keep all fills only the unanswered sous guesses of the ticket, and is hidd
   const kept = { 'D-4': { choice: KEEP, text: '', unsure: false }, 'D-6': { choice: KEEP, text: '', unsure: false } };
   assert.doesNotMatch(renderToStaticMarkup(<AnswerSheet {...props} drafts={kept} readOnly={null} />), /Keep all/);
   assert.doesNotMatch(renderToStaticMarkup(<AnswerSheet {...props} drafts={{}} readOnly="This DOCK only monitors." />), /Keep all/);
+
+  const view = (guessesLeft: number, readOnly: string | null) => renderToStaticMarkup(<QuestionView run={run} question={questions[0]} number={1} total={questions.length} sentCount={0} readOnly={readOnly} guessesLeft={guessesLeft} onKeepAll={() => undefined} onChange={() => undefined} onPrevious={() => undefined} onNext={() => undefined} />);
+  assert.match(view(2, null), />Keep all sous built \(2\)</, 'Keep all is offered while answering, not only on the answer sheet');
+  assert.doesNotMatch(view(0, null), /Keep all/);
+  assert.doesNotMatch(view(2, 'This DOCK only monitors.'), /Keep all/);
 });
 
 test('the answer sheet lists what needs a look first and folds the answers already sent', () => {

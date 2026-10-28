@@ -12,7 +12,7 @@ import { monitorsOnly, useDockMode } from '../lib/dockMode';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { AnswerSheet } from '../decisions/AnswerSheet';
 import { QuestionView } from '../decisions/QuestionView';
-import { KEEP, isAnswered, questionsOf, submissionOf, type Question } from '../decisions/questions';
+import { KEEP, isAnswered, questionsOf, submissionOf, unansweredGuesses, type Question } from '../decisions/questions';
 import { useDraft } from '../decisions/useDraft';
 import { TicketList } from '../decisions/TicketList';
 
@@ -120,6 +120,11 @@ const DecisionsPage: React.FC = () => {
                 draft={drafts[questions[q - 1].id]}
                 sentCount={questions.filter((question) => drafts[question.id]?.sent).length}
                 readOnly={readOnly}
+                guessesLeft={unansweredGuesses(questions, drafts).length}
+                onKeepAll={() => {
+                  unansweredGuesses(questions, drafts).forEach((id) => update(id, { choice: KEEP }));
+                  go(current.run.key, SHEET);
+                }}
                 onChange={(next) => update(questions[q - 1].id, next)}
                 onPrevious={() => go(current.run.key, q - 1)}
                 onNext={() => go(current.run.key, q === questions.length ? SHEET : q + 1)}
