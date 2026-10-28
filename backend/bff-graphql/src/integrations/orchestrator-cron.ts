@@ -317,7 +317,7 @@ export interface CronRun {
 export interface OwnerAnswer { issue: number; text: string }
 export interface OwnerChange { n: number; choice: string }
 
-const CHANGEABLE = new Set(['SHOV', 'USULAN']);
+const CHANGEABLE = new Set(['GUESS', 'USULAN']);
 const MAX_OWNER_TEXT = 4000;
 export const OWNER_BUSY_TEXT = 'A session on this ticket has not finished its turn yet. Wait for it, then send again.';
 

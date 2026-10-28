@@ -208,7 +208,7 @@ test('sous ledger fields: engine, card kind, rounds, draft, numbered decisions a
     draft: true,
     blackboard: 'E:/qonflo/.evidence/blackboard/QRD-1387',
     decisions: [
-      { n: 3, at: '2026-10-20T01:00:00.000Z', text: 'Keep the old export', status: 'shov', by: 'arbiter', issue: 2, effect: 'Export keeps the old columns', alts: [{ label: 'New export', effect: 'Columns follow the grid' }, { label: '' }, 'bad'] },
+      { n: 3, at: '2026-10-20T01:00:00.000Z', text: 'Keep the old export', status: 'guess', by: 'arbiter', issue: 2, effect: 'Export keeps the old columns', alts: [{ label: 'New export', effect: 'Columns follow the grid' }, { label: '' }, 'bad'] },
       { n: 4, at: '2026-10-20T02:00:00.000Z', text: 'Drop the cache', status: 'CANCELLED', by: 'sous', cancelNote: 'needed by QRD-9' },
       { n: 5, text: 'Odd one', status: 'MAYBE', by: 'robot' },
     ],
@@ -221,7 +221,7 @@ test('sous ledger fields: engine, card kind, rounds, draft, numbered decisions a
   assert.deepStrictEqual([sous.engine, sous.rounds, sous.productionData, sous.draft], ['sous', { used: 2, max: 4 }, true, true]);
   assert.ok(!('blackboard' in sous), 'the local blackboard path stays on the machine');
   assert.deepStrictEqual(sous.decisions.map((item) => [item.n, item.status, item.by, item.issue, item.cancelNote]), [
-    [3, 'SHOV', 'arbiter', 2, null], [4, 'CANCELLED', 'sous', null, 'needed by QRD-9'], [5, 'DECIDED', null, null, null],
+    [3, 'GUESS', 'arbiter', 2, null], [4, 'CANCELLED', 'sous', null, 'needed by QRD-9'], [5, 'DECIDED', null, null, null],
   ]);
   assert.deepStrictEqual([sous.decisions[0].effect, sous.decisions[0].alts], ['Export keeps the old columns', [{ label: 'New export', effect: 'Columns follow the grid' }]], 'the effect and the options sous did not build');
   assert.deepStrictEqual(sous.issues, [

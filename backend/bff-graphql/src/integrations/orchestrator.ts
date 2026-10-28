@@ -53,7 +53,7 @@ const TRANSCRIPT_PATH = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+){0,3}$/;
 export class OrchestratorInputError extends Error {}
 
 export interface LedgerAc { n: number; state: AcState; text: string; evidence: string | null }
-export const DECISION_STATUSES = ['DECIDED', 'SHOV', 'USULAN', 'SUPERSEDED', 'CANCELLED'] as const;
+export const DECISION_STATUSES = ['DECIDED', 'GUESS', 'USULAN', 'SUPERSEDED', 'CANCELLED'] as const;
 export type DecisionStatus = typeof DECISION_STATUSES[number];
 export const DECISION_BY = ['owner', 'arbiter', 'sous', 'agent'] as const;
 export type DecisionBy = typeof DECISION_BY[number];
@@ -181,7 +181,8 @@ export function normalizeDecisions(input: unknown): LedgerDecision[] {
   return (Array.isArray(input) ? input : [])
     .filter(isRecord)
     .map((item, index): LedgerDecision => {
-      const status = text(item.status, 12).toUpperCase() as DecisionStatus;
+      const raw = text(item.status, 12).toUpperCase();
+      const status = (raw === 'SHOV' ? 'GUESS' : raw) as DecisionStatus;
       const by = text(item.by, 12).toLowerCase() as DecisionBy;
       return {
         n: positive(item.n) ?? index + 1,

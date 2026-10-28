@@ -71,7 +71,7 @@ export interface AgentRun {
   issues?: AgentIssue[];
   /** Every step of the owner's last review approval succeeded. */
   approved?: boolean;
-  /** The guessed decisions (SHOV, USULAN) the owner confirmed in DOCK. */
+  /** The guessed decisions (GUESS, USULAN) the owner confirmed in DOCK. */
   confirmedDecisions?: number[];
   blockers?: number;
   activity: string;

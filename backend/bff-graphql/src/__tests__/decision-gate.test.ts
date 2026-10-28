@@ -1,6 +1,7 @@
 import assert from 'node:assert';
 import test from 'node:test';
 import { DecisionGate, ownerPending, type GateDeps } from '../integrations/decision-gate';
+import { normalizeDecisions } from '../integrations/orchestrator';
 
 const decision = (n: number, status: string) => ({ n, at: '', text: `D${n}`, status, by: 'sous', issue: null, cancelNote: null, effect: null, alts: [], replaces: null, supersededBy: null }) as never;
 const issue = (n: number, status: 'open' | 'resolved') => ({ n, at: '', type: 'QUESTION', text: `I${n}`, level: 'owner', status, resolvedBy: null, resolvedAt: null, options: [], effects: [] }) as never;
@@ -12,7 +13,7 @@ const build = (overrides: Record<string, unknown> = {}) => ({
   prBe: 'https://github.com/o/be/pull/1',
   prFe: 'https://github.com/o/fe/pull/2',
   issues: [issue(1, 'resolved')],
-  decisions: [decision(1, 'DECIDED'), decision(2, 'SHOV'), decision(3, 'USULAN'), decision(4, 'SUPERSEDED')],
+  decisions: [decision(1, 'DECIDED'), decision(2, 'GUESS'), decision(3, 'USULAN'), decision(4, 'SUPERSEDED')],
   ...overrides,
 });
 
@@ -35,6 +36,12 @@ test('only open issues and guessed decisions the owner has not confirmed wait on
   const run = build({ issues: [issue(1, 'resolved'), issue(2, 'open')] });
   assert.deepStrictEqual(ownerPending(run, []), { issues: [2], decisions: [2, 3] });
   assert.deepStrictEqual(ownerPending(run, [2]), { issues: [2], decisions: [3] });
+});
+
+test('a ledger decision sent as SHOV by an older kit is read as GUESS and waits on the owner', () => {
+  const decisions = normalizeDecisions([{ n: 1, text: 'Keep the export', status: 'SHOV', by: 'arbiter' }, { n: 2, text: 'Drop the cache', status: 'shov' }]);
+  assert.deepStrictEqual(decisions.map((item) => item.status), ['GUESS', 'GUESS']);
+  assert.deepStrictEqual(ownerPending(build({ decisions }), [2]), { issues: [], decisions: [1] });
 });
 
 test('the pull requests stay draft until every guessed decision is confirmed, then go up for review once', async () => {
