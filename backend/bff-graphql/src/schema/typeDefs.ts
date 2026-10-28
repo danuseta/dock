@@ -1337,14 +1337,20 @@ export const typeDefs = gql`
     dockIssue(number: Int!): DockIssueDetail
     """The GitHub new-issue address filled with the same title and body that reportDockIssue posts."""
     dockIssueDraftUrl(title: String!, happened: String!, steps: String, expected: String, imageLinks: [String!], page: String!): String!
-    """A folder under the home of the workspace, read only; no path is the home itself."""
+    """A folder under the home of the workspace; no path is the home itself."""
     workspaceDir(path: String): WorkspaceDir!
-    """The text of a file under the home of the workspace, read only."""
+    """The text of a file under the home of the workspace."""
     workspaceFile(path: String!): WorkspaceFile!
   }
 
   type Mutation {
     lockSession: Boolean!
+    """A new folder under the home of the workspace. Secrets stay read only; file content goes through PUT /api/workspace/file."""
+    workspaceMkdir(path: String!): WorkspaceEntry!
+    """Renames or moves a file or folder to a path that does not exist yet."""
+    workspaceRename(from: String!, to: String!): WorkspaceEntry!
+    """Deletes a file, or a folder with everything in it; refused when a secret is inside."""
+    workspaceDelete(path: String!): Boolean!
     saveDemoLink(ticketKey: String!, url: String!): Boolean
     sendToDiscord(ticketKey: String!, customMessage: String, threadId: String, threadName: String): Boolean
     setTicketDependency(ticketKey: String!, dependsOnKey: String!): TicketRelationGroup!

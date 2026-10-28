@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowDown, ArrowUp, Building2, Check, ChevronLeft, ChevronRight, ClipboardList, Clock, ExternalLink, EyeOff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Square, Table2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Building2, Check, ChevronLeft, ChevronRight, ClipboardList, Clock, ExternalLink, EyeOff, FileDiff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Square, Table2, X } from 'lucide-react';
 import { GET_AUTO_REVIEWS, GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
 import { APPROVE_REVIEW, CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
@@ -608,6 +608,11 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                   ))}
                   {selected.note && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Note</dt><dd className="break-words">{selected.note}</dd></>}
                 </dl>
+              )}
+              {(selected.pullRequests?.[0]?.repo ?? selected.prBe ?? selected.prFe) && (
+                <Button size="sm" className="self-start" onClick={() => onNavigate(changesHref(selected.key, selected.pullRequests?.[0]?.repo ?? selected.prBe ?? selected.prFe ?? null, 'agents'))}>
+                  <FileDiff size={13} aria-hidden="true" />View changes{openFindings > 0 && <span className="rounded-full bg-status-warn/20 px-1.5 font-mono text-[0.62rem] font-bold text-status-warn" aria-label={`${openFindings} open findings`}>{openFindings}</span>}
+                </Button>
               )}
 
               {!!selected.assumptions?.length && (

@@ -219,6 +219,9 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'validateGitHub',
       'validateJira',
       'verifyMasterPin',
+      'workspaceDelete',
+      'workspaceMkdir',
+      'workspaceRename',
     ]);
   });
 

@@ -1,7 +1,8 @@
 import React from 'react';
 import { useQuery } from '@apollo/client';
-import { ArrowRight, FileCode } from 'lucide-react';
+import { ArrowRight, FileCode, FileDiff } from 'lucide-react';
 import type { AgentRun } from '../agents/runs';
+import { changesHref } from '../changes/href';
 import { GET_CHAT_SESSION, GET_ORCHESTRATION } from '../graphql/queries';
 import { Badge, Button } from '../components/ui';
 import { cn } from '../lib/cn';
@@ -26,10 +27,11 @@ interface SessionInspectorProps {
   costUsd?: number | null;
   files: readonly ChatFileChange[];
   onTicketClick?: (key: string) => void;
+  onNavigate?: (path: string) => void;
   className?: string;
 }
 
-export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, costUsd, files, onTicketClick, className }) => {
+export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, costUsd, files, onTicketClick, onNavigate, className }) => {
   const ticketKey = session.ticketKey || '';
   const { data: sessionData } = useQuery<{ chatSession: ChatSession | null }>(GET_CHAT_SESSION, { variables: { id: session.id } });
   const { data: machineData } = useQuery<{ chatMachineOptions: SessionMachineOptions | null }>(CHAT_MACHINE_OPTIONS, { variables: { machine: machineOf(session) } });
@@ -45,6 +47,7 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, cos
   const sessionRows = SESSION_ROWS.flatMap((field) => applied.filter((row) => row.field === field));
   const changed = changedFiles(files);
   const total = filesTotal(changed);
+  const changesRepo = run?.pullRequests?.[0]?.repo ?? run?.prBe ?? run?.prFe ?? null;
   return (
     <aside className={cn('flex min-h-0 flex-col gap-4 overflow-y-auto bg-surface-0 p-3.5', className)} aria-label="Session details">
       <section className={cn('flex flex-col gap-1.5', sessionRows.length === 0 && (costUsd != null ? 'min-[761px]:hidden' : 'hidden'))} aria-label="Session">
@@ -98,6 +101,7 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, cos
         </div>
       </section>
       <div className="mt-auto flex flex-col gap-4">
+        {ticketKey && onNavigate && changesRepo && <Button size="sm" variant="ghost" className="w-full max-[900px]:h-11" onClick={() => onNavigate(changesHref(ticketKey, changesRepo, 'sessions', session.id))}><FileDiff size={13} aria-hidden="true" />View changes</Button>}
         {ticketKey && onTicketClick && <Button size="sm" className="w-full max-[900px]:h-11" onClick={() => onTicketClick(ticketKey)}>Open ticket<ArrowRight size={13} aria-hidden="true" /></Button>}
       </div>
     </aside>
