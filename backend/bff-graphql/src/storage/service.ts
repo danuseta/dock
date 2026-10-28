@@ -534,9 +534,20 @@ export class StorageService {
       for (const event of events) {
         const row = known.get(event.eventId);
         if (!row) {
-          if (used >= maxRows) {
+          if (used >= maxRows && event.kind !== 'agent') {
+            const spare = await tx.chatActivity.findFirst({
+              where: {
+                sessionId, turnId, status: { not: 'running' }, eventId: { not: droppedId },
+                OR: [{ kind: 'hook' }, { kind: 'note', name: { notIn: ['dropped', 'subagent'] } }],
+              },
+              orderBy: { id: 'asc' },
+              select: { id: true, eventId: true },
+            });
             dropped += 1;
-            continue;
+            if (!spare) continue;
+            await tx.chatActivity.delete({ where: { id: spare.id } });
+            known.delete(spare.eventId);
+            used -= 1;
           }
           used += 1;
           seq += 1;

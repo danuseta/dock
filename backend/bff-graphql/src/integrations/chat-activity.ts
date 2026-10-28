@@ -5,7 +5,7 @@ export type ActivityStatus = typeof ACTIVITY_STATUSES[number];
 
 export const ACTIVITY_VERSION = 1;
 export const MAX_ACTIVITY_EVENTS = 50;
-export const MAX_ACTIVITY_PER_TURN = 400;
+export const MAX_ACTIVITY_PER_TURN = 1500;
 export const MAX_ACTIVITY_EVENT_BYTES = 4096;
 export const MAX_ACTIVITY_ROWS = 40000;
 export const ACTIVITY_DETAIL_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
