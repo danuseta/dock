@@ -11,13 +11,13 @@ import { demoVideos, ingestDemoLink, type DemoVideos } from '../integrations/dem
 import { DEMO_STORAGE_ROUTES, demoStorage, demoStorageRoute, type DemoStorage } from '../integrations/demo-storage';
 import { receiveDemoVideo } from './demo-videos';
 import { autoBroadcast, type AutoBroadcast } from '../integrations/broadcast';
-import { decisionGate, type DecisionGate } from '../integrations/decision-gate';
+import { decisionGate, stillWorking, type DecisionGate } from '../integrations/decision-gate';
 import { doctorReports, type DoctorReports } from '../integrations/doctor';
 import { DiscordReaderError, type DiscordReader } from '../integrations/discord-reader';
 import { discordReader } from '../integrations/discord-reader-live';
 import { dockMode } from '../mode';
 import { ELEVENLABS_ROUTES, elevenLabsKeys, elevenLabsRoute, type ElevenLabsKeys } from '../integrations/elevenlabs-keys';
-import { MAX_TRANSCRIPT_BYTES, OrchestratorInputError, OrchestratorService, orchestratorService } from '../integrations/orchestrator';
+import { MAX_TRANSCRIPT_BYTES, OrchestratorInputError, OrchestratorService, orchestratorService, type Orchestration } from '../integrations/orchestrator';
 import { StorageService } from '../storage/service';
 
 const broadcastFailed = (error: unknown) => console.error('[Broadcast] automatic broadcast failed:', error instanceof Error ? error.message : 'unknown error');
@@ -94,20 +94,28 @@ export function createOrchestratorIngestRouter(
   };
 
   const small = express.json({ limit: '256kb' });
+  // A build goes up for review, and out to Discord, only once sous stops working on it: a ledger push mid-turn waits
+  // for the turn's end, which the hook events report.
+  const settled = (run: Orchestration) => {
+    if (stillWorking(run)) return;
+    if (broadcast) void broadcast.afterLedger(run).catch(broadcastFailed);
+    if (gate) void gate.settle(run).catch(gateFailed);
+  };
   router.post('/', small, handle(async (body, _signal, machine) => {
     const run = await service.ingestLedger(body, new Date(), machine);
-    if (!run.ignored && broadcast) void broadcast.afterLedger(run).catch(broadcastFailed);
-    if (!run.ignored && gate) void gate.settle(run).catch(gateFailed);
+    if (!run.ignored) settled(run);
     return run.ignored ? { key: run.key, ignored: true, owner: run.machine } : { key: run.key, stage: run.stage };
   }));
   router.post('/ledger/list', small, handle((_body, _signal, machine) => service.ledgerList(machine)));
   router.post('/ledger/get', small, handle((body, _signal, machine) => service.ledgerGet(body, machine)));
   router.post('/event', small, handle(async (body, _signal, machine) => {
     const run = await service.ingestHookEvent(body, new Date(), machine);
+    if (run && !run.ignored) settled(run);
     return run && { key: run.key, activity: run.activity, ...(run.ignored ? { ignored: true, owner: run.machine } : {}) };
   }));
   router.post('/events', small, handle(async (body, _signal, machine) => {
     const run = await service.ingestEventBatch(body, new Date(), machine);
+    if (run && !run.ignored) settled(run);
     return run && { key: run.key, activity: run.activity, ...(run.ignored ? { ignored: true, owner: run.machine } : {}) };
   }));
   // The workspace cron reads the runs kept here, so it never starts a ticket the laptop already works.

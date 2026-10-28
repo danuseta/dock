@@ -102,3 +102,45 @@ test('router: read-only, behind the unlock check, serves lists and file bytes wi
     done();
   }
 });
+
+test('sprint boards: a ticket comes from its materials file or its own folder under Sprint-<N>/<Epic>, merged with its ledger board', async () => {
+  const { root, done } = fixture();
+  const sprints = mkdtempSync(path.join(os.tmpdir(), 'sprints-'));
+  const put = (relative: string, body: string, at: Date) => {
+    const file = path.join(sprints, relative);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, body);
+    utimesSync(file, at, at);
+  };
+  try {
+    put('Sprint-26/V2-Playbook/materials/03-QRD-1278.md', '# QRD-1278', new Date('2026-10-27T00:00:00Z'));
+    put('Sprint-26/V2-Playbook/materials/04-QRD-1230.md', '# QRD-1230 sprint', new Date('2026-10-27T01:00:00Z'));
+    put('Sprint-26/Carry-over/QRD-1491/notes.md', '# carry', new Date('2026-10-27T02:00:00Z'));
+    put('Sprint-26/V2-Playbook/README.md', 'epic note, no ticket', new Date('2026-10-27T03:00:00Z'));
+    put('Sprint-26/V2-Playbook/materials/05-QRD-12780.md', 'another ticket', new Date('2026-10-26T00:00:00Z'));
+    put('Backlog/QRD-9999.md', 'not a sprint folder', new Date('2026-10-27T04:00:00Z'));
+    const board = new Blackboard(root, sprints);
+    const tickets = await board.tickets();
+    const byKey = new Map(tickets.map((ticket) => [ticket.key, ticket]));
+    assert.deepStrictEqual(byKey.get('QRD-1278'), { key: 'QRD-1278', epic: 'Sprint-26 · V2-Playbook', files: 1, updatedAt: '2026-10-27T00:00:00.000Z' });
+    assert.deepStrictEqual([byKey.get('QRD-1491')?.epic, byKey.get('QRD-1491')?.files], ['Sprint-26 · Carry-over', 1]);
+    assert.strictEqual(byKey.get('QRD-12780')?.files, 1);
+    assert.strictEqual(byKey.has('QRD-9999'), false);
+    assert.deepStrictEqual([byKey.get('QRD-1230')?.files, byKey.get('QRD-1230')?.updatedAt], [5, '2026-10-27T01:00:00.000Z']);
+    assert.strictEqual(tickets[0].key, 'QRD-1491');
+
+    const files = await board.files('qrd-1230');
+    assert.ok(files?.some((file) => file.path === 'NOW.md'));
+    assert.ok(files?.some((file) => file.path === 'Sprint-26/V2-Playbook/materials/04-QRD-1230.md' && !file.generated));
+    assert.deepStrictEqual((await board.files('QRD-1278'))?.map((file) => file.path), ['Sprint-26/V2-Playbook/materials/03-QRD-1278.md']);
+
+    const opened = await board.open('QRD-1278', 'Sprint-26/V2-Playbook/materials/03-QRD-1278.md');
+    assert.strictEqual(opened.mime, 'text/markdown; charset=utf-8');
+    await assert.rejects(board.open('QRD-1278', 'Sprint-26/V2-Playbook/materials/04-QRD-1230.md'), /No blackboard|No such file/);
+    await assert.rejects(board.open('QRD-1278', 'Sprint-26/V2-Playbook/README.md'), /No blackboard|No such file/);
+    assert.strictEqual((await board.open('QRD-1230', 'NOW.md')).name, 'NOW.md');
+  } finally {
+    done();
+    rmSync(sprints, { recursive: true, force: true });
+  }
+});
