@@ -1,9 +1,12 @@
-import { promises as fs } from 'node:fs';
+import { promises as fs, type Stats } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 export const MAX_ENTRIES = 2000;
 export const MAX_PREVIEW_BYTES = 512 * 1024;
+export const MAX_WRITE_BYTES = 50 * 1024 * 1024;
+/** A folder with more items than this is not walked for secrets, so it cannot be moved or deleted from DOCK. */
+export const MAX_WALK_ENTRIES = 50000;
 const BINARY_SNIFF_BYTES = 8192;
 
 export class WorkspaceFilesError extends Error {}
@@ -32,7 +35,7 @@ export function isMasked(relative: string): boolean {
 }
 
 /**
- * A read-only view of the folders and files under one root, the home of the user DOCK runs as. Paths go in and come out
+ * The folders and files under one root, the home of the user DOCK runs as. Paths go in and come out
  * relative to the root with forward slashes; one that leaves the root, by `..` or through a link, is refused.
  */
 export class WorkspaceFiles {
@@ -51,6 +54,87 @@ export class WorkspaceFiles {
     }
     if (real !== root && !real.startsWith(root + path.sep)) throw new WorkspaceFilesError('That path leads out of the home folder');
     return { absolute: real, relative };
+  }
+
+  /** A path to create, change or remove: its folder resolved inside the root, the last name kept as is so a link is never followed. */
+  private async target(input: string | null | undefined): Promise<{ absolute: string; relative: string }> {
+    const raw = (input ?? '').replace(/\\/g, '/').replace(/\/+$/, '');
+    const name = raw.split('/').pop() ?? '';
+    if (!name || name === '.' || name === '..') throw new WorkspaceFilesError('A name is required');
+    const folder = await this.resolve(raw.slice(0, raw.length - name.length));
+    if (!(await fs.stat(folder.absolute)).isDirectory()) throw new WorkspaceFilesError(`${folder.relative || '~'} is not a folder`);
+    const relative = folder.relative ? `${folder.relative}/${name}` : name;
+    if (isMasked(relative)) throw new WorkspaceFilesError(`${relative} holds secrets, so it is read only`);
+    return { absolute: path.join(folder.absolute, name), relative };
+  }
+
+  /** Refuses a folder that holds a secret anywhere inside it; dependency folders are not walked. */
+  private async holdsNoSecret(absolute: string, relative: string): Promise<void> {
+    const stack = [{ absolute, relative }];
+    let seen = 0;
+    while (stack.length) {
+      const current = stack.pop()!;
+      for (const dirent of await fs.readdir(current.absolute, { withFileTypes: true })) {
+        if (++seen > MAX_WALK_ENTRIES) throw new WorkspaceFilesError(`${relative} holds more than ${MAX_WALK_ENTRIES.toLocaleString('en-US')} items, too many to check for secrets`);
+        const child = `${current.relative}/${dirent.name}`;
+        if (isMasked(child)) throw new WorkspaceFilesError(`${relative} holds a secret (${child}), so it stays where it is`);
+        if (dirent.isDirectory() && dirent.name !== 'node_modules') stack.push({ absolute: path.join(current.absolute, dirent.name), relative: child });
+      }
+    }
+  }
+
+  private async existing(input: string): Promise<{ absolute: string; relative: string; stat: Stats }> {
+    const found = await this.target(input);
+    const stat = await fs.lstat(found.absolute).catch(() => null);
+    if (!stat) throw new WorkspaceFilesError(`${found.relative} does not exist`);
+    if (stat.isDirectory()) await this.holdsNoSecret(found.absolute, found.relative);
+    return { ...found, stat };
+  }
+
+  private async fresh(input: string): Promise<{ absolute: string; relative: string }> {
+    const found = await this.target(input);
+    if (await fs.lstat(found.absolute).then(() => true, () => false)) throw new WorkspaceFilesError(`${found.relative} already exists`);
+    return found;
+  }
+
+  async mkdir(input: string): Promise<WorkspaceEntry> {
+    const { absolute, relative } = await this.fresh(input);
+    await fs.mkdir(absolute);
+    return this.entry(absolute, relative);
+  }
+
+  /**
+   * Writes a file: a new one, or with `replace` the one already there. `expected` is the modified time the editor
+   * opened, so a file changed on disk since then is not overwritten.
+   */
+  async write(input: string, data: Buffer, options: { replace?: boolean; expected?: string | null } = {}): Promise<WorkspaceEntry> {
+    if (data.length > MAX_WRITE_BYTES) throw new WorkspaceFilesError(`A file can be at most ${MAX_WRITE_BYTES / 1024 / 1024} MB`);
+    const found = await this.target(input);
+    const stat = await fs.lstat(found.absolute).catch(() => null);
+    if (stat && !options.replace) throw new WorkspaceFilesError(`${found.relative} already exists`);
+    if (stat && !stat.isFile()) throw new WorkspaceFilesError(`${found.relative} is not a file`);
+    if (stat && options.expected && stat.mtime.toISOString() !== options.expected) throw new WorkspaceFilesError(`${found.relative} changed on disk after it was opened; reopen it first`);
+    await fs.writeFile(found.absolute, data);
+    return this.entry(found.absolute, found.relative);
+  }
+
+  async rename(from: string, to: string): Promise<WorkspaceEntry> {
+    const source = await this.existing(from);
+    const destination = await this.fresh(to);
+    await fs.rename(source.absolute, destination.absolute);
+    return this.entry(destination.absolute, destination.relative);
+  }
+
+  async remove(input: string): Promise<boolean> {
+    const { absolute } = await this.existing(input);
+    await fs.rm(absolute, { recursive: true });
+    return true;
+  }
+
+  private async entry(absolute: string, relative: string): Promise<WorkspaceEntry> {
+    const info = await fs.lstat(absolute);
+    const kind = info.isDirectory() ? 'dir' : info.isFile() ? 'file' : info.isSymbolicLink() ? 'link' : 'other';
+    return { name: path.basename(relative), path: relative, kind, size: kind === 'file' ? info.size : null, modifiedAt: info.mtime.toISOString(), masked: false };
   }
 
   async dir(input?: string | null): Promise<WorkspaceDir> {

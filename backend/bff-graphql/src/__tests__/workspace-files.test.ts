@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -72,6 +72,66 @@ test('nothing outside the home folder is read, by .. or through a link', async (
     try { symlinkSync(outside, path.join(root, 'out'), 'junction'); } catch { linked = false; }
     if (linked) await assert.rejects(files.dir('out'), /leads out of the home folder/);
     await assert.rejects(files.file('missing.txt'), /does not exist/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('folders and files are created, saved, renamed and deleted; a name already taken is refused', async () => {
+  const root = home();
+  try {
+    const files = new WorkspaceFiles(root);
+    assert.strictEqual((await files.mkdir('projects/new')).kind, 'dir');
+    await assert.rejects(files.mkdir('projects/new'), /already exists/);
+    const created = await files.write('projects/new/a.txt', Buffer.from('one'));
+    assert.deepStrictEqual([created.path, created.size], ['projects/new/a.txt', 3]);
+    await assert.rejects(files.write('projects/new/a.txt', Buffer.from('two')), /already exists/);
+    await files.write('projects/new/a.txt', Buffer.from('two'), { replace: true, expected: created.modifiedAt });
+    assert.strictEqual((await files.file('projects/new/a.txt')).text, 'two');
+    await assert.rejects(files.write('projects/new/a.txt', Buffer.from('three'), { replace: true, expected: '2000-01-01T00:00:00.000Z' }), /changed on disk/);
+    assert.strictEqual((await files.rename('projects/new/a.txt', 'projects/new/b.txt')).path, 'projects/new/b.txt');
+    await assert.rejects(files.rename('projects/new/b.txt', 'notes.txt'), /already exists/);
+    await files.rename('projects/new', 'projects/moved');
+    assert.strictEqual(await files.remove('projects/moved'), true);
+    await assert.rejects(files.dir('projects/moved'), /does not exist/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('secrets stay read only: never written, renamed, deleted, or moved with their folder', async () => {
+  const root = home();
+  try {
+    const files = new WorkspaceFiles(root);
+    await assert.rejects(files.write('projects/app/.env', Buffer.from('x'), { replace: true }), /read only/);
+    await assert.rejects(files.write('.ssh/authorized_keys', Buffer.from('x')), /secrets/);
+    await assert.rejects(files.mkdir('.aws'), /read only/);
+    await assert.rejects(files.rename('projects/app/.env', 'projects/app/env.txt'), /read only/);
+    await assert.rejects(files.rename('projects/app/index.ts', 'projects/app/.env.local'), /read only/);
+    await assert.rejects(files.remove('projects/app/.env'), /read only/);
+    await assert.rejects(files.remove('projects'), /holds a secret/);
+    await assert.rejects(files.rename('projects/app', 'app'), /holds a secret/);
+    await assert.rejects(files.remove(''), /A name is required/);
+    await assert.rejects(files.write('../outside.txt', Buffer.from('x')), WorkspaceFilesError);
+    assert.strictEqual((await files.file('projects/app/.env')).masked, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a link is removed as a link: what it points at outside the home stays', async () => {
+  const root = home();
+  const outside = mkdtempSync(path.join(os.tmpdir(), 'dock-outside-'));
+  try {
+    writeFileSync(path.join(outside, 'keep.txt'), 'keep');
+    let linked = true;
+    try { symlinkSync(outside, path.join(root, 'out'), 'junction'); } catch { linked = false; }
+    if (!linked) return;
+    const files = new WorkspaceFiles(root);
+    await assert.rejects(files.write('out/new.txt', Buffer.from('x')), /leads out of the home folder/);
+    await files.remove('out');
+    assert.strictEqual(existsSync(path.join(outside, 'keep.txt')), true);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });

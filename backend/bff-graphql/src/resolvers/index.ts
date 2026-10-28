@@ -423,6 +423,18 @@ export const resolvers = {
   },
 
   Mutation: {
+    workspaceMkdir: async (_: unknown, { path }: { path: string }) => {
+      requireWorkspaceFiles();
+      return workspaceFiles.mkdir(path).catch(workspaceFilesError);
+    },
+    workspaceRename: async (_: unknown, { from, to }: { from: string; to: string }) => {
+      requireWorkspaceFiles();
+      return workspaceFiles.rename(from, to).catch(workspaceFilesError);
+    },
+    workspaceDelete: async (_: unknown, { path }: { path: string }) => {
+      requireWorkspaceFiles();
+      return workspaceFiles.remove(path).catch(workspaceFilesError);
+    },
     lockSession: async (_: unknown, __: unknown, context: AuthContext) => {
       context.sessions.clear(context.request, context.response);
       return true;
@@ -754,6 +766,9 @@ export const protectedQueries = [
   'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile',
 ] as const;
 export const protectedMutations = [
+  'workspaceMkdir',
+  'workspaceRename',
+  'workspaceDelete',
   'saveDemoLink',
   'sendToDiscord',
   'setTicketDependency',

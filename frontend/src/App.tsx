@@ -131,7 +131,7 @@ function App() {
       case '/agents': return <Suspense fallback={<Page width="full"><LoadingSkeleton /></Page>}><AgentsPage onTicketClick={navigateToTicket} onNavigate={handleNavigate} /></Suspense>;
       case '/blackboard': return <BlackboardPage />;
       case '/guide': return <GuidePage onNavigate={handleNavigate} />;
-      case '/sessions': return <SessionsPage onTicketClick={navigateToTicket} />;
+      case '/sessions': return <SessionsPage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;
       case '/calendar': return <CalendarPage onNavigate={handleNavigate} />;
       case '/sprint': return <SprintPage />;
       case '/monitoring': return <MonitoringPage onNavigate={handleNavigate} />;

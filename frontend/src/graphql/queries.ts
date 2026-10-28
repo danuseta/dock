@@ -1226,3 +1226,21 @@ export const GET_WORKSPACE_FILE = gql`
     workspaceFile(path: $path) { path size modifiedAt masked binary truncated text }
   }
 `;
+
+export const WORKSPACE_MKDIR = gql`
+  mutation WorkspaceMkdir($path: String!) {
+    workspaceMkdir(path: $path) { name path kind size modifiedAt masked }
+  }
+`;
+
+export const WORKSPACE_RENAME = gql`
+  mutation WorkspaceRename($from: String!, $to: String!) {
+    workspaceRename(from: $from, to: $to) { name path kind size modifiedAt masked }
+  }
+`;
+
+export const WORKSPACE_DELETE = gql`
+  mutation WorkspaceDelete($path: String!) {
+    workspaceDelete(path: $path)
+  }
+`;
