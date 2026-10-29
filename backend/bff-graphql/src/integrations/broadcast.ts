@@ -172,7 +172,7 @@ export const autoBroadcast = new AutoBroadcast({
     return Boolean(ticket) && !isBeforeReview(ticket.status);
   },
   // A draft pull request is not up for review yet, so it does not count.
-  hasOpenPullRequest: async (key) => (await githubAPI.getPullRequestsForTicket(key)).some((pr) => pr.status === 'open'),
+  hasOpenPullRequest: async (key) => (await githubAPI.getPullRequestsForTicket(key, { fresh: true })).some((pr) => pr.status === 'open'),
   broadcast: (key) => sendBroadcast(broadcastDeps, { ticketKey: key }),
   event: (key, kind, detail) => orchestratorService.recordEvent(key, kind, detail),
   now: () => new Date(),

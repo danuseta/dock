@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { DecisionGate, ownerPending, stillWorking, type GateDeps } from '../integrations/decision-gate';
+import { DecisionGate, ownerPending, stillWorking, sweepReleases, type GateDeps } from '../integrations/decision-gate';
 import { normalizeDecisions } from '../integrations/orchestrator';
 
 const decision = (n: number, status: string) => ({ n, at: '', text: `D${n}`, status, by: 'sous', issue: null, cancelNote: null, effect: null, alts: [], replaces: null, supersededBy: null }) as never;
@@ -106,4 +106,30 @@ test('nothing is released while sous works on the build: an answer just reopened
   assert.deepStrictEqual(await w.gate.settle(build({ activity: 'WAITING', activityDetail: 'notification' })), [], 'a prompt mid-turn');
   assert.deepStrictEqual(await w.gate.settle(build({ activity: 'WAITING', activityDetail: 'gate' })), ['https://github.com/o/be/pull/1', 'https://github.com/o/fe/pull/2'], 'the ledger waits on the owner');
   assert.strictEqual(stillWorking({ activity: 'IDLE', activityDetail: null }), false);
+});
+
+test('an ACTIVE run with no hook event for ten minutes is not working: a ledger push does not keep it busy', () => {
+  assert.strictEqual(stillWorking({ activity: 'ACTIVE', activityDetail: 'Bash', eventIdleSeconds: 30 }), true);
+  assert.strictEqual(stillWorking({ activity: 'ACTIVE', activityDetail: 'Bash', eventIdleSeconds: 24 * 3600 }), false, 'QRD-1275 sat ACTIVE · Bash from the day before');
+  assert.strictEqual(stillWorking({ activity: 'ACTIVE', activityDetail: 'Bash', eventIdleSeconds: null }), true);
+});
+
+test('the sweep releases and posts quiet builds at their pull request stage, and leaves the rest', async () => {
+  const settled: string[] = [];
+  const posted: string[] = [];
+  const pr = (status: string) => [{ url: 'https://github.com/o/r/pull/1', number: 1, repo: 'o/r', status }];
+  const runs = [
+    { ...build(), key: 'QRD-1275', stage: 'pr', activity: 'ACTIVE', activityDetail: 'Bash', eventIdleSeconds: 86400, pullRequests: pr('open') },
+    { ...build(), key: 'QRD-1286', stage: 'pr', activity: 'WAITING', activityDetail: 'gate', eventIdleSeconds: 60, pullRequests: pr('draft') },
+    { ...build(), key: 'QRD-9', stage: 'pr', activity: 'ACTIVE', activityDetail: 'Bash', eventIdleSeconds: 20, pullRequests: pr('open') },
+    { ...build(), key: 'QRD-7', stage: 'code', activity: 'IDLE', activityDetail: null, eventIdleSeconds: 9000, pullRequests: pr('open') },
+    { ...build(), key: 'QRD-8', kind: 'review', stage: 'pr', activity: 'IDLE', activityDetail: null, eventIdleSeconds: 9000, pullRequests: pr('open') },
+  ] as never[];
+  await sweepReleases({
+    list: async () => runs,
+    gate: { settle: async (run) => { settled.push(run.key); return []; } },
+    broadcast: async (run) => { posted.push(run.key); },
+  });
+  assert.deepStrictEqual(settled, ['QRD-1275', 'QRD-1286'], 'a fresh ACTIVE run, a run still at code and a review are left alone');
+  assert.deepStrictEqual(posted, ['QRD-1275'], 'only a build with a pull request out of draft is offered to the broadcast');
 });
