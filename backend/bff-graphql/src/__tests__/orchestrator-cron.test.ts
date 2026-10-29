@@ -116,8 +116,8 @@ function world(start: Start = {}) {
     tickets: start.tickets ?? [],
     runs: start.runs ?? [] as CronRun[],
     online: start.online ?? true,
-    sessions: [] as Array<{ id: string; ticketKey: string; machine: string; title?: string; origin: string; options: Record<string, string>; state: SessionState; queuedAt: number; replied: boolean }>,
-    sent: [] as Array<{ sessionId: string; text: string; options: Record<string, string> }>,
+    sessions: [] as Array<{ id: string; ticketKey: string; machine: string; title?: string; origin: string; options: Record<string, string>; state: SessionState; queuedAt: number; replied: boolean; cronSlot?: boolean }>,
+    sent: [] as Array<{ sessionId: string; text: string; options: Record<string, string>; extra?: { cronSlot?: boolean; queue?: boolean } }>,
     moved: [] as string[],
     movedTo: [] as Array<[string, string]>,
     stopped: [] as string[],
@@ -143,7 +143,7 @@ function world(start: Start = {}) {
     dependencies: async () => start.dependencies ?? [],
     dockOrder: async () => start.dockOrder ?? new Map(),
     manualKeys: async () => start.manual ?? new Set(),
-    slots: async () => ({ busy: state.sessions.filter((s) => s.state === 'running').length, waiting: state.sessions.filter((s) => s.state === 'queued').length }),
+    slots: async () => ({ busy: state.sessions.filter((s) => s.state === 'running' && s.cronSlot !== false).length, waiting: state.sessions.filter((s) => s.state === 'queued' && s.cronSlot !== false).length }),
     machines: async () => ['laptop', 'workspace'],
     online: () => state.online,
     fiveHourUsed: () => start.used ?? null,
@@ -164,12 +164,15 @@ function world(start: Start = {}) {
       state.sessions.push(session);
       return session;
     },
-    send: async (sessionId, text, options) => {
+    send: async (sessionId, text, options, extra) => {
       if (state.failSend) throw new Error('send refused');
-      state.sent.push({ sessionId, text, options });
+      state.sent.push({ sessionId, text, options, ...(extra ? { extra } : {}) });
       const session = state.sessions.find((item) => item.id === sessionId)!;
-      Object.assign(session, { state: 'queued', queuedAt: ++state.clock });
+      // A message queued behind a running turn leaves that turn running.
+      if (session.state !== 'running') Object.assign(session, { state: 'queued', queuedAt: ++state.clock, cronSlot: extra?.cronSlot !== false });
     },
+    ownerReplySession: async () => (state.settings.get('ownerReplySession') === 'last' ? 'last' : 'new'),
+    lastTaskSession: async (key) => state.sessions.filter((s) => s.ticketKey === key && isTaskTitle(s.title ?? '', key)).at(-1) ?? null,
     machineOptions: async (_machine, options) => state.machineOptions(options),
     deleteSession: async (sessionId) => { state.sessions = state.sessions.filter((session) => session.id !== sessionId); },
     ownerSessionBusy: async (key) => state.sessions.some((s) => s.ticketKey === key && isTaskTitle(s.title ?? '', key) && (s.state === 'queued' || s.state === 'running')),
@@ -180,11 +183,12 @@ function world(start: Start = {}) {
   };
   const cron = new OrchestratorCron(deps);
   const byKey = (key: string) => state.sessions.filter((session) => session.ticketKey === key).at(-1)!;
-  /** The bridge claiming until the gate says no. */
+  /** The bridge claiming until the gate says no. Only a message that takes a cron slot waits for one. */
   const claim = () => {
+    for (const session of state.sessions) if (session.state === 'queued' && session.cronSlot === false) session.state = 'running';
     for (;;) {
       const next = state.sessions.filter((s) => s.state === 'queued').sort((a, b) => a.queuedAt - b.queuedAt)[0];
-      if (!next || state.sessions.filter((s) => s.state === 'running').length >= parallel()) return;
+      if (!next || state.sessions.filter((s) => s.state === 'running' && s.cronSlot !== false).length >= parallel()) return;
       next.state = 'running';
     }
   };
@@ -559,7 +563,7 @@ test('a stalled sous run is resumed with the sous prompt even when the cron is s
 const sousRun = (overrides: Partial<CronRun> = {}): CronRun => ({
   key: 'QRD-9', machine: 'laptop', title: 'Sous ticket', waiting: 'I-2: Keep the old export? [Keep|Drop]', activity: 'IDLE', engine: 'sous',
   issues: [{ n: 1, level: 'arbiter', status: 'resolved' }, { n: 2, level: 'owner', status: 'open' }, { n: 3, level: 'owner', status: 'open' }],
-  decisions: [{ n: 1, status: 'DECIDED' }, { n: 2, status: 'SHOV' }, { n: 3, status: 'CANCELLED' }, { n: 4, status: 'USULAN' }],
+  decisions: [{ n: 1, status: 'DECIDED' }, { n: 2, status: 'GUESS' }, { n: 3, status: 'CANCELLED' }, { n: 4, status: 'USULAN' }],
   ...overrides,
 });
 
@@ -692,8 +696,32 @@ test('an auto review opens a Review-KEY session on the cron machine with the cro
   const session = w.state.sessions.find((item) => item.id === id)!;
   assert.deepStrictEqual([session.ticketKey, session.machine, session.title, session.origin], ['QRD-1473', 'workspace', 'Review-QRD-1473', 'cron']);
   assert.strictEqual(w.state.sent[0].text, 'review it');
+  assert.strictEqual(w.state.sent[0].extra?.cronSlot, false, 'a review waits for Turns at once, not for a cron slot');
   const refused = world();
   refused.state.failSend = true;
   await assert.rejects(refused.cron.openReview('QRD-1473', 'review it'), /send refused/);
   assert.strictEqual(refused.state.sessions.length, 0);
+});
+
+test('an owner answer and a review never wait for a cron slot', async () => {
+  const w = world({ config: { parallel: 1 }, runs: [sousRun()], tickets: [ticket('QRD-1')] });
+  await w.step();
+  assert.deepStrictEqual(w.running(), ['QRD-1'], 'the one cron slot is taken');
+  await w.cron.answer('QRD-9', 'Drop');
+  await w.cron.openReview('QRD-7', 'review it');
+  w.claim();
+  assert.deepStrictEqual(w.running(), ['QRD-1', 'QRD-7', 'QRD-9'], 'both run beside the full cron');
+  assert.deepStrictEqual(w.state.sent.slice(1).map((sent) => sent.extra?.cronSlot), [false, false]);
+});
+
+test('with Settings on last session an owner answer queues in the ticket last Task session instead of opening one', async () => {
+  const w = world({ runs: [sousRun()] });
+  w.state.settings.set('ownerReplySession', 'last');
+  await w.cron.answer('QRD-9', 'Drop');
+  assert.strictEqual(w.state.sessions.length, 1, 'no Task session yet: a new one is opened');
+  w.claim();
+  await w.cron.answer('QRD-9', 'Keep', 3);
+  await w.cron.submit('QRD-9', [], [{ n: 2, choice: 'no' }]);
+  assert.strictEqual(w.state.sessions.length, 1, 'later answers go to that session, even while it runs');
+  assert.deepStrictEqual(w.state.sent.slice(1).map((sent) => [sent.sessionId, sent.extra]), [['s-1', { cronSlot: false, queue: true }], ['s-1', { cronSlot: false, queue: true }]]);
 });

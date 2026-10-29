@@ -317,7 +317,7 @@ export interface CronRun {
 export interface OwnerAnswer { issue: number; text: string }
 export interface OwnerChange { n: number; choice: string }
 
-const CHANGEABLE = new Set(['SHOV', 'USULAN']);
+const CHANGEABLE = new Set(['GUESS', 'USULAN']);
 const MAX_OWNER_TEXT = 4000;
 export const OWNER_BUSY_TEXT = 'A session on this ticket has not finished its turn yet. Wait for it, then send again.';
 
@@ -357,7 +357,12 @@ export interface CronDeps {
   deleteSession(sessionId: string): Promise<unknown>;
   /** True while an owner session of the ticket still has its first turn queued or running. */
   ownerSessionBusy(key: string): Promise<boolean>;
-  send(sessionId: string, text: string, options: Record<string, string>): Promise<unknown>;
+  /** `cronSlot: false` for an owner reply or a review: it waits for Turns at once, not for a cron slot. `queue` waits behind a running turn. */
+  send(sessionId: string, text: string, options: Record<string, string>, extra?: { cronSlot?: boolean; queue?: boolean }): Promise<unknown>;
+  /** Settings: where an owner answer goes, a new session or the ticket's last Task session. */
+  ownerReplySession(): Promise<'new' | 'last'>;
+  /** The newest Task session the cron or an owner answer opened for the ticket, or null. */
+  lastTaskSession(key: string): Promise<{ id: string } | null>;
   runningSessions(): Promise<string[]>;
   stopTurn(sessionId: string): Promise<unknown>;
   hasPushDevices(): Promise<boolean>;
@@ -610,7 +615,8 @@ export class OrchestratorCron {
   }
 
   /**
-   * The owner's answer on a sous ticket opens a new session on the ticket's machine; the old one is never resumed.
+   * The owner's answer on a sous ticket goes to a new session on the ticket's machine, or to its last Task session when
+   * Settings say so.
    * It answers `issue`, else the I-n the ledger waits on, else the oldest open owner issue. Returns the issue answered.
    */
   async answer(key: string, textInput: string, issue?: number | null): Promise<number | null> {
@@ -626,8 +632,8 @@ export class OrchestratorCron {
   }
 
   /**
-   * The owner's answer sheet for one ticket: every answered issue and changed decision goes in one new session,
-   * because a second owner session on the ticket is refused until the first finished its first turn.
+   * The owner's answer sheet for one ticket: every answered issue and changed decision goes in one message, because a
+   * second new owner session on the ticket is refused until the first finished its first turn.
    */
   async submit(key: string, answers: OwnerAnswer[], changes: OwnerChange[]): Promise<void> {
     const run = await this.sousRun(key);
@@ -645,18 +651,24 @@ export class OrchestratorCron {
   }
 
   /**
-   * One owner session at a time per ticket, opened only with options its machine takes. A session whose first message
-   * is refused is removed again, so no empty session is left behind.
+   * The owner's message on a ticket, never behind a cron slot. In `last` mode it queues in the ticket's last Task session
+   * when there is one. Otherwise one new owner session at a time per ticket, opened only with options its machine takes;
+   * a session whose first message is refused is removed again, so no empty session is left behind.
    */
   private async ownerSession(run: CronRun, prompt: string) {
     if (this.ownerOpening.has(run.key)) throw new CronInputError(OWNER_BUSY_TEXT);
     this.ownerOpening.add(run.key);
     try {
-      if (await this.deps.ownerSessionBusy(run.key)) throw new CronInputError(OWNER_BUSY_TEXT);
       const options = await this.deps.machineOptions(run.machine, this.turnOptions(await this.settings()));
+      const last = (await this.deps.ownerReplySession()) === 'last' ? await this.deps.lastTaskSession(run.key) : null;
+      if (last) {
+        await this.deps.send(last.id, prompt, options, { cronSlot: false, queue: true });
+        return;
+      }
+      if (await this.deps.ownerSessionBusy(run.key)) throw new CronInputError(OWNER_BUSY_TEXT);
       const session = await this.deps.openSession({ ticketKey: run.key, machine: run.machine, title: ticketSessionTitle('Task', run.key), origin: 'cron', options });
       try {
-        await this.deps.send(session.id, prompt, options);
+        await this.deps.send(session.id, prompt, options, { cronSlot: false });
       } catch (error) {
         await this.deps.deleteSession(session.id).catch(() => undefined);
         throw error;
@@ -667,15 +679,15 @@ export class OrchestratorCron {
   }
 
   /**
-   * A `Review-<key>` session on the cron's machine with the cron's options, so it waits for a cron slot like a ticket
-   * does. Removed again when its first message is refused. Resolves to the session id.
+   * A `Review-<key>` session on the cron's machine with the cron's options. It waits for Turns at once, not for a cron
+   * slot. Removed again when its first message is refused. Resolves to the session id.
    */
   async openReview(key: string, prompt: string): Promise<string> {
     const settings = await this.settings();
     const options = await this.deps.machineOptions(settings.machine, this.turnOptions(settings));
     const session = await this.deps.openSession({ ticketKey: key, machine: settings.machine, title: ticketSessionTitle('Review', key), origin: 'cron', options });
     try {
-      await this.deps.send(session.id, prompt, options);
+      await this.deps.send(session.id, prompt, options, { cronSlot: false });
     } catch (error) {
       await this.deps.deleteSession(session.id).catch(() => undefined);
       throw error;

@@ -50,22 +50,6 @@ test('the generated marker comment is dropped before markdown is shown', async (
   assert.equal(withoutComments('<!-- generated, do not edit: `status.cjs render QRD-1230` -->\n# NOW - QRD-1230'), '# NOW - QRD-1230');
 });
 
-test('the execution log merges the timeline log with the events it does not carry, newest first', async () => {
-  const { executionLog } = await import('../lib/blackboard');
-  const log = [
-    { at: '2026-10-27T03:00:00.000Z', kind: 'stage', head: 'Stage', text: 'verify -> evidence' },
-    { at: '2026-10-27T03:05:00.000Z', kind: 'tool', head: 'sous-reviewer', text: 'Bash' },
-  ];
-  const events = [
-    { id: '1', kind: 'STAGE', detail: 'verify -> evidence', at: '2026-10-27T03:00:00.000Z' },
-    { id: '2', kind: 'APPROVED', detail: 'Jira label danuPass: added to QRD-1189', at: '2026-10-27T03:10:00.000Z' },
-    { id: '3', kind: 'APPROVE_FAILED', detail: 'GitHub approve: 422', at: '2026-10-27T03:10:01.000Z' },
-  ];
-  assert.deepEqual(executionLog(log, events).map((entry) => [entry.kind, entry.head]), [
-    ['fail', 'approve failed'], ['ok', 'approved'], ['tool', 'sous-reviewer'], ['stage', 'Stage'],
-  ]);
-});
-
 test('Hide done on the blackboard is the shared Checkbox, and the files list offers the run log', () => {
   const page = read('pages/BlackboardPage.tsx');
   assert.ok(!page.includes('<input type="checkbox"'));

@@ -132,6 +132,9 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'pullFilePatch',
       'pushPublicKey',
       'quickLinks',
+      'retro',
+      'runThinking',
+      'runThinkingRaw',
       'settings',
       'sprintDashboard',
       'sprintDashboardSettings',
@@ -141,6 +144,8 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'ticketChanges',
       'ticketDetail',
       'ticketRelationGroup',
+      'workspaceDir',
+      'workspaceFile',
     ]);
     assert.deepStrictEqual(mutationFields, [
       'addDiscordChannel',
@@ -180,6 +185,8 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'reportDockIssue',
       'requestDoctorRun',
       'restartDevServer',
+      'retroBuild',
+      'retroItemAction',
       'revokeIngestToken',
       'runOrchestratorCronNow',
       'saveAgentLook',
@@ -217,6 +224,9 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'validateGitHub',
       'validateJira',
       'verifyMasterPin',
+      'workspaceDelete',
+      'workspaceMkdir',
+      'workspaceRename',
     ]);
   });
 

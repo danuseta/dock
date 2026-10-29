@@ -1008,7 +1008,7 @@ export class ChatService {
     sessionIdInput: string,
     textInput: string,
     machines: string[],
-    extras: { attachmentIds?: string[] | null; options?: unknown; mode?: unknown } = {},
+    extras: { attachmentIds?: string[] | null; options?: unknown; mode?: unknown; cronSlot?: boolean } = {},
   ) {
     const sessionId = chatId(sessionIdInput, 'sessionId');
     if (extras.mode != null && extras.mode !== 'queue' && extras.mode !== 'steer') throw new OrchestratorInputError('mode must be queue or steer');
@@ -1022,6 +1022,7 @@ export class ChatService {
       throw new OrchestratorInputError(`A message needs between 1 and ${MAX_SEND_CHARS} characters`);
     }
     const options = parseTurnOptions(extras.options);
+    const cronSlot = extras.cronSlot ?? true;
     await this.failStale();
     const session = await this.storage.getChatSession(sessionId);
     if (!session) throw new OrchestratorInputError('Unknown chat session');
@@ -1041,9 +1042,9 @@ export class ChatService {
     const effective = usableTurnOptions(mergeTurnOptions(stored, options), caps, catalog);
     const now = this.now();
     const optionsJson = effective ? JSON.stringify(effective) : null;
-    if (busy) return this.hold(sessionId, body, optionsJson, now, mode === 'steer', caps?.features.includes('steer') === true);
+    if (busy) return this.hold(sessionId, body, optionsJson, now, mode === 'steer', caps?.features.includes('steer') === true, cronSlot);
     let message = await this.storage.createChatMessage({
-      sessionId, role: 'user', text: body, state: attachmentIds.length > 0 ? 'draft' : 'queued', at: now, options: optionsJson,
+      sessionId, role: 'user', text: body, state: attachmentIds.length > 0 ? 'draft' : 'queued', at: now, options: optionsJson, cronSlot,
     });
     let attached: Awaited<ReturnType<ChatAttachmentService['attach']>> = [];
     if (attachmentIds.length > 0) {
@@ -1073,10 +1074,10 @@ export class ChatService {
    * Steer on a bridge that can steer adds the message to the running turn as `steer`; on an older bridge it stops the turn,
    * so the message is answered right away in the same Claude session.
    */
-  private async hold(sessionId: string, text: string, options: string | null, now: Date, steer: boolean, canSteer: boolean) {
+  private async hold(sessionId: string, text: string, options: string | null, now: Date, steer: boolean, canSteer: boolean, cronSlot = true) {
     const running = await this.storage.getOpenChatMessage(sessionId);
     const into = steer && canSteer && running?.state === 'taken';
-    let message = await this.storage.createChatMessage({ sessionId, role: 'user', text, state: into ? 'steer' : 'held', at: now, options });
+    let message = await this.storage.createChatMessage({ sessionId, role: 'user', text, state: into ? 'steer' : 'held', at: now, options, cronSlot });
     const messageCount = await this.storage.trimChatMessages(sessionId, MAX_MESSAGES_KEPT);
     await this.storage.updateChatSession(sessionId, { messageCount, lastMessageAt: now });
     const open = await this.storage.getOpenChatMessage(sessionId);
@@ -1353,18 +1354,19 @@ export class ChatService {
   }
 
   /**
-   * The oldest queued message the bridge may run. A message of a cron session waits while the cron's slots are all
-   * in use; it keeps its place, so the owner's answer runs in the first slot that frees up. Manual sessions never wait.
+   * The oldest queued message the bridge may run. A message of a cron session that takes a cron slot waits while
+   * the cron's slots are all in use; it keeps its place. Manual sessions, owner replies and reviews never wait here: the
+   * bridge's Turns at once limits them.
    */
   private async takeNext(machine: string, caps: BridgeCaps | null) {
     const queued = await this.storage.getQueuedChatMessages(machine, CLAIM_CANDIDATES);
-    const limit = queued.some((message) => message.origin === 'cron') ? await this.cronLimit() : null;
+    const limit = queued.some((message) => message.origin === 'cron' && message.cronSlot) ? await this.cronLimit() : null;
     const slots = limit === null ? null : await this.storage.countCronSlots(machine);
     for (const message of queued) {
       if (await this.storage.countChatMessagesInState(message.sessionId, ['taken']) > 0) continue;
       const session = await this.storage.getChatSession(message.sessionId);
       if (!session) continue;
-      if (message.origin === 'cron' && limit !== null && slots && slots.busy >= limit) {
+      if (message.origin === 'cron' && message.cronSlot && limit !== null && slots && slots.busy >= limit) {
         const detail = `Waiting for a cron slot (${slots.busy} of ${limit} in use)`;
         if (session.statusDetail !== detail) await this.storage.updateChatSession(session.id, { statusDetail: detail });
         continue;

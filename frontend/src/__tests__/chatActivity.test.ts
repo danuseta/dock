@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import test from 'node:test';
 import {
-  buildTree, capRows, formatDuration, groupByTurn, maxSeq, mergeActivity, splitDetail, statusText,
+  buildTree, capRows, currentWorker, formatDuration, groupByTurn, maxSeq, mergeActivity, splitDetail, statusText,
   type ActivityNode, type ChatActivity,
 } from '../chat/activity/activity';
 import { createDetailStore } from '../chat/activity/detailStore';
@@ -164,3 +164,12 @@ test('a failed detail fetch is tried again when asked', async () => {
   assert.deepStrictEqual(store.get(1), { state: 'ready', text: 'back' });
 });
 
+
+test('the chat status line names the newest running worker, however deep: the runner hands off to sous-video', () => {
+  const runner = row({ kind: 'agent', name: 'sous-ticket-runner', label: 'Agent sous-ticket-runner: QRD-1268 sous runner', status: 'running', endedAt: null, startedAt: at(1) });
+  const reviewer = row({ kind: 'agent', name: 'sous-ticket-runner:sous-reviewer', label: 'Agent sous-reviewer: FINAL review', status: 'ok', startedAt: at(2), parentId: runner.eventId });
+  const video = row({ kind: 'agent', name: 'sous-ticket-runner:sous-video', label: 'Agent sous-video: Re-record demo video', status: 'running', endedAt: null, startedAt: at(3), parentId: runner.eventId });
+  assert.strictEqual(currentWorker([runner, reviewer, video, row()]), 'sous-video: Re-record demo video');
+  assert.strictEqual(currentWorker([runner, reviewer]), 'sous-ticket-runner: QRD-1268 sous runner');
+  assert.strictEqual(currentWorker([reviewer, row()]), null);
+});

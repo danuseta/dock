@@ -39,6 +39,8 @@ const SIGNAL_REFRESH_MS = 5 * 60 * 1000;
 
 export interface SearchPRsOptions {
   staleWhileRevalidate?: boolean;
+  /** Ask GitHub now: a pull request just marked ready still reads as draft in the cache. */
+  fresh?: boolean;
 }
 
 export class GitHubClient {
@@ -272,6 +274,7 @@ export class GitHubService {
     options: SearchPRsOptions = {},
   ) {
     const cacheKey = buildPullRequestCacheKey(pat, repos, ticketKey);
+    if (options.fresh) return this.fetchAndCachePRsOnce(pat, repos, ticketKey, cacheKey);
     const cached = await this.storage.getCache('github', cacheKey).catch(() => null);
     if (Array.isArray(cached)) {
       const lastRefresh = this.lastRefresh.get(cacheKey) || 0;

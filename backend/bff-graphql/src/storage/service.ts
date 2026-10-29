@@ -338,6 +338,58 @@ export class StorageService {
     return [...tools, ...members].sort((a, b) => b.id - a.id);
   }
 
+  getRetroItems(sprint: string) {
+    return this.db.retroItem.findMany({ where: { sprint }, orderBy: { createdAt: 'asc' } });
+  }
+
+  getRetroItem(id: string) {
+    return this.db.retroItem.findUnique({ where: { id } });
+  }
+
+  /** A new draft replaces the lines still open; lines the owner accepted or closed stay. */
+  async replaceRetroDraft(sprint: string, items: Array<{ kind: string; text: string; evidence: string[]; dest: string }>) {
+    await this.db.$transaction([
+      this.db.retroItem.deleteMany({ where: { sprint, status: 'open' } }),
+      ...items.map((item) => this.db.retroItem.create({ data: { sprint, kind: item.kind, text: item.text, evidence: JSON.stringify(item.evidence), dest: item.dest } })),
+    ]);
+    return items.length;
+  }
+
+  updateRetroItem(id: string, data: { status?: string; text?: string; sessionId?: string | null }) {
+    return this.db.retroItem.update({ where: { id }, data });
+  }
+
+  /** The ticket's chat sessions, so their activity can join the run's log. */
+  private async ticketSessionIds(ticketKey: string): Promise<string[]> {
+    const sessions = await this.db.chatSession.findMany({ where: { ticketKey }, select: { id: true } });
+    return sessions.map((session) => session.id);
+  }
+
+  /** Commits, pushes and pull request commands the ticket's sessions ran, newest first. */
+  async getTicketGitActivity(ticketKey: string, take = 200) {
+    const ids = await this.ticketSessionIds(ticketKey);
+    if (ids.length === 0) return [];
+    const rows = await this.db.chatActivity.findMany({
+      where: { sessionId: { in: ids }, kind: 'tool', name: 'Bash', OR: ['git commit', 'git push', 'gh pr create', 'gh pr edit', 'gh pr ready', 'gh pr merge'].map((command) => ({ label: { contains: command } })) },
+      orderBy: { startedAt: 'desc' },
+      take,
+      select: { agent: true, label: true, summary: true, startedAt: true },
+    });
+    return rows;
+  }
+
+  /** What the ticket's sessions did in a window: the raw layer behind one row of the Thinking column. */
+  async getTicketActivityWindow(ticketKey: string, from: Date, to: Date, take = 60) {
+    const ids = await this.ticketSessionIds(ticketKey);
+    if (ids.length === 0) return [];
+    return this.db.chatActivity.findMany({
+      where: { sessionId: { in: ids }, startedAt: { gte: from, lte: to }, kind: { in: ['tool', 'agent', 'note', 'skill'] } },
+      orderBy: { startedAt: 'asc' },
+      take,
+      select: { kind: true, agent: true, name: true, label: true, summary: true, startedAt: true },
+    });
+  }
+
   async addOrchestratorToolEvents(
     ticketKey: string,
     events: Array<{ kind: string; agentId: string; agentType: string | null; name: string; detail: string | null; at: Date }>,
@@ -481,7 +533,7 @@ export class StorageService {
     return this.db.chatMessage.deleteMany({ where: { sessionId } });
   }
 
-  createChatMessage(data: { sessionId: string; role: string; text: string; state: string; at: Date; options?: string | null }) {
+  createChatMessage(data: { sessionId: string; role: string; text: string; state: string; at: Date; options?: string | null; cronSlot?: boolean }) {
     return this.db.chatMessage.create({ data });
   }
 
@@ -534,9 +586,20 @@ export class StorageService {
       for (const event of events) {
         const row = known.get(event.eventId);
         if (!row) {
-          if (used >= maxRows) {
+          if (used >= maxRows && event.kind !== 'agent') {
+            const spare = await tx.chatActivity.findFirst({
+              where: {
+                sessionId, turnId, status: { not: 'running' }, eventId: { not: droppedId },
+                OR: [{ kind: 'hook' }, { kind: 'note', name: { notIn: ['dropped', 'subagent'] } }],
+              },
+              orderBy: { id: 'asc' },
+              select: { id: true, eventId: true },
+            });
             dropped += 1;
-            continue;
+            if (!spare) continue;
+            await tx.chatActivity.delete({ where: { id: spare.id } });
+            known.delete(spare.eventId);
+            used -= 1;
           }
           used += 1;
           seq += 1;
@@ -670,15 +733,18 @@ export class StorageService {
   }
 
   async getQueuedChatMessages(machine: string, take: number) {
-    const rows = await this.db.$queryRaw<Array<{ id: number | bigint; sessionId: string; text: string; options: string | null; origin: string }>>(Prisma.sql`
-      SELECT m."id", m."sessionId", m."text", m."options", s."origin" FROM "ChatMessage" m
+    const rows = await this.db.$queryRaw<Array<{ id: number | bigint; sessionId: string; text: string; options: string | null; origin: string; cronSlot: number | bigint | boolean }>>(Prisma.sql`
+      SELECT m."id", m."sessionId", m."text", m."options", s."origin", m."cronSlot" FROM "ChatMessage" m
       JOIN "ChatSession" s ON s."id" = m."sessionId"
       WHERE m."state" = 'queued' AND m."role" = 'user' AND s."source" = 'dock' AND s."machine" = ${machine}
       ORDER BY m."id" ASC LIMIT ${take}`);
-    return rows.map((row) => ({ id: Number(row.id), sessionId: row.sessionId, text: row.text, options: row.options, origin: row.origin }));
+    return rows.map((row) => ({ id: Number(row.id), sessionId: row.sessionId, text: row.text, options: row.options, origin: row.origin, cronSlot: Boolean(Number(row.cronSlot)) }));
   }
 
-  /** Cron sessions on a machine with a running turn (busy), and those with a user message queued and no running turn (waiting). */
+  /**
+   * Cron sessions on a machine with a running turn (busy), and those with a user message queued and no running turn (waiting).
+   * Only messages that take a cron slot count: an owner reply or a review waits for Turns at once instead.
+   */
   async countCronSlots(machine: string): Promise<{ busy: number; waiting: number }> {
     const [row] = await this.db.$queryRaw<Array<{ busy: number | bigint; waiting: number | bigint }>>(Prisma.sql`
       SELECT
@@ -686,7 +752,7 @@ export class StorageService {
         COUNT(DISTINCT CASE WHEN m."state" = 'queued' AND m."role" = 'user'
           AND NOT EXISTS (SELECT 1 FROM "ChatMessage" t WHERE t."sessionId" = s."id" AND t."state" = 'taken') THEN s."id" END) AS "waiting"
       FROM "ChatSession" s JOIN "ChatMessage" m ON m."sessionId" = s."id"
-      WHERE s."origin" = 'cron' AND s."source" = 'dock' AND s."machine" = ${machine} AND m."state" IN ('taken', 'queued')`);
+      WHERE s."origin" = 'cron' AND s."source" = 'dock' AND s."machine" = ${machine} AND m."state" IN ('taken', 'queued') AND m."cronSlot" = 1`);
     return { busy: Number(row?.busy ?? 0), waiting: Number(row?.waiting ?? 0) };
   }
 

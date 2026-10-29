@@ -12,6 +12,7 @@ import { FindingCard } from '../changes/FindingCard';
 import { GENERAL, anchorFindings, type Anchor, type ChangesFinding } from '../changes/findings';
 import { LONG_FILE_LINES, parsePatch } from '../changes/patch';
 import { isViewed, patchHash, readView, readViewed, writeView, writeViewed, type DiffView } from '../changes/prefs';
+import { sessionIdFromSearch, sessionUrl } from '../chat/sessionRoute';
 
 interface ChangesPageProps { onNavigate: (path: string) => void; onTicketClick: (key: string) => void }
 
@@ -38,7 +39,7 @@ const STATE_STYLE: Record<string, string> = {
 };
 const STATE_LABEL: Record<string, string> = { open: 'Open', draft: 'Draft', merged: 'Merged', closed: 'Closed' };
 
-const FROM: Record<string, string> = { agents: 'Agents', board: 'Board', discord: 'Discord' };
+const FROM: Record<string, string> = { agents: 'Agents', board: 'Board', discord: 'Discord', sessions: 'Sessions' };
 
 const ERROR_TEXT: Record<string, string> = {
   NO_ACCESS: 'The GitHub token in Settings cannot read this repository.',
@@ -80,6 +81,7 @@ const ChangesPage: React.FC<ChangesPageProps> = ({ onNavigate, onTicketClick }) 
 
   const back = () => {
     if (from === 'ticket') onTicketClick(ticketKey);
+    else if (from === 'sessions') onNavigate(sessionUrl(sessionIdFromSearch(window.location.search)));
     else onNavigate(from === 'agents' ? '/agents' : from === 'discord' ? '/discord' : '/dashboard');
   };
   const crumb = from === 'ticket' ? ticketKey : FROM[from] ?? 'Board';

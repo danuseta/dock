@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
 import express from 'express';
+import { MAX_ACTIVITY_PER_TURN } from '../integrations/chat-activity';
 
 const directory = mkdtempSync(path.join(os.tmpdir(), 'dock-activity-'));
 const databaseUrl = `file:${path.join(directory, 'activity.db').replaceAll('\\', '/')}`;
@@ -170,14 +171,14 @@ test('nesting is kept by parent id', async () => {
   ]);
 });
 
-test('the 401st row of a turn is counted in one dropped row while updates still land', async () => {
+test('the row past the turn limit is counted in one dropped row while updates still land', async () => {
   const { service, session, rows, storage } = await world();
   const { id, turn } = await session();
-  const events = Array.from({ length: 400 }, (_, index) => event(`e${index}`));
-  for (let start = 0; start < 400; start += 50) {
+  const events = Array.from({ length: MAX_ACTIVITY_PER_TURN }, (_, index) => event(`e${index}`));
+  for (let start = 0; start < MAX_ACTIVITY_PER_TURN; start += 50) {
     assert.strictEqual((await service.activity(batch(id, turn, events.slice(start, start + 50)), 'laptop'))?.dropped, 0);
   }
-  assert.strictEqual(await storage.countChatActivity(id, turn), 400);
+  assert.strictEqual(await storage.countChatActivity(id, turn), MAX_ACTIVITY_PER_TURN);
 
   const over = await service.activity(batch(id, turn, [event('extra-1')]), 'laptop');
   assert.deepStrictEqual([over?.accepted, over?.dropped, over?.closed], [0, 1, false]);
@@ -189,7 +190,29 @@ test('the 401st row of a turn is counted in one dropped row while updates still 
   assert.deepStrictEqual([mixed?.accepted, mixed?.dropped], [1, 1], 'the update of an old row is accepted, the new row is not');
   assert.strictEqual((await rows(id)).find((row) => row.eventId === 'e7')!.status, 'ok');
   assert.strictEqual((await rows(id)).find((row) => row.eventId === 'dropped-server')!.summary, '2');
-  assert.strictEqual(await storage.countChatActivity(id, turn), 401, 'four hundred events and the dropped row');
+  assert.strictEqual(await storage.countChatActivity(id, turn), MAX_ACTIVITY_PER_TURN + 1, 'the limit of events and the dropped row');
+});
+
+test('a full turn gives up its oldest finished hook or note for a new step and still takes every agent call', async () => {
+  const { session, rows, storage } = await world();
+  const { id, turn } = await session();
+  const at = new Date(NOW);
+  const row = (eventId: string, kind: string, extra: Record<string, unknown> = {}) => ({
+    eventId, parentId: null, kind, agent: 'main', name: kind === 'note' ? 'thinking' : 'Bash', label: eventId, summary: '', detail: null,
+    status: 'ok', startedAt: at, endedAt: at, ...extra,
+  });
+  const upsert = (events: ReturnType<typeof row>[]) => storage.upsertChatActivity(id, turn, events, 4, 'dropped-server', at);
+  await upsert([row('h1', 'hook', { status: 'running' }), row('n1', 'note'), row('h2', 'hook'), row('t1', 'tool')]);
+
+  assert.deepStrictEqual(await upsert([row('t2', 'tool')]), { accepted: 1, dropped: 1, seq: 6 });
+  assert.deepStrictEqual((await rows(id)).map((item) => item.eventId), ['h1', 'h2', 't1', 't2', 'dropped-server'], 'the finished note went first, the running hook stays');
+
+  await upsert([row('t3', 'tool'), row('t4', 'tool')]);
+  assert.deepStrictEqual((await rows(id)).map((item) => item.eventId).filter((eventId) => eventId !== 'dropped-server'), ['h1', 't1', 't2', 't3']);
+
+  await upsert([row('a1', 'agent', { status: 'running' })]);
+  assert.ok((await rows(id)).some((item) => item.eventId === 'a1'), 'an agent call lands past the limit');
+  assert.strictEqual((await rows(id)).find((item) => item.eventId === 'dropped-server')!.summary, '3');
 });
 
 test('a token only writes to its own machine, and a foreign session looks like an unknown one', async () => {

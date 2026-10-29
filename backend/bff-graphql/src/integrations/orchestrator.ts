@@ -4,6 +4,7 @@ import { generateIngestToken, hashIngestToken } from '../auth/ingest-token';
 import { GitHubAPI } from '../datasources/GitHubAPI';
 import { StorageService } from '../storage/service';
 import { buildTimeline } from './orchestrator-timeline';
+import { buildThinking } from './run-thinking';
 import { reviewSignalOf, type ChecksState, type ReviewDecision } from './pr-signals';
 
 export const ORCHESTRATOR_STAGES = [
@@ -53,15 +54,22 @@ const TRANSCRIPT_PATH = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+){0,3}$/;
 export class OrchestratorInputError extends Error {}
 
 export interface LedgerAc { n: number; state: AcState; text: string; evidence: string | null }
-export const DECISION_STATUSES = ['DECIDED', 'SHOV', 'USULAN', 'SUPERSEDED', 'CANCELLED'] as const;
+export const DECISION_STATUSES = ['DECIDED', 'GUESS', 'USULAN', 'SUPERSEDED', 'CANCELLED'] as const;
 export type DecisionStatus = typeof DECISION_STATUSES[number];
 export const DECISION_BY = ['owner', 'arbiter', 'sous', 'agent'] as const;
 export type DecisionBy = typeof DECISION_BY[number];
 /** An option sous did not build, and what choosing it would change. */
 export interface DecisionAlternative { label: string; effect: string | null }
+/** An option the agent weighed and dropped, with why. */
+export interface DecisionRejected { option: string; why: string }
 export interface LedgerDecision {
   n: number; at: string; text: string; status: DecisionStatus; by: DecisionBy | null; issue: number | null; cancelNote: string | null;
   effect: string | null; alts: DecisionAlternative[]; replaces: number | null; supersededBy: number | null;
+  /** The agent that decided, as the kit names it (sous-ticket-runner, sous-reviewer, owner, ...). */
+  author: string | null;
+  /** What was unclear when the agent decided. */
+  question: string | null;
+  rejected: DecisionRejected[];
 }
 export const ISSUE_TYPES = ['BLOCKER', 'QUESTION', 'RISK', 'DISPUTE'] as const;
 export type IssueType = typeof ISSUE_TYPES[number];
@@ -181,7 +189,8 @@ export function normalizeDecisions(input: unknown): LedgerDecision[] {
   return (Array.isArray(input) ? input : [])
     .filter(isRecord)
     .map((item, index): LedgerDecision => {
-      const status = text(item.status, 12).toUpperCase() as DecisionStatus;
+      const raw = text(item.status, 12).toUpperCase();
+      const status = (raw === 'SHOV' ? 'GUESS' : raw) as DecisionStatus;
       const by = text(item.by, 12).toLowerCase() as DecisionBy;
       return {
         n: positive(item.n) ?? index + 1,
@@ -197,6 +206,11 @@ export function normalizeDecisions(input: unknown): LedgerDecision[] {
           .filter((alt) => alt.label).slice(0, MAX_OPTIONS),
         replaces: positive(item.replaces),
         supersededBy: positive(item.supersededBy),
+        author: optionalText(item.author ?? item.by, 60),
+        question: optionalText(item.question, 1000),
+        rejected: (Array.isArray(item.rejected) ? item.rejected : []).filter(isRecord)
+          .map((entry) => ({ option: text(entry.option, 300), why: text(entry.why, 500) }))
+          .filter((entry) => entry.option).slice(0, MAX_OPTIONS),
       };
     })
     .filter((item) => item.text)
@@ -532,6 +546,8 @@ export type PullRequestLookup = (key: string) => Promise<RunPullRequest[]>;
 const PR_LOOKUP_INTERVAL_MS = 5 * 60 * 1000;
 const PR_LOOKUP_STAGES = new Set<string>(['pr', 'commit', 'evidence']);
 
+const READY_FOR_REVIEW = /^ready for review\b/i;
+
 function ledgerPullRequest(url: string): RunPullRequest {
   const match = /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/.exec(url);
   return { url, number: match ? Number(match[2]) : 0, repo: match ? match[1] : url, status: 'open' };
@@ -579,15 +595,22 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
   // A hook-level WAITING (notification, permission prompt) is not a gate: with no event for as long as an idle
   // run may stay quiet, nobody is still blocked on it. The ledger's own gate below always wins.
   if (activity === 'WAITING' && idleMs > STALE_IDLE_MS) { activity = 'IDLE'; activityDetail = null; endedMs = null; }
-  if (row.waiting) { activity = 'WAITING'; activityDetail = 'gate'; endedMs = null; }
-  if (FINISHED_STAGES.has(row.stage) && !row.waiting) { activity = 'IDLE'; activityDetail = null; endedMs = null; }
+  // A build's waiting line is about getting its pull requests up for review. Once every one is out of draft on GitHub
+  // and no issue is open, it waits on the reviewers, not the owner; a "Ready for review" line also ends with the run.
+  const prsOut = githubPullRequests.length > 0 && githubPullRequests.every((pr) => pr.status !== 'draft');
+  const openIssue = normalizeIssues(ledger.issues).some((issue) => issue.status === 'open');
+  const handedOver = Boolean(row.waiting) && runKind(ledger.kind, row.key) === 'build'
+    && ((prsOut && !openIssue) || (READY_FOR_REVIEW.test(row.waiting ?? '') && FINISHED_STAGES.has(row.stage)));
+  const waiting = handedOver ? null : row.waiting;
+  if (waiting) { activity = 'WAITING'; activityDetail = 'gate'; endedMs = null; }
+  if (FINISHED_STAGES.has(row.stage) && !waiting) { activity = 'IDLE'; activityDetail = null; endedMs = null; }
 
   const pullRequests = githubPullRequests.length > 0
     ? githubPullRequests
     : [ledger.prBe, ledger.prFe].filter((url): url is string => typeof url === 'string' && url.length > 0).map(ledgerPullRequest);
   const review = FINISHED_STAGES.has(row.stage) ? null : reviewState(pullRequests);
   // A review whose pull request merged before the owner's LGTM still waits on the owner: follow-ups and the Pass label.
-  const followUp = review === 'merged' && runKind(ledger.kind, row.key) === 'review' && Boolean(row.waiting);
+  const followUp = review === 'merged' && runKind(ledger.kind, row.key) === 'review' && Boolean(waiting);
   if (review && activity === 'ACTIVE' && idleMs > STALE_ACTIVE_MS) { activity = 'IDLE'; activityDetail = null; endedMs = null; }
 
   const stalled = !FINISHED_STAGES.has(row.stage)
@@ -602,7 +625,7 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     engine: ledger.engine ?? null,
     title: row.title,
     stage: row.stage,
-    waiting: row.waiting || null,
+    waiting: waiting || null,
     gate: ledger.gate ?? null,
     ac,
     acPassed: ac.filter((item) => item.state === 'PASS').length,
@@ -636,6 +659,7 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     activity,
     activityDetail,
     idleSeconds: Math.floor(idleMs / 1000),
+    eventIdleSeconds: row.lastEventAt ? Math.floor(Math.max(0, now.getTime() - row.lastEventAt.getTime()) / 1000) : null,
     endedSeconds: endedMs === null ? null : endedMs / 1000,
     stalled,
     stalledDetail: stalled ? row.stalledDetail ?? null : null,
@@ -733,6 +757,37 @@ export class OrchestratorService {
     ]);
     const stageEvents = [...new Map([...recent, ...history].map((event) => [event.id, event])).values()];
     return buildTimeline(run, stageEvents, toolEvents, now);
+  }
+
+  /** What each agent of the run asked, decided and did, with the events around it, newest first. */
+  async thinking(keyInput: string, now = new Date()) {
+    const run = await this.get(keyInput, now);
+    if (!run) return null;
+    const [timeline, events, tools, git] = await Promise.all([
+      this.timeline(run.key, now),
+      this.storage.getOrchestratorEvents(run.key, 600),
+      this.storage.getOrchestratorToolEvents(run.key, 0),
+      this.storage.getTicketGitActivity(run.key).catch(() => []),
+    ]);
+    return buildThinking({
+      decisions: run.decisions,
+      issues: run.issues,
+      findings: run.findings,
+      events,
+      tools,
+      git: git.map((row) => ({ at: row.startedAt, agent: row.agent === 'main' ? 'lead' : row.agent, text: row.label || row.summary })),
+      visits: timeline?.visits ?? [],
+    });
+  }
+
+  /** The raw activity behind one Thinking row: tools, agents and thinking notes from two minutes before it to the next row. */
+  async thinkingRaw(keyInput: string, atInput: string, untilInput?: string | null) {
+    const key = normalizeTicketKey(keyInput);
+    const at = new Date(atInput);
+    if (!Number.isFinite(at.getTime())) throw new OrchestratorInputError('at must be a date');
+    const until = untilInput && Number.isFinite(Date.parse(untilInput)) ? new Date(untilInput) : new Date(at.getTime() + 2 * 60 * 1000);
+    const rows = await this.storage.getTicketActivityWindow(key, new Date(at.getTime() - 2 * 60 * 1000), until);
+    return rows.map((row) => ({ at: row.startedAt.toISOString(), agent: row.agent === 'main' ? 'lead' : row.agent, kind: row.kind, text: [row.label || row.name, row.summary].filter(Boolean).join(' · ').slice(0, 400) }));
   }
 
   /** The agents the main session has spawned for the stage the ticket is in. */

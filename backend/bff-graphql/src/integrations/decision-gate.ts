@@ -2,14 +2,19 @@ import { GitHubAPI } from '../datasources/GitHubAPI';
 import { dockMode } from '../mode';
 import { StorageService } from '../storage/service';
 import { autoBroadcast } from './broadcast';
-import { orchestratorService, type Orchestration } from './orchestrator';
+import { STALE_ACTIVE_MS, orchestratorService, type Orchestration } from './orchestrator';
 
 /** Decisions sous took on the owner's behalf: the owner confirms or changes each one before the pull requests are reviewed. */
-const GUESSED = new Set(['SHOV', 'USULAN']);
+const GUESSED = new Set(['GUESS', 'USULAN']);
 const GATE_CACHE = 'decision-gate';
 const PR_URL = /github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/;
 
-type GateRun = Pick<Orchestration, 'key' | 'kind' | 'productionData' | 'prBe' | 'prFe' | 'issues' | 'decisions'>;
+type GateRun = Pick<Orchestration, 'key' | 'kind' | 'prBe' | 'prFe' | 'issues' | 'decisions'> & Partial<Pick<Orchestration, 'activity' | 'activityDetail' | 'eventIdleSeconds'>>;
+
+/** A run sous is still working on: an owner's answer just reopened it, or a turn is under way. Its pull requests are not released. */
+export const stillWorking = (run: Partial<Pick<Orchestration, 'activity' | 'activityDetail' | 'eventIdleSeconds'>>) =>
+  (run.activity === 'ACTIVE' || (run.activity === 'WAITING' && run.activityDetail !== 'gate'))
+  && (run.eventIdleSeconds == null || run.eventIdleSeconds < STALE_ACTIVE_MS / 1000);
 interface GateRecord { confirmed: number[]; ready: string[] }
 
 export interface OwnerPending { issues: number[]; decisions: number[] }
@@ -40,7 +45,8 @@ const reason = (error: unknown) => {
 
 /**
  * The owner's confirmations of guessed decisions, and the gate that marks a build's draft pull requests ready once
- * every issue is answered and every guessed decision confirmed. A confirmation is only recorded: no session runs.
+* every issue is answered and every guessed decision confirmed, and only while sous is not working on the build. A
+ * confirmation is only recorded: no session runs.
  */
 export class DecisionGate {
   constructor(private readonly deps: GateDeps) {}
@@ -69,7 +75,7 @@ export class DecisionGate {
 
   /** Marks the build's draft pull requests ready when nothing waits on the owner. Returns the pull requests it marked. */
   async settle(run: GateRun): Promise<string[]> {
-    if (run.kind !== 'build' || run.productionData) return [];
+    if (run.kind !== 'build' || stillWorking(run)) return [];
     const record = await this.record(run.key);
     const urls = [run.prBe, run.prFe].filter((url): url is string => Boolean(url) && !record.ready.includes(url!));
     if (!urls.length) return [];
@@ -93,6 +99,20 @@ export class DecisionGate {
       await this.deps.afterReady(run).catch(() => undefined);
     }
     return marked;
+  }
+}
+
+type SweepRun = GateRun & Pick<Orchestration, 'stage' | 'pullRequests'>;
+
+/**
+ * The gate and the broadcast for every build at its pull request stage, on a timer: a run that went quiet without a
+ * last hook event or ledger push is released and posted all the same.
+ */
+export async function sweepReleases(deps: { list: () => Promise<SweepRun[]>; gate: Pick<DecisionGate, 'settle'>; broadcast: (run: SweepRun) => Promise<unknown> }) {
+  for (const run of await deps.list()) {
+    if (run.kind !== 'build' || run.stage !== 'pr' || stillWorking(run)) continue;
+    await deps.gate.settle(run).catch(() => undefined);
+    if (run.pullRequests.some((pr) => pr.status === 'open')) await deps.broadcast(run).catch(() => undefined);
   }
 }
 

@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowDown, ArrowUp, Building2, Check, ChevronLeft, ChevronRight, ClipboardList, Clock, ExternalLink, EyeOff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Square, Table2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Building2, Check, ChevronLeft, ChevronRight, ClipboardList, Clock, ExternalLink, EyeOff, FileDiff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, RotateCcw, Square, Table2, X } from 'lucide-react';
 import { GET_AUTO_REVIEWS, GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
 import { APPROVE_REVIEW, CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
@@ -9,6 +9,7 @@ import { DeskScene } from '../components/empty/scenes/DeskScene';
 import { RobotScene } from '../components/empty/scenes/RobotScene';
 import { Toast } from '../components/Toast';
 import { Badge, Button, Card, ConfirmDialog, Dialog, Page, PageHeader, PhoneCards } from '../components/ui';
+import { RetroTab } from '../agents/RetroTab';
 import { isPhone } from '../lib/phone';
 import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
@@ -609,6 +610,11 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                   {selected.note && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Note</dt><dd className="break-words">{selected.note}</dd></>}
                 </dl>
               )}
+              {(selected.pullRequests?.[0]?.repo ?? selected.prBe ?? selected.prFe) && (
+                <Button size="sm" className="self-start" onClick={() => onNavigate(changesHref(selected.key, selected.pullRequests?.[0]?.repo ?? selected.prBe ?? selected.prFe ?? null, 'agents'))}>
+                  <FileDiff size={13} aria-hidden="true" />View changes{openFindings > 0 && <span className="rounded-full bg-status-warn/20 px-1.5 font-mono text-[0.62rem] font-bold text-status-warn" aria-label={`${openFindings} open findings`}>{openFindings}</span>}
+                </Button>
+              )}
 
               {!!selected.assumptions?.length && (
                 <div>
@@ -770,9 +776,12 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
   );
 };
 
-type AgentsTab = 'office' | 'library';
+type AgentsTab = 'office' | 'retro' | 'library';
 
-const tabFromSearch = (search: string): AgentsTab => (new URLSearchParams(search).get('tab') === 'library' ? 'library' : 'office');
+const tabFromSearch = (search: string): AgentsTab => {
+  const tab = new URLSearchParams(search).get('tab');
+  return tab === 'library' || tab === 'retro' ? tab : 'office';
+};
 
 /** Office shows the runs; Library edits the agent files, on the DOCK that has chat and the kit bridge. */
 const AgentsPage: React.FC<AgentsPageProps> = (props) => {
@@ -781,14 +790,14 @@ const AgentsPage: React.FC<AgentsPageProps> = (props) => {
   const choose = (next: AgentsTab) => {
     setTab(next);
     const params = new URLSearchParams(window.location.search);
-    if (next === 'library') params.set('tab', 'library');
+    if (next !== 'office') params.set('tab', next);
     else params.delete('tab');
     const query = params.toString();
     window.history.replaceState(window.history.state, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
   };
   const tabs = library && (
     <div className="mb-4 flex border-b border-border" role="tablist" aria-label="Agents">
-      {([['office', 'Office', Building2], ['library', 'Library', Library]] as const).map(([id, label, Icon]) => (
+      {([['office', 'Office', Building2], ['retro', 'Retro', RotateCcw], ['library', 'Library', Library]] as const).map(([id, label, Icon]) => (
         <button
           key={id}
           type="button"
@@ -803,6 +812,18 @@ const AgentsPage: React.FC<AgentsPageProps> = (props) => {
     </div>
   );
   if (tab === 'office') return <OfficeTab {...props} tabs={tabs} />;
+  if (tab === 'retro') return (
+    <Page width="full">
+      <PageHeader>
+        <div>
+          <h1 className="text-balance font-display text-3xl font-black">Agents</h1>
+          <p className="mt-1 text-pretty text-secondary-foreground">The sprint's retro of the agents' work: numbers against the sprint before, what recurred, and the lessons sous drafts for you to accept.</p>
+        </div>
+      </PageHeader>
+      {tabs}
+      <RetroTab />
+    </Page>
+  );
   return (
     <Page width="full">
       <PageHeader>

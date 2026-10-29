@@ -224,6 +224,8 @@ model ChatMessage {
   options         String?
   takenAt         DateTime?
   stopRequestedAt DateTime?
+  /// False for an owner reply or a review in a cron session: it waits only for Turns at once, not for a cron slot.
+  cronSlot        Boolean   @default(true)
 
   @@index([sessionId, id])
   @@index([state])
@@ -371,4 +373,20 @@ model AutoReview {
   @@unique([prUrl, headSha])
   @@index([ticketKey, startedAt])
   @@index([status])
+}
+
+/// A Keep / Problem / Try line of a sprint retro, drafted by sous and accepted, edited or closed by the owner.
+model RetroItem {
+  id        String   @id @default(uuid())
+  sprint    String
+  kind      String
+  text      String
+  evidence  String   @default("[]")
+  dest      String   @default("note")
+  status    String   @default("open")
+  sessionId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sprint])
 }

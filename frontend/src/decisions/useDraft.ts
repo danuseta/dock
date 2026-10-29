@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { Draft } from './questions';
+import { unsent, type Draft } from './questions';
 
 const PREFIX = 'dock.decisions.';
 
@@ -51,11 +51,22 @@ export function useDraft(ticketKey: string | null) {
   const markSent = useCallback((ids: string[]) => {
     if (!ticketKey) return;
     setDrafts((current) => {
-      const next = Object.fromEntries(Object.entries(current).map(([id, draft]) => [id, ids.includes(id) ? { ...draft, sent: true } : draft]));
+      const sentAt = new Date().toISOString();
+      const next = Object.fromEntries(Object.entries(current).map(([id, draft]) => [id, ids.includes(id) ? { ...draft, sent: true, sentAt } : draft]));
       write(ticketKey, next);
       return next;
     });
   }, [ticketKey]);
 
-  return { drafts, update, clear, markSent };
+  /** Opens sent answers again, keeping what was written, for questions sous still asks after its turn. */
+  const reopen = useCallback((ids: string[]) => {
+    if (!ticketKey) return;
+    setDrafts((current) => {
+      const next = Object.fromEntries(Object.entries(current).map(([id, draft]) => [id, ids.includes(id) ? unsent(draft) : draft]));
+      write(ticketKey, next);
+      return next;
+    });
+  }, [ticketKey]);
+
+  return { drafts, update, clear, markSent, reopen };
 }

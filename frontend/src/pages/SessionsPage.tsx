@@ -45,7 +45,7 @@ const initialSidebarCollapsed = () => {
 
 const errorText = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
 
-const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onTicketClick }) => {
+const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate?: (path: string) => void }> = ({ onTicketClick, onNavigate }) => {
   const { data, loading, error, refetch } = useQuery<{ chatSessions: ChatSession[] }>(GET_CHAT_SESSIONS, { ...CACHED_QUERY_OPTIONS, variables: { limit: 300 }, pollInterval: SLOW_POLL_MS });
   const [createSession, { loading: creating }] = useMutation<{ createChatSession: ChatSession }>(CREATE_CHAT_SESSION);
   const [deleteSession, { loading: deleting }] = useMutation(DELETE_CHAT_SESSION);
@@ -284,12 +284,12 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void }> = ({ onT
                     onClose={() => openThread(selected.id, null)}
                     className="w-[440px] flex-none border-l border-border max-[1180px]:w-[380px] max-[900px]:fixed max-[900px]:inset-x-0 max-[900px]:top-[var(--vv-top,0px)] max-[900px]:z-[55] max-[900px]:h-[var(--vv-h,100dvh)] max-[900px]:w-auto max-[900px]:border-l-0"
                   />
-                ) : inspectorOpen && <SessionInspector session={selected} files={files} onTicketClick={onTicketClick} className="w-[260px] flex-none border-l border-border max-[900px]:hidden" />}
+                ) : inspectorOpen && <SessionInspector session={selected} files={files} onTicketClick={onTicketClick} onNavigate={onNavigate} className="w-[260px] flex-none border-l border-border max-[900px]:hidden" />}
               </div>
               {inspectorOpen && !threadId && (
                 <div className="fixed inset-x-0 bottom-0 z-[50] max-h-[70dvh] overflow-y-auto rounded-t-lg border-t border-border-glow bg-surface-1 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-card min-[901px]:hidden" role="dialog" aria-label="About this session">
                   <div className="mb-2 flex items-center justify-between"><span className="mx-auto h-1.5 w-10 rounded-pill bg-border-glow" aria-hidden="true" /><Button size="sm" variant="ghost" className="h-11 min-w-11" aria-label="Close" onClick={() => setInspectorOpen(false)}><X size={15} aria-hidden="true" /></Button></div>
-                  <SessionInspector session={selected} files={files} costUsd={liveSession?.costUsd} onTicketClick={onTicketClick} className="bg-transparent p-0" />
+                  <SessionInspector session={selected} files={files} costUsd={liveSession?.costUsd} onTicketClick={onTicketClick} onNavigate={onNavigate} className="bg-transparent p-0" />
                 </div>
               )}
             </>

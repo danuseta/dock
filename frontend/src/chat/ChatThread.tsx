@@ -8,13 +8,13 @@ import { EmptyState } from '../components/EmptyState';
 import { TerminalScene } from '../components/empty/scenes/TerminalScene';
 import { cn } from '../lib/cn';
 import {
-  isStopping, isTurnInProgress, machineCapabilities, machineOf, machineOnline, machinePlace, mergeMessages, newestAssistantId, oldestId, optimisticMessage, pollCursor, pollInterval, queuedText, sendBlocker, sessionTurnOptions,
+  isStopping, isTurnInProgress, machineCapabilities, machineOf, machineOnline, machinePlace, mergeMessages, newestAssistantId, oldestId, opensTurn, optimisticMessage, pollCursor, pollInterval, queuedText, sendBlocker, sessionTurnOptions,
   type ChatMachine, type ChatMessage, type ChatSession,
 } from './messages';
 import { MachineChip } from './MachineControls';
 import { SessionHeader } from './SessionHeader';
 import { recallMessages, rememberMessages } from './messageCache';
-import type { ChatActivity } from './activity/activity';
+import { currentWorker, type ChatActivity } from './activity/activity';
 import { TranscriptList } from './activity/TranscriptList';
 import { useTurnActivity } from './activity/useTurnActivity';
 import { WorkerStrip, WorkerTray } from './activity/WorkerTray';
@@ -54,6 +54,8 @@ export interface HeaderContext { control: TurnOptionsControl; dot: DotState; sta
 
 const NEWEST_PAGE = 200;
 const OLDER_PAGE = 100;
+const TURN_START_PAGE = 500;
+const TURN_START_PAGES = 10;
 const NEAR_BOTTOM_PX = 80;
 const PROMPT_EXAMPLES = [
   { label: 'Build QRD-…', text: 'Pakai skill sous: kerjakan QRD-' },
@@ -106,6 +108,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     onActivityRef.current = onActivity;
   }, [onActivity]);
   const allEvents = useMemo(() => [...activity.byTurn.values()].flat(), [activity.byTurn]);
+  const worker = useMemo(() => currentWorker(allEvents), [allEvents]);
   useEffect(() => {
     onActivityRef.current?.(allEvents);
   }, [allEvents]);
@@ -140,6 +143,19 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     return result.data.chatMessages;
   }, [client, sessionId]);
 
+  const backToTurnStart = useCallback(async (batch: ChatMessage[], older: boolean) => {
+    let all = batch;
+    let more = older;
+    for (let page = 0; more && !opensTurn(all) && page < TURN_START_PAGES; page += 1) {
+      const before = oldestId(all);
+      if (before === undefined) break;
+      const earlier = await fetchMessages({ beforeId: before, limit: TURN_START_PAGE });
+      more = earlier.length >= TURN_START_PAGE;
+      all = mergeMessages(all, earlier);
+    }
+    return { messages: all, hasOlder: more };
+  }, [fetchMessages]);
+
   useEffect(() => {
     sessionRef.current = sessionId;
     return () => {
@@ -155,9 +171,11 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
       const requested = sessionId;
       try {
         const cursor = pollCursor(messagesRef.current, statusRef.current);
-        const batch = await fetchMessages(cursor === undefined ? { limit: NEWEST_PAGE } : { afterId: cursor });
+        const fetched = await fetchMessages(cursor === undefined ? { limit: NEWEST_PAGE } : { afterId: cursor });
+        const start = cursor === undefined ? await backToTurnStart(fetched, fetched.length >= NEWEST_PAGE) : null;
         if (sessionRef.current !== requested) return;
-        if (cursor === undefined) setHasOlder(batch.length >= NEWEST_PAGE);
+        if (start) setHasOlder(start.hasOlder);
+        const batch = start ? start.messages : fetched;
         setMessages((current) => mergeMessages(current, batch));
         setLoaded(true);
         setLoadError('');
@@ -171,7 +189,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     void poll();
     const timer = window.setInterval(() => void poll(), pollMs);
     return () => window.clearInterval(timer);
-  }, [fetchMessages, pollMs, sessionId]);
+  }, [backToTurnStart, fetchMessages, pollMs, sessionId]);
 
   // The session's status changed: poll at once, so the last lines of a turn do not wait for the slow poll.
   useEffect(() => {
@@ -183,10 +201,11 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     if (before === undefined || loadingOlder || !hasOlder) return;
     setLoadingOlder(true);
     try {
-      const batch = await fetchMessages({ beforeId: before, limit: OLDER_PAGE });
+      const fetched = await fetchMessages({ beforeId: before, limit: OLDER_PAGE });
+      const start = await backToTurnStart(fetched, fetched.length >= OLDER_PAGE);
       heightBeforeOlder.current = scrollRef.current?.scrollHeight ?? null;
-      setHasOlder(batch.length >= OLDER_PAGE);
-      setMessages((current) => mergeMessages(current, batch));
+      setHasOlder(start.hasOlder);
+      setMessages((current) => mergeMessages(current, start.messages));
       setLoadError('');
     } catch (error) {
       setLoadError(messageOf(error, 'Older messages could not be loaded'));
@@ -273,7 +292,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
       {session && !hideMachine && !compact && <div className="flex flex-none items-center gap-2 border-b border-border bg-surface-0 px-3.5 py-1.5 font-mono text-[0.66rem] text-muted-foreground"><span>Runs on</span><MachineChip name={machine} online={machineUp} /></div>}
       {session && !compact && <SessionHeader session={session} showTitle={!hideMachine} />}
       {session && renderHeader?.({ control, dot, status: ownStatus, session, busy, turnStartedAt })}
-      <div ref={scrollRef} onScroll={handleScroll} className="min-h-[6.5rem] flex-1 overflow-y-auto overscroll-contain px-3.5 py-3" role="log" aria-label="Conversation">
+      <div ref={scrollRef} onScroll={handleScroll} className={cn('flex-1 overflow-y-auto overscroll-contain px-3.5 py-3', interactions.cards.length > 0 ? 'min-h-0' : 'min-h-[6.5rem]')} role="log" aria-label="Conversation">
         {loadingOlder && <p className="pb-2 text-center font-mono text-[0.66rem] text-muted-foreground" role="status">Loading older messages...</p>}
         {!loaded && !loadError && !missing && <p className="py-6 text-center text-sm text-muted-foreground" role="status">Loading the conversation...</p>}
         {missing && <p className="py-6 text-center text-pretty text-sm text-muted-foreground">This session no longer exists. Close this tab or pick another session.</p>}
@@ -299,7 +318,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
 
       <div className="flex flex-col gap-1.5 border-t border-border bg-surface-0 px-3.5 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))]">
         {status === 'queued' && <p className="flex items-start gap-1.5 font-mono text-[0.68rem] text-amber-200" role="status"><Loader2 size={12} className="mt-0.5 flex-none animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">{queuedText(machine, queuedBehind)}</span></p>}
-        {status === 'running' && !renderHeader && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-status-merged" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">Running{interactions.cards.length > 0 ? ' · waiting for your answer' : session?.statusDetail ? ` · ${session.statusDetail}` : ''}</span></p>}
+        {status === 'running' && (!renderHeader || worker) && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-status-merged" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">Running{interactions.cards.length > 0 ? ' · waiting for your answer' : worker ? ` · ${worker}` : session?.statusDetail ? ` · ${session.statusDetail}` : ''}</span></p>}
         {status === 'error' && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The last turn failed{session?.statusDetail ? `: ${session.statusDetail}` : '.'}</p>}
         {sendError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">Not sent: {sendError}</p>}
         {loadError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">{loadError}</p>}

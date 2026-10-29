@@ -12,6 +12,11 @@ export const RTK_SETTINGS = ['on', 'off'] as const;
 export const CAVEMAN_LEVELS = ['off', 'lite', 'full', 'ultra'] as const;
 export const MAX_PARALLEL_TURNS = 6;
 /** A saved turn count, or null when it is unset or not a whole number from 1 to MAX_PARALLEL_TURNS. */
+/** Where the owner's answer to an I-n or D-n goes: a new session (default) or the ticket's last Task session. */
+export const OWNER_REPLY_SESSIONS = ['new', 'last'] as const;
+export type OwnerReplySession = typeof OWNER_REPLY_SESSIONS[number];
+export const ownerReplySession = (value: unknown): OwnerReplySession => (value === 'last' ? 'last' : 'new');
+
 export const parallelTurns = (value: unknown): number | null => {
   const n = Number(value);
   return String(value ?? '').trim() !== '' && Number.isInteger(n) && n >= 1 && n <= MAX_PARALLEL_TURNS ? n : null;
@@ -195,6 +200,7 @@ export class StorageAPI {
       chatRtk: settings.chatRtk || 'on',
       chatCaveman: settings.chatCaveman || 'full',
       chatParallelTurns: parallelTurns(settings.chatParallelTurns)?.toString() ?? null,
+      ownerReplySession: ownerReplySession(settings.ownerReplySession),
       notificationPrefs: JSON.stringify(parseNotificationPrefs(settings.notificationPrefs)),
     };
   }
@@ -212,6 +218,7 @@ export class StorageAPI {
       if (input.chatRtk != null && !(RTK_SETTINGS as readonly string[]).includes(String(input.chatRtk))) throw new Error('Invalid RTK setting');
       if (input.chatCaveman != null && !(CAVEMAN_LEVELS as readonly string[]).includes(String(input.chatCaveman))) throw new Error('Invalid caveman level');
       if (input.chatParallelTurns != null && input.chatParallelTurns !== '' && parallelTurns(input.chatParallelTurns) === null) throw new Error('Invalid turn count');
+      if (input.ownerReplySession != null && !(OWNER_REPLY_SESSIONS as readonly string[]).includes(String(input.ownerReplySession))) throw new Error('Invalid owner reply session');
       if (input.discordMessageTemplate != null) normalizeDiscordMessageTemplate(String(input.discordMessageTemplate));
       for (const key of ['autoReviewOnIt', 'autoLgtm'] as const) {
         if (input[key] != null && input[key] !== 'true' && input[key] !== 'false') throw new Error('Invalid auto review setting');

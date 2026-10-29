@@ -6,7 +6,7 @@ import type { AgentRun } from '../agents/runs';
 import { AnswerSheet } from '../decisions/AnswerSheet';
 import { QuestionView } from '../decisions/QuestionView';
 import { TicketList } from '../decisions/TicketList';
-import { KEEP, KEEP_EFFECT, OWN, answerText, questionCount, questionsOf, submissionOf, unansweredGuesses, type Draft } from '../decisions/questions';
+import { KEEP, KEEP_EFFECT, OWN, answerText, liveDrafts, questionCount, readyToSubmit, questionsOf, staleSent, submissionOf, unansweredGuesses, type Draft } from '../decisions/questions';
 import { homeAttention, ticketAttention, ticketQuestions } from '../lib/attention';
 
 const issue = (n: number, level: string, status = 'open', options: string[] = [], effects?: Array<string | null>) => ({ n, at: '', type: 'QUESTION', text: `Issue ${n}`, level, status, options, effects });
@@ -17,8 +17,8 @@ const run = {
   issues: [issue(3, 'owner', 'open', ['Refresh', 'Log in again'], ['FE calls /auth/refresh first', null]), issue(1, 'arbiter'), issue(2, 'owner', 'resolved')],
   decisions: [
     { n: 1, at: '', text: 'Use the new table', status: 'DECIDED', by: 'owner' },
-    { n: 4, at: '', text: 'Backoff 1s to 30s', status: 'SHOV', by: 'sous', effect: 'Reconnects slow down', alts: [{ label: 'Fixed 5s', effect: 'One constant changes' }] },
-    { n: 5, at: '', text: 'Name the event workflow:sync', status: 'SHOV', by: 'sous' },
+    { n: 4, at: '', text: 'Backoff 1s to 30s', status: 'GUESS', by: 'sous', effect: 'Reconnects slow down', alts: [{ label: 'Fixed 5s', effect: 'One constant changes' }] },
+    { n: 5, at: '', text: 'Name the event workflow:sync', status: 'GUESS', by: 'sous' },
     { n: 6, at: '', text: 'Keep the last state in sessionStorage', status: 'USULAN', by: 'sous' },
   ],
 } as AgentRun;
@@ -50,7 +50,7 @@ test('the answer sheet sends answers, confirms what was kept and changes the res
 
 test('the effect is written under the picked option only', () => {
   const [, guess] = questionsOf(run);
-  const render = (draft?: Draft) => renderToStaticMarkup(<QuestionView run={run} question={guess} number={2} total={3} draft={draft} sentCount={0} readOnly={null} onChange={() => undefined} onPrevious={() => undefined} onNext={() => undefined} />);
+  const render = (draft?: Draft) => renderToStaticMarkup(<QuestionView run={run} question={guess} number={2} total={3} draft={draft} sentCount={0} readOnly={null} guessesLeft={0} onKeepAll={() => undefined} onChange={() => undefined} onPrevious={() => undefined} onNext={() => undefined} />);
   const none = render();
   assert.doesNotMatch(none, new RegExp(KEEP_EFFECT), 'nothing picked, no effect');
   const kept = render({ choice: KEEP, text: '', unsure: false });
@@ -118,6 +118,11 @@ test('Keep all fills only the unanswered sous guesses of the ticket, and is hidd
   const kept = { 'D-4': { choice: KEEP, text: '', unsure: false }, 'D-6': { choice: KEEP, text: '', unsure: false } };
   assert.doesNotMatch(renderToStaticMarkup(<AnswerSheet {...props} drafts={kept} readOnly={null} />), /Keep all/);
   assert.doesNotMatch(renderToStaticMarkup(<AnswerSheet {...props} drafts={{}} readOnly="This DOCK only monitors." />), /Keep all/);
+
+  const view = (guessesLeft: number, readOnly: string | null) => renderToStaticMarkup(<QuestionView run={run} question={questions[0]} number={1} total={questions.length} sentCount={0} readOnly={readOnly} guessesLeft={guessesLeft} onKeepAll={() => undefined} onChange={() => undefined} onPrevious={() => undefined} onNext={() => undefined} />);
+  assert.match(view(2, null), />Keep all sous built \(2\)</, 'Keep all is offered while answering, not only on the answer sheet');
+  assert.doesNotMatch(view(0, null), /Keep all/);
+  assert.doesNotMatch(view(2, 'This DOCK only monitors.'), /Keep all/);
 });
 
 test('the answer sheet lists what needs a look first and folds the answers already sent', () => {
@@ -130,7 +135,7 @@ test('the answer sheet lists what needs a look first and folds the answers alrea
 });
 
 test('the ticket list is one line per ticket and lays out the open ticket like a calendar', () => {
-  const other = { ...run, key: 'QRD-7', title: 'Other ticket', issues: [], decisions: [{ n: 1, at: '', text: 'Guess', status: 'SHOV', by: 'sous' }] } as AgentRun;
+  const other = { ...run, key: 'QRD-7', title: 'Other ticket', issues: [], decisions: [{ n: 1, at: '', text: 'Guess', status: 'GUESS', by: 'sous' }] } as AgentRun;
   const tickets = [run, other].map((item) => ({ run: item, questions: questionsOf(item) }));
   const html = renderToStaticMarkup(<TicketList tickets={tickets} openKey="QRD-9" drafts={{ 'I-3': { choice: 'o0', text: '', unsure: false } }} q={2} onOpen={() => undefined} />);
   assert.match(html, /2 tickets/);
@@ -140,4 +145,28 @@ test('the ticket list is one line per ticket and lays out the open ticket like a
   assert.match(html, /aria-current="step"[^>]*>2</);
   assert.match(html, />1\/3</);
   assert.match(html, />0\/1</);
+});
+
+test('a sent answer opens again once sous had its turn and still asks the question, and the sheet says why Submit waits', () => {
+  const sent: Draft = { choice: 'o0', text: '', unsure: false, sent: true, sentAt: '2026-10-28T04:52:00.000Z' };
+  const after = { activity: 'IDLE', updatedAt: '2026-10-28T05:10:00.000Z' };
+  assert.strictEqual(staleSent(sent, after), true, 'the ledger changed after the send and sous is idle');
+  assert.strictEqual(staleSent(sent, { ...after, activity: 'ACTIVE' }), false, 'sous is still working on it');
+  assert.strictEqual(staleSent(sent, { activity: 'IDLE', updatedAt: '2026-10-28T04:50:00.000Z' }), false, 'sous has not had its turn yet');
+  assert.strictEqual(staleSent({ ...sent, sentAt: undefined }, { activity: 'IDLE', updatedAt: '' }), true, 'a send without a time is old');
+  assert.strictEqual(staleSent({ choice: 'o0', text: '', unsure: false }, after), false, 'an unsent draft');
+  assert.deepStrictEqual(liveDrafts({ 'I-3': sent }, after), { 'I-3': { choice: 'o0', text: '', unsure: false } }, 'the answer stays, ready to send again');
+
+  const questions = questionsOf(run).slice(0, 1);
+  const html = renderToStaticMarkup(<AnswerSheet run={run} questions={questions} drafts={{ 'I-3': sent }} submitting={false} error={null} readOnly={null} onOpen={() => undefined} onKeepAll={() => undefined} onSubmit={() => undefined} />);
+  assert.match(html, /Nothing new to submit: one answer was sent and sous has not settled it yet\./);
+});
+
+test('Ready to submit needs every question answered and at least one answer not sent yet', () => {
+  const questions = questionsOf(run).slice(0, 2);
+  const keep: Draft = { choice: KEEP, text: '', unsure: false };
+  const refresh: Draft = { choice: 'o0', text: '', unsure: false };
+  assert.strictEqual(readyToSubmit(questions, { 'I-3': refresh, 'D-4': keep }), true);
+  assert.strictEqual(readyToSubmit(questions, { 'I-3': refresh }), false, 'one question is open');
+  assert.strictEqual(readyToSubmit(questions, { 'I-3': { ...refresh, sent: true }, 'D-4': { ...keep, sent: true } }), false, 'everything was sent already');
 });

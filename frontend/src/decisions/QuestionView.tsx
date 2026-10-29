@@ -15,6 +15,8 @@ interface QuestionViewProps {
   sentCount: number;
   /** Why this DOCK cannot answer; the options stay visible but cannot be picked. */
   readOnly: string | null;
+  guessesLeft: number;
+  onKeepAll: () => void;
   onChange: (next: Partial<Draft>) => void;
   onPrevious: () => void;
   onNext: () => void;
@@ -23,7 +25,7 @@ interface QuestionViewProps {
 const LETTERS = 'ABCDEFGHIJ';
 
 /** One question as an exam item: what sous asks, its context, the options, and under the picked one what it causes. */
-export const QuestionView: React.FC<QuestionViewProps> = ({ run, question, number, total, draft, sentCount, readOnly, onChange, onPrevious, onNext }) => {
+export const QuestionView: React.FC<QuestionViewProps> = ({ run, question, number, total, draft, sentCount, readOnly, guessesLeft, onKeepAll, onChange, onPrevious, onNext }) => {
   const options = [...question.options, { key: OWN, label: question.kind === 'issue' ? 'Write my own answer' : 'Change it to what I write', effect: OWN_EFFECT[question.kind] }];
   const sent = Boolean(draft?.sent);
   const pullRequests = (run.pullRequests ?? []).filter((pr) => pr.status === 'open' || pr.status === 'draft');
@@ -79,6 +81,7 @@ export const QuestionView: React.FC<QuestionViewProps> = ({ run, question, numbe
         <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-border pt-4">
           <Button variant="ghost" size="sm" onClick={onPrevious} disabled={number === 1}>‹ Previous</Button>
           {!readOnly && !sent && <Button variant="ghost" size="sm" aria-pressed={Boolean(draft?.unsure)} onClick={() => onChange({ unsure: !draft?.unsure })}>{draft?.unsure ? 'Marked unsure' : 'Mark unsure'}</Button>}
+          {!readOnly && guessesLeft > 0 && <Button variant="ghost" size="sm" title="Answers every unanswered sous guess with Keep what sous built and opens the answer sheet; nothing is sent until you submit" onClick={onKeepAll}>Keep all sous built ({guessesLeft})</Button>}
           <span className="flex-1" />
           <Button variant="primary" size="sm" onClick={onNext}>{number === total ? 'Answer sheet' : 'Save, next'}</Button>
         </div>

@@ -182,6 +182,8 @@ export const typeDefs = gql`
     chatCaveman: String!
     """How many chat turns a bridge runs at once; null leaves it to the bridge's own file."""
     chatParallelTurns: String
+    """Where an answer to an I-n or D-n goes: new (a new session) or last (the ticket's last Task session)."""
+    ownerReplySession: String!
     """JSON: the volume and, per event, whether it notifies and with which bundled sound."""
     notificationPrefs: String!
   }
@@ -472,6 +474,100 @@ export const typeDefs = gql`
     alts: [OrchestrationDecisionAlt!]!
     replaces: Int
     supersededBy: Int
+    """The agent that decided, as the kit names it: sous-ticket-runner, sous-reviewer, owner, ..."""
+    author: String
+    """What was unclear when the agent decided."""
+    question: String
+    """Options the agent weighed and dropped, each with why."""
+    rejected: [OrchestrationDecisionRejected!]!
+  }
+
+  type ThinkingOption {
+    label: String!
+    why: String
+    chosen: Boolean!
+  }
+
+  """One row of a run's Thinking column and log: what an agent asked, decided or did, or an event around it."""
+  type ThinkingRow {
+    id: String!
+    at: String!
+    stageIndex: Int!
+    round: Int!
+    """The agent or worker the row belongs to: lead, sous-ticket-runner, sous-video, DOCK, owner, ..."""
+    agent: String!
+    """ask, decide, did or event."""
+    kind: String!
+    """thinking, owner, agent, git or stage: what the log filters on."""
+    topic: String!
+    text: String!
+    answer: String
+    options: [ThinkingOption!]!
+    """Something went wrong here, in words: "while sous was still working", "failed"."""
+    flag: String
+  }
+
+  type RetroNumbers {
+    tickets: Int!
+    medianHours: Float
+    fixRounds: Float!
+    replans: Float!
+    ownerIssues: Int!
+    medianOwnerWaitHours: Float
+    reviews: Int!
+    requestChanges: Int!
+  }
+
+  type RetroProblem {
+    label: String!
+    count: Int!
+    tickets: [String!]!
+  }
+
+  type RetroTicket {
+    key: String!
+    title: String!
+    kind: String!
+    hours: Float
+    rounds: Int!
+    issues: Int!
+    ownerWaitHours: Float
+    result: String!
+  }
+
+  """A Keep / Problem / Try line: kind keep, problem or try; dest kit, memory, dock or note; status open, accepted or closed."""
+  type RetroItem {
+    id: ID!
+    kind: String!
+    text: String!
+    evidence: [String!]!
+    dest: String!
+    status: String!
+    sessionId: String
+    updatedAt: String!
+  }
+
+  type Retro {
+    sprint: String!
+    sprintId: Int!
+    previous: String
+    numbers: RetroNumbers!
+    previousNumbers: RetroNumbers
+    problems: [RetroProblem!]!
+    tickets: [RetroTicket!]!
+    items: [RetroItem!]!
+  }
+
+  type ThinkingRawLine {
+    at: String!
+    agent: String!
+    kind: String!
+    text: String!
+  }
+
+  type OrchestrationDecisionRejected {
+    option: String!
+    why: String!
   }
 
   type OrchestrationDecisionAlt {
@@ -797,7 +893,7 @@ export const typeDefs = gql`
     issues: [OrchestrationIssue!]!
     """Every step of the owner's last review approval succeeded (Jira Pass label and GitHub approve)."""
     approved: Boolean!
-    """The guessed decisions (SHOV, USULAN) the owner confirmed in DOCK."""
+    """The guessed decisions (GUESS, USULAN) the owner confirmed in DOCK."""
     confirmedDecisions: [Int!]!
     blockers: Int!
     activity: String!
@@ -1079,6 +1175,7 @@ export const typeDefs = gql`
     chatRtk: String
     chatCaveman: String
     chatParallelTurns: String
+    ownerReplySession: String
     notificationPrefs: String
   }
 
@@ -1234,6 +1331,39 @@ export const typeDefs = gql`
     log: [ClaudeRotationEntry!]!
   }
 
+  """One item of a home folder on the workspace. A masked item holds secrets: it is listed but never opened."""
+  type WorkspaceEntry {
+    name: String!
+    """Relative to the home folder, with forward slashes."""
+    path: String!
+    """dir, file, link (a link whose target is gone) or other"""
+    kind: String!
+    size: Float
+    modifiedAt: String
+    masked: Boolean!
+  }
+
+  type WorkspaceDir {
+    path: String!
+    """The folder above; null at the home folder."""
+    parent: String
+    entries: [WorkspaceEntry!]!
+    """More items than the page lists."""
+    truncated: Boolean!
+  }
+
+  type WorkspaceFile {
+    path: String!
+    size: Float!
+    modifiedAt: String!
+    """A secret: its text is never sent."""
+    masked: Boolean!
+    binary: Boolean!
+    """Only the first 512 KB is sent."""
+    truncated: Boolean!
+    text: String
+  }
+
   type Query {
     authStatus: AuthStatus!
     dockMode: String!
@@ -1301,10 +1431,30 @@ export const typeDefs = gql`
     dockIssue(number: Int!): DockIssueDetail
     """The GitHub new-issue address filled with the same title and body that reportDockIssue posts."""
     dockIssueDraftUrl(title: String!, happened: String!, steps: String, expected: String, imageLinks: [String!], page: String!): String!
+    """What each agent of the run asked, decided and did, with the events around it, newest first."""
+    runThinking(key: String!): [ThinkingRow!]!
+    """The retro of a sprint from the sprint dashboard's list; no id is the active sprint."""
+    retro(sprintId: Int): Retro
+    """The tools, agents and thinking notes behind one Thinking row, from two minutes before it to until."""
+    runThinkingRaw(key: String!, at: String!, until: String): [ThinkingRawLine!]!
+    """A folder under the home of the workspace; no path is the home itself."""
+    workspaceDir(path: String): WorkspaceDir!
+    """The text of a file under the home of the workspace."""
+    workspaceFile(path: String!): WorkspaceFile!
   }
 
   type Mutation {
     lockSession: Boolean!
+    """Asks sous for a new Keep / Problem / Try draft of the sprint, in a new session. Returns the session id."""
+    retroBuild(sprintId: Int!): String!
+    """accept, close, reopen or edit (with text). Accepting a line that goes to kit, memory or dock asks sous to apply it."""
+    retroItemAction(id: ID!, action: String!, text: String): RetroItem!
+    """A new folder under the home of the workspace. Secrets stay read only; file content goes through PUT /api/workspace/file."""
+    workspaceMkdir(path: String!): WorkspaceEntry!
+    """Renames or moves a file or folder to a path that does not exist yet."""
+    workspaceRename(from: String!, to: String!): WorkspaceEntry!
+    """Deletes a file, or a folder with everything in it; refused when a secret is inside."""
+    workspaceDelete(path: String!): Boolean!
     saveDemoLink(ticketKey: String!, url: String!): Boolean
     sendToDiscord(ticketKey: String!, customMessage: String, threadId: String, threadName: String): Boolean
     setTicketDependency(ticketKey: String!, dependsOnKey: String!): TicketRelationGroup!

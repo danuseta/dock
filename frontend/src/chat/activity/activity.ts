@@ -213,3 +213,14 @@ export function trayWorkers(events: ChatActivity[]): TrayWorker[] {
   walk(buildTree(events));
   return workers;
 }
+
+/** The step the session is on: its newest running subagent, however deep, as "sous-video: Re-record demo video". */
+export function currentWorker(events: ChatActivity[]): string | null {
+  const running = events.filter((event) => event.kind === 'agent' && event.status === 'running');
+  if (running.length === 0) return null;
+  const newest = running.reduce((latest, event) => (startOf(event) >= startOf(latest) ? event : latest));
+  return `${agentType(newest.name)}: ${agentTask(newest)}`;
+}
+
+export const byRecency = (workers: TrayWorker[]): TrayWorker[] => [...workers].sort((a, b) =>
+  Number(b.agent.status === 'running') - Number(a.agent.status === 'running') || Date.parse(b.agent.startedAt) - Date.parse(a.agent.startedAt));

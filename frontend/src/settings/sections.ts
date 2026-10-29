@@ -53,6 +53,7 @@ export interface SavedSettings {
   chatRtk?: string | null;
   chatCaveman?: string | null;
   chatParallelTurns?: string | null;
+  ownerReplySession?: string | null;
   notificationPrefs?: string | null;
 }
 
@@ -101,6 +102,7 @@ export function savedValues(settings: SavedSettings): Record<DraftSectionId, Sec
       chatRtk: normalizeRtk(settings.chatRtk),
       chatCaveman: normalizeCaveman(settings.chatCaveman),
       chatParallelTurns: settings.chatParallelTurns || '',
+      ownerReplySession: settings.ownerReplySession === 'last' ? 'last' : 'new',
     },
     notifications: prefsToValues(parseNotificationPrefs(settings.notificationPrefs)),
     jira: { jiraUrl: settings.jiraUrl || '', jiraEmail: settings.jiraEmail || '', jiraApiToken: '', jiraProjectKeys: settings.jiraProjectKeys || '' },

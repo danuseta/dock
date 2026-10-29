@@ -1,12 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import { Bot, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { cn } from '../../lib/cn';
-import { agentTask, agentType, capRows, durationOf, formatDuration, statusText, stepsText, trayWorkers, type ChatActivity, type TrayWorker } from './activity';
+import { agentTask, agentType, byRecency, capRows, durationOf, formatDuration, statusText, stepsText, trayWorkers, type ChatActivity, type TrayWorker } from './activity';
 import { StatusIcon } from './ActivityRow';
 import { AgentAvatar } from './TranscriptParts';
 import { useNow } from './useNow';
 
 const SHOWN = 3;
+const MAX_SHOWN = 10;
 
 interface WorkerTrayProps {
   events: ChatActivity[];
@@ -17,12 +18,16 @@ interface WorkerTrayProps {
 
 /** The subagents of the session, kept above the composer so they stay in view while the lead goes on talking. */
 export const WorkerTray: React.FC<WorkerTrayProps> = ({ events, activeId, onSelect }) => {
-  const workers = useMemo(() => trayWorkers(events), [events]);
+  const workers = useMemo(() => byRecency(trayWorkers(events)), [events]);
   const [open, setOpen] = useState(true);
+  const [all, setAll] = useState(false);
   const running = workers.filter((worker) => worker.agent.status === 'running').length;
   const now = useNow(running > 0);
   if (workers.length === 0) return null;
   const { visible, hidden } = capRows(workers, open ? SHOWN : 0);
+  const rest = workers.slice(visible.length);
+  const chips = all ? rest : rest.slice(0, Math.max(0, MAX_SHOWN - visible.length));
+  const folded = rest.length - chips.length;
   const pick = (worker: TrayWorker) => onSelect?.(activeId === worker.agent.eventId ? null : worker.agent.eventId);
 
   return (
@@ -59,7 +64,7 @@ export const WorkerTray: React.FC<WorkerTrayProps> = ({ events, activeId, onSele
       )}
       {hidden > 0 && (
         <ul className="m-0 flex list-none flex-wrap gap-1 p-0">
-          {workers.slice(visible.length).map((worker) => {
+          {chips.map((worker) => {
             const chipClass = cn('inline-flex items-center gap-1 rounded-pill border border-border bg-surface-1 px-2 py-0.5 font-mono text-[0.64rem] text-secondary-foreground', worker.agent.status !== 'running' && 'opacity-60');
             const label = <>{agentType(worker.agent.name)}<StatusIcon status={worker.agent.status} size={10} /></>;
             return (
@@ -70,6 +75,13 @@ export const WorkerTray: React.FC<WorkerTrayProps> = ({ events, activeId, onSele
               </li>
             );
           })}
+          {(folded > 0 || all) && rest.length > MAX_SHOWN - visible.length && (
+            <li>
+              <button type="button" className="inline-flex items-center rounded-pill border border-dashed border-border bg-transparent px-2 py-0.5 font-mono text-[0.64rem] text-secondary-foreground hover:bg-surface-2 hover:text-foreground max-[900px]:min-h-11" aria-expanded={all} onClick={() => setAll((current) => !current)}>
+                {all ? 'Show fewer' : `+${folded} more`}
+              </button>
+            </li>
+          )}
         </ul>
       )}
     </section>

@@ -130,7 +130,7 @@ test('orchestrator ledger parsing keeps only what DOCK shows', () => {
   assert.deepStrictEqual(parsed.decisions, []);
   const withBrief = parseLedger({ ...ledger, brief: 'line 1\nline 2', decisions: [{ at: '2026-10-04T08:00:00.000Z', text: 'use X' }, 'bad', { at: 'x' }, null] });
   assert.strictEqual(withBrief.brief, 'line 1\nline 2');
-  assert.deepStrictEqual(withBrief.decisions, [{ n: 1, at: '2026-10-04T08:00:00.000Z', text: 'use X', status: 'DECIDED', by: null, issue: null, cancelNote: null, effect: null, alts: [], replaces: null, supersededBy: null }], 'an old decision reads as D-1 with no author');
+  assert.deepStrictEqual(withBrief.decisions, [{ n: 1, at: '2026-10-04T08:00:00.000Z', text: 'use X', status: 'DECIDED', by: null, issue: null, cancelNote: null, effect: null, alts: [], replaces: null, supersededBy: null, author: null, question: null, rejected: [] }], 'an old decision reads as D-1 with no author');
   assert.deepStrictEqual(parsed.assumptions, []);
   assert.deepStrictEqual(parsed.failures, []);
   assert.strictEqual(parsed.closing, null);
@@ -208,7 +208,7 @@ test('sous ledger fields: engine, card kind, rounds, draft, numbered decisions a
     draft: true,
     blackboard: 'E:/qonflo/.evidence/blackboard/QRD-1387',
     decisions: [
-      { n: 3, at: '2026-10-20T01:00:00.000Z', text: 'Keep the old export', status: 'shov', by: 'arbiter', issue: 2, effect: 'Export keeps the old columns', alts: [{ label: 'New export', effect: 'Columns follow the grid' }, { label: '' }, 'bad'] },
+      { n: 3, at: '2026-10-20T01:00:00.000Z', text: 'Keep the old export', status: 'guess', by: 'arbiter', issue: 2, effect: 'Export keeps the old columns', alts: [{ label: 'New export', effect: 'Columns follow the grid' }, { label: '' }, 'bad'] },
       { n: 4, at: '2026-10-20T02:00:00.000Z', text: 'Drop the cache', status: 'CANCELLED', by: 'sous', cancelNote: 'needed by QRD-9' },
       { n: 5, text: 'Odd one', status: 'MAYBE', by: 'robot' },
     ],
@@ -221,7 +221,7 @@ test('sous ledger fields: engine, card kind, rounds, draft, numbered decisions a
   assert.deepStrictEqual([sous.engine, sous.rounds, sous.productionData, sous.draft], ['sous', { used: 2, max: 4 }, true, true]);
   assert.ok(!('blackboard' in sous), 'the local blackboard path stays on the machine');
   assert.deepStrictEqual(sous.decisions.map((item) => [item.n, item.status, item.by, item.issue, item.cancelNote]), [
-    [3, 'SHOV', 'arbiter', 2, null], [4, 'CANCELLED', 'sous', null, 'needed by QRD-9'], [5, 'DECIDED', null, null, null],
+    [3, 'GUESS', 'arbiter', 2, null], [4, 'CANCELLED', 'sous', null, 'needed by QRD-9'], [5, 'DECIDED', null, null, null],
   ]);
   assert.deepStrictEqual([sous.decisions[0].effect, sous.decisions[0].alts], ['Export keeps the old columns', [{ label: 'New export', effect: 'Columns follow the grid' }]], 'the effect and the options sous did not build');
   assert.deepStrictEqual(sous.issues, [
@@ -468,7 +468,8 @@ test('a run with a pull request is waiting for review, not stalled', async () =>
   assert.strictEqual(toOrchestration(active, at(2), [pr('open')]).activity, 'ACTIVE', 'a recent event still reads Working');
   const noPr = toOrchestration(active, at(11));
   assert.deepStrictEqual([noPr.activity, noPr.stalled], ['ACTIVE', true], 'without a pull request a stale ACTIVE run is stalled');
-  assert.strictEqual(toOrchestration({ ...active, waiting: 'Approve' }, at(11), [pr('open')]).activity, 'WAITING');
+  const asking = { ...row('pr', { issues: [{ n: 1, at: '2026-10-05T00:00:00Z', type: 'QUESTION', text: 'Approve?', level: 'owner', status: 'open' }] }), activity: 'ACTIVE', activityDetail: 'Bash' };
+  assert.strictEqual(toOrchestration({ ...asking, waiting: 'Approve' }, at(11), [pr('open')]).activity, 'WAITING', 'an open owner question waits even with the PR open');
 });
 
 test('the service looks up GitHub only for runs that can be in review', async () => {
@@ -1014,4 +1015,26 @@ test('the doctor route keeps the report under the machine of its token; a ledger
   assert.strictEqual((await post('', ledger, token)).status, 200);
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepStrictEqual(asked, ['QRD-1387 https://github.com/example/be/pull/1']);
+});
+
+test('a "Ready for review" ledger line stops waiting on the owner once every pull request is out of draft, or the run is done', () => {
+  const row = {
+    key: 'QRD-1268', title: 'Ticket', stage: 'pr', waiting: 'Ready for review: waiting for the owner', payload: JSON.stringify({ ac: [] }),
+    activity: 'IDLE', activityDetail: null, activityEndedAt: null as Date | null,
+    lastEventAt: new Date('2026-10-28T16:17:00.000Z'), ledgerUpdatedAt: new Date('2026-10-28T16:17:00.000Z'), transcriptAt: null, dismissedAt: null,
+  };
+  const now = new Date('2026-10-29T08:00:00.000Z');
+  const pr = (number: number, status: string) => ({ url: `https://github.com/o/r/pull/${number}`, number, repo: 'o/r', status }) as never;
+  const ready = toOrchestration(row, now, [pr(1080, 'open'), pr(1306, 'open')]);
+  assert.deepStrictEqual([ready.activity, ready.waiting], ['IDLE', null], 'both PRs are ready: nothing waits on the owner');
+  const draft = toOrchestration(row, now, [pr(1080, 'open'), pr(1306, 'draft')]);
+  assert.deepStrictEqual([draft.activity, draft.waiting], ['WAITING', 'Ready for review: waiting for the owner'], 'a draft still waits');
+  assert.strictEqual(toOrchestration(row, now).activity, 'WAITING', 'without GitHub the line is kept');
+  assert.strictEqual(toOrchestration({ ...row, stage: 'done' }, now).activity, 'IDLE', 'a done run waits on nobody');
+  const stale = { ...row, waiting: 'D-39 (GUESS): confirm keeping the demo, then DOCK marks BE #1315 and FE #1089 ready' };
+  assert.strictEqual(toOrchestration(stale, now, [pr(1315, 'open'), pr(1089, 'open')]).activity, 'IDLE', 'any build line is stale once its PRs are out');
+  const asking = { ...row, waiting: 'I-1: pick A or B', payload: JSON.stringify({ ac: [], issues: [{ n: 1, at: '2026-10-28T10:00:00Z', type: 'QUESTION', text: 'pick', level: 'owner', status: 'open' }] }) };
+  assert.strictEqual(toOrchestration(asking, now, [pr(1080, 'open')]).activity, 'WAITING', 'an open owner question still waits');
+  const review = { ...row, payload: JSON.stringify({ ac: [], kind: 'review' }), waiting: 'Review request-change: tell the author' };
+  assert.strictEqual(toOrchestration(review, now, [pr(1082, 'open')]).activity, 'WAITING', 'a review verdict still waits on the owner');
 });

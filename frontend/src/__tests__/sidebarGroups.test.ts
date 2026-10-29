@@ -13,7 +13,7 @@ test('the sidebar titles three groups with the pages the owner assigned', () => 
   assert.match(layout, /\['Work', 'Team', 'System'\]\.map\(\(title\)/);
   assert.deepEqual(labelsOf('Work'), ['Home', 'Board', 'Agents', 'Blackboard', 'Sessions', 'Decisions', 'Demo Videos', 'Calendar']);
   assert.deepEqual(labelsOf('Team'), ['Sprint', 'Discord']);
-  assert.deepEqual(labelsOf('System'), ['Monitoring', 'Docker Services', 'Dev Servers', 'Health', 'DOCK Issues', 'System Settings']);
+  assert.deepEqual(labelsOf('System'), ['Monitoring', 'Docker Services', 'Dev Servers', 'Workspace', 'Health', 'DOCK Issues', 'System Settings']);
 });
 
 test('a group with no page in this mode is dropped, and a collapsed sidebar shows a divider instead of the title', () => {
