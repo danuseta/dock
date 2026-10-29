@@ -119,7 +119,7 @@ const LogView: React.FC<{ ticket: string }> = ({ ticket }) => {
         <div className="inline-flex flex-wrap rounded-sm border border-border bg-surface-1 p-0.5" role="group" aria-label="Log filter">
           {LOG_FILTERS.map(([id, label]) => {
             const count = filterRows(all, id, null).length;
-            return <button key={id} type="button" aria-pressed={filter === id} onClick={() => setFilter(id)} className={cn('h-6 rounded-xs px-2.5 font-display text-[0.68rem] font-semibold text-secondary-foreground max-[760px]:h-9', filter === id && 'bg-accent text-black')}>{label} <span className="font-mono font-medium opacity-70">{count}</span></button>;
+            return <button key={id} type="button" aria-pressed={filter === id} onClick={() => setFilter(id)} className={cn('h-6 rounded-xs px-2.5 font-display text-[0.68rem] font-semibold text-secondary-foreground max-[760px]:h-11', filter === id && 'bg-accent text-black')}>{label} <span className="font-mono font-medium opacity-70">{count}</span></button>;
           })}
         </div>
         <Button size="sm" className="ml-auto" onClick={exportMarkdown}><Download size={13} aria-hidden="true" />Export .md</Button>
@@ -170,7 +170,7 @@ const BlackboardPage: React.FC = () => {
   const pickTicket = (key: string) => { setPicked(key); setSelected('NOW.md'); };
 
   return (
-    <Page width="full">
+    <Page width="full" className="max-[760px]:pb-28">
       <header className="mb-4 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-bold">Blackboard</h1>
@@ -184,7 +184,7 @@ const BlackboardPage: React.FC = () => {
         <section className={cn('flex min-w-0 flex-col border-r border-border', picked && 'max-[760px]:hidden')} aria-label="Tickets">
           <div className="flex flex-col gap-2 border-b border-border px-3 py-2.5">
             <Input type="search" aria-label="Search tickets" className="h-8 text-xs max-[760px]:h-11" placeholder="Search key or title" value={query} onChange={(event) => setQuery(event.target.value)} />
-            <label className="flex items-center gap-2 text-[0.7rem] text-muted-foreground"><Checkbox checked={hideDone} onChange={(event) => setHideDone(event.target.checked)} />Hide done</label>
+            <label className="flex items-center gap-2 text-[0.7rem] text-muted-foreground max-[760px]:min-h-11 max-[760px]:text-xs"><Checkbox checked={hideDone} onChange={(event) => setHideDone(event.target.checked)} />Hide done</label>
           </div>
           <div className="max-h-[calc(100dvh-16rem)] min-h-[320px] flex-1 overflow-y-auto max-[760px]:max-h-none">
             {tickets === null && !error && <p className="px-4 py-6 text-sm text-muted-foreground" role="status">Loading tickets...</p>}
@@ -194,9 +194,9 @@ const BlackboardPage: React.FC = () => {
               return (
                 <button key={`${ticket.epic ?? ''}/${ticket.key}`} type="button" onClick={() => pickTicket(ticket.key)} aria-current={picked === ticket.key ? 'true' : undefined} className={cn('grid w-full grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-0.5 border-0 border-b border-border bg-transparent px-3.5 py-2.5 text-left hover:bg-surface-1', picked === ticket.key && 'bg-surface-1 shadow-[inset_2px_0_0_var(--color-accent)]', ticket.epic && 'pl-6')}>
                   <span className="font-mono text-xs font-bold">{ticket.key}</span>
-                  {run ? <span className={cn('self-start rounded-xs px-1.5 py-px font-mono text-[0.6rem] font-bold', STAGE_TONE[run.stage] ?? 'bg-surface-2 text-secondary-foreground')}>{stageLabel(run.stage)}</span> : <span />}
-                  <span className="col-span-2 truncate text-[0.72rem] text-secondary-foreground">{run?.title ?? (ticket.epic ? `in ${ticket.epic}` : 'No run on this DOCK')}</span>
-                  <span className="col-span-2 font-mono text-[0.6rem] text-muted-foreground">{ticket.files} files · {when(ticket.updatedAt)}</span>
+                  {run ? <span className={cn('self-start rounded-xs px-1.5 py-px font-mono text-[0.6rem] font-bold max-[760px]:text-xs', STAGE_TONE[run.stage] ?? 'bg-surface-2 text-secondary-foreground')}>{stageLabel(run.stage)}</span> : <span />}
+                  <span className="col-span-2 truncate text-[0.72rem] text-secondary-foreground max-[760px]:line-clamp-2 max-[760px]:whitespace-normal">{run?.title ?? (ticket.epic ? `in ${ticket.epic}` : 'No run on this DOCK')}</span>
+                  <span className="col-span-2 font-mono text-[0.6rem] text-muted-foreground max-[760px]:text-xs">{ticket.files} files · {when(ticket.updatedAt)}</span>
                 </button>
               );
             })}
@@ -204,8 +204,8 @@ const BlackboardPage: React.FC = () => {
         </section>
 
         <section className={cn('flex min-w-0 flex-col border-r border-border max-[760px]:border-r-0', (!picked || selected) && 'max-[760px]:hidden', !picked && 'max-[1100px]:hidden')} aria-label="Files">
-          <div className="flex items-center justify-between border-b border-border px-3.5 py-2.5 font-mono text-[0.62rem] font-bold uppercase tracking-wide text-muted-foreground">
-            <button type="button" onClick={() => setPicked(null)} className="hidden items-center gap-1 border-0 bg-transparent p-0 text-muted-foreground max-[760px]:flex"><ArrowLeft size={12} aria-hidden="true" />Tickets</button>
+          <div className="flex items-center justify-between border-b border-border px-3.5 py-2.5 font-mono text-[0.62rem] font-bold uppercase tracking-wide text-muted-foreground max-[760px]:text-xs">
+            <button type="button" onClick={() => setPicked(null)} className="hidden items-center gap-1 border-0 bg-transparent p-0 text-muted-foreground max-[760px]:flex max-[760px]:min-h-11"><ArrowLeft size={12} aria-hidden="true" />Tickets</button>
             <span>{picked ?? 'Files'}</span><span>{files?.length ?? ''}</span>
           </div>
           <div className="max-h-[calc(100dvh-16rem)] flex-1 overflow-y-auto py-1.5 max-[760px]:max-h-none">
@@ -239,10 +239,10 @@ const BlackboardPage: React.FC = () => {
         <section className={cn('flex min-w-0 flex-col', !selected && 'max-[760px]:hidden', !picked && 'max-[1100px]:col-span-1')} aria-label="File">
           <div className="flex items-center justify-between gap-3 border-b border-border px-3.5 py-2">
             <span className="flex min-w-0 items-center gap-1.5 font-mono text-[0.72rem]">
-              <button type="button" onClick={() => setSelected(null)} className="hidden border-0 bg-transparent p-0 text-muted-foreground max-[760px]:inline"><ArrowLeft size={12} aria-hidden="true" /></button>
+              <button type="button" onClick={() => setSelected(null)} className="hidden border-0 bg-transparent p-0 text-muted-foreground max-[760px]:inline-flex max-[760px]:min-h-11 max-[760px]:min-w-11 max-[760px]:items-center"><ArrowLeft size={12} aria-hidden="true" /></button>
               {picked && <span className="text-muted-foreground">{picked} /</span>}<span className="truncate">{selected === LOG_ENTRY ? 'Log' : selected ?? ''}</span>
             </span>
-            <span className="flex items-center gap-3 font-mono text-[0.62rem] text-muted-foreground">
+            <span className="flex items-center gap-3 font-mono text-[0.62rem] text-muted-foreground max-[760px]:text-xs">
               {file && <span>changed {when(file.updatedAt)}</span>}
               {file && picked && <a href={fileUrl(picked, file.path, true)} className="inline-flex items-center gap-1 text-secondary-foreground hover:text-foreground"><Download size={12} aria-hidden="true" />Download</a>}
             </span>

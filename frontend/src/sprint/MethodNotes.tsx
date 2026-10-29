@@ -1,5 +1,6 @@
 import { Card } from '../components/ui';
 import { fmt } from './format';
+import { FoldSection } from './SprintParts';
 import type { SprintResult } from './types';
 
 export const MethodNotes = ({ result }: { result: SprintResult }) => {
@@ -15,8 +16,7 @@ export const MethodNotes = ({ result }: { result: SprintResult }) => {
   if (notes.aliasHits.length) lines.push(`Non-engineering statuses mapped to To Do: ${notes.aliasHits.map((a) => `${a.status} (${a.count}×, ${a.keys.join(', ')})`).join('; ')}.`);
 
   return (
-    <section className="mb-6">
-      <h2 className="font-display text-xl font-bold">Method notes</h2>
+    <FoldSection title="Method notes" defaultOpen={false}>
       <p className="mt-1 mb-3 text-sm text-muted-foreground">Details the metric text leaves open, and the reading used here.</p>
       <Card className="p-4">
         <ul className="m-0 list-disc space-y-2 pl-5 text-sm text-secondary-foreground">
@@ -33,6 +33,6 @@ export const MethodNotes = ({ result }: { result: SprintResult }) => {
           </div>
         )}
       </Card>
-    </section>
+    </FoldSection>
   );
 };

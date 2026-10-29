@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import type { AgentRun } from './runs';
 import { DECISION_LABEL, DECISION_TONE, isGuess, reportAge, reportDecisions } from '../lib/sousReport';
 import { Badge } from '../components/ui';
+import { PhoneFold } from './PhoneFold';
 
 /** Decisions past this many start folded. */
 const SHOWN = 3;
@@ -21,10 +22,7 @@ export const RunDecisions: React.FC<{ run: AgentRun }> = ({ run }) => {
   const shown = open ? decisions : decisions.slice(0, SHOWN);
 
   return (
-    <div>
-      <p className="mb-1 font-mono text-[0.66rem] font-bold uppercase tracking-[0.1em] text-muted-foreground">
-        Decisions{decisions.length > 0 && ` · ${decisions.length}`}{waiting.length > 0 && <span className="text-amber-200"> · {waiting.length} to confirm</span>}
-      </p>
+    <PhoneFold label={<>Decisions{decisions.length > 0 && ` · ${decisions.length}`}{waiting.length > 0 && <span className="text-amber-200"> · {waiting.length} to confirm</span>}</>}>
       {decisions.length === 0 && <p className="text-sm text-muted-foreground">None recorded yet.</p>}
       <ol className="flex flex-col">
         {shown.map((decision) => {
@@ -53,6 +51,6 @@ export const RunDecisions: React.FC<{ run: AgentRun }> = ({ run }) => {
           {open ? 'Show less' : `Show all ${decisions.length}${folded ? ` · ${folded}` : ''}`}
         </button>
       )}
-    </div>
+    </PhoneFold>
   );
 };

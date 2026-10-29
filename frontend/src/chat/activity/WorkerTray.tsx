@@ -31,7 +31,7 @@ export const WorkerTray: React.FC<WorkerTrayProps> = ({ events, activeId, onSele
   const pick = (worker: TrayWorker) => onSelect?.(activeId === worker.agent.eventId ? null : worker.agent.eventId);
 
   return (
-    <section className="flex flex-none flex-col gap-1 border-t border-border bg-surface-0 px-3.5 py-2" aria-label="Subagents of this session">
+    <section className="flex flex-none flex-col gap-1 max-[760px]:hidden border-t border-border bg-surface-0 px-3.5 py-2" aria-label="Subagents of this session">
       <button type="button" className="flex items-center gap-1.5 self-start font-mono text-[0.66rem] text-muted-foreground hover:text-foreground max-[900px]:min-h-11" aria-expanded={open} onClick={() => setOpen((current) => !current)}>
         {running > 0 ? `${running} running` : 'No worker running'}{workers.length > running && ` · ${workers.length - running} finished`}
         <ChevronDown size={12} aria-hidden="true" className={cn('transition-transform motion-reduce:transition-none', !open && '-rotate-90')} />

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@apollo/client';
-import { CalendarDays, ChevronLeft, ChevronRight, ExternalLink, List } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, ExternalLink, List, RefreshCw } from 'lucide-react';
 import { GET_CALENDAR, GET_SETTINGS } from '../graphql/queries';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { EmptyState } from '../components/EmptyState';
@@ -61,15 +61,15 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onNavigate }) => {
           <CalendarDays size={28} className="text-accent" aria-hidden="true" />
           <div>
             <h1 className="text-balance font-display text-3xl font-black">Calendar</h1>
-            <p className="mt-1 text-pretty text-muted-foreground">Browse your Google Calendar by month or switch to a compact table.</p>
+            <p className="mt-1 text-pretty text-muted-foreground max-[760px]:hidden">Browse your Google Calendar by month or switch to a compact table.</p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex rounded-md border border-border bg-surface-1 p-1" role="group" aria-label="Calendar view">
-            <Button size="sm" variant={view === 'calendar' ? 'primary' : 'ghost'} aria-pressed={view === 'calendar'} onClick={() => selectView('calendar')}><CalendarDays size={15} aria-hidden="true" />Calendar</Button>
-            <Button size="sm" variant={view === 'table' ? 'primary' : 'ghost'} aria-pressed={view === 'table'} onClick={() => selectView('table')}><List size={15} aria-hidden="true" />Table</Button>
+        <div className="flex flex-wrap items-center gap-2 max-[760px]:w-full max-[760px]:flex-nowrap">
+          <div className="flex rounded-md border border-border bg-surface-1 p-1 max-[760px]:flex-1" role="group" aria-label="Calendar view">
+            <Button size="sm" className="max-[760px]:flex-1" variant={view === 'calendar' ? 'primary' : 'ghost'} aria-pressed={view === 'calendar'} onClick={() => selectView('calendar')}><CalendarDays size={15} aria-hidden="true" />Calendar</Button>
+            <Button size="sm" className="max-[760px]:flex-1" variant={view === 'table' ? 'primary' : 'ghost'} aria-pressed={view === 'table'} onClick={() => selectView('table')}><List size={15} aria-hidden="true" />Table</Button>
           </div>
-          <Button onClick={() => void refetch()}>Refresh agenda</Button>
+          <Button onClick={() => void refetch()}><RefreshCw size={16} className="min-[761px]:hidden" aria-hidden="true" /><span className="max-[760px]:sr-only">Refresh agenda</span></Button>
         </div>
       </PageHeader>
 
@@ -89,10 +89,10 @@ const CalendarPage: React.FC<CalendarPageProps> = ({ onNavigate }) => {
           <Button variant="primary" className="mt-5" onClick={() => onNavigate('/settings')}>Open Settings</Button>
         </Card>
       ) : <>
-        <Card className="mb-4 flex flex-wrap items-center justify-between gap-3 py-3">
-          <div className="flex items-center gap-2">
+        <Card className="mb-4 flex flex-wrap items-center justify-between gap-3 py-3 max-[760px]:flex-nowrap">
+          <div className="flex items-center gap-2 max-[760px]:min-w-0 max-[760px]:flex-1">
             <IconButton variant="ghost" aria-label="Previous month" onClick={() => moveMonth(-1)}><ChevronLeft size={17} aria-hidden="true" /></IconButton>
-            <h2 className="min-w-44 text-center text-balance font-display text-lg font-bold">{monthLabel}</h2>
+            <h2 className="min-w-44 text-center max-[760px]:min-w-0 max-[760px]:flex-1 text-balance font-display text-lg font-bold">{monthLabel}</h2>
             <IconButton variant="ghost" aria-label="Next month" onClick={() => moveMonth(1)}><ChevronRight size={17} aria-hidden="true" /></IconButton>
           </div>
           <Button size="sm" onClick={() => setMonth(startOfMonth(new Date()))}>Today</Button>

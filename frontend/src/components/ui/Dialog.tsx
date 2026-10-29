@@ -39,6 +39,7 @@ export const Dialog = ({
       ref={ref}
       className={cn(
         'm-auto max-h-dvh max-w-full overflow-visible border-0 bg-transparent p-4 text-foreground outline-none backdrop:bg-black/85 backdrop:backdrop-blur-md',
+        'max-[760px]:mb-0 max-[760px]:max-h-[calc(100dvh-1rem)] max-[760px]:overflow-y-auto max-[760px]:px-2 max-[760px]:pt-2 max-[760px]:pb-[max(0.5rem,env(safe-area-inset-bottom))]',
         className,
       )}
       aria-labelledby={labelledBy}

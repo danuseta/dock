@@ -240,7 +240,7 @@ const PullView: React.FC<PullViewProps> = ({ ticketKey, title, pulls, pull, revi
           const active = item.url === pull.url;
           return (
             <button key={item.url} type="button" role="tab" aria-selected={active} onClick={() => onTab(item.tab)} className={cn('flex min-h-10 items-center gap-2 whitespace-nowrap border-0 border-b-2 bg-transparent px-3 text-[0.8rem] font-medium max-[760px]:min-h-11', active ? 'border-accent text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}>
-              {item.tab}<span className="font-mono text-[0.68rem] text-muted-foreground max-[760px]:hidden">#{item.number}</span>
+              <span className="max-[760px]:hidden">{item.tab}</span><span className="min-[761px]:hidden">{item.tab.replace(/^ms-/, '')}</span><span className="font-mono text-[0.68rem] text-muted-foreground max-[760px]:hidden">#{item.number}</span>
               {active && openInTab > 0 && <span className="font-mono text-[0.68rem] font-bold text-status-warn">{openInTab}</span>}
               {item.state !== pulls[0].state && <StatePill state={item.state} />}
             </button>
@@ -308,7 +308,7 @@ const PullView: React.FC<PullViewProps> = ({ ticketKey, title, pulls, pull, revi
           </div>
 
           {phone && anchors.length > 0 && (
-            <div className="fixed right-4 bottom-[calc(9.5rem+env(safe-area-inset-bottom))] z-20 flex gap-2">
+            <div className="fixed right-20 bottom-[calc(9.5rem+env(safe-area-inset-bottom))] z-20 flex gap-2">
               <IconButton aria-label="Previous finding" className="rounded-full shadow-lg" onClick={() => goTo(current < 0 ? -1 : current - 1)}><ChevronUp size={18} aria-hidden="true" /></IconButton>
               <IconButton aria-label="Next finding" className="rounded-full shadow-lg" onClick={() => goTo(current + 1)}><ChevronDown size={18} aria-hidden="true" /></IconButton>
             </div>

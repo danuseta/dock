@@ -78,3 +78,11 @@ button.dock-flow-visit:focus-visible b { outline: 2px solid var(--color-accent);
 @media (prefers-reduced-motion: reduce) {
   .dock-flow *, .dock-flow-dash { animation: none !important; transition: none !important; }
 }
+
+@media (max-width: 760px) {
+  .dock-flow-agent.is-flat { width: auto; padding: 10px 12px; }
+  .dock-flow-agent.is-flat header { font-size: 0.8125rem; }
+  .dock-flow-agent.is-flat p, .dock-flow-agent.is-flat footer { font-size: 0.75rem; }
+  .dock-flow-agent.is-flat footer span:first-child { max-width: 60%; }
+  .dock-flow-live, .dock-flow-viewing, .dock-flow-viewing button { font-size: 0.75rem; }
+}

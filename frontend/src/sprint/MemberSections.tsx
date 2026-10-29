@@ -35,7 +35,7 @@ export const EndSection = ({ rows }: { rows: EndRow[] }) => (
             {row.completion === null ? <Dash /> : (
               <span className="inline-flex items-center gap-2">
                 <OptionalTone tone={row.completionTone}>{pct(row.completion)}</OptionalTone>
-                <span className="text-[0.65rem] text-muted-foreground">{fmt(row.compSP)}/{fmt(row.eligSP)} SP</span>
+                <span className="text-[0.65rem] text-muted-foreground max-[760px]:text-xs">{fmt(row.compSP)}/{fmt(row.eligSP)} SP</span>
               </span>
             )}
           </Num>

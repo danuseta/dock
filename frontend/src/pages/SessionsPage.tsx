@@ -13,7 +13,7 @@ import { Button, Card, Dialog, Input, Page } from '../components/ui';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { ChatThread } from '../chat/ChatThread';
-import { LimitMeters } from '../chat/StatusLine';
+import { LimitMeters, LimitsLine } from '../chat/StatusLine';
 import { useChatStatus } from '../chat/useChatStatus';
 import { useFullViewport } from '../chat/useFullViewport';
 import { SLOW_POLL_MS, machineOf, runningBeside, sessionTitle as titleOf, type ChatMachine, type ChatSession } from '../chat/messages';
@@ -232,7 +232,7 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate
                   {searchText.trim().length === 1 && <p className="px-1 pt-2 text-xs text-muted-foreground">Type at least {SEARCH_MIN} characters to search.</p>}
                 </>
               )}
-              limits={<LimitMeters machine={selected ? machineOf(selected) : undefined} />}
+              limits={<><div className="max-[760px]:hidden"><LimitMeters machine={selected ? machineOf(selected) : undefined} /></div><LimitsLine className="hidden min-h-11 items-center max-[760px]:flex" machine={selected ? machineOf(selected) : undefined} /></>}
               results={results}
             />
           </div>
@@ -271,6 +271,7 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate
                       lanes={inspectorOpen ? null : lanesToggle}
                       onBack={() => select(null)}
                       onToggleInspector={() => setInspectorOpen((open) => !open)}
+                      onRename={() => openRename(selected)}
                     />
                   )}
                   readOnlyAction={<Button size="sm" variant="primary" disabled={creating} onClick={() => void create({ forkFrom: selected.id, title: selected.title || undefined, ticketKey: selected.ticketKey })}>Continue as a DOCK session</Button>}

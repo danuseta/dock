@@ -6,7 +6,7 @@ import { REQUEST_DOCTOR_RUN } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { EmptyState } from '../components/EmptyState';
 import { RackScene } from '../components/empty/scenes/RackScene';
-import { Badge, Button, Card, Page, PageHeader } from '../components/ui';
+import { Badge, Button, Card, Page, PageHeader, PhoneCards } from '../components/ui';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { cn } from '../lib/cn';
 import { reportAge } from '../lib/sousReport';
@@ -68,7 +68,7 @@ const HealthPage = () => {
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
             <span className="min-w-0">
               <span className="font-mono text-sm font-extrabold">{report.machine}</span>
-              <small className="ml-2 font-mono text-[0.7rem] text-muted-foreground">{[report.host, report.os, report.kitVersion ? `kit ${report.kitVersion}` : null].filter(Boolean).join(' · ')}</small>
+              <small className="ml-2 font-mono text-[0.7rem] text-muted-foreground max-[760px]:text-xs">{[report.host, report.os, report.kitVersion ? `kit ${report.kitVersion}` : null].filter(Boolean).join(' · ')}</small>
             </span>
             <span className="flex flex-wrap items-center gap-2">
               <Badge variant={failing ? 'danger' : 'success'}>{failing ? `${failing} of ${report.checks.length} not ok` : 'All ok'}</Badge>
@@ -76,14 +76,14 @@ const HealthPage = () => {
             </span>
           </div>
           {stale && <p className="border-b border-border px-4 py-2 text-pretty text-xs text-status-warn">The report is older than {STALE_HOURS} hours. Run <code className="font-mono">{PUSH_COMMAND}</code> on the workspace to update it.</p>}
-          <div className="overflow-x-auto">
+          <PhoneCards>
             <table className="w-full min-w-[560px] border-collapse text-left text-sm">
               <thead className="bg-surface-1 text-xs text-muted-foreground">
                 <tr><th className="w-[140px] px-4 py-2.5 font-medium">Check</th><th className="w-[90px] px-4 py-2.5 font-medium">Status</th><th className="px-4 py-2.5 font-medium">Detail</th></tr>
               </thead>
               {groupChecks(report.checks).map((group) => (
                 <tbody key={group.name}>
-                  <tr><th colSpan={3} scope="colgroup" className="border-t border-border bg-surface-0 px-4 py-1.5 font-mono text-[0.66rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{group.name}</th></tr>
+                  <tr><th colSpan={3} scope="colgroup" className="border-t border-border bg-surface-0 px-4 py-1.5 font-mono text-[0.66rem] font-semibold uppercase max-[760px]:text-xs tracking-[0.08em] text-muted-foreground">{group.name}</th></tr>
                   {group.checks.map((check) => (
                     <tr key={check.name} className={cn('border-t border-border', !check.ok && 'bg-status-conflict-bg')}>
                       <td className="px-4 py-2 font-mono text-xs font-semibold">{check.name}</td>
@@ -94,7 +94,7 @@ const HealthPage = () => {
                 </tbody>
               ))}
             </table>
-          </div>
+          </PhoneCards>
         </Card>
       )}
     </Page>

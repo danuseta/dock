@@ -14,6 +14,7 @@ import {
   MessagesSquare,
   MoreVertical,
   RefreshCw,
+  Send,
   X,
 } from 'lucide-react';
 import { GET_DASHBOARD, GET_ORCHESTRATION, GET_TICKET_DETAIL_CORE, GET_TICKET_DETAIL_ENRICHMENT } from '../graphql/queries';
@@ -145,7 +146,8 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
   const renderBackButton = () => onBack ? (
     <button onClick={onBack} className="inline-flex min-h-6 max-[760px]:min-h-11 items-center gap-2 font-mono text-[0.82rem] font-semibold text-muted-foreground transition-colors duration-150 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
       <ArrowLeft size={14} aria-hidden="true" />
-      <span>Dashboard</span>
+      <span className="max-[760px]:hidden">Dashboard</span>
+      <span className="hidden max-[760px]:inline">Board</span>
       <span className="opacity-40">/</span>
       <span className="text-foreground">{ticketKey}</span>
     </button>
@@ -330,12 +332,12 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
           {ticket.url && <a href={ticket.url} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-border bg-surface-2 px-3 text-sm font-semibold hover:border-border-glow max-[760px]:h-11"><ExternalLink size={15} aria-hidden="true" />Jira</a>}
           {ticket.figmaUrl && <a href={ticket.figmaUrl} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-border bg-surface-2 px-3 text-sm font-semibold hover:border-border-glow max-[760px]:h-11"><Figma size={15} aria-hidden="true" />Figma</a>}
           {run?.kind === 'review' && (run.approved
-            ? <Button className="max-[760px]:h-11" disabled title="Your Jira Pass label is on the ticket and its pull requests are approved"><Check size={15} aria-hidden="true" />Approved</Button>
-            : <Button variant="primary" className="max-[760px]:h-11" onClick={() => setConfirmApprove(true)} disabled={approving} title="Adds your Jira Pass label and approves the open pull requests on GitHub"><Check size={15} aria-hidden="true" />{approving ? 'Approving...' : 'Approve'}</Button>)}
-          {blackboardFiles && <Button className="max-[760px]:h-11" onClick={() => onNavigate(blackboardHref(ticket.key))}><ClipboardList size={15} aria-hidden="true" />Blackboard</Button>}
+            ? <Button className="max-[760px]:hidden" disabled title="Your Jira Pass label is on the ticket and its pull requests are approved"><Check size={15} aria-hidden="true" />Approved</Button>
+            : <Button variant="primary" className="max-[760px]:hidden" onClick={() => setConfirmApprove(true)} disabled={approving} title="Adds your Jira Pass label and approves the open pull requests on GitHub"><Check size={15} aria-hidden="true" />{approving ? 'Approving...' : 'Approve'}</Button>)}
+          {blackboardFiles && <Button className="max-[760px]:hidden" onClick={() => onNavigate(blackboardHref(ticket.key))}><ClipboardList size={15} aria-hidden="true" />Blackboard</Button>}
           <Button className="max-[760px]:h-11" onClick={() => void openForTicket(ticket.key)} disabled={openingSession}><MessagesSquare size={15} aria-hidden="true" />{openingSession ? 'Opening...' : 'Session'}</Button>
           <Button
-            className="border-status-discord bg-status-discord text-white hover:bg-status-discord/80 max-[760px]:h-11"
+            className="border-status-discord bg-status-discord text-white hover:bg-status-discord/80 max-[760px]:hidden"
             title={isCombinedAnnouncement ? `One combined Discord announcement for ${relationTickets.map((item: any) => item.key).join(' + ')}` : 'Send status, PR checks and the demo link to Discord'}
             onClick={handleDiscordBroadcast}
           >
@@ -533,11 +535,11 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
               return (
                 <li key={pr.id} className={cn('-mx-2 rounded-xs px-2 py-1.5', isConflict ? 'bg-status-conflict-bg' : 'hover:bg-surface-2')}>
                   <div className="flex items-center justify-between gap-2">
-                    <a href={pr.url} target="_blank" rel="noreferrer" className="truncate font-mono text-xs font-bold text-accent hover:underline" title={pr.title}>{pr.repo}#{pr.pullNumber || pr.number}</a>
+                    <a href={pr.url} target="_blank" rel="noreferrer" className="truncate font-mono text-xs font-bold text-accent hover:underline max-[760px]:flex max-[760px]:min-w-0" title={pr.title}><span className="max-[760px]:truncate">{pr.repo}</span><span className="max-[760px]:flex-none">#{pr.pullNumber || pr.number}</span></a>
                     <span className="flex flex-none items-center gap-1.5">
-                      <Button size="sm" variant="ghost" onClick={() => onNavigate(changesHref(ticket.key, pr.repo, 'ticket'))}>Changes</Button>
+                      <Button size="sm" variant="ghost" className="max-[760px]:h-11" onClick={() => onNavigate(changesHref(ticket.key, pr.repo, 'ticket'))}>Changes</Button>
                       {isConflict
-                        ? <Button size="sm" variant="danger" onClick={() => void handleInspect(pr.owner, pr.repo, pr.pullNumber || pr.number)}><AlertTriangle size={12} aria-hidden="true" />Inspect</Button>
+                        ? <Button size="sm" variant="danger" className="max-[760px]:h-11" onClick={() => void handleInspect(pr.owner, pr.repo, pr.pullNumber || pr.number)}><AlertTriangle size={12} aria-hidden="true" />Inspect</Button>
                         : <PRBadge status={pr.status} />}
                     </span>
                   </div>
@@ -601,6 +603,11 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
           refetchQueries={['GetTicketDetailCore']}
           onSession={() => void openForTicket(ticket.key)}
           onDependency={() => setShowDependency(true)}
+          phoneActions={[
+            ...(run?.kind === 'review' ? [{ label: run.approved ? 'Approved' : approving ? 'Approving...' : 'Approve', icon: Check, disabled: run.approved || approving, onPick: () => setConfirmApprove(true) }] : []),
+            ...(blackboardFiles ? [{ label: 'Blackboard', icon: ClipboardList, onPick: () => onNavigate(blackboardHref(ticket.key)) }] : []),
+            { label: isCombinedAnnouncement ? `Broadcast ${relationTickets.length}` : 'Broadcast', icon: Send, onPick: handleDiscordBroadcast },
+          ]}
           onDone={report}
           onClose={closeMenu}
         />

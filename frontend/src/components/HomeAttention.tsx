@@ -44,7 +44,7 @@ const CHIP: Record<SignalGroup, string> = {
   quiet: 'bg-surface-2 text-secondary-foreground',
 };
 const BAR: Record<SignalGroup, string> = { blocked: 'bg-status-conflict', answer: 'bg-status-warn', quiet: 'bg-muted-foreground' };
-const chipClass = 'whitespace-nowrap rounded-xs px-1.5 py-0.5 font-mono text-[0.6rem] font-bold';
+const chipClass = 'whitespace-nowrap rounded-xs px-1.5 py-0.5 font-mono text-[0.6rem] max-[760px]:text-xs font-bold';
 const pullUrl = (item: HomeAttentionItem) => item.prUrl || (item.owner && item.repo && item.pullNumber ? `https://github.com/${item.owner}/${item.repo}/pull/${item.pullNumber}` : null);
 
 /** Home's Needs you: one row per ticket with every signal that waits on the owner, worst first. */
@@ -115,15 +115,15 @@ export const HomeAttention: React.FC<HomeAttentionProps> = ({ rows, titleOf, pan
         const group = row.rank === QUESTIONS_RANK || !worst ? 'answer' : worst.group;
         const title = (row.ticketKey && titleOf(row.ticketKey)) || row.questions?.title || null;
         return (
-          <div key={row.id} className="grid grid-cols-[4px_82px_minmax(0,1fr)_auto] items-center gap-3.5 border-b border-border py-3 pr-4 last:border-b-0 max-[760px]:grid-cols-[4px_68px_minmax(0,1fr)]">
-            <span className={cn('h-full min-h-9 rounded-r-[3px]', BAR[group])} aria-hidden="true" />
+          <div key={row.id} className="grid grid-cols-[4px_82px_minmax(0,1fr)_auto] items-center gap-3.5 border-b border-border py-3 pr-4 last:border-b-0 max-[760px]:grid-cols-[4px_minmax(0,1fr)]">
+            <span className={cn('h-full min-h-9 rounded-r-[3px] max-[760px]:row-span-3', BAR[group])} aria-hidden="true" />
             {row.ticketKey ? <button type="button" className="border-0 bg-transparent p-0 text-left font-mono text-[0.69rem] font-bold text-accent hover:underline" onClick={() => onTicketClick(row.ticketKey as string)}>{row.ticketKey}</button> : <span className="font-mono text-[0.69rem] font-bold text-accent">{row.items.every((item) => item.type === 'DISCORD') ? 'DISCORD' : 'PR'}</span>}
             <div className="grid min-w-0 gap-1.5">
-              {title && <span className="truncate text-[0.84rem] font-medium">{title}</span>}
+              {title && <span className="truncate text-[0.84rem] font-medium max-[760px]:line-clamp-2 max-[760px]:whitespace-normal max-[760px]:break-words">{title}</span>}
               <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 {row.items.map((item) => <span key={item.id} className={cn(chipClass, CHIP[signalOf(item.type).group])}>{signalOf(item.type).label}</span>)}
                 {row.questions && <span className={cn(chipClass, CHIP.answer)}>{row.questions.count} {row.questions.count === 1 ? 'QUESTION' : 'QUESTIONS'}{row.questions.blocking ? ' · BLOCKING' : ''}</span>}
-                {row.items[0] && <span className="min-w-0 truncate text-[0.72rem] text-secondary-foreground" title={row.items.map((item) => item.message).join('\n')}>{row.items[0].message}</span>}
+                {row.items[0] && <span className="min-w-0 truncate text-[0.72rem] text-secondary-foreground max-[760px]:line-clamp-2 max-[760px]:whitespace-normal max-[760px]:break-words max-[760px]:text-xs" title={row.items.map((item) => item.message).join('\n')}>{row.items[0].message}</span>}
               </div>
             </div>
             <div className="flex items-center gap-1.5 max-[760px]:col-start-2 max-[760px]:col-end-[-1]">{actions(row)}</div>
