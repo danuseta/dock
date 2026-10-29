@@ -1015,3 +1015,20 @@ test('the doctor route keeps the report under the machine of its token; a ledger
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepStrictEqual(asked, ['QRD-1387 https://github.com/example/be/pull/1']);
 });
+
+test('a "Ready for review" ledger line stops waiting on the owner once every pull request is out of draft, or the run is done', () => {
+  const row = {
+    key: 'QRD-1268', title: 'Ticket', stage: 'pr', waiting: 'Ready for review: waiting for the owner', payload: JSON.stringify({ ac: [] }),
+    activity: 'IDLE', activityDetail: null, activityEndedAt: null as Date | null,
+    lastEventAt: new Date('2026-10-28T16:17:00.000Z'), ledgerUpdatedAt: new Date('2026-10-28T16:17:00.000Z'), transcriptAt: null, dismissedAt: null,
+  };
+  const now = new Date('2026-10-29T08:00:00.000Z');
+  const pr = (number: number, status: string) => ({ url: `https://github.com/o/r/pull/${number}`, number, repo: 'o/r', status }) as never;
+  const ready = toOrchestration(row, now, [pr(1080, 'open'), pr(1306, 'open')]);
+  assert.deepStrictEqual([ready.activity, ready.waiting], ['IDLE', null], 'both PRs are ready: nothing waits on the owner');
+  const draft = toOrchestration(row, now, [pr(1080, 'open'), pr(1306, 'draft')]);
+  assert.deepStrictEqual([draft.activity, draft.waiting], ['WAITING', 'Ready for review: waiting for the owner'], 'a draft still waits');
+  assert.strictEqual(toOrchestration(row, now).activity, 'WAITING', 'without GitHub the line is kept');
+  assert.strictEqual(toOrchestration({ ...row, stage: 'done' }, now).activity, 'IDLE', 'a done run waits on nobody');
+  assert.strictEqual(toOrchestration({ ...row, waiting: 'I-1: pick A or B' }, now, [pr(1080, 'open')]).activity, 'WAITING', 'an owner question still waits');
+});

@@ -546,6 +546,8 @@ export type PullRequestLookup = (key: string) => Promise<RunPullRequest[]>;
 const PR_LOOKUP_INTERVAL_MS = 5 * 60 * 1000;
 const PR_LOOKUP_STAGES = new Set<string>(['pr', 'commit', 'evidence']);
 
+const READY_FOR_REVIEW = /^ready for review\b/i;
+
 function ledgerPullRequest(url: string): RunPullRequest {
   const match = /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/.exec(url);
   return { url, number: match ? Number(match[2]) : 0, repo: match ? match[1] : url, status: 'open' };
@@ -593,15 +595,20 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
   // A hook-level WAITING (notification, permission prompt) is not a gate: with no event for as long as an idle
   // run may stay quiet, nobody is still blocked on it. The ledger's own gate below always wins.
   if (activity === 'WAITING' && idleMs > STALE_IDLE_MS) { activity = 'IDLE'; activityDetail = null; endedMs = null; }
-  if (row.waiting) { activity = 'WAITING'; activityDetail = 'gate'; endedMs = null; }
-  if (FINISHED_STAGES.has(row.stage) && !row.waiting) { activity = 'IDLE'; activityDetail = null; endedMs = null; }
+  // The runner's "Ready for review" line hands the build to its reviewers: it stops waiting on the owner once every
+  // pull request is out of draft on GitHub, and once the run is done.
+  const handedOver = READY_FOR_REVIEW.test(row.waiting ?? '')
+    && (FINISHED_STAGES.has(row.stage) || (githubPullRequests.length > 0 && githubPullRequests.every((pr) => pr.status !== 'draft')));
+  const waiting = handedOver ? null : row.waiting;
+  if (waiting) { activity = 'WAITING'; activityDetail = 'gate'; endedMs = null; }
+  if (FINISHED_STAGES.has(row.stage) && !waiting) { activity = 'IDLE'; activityDetail = null; endedMs = null; }
 
   const pullRequests = githubPullRequests.length > 0
     ? githubPullRequests
     : [ledger.prBe, ledger.prFe].filter((url): url is string => typeof url === 'string' && url.length > 0).map(ledgerPullRequest);
   const review = FINISHED_STAGES.has(row.stage) ? null : reviewState(pullRequests);
   // A review whose pull request merged before the owner's LGTM still waits on the owner: follow-ups and the Pass label.
-  const followUp = review === 'merged' && runKind(ledger.kind, row.key) === 'review' && Boolean(row.waiting);
+  const followUp = review === 'merged' && runKind(ledger.kind, row.key) === 'review' && Boolean(waiting);
   if (review && activity === 'ACTIVE' && idleMs > STALE_ACTIVE_MS) { activity = 'IDLE'; activityDetail = null; endedMs = null; }
 
   const stalled = !FINISHED_STAGES.has(row.stage)
@@ -616,7 +623,7 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     engine: ledger.engine ?? null,
     title: row.title,
     stage: row.stage,
-    waiting: row.waiting || null,
+    waiting: waiting || null,
     gate: ledger.gate ?? null,
     ac,
     acPassed: ac.filter((item) => item.state === 'PASS').length,
