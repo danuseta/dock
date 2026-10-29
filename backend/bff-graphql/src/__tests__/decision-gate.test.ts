@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { DecisionGate, PRODUCTION_DATA_HELD, heldWaiting, ownerPending, stillWorking, type GateDeps } from '../integrations/decision-gate';
+import { DecisionGate, ownerPending, stillWorking, type GateDeps } from '../integrations/decision-gate';
 import { normalizeDecisions } from '../integrations/orchestrator';
 
 const decision = (n: number, status: string) => ({ n, at: '', text: `D${n}`, status, by: 'sous', issue: null, cancelNote: null, effect: null, alts: [], replaces: null, supersededBy: null }) as never;
@@ -75,11 +75,10 @@ test('an open issue holds the gate, and a ready pull request is checked once wit
   assert.strictEqual(w.calls.length, 2, 'checked pull requests are not asked again');
 });
 
-test('reviews, production data and builds without a pull request are never released; a GitHub failure is retried on the next push', async () => {
+test('reviews and builds without a pull request are never released; a GitHub failure is retried on the next push', async () => {
   const w = world();
   const settled = { decisions: [decision(1, 'DECIDED')] };
   assert.deepStrictEqual(await w.gate.settle(build({ ...settled, kind: 'review' })), []);
-  assert.deepStrictEqual(await w.gate.settle(build({ ...settled, productionData: true })), []);
   assert.deepStrictEqual(await w.gate.settle(build({ ...settled, prBe: null, prFe: null })), []);
   assert.deepStrictEqual(w.calls, []);
 
@@ -91,22 +90,13 @@ test('reviews, production data and builds without a pull request are never relea
   assert.deepStrictEqual(await flaky.gate.settle(build({ ...settled, prFe: null })), ['https://github.com/o/be/pull/1']);
 });
 
-test('a production-data build that waits on nobody but the owner says so, instead of the stale ledger line', () => {
-  const run = {
-    kind: 'build' as const,
-    productionData: true,
-    draft: true,
-    prBe: 'https://github.com/o/be/pull/1',
-    prFe: null,
-    waiting: 'D-39 (GUESS): confirm, then DOCK marks the pull requests ready',
-    issues: [{ n: 17, status: 'resolved' }],
-    decisions: [{ n: 39, status: 'GUESS' }],
-  } as unknown as Parameters<typeof heldWaiting>[0];
-  assert.strictEqual(heldWaiting(run, [39]), PRODUCTION_DATA_HELD);
-  assert.strictEqual(heldWaiting(run, []), run.waiting);
-  assert.strictEqual(heldWaiting({ ...run, issues: [{ n: 17, status: 'open' }] } as typeof run, [39]), run.waiting);
-  assert.strictEqual(heldWaiting({ ...run, productionData: false }, [39]), run.waiting);
-  assert.strictEqual(heldWaiting({ ...run, draft: false }, [39]), run.waiting);
+test('a production-data build with no blocker goes up for review and out to Discord like any other', async () => {
+  const w = world();
+  const run = build({ productionData: true, decisions: [decision(39, 'GUESS')], issues: [issue(17, 'resolved')] });
+  assert.deepStrictEqual(await w.gate.settle(run), [], 'D-39 still waits on the owner');
+  await w.gate.confirm(run, [39]);
+  assert.deepStrictEqual(await w.gate.settle(run), ['https://github.com/o/be/pull/1', 'https://github.com/o/fe/pull/2']);
+  assert.strictEqual(w.broadcasts(), 1);
 });
 
 test('nothing is released while sous works on the build: an answer just reopened it, or a permission prompt is open', async () => {
