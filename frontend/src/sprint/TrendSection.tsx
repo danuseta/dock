@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card } from '../components/ui';
 import { EmptyState } from '../components/EmptyState';
 import { ChartScene } from '../components/empty/scenes/ChartScene';
 import { PALETTE, nearestIndex, trendPath, trendX, trendY, type TrendGeometry } from './format';
+import { FoldSection } from './SprintParts';
 import type { SprintTrend } from './types';
 
 const HEIGHT = 300;
@@ -12,17 +13,16 @@ export const TrendSection = ({ trend }: { trend: SprintTrend | null }) => {
   const series = trend?.series ?? [];
   const labels = trend?.labels ?? [];
   const hasData = series.length > 0;
-  const wrap = useRef<HTMLDivElement>(null);
+  const [wrap, setWrap] = useState<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(720);
   const [hover, setHover] = useState<number | null>(null);
 
   useEffect(() => {
-    const element = wrap.current;
-    if (!element) return undefined;
+    if (!wrap) return undefined;
     const observer = new ResizeObserver(([entry]) => setWidth(Math.max(280, Math.round(entry.contentRect.width))));
-    observer.observe(element);
+    observer.observe(wrap);
     return () => observer.disconnect();
-  }, [hasData]);
+  }, [wrap]);
 
   const geometry: TrendGeometry = { width, height: HEIGHT, left: 44, right: 28, top: 12, bottom: 30 };
   const colorOf = (index: number, color: string | null) => color || PALETTE[index % PALETTE.length];
@@ -31,8 +31,7 @@ export const TrendSection = ({ trend }: { trend: SprintTrend | null }) => {
   const tooltipOnLeft = hoverX > width / 2;
 
   return (
-    <section className="mb-6">
-      <h2 className="font-display text-xl font-bold">Velocity trend</h2>
+    <FoldSection title="Velocity trend">
       <p className="mt-1 mb-3 max-w-[980px] text-pretty text-sm text-muted-foreground">
         Dev velocity across the stored sprints. Developers with no load in the two most recent sprints are left out, and a line that ends mid-chart means no load after it. This chart does not change with the sprint selector.
       </p>
@@ -47,23 +46,25 @@ export const TrendSection = ({ trend }: { trend: SprintTrend | null }) => {
                 </span>
               ))}
             </div>
-            <div ref={wrap} className="relative" style={{ height: HEIGHT }}>
+            <div ref={setWrap} className="relative" style={{ height: HEIGHT }}>
               <svg
                 width={width}
                 height={HEIGHT}
                 role="img"
                 aria-label="Line chart of dev velocity across sprints"
-                onMouseMove={(event) => setHover(nearestIndex(event.clientX - event.currentTarget.getBoundingClientRect().left, labels.length, geometry))}
-                onMouseLeave={() => setHover(null)}
+                style={{ touchAction: 'pan-y' }}
+                onPointerDown={(event) => setHover(nearestIndex(event.clientX - event.currentTarget.getBoundingClientRect().left, labels.length, geometry))}
+                onPointerMove={(event) => setHover(nearestIndex(event.clientX - event.currentTarget.getBoundingClientRect().left, labels.length, geometry))}
+                onPointerLeave={(event) => { if (event.pointerType === 'mouse') setHover(null); }}
               >
                 {GRID.map((value) => (
                   <g key={value}>
                     <line x1={geometry.left} x2={width - geometry.right} y1={trendY(value, geometry)} y2={trendY(value, geometry)} className="stroke-border" strokeWidth={1} />
-                    <text x={geometry.left - 8} y={trendY(value, geometry) + 4} textAnchor="end" className="fill-muted-foreground text-[11px]">{value}%</text>
+                    <text x={geometry.left - 8} y={trendY(value, geometry) + 4} textAnchor="end" className="fill-muted-foreground text-[11px] max-[760px]:text-xs">{value}%</text>
                   </g>
                 ))}
                 {labels.map((label, index) => index % labelStep === 0 && (
-                  <text key={label} x={trendX(index, labels.length, geometry)} y={HEIGHT - 10} textAnchor="middle" className="fill-muted-foreground text-[11px]">{label}</text>
+                  <text key={label} x={trendX(index, labels.length, geometry)} y={HEIGHT - 10} textAnchor="middle" className="fill-muted-foreground text-[11px] max-[760px]:text-xs">{label}</text>
                 ))}
                 {hover !== null && <line x1={hoverX} x2={hoverX} y1={geometry.top} y2={HEIGHT - geometry.bottom} className="stroke-border-accent" strokeWidth={1} />}
                 {series.map((line, index) => (
@@ -96,6 +97,6 @@ export const TrendSection = ({ trend }: { trend: SprintTrend | null }) => {
           </>
         )}
       </Card>
-    </section>
+    </FoldSection>
   );
 };

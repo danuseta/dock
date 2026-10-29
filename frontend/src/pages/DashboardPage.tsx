@@ -26,6 +26,7 @@ import { EmptyState } from '../components/EmptyState';
 import { KanbanScene } from '../components/empty/scenes/KanbanScene';
 import { Button, Input, Page, PageHeader, Select } from '../components/ui';
 import { cn } from '../lib/cn';
+import { isPhone } from '../lib/phone';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 
 interface DashboardPageProps {
@@ -159,12 +160,12 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
       <PageHeader className="mb-4">
         <h1 className="text-balance font-display text-2xl font-black">Board</h1>
 
-        <div className="flex flex-1 flex-wrap items-center justify-end gap-3">
-          <div className="relative min-w-60 max-w-md flex-1">
+        <div className="flex flex-1 flex-wrap items-center justify-end gap-3 max-[760px]:basis-full max-[760px]:justify-start">
+          <div className="relative min-w-60 max-w-md flex-1 max-[760px]:min-w-full max-[760px]:max-w-none">
             <Input
               aria-label="Search Jira tickets"
               type="text" 
-              placeholder="Search by Key, Title, or Sprint..." 
+              placeholder={isPhone() ? 'Search key, title, sprint' : 'Search by Key, Title, or Sprint...'} 
               className="bg-surface-1 pl-[38px] font-mono"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -174,7 +175,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
             </span>
           </div>
 
-          <div className="w-56 shrink-0 max-[600px]:w-full">
+          <div className="w-56 shrink-0 max-[760px]:w-auto max-[760px]:min-w-0 max-[760px]:flex-1">
             <Select
               aria-label="Select sprint workload"
               className="bg-surface-1 font-display font-bold"
@@ -188,14 +189,15 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
             variant="primary"
             onClick={() => refreshData()} 
             disabled={refreshing}
+            className="max-[760px]:size-11 max-[760px]:px-0"
           >
             <RefreshCw size={16} className={cn(refreshing && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />
-            <span>{refreshing ? 'Syncing Jira...' : 'Sync Jira'}</span>
+            <span className="max-[760px]:sr-only">{refreshing ? 'Syncing Jira...' : 'Sync Jira'}</span>
           </Button>
         </div>
       </PageHeader>
 
-      <div className="mb-5 flex gap-2 overflow-x-auto pb-1">
+      <div className="mb-5 flex gap-2 overflow-x-auto pb-1 max-[760px]:snap-x max-[760px]:pr-8 max-[760px]:[mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)]">
         {filterTabs.map((filter) => {
           const isActive = activeFilter.toUpperCase() === filter.toUpperCase();
           const count = getTabCount(filter);
@@ -205,7 +207,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
               size="sm"
               variant={isActive ? 'primary' : 'default'}
               onClick={() => setActiveFilter(filter.toUpperCase())}
-              className="shrink-0 rounded-pill"
+              className="shrink-0 rounded-pill max-[760px]:snap-start"
             >
               <span>{filter}</span>
               <span className={cn('ml-1.5 rounded-pill px-2 py-0.5 font-mono text-xs tabular-nums', isActive ? 'bg-black/20 text-black' : 'bg-surface-2 text-muted-foreground')}>

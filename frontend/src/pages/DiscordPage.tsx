@@ -24,7 +24,7 @@ const PROGRESS_STYLE: Record<Progress, string> = {
 };
 
 const ProgressChip: React.FC<{ progress: Progress }> = ({ progress }) => (
-  <span className={cn('shrink-0 rounded-[3px] px-1 py-px font-mono text-[0.58rem] font-bold', PROGRESS_STYLE[progress])}>{progress}</span>
+  <span className={cn('shrink-0 rounded-[3px] px-1 py-px font-mono text-[0.58rem] font-bold max-[760px]:text-xs', PROGRESS_STYLE[progress])}>{progress}</span>
 );
 
 const SLOT_STYLE: Record<Slot, string> = { pass: 'bg-status-merged', onit: 'bg-status-warn', free: 'bg-border-glow' };
@@ -101,9 +101,9 @@ const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) 
             ? <span className="text-status-warn">Bot not set up · <button type="button" className="border-0 bg-transparent p-0 text-status-warn underline" onClick={() => onNavigate('/settings')}>Settings</button></span>
             : feed.error
             ? <span className="text-status-conflict" role="alert">Last sync failed: {feed.error}{feed.syncedAt ? ` · showing ${wib(feed.syncedAt)}` : ''}</span>
-            : <span className="flex items-center gap-1.5 text-muted-foreground"><span className={cn('size-1.5 rounded-full', feed.live ? 'bg-status-merged' : 'bg-status-warn')} aria-hidden="true" />{feed.live ? 'Live' : 'Reconnecting'}{feed.syncedAt ? ` · updated ${wibTime(feed.syncedAt)}` : ''}</span>}
-          <Button size="sm" variant={managing ? 'primary' : 'default'} onClick={() => setManaging(!managing)} aria-expanded={managing}><Settings2 size={14} aria-hidden="true" />Channels</Button>
-          <Button size="sm" onClick={() => void refresh()} disabled={refreshing || !feed?.configured}><RefreshCw size={14} className={cn(refreshing && 'animate-spin')} aria-hidden="true" />{refreshing ? 'Syncing' : 'Refresh'}</Button>
+            : <span className="flex items-center gap-1.5 text-muted-foreground"><span className={cn('size-1.5 rounded-full', feed.live ? 'bg-status-merged' : 'bg-status-warn')} aria-hidden="true" />{feed.live ? 'Live' : 'Reconnecting'}{feed.syncedAt && <span className="whitespace-nowrap">· <span className="max-[760px]:hidden">updated </span>{wibTime(feed.syncedAt)}</span>}</span>}
+          <Button size="sm" variant={managing ? 'primary' : 'default'} onClick={() => setManaging(!managing)} aria-expanded={managing}><Settings2 size={14} aria-hidden="true" /><span className="max-[760px]:sr-only">Channels</span></Button>
+          <Button size="sm" onClick={() => void refresh()} disabled={refreshing || !feed?.configured}><RefreshCw size={14} className={cn(refreshing && 'animate-spin')} aria-hidden="true" /><span className="max-[760px]:sr-only">{refreshing ? 'Syncing' : 'Refresh'}</span></Button>
         </div>
       </header>
 
@@ -124,7 +124,7 @@ const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) 
           <div className="flex gap-4 overflow-x-auto border-b border-border px-4" role="tablist" aria-label="Forum">
             {tabs.map((entry) => (
               <button key={entry.id} type="button" role="tab" aria-selected={tab === entry.id} onClick={() => setTab(entry.id)} className={cn('min-h-11 whitespace-nowrap border-0 border-b-2 bg-transparent px-0 pt-2 text-xs font-medium', tab === entry.id ? 'border-accent text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}>
-                {entry.label} <span className="font-mono text-[0.64rem] tabular-nums">{countFor(rows, entry.id, view)}</span>
+                {entry.label} <span className="font-mono text-[0.64rem] tabular-nums max-[760px]:text-xs">{countFor(rows, entry.id, view)}</span>
               </button>
             ))}
           </div>
@@ -138,7 +138,7 @@ const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) 
               const expanded = !folded.includes(group.name);
               return (
                 <div key={group.name}>
-                  <button type="button" aria-expanded={expanded} onClick={() => toggle(group.name)} className="sticky top-0 z-[1] flex w-full items-center justify-between border-0 border-b border-border bg-surface-0 px-4 py-1.5 text-left font-mono text-[0.64rem] font-bold tracking-wide uppercase max-[760px]:min-h-11">
+                  <button type="button" aria-expanded={expanded} onClick={() => toggle(group.name)} className="sticky top-0 z-[1] flex w-full items-center justify-between border-0 border-b border-border bg-surface-0 px-4 py-1.5 text-left font-mono text-[0.64rem] font-bold tracking-wide uppercase max-[760px]:min-h-11 max-[760px]:text-xs">
                     <span className={group.active ? 'text-accent' : 'text-secondary-foreground'}>{group.name}{group.active ? ' · active' : ''}</span>
                     <span className="font-normal text-muted-foreground tabular-nums">{group.threads.length}</span>
                   </button>
@@ -167,12 +167,12 @@ const ThreadRow: React.FC<{ row: DiscordThread; now: Date; selected: boolean; on
         {needsYou(row) && <span className={cn('absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full border-2 border-background', fresh ? 'bg-status-warn' : 'bg-surface-2 ring-1 ring-status-warn')} aria-label="Needs you" />}
       </span>
       <span className="min-w-0">
-        <strong className={cn('block truncate text-[0.8rem]', fresh ? 'font-semibold' : 'font-medium')}><Title text={row.title} /></strong>
-        <small className="mt-1 flex min-w-0 items-center gap-1.5 text-[0.68rem] text-muted-foreground"><ProgressChip progress={progressOf(row)} />{row.kind === 'pr' && <Slots thread={row} />}<span className="truncate">{row.why}</span></small>
+        <strong className={cn('block truncate text-[0.8rem] max-[760px]:line-clamp-2 max-[760px]:whitespace-normal', fresh ? 'font-semibold' : 'font-medium')}><Title text={row.title} /></strong>
+        <small className="mt-1 flex min-w-0 items-center gap-1.5 text-[0.68rem] text-muted-foreground max-[760px]:text-xs"><ProgressChip progress={progressOf(row)} />{row.kind === 'pr' && <Slots thread={row} />}<span className="truncate">{row.why}</span></small>
       </span>
       <span className="text-right">
-        <time className="block font-mono text-[0.62rem] text-secondary-foreground">{ago(row.lastActivity, now)}</time>
-        <time className="mt-0.5 block font-mono text-[0.58rem] whitespace-nowrap text-muted-foreground">{wib(row.lastActivity)}</time>
+        <time className="block font-mono text-[0.62rem] text-secondary-foreground max-[760px]:text-xs">{ago(row.lastActivity, now)}</time>
+        <time className="mt-0.5 block font-mono text-[0.58rem] whitespace-nowrap text-muted-foreground max-[760px]:hidden">{wib(row.lastActivity)}</time>
       </span>
     </button>
   );

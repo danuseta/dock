@@ -26,6 +26,7 @@ import { useChatStatus } from './useChatStatus';
 import type { ChatSessionStatus } from './status';
 import type { SendPayload } from './composer/composerLogic';
 import { InteractionCards } from './interactions/InteractionCards';
+import { isPhone } from '../lib/phone';
 import { offlineLine } from './phonePanel';
 import { useInteractionLog } from './interactions/useInteractionLog';
 import { chatStore } from './store';
@@ -318,7 +319,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
 
       <div className="flex flex-col gap-1.5 border-t border-border bg-surface-0 px-3.5 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))]">
         {status === 'queued' && <p className="flex items-start gap-1.5 font-mono text-[0.68rem] text-amber-200" role="status"><Loader2 size={12} className="mt-0.5 flex-none animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">{queuedText(machine, queuedBehind)}</span></p>}
-        {status === 'running' && (!renderHeader || worker) && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] text-status-merged" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">Running{interactions.cards.length > 0 ? ' · waiting for your answer' : worker ? ` · ${worker}` : session?.statusDetail ? ` · ${session.statusDetail}` : ''}</span></p>}
+        {status === 'running' && (!renderHeader || worker || isPhone()) && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] max-[760px]:text-xs text-status-merged" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">Running{interactions.cards.length > 0 ? ' · waiting for your answer' : worker ? ` · ${worker}` : session?.statusDetail ? ` · ${session.statusDetail}` : ''}</span></p>}
         {status === 'error' && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The last turn failed{session?.statusDetail ? `: ${session.statusDetail}` : '.'}</p>}
         {sendError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">Not sent: {sendError}</p>}
         {loadError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">{loadError}</p>}

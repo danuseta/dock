@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Lock, KeyRound } from 'lucide-react';
+import { Lock, KeyRound, Delete } from 'lucide-react';
 import { Button, Card, Dialog } from './ui';
 import { cn } from '../lib/cn';
 
@@ -80,7 +80,7 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({ isOpen, onUnlock }) 
       dismissible={false}
       labelledBy="pin-lock-title"
       describedBy="pin-lock-description"
-      className="backdrop:bg-black/95 backdrop:backdrop-blur-xl"
+      className="backdrop:bg-black/95 backdrop:backdrop-blur-xl max-[760px]:mb-auto max-[760px]:overflow-visible max-[760px]:p-4"
     >
       <Card className={cn('w-[380px] max-w-full p-6 text-center shadow-2xl sm:px-6 sm:py-8', error && 'border-status-conflict')}>
         <div className={cn(
@@ -127,7 +127,8 @@ export const PinLockModal: React.FC<PinLockModalProps> = ({ isOpen, onUnlock }) 
             </Button>
           ))}
           <Button className="h-[52px] text-sm" onClick={handleDelete} aria-label="Delete last PIN digit">
-            ⌫
+            <Delete size={20} aria-hidden="true" className="min-[761px]:hidden" />
+            <span aria-hidden="true" className="max-[760px]:hidden">⌫</span>
           </Button>
           <Button className="h-[52px] font-mono text-xl font-bold tabular-nums" onClick={() => handleNumClick('0')}>
             0

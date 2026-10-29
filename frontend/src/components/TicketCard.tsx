@@ -71,7 +71,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({ ticket, menuOpen, onClic
     >
       <button
         type="button"
-        className="flex w-full flex-col gap-2 rounded-md px-4 py-3 pr-10 text-left max-[900px]:pr-14 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+        className="flex w-full flex-col gap-2 rounded-md px-4 py-3 pr-10 text-left max-[900px]:pr-14 max-[760px]:pr-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
         onClick={() => { if (!pressed()) onClick(); }}
         onKeyDown={(event) => {
           if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
@@ -80,7 +80,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({ ticket, menuOpen, onClic
           onMenu(box.left + 24, box.bottom, false);
         }}
       >
-        <span className="flex flex-wrap items-center gap-2">
+        <span className="flex flex-wrap items-center gap-2 max-[760px]:pr-10">
           <span className="font-mono text-sm font-extrabold text-accent">{ticket.key}</span>
           {ticket.workOrder != null && (
             <span

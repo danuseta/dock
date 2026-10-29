@@ -1,7 +1,8 @@
 import { TICKET_STEPS } from '../lib/ticketDetail';
 import { effortChoices, MODE_LABELS, PERMISSION_MODES, type TurnOptions } from './composer/composerLogic';
 import type { ChatFileChange } from './status';
-import type { OptionField, SessionMachineOptions } from './sessionOptions';
+import { modelName, type OptionField, type SessionMachineOptions } from './sessionOptions';
+import type { TurnOptionsControl } from './composer/useTurnOptions';
 
 export type DotState = 'running' | 'needs' | 'disconnected' | 'done';
 
@@ -76,3 +77,10 @@ export const defaultsToSave = (rows: readonly PopoverRow[]): Partial<Record<(typ
   Object.fromEntries(rows.filter((row) => row.value && !row.isDefault).map((row) => [SETTING_KEY[row.field], row.value]))
 );
 
+export const modelSummary = (control: TurnOptionsControl, fallbackLabel: string) => {
+  const machineOptions = control.machineOptions as SessionMachineOptions | undefined;
+  const rows = machineOptions ? popoverRows(control.options, machineOptions) : [];
+  const model = rows.find((row) => row.field === 'model');
+  const label = (model && modelName(machineOptions?.models ?? [], model.value)) || fallbackLabel;
+  return { machineOptions, rows, label };
+};

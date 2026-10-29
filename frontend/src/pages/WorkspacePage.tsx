@@ -111,7 +111,7 @@ const FileView: React.FC<{ path: string; onSaved: () => void }> = ({ path, onSav
     }
   };
   return (
-    <div className="flex min-w-0 flex-col gap-3 px-6 py-5 text-[0.82rem] leading-relaxed text-secondary-foreground">
+    <div className="flex min-w-0 flex-col gap-3 px-6 py-5 text-[0.82rem] leading-relaxed text-secondary-foreground max-[760px]:px-4">
       <div className="flex flex-wrap items-center justify-end gap-2">
         {draft === null
           ? <Button size="sm" onClick={() => setDraft(file.text ?? '')} disabled={file.truncated} title={file.truncated ? 'Files over 512 KB are not edited here' : undefined}><Pencil size={13} aria-hidden="true" />Edit</Button>
@@ -216,7 +216,7 @@ const WorkspacePage: React.FC = () => {
       <header className="mb-4 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-bold">Workspace</h1>
-          <p className="mt-1 text-xs text-muted-foreground">The folders and files of this workspace, from the home folder down. Keys, logins and .env files are listed but never opened or changed.</p>
+          <p className="mt-1 text-xs text-muted-foreground max-[760px]:line-clamp-1">The folders and files of this workspace, from the home folder down. Keys, logins and .env files are listed but never opened or changed.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" onClick={() => { setActionError(null); setAsking({ kind: 'folder' }); }} disabled={!dir}><FolderPlus size={13} aria-hidden="true" />New folder</Button>
@@ -230,7 +230,7 @@ const WorkspacePage: React.FC = () => {
         <p className={cn('mb-3 text-xs', actionError && !asking && !deleting ? 'text-status-conflict' : 'text-muted-foreground')} role={actionError ? 'alert' : 'status'}>{actionError && !asking && !deleting ? actionError : notice}</p>
       )}
 
-      <div className="grid min-h-[640px] grid-cols-[minmax(280px,380px)_minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-background max-[760px]:grid-cols-1">
+      <div className="grid min-h-[640px] grid-cols-[minmax(280px,380px)_minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-background max-[760px]:min-h-0 max-[760px]:grid-cols-1">
         <section className={cn('flex min-w-0 flex-col border-r border-border max-[760px]:border-r-0', place.file && 'max-[760px]:hidden')} aria-label="Folder">
           <div className="flex flex-col gap-2 border-b border-border px-3 py-2.5">
             <Crumbs path={place.path} onOpen={open} />
@@ -261,7 +261,7 @@ const WorkspacePage: React.FC = () => {
                   >
                     <Icon size={14} aria-hidden="true" />
                     <span className="truncate">{entry.name}</span>
-                    <span className="font-mono text-[0.6rem] text-muted-foreground">{entry.masked ? 'secret' : entry.size !== null ? formatSize(entry.size) : ''}</span>
+                    <span className="font-mono text-[0.6rem] text-muted-foreground max-[760px]:text-xs">{entry.masked ? 'secret' : entry.size !== null ? formatSize(entry.size) : ''}</span>
                   </button>
                   {!entry.masked && (
                     <span className="flex flex-none gap-0.5 pr-1.5 opacity-0 focus-within:opacity-100 group-hover:opacity-100 max-[760px]:opacity-100">
@@ -279,10 +279,10 @@ const WorkspacePage: React.FC = () => {
         <section className={cn('flex min-w-0 flex-col', !place.file && 'max-[760px]:hidden')} aria-label="File">
           <div className="flex items-center justify-between gap-3 border-b border-border px-3.5 py-2">
             <span className="flex min-w-0 items-center gap-1.5 font-mono text-[0.72rem]">
-              <button type="button" aria-label="Back to the folder" onClick={() => setPlace({ path: place.path, file: null })} className="hidden border-0 bg-transparent p-0 text-muted-foreground max-[760px]:inline"><ArrowLeft size={12} aria-hidden="true" /></button>
+              <button type="button" aria-label="Back to the folder" onClick={() => setPlace({ path: place.path, file: null })} className="hidden border-0 bg-transparent p-0 text-muted-foreground max-[760px]:grid max-[760px]:size-11 max-[760px]:place-items-center"><ArrowLeft size={16} aria-hidden="true" /></button>
               <span className="truncate">{place.file ?? ''}</span>
             </span>
-            {place.file && <span className="font-mono text-[0.62rem] text-muted-foreground">{when(openFileEntry?.modifiedAt ?? null)}</span>}
+            {place.file && <span className="font-mono text-[0.62rem] text-muted-foreground max-[760px]:text-xs">{when(openFileEntry?.modifiedAt ?? null)}</span>}
           </div>
           <div className="max-h-[calc(100dvh-16rem)] min-h-[320px] flex-1 overflow-y-auto max-[760px]:max-h-none">
             {place.file

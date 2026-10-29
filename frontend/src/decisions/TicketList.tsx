@@ -63,14 +63,14 @@ export const TicketList: React.FC<TicketListProps> = ({ tickets, openKey, drafts
   });
 
   return (
-    <nav className="sticky top-4 flex max-h-[calc(100dvh-2rem)] flex-col self-start border-r border-border p-2.5 max-[900px]:static max-[900px]:order-2 max-[900px]:max-h-none max-[900px]:border-r-0 max-[900px]:border-t" aria-label="Tickets with questions">
+    <nav id="decision-tickets" className="sticky top-4 flex max-h-[calc(100dvh-2rem)] flex-col self-start border-r border-border p-2.5 max-[900px]:static max-[900px]:order-2 max-[900px]:max-h-none max-[900px]:border-r-0 max-[900px]:border-t" aria-label="Tickets with questions">
       <div className="flex items-center gap-2 px-1 pb-2">
         <input className="h-8 min-w-0 flex-1 rounded-[6px] border border-border bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 max-[760px]:h-11" placeholder="Find a ticket…" aria-label="Find a ticket" value={query} onChange={(event) => setQuery(event.target.value)} />
-        <span className="font-mono text-[0.68rem] whitespace-nowrap text-muted-foreground">{shown.length} tickets</span>
+        <span className="font-mono text-[0.68rem] whitespace-nowrap text-muted-foreground max-[760px]:text-xs">{shown.length} {shown.length === 1 ? <><span className="max-[760px]:hidden">tickets</span><span className="hidden max-[760px]:inline">ticket</span></> : 'tickets'}</span>
       </div>
       <div className="flex flex-wrap gap-1 px-1 pb-2">
         {FILTERS.map((item) => (
-          <button key={item.id} type="button" aria-pressed={filter === item.id} className={cn('h-6 rounded-full border px-2 text-[0.7rem] max-[760px]:h-9', filter === item.id ? 'border-border-glow bg-surface-2 text-foreground' : 'border-border text-muted-foreground')} onClick={() => setFilter(item.id)}>{item.label}</button>
+          <button key={item.id} type="button" aria-pressed={filter === item.id} className={cn('h-6 rounded-full border px-2 text-[0.7rem] max-[760px]:h-11 max-[760px]:text-xs', filter === item.id ? 'border-border-glow bg-surface-2 text-foreground' : 'border-border text-muted-foreground')} onClick={() => setFilter(item.id)}>{item.label}</button>
         ))}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -81,7 +81,7 @@ export const TicketList: React.FC<TicketListProps> = ({ tickets, openKey, drafts
             <span className="grid w-full grid-cols-[72px_minmax(0,1fr)_auto_8px] items-center gap-2 text-left text-xs">
               <span className="font-mono font-semibold text-foreground">{row.run.key}</span>
               <span className="truncate text-muted-foreground">{row.run.title || 'Untitled'}</span>
-              <span className={cn('font-mono text-[0.68rem]', row.answered === row.questions.length ? 'text-status-merged' : 'text-muted-foreground')}>{row.answered}/{row.questions.length}</span>
+              <span className={cn('font-mono text-[0.68rem] max-[760px]:text-xs', row.answered === row.questions.length ? 'text-status-merged' : 'text-muted-foreground')}>{row.answered}/{row.questions.length}</span>
               <span className={cn('size-1.5 rounded-full', row.waits && 'bg-amber-300')} aria-label={row.waits ? 'Sous waits on an answer' : undefined} />
             </span>
           );
@@ -98,7 +98,7 @@ export const TicketList: React.FC<TicketListProps> = ({ tickets, openKey, drafts
           );
         })}
       </div>
-      <p className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 border-t border-border px-1 pt-2 text-[0.68rem] text-muted-foreground">
+      <p className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 border-t border-border px-1 pt-2 text-[0.68rem] text-muted-foreground max-[760px]:text-xs">
         <span><s>1</s> sent</span><span><span className="mr-1 inline-block size-2.5 rounded-[3px] bg-surface-2 align-[-1px]" />answered</span><span><span className="mr-1 inline-block size-2.5 rounded-[3px] border border-dashed border-secondary-foreground align-[-1px]" />unsure</span><span><span className="mr-1 inline-block size-1.5 rounded-full bg-amber-300 align-[1px]" />sous waits</span>
       </p>
     </nav>

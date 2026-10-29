@@ -128,7 +128,7 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
 
   return (
     <div className={cn('flex min-w-0 flex-col gap-1.5', full && 'max-[900px]:fixed max-[900px]:inset-0 max-[900px]:z-[60] max-[900px]:bg-background max-[900px]:p-3 max-[900px]:pt-[max(0.75rem,env(safe-area-inset-top))]')}>
-      {!compact && <div className="flex items-center justify-end min-[901px]:hidden">
+      {!compact && <div className="flex items-center justify-end max-[760px]:hidden min-[901px]:hidden">
         <Button size="sm" variant="ghost" className="h-11 min-w-11" aria-pressed={full} aria-label={full ? 'Back to the small message box' : 'Write in full screen'} onClick={() => setFull((current) => !current)}>
           {full ? <Minimize2 size={15} aria-hidden="true" /> : <Maximize2 size={15} aria-hidden="true" />}
         </Button>
@@ -175,11 +175,9 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
             </>
           )}
           <span className="flex-1" />
-          {compact && (
-            <button type="button" className={cn(iconButton, 'border-transparent text-secondary-foreground hover:bg-surface-hover hover:text-foreground min-[901px]:hidden')} aria-pressed={full} aria-label={full ? 'Back to the small message box' : 'Write in full screen'} title={full ? 'Back to the small message box' : 'Write in full screen'} onClick={() => setFull((current) => !current)}>
-              {full ? <Minimize2 size={15} aria-hidden="true" /> : <Maximize2 size={15} aria-hidden="true" />}
-            </button>
-          )}
+          <button type="button" className={cn(iconButton, 'border-transparent text-secondary-foreground hover:bg-surface-hover hover:text-foreground', compact ? 'min-[901px]:hidden' : 'min-[761px]:hidden')} aria-pressed={full} aria-label={full ? 'Back to the small message box' : 'Write in full screen'} title={full ? 'Back to the small message box' : 'Write in full screen'} onClick={() => setFull((current) => !current)}>
+            {full ? <Minimize2 size={15} aria-hidden="true" /> : <Maximize2 size={15} aria-hidden="true" />}
+          </button>
           {busy && !compact && (
             <span className="inline-flex flex-none overflow-hidden rounded-[10px] border border-border-glow" role="radiogroup" aria-label="How a message is sent while Claude works">
               {(['queue', 'steer'] as const).map((choice) => (

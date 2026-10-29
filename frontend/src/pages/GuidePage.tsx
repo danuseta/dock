@@ -59,8 +59,8 @@ const Section: React.FC<{ id: string; title: string; children: React.ReactNode }
 );
 
 const Flow: React.FC<{ steps: string[] }> = ({ steps }) => (
-  <p className="flex flex-wrap items-center gap-1.5 font-mono text-[0.72rem] text-secondary-foreground">
-    {steps.map((step, index) => <React.Fragment key={step}>{index > 0 && <ArrowRight size={12} className="text-muted-foreground" aria-hidden="true" />}<span className="rounded-xs border border-border bg-surface-1 px-1.5 py-0.5">{step}</span></React.Fragment>)}
+  <p className="flex flex-wrap items-center gap-1.5 font-mono text-[0.72rem] max-[760px]:flex-col max-[760px]:items-start text-secondary-foreground">
+    {steps.map((step, index) => <React.Fragment key={step}>{index > 0 && <ArrowRight size={12} className="text-muted-foreground max-[760px]:hidden" aria-hidden="true" />}<span className="rounded-xs border border-border bg-surface-1 px-1.5 py-0.5">{step}</span></React.Fragment>)}
   </p>
 );
 
@@ -81,8 +81,8 @@ const GuidePage: React.FC<GuidePageProps> = ({ onNavigate }) => (
       <p className="mb-1 flex items-center gap-2 text-xs font-semibold text-muted-foreground"><BookOpen size={14} aria-hidden="true" />HOW TO USE</p>
       <h1 className="font-display text-3xl font-bold">Tata kerja DOCK</h1>
       <p className="mt-2 text-sm text-muted-foreground">Alur kerja tiket, review, dan agent di DOCK, setting yang mengaturnya, berikut default dan batasnya.</p>
-      <nav aria-label="Isi" className="mt-4 flex flex-wrap gap-2">
-        {SECTIONS.map(([id, label]) => <a key={id} href={`#${id}`} className="rounded-pill border border-border px-3 py-1 text-xs text-secondary-foreground hover:border-border-glow hover:text-foreground">{label}</a>)}
+      <nav aria-label="Isi" className="mt-4 flex flex-wrap gap-2 max-[760px]:flex-nowrap max-[760px]:overflow-x-auto">
+        {SECTIONS.map(([id, label]) => <a key={id} href={`#${id}`} className="rounded-pill border border-border px-3 py-1 text-xs max-[760px]:flex max-[760px]:min-h-11 max-[760px]:shrink-0 max-[760px]:items-center max-[760px]:whitespace-nowrap max-[760px]:px-4 text-secondary-foreground hover:border-border-glow hover:text-foreground">{label}</a>)}
       </nav>
     </header>
 
