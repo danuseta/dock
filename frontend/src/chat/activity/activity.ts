@@ -221,3 +221,6 @@ export function currentWorker(events: ChatActivity[]): string | null {
   const newest = running.reduce((latest, event) => (startOf(event) >= startOf(latest) ? event : latest));
   return `${agentType(newest.name)}: ${agentTask(newest)}`;
 }
+
+export const byRecency = (workers: TrayWorker[]): TrayWorker[] => [...workers].sort((a, b) =>
+  Number(b.agent.status === 'running') - Number(a.agent.status === 'running') || Date.parse(b.agent.startedAt) - Date.parse(a.agent.startedAt));

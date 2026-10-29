@@ -34,3 +34,16 @@ test('without onSelect the tray only shows the workers, a finished one reads as 
   assert.match(html, /done · 0 steps/);
   assert.doesNotMatch(html, /aria-pressed/);
 });
+
+test('the tray shows ten workers at most, running and newest first, and folds the rest into one chip', () => {
+  const done = Array.from({ length: 30 }, (_, index) => agent(`done-${index}`, { status: 'ok', endedAt: at(500 + index) }));
+  const live = ['sous-video', 'browser-verifier', 'sous-reviewer'].map((name) => agent(name));
+  const html = renderToStaticMarkup(<WorkerTray events={[...done, ...live]} onSelect={() => undefined} />);
+  assert.match(html, /3 running · 30 finished/);
+  assert.strictEqual((html.match(/rounded-xs border/g) ?? []).length, 3, 'three rows');
+  assert.strictEqual((html.match(/rounded-pill border border-border/g) ?? []).length, 7, 'seven chips');
+  assert.match(html, /\+23 more/);
+  const rows = html.slice(0, html.indexOf('rounded-pill'));
+  assert.ok(['sous-video', 'browser-verifier', 'sous-reviewer'].every((name) => rows.includes(name)), 'the running ones are the rows');
+  assert.ok(html.includes('done-29') && !html.includes('done-0<'), 'the newest finished ones come before the oldest');
+});
