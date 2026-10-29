@@ -9,7 +9,7 @@ const GUESSED = new Set(['GUESS', 'USULAN']);
 const GATE_CACHE = 'decision-gate';
 const PR_URL = /github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/;
 
-type GateRun = Pick<Orchestration, 'key' | 'kind' | 'productionData' | 'prBe' | 'prFe' | 'issues' | 'decisions'> & Partial<Pick<Orchestration, 'activity' | 'activityDetail'>>;
+type GateRun = Pick<Orchestration, 'key' | 'kind' | 'prBe' | 'prFe' | 'issues' | 'decisions'> & Partial<Pick<Orchestration, 'activity' | 'activityDetail'>>;
 
 /** A run sous is still working on: an owner's answer just reopened it, or a turn is under way. Its pull requests are not released. */
 export const stillWorking = (run: Partial<Pick<Orchestration, 'activity' | 'activityDetail'>>) =>
@@ -24,15 +24,6 @@ export function ownerPending(run: Pick<Orchestration, 'issues' | 'decisions'>, c
     issues: run.issues.filter((issue) => issue.status === 'open').map((issue) => issue.n),
     decisions: run.decisions.filter((decision) => GUESSED.has(decision.status) && !confirmed.includes(decision.n)).map((decision) => decision.n),
   };
-}
-
-/** A build on production data whose draft pull requests wait only on the owner marking them ready: the gate never does. */
-export const PRODUCTION_DATA_HELD = 'Production data: nothing waits on sous. Mark the draft pull requests ready yourself.';
-
-export function heldWaiting(run: Pick<Orchestration, 'kind' | 'productionData' | 'draft' | 'prBe' | 'prFe' | 'issues' | 'decisions' | 'waiting'>, confirmed: number[]): string | null {
-  if (run.kind !== 'build' || !run.productionData || !run.draft || (!run.prBe && !run.prFe)) return run.waiting;
-  const pending = ownerPending(run, confirmed);
-  return pending.issues.length || pending.decisions.length ? run.waiting : PRODUCTION_DATA_HELD;
 }
 
 export interface GateDeps {
@@ -83,7 +74,7 @@ export class DecisionGate {
 
   /** Marks the build's draft pull requests ready when nothing waits on the owner. Returns the pull requests it marked. */
   async settle(run: GateRun): Promise<string[]> {
-    if (run.kind !== 'build' || run.productionData || stillWorking(run)) return [];
+    if (run.kind !== 'build' || stillWorking(run)) return [];
     const record = await this.record(run.key);
     const urls = [run.prBe, run.prFe].filter((url): url is string => Boolean(url) && !record.ready.includes(url!));
     if (!urls.length) return [];
