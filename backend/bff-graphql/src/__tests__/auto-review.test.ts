@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { AutoReview, ON_IT_WINDOW_MS, reviewPrompt, type AutoReviewDeps, type AutoReviewRecord, type PushMessage } from '../integrations/auto-review';
+import { AutoReview, ON_IT_WINDOW_MS, currentReviews, reviewPrompt, type AutoReviewDeps, type AutoReviewRecord, type PushMessage } from '../integrations/auto-review';
 import type { ThreadRow } from '../integrations/discord-threads';
 import type { Orchestration } from '../integrations/orchestrator';
 
@@ -149,4 +149,27 @@ test('a thread with a BE and an FE pull request starts one Review session for bo
   const failing = world({ failOpen: true, rows: [row({ prs: [PR, FE] })] });
   assert.strictEqual(await failing.review.tick(), 0);
   assert.deepStrictEqual(failing.records.map((record) => record.status), ['failed', 'failed']);
+});
+
+test('the Agents list drops an auto review the pull request has moved past, keeps a running one and one GitHub cannot be asked about', async () => {
+  const BE = 'https://github.com/qonekid/ms-admin-worker-backend/pull/1307';
+  const FE = 'https://github.com/qonekid/ms-client-dashboard-frontend/pull/1081';
+  const MERGED = 'https://github.com/qonekid/ms-client-dashboard-frontend/pull/1000';
+  const DOWN = 'https://github.com/qonekid/ms-admin-worker-backend/pull/9';
+  const asked: string[] = [];
+  const pull: AutoReviewDeps['pull'] = async (owner, repo, number) => {
+    asked.push(`${repo}#${number}`);
+    if (number === 9) throw new Error('GitHub token is not configured in Settings');
+    if (number === 1000) return { open: false, headSha: 'm1' };
+    return { open: true, headSha: number === 1307 ? 'a28502d' : 'e25f2ad' };
+  };
+  const rows = [
+    { id: 'pushed-past', prUrl: BE, headSha: '4adfd14', status: 'blockers' },
+    { id: 'same-head', prUrl: FE, headSha: 'e25f2ad', status: 'blockers' },
+    { id: 'running', prUrl: BE, headSha: 'a28502d', status: 'running' },
+    { id: 'merged', prUrl: MERGED, headSha: 'm1', status: 'lgtm' },
+    { id: 'unknown', prUrl: DOWN, headSha: 'x', status: 'clean' },
+  ];
+  assert.deepStrictEqual((await currentReviews(rows, pull)).map((item) => item.id), ['same-head', 'running', 'unknown']);
+  assert.deepStrictEqual(asked.sort(), ['ms-admin-worker-backend#1307', 'ms-admin-worker-backend#9', 'ms-client-dashboard-frontend#1000', 'ms-client-dashboard-frontend#1081'], 'each pull request is asked once');
 });

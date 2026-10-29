@@ -18,6 +18,7 @@ import { ChannelInputError, channelStore, isChannelKind, threadService, withJira
 import { DiscordReaderError, ROW_VERSION } from '../integrations/discord-reader';
 import { CronInputError, type OwnerAnswer, type OwnerChange } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
+import { listedAutoReviews } from '../integrations/auto-review-live';
 import { labelOrder } from '../integrations/orchestrator-cron';
 import { pushService } from '../integrations/push';
 import { demoVideos, withTitles } from '../integrations/demo-videos';
@@ -306,7 +307,7 @@ export const resolvers = {
     pullFilePatch: (_: unknown, { ticketKey, url, path }: { ticketKey: string; url: string; path: string }) => pullChangesService.filePatch(ticketKey, url, path).catch(changesInputError),
     pullFileLines: (_: unknown, args: { ticketKey: string; url: string; path: string; ref: string; from: number; to: number }) =>
       pullChangesService.fileLines(args.ticketKey, args.url, args.path, args.ref, args.from, args.to).catch(changesInputError),
-    autoReviews: () => storageAPI.getAutoReviews(),
+    autoReviews: async () => listedAutoReviews(await storageAPI.getAutoReviews()),
     claudeAccounts: () => claudeAccountsState(),
     needsAttention: async () => {
       const [agentItems, pullRequestItems] = await Promise.all([
