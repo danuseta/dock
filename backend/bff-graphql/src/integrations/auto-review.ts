@@ -32,6 +32,30 @@ export const reviewPrompt = (key: string, prUrls: string[], threadUrl: string) =
   'Ini auto review dari DOCK karena owner bilang on it di thread itu. Jangan komentar di PR, Jira, atau Discord; tulis verdict dan temuan ke ledger seperti biasa.',
 ].join('\n');
 
+/**
+ * The auto reviews worth showing: one still running, or one whose pull request is open at the commit it reviewed. A review of a
+ * commit the author has since pushed past, or of a merged or closed pull request, is done with. A pull request GitHub cannot be
+ * asked about keeps its rows.
+ */
+export async function currentReviews<T extends Pick<AutoReviewRecord, 'prUrl' | 'headSha' | 'status'>>(rows: T[], pull: AutoReviewDeps['pull']): Promise<T[]> {
+  const states = new Map<string, Promise<PullState | null>>();
+  const stateOf = (url: string) => {
+    let state = states.get(url);
+    if (!state) {
+      const match = PULL.exec(url);
+      state = match ? pull(match[1], match[2], Number(match[3])).catch(() => null) : Promise.resolve(null);
+      states.set(url, state);
+    }
+    return state;
+  };
+  const keep = await Promise.all(rows.map(async (row) => {
+    if (row.status === 'running' || row.status === 'deciding') return true;
+    const state = await stateOf(row.prUrl);
+    return !state || (state.open && state.headSha === row.headSha);
+  }));
+  return rows.filter((_, index) => keep[index]);
+}
+
 /** The ticket of a pull request thread: the first key in its title, tags or a Jira link. */
 const ticketOf = (row: ThreadRow) => row.tickets[0] ?? null;
 
