@@ -468,7 +468,8 @@ test('a run with a pull request is waiting for review, not stalled', async () =>
   assert.strictEqual(toOrchestration(active, at(2), [pr('open')]).activity, 'ACTIVE', 'a recent event still reads Working');
   const noPr = toOrchestration(active, at(11));
   assert.deepStrictEqual([noPr.activity, noPr.stalled], ['ACTIVE', true], 'without a pull request a stale ACTIVE run is stalled');
-  assert.strictEqual(toOrchestration({ ...active, waiting: 'Approve' }, at(11), [pr('open')]).activity, 'WAITING');
+  const asking = { ...row('pr', { issues: [{ n: 1, at: '2026-10-05T00:00:00Z', type: 'QUESTION', text: 'Approve?', level: 'owner', status: 'open' }] }), activity: 'ACTIVE', activityDetail: 'Bash' };
+  assert.strictEqual(toOrchestration({ ...asking, waiting: 'Approve' }, at(11), [pr('open')]).activity, 'WAITING', 'an open owner question waits even with the PR open');
 });
 
 test('the service looks up GitHub only for runs that can be in review', async () => {
@@ -1030,5 +1031,10 @@ test('a "Ready for review" ledger line stops waiting on the owner once every pul
   assert.deepStrictEqual([draft.activity, draft.waiting], ['WAITING', 'Ready for review: waiting for the owner'], 'a draft still waits');
   assert.strictEqual(toOrchestration(row, now).activity, 'WAITING', 'without GitHub the line is kept');
   assert.strictEqual(toOrchestration({ ...row, stage: 'done' }, now).activity, 'IDLE', 'a done run waits on nobody');
-  assert.strictEqual(toOrchestration({ ...row, waiting: 'I-1: pick A or B' }, now, [pr(1080, 'open')]).activity, 'WAITING', 'an owner question still waits');
+  const stale = { ...row, waiting: 'D-39 (GUESS): confirm keeping the demo, then DOCK marks BE #1315 and FE #1089 ready' };
+  assert.strictEqual(toOrchestration(stale, now, [pr(1315, 'open'), pr(1089, 'open')]).activity, 'IDLE', 'any build line is stale once its PRs are out');
+  const asking = { ...row, waiting: 'I-1: pick A or B', payload: JSON.stringify({ ac: [], issues: [{ n: 1, at: '2026-10-28T10:00:00Z', type: 'QUESTION', text: 'pick', level: 'owner', status: 'open' }] }) };
+  assert.strictEqual(toOrchestration(asking, now, [pr(1080, 'open')]).activity, 'WAITING', 'an open owner question still waits');
+  const review = { ...row, payload: JSON.stringify({ ac: [], kind: 'review' }), waiting: 'Review request-change: tell the author' };
+  assert.strictEqual(toOrchestration(review, now, [pr(1082, 'open')]).activity, 'WAITING', 'a review verdict still waits on the owner');
 });

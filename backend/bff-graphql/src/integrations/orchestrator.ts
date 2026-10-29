@@ -595,10 +595,12 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
   // A hook-level WAITING (notification, permission prompt) is not a gate: with no event for as long as an idle
   // run may stay quiet, nobody is still blocked on it. The ledger's own gate below always wins.
   if (activity === 'WAITING' && idleMs > STALE_IDLE_MS) { activity = 'IDLE'; activityDetail = null; endedMs = null; }
-  // The runner's "Ready for review" line hands the build to its reviewers: it stops waiting on the owner once every
-  // pull request is out of draft on GitHub, and once the run is done.
-  const handedOver = READY_FOR_REVIEW.test(row.waiting ?? '')
-    && (FINISHED_STAGES.has(row.stage) || (githubPullRequests.length > 0 && githubPullRequests.every((pr) => pr.status !== 'draft')));
+  // A build's waiting line is about getting its pull requests up for review. Once every one is out of draft on GitHub
+  // and no issue is open, it waits on the reviewers, not the owner; a "Ready for review" line also ends with the run.
+  const prsOut = githubPullRequests.length > 0 && githubPullRequests.every((pr) => pr.status !== 'draft');
+  const openIssue = normalizeIssues(ledger.issues).some((issue) => issue.status === 'open');
+  const handedOver = Boolean(row.waiting) && runKind(ledger.kind, row.key) === 'build'
+    && ((prsOut && !openIssue) || (READY_FOR_REVIEW.test(row.waiting ?? '') && FINISHED_STAGES.has(row.stage)));
   const waiting = handedOver ? null : row.waiting;
   if (waiting) { activity = 'WAITING'; activityDetail = 'gate'; endedMs = null; }
   if (FINISHED_STAGES.has(row.stage) && !waiting) { activity = 'IDLE'; activityDetail = null; endedMs = null; }
