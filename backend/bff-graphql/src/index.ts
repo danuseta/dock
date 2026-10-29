@@ -13,6 +13,8 @@ import { discordGateway, discordReader } from './integrations/discord-reader-liv
 import { discordTeam, ensureTeamChannels } from './integrations/discord-team';
 import { channelStore } from './integrations/discord-threads';
 import { autoReview } from './integrations/auto-review-live';
+import { autoBroadcast } from './integrations/broadcast';
+import { decisionGate, sweepReleases } from './integrations/decision-gate';
 import { claudeAccounts, cycleAvailable } from './integrations/claude-accounts-live';
 import { dockMode } from './mode';
 import { useWriteAheadLog } from './storage/client';
@@ -26,6 +28,7 @@ const DISCORD_TOKEN_CHECK_MS = 60 * 1000;
 const AUTO_REVIEW_MS = 60 * 1000;
 /** How often auto rotate looks again without a turn, so back to main follows a reset. */
 const CLAUDE_ROTATE_MS = 5 * 60 * 1000;
+const RELEASE_SWEEP_MS = 5 * 60 * 1000;
 
 export async function startServer(): Promise<void> {
   const journal = await useWriteAheadLog().catch((error) => `unchanged (${error instanceof Error ? error.message : 'unknown error'})`);
@@ -66,6 +69,10 @@ export async function startServer(): Promise<void> {
       const rotateClaude = () => (cycleAvailable() ? claudeAccounts.tick() : Promise.resolve())
         .catch((error) => console.warn('[ClaudeAccounts] rotate check failed:', error instanceof Error ? error.message : 'unknown error'));
       setInterval(rotateClaude, CLAUDE_ROTATE_MS).unref();
+      // A build that went quiet with nothing waiting on the owner still goes up for review and out to Discord.
+      const releaseQuiet = () => sweepReleases({ list: () => orchestratorService.list(), gate: decisionGate, broadcast: (run) => autoBroadcast.afterLedger(run) })
+        .catch((error) => console.warn('[DecisionGate] sweep failed:', error instanceof Error ? error.message : 'unknown error'));
+      setInterval(releaseQuiet, RELEASE_SWEEP_MS).unref();
     }
   });
 }

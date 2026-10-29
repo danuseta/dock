@@ -659,6 +659,7 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     activity,
     activityDetail,
     idleSeconds: Math.floor(idleMs / 1000),
+    eventIdleSeconds: row.lastEventAt ? Math.floor(Math.max(0, now.getTime() - row.lastEventAt.getTime()) / 1000) : null,
     endedSeconds: endedMs === null ? null : endedMs / 1000,
     stalled,
     stalledDetail: stalled ? row.stalledDetail ?? null : null,
