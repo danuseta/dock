@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useApolloClient } from '@apollo/client';
-import { ChevronDown, ChevronRight, ExternalLink, FileWarning, UnfoldVertical } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, ExternalLink, FileWarning, UnfoldVertical } from 'lucide-react';
 import { GET_PULL_FILE_LINES } from '../graphql/queries';
 import { Button, Checkbox } from '../components/ui';
 import { cn } from '../lib/cn';
@@ -39,7 +39,7 @@ interface DiffFileProps {
 /** Loaded unchanged lines per gap: gap i sits before hunk i and grows upwards; the gap after the last hunk grows downwards. */
 interface Extra { lines: string[]; end: boolean }
 
-const ROW = 'grid min-w-full w-max font-mono text-[0.74rem] leading-5';
+const ROW = 'grid min-w-full w-max font-mono text-[0.74rem] leading-5 max-[760px]:text-xs';
 const NUMBER = 'select-none px-2 text-right text-muted-foreground tabular-nums';
 const KIND_STYLE: Record<DiffLine['kind'], string> = { context: '', add: 'bg-status-merged/[0.09]', del: 'bg-status-conflict/[0.09]' };
 const SIGN: Record<DiffLine['kind'], string> = { context: ' ', add: '+', del: '-' };
@@ -68,15 +68,16 @@ export const DiffFile: React.FC<DiffFileProps> = (props) => {
   return (
     <section ref={ref} id={`file-${props.file.path}`} data-path={file.path} className="scroll-mt-28 overflow-hidden rounded-sm border border-border bg-background">
       <header className="sticky top-0 z-[2] flex min-w-0 items-center gap-2 border-b border-border bg-surface-0 px-3 py-2">
-        <button type="button" aria-expanded={!folded} aria-label={folded ? `Show ${file.path}` : `Fold ${file.path}`} onClick={() => props.onFold(!folded)} className="grid size-6 flex-none place-items-center rounded-xs border-0 bg-transparent text-secondary-foreground hover:bg-surface-2 max-[760px]:size-9">
+        <button type="button" aria-expanded={!folded} aria-label={folded ? `Show ${file.path}` : `Fold ${file.path}`} onClick={() => props.onFold(!folded)} className="grid size-6 flex-none place-items-center rounded-xs border-0 bg-transparent text-secondary-foreground hover:bg-surface-2 max-[760px]:size-11">
           {folded ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
         </button>
-        <h3 className="min-w-0 flex-1 truncate font-mono text-[0.78rem] font-semibold" title={file.path}>
-          {file.previousPath && <span className="text-muted-foreground">{file.previousPath} → </span>}{file.path}
+        <h3 className="min-w-0 flex-1 truncate font-mono text-[0.78rem] font-semibold max-[760px]:flex max-[760px]:flex-col-reverse" title={file.path}>
+          {file.previousPath && <span className="text-muted-foreground">{file.previousPath} → </span>}<span className="max-[760px]:block max-[760px]:truncate max-[760px]:text-xs max-[760px]:font-normal max-[760px]:text-muted-foreground">{file.path.slice(0, file.path.lastIndexOf('/') + 1)}</span><span className="max-[760px]:block max-[760px]:truncate">{file.path.slice(file.path.lastIndexOf('/') + 1)}</span>
         </h3>
         <span className="flex-none font-mono text-[0.72rem] tabular-nums"><span className="text-status-merged">+{file.additions}</span> <span className="text-status-conflict">-{file.deletions}</span></span>
+        <button type="button" aria-pressed={props.viewed} aria-label={`Viewed ${file.path}`} onClick={() => props.onViewed(!props.viewed)} className={cn('grid size-11 flex-none place-items-center rounded-xs border-0 bg-transparent min-[761px]:hidden', props.viewed ? 'text-status-merged' : 'text-secondary-foreground')}><Check size={18} aria-hidden="true" /></button>
         <label className="flex flex-none items-center gap-1.5 text-[0.72rem] text-secondary-foreground max-[760px]:hidden"><Checkbox checked={props.viewed} onChange={(event) => props.onViewed(event.target.checked)} />Viewed</label>
-        <a href={fileUrl} target="_blank" rel="noopener noreferrer" aria-label={`Open ${file.path} on GitHub`} className="grid size-6 flex-none place-items-center rounded-xs text-secondary-foreground hover:bg-surface-2 max-[760px]:size-9"><ExternalLink size={13} aria-hidden="true" /></a>
+        <a href={fileUrl} target="_blank" rel="noopener noreferrer" aria-label={`Open ${file.path} on GitHub`} className="grid size-6 flex-none place-items-center rounded-xs text-secondary-foreground hover:bg-surface-2 max-[760px]:size-11"><ExternalLink size={13} aria-hidden="true" /></a>
       </header>
       {!folded && (seen ? <Body {...props} changed={changed} fileUrl={fileUrl} /> : <div style={{ height: Math.min(Math.max(changed, 3) * 20, 4000) }} />)}
       {folded && !file.tooLarge && file.patch !== null && changed > LONG_FILE_LINES && (
@@ -171,8 +172,8 @@ const Body: React.FC<DiffFileProps & { changed: number; fileUrl: string }> = (pr
 
   const unifiedLine = (line: DiffLine, key: string) => (
     <React.Fragment key={key}>
-      <div className={cn(ROW, 'grid-cols-[3.25rem_3.25rem_1.25rem_minmax(0,1fr)]', KIND_STYLE[line.kind], marked(line) && 'shadow-[inset_3px_0_0_var(--color-status-warn)]')}>
-        <span className={NUMBER}>{line.oldLine ?? ''}</span>
+      <div className={cn(ROW, 'grid-cols-[3.25rem_3.25rem_1.25rem_minmax(0,1fr)] max-[760px]:grid-cols-[2.5rem_1.25rem_minmax(0,1fr)]', KIND_STYLE[line.kind], marked(line) && 'shadow-[inset_3px_0_0_var(--color-status-warn)]')}>
+        <span className={cn(NUMBER, 'max-[760px]:hidden')}>{line.oldLine ?? ''}</span>
         <span className={NUMBER}>{line.newLine ?? ''}</span>
         <span className={cn('select-none text-center', line.kind === 'add' ? 'text-status-merged' : line.kind === 'del' ? 'text-status-conflict' : 'text-muted-foreground')}>{SIGN[line.kind]}</span>
         <code className="whitespace-pre pr-4 text-foreground">{line.text || ' '}</code>
@@ -203,7 +204,7 @@ const Body: React.FC<DiffFileProps & { changed: number; fileUrl: string }> = (pr
     const label = left === Infinity ? 'Expand' : `Expand ${left} ${left === 1 ? 'line' : 'lines'}`;
     if (left === 0 && header === null) return null;
     return (
-      <div className="flex min-w-full items-center gap-2 bg-status-discord-bg/60 px-2 py-0.5 font-mono text-[0.7rem] text-status-discord">
+      <div className="flex min-w-full items-center gap-2 bg-status-discord-bg/60 px-2 py-0.5 font-mono text-[0.7rem] text-status-discord max-[760px]:text-xs">
         {left > 0 && (
           <button type="button" onClick={() => void expand(gap)} disabled={loading === gap} className="flex min-h-6 flex-none items-center gap-1 whitespace-nowrap rounded-xs border-0 bg-transparent px-1 text-muted-foreground hover:text-foreground max-[760px]:min-h-9">
             <UnfoldVertical size={12} aria-hidden="true" />{loading === gap ? 'Loading' : label}

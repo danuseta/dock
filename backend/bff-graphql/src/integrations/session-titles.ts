@@ -13,3 +13,19 @@ export function nextSessionTitle(base: string, taken: string[]): string {
 
 /** Whether a title is one of the `Task-` titles of a ticket, numbered or not. */
 export const isTaskTitle = (title: string, key: string) => numbered(ticketSessionTitle('Task', key)).test(title);
+
+const TICKET_IN_TEXT = /\b([A-Z][A-Z0-9]+-\d+)\b/;
+const REVIEW_WORDS = /\breview\w*/i;
+const BUILD_WORDS = /\b(kerjakan|kerjain|build|implement\w*|lanjutkan|bikin)\b/i;
+
+/**
+ * A chat opened by hand on one ticket gets the cron's title for it: "review QRD-1491" is `Review-QRD-1491`, "kerjakan
+ * QRD-1491" is `Task-QRD-1491`. Null when the first message names no ticket or no review or build.
+ */
+export function ticketTitleFromText(text: string): { kind: 'Task' | 'Review'; key: string } | null {
+  const key = TICKET_IN_TEXT.exec(text)?.[1];
+  if (!key || key.startsWith('CARD-')) return null;
+  if (REVIEW_WORDS.test(text)) return { kind: 'Review', key };
+  if (BUILD_WORDS.test(text)) return { kind: 'Task', key };
+  return null;
+}

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import { ArrowUpToLine, Copy, ExternalLink, Hand, Link2, MessagesSquare, ArrowUpRight, Unlink } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import { monitorsOnly, useDockMode } from '../../lib/dockMode';
@@ -11,6 +12,13 @@ export interface TicketMenuTarget {
   y: number;
   /** A long press on a phone opens a bottom sheet instead of a menu at the pointer. */
   sheet: boolean;
+}
+
+export interface TicketMenuAction {
+  label: string;
+  icon: LucideIcon;
+  disabled?: boolean;
+  onPick: () => void;
 }
 
 export interface TicketMenuTicket {
@@ -30,6 +38,7 @@ interface TicketMenuProps {
   onOpen?: () => void;
   onSession: () => void;
   onDependency?: () => void;
+  phoneActions?: TicketMenuAction[];
   onDone: (message: string, type: 'success' | 'error') => void;
   onClose: () => void;
 }
@@ -37,7 +46,7 @@ interface TicketMenuProps {
 export const MENU_WIDTH = 248;
 const MENU_HEIGHT = 360;
 
-export const TicketMenu: React.FC<TicketMenuProps> = ({ target, ticket, nextOrder, refetchQueries, onOpen, onSession, onDependency, onDone, onClose }) => {
+export const TicketMenu: React.FC<TicketMenuProps> = ({ target, ticket, nextOrder, refetchQueries, onOpen, onSession, onDependency, phoneActions, onDone, onClose }) => {
   const root = useRef<HTMLDivElement>(null);
   const [order, setOrder] = useState(ticket.workOrder != null ? String(ticket.workOrder) : '');
   const work = useTicketWork(refetchQueries);
@@ -80,6 +89,7 @@ export const TicketMenu: React.FC<TicketMenuProps> = ({ target, ticket, nextOrde
       </p>
       {onOpen && <button type="button" role="menuitem" className={item} onClick={() => pick(onOpen)}><ArrowUpRight size={14} aria-hidden="true" />Open ticket</button>}
       <button type="button" role="menuitem" className={item} onClick={() => pick(onSession)}><MessagesSquare size={14} aria-hidden="true" />Open session</button>
+      {phoneActions?.map(({ label, icon: Icon, disabled, onPick }) => <button key={label} type="button" role="menuitem" className={cn(item, 'min-[761px]:hidden')} disabled={disabled} onClick={() => pick(onPick)}><Icon size={14} aria-hidden="true" />{label}</button>)}
       {!monitoring && <>
       <div className="my-1 h-px bg-border" />
       <p className="px-2.5 pt-1 font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground">Work order</p>

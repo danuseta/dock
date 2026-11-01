@@ -47,13 +47,13 @@ export const ClaudeUsageCard = () => {
           </div>
           {usage.days.length === 0 ? <div className="px-4 py-5 text-sm text-muted-foreground">No Claude usage in this period.</div> : <>
             <UsageLineChart days={days} />
-            <div className="overflow-x-auto"><table className="w-full text-[0.68rem]">
-              <thead><tr className="text-left text-muted-foreground"><th className="px-4 py-2 font-medium">Model</th><th className="px-2 py-2 text-right font-medium">Input</th><th className="px-2 py-2 text-right font-medium">Output</th><th className="px-2 py-2 text-right font-medium">Cache</th><th className="px-4 py-2 text-right font-medium">Cost</th></tr></thead>
+            <div className="overflow-x-auto"><table className="w-full text-[0.68rem] max-[760px]:text-xs">
+              <thead><tr className="text-left text-muted-foreground"><th className="px-4 py-2 font-medium">Model</th><th className="px-2 py-2 text-right font-medium">Input</th><th className="px-2 py-2 text-right font-medium">Output</th><th className="px-2 py-2 text-right font-medium max-[760px]:hidden">Cache</th><th className="px-4 py-2 text-right font-medium">Cost</th></tr></thead>
               <tbody>{usage.models.map((model) => <tr className="border-t border-border" key={model.model}>
                 <td className="max-w-[160px] truncate px-4 py-1.5 font-mono">{model.model}</td>
                 <td className="px-2 py-1.5 text-right font-mono tabular-nums">{formatTokens(model.inputTokens)}</td>
                 <td className="px-2 py-1.5 text-right font-mono tabular-nums">{formatTokens(model.outputTokens)}</td>
-                <td className="px-2 py-1.5 text-right font-mono tabular-nums">{formatTokens(model.cacheCreationTokens + model.cacheReadTokens)}</td>
+                <td className="px-2 py-1.5 text-right font-mono tabular-nums max-[760px]:hidden">{formatTokens(model.cacheCreationTokens + model.cacheReadTokens)}</td>
                 <td className="px-4 py-1.5 text-right font-mono tabular-nums">{formatCost(model.cost)}</td>
               </tr>)}</tbody>
             </table></div>

@@ -10,6 +10,8 @@ import { RobotScene } from '../components/empty/scenes/RobotScene';
 import { Toast } from '../components/Toast';
 import { Badge, Button, Card, ConfirmDialog, Dialog, Page, PageHeader, PhoneCards } from '../components/ui';
 import { RetroTab } from '../agents/RetroTab';
+import { PhoneFold } from '../agents/PhoneFold';
+import { PhoneTabs, type PhoneTab } from '../agents/PhoneTabs';
 import { isPhone } from '../lib/phone';
 import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
@@ -125,7 +127,7 @@ const WaitingText: React.FC<{ run: AgentRun }> = ({ run }) => {
   return issue ? <><b className="mr-1.5 font-mono text-amber-200">I-{issue.n}</b>{issue.text}</> : <>{run.waiting || '—'}</>;
 };
 
-const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTicketClick, onNavigate, tabs }) => {
+const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: boolean; startArchive: boolean; onPickTab: (tab: PhoneTab) => void }> = ({ onTicketClick, onNavigate, tabs, library, startArchive, onPickTab }) => {
   const { data, loading, error, refetch } = useQuery(GET_ORCHESTRATIONS, { ...CACHED_QUERY_OPTIONS, returnPartialData: false, pollInterval: POLL_MS });
   const [dismissOrchestration, { loading: dismissing }] = useMutation(DISMISS_ORCHESTRATION);
   const [confirmOrchestration, { loading: confirming }] = useMutation(CONFIRM_ORCHESTRATION);
@@ -158,7 +160,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
   const [officeView, setOfficeView] = useState(savedOfficeView);
   const [viewTick, setViewTick] = useState(0);
   const [boardOpen, setBoardOpen] = useState(false);
-  const [tableTab, setTableTab] = useState<TableTab>('active');
+  const [tableTab, setTableTab] = useState<TableTab>(startArchive ? 'archive' : 'active');
   const [sort, setSort] = useState<RunSort>({ column: 'activity', descending: false });
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState<RunFilter>(() => runFilterFromSearch(window.location.search));
@@ -287,6 +289,13 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
     if (isPhone()) requestAnimationFrame(() => document.getElementById('agent-run-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   };
 
+  const pickPhoneTab = (next: PhoneTab) => {
+    if (next === 'runs' || next === 'archive') {
+      setTableTab(next === 'archive' ? 'archive' : 'active');
+      setPage(1);
+    } else onPickTab(next);
+  };
+
   const runAction = async (work: () => Promise<void>) => {
     setCronError('');
     try {
@@ -320,7 +329,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
   );
 
   return (
-    <Page width="full">
+    <Page width="full" className="max-[760px]:flex max-[760px]:flex-col max-[760px]:pb-28">
       <PageHeader>
         <div>
           <h1 className="text-balance font-display text-3xl font-black">Agents</h1>
@@ -329,7 +338,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {sampling && <Badge variant="draft" className="border-dashed">SAMPLE DATA</Badge>}
-          <div className="flex rounded-sm border border-border bg-surface-1 p-0.5" role="group" aria-label="View">
+          <div className="flex rounded-sm border border-border bg-surface-1 p-0.5 max-[760px]:hidden" role="group" aria-label="View">
             {([['office', 'Office', Building2], ['table', 'Table', Table2]] as const).map(([id, label, Icon]) => (
               <button
                 key={id}
@@ -343,7 +352,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
             ))}
           </div>
           {/* The cron and Stop all act on chat sessions, so they live on the DOCK that has chat. */}
-          {chat && <Button size="sm" aria-haspopup="dialog" onClick={() => setShowCron(true)}><Clock size={14} aria-hidden="true" />Cron</Button>}
+          {chat && <Button size="sm" className="max-[760px]:hidden" aria-haspopup="dialog" onClick={() => setShowCron(true)}><Clock size={14} aria-hidden="true" />Cron</Button>}
           {chat && <Button size="sm" variant="danger" disabled={stoppingAll} onClick={() => void runAction(async () => { await stopAllAgents(); })}><Octagon size={14} aria-hidden="true" />Stop all</Button>}
           {sampling
             ? <Button size="sm" onClick={() => { setSampleStartedAt(null); setSelectedKey(null); }}><Square size={14} aria-hidden="true" />Stop sample</Button>
@@ -351,14 +360,15 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
         </div>
       </PageHeader>
       {tabs}
+      <PhoneTabs current={tableTab === 'archive' ? 'archive' : 'runs'} library={library} counts={{ runs: active.length, archive: archived.length }} onPick={pickPhoneTab} />
 
-      <AutoReviewList rows={autoReviews} now={now * 1000} onTicket={pickRun} onNavigate={onNavigate} />
+      <AutoReviewList rows={autoReviews} now={now * 1000} onTicket={pickRun} onNavigate={onNavigate} className={cn('max-[760px]:order-5', tableTab === 'archive' && 'max-[760px]:hidden')} />
       {error && !data && <Card className="mb-4 border-status-conflict text-status-conflict" role="alert">Agent runs failed to load: {error.message}</Card>}
       {cronError && <Card className="mb-4 border-status-conflict text-status-conflict" role="alert">{cronError}</Card>}
       {chat && <CronSettingsDialog open={showCron} onClose={() => setShowCron(false)} />}
-      {chat && <CronRow pollMs={POLL_MS} onOpenSettings={() => setShowCron(true)} />}
+      {chat && <CronRow className="max-[760px]:order-1" pollMs={POLL_MS} onOpenSettings={() => setShowCron(true)} />}
 
-      <section className="mb-4 grid grid-cols-4 overflow-hidden rounded-md border border-border bg-surface-1 max-[700px]:grid-cols-2 [&>div]:border-r [&>div]:border-border [&>div:last-child]:border-r-0 max-[700px]:[&>div:nth-child(2)]:border-r-0 max-[700px]:[&>div:nth-child(-n+2)]:border-b" aria-label="Agent overview">
+      <section className={cn('mb-4 grid grid-cols-4 overflow-hidden rounded-md border border-border bg-surface-1 max-[760px]:order-3 max-[700px]:grid-cols-2 [&>div]:border-r [&>div]:border-border [&>div:last-child]:border-r-0 max-[700px]:[&>div:nth-child(2)]:border-r-0 max-[700px]:[&>div:nth-child(-n+2)]:border-b', tableTab === 'archive' && 'max-[760px]:hidden')} aria-label="Agent overview">
         {metrics.map((metric) => (
           <div className="p-[18px]" key={metric.label}>
             <strong className={cn('block font-display text-[1.55rem] leading-none font-extrabold tabular-nums', metric.className)}>{metric.value}</strong>
@@ -367,8 +377,8 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
         ))}
       </section>
 
-      <div className={cn('grid grid-cols-[minmax(0,1fr)_360px] gap-4 max-[1120px]:grid-cols-1', view === 'office' ? 'items-stretch max-[1120px]:items-start' : 'items-start')}>
-        <Card className="p-0">
+      <div className={cn('grid grid-cols-[minmax(0,1fr)_360px] gap-4 max-[1120px]:grid-cols-1 max-[760px]:contents', view === 'office' ? 'items-stretch max-[1120px]:items-start' : 'items-start')}>
+        <Card className="p-0 max-[760px]:order-4 max-[760px]:mb-4">
           {view === 'office' ? (
             <>
             {!empty && (
@@ -452,14 +462,14 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
           ) : (
             <div>
               <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
-                <div className="flex rounded-sm border border-border bg-surface-1 p-0.5" role="group" aria-label="Tickets shown">
+                <div className="flex rounded-sm border border-border bg-surface-1 p-0.5 max-[760px]:hidden" role="group" aria-label="Tickets shown">
                   {([['active', 'Active', active.length], ['archive', 'Archive', archived.length]] as const).map(([id, label, count]) => (
                     <button key={id} type="button" className={cn('flex h-7 max-[760px]:h-11 items-center gap-1.5 rounded-xs px-3 font-display text-xs font-semibold text-secondary-foreground transition-colors duration-150', tableTab === id && 'bg-accent text-black')} aria-pressed={tableTab === id} onClick={() => { setTableTab(id); setPage(1); }}>
                       {label}<span className="font-mono tabular-nums opacity-70">{count}</span>
                     </button>
                   ))}
                 </div>
-                <span className="text-pretty text-xs text-muted-foreground">{tableTab === 'archive' ? 'Finished tickets. They no longer count in the totals above.' : 'Tickets an agent is still on.'}</span>
+                <span className="text-pretty text-xs text-muted-foreground max-[760px]:hidden">{tableTab === 'archive' ? 'Finished tickets. They no longer count in the totals above.' : 'Tickets an agent is still on.'}</span>
                 {typeFilter}
               </div>
               <PhoneCards>
@@ -474,7 +484,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                               {sort.column === column && (sort.descending ? <ArrowDown size={12} aria-hidden="true" /> : <ArrowUp size={12} aria-hidden="true" />)}
                             </button>
                           </th>
-                          {column === 'ticket' && <th className="px-3 py-2 font-medium">Type</th>}
+                          {column === 'ticket' && <th className="px-3 py-2 font-medium max-[760px]:hidden!">Type</th>}
                         </React.Fragment>
                       ))}
                     </tr>
@@ -483,20 +493,24 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                     {listed.items.length === 0 && (
                       <tr><td colSpan={TABLE_COLUMNS.length + 1} className="px-4 py-10 text-center text-sm text-muted-foreground">{tableTab === 'archive' ? 'Nothing archived yet. A ticket moves here when it is done.' : 'No ticket is being worked on right now.'}</td></tr>
                     )}
-                    {listed.items.map((run) => (
+                    {listed.items.map((run) => {
+                      const waitingShown = Boolean(openIssues(run).owner[0] || run.waiting);
+                      const lgtmShown = runActions(run, monitorsOnly(mode)).hide && (canLgtm(run) || (run.kind === 'review' && run.approved));
+                      return (
                       <tr key={run.key} className={cn('cursor-pointer border-t border-border hover:bg-surface-1', selected?.key === run.key && 'bg-surface-1')} onClick={() => pickRun(run.key)}>
-                        <td className="px-3 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => pickRun(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><VerdictBadge run={run} className="ml-2" /><AutoReviewBadge row={autoByTicket.get(run.key)} className="ml-1.5" /><span className="mt-0.5 block max-w-[200px] truncate text-[0.8rem] text-foreground">{run.title || 'Untitled'}</span></button></td>
-                        <td className="px-3 py-3 text-xs text-secondary-foreground">{kindLabel(run.kind)}</td>
-                        <td className="px-3 py-3"><StageChip stage={run.stage} kind={run.kind} /></td>
-                        <td className="px-3 py-3"><StatusChip status={statusOf(run)} review={run.review} /></td>
-                        <td className="px-3 py-3 font-mono text-xs tabular-nums">{run.acPassed}/{run.acTotal}{run.acFailed > 0 && <span className="ml-1.5 text-status-conflict">{run.acFailed} failed</span>}</td>
-                        <td className="max-w-[200px] px-3 py-3 text-xs text-secondary-foreground">
+                        <td className="px-3 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => pickRun(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><VerdictBadge run={run} className="ml-2" /><AutoReviewBadge row={autoByTicket.get(run.key)} className="ml-1.5" /><span className="mt-0.5 block max-w-[200px] truncate text-[0.8rem] text-foreground max-[760px]:line-clamp-2 max-[760px]:max-w-none max-[760px]:whitespace-normal">{run.title || 'Untitled'}</span><span className="mt-1.5 hidden flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground max-[760px]:flex"><StatusChip status={statusOf(run)} review={run.review} /><span>{kindLabel(run.kind)} · {stageName(run.stage, run.kind)} · AC {run.acPassed}/{run.acTotal}{run.acFailed > 0 && <span className="text-status-conflict"> {run.acFailed} failed</span>} · {formatAge(run.idleSeconds + drift)} ago</span></span></button></td>
+                        <td className="px-3 py-3 text-xs text-secondary-foreground max-[760px]:hidden!">{kindLabel(run.kind)}</td>
+                        <td className="px-3 py-3 max-[760px]:hidden!"><StageChip stage={run.stage} kind={run.kind} /></td>
+                        <td className="px-3 py-3 max-[760px]:hidden!"><StatusChip status={statusOf(run)} review={run.review} /></td>
+                        <td className="px-3 py-3 font-mono text-xs tabular-nums max-[760px]:hidden!">{run.acPassed}/{run.acTotal}{run.acFailed > 0 && <span className="ml-1.5 text-status-conflict">{run.acFailed} failed</span>}</td>
+                        <td className={cn('max-w-[200px] px-3 py-3 text-xs text-secondary-foreground', !waitingShown && !lgtmShown && 'max-[760px]:hidden!')}>
                           <span className="line-clamp-2"><WaitingText run={run} /></span>
-                          {runActions(run, monitorsOnly(mode)).hide && (canLgtm(run) || (run.kind === 'review' && run.approved)) && <div className="mt-1.5"><LgtmButton run={run} busy={approving} onLgtm={setLgtmTarget} /></div>}
+                          {lgtmShown && <div className="mt-1.5"><LgtmButton run={run} busy={approving} onLgtm={setLgtmTarget} /></div>}
                         </td>
-                        <td className="px-3 py-3 text-xs text-muted-foreground tabular-nums">{formatAge(run.idleSeconds + drift)} ago</td>
+                        <td className="px-3 py-3 text-xs text-muted-foreground tabular-nums max-[760px]:hidden!">{formatAge(run.idleSeconds + drift)} ago</td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </PhoneCards>
@@ -512,7 +526,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
           )}
         </Card>
 
-        <Card id="agent-run-detail" className={cn('relative scroll-mt-4 bg-surface-0 p-0', view !== 'office' && 'max-h-[600px] overflow-y-auto max-[1120px]:max-h-none')} aria-live="polite">
+        <Card id="agent-run-detail" className={cn('relative scroll-mt-4 bg-surface-0 p-0 max-[760px]:order-6 max-[760px]:mb-4', view !== 'office' && 'max-h-[600px] overflow-y-auto max-[1120px]:max-h-none')} aria-live="polite">
           <div className={cn('flex flex-col gap-3.5 p-[18px]', view === 'office' && 'absolute inset-0 overflow-y-auto max-[1120px]:static')}>
           {!selected ? (
             <p className="text-pretty text-sm text-muted-foreground">Select a character, a wall card or a table row to see that ticket's run.</p>
@@ -523,6 +537,8 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                 <VerdictBadge run={selected} />
                 {!ACTIVITY_SHOWS.has(statusOf(selected)) && <StatusChip status={statusOf(selected)} review={selected.review} />}
                 {chat && actions?.chat && <Button size="sm" className="ml-auto h-7 px-2.5" disabled={openingChat} onClick={() => void openForTicket(selected.key)}><MessagesSquare size={13} aria-hidden="true" />Chat</Button>}
+                {!selected.sample && <Button size="sm" variant="primary" className="hidden h-7 px-2.5 max-[760px]:inline-flex" onClick={() => onTicketClick(selected.key)}>Open ticket</Button>}
+                {!selected.sample && actions?.hide && <Button size="sm" variant="ghost" className="hidden h-7 px-2.5 max-[760px]:inline-flex" onClick={() => { setActionError(''); setDismissTarget(selected); }}><EyeOff size={14} aria-hidden="true" />Hide run</Button>}
               </div>
               {chatError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The chat could not be opened: {chatError}</p>}
               <h2 className="text-pretty font-display text-base leading-snug font-bold">{selected.title || 'Untitled'}</h2>
@@ -577,8 +593,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
 
               <RunDecisions key={`decisions-${selected.key}`} run={selected} />
 
-              <div>
-                <p className={cn(sectionLabel, 'mb-1')}>Acceptance criteria · {selected.acPassed}/{selected.acTotal}</p>
+              <PhoneFold label={`Acceptance criteria · ${selected.acPassed}/${selected.acTotal}`}>
                 {selected.ac.length === 0 && <p className="text-sm text-muted-foreground">No acceptance criteria recorded yet.</p>}
                 {(acOpen ? acList : acList.slice(0, AC_SHOWN)).map((item) => (
                   <div className="grid grid-cols-[46px_1fr] gap-[9px] border-b border-border py-1.5 text-[0.82rem] last:border-b-0" key={item.n}>
@@ -587,14 +602,13 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                   </div>
                 ))}
                 {acList.length > AC_SHOWN && <button type="button" className="mt-1 text-xs font-semibold text-accent hover:underline" aria-expanded={acOpen} onClick={() => setAcOpen((value) => !value)}>{acOpen ? 'Show less' : `Show all ${acList.length}`}</button>}
-              </div>
+              </PhoneFold>
 
               {selected.brief && (
-                <div>
-                  <p className={cn(sectionLabel, 'mb-1')}>Brief</p>
+                <PhoneFold label="Brief">
                   <p className={cn('whitespace-pre-wrap break-words text-[0.82rem]', !briefOpen && 'line-clamp-3')}>{selected.brief}</p>
                   {isLongDescription(selected.brief, 3) && <button type="button" className="mt-1 text-xs font-semibold text-accent hover:underline" aria-expanded={briefOpen} onClick={() => setBriefOpen((value) => !value)}>{briefOpen ? 'Show less' : 'Show all'}</button>}
-                </div>
+                </PhoneFold>
               )}
 
               {(selected.testsBe || selected.testsFe || selected.prBe || selected.prFe || selected.note) && (
@@ -617,8 +631,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
               )}
 
               {!!selected.assumptions?.length && (
-                <div>
-                  <p className={cn(sectionLabel, 'mb-1')}>Assumptions</p>
+                <PhoneFold label="Assumptions">
                   <ol className="flex flex-col">
                     {selected.assumptions.map((assumption) => (
                       <li className="grid grid-cols-[1fr_auto] gap-2 border-b border-border py-1.5 text-[0.78rem] last:border-b-0" key={assumption.n}>
@@ -627,12 +640,11 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                       </li>
                     ))}
                   </ol>
-                </div>
+                </PhoneFold>
               )}
 
               {selected.kind === 'review' && (!!selected.findings?.length || !!selected.lgtm?.length || !!selected.verdict) && (
-                <div>
-                  <p className={cn(sectionLabel, 'mb-1')}>Review</p>
+                <PhoneFold label="Review">
                   <ol className="flex flex-col">
                     {reviewFindings(selected.findings ?? []).map((finding, index) => (
                       <li className="grid grid-cols-[1fr_auto] gap-2 border-b border-border py-1.5 text-[0.78rem] last:border-b-0" key={`${finding.at}-${index}`}>
@@ -656,15 +668,14 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                       {actions?.hide && <LgtmButton run={selected} busy={approving} onLgtm={setLgtmTarget} />}
                     </div>
                   )}
-                </div>
+                </PhoneFold>
               )}
 
               {blackboardFiles && blackboardFiles.length > 0 && (() => {
                 const top = sortFiles(blackboardFiles).filter((file) => !folderOf(file.path)).slice(0, 3);
                 const folders = [...new Set(blackboardFiles.map((file) => folderOf(file.path)).filter(Boolean))];
                 return (
-                  <div>
-                    <p className={cn(sectionLabel, 'mb-1 flex items-center gap-1.5')}><ClipboardList size={12} aria-hidden="true" />Blackboard</p>
+                  <PhoneFold label={<><ClipboardList size={12} aria-hidden="true" />Blackboard</>} labelClassName="flex items-center gap-1.5">
                     <ul className="flex flex-col overflow-hidden rounded-xs border border-border">
                       {top.map((file) => (
                         <li key={file.path} className="border-b border-border last:border-b-0">
@@ -678,13 +689,12 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                       ))}
                     </ul>
                     <button type="button" onClick={() => onNavigate(blackboardHref(selected.key))} className="mt-1.5 border-0 bg-transparent p-0 text-xs text-secondary-foreground hover:text-foreground">All {blackboardFiles.length} files</button>
-                  </div>
+                  </PhoneFold>
                 );
               })()}
 
               {!!selected.failures?.length && (
-                <div>
-                  <p className={cn(sectionLabel, 'mb-1')}>Failures</p>
+                <PhoneFold label="Failures">
                   <ol className="flex flex-col">
                     {[...selected.failures].reverse().map((failure, index) => (
                       <li className="grid grid-cols-[1fr_auto] gap-2 border-b border-border py-1.5 text-[0.78rem] last:border-b-0" key={`${failure.at}-${index}`}>
@@ -693,36 +703,34 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
                       </li>
                     ))}
                   </ol>
-                </div>
+                </PhoneFold>
               )}
 
               {selected.closing && (
-                <div>
-                  <p className={cn(sectionLabel, 'mb-1')}>Closing</p>
+                <PhoneFold label="Closing">
                   <dl className="grid grid-cols-[92px_1fr] gap-x-2.5 gap-y-1 text-[0.82rem]">
                     <dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Fix rounds</dt><dd className="tabular-nums">{selected.closing.fixRounds}</dd>
                     <dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Replans</dt><dd className="tabular-nums">{selected.closing.replans}</dd>
                     {selected.closing.hours != null && <><dt className="pt-0.5 font-mono text-[0.68rem] font-semibold text-muted-foreground">Hours</dt><dd className="tabular-nums">{selected.closing.hours}</dd></>}
                   </dl>
-                </div>
+                </PhoneFold>
               )}
 
               {events.length > 0 && (
-                <div>
-                  <p className={cn(sectionLabel, 'mb-1')}>Recent events</p>
+                <PhoneFold label="Recent events">
                   <ol className="flex flex-col">
                     {events.slice(0, 8).map((event) => (
                       <li className="grid grid-cols-[1fr_auto] gap-2 border-b border-border py-1.5 text-[0.78rem] last:border-b-0" key={event.id}>
-                        <span className="min-w-0 truncate"><span className="text-secondary-foreground">{eventLabel[event.kind] || event.kind}</span>{event.detail && <span className="text-foreground"> {event.kind === 'STAGE' ? stageLabel(event.detail) : event.detail}</span>}</span>
+                        <span className="min-w-0 truncate max-[760px]:line-clamp-2 max-[760px]:whitespace-normal max-[760px]:break-words"><span className="text-secondary-foreground">{eventLabel[event.kind] || event.kind}</span>{event.detail && <span className="text-foreground"> {event.kind === 'STAGE' ? stageLabel(event.detail) : event.detail}</span>}</span>
                         <time className="font-mono text-[0.68rem] text-muted-foreground tabular-nums" dateTime={event.at}>{new Date(event.at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</time>
                       </li>
                     ))}
                   </ol>
-                </div>
+                </PhoneFold>
               )}
 
               {!selected.sample && (
-                <div className="mt-auto flex flex-wrap gap-2 border-t border-border pt-3.5">
+                <div className="mt-auto flex flex-wrap gap-2 border-t border-border pt-3.5 max-[760px]:hidden">
                   <Button size="sm" variant="primary" onClick={() => onTicketClick(selected.key)}>Open ticket</Button>
                   {actions?.hide && <Button size="sm" variant="ghost" onClick={() => { setActionError(''); setDismissTarget(selected); }}><EyeOff size={14} aria-hidden="true" />Hide run</Button>}
                 </div>
@@ -733,7 +741,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
         </Card>
       </div>
 
-      <Card className="mt-4 p-0">
+      <Card className="mt-4 p-0 max-[760px]:order-7">
         <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 border-b border-border bg-surface-0 px-5 py-2.5">
           <h2 className="font-display text-[0.95rem] font-bold">Session flow</h2>
           {selected && <span className="font-mono text-xs font-bold text-accent">{selected.key}</span>}
@@ -741,7 +749,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode }> = ({ onTi
           {canReplay && (
             <div className="ml-auto flex rounded-sm border border-border bg-surface-1 p-0.5 max-[700px]:ml-0" role="group" aria-label="Session flow view">
               {([['live', 'Live graph'], ['replay', 'Replay detail']] as const).map(([id, label]) => (
-                <button key={id} type="button" className={cn('h-7 rounded-xs px-3 font-display text-xs font-semibold text-secondary-foreground transition-colors duration-150', flowView === id && 'bg-accent text-black')} aria-pressed={flowView === id} onClick={() => setFlowView(id)}>{label}</button>
+                <button key={id} type="button" className={cn('h-7 max-[760px]:h-11 rounded-xs px-3 font-display text-xs font-semibold text-secondary-foreground transition-colors duration-150', flowView === id && 'bg-accent text-black')} aria-pressed={flowView === id} onClick={() => setFlowView(id)}>{label}</button>
               ))}
             </div>
           )}
@@ -787,6 +795,7 @@ const tabFromSearch = (search: string): AgentsTab => {
 const AgentsPage: React.FC<AgentsPageProps> = (props) => {
   const library = hasPage(useDockMode(), '/sessions');
   const [tab, setTab] = useState<AgentsTab>(() => (library ? tabFromSearch(window.location.search) : 'office'));
+  const [startArchive, setStartArchive] = useState(false);
   const choose = (next: AgentsTab) => {
     setTab(next);
     const params = new URLSearchParams(window.location.search);
@@ -795,8 +804,14 @@ const AgentsPage: React.FC<AgentsPageProps> = (props) => {
     const query = params.toString();
     window.history.replaceState(window.history.state, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
   };
+  const pickPhoneTab = (next: PhoneTab) => {
+    if (next === 'runs' || next === 'archive') {
+      setStartArchive(next === 'archive');
+      choose('office');
+    } else choose(next);
+  };
   const tabs = library && (
-    <div className="mb-4 flex border-b border-border" role="tablist" aria-label="Agents">
+    <div className="mb-4 flex border-b border-border max-[760px]:hidden" role="tablist" aria-label="Agents">
       {([['office', 'Office', Building2], ['retro', 'Retro', RotateCcw], ['library', 'Library', Library]] as const).map(([id, label, Icon]) => (
         <button
           key={id}
@@ -811,9 +826,9 @@ const AgentsPage: React.FC<AgentsPageProps> = (props) => {
       ))}
     </div>
   );
-  if (tab === 'office') return <OfficeTab {...props} tabs={tabs} />;
+  if (tab === 'office') return <OfficeTab {...props} tabs={tabs} library={library} startArchive={startArchive} onPickTab={pickPhoneTab} />;
   if (tab === 'retro') return (
-    <Page width="full">
+    <Page width="full" className="max-[760px]:pb-28">
       <PageHeader>
         <div>
           <h1 className="text-balance font-display text-3xl font-black">Agents</h1>
@@ -821,11 +836,12 @@ const AgentsPage: React.FC<AgentsPageProps> = (props) => {
         </div>
       </PageHeader>
       {tabs}
+      <PhoneTabs current="retro" library={library} onPick={pickPhoneTab} />
       <RetroTab />
     </Page>
   );
   return (
-    <Page width="full">
+    <Page width="full" className="max-[760px]:pb-28">
       <PageHeader>
         <div>
           <h1 className="text-balance font-display text-3xl font-black">Agents</h1>
@@ -833,6 +849,7 @@ const AgentsPage: React.FC<AgentsPageProps> = (props) => {
         </div>
       </PageHeader>
       {tabs}
+      <PhoneTabs current="library" library={library} onPick={pickPhoneTab} />
       <AgentsLibrary />
     </Page>
   );

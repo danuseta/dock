@@ -1,6 +1,6 @@
 import { GitHubAPI } from '../datasources/GitHubAPI';
 import { StorageService } from '../storage/service';
-import { AutoReview } from './auto-review';
+import { AutoReview, currentReviews, type PullState } from './auto-review';
 import { threadService } from './discord-threads';
 import { orchestratorService } from './orchestrator';
 import { orchestratorCron } from './orchestrator-cron-live';
@@ -9,6 +9,23 @@ import { lgtmReview } from './review-approval';
 
 const storage = new StorageService();
 const github = new GitHubAPI();
+
+/** How long the Agents list trusts a pull request's state: the page polls, GitHub should not be asked on every poll. */
+const LISTED_PULL_MS = 60_000;
+const listedPulls = new Map<string, { at: number; state: Promise<PullState> }>();
+
+function listedPull(owner: string, repo: string, number: number): Promise<PullState> {
+  const key = `${owner}/${repo}#${number}`;
+  const hit = listedPulls.get(key);
+  if (hit && Date.now() - hit.at < LISTED_PULL_MS) return hit.state;
+  const state = github.pullState(owner, repo, number);
+  listedPulls.set(key, { at: Date.now(), state });
+  state.catch(() => listedPulls.delete(key));
+  return state;
+}
+
+/** The auto reviews the Agents page lists: the stored ones that still say something about the pull request as it is now. */
+export const listedAutoReviews = async <T extends { prUrl: string; headSha: string; status: string }>(rows: T[]) => currentReviews(rows, listedPull);
 
 export const AUTO_REVIEW_KEYS = ['autoReviewOnIt', 'autoLgtm'] as const;
 

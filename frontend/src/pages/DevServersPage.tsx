@@ -6,9 +6,10 @@ import { RESTART_DEV_SERVER, START_ALL_DEV_SERVERS, START_DEV_SERVER, STOP_ALL_D
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { EmptyState } from '../components/EmptyState';
 import { RackScene } from '../components/empty/scenes/RackScene';
-import { Button, Card, ConfirmDialog, IconButton, Input, Page, PageHeader } from '../components/ui';
+import { Button, Card, ConfirmDialog, Dialog, IconButton, Input, Page, PageHeader } from '../components/ui';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { cn } from '../lib/cn';
+import { isPhone } from '../lib/phone';
 import { canStop, filterLog, type DevServer, type DevServerAction } from '../lib/devServers';
 
 const POLL_MS = 5000;
@@ -60,6 +61,21 @@ const DevServersPage = () => {
     URL.revokeObjectURL(url);
   };
 
+  const phone = isPhone();
+  const logCard = (
+    <Card className={cn('mb-6 p-0', phone && 'mb-0 w-[calc(100vw-1rem)]')}>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
+        <h2 id="dev-server-log-title" className="flex items-center gap-2 font-display text-lg font-bold"><Server size={18} aria-hidden="true" />{logApp} log</h2>
+        <span className="flex items-center gap-2 max-[760px]:w-full">
+          <label className="relative max-[760px]:min-w-0 max-[760px]:flex-1"><span className="sr-only">Search the log</span><Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input className="h-8 pl-9 max-[760px]:h-11" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search" /></label>
+          <IconButton variant="ghost" aria-label="Download the log" title="Download" onClick={download}><Download size={15} aria-hidden="true" /></IconButton>
+          <Button size="sm" onClick={() => setLogApp(null)}>Close</Button>
+        </span>
+      </div>
+      {logError ? <p className="p-4 text-sm text-status-conflict" role="alert">{logError.message}</p> : <pre className="max-h-[60vh] overflow-auto p-4 whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-secondary-foreground">{log || 'No output yet.'}</pre>}
+    </Card>
+  );
+
   return (
     <Page width="full">
       <PageHeader>
@@ -67,7 +83,7 @@ const DevServersPage = () => {
         <span className="flex flex-wrap items-center gap-2">
           <Button onClick={() => void act('all', () => startAll())} disabled={busy !== null}><Play size={16} aria-hidden="true" />Start all</Button>
           <Button onClick={() => setConfirmStopAll(true)} disabled={busy !== null}><Square size={16} aria-hidden="true" />Stop all</Button>
-          <Button onClick={() => void refetch()} disabled={loading}><RefreshCw size={16} className={cn(loading && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />Refresh</Button>
+          <Button className="max-[760px]:w-11 max-[760px]:px-0" onClick={() => void refetch()} disabled={loading}><RefreshCw size={16} className={cn(loading && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" /><span className="max-[760px]:sr-only">Refresh</span></Button>
         </span>
       </PageHeader>
 
@@ -78,8 +94,8 @@ const DevServersPage = () => {
       <Card className="mb-6 overflow-hidden p-0">
         <ul className="flex flex-col">
           {main.map((app) => (
-            <li className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 last:border-b-0" key={app.name}>
-              <span className="flex min-w-0 items-center gap-2.5"><StatusDot state={app.state} /><span className="min-w-0"><strong className="block font-display">{app.name}</strong><small className="font-mono text-[0.68rem] text-muted-foreground">{app.folder} · port {app.port} · {app.state}</small>{app.state === 'failed' && app.error && <small className="block max-w-xl whitespace-pre-wrap break-words text-pretty font-mono text-[0.7rem] text-status-conflict">{app.error}</small>}{app.running && !app.hasLog && <small className="block text-pretty text-[0.7rem] text-amber-300">Started outside DOCK, so there is no log. Restart it here to keep one.</small>}</span></span>
+            <li className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 last:border-b-0 max-[760px]:flex-nowrap" key={app.name}>
+              <span className="flex min-w-0 items-center gap-2.5"><StatusDot state={app.state} /><span className="min-w-0"><strong className="block font-display">{app.name}</strong><small className="font-mono text-[0.68rem] text-muted-foreground max-[760px]:block max-[760px]:truncate max-[760px]:text-xs">{app.folder} · port {app.port} · {app.state}</small>{app.state === 'failed' && app.error && <small className="block max-w-xl whitespace-pre-wrap break-words text-pretty font-mono text-[0.7rem] text-status-conflict">{app.error}</small>}{app.running && !app.hasLog && <small className="block text-pretty text-[0.7rem] text-amber-300">Started outside DOCK, so there is no log. Restart it here to keep one.</small>}</span></span>
               <span className="flex items-center gap-1">
                 {app.state === 'running' && <IconButton variant="ghost" aria-label={`Restart ${app.name}`} title="Restart" disabled={busy === app.name || busy === 'all'} onClick={() => void act(app.name, () => restartServer({ variables: { name: app.name } }))}><RotateCcw size={15} aria-hidden="true" /></IconButton>}
                 {canStop(app.state)
@@ -97,8 +113,8 @@ const DevServersPage = () => {
         {secondary.length === 0 ? <EmptyState size="panel" scene={<RackScene />} description="No server runs in a ticket worktree." /> : (
           <ul className="flex flex-col">
             {secondary.map((item) => (
-              <li className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 last:border-b-0" key={item.port}>
-                <span className="flex min-w-0 items-center gap-2.5"><StatusDot state="running" /><span className="min-w-0"><strong className="block font-display">{item.ticketKey || item.folder}</strong><small className="font-mono text-[0.68rem] text-muted-foreground">{item.folder} · port {item.port}{item.pid ? ` · pid ${item.pid}` : ''}</small></span></span>
+              <li className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 last:border-b-0 max-[760px]:flex-nowrap" key={item.port}>
+                <span className="flex min-w-0 items-center gap-2.5"><StatusDot state="running" /><span className="min-w-0"><strong className="block font-display">{item.ticketKey || item.folder}</strong><small className="font-mono text-[0.68rem] text-muted-foreground max-[760px]:block max-[760px]:truncate max-[760px]:text-xs">{item.folder} · port {item.port}{item.pid ? ` · pid ${item.pid}` : ''}</small></span></span>
                 <span className="flex items-center gap-1">
                 <IconButton variant="ghost" aria-label={`Log of the server on port ${item.port}`} title={item.hasLog ? 'Log' : 'No log: not started with dev-server.cjs'} disabled={!item.hasLog} onClick={() => setLogApp(item.name)}><Terminal size={15} aria-hidden="true" /></IconButton>
                 <IconButton variant="ghost" className="text-status-conflict" aria-label={`Stop the server on port ${item.port}`} title="Stop" disabled={busy === String(item.port)} onClick={() => void act(String(item.port), () => stopWorktree({ variables: { port: item.port } }))}><Square size={15} aria-hidden="true" /></IconButton>
@@ -109,19 +125,8 @@ const DevServersPage = () => {
         )}
       </Card>
 
-      {logApp && (
-        <Card className="mb-6 p-0">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
-            <h2 className="flex items-center gap-2 font-display text-lg font-bold"><Server size={18} aria-hidden="true" />{logApp} log</h2>
-            <span className="flex items-center gap-2">
-              <label className="relative"><span className="sr-only">Search the log</span><Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input className="h-8 pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search" /></label>
-              <IconButton variant="ghost" aria-label="Download the log" title="Download" onClick={download}><Download size={15} aria-hidden="true" /></IconButton>
-              <Button size="sm" onClick={() => setLogApp(null)}>Close</Button>
-            </span>
-          </div>
-          {logError ? <p className="p-4 text-sm text-status-conflict" role="alert">{logError.message}</p> : <pre className="max-h-[60vh] overflow-auto p-4 whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-secondary-foreground">{log || 'No output yet.'}</pre>}
-        </Card>
-      )}
+      {logApp && phone && <Dialog open onClose={() => setLogApp(null)} labelledBy="dev-server-log-title">{logCard}</Dialog>}
+      {logApp && !phone && logCard}
 
       <h2 className="mb-2 font-display text-lg font-bold">Recent actions</h2>
       <Card className="overflow-hidden p-0">

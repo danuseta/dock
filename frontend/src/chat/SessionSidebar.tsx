@@ -52,7 +52,7 @@ const SessionThreads: React.FC<SessionThreadsProps> = ({ sessionId, activeThread
         <button type="button" className={cn('flex w-full items-center gap-2 rounded-xs border border-transparent px-2 py-1.5 text-left hover:bg-surface-1 max-[900px]:min-h-11', nested && 'pl-5', activeThreadId === worker.id && 'border-border-glow bg-surface-1')} aria-current={activeThreadId === worker.id ? 'true' : undefined} title={worker.label} onClick={() => onOpenThread(sessionId, worker.id)}>
           <AgentAvatar name={worker.name} small />
           <span className="min-w-0 flex-1 truncate text-[0.76rem]">{nested ? agentTask({ label: worker.label, name: worker.name }) : shortAgent(worker.name)}</span>
-          {!nested && <span className="flex-none font-mono text-[0.62rem] text-muted-foreground tabular-nums">{clock(worker.startedAt)}{workerCount > 0 ? ` · ${workerCount}` : ''}</span>}
+          {!nested && <span className="flex-none font-mono text-[0.62rem] max-[760px]:text-xs text-muted-foreground tabular-nums">{clock(worker.startedAt)}{workerCount > 0 ? ` · ${workerCount}` : ''}</span>}
           {ended ? <Pill className={ended.className}>{ended.text}</Pill> : <StatusDot state="running" className="size-2" />}
         </button>
       </li>
@@ -149,24 +149,27 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({ sessions, machin
       <div className={cn('min-h-0 flex-1 overflow-y-auto px-2 pb-2', collapsed && 'min-[901px]:px-1')}>
         {results ?? groupSessions(sessions, now).map((group) => (
           <section key={group.key} aria-label={group.label} className={cn(collapsed && 'min-[901px]:mt-2 min-[901px]:border-t min-[901px]:border-border min-[901px]:pt-2 min-[901px]:first:mt-0 min-[901px]:first:border-t-0')}>
-            <h3 className={cn('flex items-center justify-between px-2 pb-1 pt-3 font-mono text-[0.62rem] font-bold uppercase tracking-wider', group.key === 'needs-you' ? 'text-amber-300' : 'text-muted-foreground', full)}>{group.label} <span className="tabular-nums text-muted-foreground">{group.sessions.length}</span></h3>
+            <h3 className={cn('flex items-center justify-between px-2 pb-1 pt-3 font-mono text-[0.62rem] max-[760px]:text-xs font-bold uppercase tracking-wider', group.key === 'needs-you' ? 'text-amber-300' : 'text-muted-foreground', full)}>{group.label} <span className="tabular-nums text-muted-foreground">{group.sessions.length}</span></h3>
             {group.sessions.map((session) => {
               const active = session.id === activeId;
               const workers = session.workerCount ?? 0;
               const open = workers > 0 && (openOverride.get(session.id) ?? active);
               const dot = sidebarDot(session, { bridgeUp: machineOnline(machines, machineOf(session)) });
-              let meta: React.ReactNode = <span className="flex-none font-mono text-[0.64rem] text-muted-foreground tabular-nums">{relativeTime(session.lastMessageAt, now)}</span>;
+              let meta: React.ReactNode = <span className="flex-none font-mono text-[0.64rem] max-[760px]:text-xs text-muted-foreground tabular-nums">{relativeTime(session.lastMessageAt, now)}</span>;
               if (group.key === 'needs-you') meta = <Pill className="border-amber-300/50 text-amber-300">answer</Pill>;
               else if (session.status === 'queued') meta = <Pill className="border-amber-300/50 text-amber-200">queued</Pill>;
-              else if ((session.status === 'queued' || session.status === 'running') && workers > 0) meta = <span className="flex-none font-mono text-[0.64rem] text-muted-foreground tabular-nums">team {workers}</span>;
+              else if ((session.status === 'queued' || session.status === 'running') && workers > 0) meta = <span className="flex-none font-mono text-[0.64rem] max-[760px]:text-xs text-muted-foreground tabular-nums">team {workers}</span>;
               const hint = collapsed ? sessionTitle(session) : undefined;
               return (
                 <div key={session.id}>
                   <div className={cn('flex items-center rounded-xs border border-transparent hover:bg-surface-1', active && activeThreadId === null && 'border-border-glow bg-surface-1')}>
                     <button type="button" className={cn('flex min-w-0 flex-1 items-center gap-2 py-2 pl-2.5 pr-1.5 text-left max-[900px]:min-h-11', collapsed && 'min-[901px]:justify-center min-[901px]:px-0')} aria-current={active ? 'true' : undefined} aria-label={collapsed ? sessionTitle(session) : undefined} title={hint} {...rowHandlers(session)} onClick={() => { if (pressed()) return; if (active) onOpenThread(session.id, null); else onSelect(session.id); }}>
                       <StatusDot state={dot} className="size-2" />
-                      <span className={cn('min-w-0 flex-1 truncate font-display text-[0.8rem] font-semibold', full)}>{sessionTitle(session)}</span>
-                      <span className={cn('contents', full)}>{meta}</span>
+                      <span className={cn('flex min-w-0 flex-1 flex-col', full)}>
+                        <span className="block truncate font-display text-[0.8rem] font-semibold">{sessionTitle(session)}</span>
+                        <span className="hidden max-[760px]:flex">{meta}</span>
+                      </span>
+                      <span className={cn('contents max-[760px]:hidden', full)}>{meta}</span>
                     </button>
                     {workers > 0 && (
                       <button type="button" className={cn('mr-1 flex size-7 flex-none items-center justify-center rounded-xs text-muted-foreground hover:text-foreground max-[900px]:size-11', full)} aria-expanded={open} aria-label={open ? 'Hide threads' : 'Show threads'} title={open ? 'Hide threads' : 'Show threads'} onClick={() => setOpenOverride((current) => new Map(current).set(session.id, !open))}>

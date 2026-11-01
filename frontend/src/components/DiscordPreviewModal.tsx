@@ -33,7 +33,7 @@ export const DiscordPreviewModal: React.FC<DiscordPreviewModalProps> = ({ isOpen
 
   return (
     <Dialog open={isOpen} onClose={onClose} dismissible={!loading} labelledBy="discord-preview-title">
-      <Card className="flex max-h-[calc(100dvh-2rem)] w-[760px] max-w-full flex-col overflow-y-auto border-status-discord p-6 shadow-xl">
+      <Card className="flex max-h-[calc(100dvh-2rem)] w-[760px] max-w-full flex-col overflow-y-auto border-status-discord p-6 shadow-xl max-[760px]:p-4">
         <div className="mb-4 flex items-center justify-between border-b border-border pb-3"><div className="flex items-center gap-2"><MessageSquare size={22} className="text-status-discord" aria-hidden="true" /><h2 id="discord-preview-title" className="font-mono text-xl font-bold text-status-discord">Discord Broadcast Preview</h2></div><IconButton variant="ghost" className="size-8 rounded-full" onClick={onClose} disabled={loading} aria-label="Close Discord preview"><X size={16} aria-hidden="true" /></IconButton></div>
         <p className="mb-4 text-pretty text-sm text-secondary-foreground">Review and customize the Markdown summary before sending it to your Discord server.</p>
 
@@ -48,7 +48,7 @@ export const DiscordPreviewModal: React.FC<DiscordPreviewModalProps> = ({ isOpen
           </div>
         </section>
 
-        <div className="mt-auto flex justify-end gap-3 border-t border-border pt-3"><Button onClick={onClose} disabled={loading}>Cancel</Button><Button className="border-status-discord bg-status-discord text-white hover:bg-status-discord/80" onClick={handleSubmit} disabled={loading}><Send size={16} aria-hidden="true" />{loading ? 'Broadcasting...' : 'Confirm & Post to Discord'}</Button></div>
+        <div className="mt-auto flex justify-end gap-3 border-t border-border pt-3 max-[760px]:sticky max-[760px]:bottom-0 max-[760px]:flex-col-reverse max-[760px]:bg-surface-1"><Button className="max-[760px]:w-full" onClick={onClose} disabled={loading}>Cancel</Button><Button className="border-status-discord bg-status-discord text-white hover:bg-status-discord/80 max-[760px]:w-full" onClick={handleSubmit} disabled={loading}><Send size={16} aria-hidden="true" />{loading ? 'Broadcasting...' : 'Confirm & Post to Discord'}</Button></div>
       </Card>
     </Dialog>
   );

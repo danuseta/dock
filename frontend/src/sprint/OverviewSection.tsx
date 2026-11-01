@@ -1,6 +1,7 @@
 import { Card } from '../components/ui';
 import { cn } from '../lib/cn';
 import { fmt, pct } from './format';
+import { FoldSection } from './SprintParts';
 import type { SprintResult } from './types';
 
 export const OverviewSection = ({ result }: { result: SprintResult }) => {
@@ -23,8 +24,7 @@ export const OverviewSection = ({ result }: { result: SprintResult }) => {
   ];
 
   return (
-    <section className="mb-6">
-      <h2 className="font-display text-xl font-bold">Sprint overview (team)</h2>
+    <FoldSection title="Sprint overview (team)">
       <p className="mt-1 mb-3 text-sm text-muted-foreground">Capacity and pipeline distribution at the cutoff.</p>
       <div className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
         {metrics.map((metric) => (
@@ -54,6 +54,6 @@ export const OverviewSection = ({ result }: { result: SprintResult }) => {
           </span>
         ))}
       </div>
-    </section>
+    </FoldSection>
   );
 };

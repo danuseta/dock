@@ -361,6 +361,22 @@ test('a DOCK session takes one turn at a time and the bridge moves it through it
   assert.deepStrictEqual((await service.claim({ wait: 0 }, undefined, 'laptop')).message, null, 'a deleted session leaves nothing queued');
 });
 
+test('the first message names a session: a review or build of one ticket takes its Review-/Task- title', async () => {
+  const { service } = clockedService();
+  const review = await service.createSession({});
+  await service.sendMessage(review.id, 'bantu review Minta tolong buat review : QRD-1491 [FE][BE] In-app notifications:', MACHINES);
+  assert.deepStrictEqual([(await service.session(review.id))?.title, (await service.session(review.id))?.ticketKey], ['Review-QRD-1491', 'QRD-1491']);
+  const again = await service.createSession({});
+  await service.sendMessage(again.id, 'review QRD-1491 lagi', MACHINES);
+  assert.strictEqual((await service.session(again.id))?.title, 'Review-QRD-1491 (2)');
+  const build = await service.createSession({ ticketKey: 'QRD-1258' });
+  await service.sendMessage(build.id, 'kerjakan QRD-1491', MACHINES);
+  assert.deepStrictEqual([(await service.session(build.id))?.title, (await service.session(build.id))?.ticketKey], ['Task-QRD-1491', 'QRD-1258']);
+  const plain = await service.createSession({});
+  await service.sendMessage(plain.id, 'What changed in QRD-1491?', MACHINES);
+  assert.strictEqual((await service.session(plain.id))?.title, 'What changed in QRD-1491?');
+});
+
 test('claim skips a session that already has a taken message', async () => {
   const { service, storage } = clockedService();
   const busy = await service.createSession({ title: 'Busy' });

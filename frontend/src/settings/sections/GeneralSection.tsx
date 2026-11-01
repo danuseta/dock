@@ -40,6 +40,7 @@ export const GeneralSection = ({ values, set }: { values: SectionValues; set: (k
   return (
     <div className="flex flex-col gap-5">
       <SettingsCard title="This device" caption="Saves immediately, only in this browser." aside={savedNote ? <span role="status" className="font-mono text-xs text-status-merged">✓ Saved on this device</span> : undefined}>
+        <div className="max-[760px]:hidden">
         <SettingRow label="Navigation layout" help="Where the main menu sits.">
           <div className="grid grid-cols-4 gap-2 max-[520px]:grid-cols-2" role="radiogroup" aria-label="Navigation layout">
             {([['left', 'Left'], ['right', 'Right'], ['top', 'Top'], ['bottom', 'Bottom']] as const).map(([mode, label]) => {
@@ -58,6 +59,8 @@ export const GeneralSection = ({ values, set }: { values: SectionValues; set: (k
             <Checkbox aria-label="Start with a small sidebar" checked={navigation.collapsed} onChange={(event) => saveNavigation({ ...navigation, collapsed: event.target.checked })} />
           </SettingRow>
         )}
+        </div>
+        <p className="hidden text-pretty text-xs text-muted-foreground max-[760px]:block">Phone always uses the bottom bar. Menu position and sidebar size can be set from a larger screen.</p>
       </SettingsCard>
 
       <SettingsCard title="All devices" caption="Saved with the General save bar.">

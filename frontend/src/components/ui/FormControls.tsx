@@ -116,7 +116,10 @@ Textarea.displayName = 'Textarea';
 export type CheckboxProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>;
 
 export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(({ className, ...props }, ref) => (
-  <span className="relative grid size-5 shrink-0 place-items-center">
+  <span
+    className="relative grid size-5 shrink-0 place-items-center max-[760px]:-m-3 max-[760px]:size-11"
+    onClick={(event) => { if (event.target === event.currentTarget && !event.currentTarget.closest('label')) event.currentTarget.querySelector('input')?.click(); }}
+  >
     <input
       ref={ref}
       type="checkbox"

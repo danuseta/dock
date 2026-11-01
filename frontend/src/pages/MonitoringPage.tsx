@@ -175,7 +175,7 @@ const MonitoringPage: React.FC<MonitoringPageProps> = ({ onNavigate }) => {
               <label><span className="mb-1.5 block text-sm font-medium">Timeout (milliseconds)</span><Input type="number" min={500} max={15000} step={500} value={editor.timeoutMs} onChange={(event) => setEditor({ ...editor, timeoutMs: Number(event.target.value) })} required /></label>
             </div>
             {actionError && <p className="text-pretty text-sm text-status-conflict" role="alert">{actionError}</p>}
-            <div className="flex justify-end gap-2 border-t border-border pt-4"><Button onClick={() => setEditor(null)} disabled={isSaving}>Cancel</Button><Button type="submit" variant="primary" disabled={isSaving}>{isSaving ? 'Saving...' : editor.id ? 'Save changes' : 'Add service'}</Button></div>
+            <div className="flex justify-end gap-2 border-t border-border pt-4 max-[760px]:sticky max-[760px]:bottom-0 max-[760px]:-mx-5 max-[760px]:-mb-5 max-[760px]:bg-surface-1 max-[760px]:p-4"><Button onClick={() => setEditor(null)} disabled={isSaving}>Cancel</Button><Button type="submit" variant="primary" disabled={isSaving}>{isSaving ? 'Saving...' : editor.id ? 'Save changes' : 'Add service'}</Button></div>
           </form>}
         </Card>
       </Dialog>

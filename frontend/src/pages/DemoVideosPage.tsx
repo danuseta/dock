@@ -6,7 +6,7 @@ import { DELETE_DEMO_VIDEO } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { EmptyState } from '../components/EmptyState';
 import { FilmScene } from '../components/empty/scenes/FilmScene';
-import { Badge, Button, Card, ConfirmDialog, IconButton, Input, Page, PageHeader } from '../components/ui';
+import { Badge, Button, Card, ConfirmDialog, IconButton, Input, Page, PageHeader, PhoneCards, Select } from '../components/ui';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { cn } from '../lib/cn';
 import { formatSize, isPlayableVideo, videoSource, viewVideos, type DemoVideo, type VideoSort, type VideoSortColumn } from '../lib/demoVideos';
@@ -19,6 +19,8 @@ const COLUMNS: Array<{ id: VideoSortColumn; label: string; first: VideoSort['dir
   { id: 'uploaded', label: 'Uploaded', first: 'desc' },
   { id: 'size', label: 'Size', first: 'desc', className: 'text-right' },
 ];
+
+const SORT_OPTIONS = COLUMNS.flatMap((column) => (['asc', 'desc'] as const).map((dir) => ({ value: `${column.id}:${dir}`, label: `${column.label} ${dir === 'asc' ? 'ascending' : 'descending'}` })));
 
 const DemoVideosPage = ({ onTicketClick }: { onTicketClick: (key: string) => void }) => {
   const { data, loading, error, refetch } = useQuery(GET_DEMO_VIDEOS, CACHED_QUERY_OPTIONS);
@@ -65,7 +67,7 @@ const DemoVideosPage = ({ onTicketClick }: { onTicketClick: (key: string) => voi
     <Page width="full">
       <PageHeader>
         <div><h1 className="text-balance font-display text-3xl font-black">Demo videos</h1><p className="mt-1 text-pretty text-secondary-foreground">The demo link of every ticket. It shows on the ticket page of both DOCKs and goes into the Discord broadcast.</p></div>
-        <Button onClick={() => void refetch()} disabled={loading}><RefreshCw size={16} className={cn(loading && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />Refresh</Button>
+        <Button className={cn(videos.length > 0 && 'max-[760px]:hidden')} onClick={() => void refetch()} disabled={loading}><RefreshCw size={16} className={cn(loading && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />Refresh</Button>
       </PageHeader>
 
       {error && <Card className="mb-4 border-status-conflict text-pretty text-sm text-status-conflict" role="alert">{error.message}</Card>}
@@ -74,10 +76,23 @@ const DemoVideosPage = ({ onTicketClick }: { onTicketClick: (key: string) => voi
       {videos.length === 0 ? <Card className="p-0"><EmptyState scene={<FilmScene />} description="No demo video yet." /></Card> : (
         <>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <Input className="w-[min(320px,100%)]" type="search" placeholder="Search ticket key or title" aria-label="Search demo videos" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} />
-            <span className="font-mono text-xs text-muted-foreground tabular-nums">{matching.length} of {videos.length} links</span>
+            <div className="flex items-center gap-2 max-[760px]:w-full">
+              <Input className="w-[min(320px,100%)] max-[760px]:w-full max-[760px]:flex-1" type="search" placeholder="Search ticket key or title" aria-label="Search demo videos" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} />
+              <IconButton className="min-[761px]:hidden" aria-label="Refresh" disabled={loading} onClick={() => void refetch()}><RefreshCw size={16} className={cn(loading && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" /></IconButton>
+            </div>
+            <span className="flex items-center gap-3 max-[760px]:w-full max-[760px]:justify-between">
+              <span className="font-mono text-xs text-muted-foreground tabular-nums">{matching.length} of {videos.length} links</span>
+              <Select
+                className="w-44 min-[761px]:hidden"
+                aria-label="Sort demo videos"
+                value={`${sort.column}:${sort.dir}`}
+                options={SORT_OPTIONS}
+                onValueChange={(value) => { const [column, dir] = value.split(':'); setSort({ column: column as VideoSortColumn, dir: dir as VideoSort['dir'] }); setPage(1); }}
+              />
+            </span>
           </div>
-          <Card className="overflow-x-auto p-0">
+          <Card className="overflow-hidden p-0">
+            <PhoneCards>
             <table className="w-full min-w-[900px] border-collapse text-left text-sm">
               <thead className="bg-surface-1 text-xs text-muted-foreground">
                 <tr>
@@ -103,7 +118,7 @@ const DemoVideosPage = ({ onTicketClick }: { onTicketClick: (key: string) => voi
                     <tr className="border-t border-border hover:bg-surface-1">
                       <td className="max-w-[340px] px-4 py-2.5">
                         <button type="button" className="border-0 bg-transparent p-0 font-mono text-sm font-extrabold text-accent hover:underline" onClick={() => onTicketClick(video.ticketKey)}>{video.ticketKey}</button>
-                        <span className="block truncate text-xs text-secondary-foreground" title={video.title || undefined}>{video.title || '—'}</span>
+                        <span className="block truncate text-xs text-secondary-foreground max-[760px]:line-clamp-2 max-[760px]:whitespace-normal" title={video.title || undefined}>{video.title || '—'}</span>
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-xs" title={video.updatedAt ? new Date(video.updatedAt).toLocaleString('en-GB') : undefined}>{video.updatedAt ? reportAge(video.updatedAt) : '—'}</td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-right font-mono text-xs tabular-nums">{video.size != null ? formatSize(video.size) : '—'}</td>
@@ -129,6 +144,7 @@ const DemoVideosPage = ({ onTicketClick }: { onTicketClick: (key: string) => voi
                 {matching.length === 0 && <tr><td colSpan={6} className="px-4 py-6 text-center text-sm text-muted-foreground">No video matches "{query}".</td></tr>}
               </tbody>
             </table>
+            </PhoneCards>
           </Card>
         </>
       )}

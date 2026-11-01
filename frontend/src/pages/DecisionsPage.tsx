@@ -107,11 +107,15 @@ const DecisionsPage: React.FC = () => {
   };
 
   return (
-    <Page width="full">
+    <Page width="full" className="max-[760px]:pb-28">
       <h1 className="mb-5 font-display text-2xl font-bold">Decisions</h1>
       {!current ? (
         <Card><EmptyState scene={<AllClearScene />} title={<span className="text-status-merged">Nothing to answer</span>} description="Sous has no open question and every guess is confirmed." /></Card>
       ) : (
+        <>
+        <button type="button" className="mb-3 hidden min-h-11 items-center gap-2 rounded-full border border-border bg-surface-0 px-3.5 font-mono text-xs font-semibold max-[760px]:inline-flex" onClick={() => document.getElementById('decision-tickets')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
+          {current.run.key} · {questions.filter((question) => isAnswered(drafts[question.id])).length}/{questions.length}
+        </button>
         <div className="grid grid-cols-[300px_minmax(0,1fr)] overflow-clip rounded-md border border-border bg-surface-0 max-[900px]:grid-cols-1">
           <TicketList tickets={tickets} openKey={current.run.key} drafts={drafts} q={q} onOpen={go} />
           <div className="@container min-w-0">
@@ -139,6 +143,7 @@ const DecisionsPage: React.FC = () => {
             )}
           </div>
         </div>
+        </>
       )}
       {toast && <Toast message={toast} type="success" onClose={() => setToast(null)} />}
     </Page>

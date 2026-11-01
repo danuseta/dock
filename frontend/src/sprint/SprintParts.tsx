@@ -1,27 +1,52 @@
-import type { ReactNode } from 'react';
+import { Children, useState, type ReactNode } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { Badge, Card, PhoneCards } from '../components/ui';
+import { usePhone } from '../agents/usePhone';
 import { cn } from '../lib/cn';
 import { toneVariant } from './format';
 import type { IssueRef, Tone } from './types';
 
+export const FoldSection = ({ title, defaultOpen = true, children }: { title: string; defaultOpen?: boolean; children: ReactNode }) => {
+  const phone = usePhone();
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className="mb-6">
+      <h2 className="font-display text-xl font-bold">
+        {phone ? (
+          <button type="button" className="flex min-h-11 w-full items-center justify-between gap-2 border-0 bg-transparent p-0 text-left" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+            {title}
+            <ChevronDown size={18} aria-hidden="true" className={cn('shrink-0 text-muted-foreground transition-transform', !open && '-rotate-90')} />
+          </button>
+        ) : title}
+      </h2>
+      {(!phone || open) && children}
+    </section>
+  );
+};
+
 export const SectionCard = ({ title, sub, children }: { title: string; sub?: ReactNode; children: ReactNode }) => (
-  <section className="mb-6">
-    <h2 className="font-display text-xl font-bold">{title}</h2>
+  <FoldSection title={title}>
     {sub && <p className="mt-1 mb-3 max-w-[980px] text-pretty text-sm text-muted-foreground">{sub}</p>}
     <Card className="overflow-x-auto p-0">{children}</Card>
-  </section>
+  </FoldSection>
 );
 
-export const Table = ({ head, children, minWidth = 720 }: { head: Array<{ label: string; numeric?: boolean }>; children: ReactNode; minWidth?: number }) => (
-  <PhoneCards>
-  <table className="w-full border-collapse text-left text-sm" style={{ minWidth }}>
-    <thead className="bg-surface-1 text-xs text-muted-foreground">
-      <tr>{head.map((column) => <th key={column.label} className={cn('px-4 py-3 font-medium', column.numeric && 'text-right')}>{column.label}</th>)}</tr>
-    </thead>
-    <tbody>{children}</tbody>
-  </table>
-  </PhoneCards>
-);
+export const Table = ({ head, children, minWidth = 720 }: { head: Array<{ label: string; numeric?: boolean }>; children: ReactNode; minWidth?: number }) => {
+  const empty = Children.toArray(children).length === 0;
+  return (
+    <>
+      {empty && <p className="hidden px-4 py-4 text-sm text-muted-foreground max-[760px]:block">No data yet</p>}
+      <PhoneCards className={empty ? 'max-[760px]:hidden' : undefined}>
+      <table className="w-full border-collapse text-left text-sm" style={{ minWidth }}>
+        <thead className="bg-surface-1 text-xs text-muted-foreground">
+          <tr>{head.map((column) => <th key={column.label} className={cn('px-4 py-3 font-medium', column.numeric && 'text-right')}>{column.label}</th>)}</tr>
+        </thead>
+        <tbody>{children}</tbody>
+      </table>
+      </PhoneCards>
+    </>
+  );
+};
 
 export const Tr = ({ children }: { children: ReactNode }) => <tr className="border-t border-border hover:bg-surface-1">{children}</tr>;
 

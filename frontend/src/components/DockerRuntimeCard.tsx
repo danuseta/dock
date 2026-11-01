@@ -24,13 +24,13 @@ export const DockerRuntimeCard = ({ runtime, onNavigate, compact = false, loadin
     ) : (
       <>
         <div className="grid grid-cols-3 border-b border-border bg-surface-1 [&>div]:border-r [&>div]:border-border [&>div:last-child]:border-r-0">
-          {[['Total', runtime.total], ['Running', runtime.running], ['Stopped', runtime.stopped]].map(([label, value]) => <div className="px-3 py-2.5" key={label}><strong className="block font-mono text-base tabular-nums">{value}</strong><span className="text-[0.65rem] text-muted-foreground">{label}</span></div>)}
+          {[['Total', runtime.total], ['Running', runtime.running], ['Stopped', runtime.stopped]].map(([label, value]) => <div className="px-3 py-2.5" key={label}><strong className="block font-mono text-base tabular-nums">{value}</strong><span className="text-[0.65rem] text-muted-foreground max-[760px]:text-xs">{label}</span></div>)}
         </div>
         {runtime.containers.slice(0, compact ? 3 : 4).map((container) => (
           <div className="flex items-center gap-2.5 border-b border-border px-4 py-2.5 last:border-b-0" key={container.id}>
             <span className={cn('size-2 shrink-0 rounded-full', dockerStatusTone(container.state))} aria-hidden="true" />
-            <span className="min-w-0 flex-1"><strong className="block truncate text-xs">{container.name}</strong><small className="block truncate font-mono text-[0.63rem] text-muted-foreground">{container.image}</small></span>
-            <span className="font-mono text-[0.65rem] text-muted-foreground tabular-nums">{container.uptime}</span>
+            <span className="min-w-0 flex-1"><strong className="block truncate text-xs">{container.name}</strong><small className="block truncate font-mono text-[0.63rem] text-muted-foreground max-[760px]:text-xs">{container.image}</small></span>
+            <span className="font-mono text-[0.65rem] text-muted-foreground tabular-nums max-[760px]:text-xs">{container.uptime}</span>
           </div>
         ))}
         {runtime.containers.length === 0 && <div className="px-4 py-5 text-sm text-muted-foreground">No containers found.</div>}

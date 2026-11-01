@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { TICKET_TITLE, isTaskTitle, nextSessionTitle, ticketSessionTitle } from '../integrations/session-titles';
+import { TICKET_TITLE, isTaskTitle, nextSessionTitle, ticketSessionTitle, ticketTitleFromText } from '../integrations/session-titles';
 import {
   CronInputError, DEFAULT_CRON_SETTINGS, MAX_RESUMES, OrchestratorCron, PARKED_TEXT, RESUME_GAVE_UP_TEXT, START_FAILED_TEXT, candidates, hasAcceptanceCriteria, labelOrder, ticketHasAcceptanceCriteria, outsideWindow, parseCronSettings,
   OWNER_BUSY_TEXT, confirmedPrompt, isStackable, stackLine, ownerReplyPrompt, resumePrompt, sousConfirmedPrompt, sousStartPrompt, startPrompt, wib, type CronDeps, type CronRun, type CronSettings, type CronTicket,
@@ -688,6 +688,14 @@ test('a ticket session is titled Task-KEY, the next one Task-KEY (2); a review R
   assert.strictEqual(nextSessionTitle('Review-QRD-7', ['Task-QRD-7']), 'Review-QRD-7');
   assert.ok(TICKET_TITLE.test('Review-QRD-7') && !TICKET_TITLE.test('Task-QRD-7 (2)') && !TICKET_TITLE.test('QRD-7 (cron)'));
   assert.ok(isTaskTitle('Task-QRD-7 (2)', 'QRD-7') && !isTaskTitle('Task-QRD-70', 'QRD-7') && !isTaskTitle('Review-QRD-7', 'QRD-7'));
+});
+
+test('a chat opened by hand on one ticket takes the cron title for it', () => {
+  assert.deepStrictEqual(ticketTitleFromText('bantu review Minta tolong buat review : QRD-1491 [FE][BE] In-app notifications:'), { kind: 'Review', key: 'QRD-1491' });
+  assert.deepStrictEqual(ticketTitleFromText('Pakai skill sous: kerjakan QRD-1491'), { kind: 'Task', key: 'QRD-1491' });
+  assert.strictEqual(ticketTitleFromText('cek QRD-1491 statusnya'), null);
+  assert.strictEqual(ticketTitleFromText('review the login redirect'), null);
+  assert.strictEqual(ticketTitleFromText('review CARD-audit-log'), null);
 });
 
 test('an auto review opens a Review-KEY session on the cron machine with the cron options; a refused first message removes it', async () => {

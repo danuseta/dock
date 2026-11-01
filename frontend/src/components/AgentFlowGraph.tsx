@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { FLOW_RAIL, type AgentRun, type AgentTimeline, type TimelineAgent } from '../agents/runs';
 import { SHOWN_ROUNDS, inVisit, railVisits, shortDuration, visitLength, type RailVisit } from '../agents/rail';
 import { formatDuration } from '../chat/activity/activity';
@@ -26,10 +27,10 @@ const footerText = (agent: TimelineAgent, supervising?: boolean) => {
   return stateLabel[agent.state] || agent.state;
 };
 
-const AgentBox: React.FC<{ agent: TimelineAgent; x: number; y: number; small: boolean; supervising?: boolean; picked?: boolean; onPick?: (name: string) => void }> = ({ agent, x, y, small, supervising, picked, onPick }) => (
+const AgentBox: React.FC<{ agent: TimelineAgent; x: number; y: number; small: boolean; flat?: boolean; supervising?: boolean; picked?: boolean; onPick?: (name: string) => void }> = ({ agent, x, y, small, flat, supervising, picked, onPick }) => (
   <div
-    className={cn('dock-flow-node dock-flow-agent', `is-${agent.state}`, small && 'is-small', onPick && 'cursor-pointer', picked && 'is-picked-agent')}
-    style={{ left: `${x / 10}%`, top: y }}
+    className={cn('dock-flow-agent', !flat && 'dock-flow-node', flat && 'is-flat', `is-${agent.state}`, small && 'is-small', onPick && 'cursor-pointer', picked && 'is-picked-agent')}
+    style={flat ? undefined : { left: `${x / 10}%`, top: y }}
     role={onPick ? 'button' : undefined}
     tabIndex={onPick ? 0 : undefined}
     aria-pressed={onPick ? Boolean(picked) : undefined}
@@ -54,6 +55,7 @@ export const AgentFlowGraph: React.FC<AgentFlowGraphProps> = ({ run, timeline })
   const [picked, setPicked] = useState<number | null>(null);
   const [allRounds, setAllRounds] = useState(false);
   const [agentPick, setAgentPick] = useState<string | null>(null);
+  const [roundOpen, setRoundOpen] = useState<Record<number, boolean>>({});
   const pickAgent = (name: string) => setAgentPick((current) => (current === name ? null : name));
   // A cron run never stops at GATE 1, so its rail starts at Plan.
   const skip = timeline.hasGate ? 0 : 1;
@@ -70,6 +72,7 @@ export const AgentFlowGraph: React.FC<AgentFlowGraphProps> = ({ run, timeline })
 
   // Another ticket, or the run reaching a new stop, brings the graph back to where the run is now.
   useEffect(() => setPicked(null), [run.key, visits.length]);
+  useEffect(() => setRoundOpen({}), [run.key]);
 
   const shown = picked != null && visits[picked] ? visits[picked] : last;
   const looking = shown !== last;
@@ -129,7 +132,67 @@ export const AgentFlowGraph: React.FC<AgentFlowGraphProps> = ({ run, timeline })
 
   return (
     <div className="grid grid-cols-[minmax(0,3fr)_minmax(0,2fr)] max-[1120px]:grid-cols-1">
-      <div className="dock-flow-wrap">
+      <div className="hidden max-[760px]:block">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-3">
+          <span className={cn('dock-flow-live', !busy && 'is-quiet')}><i aria-hidden="true" />{looking ? 'HISTORY' : busy ? 'LIVE' : finished ? 'DONE' : 'QUIET'}</span>
+          {looking && (
+            <span className="dock-flow-viewing">
+              Showing <b>{stopName(shown.stageIndex)} · R{shown.round}</b>{shownWhen && ` ${shownWhen}`}
+              <button type="button" className="min-h-11" onClick={() => setPicked(null)}>Back to now</button>
+            </span>
+          )}
+        </div>
+        <ol className="m-0 list-none p-0" aria-label={`Rounds of ${run.key}`}>
+          {Array.from({ length: last.round }, (_, index) => index + 1).map((round) => {
+            const open = roundOpen[round] ?? round === last.round;
+            return (
+              <li key={round} className="border-t border-border first:mt-3">
+                <button type="button" className="flex min-h-11 w-full items-center gap-2 border-0 bg-transparent px-4 text-left" aria-expanded={open} onClick={() => setRoundOpen((current) => ({ ...current, [round]: !open }))}>
+                  <b className="font-mono text-sm">R{round}</b>
+                  <ChevronDown size={14} aria-hidden="true" className={cn('ml-auto text-muted-foreground transition-transform', !open && '-rotate-90')} />
+                </button>
+                {open && (
+                  <ol className="m-0 list-none p-0">
+                    {visits.filter((visit) => visit.round === round).map((visit) => {
+                      const meta = metaOf(visit);
+                      const note = visit === last ? noteAt(visit.stageIndex) : null;
+                      return (
+                        <li key={visit.index}>
+                          <button
+                            type="button"
+                            className={cn('flex min-h-11 w-full items-center gap-3 border-0 bg-transparent px-4 text-left', visit === shown && 'bg-surface-1')}
+                            aria-pressed={visit === shown}
+                            aria-label={`${stopName(visit.stageIndex)}, round ${visit.round}${meta ? `, ${meta}` : ''}. Show the team that worked there.`}
+                            onClick={() => setPicked(visit === last ? null : visit.index)}
+                          >
+                            <b className={cn('grid size-6 shrink-0 place-items-center rounded-full border-2 font-mono text-xs', visit.state === 'done' ? 'border-status-merged bg-status-merged-bg text-status-merged' : visit.state === 'returned' ? 'border-status-conflict bg-status-conflict-bg text-status-conflict' : 'border-foreground text-foreground')}>{visit.state === 'done' ? '✓' : visit.state === 'returned' ? '↩' : visit.stageIndex - skip + 1}</b>
+                            <span className="min-w-0 text-sm font-semibold">{stopName(visit.stageIndex)}{note && <small className="block text-xs font-normal text-muted-foreground">{note}</small>}</span>
+                            {meta && <span className="ml-auto shrink-0 font-mono text-xs text-muted-foreground">{meta}</span>}
+                          </button>
+                          {visit === shown && (
+                            <div className="grid gap-2 bg-surface-1 px-4 pt-1 pb-3">
+                              {root && <AgentBox flat agent={root} x={0} y={0} small={false} picked={agentPick === root.name} onPick={pickAgent} />}
+                              {children.map((child) => <div key={child.id} className="ml-3 grid"><AgentBox flat agent={child} x={0} y={0} small={false} supervising={leaves.some((leaf) => leaf.parentId === child.id && leaf.state === 'active')} picked={agentPick === child.name} onPick={pickAgent} /></div>)}
+                              {leaves.map((leaf) => <div key={leaf.id} className="ml-6 grid"><AgentBox flat agent={leaf} x={0} y={0} small={false} picked={agentPick === leaf.name} onPick={pickAgent} /></div>)}
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
+                    {round === last.round && ahead.map((index) => (
+                      <li key={index} className="flex min-h-11 items-center gap-3 px-4 text-muted-foreground">
+                        <b className="grid size-6 shrink-0 place-items-center rounded-full border-2 border-border-glow font-mono text-xs">{index - skip + 1}</b>
+                        <span className="text-sm">{stopName(index)}</span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      </div>
+      <div className="dock-flow-wrap max-[760px]:hidden">
         <div className="dock-flow" style={{ height }} role="group" aria-label={`Flow of ${run.key}: stage ${stopName(current)}, round ${last.round}, ${timeline.agents.length} agents, ${timeline.totalTools} tool calls`}>
           <svg viewBox={`0 0 1000 ${height}`} preserveAspectRatio="none" aria-hidden="true">
             {rounds.map((round) => {

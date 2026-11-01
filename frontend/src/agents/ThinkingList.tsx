@@ -19,7 +19,7 @@ const Row: React.FC<{ runKey: string; row: ThinkingRow; until: string | null }> 
   };
   return (
     <li className="relative grid grid-cols-[40px_14px_minmax(0,1fr)] gap-x-2 py-[5px] before:absolute before:bottom-0 before:left-[54px] before:top-0 before:w-px before:bg-border">
-      <time className="pt-0.5 text-right font-mono text-[0.66rem] tabular-nums text-muted-foreground" dateTime={row.at}>{clock(row.at)}</time>
+      <time className="pt-0.5 text-right font-mono text-[0.66rem] tabular-nums max-[760px]:text-xs text-muted-foreground" dateTime={row.at}>{clock(row.at)}</time>
       <span className="relative z-[1] mt-0.5 grid size-3.5 place-items-center bg-surface-0" aria-hidden="true">
         <i className={cn('block rounded-full', thinking ? 'size-2 border-[1.5px] border-secondary-foreground' : 'size-1.5 bg-border-glow', row.flag && 'border-status-conflict bg-status-conflict')} />
       </span>
@@ -32,8 +32,8 @@ const Row: React.FC<{ runKey: string; row: ThinkingRow; until: string | null }> 
           className="group block w-full min-w-0 border-0 bg-transparent p-0 text-left disabled:cursor-default"
         >
           {opens && <ChevronRight size={13} aria-hidden="true" className={cn('float-right mt-0.5 text-muted-foreground transition-transform', open && 'rotate-90 text-foreground')} />}
-          <span className={cn('mr-1.5 font-mono text-[0.7rem] font-bold', row.flag ? 'text-status-conflict' : thinking ? 'text-foreground' : 'font-semibold text-muted-foreground')}>{row.agent}</span>
-          {thinking && KIND[row.kind] && <span className="mr-1.5 font-mono text-[0.66rem] text-muted-foreground">{KIND[row.kind]}</span>}
+          <span className={cn('mr-1.5 font-mono text-[0.7rem] font-bold max-[760px]:text-xs', row.flag ? 'text-status-conflict' : thinking ? 'text-foreground' : 'font-semibold text-muted-foreground')}>{row.agent}</span>
+          {thinking && KIND[row.kind] && <span className="mr-1.5 font-mono text-[0.66rem] text-muted-foreground max-[760px]:text-xs">{KIND[row.kind]}</span>}
           <span className={cn('[overflow-wrap:anywhere]', thinking ? 'text-foreground group-enabled:group-hover:underline group-enabled:group-hover:decoration-border-glow group-enabled:group-hover:underline-offset-[3px]' : 'text-secondary-foreground')}>{row.text}</span>
           {row.answer && <span className="text-status-merged"> → {row.answer}</span>}
           {row.flag && <span className="text-muted-foreground"> · {row.flag}</span>}
@@ -46,7 +46,7 @@ const Row: React.FC<{ runKey: string; row: ThinkingRow; until: string | null }> 
                 <span><b className={option.chosen ? 'font-semibold text-foreground' : 'font-medium text-secondary-foreground'}>{option.label}</b>{option.why && <small className="mt-px block text-[0.72rem] text-muted-foreground">{option.why}</small>}</span>
               </div>
             ))}
-            <button type="button" onClick={toggleRaw} className={cn('justify-self-start border-0 bg-transparent p-0 font-mono text-[0.66rem] font-semibold underline underline-offset-[3px]', showRaw ? 'text-foreground' : 'text-muted-foreground hover:text-foreground')}>raw</button>
+            <button type="button" onClick={toggleRaw} className={cn('justify-self-start border-0 bg-transparent p-0 font-mono text-[0.66rem] font-semibold underline underline-offset-[3px] max-[760px]:min-h-11 max-[760px]:text-xs', showRaw ? 'text-foreground' : 'text-muted-foreground hover:text-foreground')}>raw</button>
             {showRaw && (
               <pre className="m-0 whitespace-pre-wrap rounded-sm border border-border bg-background px-2.5 py-2 font-mono text-[0.68rem] leading-relaxed text-secondary-foreground">
                 {raw.loading && 'Loading...'}
@@ -80,7 +80,7 @@ export const ThinkingList: React.FC<ThinkingListProps> = ({ runKey, rows, allRow
     <ol className="m-0 list-none p-0">
       {groupRows(rows).map((group) => (
         <React.Fragment key={group.key}>
-          <li className="sticky top-0 z-[2] flex items-center gap-2 bg-surface-0 pt-3 pb-1 font-mono text-[0.6rem] font-bold uppercase tracking-[0.1em] text-muted-foreground after:h-px after:flex-1 after:bg-border">
+          <li className="sticky top-0 z-[2] flex items-center gap-2 bg-surface-0 pt-3 pb-1 font-mono text-[0.6rem] font-bold uppercase max-[760px]:text-xs tracking-[0.1em] text-muted-foreground after:h-px after:flex-1 after:bg-border">
             <span>{stopName(group.stageIndex, review)}</span><span className="font-medium normal-case tracking-normal">R{group.round}</span>
           </li>
           {group.rows.map((row) => <Row key={row.id} runKey={runKey} row={row} until={nextAt(every, row)} />)}

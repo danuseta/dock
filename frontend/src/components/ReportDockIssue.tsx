@@ -92,12 +92,12 @@ export const ReportDockIssue: React.FC<ReportDockIssueProps> = ({ open, onClose,
               </p>
             )}
             {error && <p className="text-xs text-status-conflict" role="alert">{error}</p>}
-            <div className="flex flex-wrap justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2 max-[760px]:sticky max-[760px]:bottom-0 max-[760px]:-mx-6 max-[760px]:-mb-6 max-[760px]:border-t max-[760px]:border-border max-[760px]:bg-surface-1 max-[760px]:px-6 max-[760px]:py-3">
               <Button onClick={onClose} disabled={posting}>Cancel</Button>
               <Button onClick={() => void continueOnGitHub()} disabled={!ready || posting}><ExternalLink size={14} aria-hidden="true" />Continue on GitHub</Button>
               <Button type="submit" variant="primary" disabled={!ready || posting || tokenMissing}><Send size={14} aria-hidden="true" />{posting ? 'Posting' : 'Post to GitHub'}</Button>
             </div>
-            <p className="text-[0.7rem] text-muted-foreground">Have a screenshot? Use Continue on GitHub - the form is filled in, just paste the image.</p>
+            <p className="text-[0.7rem] text-muted-foreground max-[760px]:text-xs">Have a screenshot? Use Continue on GitHub - the form is filled in, just paste the image.</p>
           </form>
         </Card>
       </Dialog>

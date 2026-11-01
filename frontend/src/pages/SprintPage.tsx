@@ -23,7 +23,7 @@ const SprintPage: React.FC = () => {
   if (board.loading) return <Page width="full"><LoadingSkeleton /></Page>;
 
   return (
-    <Page width="full">
+    <Page width="full" className="max-[760px]:pb-28">
       <PageHeader>
         <div>
           <h1 className="text-balance font-display text-3xl font-black">Sprint dashboard</h1>
@@ -31,11 +31,11 @@ const SprintPage: React.FC = () => {
             Updated {formatUpdated(summary?.computedAt ?? null)}. Refreshed every morning from Jira, or on demand.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 max-[760px]:w-full">
           {board.sprints.length > 0 && (
             <Select
               aria-label="Sprint"
-              className="w-[min(420px,80vw)]"
+              className="w-[min(420px,80vw)] max-[760px]:w-full"
               value={String(summary?.id ?? '')}
               onValueChange={(value) => setSelected(Number(value))}
               options={board.sprints.map((sprint) => ({ value: String(sprint.id), label: sprintOptionLabel(sprint) }))}

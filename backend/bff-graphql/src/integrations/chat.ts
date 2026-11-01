@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { CAVEMAN_LEVELS, CHAT_MODES, parallelTurns } from '../datasources/StorageAPI';
 import { StorageService } from '../storage/service';
-import { TICKET_TITLE, nextSessionTitle } from './session-titles';
+import { nextSessionTitle, TICKET_TITLE, ticketSessionTitle, ticketTitleFromText } from './session-titles';
 import {
   ACTIVITY_DETAIL_KEEP_MS,
   ACTIVITY_ID,
@@ -961,6 +961,13 @@ export class ChatService {
     return newest.flatMap((message) => (message && message.at >= since ? [toMessage(message)] : []));
   }
 
+  /** The title a session takes from its first message: a ticket's `Review-`/`Task-` title when it reviews or builds one, else the text. */
+  private async firstTitle(body: string, ticketKey: string | null): Promise<{ title: string; ticketKey?: string }> {
+    const ticket = ticketTitleFromText(body);
+    if (!ticket) return { title: titleFromText(body) };
+    return { title: await this.uniqueTitle(ticketSessionTitle(ticket.kind, ticket.key)), ...(ticketKey ? {} : { ticketKey: ticket.key }) };
+  }
+
   /** A `Task-` or `Review-` title of a ticket gets ` (2)`, ` (3)`... when a session already has it. */
   private async uniqueTitle(title: string): Promise<string> {
     if (!TICKET_TITLE.test(title)) return title;
@@ -1062,9 +1069,9 @@ export class ChatService {
       message = { ...message, state: 'queued' };
     }
     const messageCount = await this.storage.trimChatMessages(sessionId, MAX_MESSAGES_KEPT);
-    const title = session.title.trim() === '' ? titleFromText(body) : '';
+    const named = session.title.trim() === '' ? await this.firstTitle(body, session.ticketKey) : null;
     await this.storage.updateChatSession(sessionId, {
-      status: 'queued', statusDetail: null, messageCount, lastMessageAt: now, ...(title ? { title } : {}),
+      status: 'queued', statusDetail: null, messageCount, lastMessageAt: now, ...(named ?? {}),
     });
     return { ...toMessage(message), ...(attached.length > 0 ? { attachments: attached } : {}) };
   }
