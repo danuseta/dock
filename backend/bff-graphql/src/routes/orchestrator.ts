@@ -13,6 +13,8 @@ import { receiveDemoVideo } from './demo-videos';
 import { autoBroadcast, type AutoBroadcast } from '../integrations/broadcast';
 import { decisionGate, stillWorking, type DecisionGate } from '../integrations/decision-gate';
 import { parseRetroDraft } from '../integrations/retro';
+import type { SprintPlanner } from '../integrations/sprint-plan';
+import { sprintPlanner } from '../integrations/sprint-plan-live';
 import { doctorReports, type DoctorReports } from '../integrations/doctor';
 import { DiscordReaderError, type DiscordReader } from '../integrations/discord-reader';
 import { discordReader } from '../integrations/discord-reader-live';
@@ -69,6 +71,8 @@ export function createOrchestratorIngestRouter(
   discord: Pick<DiscordReader, 'threadFiles'> = discordReader,
   // The sprint retro draft the kit writes for the owner to accept.
   retroStore: Pick<StorageService, 'replaceRetroDraft'> = new StorageService(),
+  // The sprint plan draft the plan session posts.
+  planner: Pick<SprintPlanner, 'ingest'> = sprintPlanner,
 ): Router {
   const router = Router();
 
@@ -113,6 +117,7 @@ export function createOrchestratorIngestRouter(
     const draft = parseRetroDraft(body);
     return { sprint: draft.sprint, items: await retroStore.replaceRetroDraft(draft.sprint, draft.items) };
   }));
+  router.post('/plan', small, handle((body) => planner.ingest(body)));
   router.post('/ledger/list', small, handle((_body, _signal, machine) => service.ledgerList(machine)));
   router.post('/ledger/get', small, handle((body, _signal, machine) => service.ledgerGet(body, machine)));
   router.post('/event', small, handle(async (body, _signal, machine) => {

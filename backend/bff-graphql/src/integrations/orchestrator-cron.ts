@@ -1,3 +1,4 @@
+import type { TicketLink } from './jira';
 import type { PushMessage } from './push';
 import { stalledNotice, waitingNotice } from './push-notices';
 import { isSettledStatus } from './attention';
@@ -159,7 +160,7 @@ export function hasAcceptanceCriteria(description: string | null | undefined): b
   return text.slice(at).split('\n').slice(1).some((line) => (line.match(/[\p{L}\p{N}]+/gu) || []).length >= 2);
 }
 
-export interface CronTicket { key: string; title: string; description?: string | null; acceptanceCriteria?: string | null; status: string; sprintState?: string | null; labels?: string[]; parentKey?: string | null }
+export interface CronTicket { key: string; title: string; description?: string | null; acceptanceCriteria?: string | null; status: string; sprintState?: string | null; labels?: string[]; parentKey?: string | null; sprintName?: string | null; issueType?: string | null; links?: TicketLink[] }
 
 /** The Jira Acceptance Criteria field when it holds a criterion, else an "Acceptance criteria" heading in the description. */
 export function ticketHasAcceptanceCriteria(ticket: Pick<CronTicket, 'description' | 'acceptanceCriteria'>): boolean {
@@ -332,6 +333,12 @@ export interface CronDeps {
   ticket(key: string): Promise<CronTicket | null>;
   moveTicket(key: string, statusName: string): Promise<boolean>;
   dependencies(): Promise<Array<{ ticketKey: string; dependsOnKey: string }>>;
+  /** Tickets with a pending inferred dependency: held until the owner decides. */
+  heldKeys(): Promise<Set<string>>;
+  /** Lets the sprint planner see the tickets the cron fetched. */
+  planWatch(tickets: CronTicket[]): Promise<unknown>;
+  /** Notes once that a ticket waits: on `dependsOn`, or `pending` for an undecided inferred edge. */
+  recordWait(key: string, dependsOn: string): Promise<unknown>;
   /** Work order numbers set in DOCK, by ticket key. */
   dockOrder(): Promise<Map<string, number>>;
   /** Tickets the owner works by hand: never picked, never resumed. */
@@ -458,12 +465,16 @@ export class OrchestratorCron {
    * A slot waited for by a queued message (an owner's answer, a confirmed ticket) is not free: that message goes first.
    */
   private async pick(settings: CronSettings, now: Date, log: FillLog, day: DayCount): Promise<void> {
-    const [tickets, taken, { blocked, stacked }, dockOrder, slots, manual] = await Promise.all([
-      this.deps.tickets(), this.deps.takenKeys(), this.dependencyState(settings), this.deps.dockOrder(), this.deps.slots(settings.machine), this.deps.manualKeys(),
+    const [tickets, taken, { blocked, stacked, waitsOn }, dockOrder, slots, manual, held] = await Promise.all([
+      this.deps.tickets(), this.deps.takenKeys(), this.dependencyState(settings), this.deps.dockOrder(), this.deps.slots(settings.machine), this.deps.manualKeys(), this.deps.heldKeys(),
     ]);
     let free = Math.max(0, settings.parallel - slots.busy - slots.waiting);
     const defer = (key: string, reason: string) => { if (log.deferred.length < MAX_DEFERRED_LOGGED) log.deferred.push({ key, reason }); };
-    for (const ticket of candidates(tickets, new Set(taken), blocked, settings, dockOrder, manual)) {
+    for (const ticket of candidates(tickets, new Set(taken), new Set(), settings, dockOrder, manual)) {
+      if (held.has(ticket.key) || blocked.has(ticket.key)) {
+        await this.deps.recordWait(ticket.key, held.has(ticket.key) ? 'pending' : waitsOn.get(ticket.key) ?? '').catch(() => undefined);
+        continue;
+      }
       try {
         if (!ticketHasAcceptanceCriteria(ticket)) {
           if (day.parked.length >= settings.maxPerDay) { defer(ticket.key, `daily cap reached: ${settings.maxPerDay} parked today`); continue; }
@@ -555,20 +566,28 @@ export class OrchestratorCron {
 
   /**
    * Tickets whose dependency is not settled yet are blocked, unless the dependency is stackable on engine sous:
-   * then the ticket runs stacked on its parent, and `stacked` names that parent.
+   * then the ticket runs stacked on its parent, and `stacked` names that parent. A ticket with more than one unsettled
+   * dependency is blocked, never stacked. `waitsOn` names the first dependency a blocked ticket waits for.
    */
-  private async dependencyState(settings: CronSettings): Promise<{ blocked: Set<string>; stacked: Map<string, string> }> {
+  private async dependencyState(settings: CronSettings): Promise<{ blocked: Set<string>; stacked: Map<string, string>; waitsOn: Map<string, string> }> {
     const blocked = new Set<string>();
     const stacked = new Map<string, string>();
+    const waitsOn = new Map<string, string>();
+    const open = new Map<string, string[]>();
     const dependencies = await this.deps.dependencies();
     const runs = settings.engine === 'sous' && dependencies.length ? await this.deps.runs() : [];
     for (const { ticketKey, dependsOnKey } of dependencies) {
       const dependency = await this.deps.ticket(dependsOnKey).catch(() => null);
       if (dependency && isSettledStatus(dependency.status)) continue;
+      open.set(ticketKey, [...new Set([...(open.get(ticketKey) ?? []), dependsOnKey])]);
       if (dependency && settings.engine === 'sous' && isStackable(dependency.status, runs.find((run) => run.key === dependsOnKey))) stacked.set(ticketKey, dependsOnKey);
       else blocked.add(ticketKey);
     }
-    return { blocked, stacked };
+    for (const [ticketKey, keys] of open) {
+      if (keys.length > 1) { stacked.delete(ticketKey); blocked.add(ticketKey); }
+      if (blocked.has(ticketKey)) waitsOn.set(ticketKey, keys[0]);
+    }
+    return { blocked, stacked, waitsOn };
   }
 
   private saveRun(ticket: Pick<CronTicket, 'key' | 'title'>, machine: string, now: Date, waiting: string, engine?: CronEngine) {
@@ -768,6 +787,7 @@ ${run.stalledDetail ?? ''}`, stalledNotice);
     } catch (error) {
       console.error('[Orchestrator cron] Ping failed:', error instanceof Error ? error.message : 'unknown error');
     }
+    await this.deps.planWatch(await this.deps.tickets()).catch((error) => console.error('[Orchestrator cron] Plan watch failed:', error instanceof Error ? error.message : 'unknown error'));
     if ((await this.settings()).enabled) await this.runFill();
   }
 }

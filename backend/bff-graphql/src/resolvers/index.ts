@@ -11,7 +11,9 @@ import { OrchestratorInputError, attentionItems, normalizeTicketKey, orchestrato
 import { CHAT_MACHINE, chatService } from '../integrations/chat';
 import { retroApplyPrompt, retroNumbers, retroProblems, retroTickets } from '../integrations/retro';
 import { StorageService } from '../storage/service';
-import { isSettledStatus, mergeAttention, withoutSettledTickets } from '../integrations/attention';
+import { activeSprint } from '../integrations/sprint-plan';
+import { sprintPlanner } from '../integrations/sprint-plan-live';
+import { isSettledStatus, mergeAttention, planAttentionItems, withoutSettledTickets } from '../integrations/attention';
 import { discordGateway, discordReader } from '../integrations/discord-reader-live';
 import { isTeamChannel } from '../integrations/discord-team';
 import { ChannelInputError, channelStore, isChannelKind, threadService, withJira } from '../integrations/discord-threads';
@@ -99,11 +101,70 @@ const retroItemView = (row: { id: string; kind: string; text: string; evidence: 
 };
 
 /** The runs of one sprint, read from the sprint dashboard's issue list. */
-async function sprintRuns(sprintId: number) {
-  let keys: string[] = [];
-  try { keys = (JSON.parse(await sprintDashboardService.issueEvents(sprintId)) as Array<{ key?: unknown }>).map((issue) => String(issue.key)); } catch { keys = []; }
+async function sprintKeyList(sprintId: number) {
+  try { return (JSON.parse(await sprintDashboardService.issueEvents(sprintId)) as Array<{ key?: unknown }>).map((issue) => String(issue.key)); } catch { return []; }
+}
+
+async function sprintRuns(keys: string[]) {
   const wanted = new Set(keys);
   return (await orchestratorService.list()).filter((run) => wanted.has(run.key));
+}
+
+async function sprintLoad(sprint: { id: number; startDate: string; endDate: string }) {
+  const keys = await sprintKeyList(sprint.id);
+  const runs = await sprintRuns(keys);
+  return { runs, numbers: await sprintRetroNumbers(sprint, runs, keys) };
+}
+
+async function sprintRetroNumbers(sprint: { id: number; startDate: string; endDate: string }, runs: Awaited<ReturnType<typeof sprintRuns>>, keys: string[]) {
+  const from = new Date(sprint.startDate);
+  const to = new Date(sprint.endDate);
+  const [blockedWaits, mergeConflicts] = await Promise.all([
+    storageService.countEventTickets('DEP_WAIT', keys, from, to),
+    storageService.countEventTickets('CONFLICT', keys, from, to, 'detail'),
+  ]);
+  return retroNumbers(runs, { blockedWaits, mergeConflicts });
+}
+
+async function sprintPlanView() {
+  const active = activeSprint(await jiraAPI.getTickets());
+  if (!active) return null;
+  const [plan, edges, orders] = await Promise.all([storageService.getSprintPlan(active.sprint), storageService.getPlanEdges(active.sprint), storageService.getTicketOrders()]);
+  const known = new Map<string, { title?: string; assignee?: string | null }>(active.tickets.map((ticket: any) => [ticket.key, ticket]));
+  const sprintId = (await sprintDashboardService.listSprints()).find((item) => item.name === active.sprint)?.id;
+  if (sprintId != null) {
+    try {
+      for (const issue of JSON.parse(await sprintDashboardService.issueEvents(sprintId)) as Array<{ key?: string; summary?: string; assignee?: string | null }>) {
+        if (issue.key && !known.has(issue.key)) known.set(issue.key, { title: issue.summary, assignee: issue.assignee });
+      }
+    } catch { /* snapshot unreadable: parents show without a title */ }
+  }
+  const lookup = (key: string) => known.get(key) ?? null;
+  const pending = new Set(edges.filter((edge) => edge.state === 'pending').map((edge) => edge.ticketKey));
+  const edgeViews = edges.map((edge) => {
+    const parent = lookup(edge.dependsOnKey);
+    return { id: edge.id, ticketKey: edge.ticketKey, dependsOnKey: edge.dependsOnKey, dependsOnTitle: parent?.title ?? null, dependsOnAssignee: parent?.assignee ?? null, source: edge.source, reason: edge.reason, state: edge.state };
+  });
+  const rank = (key: string) => orders.get(key) ?? Number.MAX_SAFE_INTEGER;
+  const ordered = [...active.tickets].sort((a: any, b: any) => rank(a.key) - rank(b.key));
+  let groups: string[][] = [];
+  try { groups = JSON.parse(plan?.groups ?? '[]'); } catch { groups = []; }
+  return {
+    sprint: active.sprint,
+    status: plan?.status ?? 'idle',
+    error: plan?.error ?? null,
+    sessionId: plan?.sessionId ?? null,
+    mappedAt: plan?.mappedAt?.toISOString() ?? null,
+    groups,
+    tickets: ordered.map((ticket: any, index) => ({
+      key: ticket.key,
+      title: ticket.title,
+      status: ticket.status,
+      position: index + 1,
+      held: pending.has(ticket.key),
+      edges: edgeViews.filter((edge) => edge.ticketKey === ticket.key),
+    })),
+  };
 }
 
 async function retroView(sprintId?: number | null) {
@@ -111,13 +172,13 @@ async function retroView(sprintId?: number | null) {
   const sprint = sprintId != null ? sprints.find((item) => item.id === sprintId) : sprints.find((item) => item.state === 'active') ?? sprints[sprints.length - 1];
   if (!sprint) return null;
   const previous = sprints[sprints.indexOf(sprint) - 1] ?? null;
-  const [runs, before, items] = await Promise.all([sprintRuns(sprint.id), previous ? sprintRuns(previous.id) : Promise.resolve(null), storageService.getRetroItems(sprint.name)]);
+  const [{ runs, numbers }, before, items] = await Promise.all([sprintLoad(sprint), previous ? sprintLoad(previous).then((load) => load.numbers) : Promise.resolve(null), storageService.getRetroItems(sprint.name)]);
   return {
     sprint: sprint.name,
     sprintId: sprint.id,
     previous: previous?.name ?? null,
-    numbers: retroNumbers(runs),
-    previousNumbers: before ? retroNumbers(before) : null,
+    numbers,
+    previousNumbers: before,
     problems: retroProblems(runs),
     tickets: retroTickets(runs),
     items: items.map(retroItemView),
@@ -239,6 +300,7 @@ export const resolvers = {
     dockIssue: async (_: unknown, { number }: { number: number }) => githubAPI.getDockIssue(number),
     dockIssueDraftUrl: (_: unknown, draft: IssueDraft) => draftUrl(issuesRepo(), draft, issueEnvironment(draft.page)),
     retro: (_: unknown, { sprintId }: { sprintId?: number | null }) => retroView(sprintId),
+    sprintPlan: () => sprintPlanView(),
     runThinking: async (_: unknown, { key }: { key: string }) => (await orchestratorService.thinking(key).catch(orchestratorInputError)) ?? [],
     runThinkingRaw: (_: unknown, { key, at, until }: { key: string; at: string; until?: string | null }) => orchestratorService.thinkingRaw(key, at, until).catch(orchestratorInputError),
     workspaceDir: async (_: unknown, { path }: { path?: string | null }) => {
@@ -331,7 +393,13 @@ export const resolvers = {
     claudeAccounts: () => claudeAccountsState(),
     needsAttention: async () => {
       const [agentItems, pullRequestItems] = await Promise.all([
-        orchestratorService.list().then((runs) => attentionItems(ownRuns(runs))).catch((error) => {
+        Promise.all([
+          orchestratorService.list().then((runs) => attentionItems(ownRuns(runs))),
+          jiraAPI.getTickets().then(async (tickets) => {
+            const active = activeSprint(tickets);
+            return active ? planAttentionItems([...await storageService.getPendingPlanKeys(active.sprint)].map((ticketKey) => ({ ticketKey }))) : [];
+          }),
+        ]).then(([runItems, planItems]) => [...runItems, ...planItems]).catch((error) => {
           console.error('[BFF Orchestrator] Failed to load attention items:', error instanceof Error ? error.message : 'unknown error');
           return [];
         }),
@@ -347,6 +415,8 @@ export const resolvers = {
         return [];
       });
       const items = [...mergeAttention(agentItems, pullRequestItems), ...roundItems];
+      await Promise.all(pullRequestItems.filter((item: any) => item.type === 'CONFLICT' && item.ticketKey).map((item: any) =>
+        storageService.addOrchestratorEventOnce(item.ticketKey, 'CONFLICT', item.prUrl || null).catch(() => null)));
       const keys = [...new Set(items.map((item) => item.ticketKey).filter(isPresent))];
       const tickets = await Promise.all(keys.map((key) => jiraAPI.getTicket(key).catch(() => null)));
       const statusOf = new Map(tickets.filter(isPresent).map((ticket: any) => [String(ticket.key), String(ticket.status)]));
@@ -504,6 +574,18 @@ export const resolvers = {
       const sprint = (await sprintDashboardService.listSprints()).find((item) => item.id === sprintId);
       if (!sprint) throw new GraphQLError('Unknown sprint', { extensions: { code: 'BAD_USER_INPUT' } });
       return runSousPrompt(`Retro-${sprint.name}`, `Pakai skill sous: retro ${sprint.name}`);
+    },
+    sprintPlanMap: () => {
+      requireAgentControls();
+      return sprintPlanner.map().catch(orchestratorInputError);
+    },
+    sprintPlanEdgeAction: async (_: unknown, { id, action }: { id: string; action: string }) => {
+      requireAgentControls();
+      const active = activeSprint(await jiraAPI.getTickets());
+      if (!active) throw new GraphQLError('No active sprint', { extensions: { code: 'BAD_USER_INPUT' } });
+      const edge = await sprintPlanner.decide(active.sprint, id, action).catch(orchestratorInputError);
+      const parent: any = await jiraAPI.getTicket(edge.dependsOnKey).catch(() => null);
+      return { id: edge.id, ticketKey: edge.ticketKey, dependsOnKey: edge.dependsOnKey, dependsOnTitle: parent?.title ?? null, dependsOnAssignee: parent?.assignee ?? null, source: edge.source, reason: edge.reason, state: edge.state };
     },
     retroItemAction: async (_: unknown, { id, action, text }: { id: string; action: string; text?: string | null }) => {
       const item = await storageService.getRetroItem(id);
@@ -861,10 +943,12 @@ export const protectedQueries = [
   'chatSessions', 'chatSession', 'chatSessionStates', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'agentLooks', 'libraryAgents', 'libraryAgent',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
-  'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro',
+  'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro', 'sprintPlan',
 ] as const;
 export const protectedMutations = [
   'retroBuild',
+  'sprintPlanMap',
+  'sprintPlanEdgeAction',
   'retroItemAction',
   'workspaceMkdir',
   'workspaceRename',

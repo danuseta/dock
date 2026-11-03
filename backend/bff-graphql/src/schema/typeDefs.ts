@@ -529,6 +529,43 @@ export const typeDefs = gql`
     medianOwnerWaitHours: Float
     reviews: Int!
     requestChanges: Int!
+    blockedWaits: Int!
+    mergeConflicts: Int!
+    stackedRebases: Int!
+  }
+
+  type SprintPlanEdge {
+    id: ID!
+    ticketKey: String!
+    dependsOnKey: String!
+    dependsOnTitle: String
+    dependsOnAssignee: String
+    """jira or inferred."""
+    source: String!
+    reason: String
+    """pending, accepted or rejected."""
+    state: String!
+  }
+
+  type SprintPlanTicket {
+    key: String!
+    title: String!
+    status: String!
+    position: Int!
+    """A pending inferred dependency holds this ticket."""
+    held: Boolean!
+    edges: [SprintPlanEdge!]!
+  }
+
+  """The active sprint's dependency map and work order. Status is idle, mapping or failed."""
+  type SprintPlan {
+    sprint: String!
+    status: String!
+    error: String
+    sessionId: String
+    mappedAt: String
+    groups: [[String!]!]!
+    tickets: [SprintPlanTicket!]!
   }
 
   type RetroProblem {
@@ -1459,6 +1496,7 @@ export const typeDefs = gql`
     runThinking(key: String!): [ThinkingRow!]!
     """The retro of a sprint from the sprint dashboard's list; no id is the active sprint."""
     retro(sprintId: Int): Retro
+    sprintPlan: SprintPlan
     """The tools, agents and thinking notes behind one Thinking row, from two minutes before it to until."""
     runThinkingRaw(key: String!, at: String!, until: String): [ThinkingRawLine!]!
     """A folder under the home of the workspace; no path is the home itself."""
@@ -1471,6 +1509,8 @@ export const typeDefs = gql`
     lockSession: Boolean!
     """Asks sous for a new Keep / Problem / Try draft of the sprint, in a new session. Returns the session id."""
     retroBuild(sprintId: Int!): String!
+    sprintPlanMap: String!
+    sprintPlanEdgeAction(id: ID!, action: String!): SprintPlanEdge!
     """accept, close, reopen or edit (with text). Accepting a line that goes to kit, memory or dock asks sous to apply it."""
     retroItemAction(id: ID!, action: String!, text: String): RetroItem!
     """A new folder under the home of the workspace. Secrets stay read only; file content goes through PUT /api/workspace/file."""

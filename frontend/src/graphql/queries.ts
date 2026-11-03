@@ -695,12 +695,41 @@ export const GET_RETRO = gql`
       sprint
       sprintId
       previous
-      numbers { tickets medianHours fixRounds replans ownerIssues medianOwnerWaitHours reviews requestChanges }
-      previousNumbers { tickets medianHours fixRounds replans ownerIssues medianOwnerWaitHours reviews requestChanges }
+      numbers { tickets medianHours fixRounds replans ownerIssues medianOwnerWaitHours reviews requestChanges blockedWaits mergeConflicts stackedRebases }
+      previousNumbers { tickets medianHours fixRounds replans ownerIssues medianOwnerWaitHours reviews requestChanges blockedWaits mergeConflicts stackedRebases }
       problems { label count tickets }
       tickets { key title kind hours rounds issues ownerWaitHours result }
       items { id kind text evidence dest status sessionId updatedAt }
     }
+  }
+`;
+
+export const GET_SPRINT_PLAN = gql`
+  query GetSprintPlan {
+    sprintPlan {
+      sprint
+      status
+      error
+      sessionId
+      mappedAt
+      groups
+      tickets {
+        key title status position held
+        edges { id ticketKey dependsOnKey dependsOnTitle dependsOnAssignee source reason state }
+      }
+    }
+  }
+`;
+
+export const SPRINT_PLAN_MAP = gql`
+  mutation SprintPlanMap {
+    sprintPlanMap
+  }
+`;
+
+export const SPRINT_PLAN_EDGE_ACTION = gql`
+  mutation SprintPlanEdgeAction($id: ID!, $action: String!) {
+    sprintPlanEdgeAction(id: $id, action: $action) { id ticketKey dependsOnKey dependsOnTitle dependsOnAssignee source reason state }
   }
 `;
 

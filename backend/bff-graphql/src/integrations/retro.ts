@@ -16,11 +16,14 @@ export interface RetroNumbers {
   medianOwnerWaitHours: number | null;
   reviews: number;
   requestChanges: number;
+  blockedWaits: number;
+  mergeConflicts: number;
+  stackedRebases: number;
 }
 export interface RetroProblem { label: string; count: number; tickets: string[] }
 export interface RetroTicket { key: string; title: string; kind: string; hours: number | null; rounds: number; issues: number; ownerWaitHours: number | null; result: string }
 
-type RetroRun = Pick<Orchestration, 'key' | 'kind' | 'title' | 'stage' | 'closing' | 'rounds' | 'issues' | 'failures' | 'findings' | 'verdict'>;
+type RetroRun = Pick<Orchestration, 'key' | 'kind' | 'title' | 'stage' | 'closing' | 'rounds' | 'issues' | 'failures' | 'findings' | 'verdict' | 'stackedOn'>;
 
 const MAX_ITEMS = 40;
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -37,7 +40,7 @@ const hoursBetween = (from: string, to: string | null) => (to ? (Date.parse(to) 
 const ownerIssues = (run: RetroRun) => run.issues.filter((issue) => issue.level === 'owner');
 const ownerWait = (run: RetroRun) => ownerIssues(run).map((issue) => hoursBetween(issue.at, issue.resolvedAt)).filter((hours) => hours >= 0);
 
-export function retroNumbers(runs: RetroRun[]): RetroNumbers {
+export function retroNumbers(runs: RetroRun[], extra = { blockedWaits: 0, mergeConflicts: 0 }): RetroNumbers {
   const builds = runs.filter((run) => run.kind === 'build');
   const reviews = runs.filter((run) => run.kind === 'review');
   const average = (values: number[]) => (values.length ? round1(values.reduce((sum, value) => sum + value, 0) / values.length) : 0);
@@ -50,6 +53,8 @@ export function retroNumbers(runs: RetroRun[]): RetroNumbers {
     medianOwnerWaitHours: median(runs.flatMap(ownerWait)),
     reviews: reviews.length,
     requestChanges: reviews.filter((run) => run.verdict === 'request-change').length,
+    ...extra,
+    stackedRebases: runs.reduce((sum, run) => sum + (run.stackedOn?.be?.retargetedAt ? 1 : 0) + (run.stackedOn?.fe?.retargetedAt ? 1 : 0), 0),
   };
 }
 

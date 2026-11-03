@@ -26,6 +26,7 @@ const SIGNALS: Record<string, Signal> = {
   REVIEW_ROUND_FAILED: { rank: 3, group: 'blocked', label: 'FINDINGS' },
   REVIEW_REVISED: { rank: 5, group: 'answer', label: 'REVISED' },
   AGENT_WAITING: { rank: 6, group: 'answer', label: 'WAITING' },
+  PLAN_DEPENDENCY: { rank: 6, group: 'answer', label: 'DEPENDENCY' },
   AGENT_STALLED: { rank: 7, group: 'quiet', label: 'STALLED' },
 };
 
