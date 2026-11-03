@@ -6,6 +6,7 @@ import { cn } from '../lib/cn';
 import { EmptyState } from '../components/EmptyState';
 import { SearchScene } from '../components/empty/scenes/SearchScene';
 import { IconButton } from '../components/ui';
+import { revisedRound } from '../lib/attention';
 import { agentTask } from './activity/activity';
 import { AgentAvatar } from './activity/TranscriptParts';
 import { shortAgent, threadRoot } from './activity/transcript';
@@ -180,6 +181,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({ sessions, machin
                       <StatusDot state={dot} className="size-2" />
                       <span className={cn('flex min-w-0 flex-1 flex-col', full)}>
                         <span className="block truncate font-display text-[0.8rem] font-semibold">{sessionTitle(session)}</span>
+                        {revisedRound(session) && <span className="block truncate font-mono text-[0.62rem] text-accent" title={revisedRound(session)?.summary ?? undefined}>Revised from review</span>}
                         <span className="hidden max-[760px]:flex">{meta}</span>
                       </span>
                       <span className={cn('contents max-[760px]:hidden', full)}>{meta}</span>

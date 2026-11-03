@@ -188,6 +188,7 @@ export class StorageAPI {
       discordUserId: settings.discordUserId || null,
       autoReviewOnIt: settings.autoReviewOnIt === 'true',
       autoLgtm: settings.autoLgtm === 'true',
+      reviewFindingsToTask: settings.reviewFindingsToTask !== 'false',
       hasGoogleClientSecret: Boolean(settings.googleClientSecret),
       googleCalendarConnected: Boolean(settings.googleRefreshToken),
       serviceHealthRefreshSeconds: isValidServiceHealthRefreshSeconds(settings.serviceHealthRefreshSeconds)
@@ -220,7 +221,7 @@ export class StorageAPI {
       if (input.chatParallelTurns != null && input.chatParallelTurns !== '' && parallelTurns(input.chatParallelTurns) === null) throw new Error('Invalid turn count');
       if (input.ownerReplySession != null && !(OWNER_REPLY_SESSIONS as readonly string[]).includes(String(input.ownerReplySession))) throw new Error('Invalid owner reply session');
       if (input.discordMessageTemplate != null) normalizeDiscordMessageTemplate(String(input.discordMessageTemplate));
-      for (const key of ['autoReviewOnIt', 'autoLgtm'] as const) {
+      for (const key of ['autoReviewOnIt', 'autoLgtm', 'reviewFindingsToTask'] as const) {
         if (input[key] != null && input[key] !== 'true' && input[key] !== 'false') throw new Error('Invalid auto review setting');
       }
       if (input.discordUserId != null && input.discordUserId !== '' && !/^\d{5,25}$/.test(String(input.discordUserId).trim())) throw new Error('Invalid Discord user id');

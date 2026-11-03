@@ -74,6 +74,30 @@ export class GitHubAPI {
     }
   }
 
+  /** The cached pull requests of a ticket, without any GitHub call; null on a cache miss. */
+  async cachedPullRequestsForTicket(ticketKey: string): Promise<Array<{ url: string; status: string; owner: string; repo: string; number: number }> | null> {
+    const auth = await this.getAuth();
+    if (!auth.hasToken || !auth.repos) return null;
+    const items = await this.githubService.cachedPRs(auth.headers.Authorization.replace('Bearer ', ''), auth.repos.split(',').map((repo: string) => repo.trim()).filter(Boolean), ticketKey);
+    return items && items.map((pr: any) => ({ url: pr.url || pr.html_url || '', status: pr.status || 'open', owner: pr.owner, repo: pr.repo, number: pr.number || pr.pullNumber }));
+  }
+
+  /** A fresh search; `complete` is false when a pull request was dropped because it could not be enriched. */
+  async freshPullRequestsForTicket(ticketKey: string) {
+    const prs = await this.getPullRequestsForTicket(ticketKey, { fresh: true });
+    const auth = await this.getAuth();
+    const complete = auth.hasToken && this.githubService.lastFetchComplete(auth.headers.Authorization.replace('Bearer ', ''), auth.repos.split(',').map((repo: string) => repo.trim()).filter(Boolean), ticketKey);
+    return { prs, complete };
+  }
+
+  /** The state of one pull request, read live; throws when there is no token or GitHub refuses. */
+  async pullStatus(owner: string, repo: string, pullNumber: number): Promise<'open' | 'merged' | 'closed'> {
+    const auth = await this.getAuth();
+    if (!auth.hasToken) throw new Error('GitHub token is not configured in Settings');
+    const pull = await new GitHubClient(auth.headers.Authorization.replace('Bearer ', '')).getPRStatus(owner, repo, pullNumber);
+    return pull?.merged || pull?.merged_at ? 'merged' : pull?.state === 'open' ? 'open' : 'closed';
+  }
+
   /** Cache read only: the first call for a ticket starts a background refresh and returns nothing. */
   async getPullRequestSignals(ticketKey: string, pullRequests: Array<{ url: string; status: string; owner: string; repo: string; number: number; headSha?: string }>) {
     try {

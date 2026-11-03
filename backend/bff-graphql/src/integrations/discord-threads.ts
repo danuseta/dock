@@ -52,6 +52,8 @@ export interface ThreadRow {
   why: string;
   needsYou: boolean;
   createdBy: string | null;
+  /** The Discord id of whoever opened the thread; a webhook post carries the webhook id. */
+  createdById?: string | null;
   /** The avatar of whoever opened the thread. */
   createdByAvatar: string | null;
   createdAt: string;
@@ -63,6 +65,8 @@ export interface ThreadRow {
   slots: number;
   tickets: string[];
   prs: string[];
+  /** The pull requests linked by whoever opened the thread; a teammate's link is left out. */
+  posterPrs?: string[];
   /** The last "on it" in the thread. */
   claim: ThreadClaim | null;
   /** The owner's own last "on it" in the thread, whoever said on it after. */

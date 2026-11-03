@@ -11,6 +11,7 @@ import { SkeletonScene } from '../components/empty/scenes/SkeletonScene';
 import { Toast } from '../components/Toast';
 import { Button, Card, Dialog, Input, Page } from '../components/ui';
 import { cn } from '../lib/cn';
+import { revisedRound } from '../lib/attention';
 import { readSessionFilter, writeSessionFilter } from '../chat/sessionFilter';
 import { filterSessions, type SessionFilter } from '../chat/sessionGroups';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
@@ -261,6 +262,13 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate
           ) : (
             <>
               {actionError && !deleteTarget && <p className="flex-none border-b border-border px-3.5 py-1.5 text-pretty text-xs break-words text-status-conflict" role="alert">{actionError}</p>}
+              {revisedRound(selected) && (
+                <div className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-3.5 py-1.5 text-xs">
+                  <span className="rounded-pill border border-accent/40 px-1.5 font-mono text-[0.62rem] leading-4 text-accent">Revised from review</span>
+                  <span className="min-w-0 flex-1 truncate text-secondary-foreground">{revisedRound(selected)?.summary}</span>
+                  {revisedRound(selected)?.threadUrl && <a className="text-accent hover:underline" href={revisedRound(selected)?.threadUrl ?? undefined} target="_blank" rel="noreferrer">Open thread</a>}
+                </div>
+              )}
               <div className="flex min-h-0 flex-1">
                 <ChatThread
                   key={selected.id}

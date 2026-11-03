@@ -28,7 +28,7 @@ const JIRA_LINK = /https:\/\/[\w.-]+\.atlassian\.net\/browse\/([A-Z][A-Z0-9_]{1,
 export const NEEDS_YOU = new Set<ThreadState>(['FLOW_2', 'FLOW_4', 'YOUR_TURN', 'FLOW_5', 'REVIEW_ASKED']);
 export const SETTING_KEYS = { token: 'discordBotToken', guild: 'discordGuildId' } as const;
 /** Bumped when ThreadRow gains a field, so the next sync builds every stored row again. */
-export const ROW_VERSION = 7;
+export const ROW_VERSION = 8;
 /** Discord channel types that are threads. */
 const THREAD_TYPES = new Set([10, 11, 12]);
 
@@ -218,6 +218,7 @@ export function buildRow(channel: Channel, guildId: string, thread: RawThread, t
   const slots = slotsOf(messages, thread.owner_id ?? null, tags);
   const sorted = sortThread(channel.kind, channel.thread, thread.owner_id ?? null, closed(thread), messages, me, tags, slots);
   const poster = messages.find((message) => message.authorId === thread.owner_id);
+  const createdById = poster?.authorId ?? thread.owner_id ?? null;
   const onIt = [...new Set(messages.filter((message) => ON_IT.test(message.text) && !(channel.kind === 'pr' && message.authorId === thread.owner_id)).map((message) => message.author))];
   const linked = messages.flatMap((message) => [...message.text.matchAll(JIRA_LINK)].map((match) => match[1].toUpperCase()));
   const lastActivity = messages.length ? messages[messages.length - 1].at : createdAtOf(thread);
@@ -232,6 +233,7 @@ export function buildRow(channel: Channel, guildId: string, thread: RawThread, t
     ...sorted,
     needsYou: NEEDS_YOU.has(sorted.state),
     createdBy: poster?.author ?? null,
+    createdById,
     createdByAvatar: poster?.avatar ?? null,
     createdAt: createdAtOf(thread),
     lastActivity,
@@ -242,6 +244,7 @@ export function buildRow(channel: Channel, guildId: string, thread: RawThread, t
     onIt,
     tickets: [...new Set([...matches([thread.name, ...tags].join(' ').toUpperCase(), TICKET), ...linked])],
     prs: matches(messages.map((message) => message.text).join(' '), PULL),
+    posterPrs: matches(messages.filter((message) => message.authorId === createdById).map((message) => message.text).join(' '), PULL),
     messages: messages.slice(-KEPT_MESSAGES),
   };
 }

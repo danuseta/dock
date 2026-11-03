@@ -178,6 +178,7 @@ export const typeDefs = gql`
     discordUserId: String
     autoReviewOnIt: Boolean!
     autoLgtm: Boolean!
+    reviewFindingsToTask: Boolean!
     hasGoogleClientSecret: Boolean!
     googleCalendarConnected: Boolean!
     googleCalendarError: String
@@ -953,6 +954,14 @@ export const typeDefs = gql`
     pending: [ChatInteraction!]!
     settled: [ChatSettled!]!
     options: ChatTurnOptions
+    reviewRound: ReviewRoundInfo
+  }
+
+  type ReviewRoundInfo {
+    status: String!
+    summary: String!
+    threadUrl: String!
+    at: String!
   }
 
   type ChatSessionState {
@@ -1177,6 +1186,7 @@ export const typeDefs = gql`
     discordUserId: String
     autoReviewOnIt: String
     autoLgtm: String
+    reviewFindingsToTask: String
     googleClientId: String
     googleClientSecret: String
     googleCalendarId: String

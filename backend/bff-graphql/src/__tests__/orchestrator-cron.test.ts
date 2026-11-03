@@ -735,3 +735,20 @@ test('with Settings on last session an owner answer queues in the ticket last Ta
   assert.strictEqual(w.state.sessions.length, 1, 'later answers go to that session, even while it runs');
   assert.deepStrictEqual(w.state.sent.slice(1).map((sent) => [sent.sessionId, sent.extra]), [['s-1', { cronSlot: false, queue: true }], ['s-1', { cronSlot: false, queue: true }]]);
 });
+
+test('review findings queue in the last Task session; with none a Task-KEY session opens on the cron machine and is removed when refused', async () => {
+  const w = world({ config: { machine: 'workspace' } });
+  w.state.sessions.push({ id: 'task-1', ticketKey: 'QRD-1292', machine: 'laptop', title: 'Task-QRD-1292', origin: 'cron', options: {}, state: 'running', queuedAt: 0, replied: true });
+  assert.deepStrictEqual(await w.cron.taskMessage('QRD-1292', 'findings'), { sessionId: 'task-1', opened: false });
+  assert.deepStrictEqual([w.state.sent[0].sessionId, w.state.sent[0].text, w.state.sent[0].extra], ['task-1', 'findings', { cronSlot: false, queue: true }]);
+  const fresh = world({ config: { machine: 'workspace' } });
+  const result = await fresh.cron.taskMessage('QRD-7', 'findings');
+  const session = fresh.state.sessions.find((item) => item.id === result.sessionId)!;
+  assert.strictEqual(result.opened, true);
+  assert.deepStrictEqual([session.ticketKey, session.machine, session.title, session.origin], ['QRD-7', 'workspace', 'Task-QRD-7', 'cron']);
+  assert.strictEqual(fresh.state.sent[0].extra?.cronSlot, false);
+  const refused = world();
+  refused.state.failSend = true;
+  await assert.rejects(refused.cron.taskMessage('QRD-7', 'findings'), /send refused/);
+  assert.strictEqual(refused.state.sessions.length, 0);
+});
