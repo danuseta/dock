@@ -236,7 +236,7 @@ test('internal integration behavior', async (t) => {
   });
 
   await t.test('revalidates cached assigned Jira tickets in the background and re-upserts', async () => {
-    const cachedTickets = [{ key: 'QRD-1', title: 'Cached', status: 'TODO', assignee: 'M Danu Seta W', labels: ['alvinPass'] }];
+    const cachedTickets = [{ key: 'QRD-1', title: 'Cached', status: 'TODO', assignee: 'M Danu Seta W', labels: ['alvinPass'], links: [] }];
     let fetchCalls = 0;
     let upserted: any = null;
     const storage = {
@@ -262,7 +262,7 @@ test('internal integration behavior', async (t) => {
 
   await t.test('does not revalidate cached assigned Jira tickets again inside the revalidation window', async () => {
     let fetchCalls = 0;
-    const freshTicket = { key: 'QRD-2', title: 'Fresh', status: 'TODO', assignee: 'M Danu Seta W', labels: ['alvinPass'] };
+    const freshTicket = { key: 'QRD-2', title: 'Fresh', status: 'TODO', assignee: 'M Danu Seta W', labels: ['alvinPass'], links: [] };
     const storage: { getCache: () => Promise<any>; upsertCache: () => Promise<void> } = {
       getCache: async () => null,
       upsertCache: async () => undefined,
@@ -286,7 +286,7 @@ test('internal integration behavior', async (t) => {
   });
 
   await t.test('serves cached Jira assigned tickets without waiting on a background Jira revalidation', async () => {
-    const cachedTickets = [{ key: 'QRD-5', title: 'Cached', status: 'TODO', assignee: 'M Danu Seta W', labels: ['alvinPass'] }];
+    const cachedTickets = [{ key: 'QRD-5', title: 'Cached', status: 'TODO', assignee: 'M Danu Seta W', labels: ['alvinPass'], links: [] }];
     let jiraCalls = 0;
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -308,7 +308,7 @@ test('internal integration behavior', async (t) => {
 
   await t.test('revalidates once the cache entry crosses the 45s staleness boundary', async () => {
     let fetchCalls = 0;
-    const freshTicket = { key: 'QRD-6', title: 'Fresh', status: 'TODO', assignee: 'M Danu Seta W', labels: ['alvinPass'] };
+    const freshTicket = { key: 'QRD-6', title: 'Fresh', status: 'TODO', assignee: 'M Danu Seta W', labels: ['alvinPass'], links: [] };
     const storage: { getCache: () => Promise<any>; upsertCache: () => Promise<void> } = {
       getCache: async () => null,
       upsertCache: async () => undefined,
@@ -339,7 +339,7 @@ test('internal integration behavior', async (t) => {
   });
 
   await t.test('forceRefresh does not join an in-flight background revalidation', async () => {
-    const cachedTickets = [{ key: 'QRD-7', title: 'Cached', status: 'TODO', assignee: 'M Danu Seta W', labels: ['alvinPass'] }];
+    const cachedTickets = [{ key: 'QRD-7', title: 'Cached', status: 'TODO', assignee: 'M Danu Seta W', labels: ['alvinPass'], links: [] }];
     let clientCalls = 0;
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -371,7 +371,7 @@ test('internal integration behavior', async (t) => {
   });
 
   await t.test('a forced refresh waits out an in-flight background revalidation and lands last', async () => {
-    const cachedTickets = [{ key: 'QRD-8', title: 'Cached', status: 'TODO', assignee: 'M Danu Seta W', labels: ['alvinPass'] }];
+    const cachedTickets = [{ key: 'QRD-8', title: 'Cached', status: 'TODO', assignee: 'M Danu Seta W', labels: ['alvinPass'], links: [] }];
     let clientCalls = 0;
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });

@@ -7,6 +7,9 @@ export interface RetroNumbers {
   medianOwnerWaitHours: number | null;
   reviews: number;
   requestChanges: number;
+  blockedWaits: number;
+  mergeConflicts: number;
+  stackedRebases: number;
 }
 export interface RetroItem { id: string; kind: string; text: string; evidence: string[]; dest: string; status: string; sessionId: string | null; updatedAt: string }
 export interface Retro {
@@ -30,6 +33,9 @@ export const RETRO_NUMBERS: Array<[keyof RetroNumbers, string, string, 'up' | 'd
   ['medianOwnerWaitHours', 'Median wait on you', ' h', 'down'],
   ['reviews', 'Reviews done', '', null],
   ['requestChanges', 'Reviews asking for changes', '', null],
+  ['blockedWaits', 'Tickets that waited on a dependency', '', 'down'],
+  ['mergeConflicts', 'Pull requests with a merge conflict', '', 'down'],
+  ['stackedRebases', 'Stacked rebases', '', 'down'],
 ];
 
 /** "+1.2 vs before" and whether that is the better direction; null when there is nothing to compare. */

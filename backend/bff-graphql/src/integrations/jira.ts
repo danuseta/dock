@@ -80,6 +80,20 @@ export class JiraClient {
   }
 }
 
+export interface TicketLink { key: string; relation: 'blockedBy' | 'blocks' }
+
+/** The "blocks" links of an issue: an inward issue blocks this one, an outward issue is blocked by it. Other link types are dropped. */
+export function blockLinks(issueLinks: unknown): TicketLink[] {
+  const lower = (value: unknown) => String(value ?? '').trim().toLowerCase();
+  return (Array.isArray(issueLinks) ? issueLinks : []).flatMap((link: any): TicketLink[] => {
+    const type = link?.type;
+    if (lower(type?.name) !== 'blocks' && lower(type?.inward) !== 'is blocked by' && lower(type?.outward) !== 'blocks') return [];
+    if (typeof link?.inwardIssue?.key === 'string') return [{ key: link.inwardIssue.key, relation: 'blockedBy' }];
+    if (typeof link?.outwardIssue?.key === 'string') return [{ key: link.outwardIssue.key, relation: 'blocks' }];
+    return [];
+  });
+}
+
 const ASSIGNED_TICKETS_TTL_SECONDS = 3600;
 const TICKET_DETAIL_TTL_SECONDS = 600;
 const REVALIDATE_AFTER_MS = 45000;
@@ -135,6 +149,7 @@ export class JiraService {
     const cached = await this.storage.getCache('jira', cacheKey).catch(() => null);
     const isCurrentCache = Array.isArray(cached) && cached.every((ticket: any) => (
       Array.isArray(ticket?.labels)
+      && Array.isArray(ticket?.links)
       && typeof ticket?.assignee === 'string'
       && ticket.assignee.trim().length > 0
       && ticket.assignee !== 'Unassigned'
@@ -255,6 +270,8 @@ export class JiraService {
       sprintState,
       storyPoints: typeof storyPointValue === 'number' && !Number.isNaN(storyPointValue) ? storyPointValue : null,
       parentKey: typeof fields.parent?.key === 'string' ? fields.parent.key : null,
+      issueType: typeof fields.issuetype?.name === 'string' ? fields.issuetype.name : null,
+      links: blockLinks(fields.issuelinks),
       labels: Array.isArray(fields.labels)
         ? fields.labels.filter((label: unknown): label is string => typeof label === 'string' && label.trim().length > 0)
         : [],

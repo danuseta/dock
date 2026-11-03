@@ -981,3 +981,47 @@ test('SQLite storage expires review rounds stuck in sending', {
   await prisma.reviewRound.update({ where: { id: stuck.id }, data: { createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000) } });
   assert.ok(!(await storage.pendingReviewSessions()).includes('session-3'), 'an expired round older than a day is not pending');
 });
+
+test('SQLite storage keeps sprint plan edges, their state across a re-map, and mapped-at per sprint', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }] = await Promise.all([import('../storage/service'), import('../storage/client')]);
+  const storage = new StorageService(prisma);
+  t.after(() => prisma.$disconnect());
+  const states = async (sprint: string) => (await storage.getPlanEdges(sprint)).map((row) => `${row.ticketKey}>${row.dependsOnKey}:${row.source}:${row.state}`).sort();
+
+  await storage.replaceJiraEdges('S1', [{ ticketKey: 'P-1', dependsOnKey: 'P-9' }, { ticketKey: 'P-1', dependsOnKey: 'P-9' }]);
+  assert.deepStrictEqual(await states('S1'), ['P-1>P-9:jira:accepted'], 'an edge is stored once per sprint, ticket and dependsOn');
+  await storage.applyInferredEdges('S1', [{ ticketKey: 'P-1', dependsOnKey: 'P-9', reason: 'same' }, { ticketKey: 'P-2', dependsOnKey: 'P-3' }, { ticketKey: 'P-4', dependsOnKey: 'P-5' }, { ticketKey: 'P-6', dependsOnKey: 'P-7' }]);
+  assert.deepStrictEqual(await states('S1'), ['P-1>P-9:jira:accepted', 'P-2>P-3:inferred:pending', 'P-4>P-5:inferred:pending', 'P-6>P-7:inferred:pending'], 'a jira edge is not duplicated as inferred');
+  const rows = await storage.getPlanEdges('S1');
+  await storage.setPlanEdgeState(rows.find((row) => row.ticketKey === 'P-2')!.id, 'accepted');
+  await storage.setPlanEdgeState(rows.find((row) => row.ticketKey === 'P-4')!.id, 'rejected');
+  assert.deepStrictEqual([...(await storage.getPendingPlanKeys('S1'))], ['P-6']);
+  assert.strictEqual((await storage.getPendingPlanKeys('S2')).size, 0, 'pending is scoped by sprint');
+  await storage.applyInferredEdges('S1', [{ ticketKey: 'P-8', dependsOnKey: 'P-5' }], ['P-8']);
+  assert.deepStrictEqual([...(await storage.getPendingPlanKeys('S1'))].sort(), ['P-6', 'P-8'], 'ticket mode keeps other tickets pending edges');
+  await storage.applyInferredEdges('S1', [], ['P-8']);
+  assert.deepStrictEqual([...(await storage.getPendingPlanKeys('S1'))], ['P-6']);
+  await storage.applyInferredEdges('S1', [{ ticketKey: 'P-2', dependsOnKey: 'P-3' }, { ticketKey: 'P-4', dependsOnKey: 'P-5' }]);
+  assert.deepStrictEqual(await states('S1'), ['P-1>P-9:jira:accepted', 'P-2>P-3:inferred:accepted', 'P-4>P-5:inferred:rejected'], 'a re-map keeps decisions and drops the stale pending row');
+  await storage.replaceJiraEdges('S1', []);
+  assert.deepStrictEqual(await states('S1'), ['P-2>P-3:inferred:accepted', 'P-4>P-5:inferred:rejected'], 'replaceJiraEdges keeps inferred rows');
+  assert.strictEqual((await storage.getAcceptedPlanEdges('S1')).length, 1);
+  assert.strictEqual((await storage.getAcceptedPlanEdges('S2')).length, 0, 'accepted is scoped by sprint');
+
+  const mappedAt = new Date('2026-11-03T08:00:00Z');
+  await storage.saveSprintPlan('S1', { status: 'idle', mappedKeys: ['P-1'], groups: [['P-1', 'P-2']], mappedAt });
+  await storage.saveSprintPlan('S2', { status: 'mapping', mappingKeys: ['P-8'] });
+  assert.strictEqual((await storage.getSprintPlan('S1'))?.mappedAt?.toISOString(), mappedAt.toISOString());
+  assert.strictEqual((await storage.getSprintPlan('S2'))?.mappedAt, null, 'mapped-at is per sprint');
+  await storage.saveSprintPlan('S1', { error: 'x' });
+  const kept = await storage.getSprintPlan('S1');
+  assert.deepStrictEqual([kept?.groups, kept?.mappedAt?.toISOString()], ['[["P-1","P-2"]]', mappedAt.toISOString()], 'a partial save keeps other fields');
+
+  assert.ok(await storage.addOrchestratorEventOnce('P-2', 'DEP_WAIT', 'P-3'));
+  assert.strictEqual(await storage.addOrchestratorEventOnce('P-2', 'DEP_WAIT', 'P-3'), null);
+  assert.ok(await storage.addOrchestratorEventOnce('P-2', 'DEP_WAIT', 'P-3', new Date(Date.now() + 60_000)), 'an older event does not count when since is later');
+  for (let i = 0; i < 5; i += 1) await storage.addOrchestratorEvent('P-2', 'ACTIVITY', String(i), 2);
+  assert.strictEqual(await storage.countEventTickets('DEP_WAIT', ['P-2', 'P-3'], new Date(Date.now() - 60_000), new Date(Date.now() + 60_000)), 1, 'DEP_WAIT survives the trim');
+});

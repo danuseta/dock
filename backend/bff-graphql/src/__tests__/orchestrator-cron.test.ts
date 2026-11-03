@@ -95,6 +95,7 @@ interface Start {
   used?: { usedPercentage: number; resetsAt: string | null } | null;
   moves?: boolean;
   dependencies?: Array<{ ticketKey: string; dependsOnKey: string }>;
+  held?: Set<string>;
   pushDevices?: boolean;
   dockOrder?: Map<string, number>;
   manual?: Set<string>;
@@ -123,6 +124,8 @@ function world(start: Start = {}) {
     stopped: [] as string[],
     pushes: [] as Array<{ title: string; body: string; url: string }>,
     clock: 0,
+    waits: [] as Array<[string, string]>,
+    watched: 0,
     ownerStopped: new Set<string>(),
     otherActive: new Set<string>(),
     failSend: false,
@@ -141,6 +144,9 @@ function world(start: Start = {}) {
     ticket: async (key) => state.tickets.find((item) => item.key === key) ?? null,
     moveTicket: async (key, statusName) => { state.moved.push(key); state.movedTo.push([key, statusName]); return start.moves ?? true; },
     dependencies: async () => start.dependencies ?? [],
+    heldKeys: async () => start.held ?? new Set(),
+    planWatch: async () => { state.watched += 1; },
+    recordWait: async (key, dependsOn) => { if (!state.waits.some(([k, d]) => k === key && d === dependsOn)) state.waits.push([key, dependsOn]); },
     dockOrder: async () => start.dockOrder ?? new Map(),
     manualKeys: async () => start.manual ?? new Set(),
     slots: async () => ({ busy: state.sessions.filter((s) => s.state === 'running' && s.cronSlot !== false).length, waiting: state.sessions.filter((s) => s.state === 'queued' && s.cronSlot !== false).length }),
@@ -313,6 +319,27 @@ test('a fill is skipped when the machine is offline or the usage brake is reache
 
   const stale = world({ tickets: [ticket('QRD-1')], used: { usedPercentage: 99, resetsAt: '2026-10-14T01:00:00.000Z' } });
   assert.deepStrictEqual((await stale.cron.runFill()).started, ['QRD-1']);
+});
+
+test('a ticket with a pending inferred edge is held and the next one starts; the wait is recorded once over two ticks', async () => {
+  const w = world({ tickets: [ticket('QRD-1'), ticket('QRD-2')], held: new Set(['QRD-1']), config: { parallel: 2 } });
+  assert.deepStrictEqual((await w.cron.runFill()).started, ['QRD-2']);
+  await w.cron.runFill();
+  assert.deepStrictEqual(w.state.waits, [['QRD-1', 'pending']]);
+});
+
+test('an accepted plan edge blocks like a hand-set dependency, and two unsettled dependencies block instead of stacking', async () => {
+  const dependencies = [{ ticketKey: 'QRD-1', dependsOnKey: 'QRD-10' }, { ticketKey: 'QRD-2', dependsOnKey: 'QRD-10' }, { ticketKey: 'QRD-2', dependsOnKey: 'QRD-12' }];
+  const w = world({ tickets: [ticket('QRD-1'), ticket('QRD-2'), ticket('QRD-10', { status: 'PR Review' }), ticket('QRD-12', { status: 'PR Review' })], dependencies, config: { engine: 'sous', parallel: 3 } });
+  const log = await w.cron.runFill();
+  assert.deepStrictEqual(log.started, ['QRD-1']);
+  assert.deepStrictEqual(w.state.waits, [['QRD-2', 'QRD-10']]);
+});
+
+test('the tick lets the planner watch the tickets while the cron is off', async () => {
+  const w = world({ tickets: [ticket('QRD-1')], config: { enabled: false } });
+  await w.cron.tick();
+  assert.strictEqual(w.state.watched, 1);
 });
 
 test('a ticket whose dependency is not settled waits; a ticket Jira would not move still starts and is reported', async () => {

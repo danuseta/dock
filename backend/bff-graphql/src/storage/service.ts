@@ -7,7 +7,10 @@ const RUN_WITHOUT_LEDGER = {
   key: true, title: true, stage: true, waiting: true, payload: true, activity: true, activityDetail: true, activityEndedAt: true,
   lastEventAt: true, ledgerUpdatedAt: true, transcriptAt: true, dismissedAt: true, machine: true, jiraStatus: true, jiraStage: true, stalledDetail: true, stalledAt: true, createdAt: true, updatedAt: true,
 } as const;
-const KEPT_EVENT_KINDS = ['STAGE', 'WAITING'];
+const KEPT_EVENT_KINDS = ['STAGE', 'WAITING', 'DEP_WAIT', 'CONFLICT'];
+
+export interface PlanEdgeInput { ticketKey: string; dependsOnKey: string; reason?: string | null }
+export interface SprintPlanData { status?: string; mappingKeys?: string[]; sessionId?: string | null; mappedKeys?: string[]; groups?: string[][]; error?: string | null; startedAt?: Date | null; mappedAt?: Date | null }
 
 const SENSITIVE_KEYS = new Set([
   'jiraApiToken',
@@ -337,6 +340,90 @@ export class StorageService {
       this.db.orchestratorToolEvent.findMany({ where: { ticketKey, kind: { not: 'tool' } }, orderBy: { id: 'desc' } }),
     ]);
     return [...tools, ...members].sort((a, b) => b.id - a.id);
+  }
+
+  /** Records an event once per (ticket, kind, detail), counting only events since `since` when given. */
+  async addOrchestratorEventOnce(ticketKey: string, kind: string, detail: string | null, since?: Date) {
+    if (await this.db.orchestratorEvent.findFirst({ where: { ticketKey, kind, detail, ...(since ? { createdAt: { gte: since } } : {}) }, select: { id: true } })) return null;
+    return this.db.orchestratorEvent.create({ data: { ticketKey, kind, detail } });
+  }
+
+  /** Distinct tickets (or distinct details) with an event of `kind` for one of `keys` between `from` and `to`. */
+  async countEventTickets(kind: string, keys: string[], from: Date, to: Date, by: 'ticketKey' | 'detail' = 'ticketKey') {
+    const rows = await this.db.orchestratorEvent.findMany({
+      where: { kind, ticketKey: { in: keys }, createdAt: { gte: from, lte: to } }, select: { ticketKey: true, detail: true },
+    });
+    return new Set(rows.map((row) => row[by])).size;
+  }
+
+  getSprintPlan(sprint: string) {
+    return this.db.sprintPlan.findUnique({ where: { sprint } });
+  }
+
+  saveSprintPlan(sprint: string, data: SprintPlanData) {
+    const { mappingKeys, mappedKeys, groups, ...rest } = data;
+    const fields = {
+      ...rest,
+      ...(mappingKeys ? { mappingKeys: JSON.stringify(mappingKeys) } : {}),
+      ...(mappedKeys ? { mappedKeys: JSON.stringify(mappedKeys) } : {}),
+      ...(groups ? { groups: JSON.stringify(groups) } : {}),
+    };
+    return this.db.sprintPlan.upsert({ where: { sprint }, update: fields, create: { sprint, ...fields } });
+  }
+
+  getPlanEdges(sprint: string) {
+    return this.db.sprintPlanEdge.findMany({ where: { sprint }, orderBy: [{ ticketKey: 'asc' }, { createdAt: 'asc' }] });
+  }
+
+  /** Jira links apply at once: stale jira rows go, the rest are accepted. Inferred rows stay. */
+  async replaceJiraEdges(sprint: string, edges: PlanEdgeInput[]) {
+    const now = new Date();
+    await this.db.$transaction(async (tx) => {
+      const current = await tx.sprintPlanEdge.findMany({ where: { sprint, source: 'jira' } });
+      const wanted = new Set(edges.map((edge) => `${edge.ticketKey}|${edge.dependsOnKey}`));
+      const stale = current.filter((row) => !wanted.has(`${row.ticketKey}|${row.dependsOnKey}`)).map((row) => row.id);
+      if (stale.length > 0) await tx.sprintPlanEdge.deleteMany({ where: { id: { in: stale } } });
+      for (const edge of edges) {
+        const reason = edge.reason ?? null;
+        const row = current.find((item) => item.ticketKey === edge.ticketKey && item.dependsOnKey === edge.dependsOnKey);
+        if (row?.state === 'accepted' && row.reason === reason) continue;
+        const data = { source: 'jira', reason, state: 'accepted', decidedAt: now };
+        await tx.sprintPlanEdge.upsert({
+          where: { sprint_ticketKey_dependsOnKey: { sprint, ticketKey: edge.ticketKey, dependsOnKey: edge.dependsOnKey } },
+          update: data,
+          create: { sprint, ticketKey: edge.ticketKey, dependsOnKey: edge.dependsOnKey, ...data },
+        });
+      }
+    });
+  }
+
+  /** New edges are pending; accepted and rejected ones keep their state, a pending one the draft dropped is deleted (only for `scope` tickets when given), a jira edge is skipped. */
+  async applyInferredEdges(sprint: string, edges: PlanEdgeInput[], scope?: string[]) {
+    await this.db.$transaction(async (tx) => {
+      const current = await tx.sprintPlanEdge.findMany({ where: { sprint } });
+      const id = (edge: PlanEdgeInput) => `${edge.ticketKey}|${edge.dependsOnKey}`;
+      const held = new Map(current.map((row) => [id(row), row]));
+      const wanted = new Set(edges.map(id));
+      const stale = current.filter((row) => row.source === 'inferred' && row.state === 'pending' && !wanted.has(id(row)) && (!scope || scope.includes(row.ticketKey))).map((row) => row.id);
+      if (stale.length > 0) await tx.sprintPlanEdge.deleteMany({ where: { id: { in: stale } } });
+      for (const edge of edges) {
+        const row = held.get(id(edge));
+        if (!row) await tx.sprintPlanEdge.create({ data: { sprint, ticketKey: edge.ticketKey, dependsOnKey: edge.dependsOnKey, source: 'inferred', reason: edge.reason ?? null } });
+        else if (row.source === 'inferred' && row.state === 'pending') await tx.sprintPlanEdge.update({ where: { id: row.id }, data: { reason: edge.reason ?? null } });
+      }
+    });
+  }
+
+  setPlanEdgeState(id: string, state: 'accepted' | 'rejected') {
+    return this.db.sprintPlanEdge.update({ where: { id }, data: { state, decidedAt: new Date() } });
+  }
+
+  getAcceptedPlanEdges(sprint: string) {
+    return this.db.sprintPlanEdge.findMany({ where: { sprint, state: 'accepted' } });
+  }
+
+  async getPendingPlanKeys(sprint: string): Promise<Set<string>> {
+    return new Set((await this.db.sprintPlanEdge.findMany({ where: { sprint, state: 'pending' }, select: { ticketKey: true } })).map((row) => row.ticketKey));
   }
 
   getRetroItems(sprint: string) {

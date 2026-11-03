@@ -82,6 +82,7 @@ export const HomeAttention: React.FC<HomeAttentionProps> = ({ rows, titleOf, pan
     const main = conflictItem && top === conflictItem ? 'inspect'
       : row.rank === QUESTIONS_RANK && row.questions ? 'answer'
       : thread && top?.type === 'DISCORD' ? 'discord'
+      : top?.type === 'PLAN_DEPENDENCY' ? 'plan'
       : key && (top?.type === 'AGENT_STALLED' || top?.type === 'AGENT_WAITING') ? 'run'
       : key ? 'ticket' : 'pr';
     const second = row.questions && main !== 'answer' ? 'answer' : thread && main !== 'discord' ? 'discord' : prUrl && main !== 'pr' ? 'pr' : null;
@@ -90,6 +91,7 @@ export const HomeAttention: React.FC<HomeAttentionProps> = ({ rows, titleOf, pan
       if (kind === 'inspect' && conflictItem) return <Button key={kind} size="sm" variant={variant} onClick={() => void inspect(conflictItem)}>Inspect file</Button>;
       if (kind === 'answer' && key) return <Button key={kind} size="sm" variant={variant} onClick={() => onNavigate(`/decisions?ticket=${encodeURIComponent(key)}`)}>Answer</Button>;
       if (kind === 'discord' && thread) return <Button key={kind} size="sm" variant={variant} onClick={() => onNavigate(`/discord?thread=${encodeURIComponent(thread)}`)}>Read thread</Button>;
+      if (kind === 'plan') return <Button key={kind} size="sm" variant={variant} onClick={() => onNavigate('/agents?tab=sprint&sub=plan')}>Open plan</Button>;
       if (kind === 'run' && key) return <Button key={kind} size="sm" variant={variant} onClick={() => onNavigate(`/agents?run=${encodeURIComponent(key)}`)}>Open run</Button>;
       if (kind === 'ticket' && key) return <Button key={kind} size="sm" variant={variant} onClick={() => onTicketClick(key)}>Open ticket</Button>;
       if (kind === 'pr' && prUrl) return <Button key={kind} size="sm" variant={variant} onClick={() => window.open(prUrl, '_blank', 'noopener')}>Open PR</Button>;
