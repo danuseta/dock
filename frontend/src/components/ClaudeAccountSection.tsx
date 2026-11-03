@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { ArrowRightLeft, CheckCircle2, Circle, Info, RefreshCw, Users } from 'lucide-react';
 import { GET_CLAUDE_ACCOUNTS } from '../graphql/queries';
-import { SET_CLAUDE_ROTATION, USE_CLAUDE_ACCOUNT } from '../graphql/mutations';
+import { SET_CLAUDE_ROTATION, REFRESH_CLAUDE_USAGE, USE_CLAUDE_ACCOUNT } from '../graphql/mutations';
 import { limitTone, resetLabel, toneClass } from '../chat/status';
 import { useNow } from '../chat/activity/useNow';
 import { cn } from '../lib/cn';
@@ -10,13 +10,19 @@ import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 import { Button, Card, Checkbox, Input } from './ui';
 
 interface UsageWindow { usedPercentage: number; resetsAt: string | null }
-interface Account { name: string; active: boolean; seenAt: string | null; fiveHour: UsageWindow | null; sevenDay: UsageWindow | null }
+interface Account { name: string; active: boolean; seenAt: string | null; status: string | null; checkedAt: string | null; fiveHour: UsageWindow | null; sevenDay: UsageWindow | null }
 interface Rotation { enabled: boolean; fiveHour: number; sevenDay: number; backToMain: boolean }
 interface Entry { at: string; from: string; to: string; reason: string; auto: boolean }
 interface State { available: boolean; accounts: Account[]; rotation: Rotation; log: Entry[] }
 
 const METER = { ok: 'bg-status-merged', warn: 'bg-amber-200', danger: 'bg-status-conflict' } as const;
 const time = (iso: string) => new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+const blockedUntil = (account: Account, now: number) => {
+  const window = [account.sevenDay, account.fiveHour].find((candidate) => candidate && candidate.usedPercentage >= 100 && candidate.resetsAt) ?? account.sevenDay ?? account.fiveHour;
+  return window?.resetsAt ? `Blocked until ${resetLabel(window.resetsAt, now).replace(/^resets /, '')}` : 'Blocked';
+};
 
 const Meter: React.FC<{ label: string; window: UsageWindow | null; seen: boolean; now: number }> = ({ label, window, seen, now }) => {
   if (!window) return <span className="font-mono text-[0.7rem] text-muted-foreground">{label} {seen ? 'none' : '-'}</span>;
@@ -35,6 +41,7 @@ export const ClaudeAccountSection: React.FC = () => {
   const { data, error, loading } = useQuery<{ claudeAccounts: State }>(GET_CLAUDE_ACCOUNTS, { ...CACHED_QUERY_OPTIONS, pollInterval: 60000 });
   const [switchAccount, { loading: switching }] = useMutation(USE_CLAUDE_ACCOUNT, { refetchQueries: [GET_CLAUDE_ACCOUNTS] });
   const [setRotation, { loading: saving }] = useMutation(SET_CLAUDE_ROTATION, { refetchQueries: [GET_CLAUDE_ACCOUNTS] });
+  const [refreshUsage, { loading: refreshing }] = useMutation(REFRESH_CLAUDE_USAGE, { refetchQueries: [GET_CLAUDE_ACCOUNTS] });
   const [actionError, setActionError] = useState('');
   const [limits, setLimits] = useState({ fiveHour: '', sevenDay: '' });
   const state = data?.claudeAccounts;
@@ -81,7 +88,9 @@ export const ClaudeAccountSection: React.FC = () => {
               <span className="flex min-w-0 items-center gap-2 max-[760px]:col-span-2">
                 {account.active ? <CheckCircle2 size={16} className="text-status-merged" aria-hidden="true" /> : <Circle size={16} className="text-muted-foreground" aria-hidden="true" />}
                 <span className="min-w-0"><strong className="font-mono text-sm">{account.name}</strong>{account.active && <span className="ml-2 rounded-xs bg-status-merged-bg px-1.5 py-px font-mono text-[0.6rem] font-bold text-status-merged">IN USE</span>}
-                  <small className="block text-[0.68rem] text-muted-foreground">{account.seenAt ? `usage seen ${time(account.seenAt)}` : 'no usage seen yet'}</small></span>
+                  <small className="block text-[0.68rem] text-muted-foreground">{account.seenAt ? `usage seen ${time(account.seenAt)}` : 'no usage seen yet'}</small>
+                  {account.status === 'rejected' && <small className="block text-[0.68rem] font-bold text-status-conflict">{blockedUntil(account, now)}</small>}
+                  {account.checkedAt && <small className="block text-[0.68rem] text-muted-foreground">Checked {clock(account.checkedAt)}</small>}</span>
                 {!account.active && <Button size="sm" className="ml-auto hidden max-[760px]:inline-flex" disabled={switching} onClick={() => void run(() => switchAccount({ variables: { name: account.name } }))}><ArrowRightLeft size={14} aria-hidden="true" />Use</Button>}
               </span>
               <Meter label="5h" window={account.fiveHour} seen={Boolean(account.seenAt || account.sevenDay)} now={now} />
@@ -92,9 +101,10 @@ export const ClaudeAccountSection: React.FC = () => {
             </li>
           ))}
         </ul>
+        <Button size="sm" className="self-start" disabled={refreshing} onClick={() => void run(() => refreshUsage())}><RefreshCw size={14} aria-hidden="true" />{refreshing ? 'Refreshing...' : 'Refresh usage'}</Button>
         <p className="flex items-start gap-2 rounded-sm border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
           <Info size={14} className="mt-0.5 flex-none" aria-hidden="true" />
-          <span>An account's usage is known only while it is in use, so the others show the last numbers seen; a window past its reset shows none. Add or remove an account with the Coder parameters or <code className="font-mono">/cycle add</code> in a terminal, since that needs the token.</span>
+          <span>Each account's usage is probed every 30 minutes and on Refresh usage (once a minute), and the account in use also updates after each turn; a window past its reset shows none. Add or remove an account with the Coder parameters or <code className="font-mono">/cycle add</code> in a terminal, since that needs the token.</span>
         </p>
       </Card>
 

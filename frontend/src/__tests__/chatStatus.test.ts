@@ -50,3 +50,11 @@ test('LimitBars draws only the windows that exist, and the account meter tells n
   const account = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'components', 'ClaudeAccountSection.tsx'), 'utf8');
   assert.match(account, /\{label\} \{seen \? 'none' : '-'\}/);
 });
+
+test('the account list shows the probe verdict, the check time and a throttled refresh button', () => {
+  const account = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'components', 'ClaudeAccountSection.tsx'), 'utf8');
+  assert.match(account, /account\.status === 'rejected'/);
+  assert.match(account, /Blocked until \$\{resetLabel/);
+  assert.match(account, /Checked \{clock\(account\.checkedAt\)\}/);
+  assert.match(account, /disabled=\{refreshing\}/);
+});
