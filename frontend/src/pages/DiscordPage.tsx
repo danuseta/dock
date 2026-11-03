@@ -27,6 +27,10 @@ const ProgressChip: React.FC<{ progress: Progress }> = ({ progress }) => (
   <span className={cn('shrink-0 rounded-[3px] px-1 py-px font-mono text-[0.58rem] font-bold max-[760px]:text-xs', PROGRESS_STYLE[progress])}>{progress}</span>
 );
 
+const ReviewingChip: React.FC = () => (
+  <span className="shrink-0 rounded-[3px] bg-status-warn/15 px-1 py-px font-mono text-[0.58rem] font-bold text-status-warn max-[760px]:text-xs">Reviewing</span>
+);
+
 const SLOT_STYLE: Record<Slot, string> = { pass: 'bg-status-merged', onit: 'bg-status-warn', free: 'bg-border-glow' };
 
 /** A pull request's reviewer slots: green passed, yellow on it, grey free. */
@@ -168,7 +172,7 @@ const ThreadRow: React.FC<{ row: DiscordThread; now: Date; selected: boolean; on
       </span>
       <span className="min-w-0">
         <strong className={cn('block truncate text-[0.8rem] max-[760px]:line-clamp-2 max-[760px]:whitespace-normal', fresh ? 'font-semibold' : 'font-medium')}><Title text={row.title} /></strong>
-        <small className="mt-1 flex min-w-0 items-center gap-1.5 text-[0.68rem] text-muted-foreground max-[760px]:text-xs"><ProgressChip progress={progressOf(row)} />{row.kind === 'pr' && <Slots thread={row} />}<span className="truncate">{row.why}</span></small>
+        <small className="mt-1 flex min-w-0 items-center gap-1.5 text-[0.68rem] text-muted-foreground max-[760px]:text-xs"><ProgressChip progress={progressOf(row)} />{row.kind === 'pr' && <Slots thread={row} />}{row.reviewing && <ReviewingChip />}<span className="truncate">{row.why}</span></small>
       </span>
       <span className="text-right">
         <time className="block font-mono text-[0.62rem] text-secondary-foreground max-[760px]:text-xs">{ago(row.lastActivity, now)}</time>
@@ -356,7 +360,7 @@ const ThreadPane: React.FC<{ thread: DiscordThread; picked: boolean; onBack: () 
     ['Sprint', thread.tickets.find((item) => item.sprint)?.sprint ?? 'None'],
     ['Pull request', pr ? <span className="flex items-center gap-2"><a href={pr} target="_blank" rel="noreferrer" className="truncate text-foreground hover:underline">{pr.replace('https://github.com/', '')}</a>{ticket && <button type="button" onClick={() => onNavigate(changesHref(ticket.key, pr, 'discord'))} className="flex-none border-0 bg-transparent p-0 font-semibold text-accent hover:underline">Changes</button>}</span> : '—'],
     thread.kind === 'pr'
-      ? ['Reviewers', <span key="slots" className="flex flex-col gap-1"><Slots thread={thread} large /><span className="text-[0.66rem] whitespace-normal text-muted-foreground">{thread.onIt.length ? `On it: ${thread.onIt.join(', ')}` : 'Nobody on it'}</span>{thread.passes.length > 0 && <span className="text-[0.66rem] whitespace-normal text-muted-foreground">Pass: {thread.passes.join(', ')}</span>}</span>]
+      ? ['Reviewers', <span key="slots" className="flex flex-col gap-1"><Slots thread={thread} large />{thread.reviewing && <ReviewingChip />}<span className="text-[0.66rem] whitespace-normal text-muted-foreground">{thread.onIt.length ? `On it: ${thread.onIt.join(', ')}` : 'Nobody on it'}</span>{thread.passes.length > 0 && <span className="text-[0.66rem] whitespace-normal text-muted-foreground">Pass: {thread.passes.join(', ')}</span>}</span>]
       : ['On it', thread.claim ? `${thread.claim.mine ? 'You' : thread.claim.author} · ${wib(thread.claim.at)}${thread.claimerRepliedAt ? '' : ' · no update since'}` : 'Nobody yet'],
     ['Your last reply', thread.repliedAt ? wib(thread.repliedAt) : 'None'],
   ];

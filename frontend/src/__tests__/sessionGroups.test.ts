@@ -1,7 +1,8 @@
 import assert from 'node:assert';
 import test from 'node:test';
 import type { ChatSession } from '../chat/messages';
-import { groupSessions, sessionGroupKey, sidebarDot } from '../chat/sessionGroups';
+import { readSessionFilter, writeSessionFilter } from '../chat/sessionFilter';
+import { filterSessions, groupSessions, sessionGroupKey, sessionKind, sidebarDot } from '../chat/sessionGroups';
 
 const make = (id: string, status: string, waiting = false, lastMessageAt = ''): ChatSession =>
   ({ id, source: 'dock', title: id, status, waiting, messageCount: 0, startedAt: '', lastMessageAt });
@@ -42,4 +43,29 @@ test('sidebar dot: a long turn stays running, done stays grey when the bridge is
   assert.strictEqual(sidebarDot(make('a', 'idle', true), { bridgeUp: true }), 'needs');
   assert.strictEqual(sidebarDot(make('a', 'running'), { bridgeUp: false }), 'disconnected');
   assert.strictEqual(sidebarDot(make('a', 'idle'), { bridgeUp: false }), 'done');
+});
+
+test('sessionKind reads the title prefix', () => {
+  assert.strictEqual(sessionKind('Task-QRD-1'), 'task');
+  assert.strictEqual(sessionKind('Review-QRD-7 (3)'), 'review');
+  assert.strictEqual(sessionKind('Fix login'), null);
+  assert.strictEqual(sessionKind(''), null);
+});
+
+test('filterSessions keeps all, only Task, or only Review', () => {
+  const list = [make('Task-QRD-1', 'idle'), make('Review-QRD-7', 'idle'), make('Fix login', 'idle')];
+  assert.deepStrictEqual(filterSessions(list, 'all').map((s) => s.id), ['Task-QRD-1', 'Review-QRD-7', 'Fix login']);
+  assert.deepStrictEqual(filterSessions(list, 'task').map((s) => s.id), ['Task-QRD-1']);
+  assert.deepStrictEqual(filterSessions(list, 'review').map((s) => s.id), ['Review-QRD-7']);
+});
+
+test('readSessionFilter falls back to all when storage throws or holds an unknown value', () => {
+  const set = (value: unknown) => Object.defineProperty(globalThis, 'window', { configurable: true, value });
+  set({ localStorage: { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } } });
+  assert.strictEqual(readSessionFilter(), 'all');
+  assert.doesNotThrow(() => writeSessionFilter('task'));
+  set({ localStorage: { getItem: () => 'x' } });
+  assert.strictEqual(readSessionFilter(), 'all');
+  set({ localStorage: { getItem: () => 'review' } });
+  assert.strictEqual(readSessionFilter(), 'review');
 });

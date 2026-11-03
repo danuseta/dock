@@ -11,6 +11,8 @@ import { SkeletonScene } from '../components/empty/scenes/SkeletonScene';
 import { Toast } from '../components/Toast';
 import { Button, Card, Dialog, Input, Page } from '../components/ui';
 import { cn } from '../lib/cn';
+import { readSessionFilter, writeSessionFilter } from '../chat/sessionFilter';
+import { filterSessions, type SessionFilter } from '../chat/sessionGroups';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { ChatThread } from '../chat/ChatThread';
 import { LimitMeters, LimitsLine } from '../chat/StatusLine';
@@ -67,11 +69,17 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate
   const [lanesOn, setLanesOn] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(() => window.matchMedia(WIDE_QUERY).matches);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(initialSidebarCollapsed);
+  const [filter, setFilter] = useState<SessionFilter>(readSessionFilter);
   const closeGone = useCallback(() => setGone(false), []);
   const toggleSidebar = () => {
     const next = !sidebarCollapsed;
     setSidebarCollapsed(next);
     try { window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(next)); } catch { /* Preference storage is optional. */ }
+  };
+
+  const changeFilter = (next: SessionFilter) => {
+    setFilter(next);
+    writeSessionFilter(next);
   };
 
   useEffect(() => {
@@ -213,7 +221,9 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate
         <Card className={cn('flex min-h-0 min-w-0 flex-col overflow-hidden bg-surface-0 p-0', selected && 'max-[900px]:hidden')}>
           <div className="min-h-0 flex-1">
             <SessionSidebar
-              sessions={sessions}
+              sessions={filterSessions(sessions, filter)}
+              filter={filter}
+              onFilter={changeFilter}
               machines={machinesData?.chatMachines}
               activeId={selectedId}
               activeThreadId={threadId}

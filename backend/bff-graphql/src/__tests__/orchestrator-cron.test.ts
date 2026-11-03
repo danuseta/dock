@@ -696,6 +696,8 @@ test('a chat opened by hand on one ticket takes the cron title for it', () => {
   assert.strictEqual(ticketTitleFromText('cek QRD-1491 statusnya'), null);
   assert.strictEqual(ticketTitleFromText('review the login redirect'), null);
   assert.strictEqual(ticketTitleFromText('review CARD-audit-log'), null);
+  assert.strictEqual(ticketTitleFromText('tolong cek prompt ini\n\nreview QRD-1491 di bawah'), null);
+  assert.deepStrictEqual(ticketTitleFromText('\n\nkerjakan QRD-7\nlalu review'), { kind: 'Task', key: 'QRD-7' });
 });
 
 test('an auto review opens a Review-KEY session on the cron machine with the cron options; a refused first message removes it', async () => {

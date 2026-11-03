@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { Plus, RefreshCw, Trash2, X } from 'lucide-react';
-import { GET_DISCORD_THREADS, GET_HOME_CORE, GET_HOME_SECONDARY, GET_OWNER_NAME, GET_OWNER_QUESTIONS } from '../graphql/queries';
+import { GET_DISCORD_THREADS, GET_HOME_CORE, GET_HOME_SECONDARY, GET_HOME_TICKET_PRS, GET_OWNER_NAME, GET_OWNER_QUESTIONS } from '../graphql/queries';
 import { ADD_QUICK_LINK, REMOVE_QUICK_LINK } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { WebsiteIcon } from '../components/WebsiteIcon';
@@ -10,6 +10,8 @@ import { ClaudeUsageCard } from '../components/ClaudeUsageCard';
 import { AgentRunStrip } from '../components/AgentRunStrip';
 import { HomeAttention, type HomeAttentionItem } from '../components/HomeAttention';
 import { ticketAttention, ticketQuestions } from '../lib/attention';
+import { openConflict, passCount, slotsForTicket } from '../lib/ticketApprovals';
+import { PRBadge } from '../components/PRBadge';
 import { discordAttention } from '../lib/discordThreads';
 import { isArchived, type AgentRunSummary } from '../agents/runs';
 import { MonthCalendar } from '../components/MonthCalendar';
@@ -76,6 +78,8 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
 
   const tickets = useMemo(() => (coreData?.dashboard || []).flatMap((group: any) => group.tickets || []), [coreData]);
   const activeTickets = tickets.filter((ticket: any) => !/done|merged|closed|resolved/i.test(ticket.status));
+  const shownKeys = activeTickets.slice(0, MY_TICKETS).map((ticket: any) => ticket.key);
+  const { data: prData } = useQuery(GET_HOME_TICKET_PRS, { ...CACHED_QUERY_OPTIONS, variables: { keys: shownKeys }, pollInterval: 300000, skip: shownKeys.length === 0 });
   const storyPoints = activeTickets.reduce((total: number, ticket: any) => total + (ticket.storyPoints || 0), 0);
   const monitors = secondaryData?.monitors || [];
   const healthyServices = monitors.filter((monitor: any) => monitor.lastStatus === 'UP').length;
@@ -83,6 +87,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
   const attention = ticketAttention<HomeAttentionItem>([...(secondaryData?.needsAttention ?? []), ...discordAttention(discordData?.discordThreads?.rows ?? [])], ticketQuestions(questionsData?.orchestrations ?? []));
   const agentRuns: Array<AgentRunSummary & { title: string }> = (secondaryData?.orchestrations || []).filter((run: AgentRunSummary) => !isArchived(run));
   const runOf = new Map(agentRuns.map((run) => [run.key, run]));
+  const extraOf = new Map<string, any>((prData?.ticketPullRequests || []).map((ticket: any) => [ticket.key, ticket]));
   const titleOf = (key: string) => tickets.find((ticket: any) => ticket.key === key)?.title;
 
   const handleAdd = async (event: React.FormEvent) => {
@@ -142,7 +147,14 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
             </header>
             {activeTickets.slice(0, MY_TICKETS).map((ticket: any) => {
               const run = runOf.get(ticket.key);
-              return <button className="grid w-full grid-cols-[82px_minmax(0,1fr)_minmax(0,auto)_auto_auto] items-center gap-2.5 border-0 border-b border-border bg-transparent px-4 py-2.5 text-left text-foreground transition-colors duration-150 ease-out last:border-b-0 hover:bg-surface-1 max-[760px]:grid-cols-[72px_minmax(0,1fr)_auto]" key={ticket.key} onClick={() => onTicketClick(ticket.key)}><span className="font-mono text-[0.69rem] font-bold text-accent">{ticket.key}</span><span className="truncate text-[0.8rem]">{ticket.title}</span>{run ? <AgentRunStrip run={run} className="max-[760px]:col-span-3 max-[760px]:row-start-2" /> : <span className="justify-self-end rounded-xs border border-border px-2 py-1 font-mono text-[0.62rem] text-muted-foreground max-[760px]:hidden">No agent</span>}<span className="whitespace-nowrap font-mono text-[0.63rem] font-bold text-muted-foreground tabular-nums">{ticket.storyPoints || 0} SP</span><span className="whitespace-nowrap rounded-[5px] bg-surface-2 px-1.5 py-0.5 text-[0.63rem] text-secondary-foreground max-[760px]:hidden">{ticket.status}</span></button>;
+              const extra = extraOf.get(ticket.key);
+              const prs = (extra?.pullRequests ?? []).filter((pr: any) => ['open', 'draft', 'merged'].includes(pr.status.toLowerCase()));
+              const pass = passCount(extra?.labels, slotsForTicket(discordData?.discordThreads?.rows, ticket.key));
+              return <div className="grid w-full grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2.5 border-b border-border pr-4 transition-colors duration-150 ease-out last:border-b-0 hover:bg-surface-1 max-[760px]:grid-cols-[minmax(0,1fr)_auto] max-[760px]:pr-0" key={ticket.key}>
+                <button className="grid w-full grid-cols-[82px_minmax(0,1fr)_minmax(0,auto)] items-center gap-2.5 border-0 bg-transparent px-4 py-2.5 text-left text-foreground max-[760px]:col-span-2 max-[760px]:grid-cols-[72px_minmax(0,1fr)]" onClick={() => onTicketClick(ticket.key)}><span className="font-mono text-[0.69rem] font-bold text-accent">{ticket.key}</span><span className="truncate text-[0.8rem]">{ticket.title}</span>{run ? <AgentRunStrip run={run} className="max-[760px]:col-span-2 max-[760px]:row-start-2" /> : <span className="justify-self-end rounded-xs border border-border px-2 py-1 font-mono text-[0.62rem] text-muted-foreground max-[760px]:hidden">No agent</span>}</button>
+                <div className="flex items-center gap-2 font-mono text-[0.63rem] max-[760px]:col-span-2 max-[760px]:px-4 max-[760px]:pb-2.5"><span className={cn('whitespace-nowrap font-bold tabular-nums', pass.n >= pass.of ? 'text-status-merged' : 'text-muted-foreground')}>Pass {pass.n}/{pass.of}</span>{prs.map((pr: any) => <a key={pr.id} className="text-accent hover:underline" href={pr.url} target="_blank" rel="noreferrer" title={pr.repo}>#{pr.pullNumber}</a>)}{openConflict(extra?.pullRequests) && <PRBadge status="CONFLICT" />}</div>
+                <span className="whitespace-nowrap font-mono text-[0.63rem] font-bold text-muted-foreground tabular-nums max-[760px]:hidden">{ticket.storyPoints || 0} SP</span><span className="whitespace-nowrap rounded-[5px] bg-surface-2 px-1.5 py-0.5 text-[0.63rem] text-secondary-foreground max-[760px]:hidden">{ticket.status}</span>
+              </div>;
             })}
             {activeTickets.length === 0 && <div className="px-4 py-5 text-[0.78rem] text-muted-foreground">No active Jira tickets.</div>}
             {activeTickets.length > MY_TICKETS && <div className="flex items-center justify-between border-t border-border px-4 py-2.5 text-[0.72rem] text-muted-foreground"><span>{activeTickets.length - MY_TICKETS} more on the board</span><Button variant="ghost" size="sm" className={textActionClass} onClick={() => onNavigate('/dashboard')}>Open board →</Button></div>}

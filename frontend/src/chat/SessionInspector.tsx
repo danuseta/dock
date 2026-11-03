@@ -1,11 +1,17 @@
-import React from 'react';
-import { useQuery } from '@apollo/client';
+import React, { useState } from 'react';
+import { useMutation, useQuery } from '@apollo/client';
 import { ArrowRight, FileCode, FileDiff, Workflow } from 'lucide-react';
 import type { AgentRun } from '../agents/runs';
 import { changesHref } from '../changes/href';
+import { LgtmButton } from '../agents/lgtm';
+import { LGTM_CONFIRM, lgtmResult } from '../agents/lgtmCopy';
+import { VerdictBadge } from '../agents/VerdictBadge';
+import { APPROVE_REVIEW } from '../graphql/mutations';
 import { GET_CHAT_SESSION, GET_ORCHESTRATION } from '../graphql/queries';
-import { Badge, Button } from '../components/ui';
+import { Toast } from '../components/Toast';
+import { Badge, Button, ConfirmDialog } from '../components/ui';
 import { cn } from '../lib/cn';
+import { monitorsOnly, useDockMode } from '../lib/dockMode';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 import { TICKET_STEPS, stepIndex } from '../lib/ticketDetail';
 import { CHAT_MACHINE_OPTIONS } from './composer/documents';
@@ -36,6 +42,10 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, cos
   const { data: sessionData } = useQuery<{ chatSession: ChatSession | null }>(GET_CHAT_SESSION, { variables: { id: session.id } });
   const { data: machineData } = useQuery<{ chatMachineOptions: SessionMachineOptions | null }>(CHAT_MACHINE_OPTIONS, { variables: { machine: machineOf(session) } });
   const { data } = useQuery(GET_ORCHESTRATION, { ...CACHED_QUERY_OPTIONS, variables: { key: ticketKey }, skip: !ticketKey, pollInterval: 30000 });
+  const mode = useDockMode();
+  const [approveReview, { loading: approving }] = useMutation(APPROVE_REVIEW, { refetchQueries: ['GetOrchestrations', 'GetOrchestration'] });
+  const [lgtmTarget, setLgtmTarget] = useState<AgentRun | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const run: AgentRun | null = ticketKey && data?.orchestration?.key?.toUpperCase() === ticketKey.toUpperCase() ? data.orchestration : null;
   const current = stepIndex(run?.stage);
   const machine = machineData?.chatMachineOptions ?? undefined;
@@ -47,6 +57,17 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, cos
   const sessionRows = SESSION_ROWS.flatMap((field) => applied.filter((row) => row.field === field));
   const changed = changedFiles(files);
   const total = filesTotal(changed);
+  const handleLgtm = async () => {
+    if (!lgtmTarget) return;
+    try {
+      const res = await approveReview({ variables: { ticketKey: lgtmTarget.key } });
+      setToast(lgtmResult(lgtmTarget.key, res.data?.approveReview ?? []));
+    } catch (lgtmError) {
+      setToast({ message: lgtmError instanceof Error ? lgtmError.message : 'The LGTM could not be sent', type: 'error' });
+    } finally {
+      setLgtmTarget(null);
+    }
+  };
   const changesRepo = run?.pullRequests?.[0]?.repo ?? run?.prBe ?? run?.prFe ?? null;
   return (
     <aside className={cn('flex min-h-0 flex-col gap-4 overflow-y-auto bg-surface-0 p-3.5', className)} aria-label="Session details">
@@ -62,7 +83,7 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, cos
       <section className="flex flex-col gap-2.5" aria-label="Ticket">
         <div className="flex items-center justify-between gap-2">
           <h3 className={label}>Ticket</h3>
-          {ticketKey && <span className="rounded-xs border border-border-glow px-1.5 py-px font-mono text-[0.66rem] font-bold text-secondary-foreground">{ticketKey}</span>}
+          {ticketKey && <span className="flex items-center gap-1.5"><span className="rounded-xs border border-border-glow px-1.5 py-px font-mono text-[0.66rem] font-bold text-secondary-foreground">{ticketKey}</span>{run && <VerdictBadge run={run} />}</span>}
         </div>
         {!ticketKey && <p className="text-xs text-muted-foreground">This session has no ticket.</p>}
         {run && (
@@ -101,10 +122,22 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, cos
         </div>
       </section>
       <div className="mt-auto flex flex-col gap-4">
+        {run?.kind === 'review' && !monitorsOnly(mode) && <LgtmButton run={run} busy={approving} onLgtm={setLgtmTarget} className="w-full max-[900px]:h-11" />}
         {ticketKey && onNavigate && run && <Button size="sm" variant="ghost" className="w-full max-[900px]:h-11" onClick={() => onNavigate(`/agents?run=${encodeURIComponent(ticketKey)}`)}><Workflow size={13} aria-hidden="true" />View flow</Button>}
         {ticketKey && onNavigate && changesRepo && <Button size="sm" variant="ghost" className="w-full max-[900px]:h-11" onClick={() => onNavigate(changesHref(ticketKey, changesRepo, 'sessions', session.id))}><FileDiff size={13} aria-hidden="true" />View changes</Button>}
         {ticketKey && onTicketClick && <Button size="sm" className="w-full max-[900px]:h-11" onClick={() => onTicketClick(ticketKey)}>Open ticket<ArrowRight size={13} aria-hidden="true" /></Button>}
       </div>
+      <ConfirmDialog
+        open={Boolean(lgtmTarget)}
+        title={`LGTM ${lgtmTarget?.key ?? ''}?`}
+        description={LGTM_CONFIRM.description}
+        confirmLabel="LGTM"
+        busyLabel="Sending..."
+        busy={approving}
+        onConfirm={() => void handleLgtm()}
+        onCancel={() => setLgtmTarget(null)}
+      />
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </aside>
   );
 };

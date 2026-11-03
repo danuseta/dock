@@ -32,6 +32,18 @@ export function sidebarDot(session: Pick<ChatSession, 'waiting' | 'status'>, fac
   return dotState({ bridgeUp: facts.bridgeUp, waiting: Boolean(session.waiting), busy });
 }
 
+export type SessionFilter = 'all' | 'task' | 'review';
+
+export function sessionKind(title: string): 'task' | 'review' | null {
+  if (/^Task-/.test(title)) return 'task';
+  return /^Review-/.test(title) ? 'review' : null;
+}
+
+export function filterSessions(sessions: ChatSession[], filter: SessionFilter): ChatSession[] {
+  if (filter === 'all') return sessions;
+  return sessions.filter((s) => sessionKind(s.title) === filter);
+}
+
 export function groupSessions(sessions: ChatSession[], now: number): SessionGroup[] {
   return ORDER
     .map((key) => ({ key, label: LABELS[key], sessions: sessions.filter((s) => sessionGroupKey(s, now) === key) }))
