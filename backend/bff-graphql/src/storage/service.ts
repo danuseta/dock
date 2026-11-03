@@ -583,11 +583,12 @@ export class StorageService {
       let used = await tx.chatActivity.count({ where: { sessionId, turnId, eventId: { not: droppedId } } });
       let accepted = 0;
       let dropped = 0;
+      let noSpare = false;
       for (const event of events) {
         const row = known.get(event.eventId);
         if (!row) {
           if (used >= maxRows && event.kind !== 'agent') {
-            const spare = await tx.chatActivity.findFirst({
+            const spare = noSpare ? null : await tx.chatActivity.findFirst({
               where: {
                 sessionId, turnId, status: { not: 'running' }, eventId: { not: droppedId },
                 OR: [{ kind: 'hook' }, { kind: 'note', name: { notIn: ['dropped', 'subagent'] } }],
@@ -596,7 +597,10 @@ export class StorageService {
               select: { id: true, eventId: true },
             });
             dropped += 1;
-            if (!spare) continue;
+            if (!spare) {
+              noSpare = true;
+              continue;
+            }
             await tx.chatActivity.delete({ where: { id: spare.id } });
             known.delete(spare.eventId);
             used -= 1;
@@ -604,6 +608,7 @@ export class StorageService {
           used += 1;
           seq += 1;
           known.set(event.eventId, await tx.chatActivity.create({ data: { sessionId, turnId, ...event, seq } }));
+          noSpare = false;
         } else if (row.status !== 'running' && event.status === 'running') {
           accepted += 1;
           continue;
@@ -620,6 +625,7 @@ export class StorageService {
           if (changed) {
             seq += 1;
             known.set(event.eventId, await tx.chatActivity.update({ where: { id: row.id }, data: { ...next, seq } }));
+            noSpare = false;
           }
         }
         accepted += 1;

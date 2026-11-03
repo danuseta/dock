@@ -18,7 +18,7 @@ import { ChannelInputError, channelStore, isChannelKind, threadService, withJira
 import { DiscordReaderError, ROW_VERSION } from '../integrations/discord-reader';
 import { CronInputError, type OwnerAnswer, type OwnerChange } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
-import { listedAutoReviews } from '../integrations/auto-review-live';
+import { autoReview, listedAutoReviews } from '../integrations/auto-review-live';
 import { labelOrder } from '../integrations/orchestrator-cron';
 import { pushService } from '../integrations/push';
 import { demoVideos, withTitles } from '../integrations/demo-videos';
@@ -64,7 +64,7 @@ async function discordThreadsView() {
     labels: Array.isArray(ticket.labels) ? ticket.labels.map(String) : [],
   }]));
   const error = status.error ?? discordGateway.error;
-  return { configured: Boolean(config), ownerSet: Boolean(owner), live: discordGateway.live, syncedAt: status.syncedAt, error, channels, rows: withJira(await discordReader.freshen(rows), jira, isSettledStatus, new Date()) };
+  return { configured: Boolean(config), ownerSet: Boolean(owner), live: discordGateway.live, syncedAt: status.syncedAt, error, channels, rows: withJira(await discordReader.freshen(rows), jira, isSettledStatus, new Date(), (id) => autoReview.skipReason(id)) };
 }
 
 function channelKind(kind: string) {

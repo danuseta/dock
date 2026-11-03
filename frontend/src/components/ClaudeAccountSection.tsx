@@ -119,6 +119,7 @@ export const ClaudeAccountSection: React.FC = () => {
           </label>
           <label className="flex items-center gap-3 self-end pb-2.5 text-sm max-[760px]:col-span-2"><Checkbox checked={rotation?.backToMain ?? true} disabled={saving} onChange={(event) => void saveRotation({ backToMain: event.target.checked })} />Back to main when it resets</label>
         </div>
+        <p className="text-xs text-muted-foreground">Rotates when either limit is reached</p>
         <p className="text-xs text-muted-foreground">Checked after each turn from the usage that turn reports, and every 5 minutes. The next account is the first in the list below both limits by its last seen numbers. When every account is over a limit, DOCK stays on the current one and tells you.</p>
         {state.log.length > 0 && (
           <ol className="m-0 flex list-none flex-col gap-1.5 border-t border-border p-0 pt-3 font-mono text-[0.72rem]">

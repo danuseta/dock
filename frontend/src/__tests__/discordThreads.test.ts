@@ -7,7 +7,7 @@ import { NO_SPRINT, ago, channelLabel, channelTabs, countFor, discordAttention, 
 const thread = (id: string, extra: Partial<DiscordThread>): DiscordThread => ({
   id, channelId: 'cb', channel: 'bug-report', kind: 'bug', title: `Thread ${id}`, url: `https://discord.com/channels/g/${id}`, state: 'FLOW_1', why: 'New bug; nobody said on it',
   needsYou: true, older: false, dismissed: false, createdBy: 'Rina', createdByAvatar: null, createdAt: '2026-10-20T09:00:00.000Z', lastActivity: '2026-10-22T09:00:00.000Z',
-  messageCount: 1, tags: [], slots: 2, tickets: [], prs: [], claim: null, onIt: [], passes: [], claimerRepliedAt: null, mentionedAt: null, repliedAt: null, messages: [], ...extra,
+  messageCount: 1, tags: [], slots: 2, tickets: [], prs: [], claim: null, onIt: [], passes: [], autoReviewSkip: null, claimerRepliedAt: null, mentionedAt: null, repliedAt: null, messages: [], ...extra,
 });
 
 const rows = [

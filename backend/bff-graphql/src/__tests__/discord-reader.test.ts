@@ -47,6 +47,14 @@ test('a bug report thread follows who took it and who spoke last', () => {
   assert.strictEqual(sorted('bug', [msg(RINA, 'x')], RINA.id, true).state, 'CLOSED');
 });
 
+test("the owner's own on it is kept beside the claim when a second reviewer says on it later", () => {
+  const both = sorted('pr', [msg(RINA, 'PR please'), msg(DANU, 'on it'), msg(HAMZAH, 'on it')], RINA.id);
+  assert.strictEqual(both.claim?.author, 'Hamzah');
+  assert.strictEqual(both.ownClaim?.author, 'Danu');
+  assert.strictEqual(both.ownClaim?.mine, true);
+  assert.strictEqual(sorted('pr', [msg(RINA, 'PR please'), msg(HAMZAH, 'on it')], RINA.id).ownClaim, null);
+});
+
 test('the claimer writing again is what counts as a reply to the claim', () => {
   const others = sorted('pr', [msg(DANU, 'Review please'), msg(HAMZAH, 'on it'), msg(RINA, 'video for context')], ME);
   assert.strictEqual(others.claimerRepliedAt, null, 'a message from someone else is not a reply to the claim');

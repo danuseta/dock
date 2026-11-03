@@ -17,7 +17,7 @@ import { autoBroadcast } from './integrations/broadcast';
 import { decisionGate, sweepReleases } from './integrations/decision-gate';
 import { claudeAccounts, cycleAvailable } from './integrations/claude-accounts-live';
 import { dockMode } from './mode';
-import { useWriteAheadLog } from './storage/client';
+import { useBusyTimeout, useWriteAheadLog } from './storage/client';
 import { StorageService } from './storage/service';
 
 const port = Number(process.env.PORT || 4000);
@@ -33,6 +33,7 @@ const RELEASE_SWEEP_MS = 5 * 60 * 1000;
 export async function startServer(): Promise<void> {
   const journal = await useWriteAheadLog().catch((error) => `unchanged (${error instanceof Error ? error.message : 'unknown error'})`);
   if (journal !== 'wal') console.warn(`SQLite journal mode: ${journal}`);
+  await useBusyTimeout().catch((error) => console.warn(`SQLite busy timeout not set: ${error instanceof Error ? error.message : 'unknown error'}`));
   const { app, frontendEnabled } = await createApp();
   const pinWarning = missingPinWarning(await new StorageService().hasMasterPin().catch(() => true));
   if (pinWarning) console.warn(pinWarning);

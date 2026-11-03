@@ -369,6 +369,7 @@ const ThreadPane: React.FC<{ thread: DiscordThread; picked: boolean; onBack: () 
         <dl className="grid grid-cols-5 gap-x-7 gap-y-1 text-[0.72rem] max-[1100px]:grid-cols-2 max-[600px]:grid-cols-1">
           {facts.map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-muted-foreground">{label}</dt><dd className="m-0 truncate text-foreground">{value}</dd></div>)}
         </dl>
+        {thread.autoReviewSkip && <p className="mt-2 mb-0 text-[0.68rem] text-muted-foreground">Auto review skipped: {thread.autoReviewSkip}</p>}
       </div>
       <div className="flex-1 py-1.5">
         {earlier > 0 && <p className="mx-5 my-1.5 pl-11 text-[0.68rem] text-muted-foreground">{earlier} earlier {earlier === 1 ? 'message' : 'messages'} · Open in Discord to read them</p>}

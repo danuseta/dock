@@ -46,6 +46,8 @@ export interface DiscordThread {
   onIt: string[];
   /** The Jira Pass labels of the thread's tickets. */
   passes: string[];
+  /** Why the auto review did not start for this pull request thread. */
+  autoReviewSkip: string | null;
   claimerRepliedAt: string | null;
   mentionedAt: string | null;
   repliedAt: string | null;

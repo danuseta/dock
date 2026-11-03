@@ -139,7 +139,7 @@ const GuidePage: React.FC<GuidePageProps> = ({ onNavigate }) => (
         <p>Di <Go to="/settings?section=claude" label="Settings → Claude account" onNavigate={onNavigate} />. Akun berasal dari <code className="font-mono text-xs">/cycle</code> di workspace (parameter token Coder).</p>
         <SettingsBlock rows={[
           ['Use', '–', 'per akun', 'Pindah akun. Berlaku untuk giliran berikutnya; giliran yang sedang jalan selesai di akun lama.'],
-          ['Rotate automatically', 'off', 'on / off', 'Pindah ke akun berikutnya kalau akun aktif melewati batas.'],
+          ['Rotate automatically', 'off', 'on / off', 'Pindah ke akun berikutnya kalau akun aktif mencapai batas 5h atau batas 7d, mana saja yang lebih dulu.'],
           ['Rotate when 5h reaches', '90%', '50–100', ''],
           ['Rotate when 7d reaches', '95%', '50–100', ''],
           ['Back to main when it resets', 'on', 'on / off', 'Setelah rotasi otomatis, kembali ke main begitu main di bawah batas lagi.'],

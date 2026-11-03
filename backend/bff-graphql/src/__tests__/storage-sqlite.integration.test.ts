@@ -293,6 +293,32 @@ test('SQLite storage keeps chat activity per turn with its own seq and removes i
   assert.strictEqual(await prisma.chatActivity.count({ where: { sessionId } }), 0);
 });
 
+test('SQLite storage gives two concurrent activity batches of one session distinct, increasing seq', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }] = await Promise.all([
+    import('../storage/service'),
+    import('../storage/client'),
+  ]);
+  const storage = new StorageService(prisma);
+  t.after(() => prisma.$disconnect());
+
+  const at = new Date('2026-10-11T03:00:00.000Z');
+  const sessionId = 'aaaaaaaa-0000-4000-8000-000000000012';
+  await storage.createChatSession({ id: sessionId, source: 'dock', title: 'ZED-102', ticketKey: 'ZED-102', startedAt: at, lastMessageAt: at });
+  const turn = await storage.createChatMessage({ sessionId, role: 'user', text: 'one', state: 'done', at });
+  const row = (eventId: string) => ({
+    eventId, parentId: null, kind: 'tool', agent: 'main', name: 'Bash', label: 'Bash', summary: 'ls', detail: null, status: 'running', startedAt: at, endedAt: null,
+  });
+  const batch = (prefix: string) => storage.upsertChatActivity(sessionId, turn.id, [row(`${prefix}1`), row(`${prefix}2`)], 400, 'dropped-server', at);
+
+  const results = await Promise.all([batch('a'), batch('b')]);
+  assert.deepStrictEqual(results.map((result) => result.accepted), [2, 2]);
+  assert.deepStrictEqual(results.map((result) => result.seq).sort((a, b) => a - b), [2, 4]);
+  const seqs = (await storage.getChatActivity(sessionId, {}, 10)).map((item) => item.seq);
+  assert.deepStrictEqual(seqs, [1, 2, 3, 4]);
+});
+
 test('SQLite storage keeps chat interactions unique per request, caps them, and removes them with the turn or the session', {
   skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
 }, async (t) => {

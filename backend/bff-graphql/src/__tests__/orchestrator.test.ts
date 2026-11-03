@@ -150,7 +150,8 @@ test('orchestrator ledger parsing keeps only what DOCK shows', () => {
 
   assert.throws(() => parseLedger({ ...ledger, key: '../etc' }), OrchestratorInputError);
   assert.throws(() => parseLedger({ ...ledger, stage: 'shipping' }), OrchestratorInputError);
-  assert.throws(() => parseLedger({ ...ledger, ac: Array.from({ length: 51 }, () => ({})) }), OrchestratorInputError);
+  assert.strictEqual(parseLedger({ ...ledger, ac: Array.from({ length: 120 }, () => ({})) }).ac.length, 120);
+  assert.throws(() => parseLedger({ ...ledger, ac: Array.from({ length: 201 }, () => ({})) }), OrchestratorInputError);
   assert.strictEqual(
     parseLedger({ ...ledger, updatedAt: '2999-01-01T00:00:00.000Z' }, new Date('2026-10-05T00:00:00.000Z')).updatedAt,
     '2026-10-05T00:00:00.000Z',
@@ -287,6 +288,8 @@ test('a run whose lead ended its turn with subagents still running is stalled at
   const { storage, events } = memoryStorage();
   const service = new OrchestratorService(storage, await mkdtemp(path.join(os.tmpdir(), 'dock-transcripts-')));
   await service.ingestLedger({ ...ledger, waiting: '', pr: {} }, soon, 'laptop');
+  const wide = await service.ingestLedger({ ...ledger, key: 'QRD-1500', waiting: '', ac: Array.from({ length: 120 }, (_, index) => ({ n: index + 1, state: 'PASS', text: `AC ${index + 1}` })), pr: {} }, soon, 'laptop');
+  assert.deepStrictEqual([wide.acPassed, wide.acTotal], [120, 120], 'a ledger with 120 acceptance criteria is stored whole');
   await service.setStalledDetail('QRD-1387', base.stalledDetail);
   await service.setStalledDetail('QRD-1387', base.stalledDetail);
   assert.deepStrictEqual((await service.get('QRD-1387', soon))?.stalledDetail, base.stalledDetail);
