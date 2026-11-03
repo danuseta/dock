@@ -12,6 +12,7 @@ import { CHAT_MACHINE, chatService } from '../integrations/chat';
 import { retroApplyPrompt, retroNumbers, retroProblems, retroTickets } from '../integrations/retro';
 import { StorageService } from '../storage/service';
 import { activeSprint } from '../integrations/sprint-plan';
+import { lookupDependencies } from '../integrations/dependency-lookup';
 import { sprintPlanner } from '../integrations/sprint-plan-live';
 import { isSettledStatus, mergeAttention, planAttentionItems, withoutSettledTickets } from '../integrations/attention';
 import { discordGateway, discordReader } from '../integrations/discord-reader-live';
@@ -139,7 +140,8 @@ async function sprintPlanView() {
       }
     } catch { /* snapshot unreadable: parents show without a title */ }
   }
-  const lookup = (key: string) => known.get(key) ?? null;
+  const outside = await lookupDependencies(edges.map((edge) => edge.dependsOnKey).filter((key) => !known.has(key)), (key) => jiraAPI.getTicket(key));
+  const lookup = (key: string) => known.get(key) ?? outside.get(key) ?? null;
   const pending = new Set(edges.filter((edge) => edge.state === 'pending').map((edge) => edge.ticketKey));
   const edgeViews = edges.map((edge) => {
     const parent = lookup(edge.dependsOnKey);
