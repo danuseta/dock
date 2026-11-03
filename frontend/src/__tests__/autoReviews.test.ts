@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { AUTO_REVIEW_LABEL, latestByTicket, prLabel, type AutoReviewRow } from '../agents/autoReviews';
+import { revisedRound, signalOf } from '../lib/attention';
 import { savedValues, sectionInput } from '../settings/sections';
 
 const row = (id: string, ticketKey: string, status: string): AutoReviewRow => ({
@@ -27,4 +28,15 @@ test('both auto review settings are off until turned on, and the Discord save se
   const agents = readFileSync(new URL('../pages/AgentsPage.tsx', import.meta.url), 'utf8');
   assert.match(agents, /<AutoReviewList rows=\{autoReviews\}/);
   assert.match(agents, /<AutoReviewBadge row=\{autoByTicket\.get\(run\.key\)\}/);
+});
+
+test('the review findings toggle is on until saved off, and a reported round marks the session', () => {
+  assert.equal(savedValues({}).discord.reviewFindingsToTask, 'true');
+  assert.equal(savedValues({ reviewFindingsToTask: false }).discord.reviewFindingsToTask, 'false');
+  assert.equal(sectionInput('discord', { ...savedValues({}).discord }).reviewFindingsToTask, 'true');
+  assert.deepEqual([signalOf('REVIEW_REVISED').label, signalOf('REVIEW_REVISED').rank], ['REVISED', 5]);
+  assert.deepEqual([signalOf('REVIEW_ROUND_FAILED').label, signalOf('REVIEW_ROUND_FAILED').rank], ['FINDINGS', 3]);
+  assert.equal(revisedRound({ reviewRound: { status: 'reported', summary: 'QRD-1: 1 valid, pushed' } })?.summary, 'QRD-1: 1 valid, pushed');
+  assert.equal(revisedRound({ reviewRound: { status: 'sent' } }), null);
+  assert.equal(revisedRound({}), null);
 });

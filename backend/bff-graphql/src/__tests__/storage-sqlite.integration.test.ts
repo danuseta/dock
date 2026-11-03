@@ -916,3 +916,68 @@ test('SQLite storage removes a reset run with its events and keeps the reset', {
   assert.deepStrictEqual((await storage.getOrchestratorResets('workspace')).map((reset) => reset.key), ['ZED-480']);
   assert.deepStrictEqual(await storage.getOrchestratorResets('laptop'), []);
 });
+
+test('SQLite storage keeps one review round per thread and last message', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }] = await Promise.all([import('../storage/service'), import('../storage/client')]);
+  const storage = new StorageService(prisma);
+  t.after(() => prisma.$disconnect());
+  const now = Date.now();
+  const round = (lastMessageId: string, at: number) => ({
+    threadId: 'thread-1', ticketKey: 'ZED-500', threadUrl: 'https://discord.test/1', prUrls: '[]', messageIds: `["${lastMessageId}"]`, lastMessageId, lastMessageAt: new Date(at),
+  });
+  const first = await storage.createReviewRound(round('m1', now - 2000));
+  await assert.rejects(storage.createReviewRound(round('m1', now - 2000)), { code: 'P2002' });
+  assert.strictEqual(await prisma.reviewRound.count({ where: { threadId: 'thread-1' } }), 1);
+
+  await storage.updateReviewRound(first.id, { sessionId: 'session-1', status: 'sent' });
+  assert.strictEqual((await storage.getSentRoundForSession('session-1'))?.id, first.id);
+  assert.strictEqual((await storage.roundsForSessions(['session-1'])).get('session-1')?.id, first.id);
+
+  await storage.updateReviewRound(first.id, { status: 'reported', valid: 2, invalid: 1, pushed: true, reportedAt: new Date() });
+  assert.deepStrictEqual((await storage.openReviewRounds(3)).map((row) => row.id), [first.id]);
+  const second = await storage.createReviewRound(round('m2', now - 1000));
+  assert.strictEqual((await storage.latestRoundsByThread(['thread-1'])).get('thread-1')?.id, second.id);
+  assert.deepStrictEqual(await storage.openReviewRounds(3), [], 'a newer round replaces the reported one');
+
+  await storage.updateReviewRound(second.id, { status: 'sent', sessionId: 'session-2' });
+  const expired = await storage.expireSentRounds(new Date(Date.now() + 1000), 3, 'no result');
+  assert.deepStrictEqual(expired.map((row) => row.id), [second.id]);
+  assert.deepStrictEqual((await storage.getRoundsToSend(3)), []);
+  assert.deepStrictEqual((await storage.openReviewRounds(3)).map((row) => row.id), [second.id]);
+
+  const old = await storage.createReviewRound({ ...round('m0', 0), threadId: 'thread-old', findings: '["a"]' });
+  await storage.updateReviewRound(old.id, { status: 'reported' });
+  assert.ok(!(await storage.openReviewRounds(3)).some((row) => row.id === old.id), 'a round older than 14 days is not open');
+  assert.strictEqual((await storage.getReviewRound(old.id))?.findings, '["a"]');
+});
+
+test('SQLite storage expires review rounds stuck in sending', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }] = await Promise.all([import('../storage/service'), import('../storage/client')]);
+  const storage = new StorageService(prisma);
+  t.after(() => prisma.$disconnect());
+  const stuck = await storage.createReviewRound({ threadId: 'thread-2', ticketKey: 'ZED-501', threadUrl: 'https://discord.test/2', prUrls: '[]', messageIds: '["m1"]', lastMessageId: 'm1', lastMessageAt: new Date(1000) });
+  assert.strictEqual((await storage.getReviewRound(stuck.id))?.status, 'sending');
+  assert.ok(!(await storage.pendingReviewSessions()).includes('session-3'));
+  await storage.updateReviewRound(stuck.id, { sessionId: 'session-3' });
+  assert.ok((await storage.pendingReviewSessions()).includes('session-3'), 'a sending round with a session is pending');
+  await storage.updateReviewRound(stuck.id, { sessionId: null });
+  assert.ok(!(await storage.getRoundsToSend(3)).some((row) => row.id === stuck.id), 'a fresh sending round is not resent');
+  await prisma.reviewRound.update({ where: { id: stuck.id }, data: { createdAt: new Date(Date.now() - 120_000) } });
+  assert.ok((await storage.getRoundsToSend(3)).some((row) => row.id === stuck.id), 'a sending round with no session for over 60 s is resent');
+  await storage.updateReviewRound(stuck.id, { sessionId: 'session-3' });
+  assert.strictEqual(await storage.getReviewRound('missing'), null);
+  const expired = await storage.expireSentRounds(new Date(Date.now() + 1000), 3, 'no result');
+  assert.ok(expired.some((row) => row.id === stuck.id));
+  const after = await storage.getReviewRound(stuck.id);
+  assert.deepStrictEqual([after?.status, after?.attempts, after?.detail], ['failed', 3, 'no result']);
+
+  const { EXPIRED_DETAIL } = await import('../integrations/review-findings');
+  await storage.updateReviewRound(stuck.id, { detail: EXPIRED_DETAIL });
+  assert.ok((await storage.pendingReviewSessions()).includes('session-3'), 'a round expired in the last day is still pending');
+  await prisma.reviewRound.update({ where: { id: stuck.id }, data: { createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000) } });
+  assert.ok(!(await storage.pendingReviewSessions()).includes('session-3'), 'an expired round older than a day is not pending');
+});

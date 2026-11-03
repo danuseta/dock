@@ -277,6 +277,7 @@ export const GET_SETTINGS = gql`
       discordUserId
       autoReviewOnIt
       autoLgtm
+      reviewFindingsToTask
       discordMessageTemplate
       hasGoogleClientSecret
       googleCalendarConnected
@@ -763,6 +764,7 @@ export const CHAT_SESSION_FIELDS = `
   lastText
   waiting
   workerCount
+  reviewRound { status summary threadUrl at }
 `;
 
 export const CHAT_INTERACTION_FIELDS = `

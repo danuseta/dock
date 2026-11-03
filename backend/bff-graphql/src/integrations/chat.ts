@@ -462,6 +462,8 @@ export class ChatService {
   onAsk: (ask: { sessionId: string; sessionTitle: string; id: number; kind: string; title: string; tool: string | null; summary: string | null }) => void = () => undefined;
   /** Hears of every turn that ends on its own, for the phone notification. It must not throw. */
   onTurnDone: (turn: { sessionId: string; sessionTitle: string }) => void = () => undefined;
+  /** Hears of every turn that ends, whatever its origin and whether it failed or was stopped. It must not throw. */
+  onTurnEnded: (turn: { sessionId: string; ticketKey: string | null; failed: boolean }) => void = () => undefined;
   /** Agent file jobs waiting for a machine's bridge, handed out once on a claim. Wired by the agents bridge like cronLimit. */
   agentJobs: (machine: string) => Array<{ id: string; op: string; input: unknown }> = () => [];
 
@@ -1477,6 +1479,7 @@ export class ChatService {
         await this.cronTurn(session.ticketKey, detail, true).catch(() => undefined);
       }
       if (ended && !delta.error && !delta.stopped && session.origin !== 'cron') this.onTurnDone({ sessionId: session.id, sessionTitle: session.title });
+      if (ended) this.onTurnEnded({ sessionId: session.id, ticketKey: session.ticketKey ?? null, failed: Boolean(delta.error) });
       return { id: updated.id, status: updated.status, messageCount };
     } finally {
       if (ended) await this.closeActivity(session.id, replyTo.id);

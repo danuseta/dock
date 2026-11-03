@@ -1,4 +1,5 @@
-import { Prisma, type PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient, type ReviewRound } from '@prisma/client';
+import { EXPIRED_DETAIL } from '../integrations/review-findings';
 import { prisma } from './client';
 import { decrypt, encrypt, hashPin, verifyPin } from './crypto';
 
@@ -483,6 +484,89 @@ export class StorageService {
 
   updateAutoReview(id: string, data: { sessionId?: string | null; status?: string; detail?: string | null; finishedAt?: Date | null }) {
     return this.db.autoReview.update({ where: { id }, data });
+  }
+
+  createReviewRound(data: { threadId: string; ticketKey: string; threadUrl: string; prUrls: string; messageIds: string; findings?: string; lastMessageId: string; lastMessageAt: Date }) {
+    return this.db.reviewRound.create({ data });
+  }
+
+  updateReviewRound(id: string, data: {
+    sessionId?: string | null; opened?: boolean; status?: string; attempts?: number;
+    valid?: number | null; invalid?: number | null; pushed?: boolean | null; detail?: string | null; reportedAt?: Date | null;
+  }) {
+    return this.db.reviewRound.update({ where: { id }, data });
+  }
+
+  /** Sessions owing a result: `sending` and `sent` rounds, and rounds expired in the last 24 h whose late marker may still arrive. */
+  async pendingReviewSessions() {
+    const day = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const rows = await this.db.reviewRound.findMany({
+      where: {
+        sessionId: { not: null },
+        OR: [{ status: { in: ['sending', 'sent'] } }, { status: 'failed', detail: EXPIRED_DETAIL, createdAt: { gte: day } }],
+      },
+      select: { sessionId: true },
+    });
+    return rows.map((row) => row.sessionId as string);
+  }
+
+  getReviewRound(id: string) {
+    return this.db.reviewRound.findUnique({ where: { id } });
+  }
+
+  /** The newest round of each thread, by its last finding message. */
+  async latestRoundsByThread(threadIds: string[]) {
+    const latest = new Map<string, ReviewRound>();
+    if (threadIds.length === 0) return latest;
+    const rows = await this.db.reviewRound.findMany({ where: { threadId: { in: threadIds } }, orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }] });
+    for (const row of rows) if (!latest.has(row.threadId)) latest.set(row.threadId, row);
+    return latest;
+  }
+
+  /** The newest round of each session. */
+  async roundsForSessions(sessionIds: string[]) {
+    const latest = new Map<string, ReviewRound>();
+    if (sessionIds.length === 0) return latest;
+    const rows = await this.db.reviewRound.findMany({ where: { sessionId: { in: sessionIds } }, orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }] });
+    for (const row of rows) if (row.sessionId && !latest.has(row.sessionId)) latest.set(row.sessionId, row);
+    return latest;
+  }
+
+  /** The round a session still owes a result for, newest first. */
+  getSentRoundForSession(sessionId: string) {
+    return this.db.reviewRound.findFirst({ where: { sessionId, status: 'sent' }, orderBy: { lastMessageAt: 'desc' } });
+  }
+
+  /** Failed rounds with attempts left, and rounds left in `sending` with no session for over a minute (a crash between create and send). */
+  getRoundsToSend(maxAttempts: number) {
+    return this.db.reviewRound.findMany({
+      where: { OR: [{ status: 'failed', attempts: { lt: maxAttempts } }, { status: 'sending', sessionId: null, createdAt: { lt: new Date(Date.now() - 60_000) } }] },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  /** Marks `sending` and `sent` rounds created before the cutoff as failed with attempts at the cap, so they are not retried. */
+  async expireSentRounds(before: Date, maxAttempts: number, detail: string) {
+    const stale = await this.db.reviewRound.findMany({ where: { status: { in: ['sending', 'sent'] }, createdAt: { lt: before } } });
+    if (stale.length === 0) return stale;
+    await this.db.reviewRound.updateMany({ where: { id: { in: stale.map((row) => row.id) } }, data: { status: 'failed', attempts: maxAttempts, detail } });
+    return stale;
+  }
+
+  /** Reported rounds, and failed rounds that ran out of attempts, from the last 14 days that no newer round on the same thread has replaced. */
+  async openReviewRounds(maxAttempts: number) {
+    const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    const rows = await this.db.reviewRound.findMany({
+      where: {
+        AND: [
+          { OR: [{ status: 'reported' }, { status: 'failed', attempts: { gte: maxAttempts } }] },
+          { OR: [{ lastMessageAt: { gte: since } }, { reportedAt: { gte: since } }] },
+        ],
+      },
+      orderBy: { lastMessageAt: 'desc' },
+    });
+    const latest = await this.latestRoundsByThread([...new Set(rows.map((row) => row.threadId))]);
+    return rows.filter((row) => latest.get(row.threadId)?.id === row.id);
   }
 
   getChatSessionTitles(prefix: string) {

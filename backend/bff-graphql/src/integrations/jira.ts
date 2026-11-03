@@ -169,6 +169,12 @@ export class JiraService {
     return this.fetchOnce(cacheKey, fetchTicket);
   }
 
+  /** The ticket as Jira has it now; skips the ticket cache. */
+  async getTicketNow(credentials: JiraCredentials, ticketKey: string) {
+    const issue = await this.client.getTicketDetails(credentials, ticketKey.trim().toUpperCase());
+    return this.formatTicket(issue, cleanDomain(credentials.domain));
+  }
+
   listProjects(credentials: JiraCredentials) { return this.client.listProjects(credentials); }
   transitionTo(credentials: JiraCredentials, ticketKey: string, statusName: string) { return this.client.transitionTo(credentials, ticketKey, statusName); }
   validateCredentials(credentials: JiraCredentials) { return this.client.validateCredentials(credentials); }

@@ -23,8 +23,17 @@ const SIGNALS: Record<string, Signal> = {
   DISCORD: { rank: 4, group: 'answer', label: 'DISCORD' },
   AGENT_CHANGES_REQUESTED: { rank: 5, group: 'answer', label: 'CHANGES REQ' },
   PR_CHANGES_REQUESTED: { rank: 5, group: 'answer', label: 'CHANGES REQ' },
+  REVIEW_ROUND_FAILED: { rank: 3, group: 'blocked', label: 'FINDINGS' },
+  REVIEW_REVISED: { rank: 5, group: 'answer', label: 'REVISED' },
   AGENT_WAITING: { rank: 6, group: 'answer', label: 'WAITING' },
   AGENT_STALLED: { rank: 7, group: 'quiet', label: 'STALLED' },
+};
+
+export interface ReviewRoundInfo { status: string; summary?: string | null; threadUrl?: string | null; at?: string | null }
+
+export const revisedRound = (session: object): ReviewRoundInfo | null => {
+  const round = (session as { reviewRound?: ReviewRoundInfo | null }).reviewRound;
+  return round && (round.status === 'reported' || round.status === 'answered') ? round : null;
 };
 
 export const signalOf = (type: string): Signal => SIGNALS[type] ?? { rank: 8, group: 'quiet', label: type.replace(/_/g, ' ') };

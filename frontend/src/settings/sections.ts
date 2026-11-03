@@ -42,6 +42,7 @@ export interface SavedSettings {
   discordUserId?: string | null;
   autoReviewOnIt?: boolean | null;
   autoLgtm?: boolean | null;
+  reviewFindingsToTask?: boolean | null;
   hasGoogleClientSecret?: boolean | null;
   googleCalendarConnected?: boolean | null;
   googleCalendarError?: string | null;
@@ -115,6 +116,7 @@ export function savedValues(settings: SavedSettings): Record<DraftSectionId, Sec
       discordUserId: settings.discordUserId || '',
       autoReviewOnIt: String(Boolean(settings.autoReviewOnIt)),
       autoLgtm: String(Boolean(settings.autoLgtm)),
+      reviewFindingsToTask: String(settings.reviewFindingsToTask !== false),
     },
     calendar: { googleClientId: settings.googleClientId || '', googleClientSecret: '', googleCalendarId: settings.googleCalendarId || 'primary' },
   };

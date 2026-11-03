@@ -362,7 +362,7 @@ export interface CronDeps {
   /** Settings: where an owner answer goes, a new session or the ticket's last Task session. */
   ownerReplySession(): Promise<'new' | 'last'>;
   /** The newest Task session the cron or an owner answer opened for the ticket, or null. */
-  lastTaskSession(key: string): Promise<{ id: string } | null>;
+  lastTaskSession(key: string): Promise<{ id: string; machine?: string } | null>;
   runningSessions(): Promise<string[]>;
   stopTurn(sessionId: string): Promise<unknown>;
   hasPushDevices(): Promise<boolean>;
@@ -693,6 +693,29 @@ export class OrchestratorCron {
       throw error;
     }
     return session.id;
+  }
+
+  /**
+   * A message for the ticket's last Task session, queued behind its running turn; without one, a new `Task-<key>` session
+   * on the cron's machine, removed again when its first message is refused.
+   */
+  async taskMessage(key: string, prompt: string): Promise<{ sessionId: string; opened: boolean }> {
+    const settings = await this.settings();
+    const last = await this.deps.lastTaskSession(key);
+    if (last) {
+      const options = await this.deps.machineOptions(last.machine ?? settings.machine, this.turnOptions(settings));
+      await this.deps.send(last.id, prompt, options, { cronSlot: false, queue: true });
+      return { sessionId: last.id, opened: false };
+    }
+    const options = await this.deps.machineOptions(settings.machine, this.turnOptions(settings));
+    const session = await this.deps.openSession({ ticketKey: key, machine: settings.machine, title: ticketSessionTitle('Task', key), origin: 'cron', options });
+    try {
+      await this.deps.send(session.id, prompt, options, { cronSlot: false });
+    } catch (error) {
+      await this.deps.deleteSession(session.id).catch(() => undefined);
+      throw error;
+    }
+    return { sessionId: session.id, opened: true };
   }
 
   async stopAll(): Promise<number> {

@@ -28,6 +28,7 @@ import { WorkspaceFilesError, workspaceFiles } from '../integrations/workspace-f
 import { elevenLabsKeys } from '../integrations/elevenlabs-keys';
 import { broadcastDeps, sendBroadcast } from '../integrations/broadcast';
 import { ReviewApprovalError, approvalRecords, lgtmReview, ownerPassLabel, resetOwnerPassLabel } from '../integrations/review-approval';
+import { MAX_ROUND_ATTEMPTS, roundSummary } from '../integrations/review-findings';
 import { decisionGate } from '../integrations/decision-gate';
 import { doctorReports } from '../integrations/doctor';
 import { claudeUsage } from '../integrations/claude-usage';
@@ -46,6 +47,15 @@ const githubAPI = new GitHubAPI();
 const discordAPI = new DiscordAPI();
 const storageAPI = new StorageAPI();
 const storageService = new StorageService();
+
+/** The newest review round of each listed session, from one query. */
+async function withReviewRounds<T extends { id: string }>(sessions: T[]) {
+  const rounds = await storageService.roundsForSessions(sessions.map((session) => session.id));
+  return sessions.map((session) => {
+    const round = rounds.get(session.id);
+    return { ...session, reviewRound: round ? { status: round.status, summary: `${round.ticketKey}: ${roundSummary(round)}`, threadUrl: round.threadUrl, at: (round.reportedAt ?? round.lastMessageAt).toISOString() } : null };
+  });
+}
 const isPresent = <T>(value: T | null | undefined): value is T => value != null;
 
 async function discordThreadsView() {
@@ -327,7 +337,16 @@ export const resolvers = {
         }),
         githubAPI.getNeedsAttention(),
       ]);
-      const items = mergeAttention(agentItems, pullRequestItems);
+      const roundItems = await storageService.openReviewRounds(MAX_ROUND_ATTEMPTS).then((rounds) => rounds.map((round) => ({
+        id: `review-round-${round.id}`,
+        type: round.status === 'reported' ? 'REVIEW_REVISED' : 'REVIEW_ROUND_FAILED',
+        message: round.status === 'reported' ? `${round.ticketKey}: ${roundSummary(round)}` : `${round.ticketKey}: review findings did not reach the session`,
+        ticketKey: round.ticketKey,
+      }))).catch((error) => {
+        console.error('[BFF ReviewFindings] Failed to load review rounds:', error instanceof Error ? error.message : 'unknown error');
+        return [];
+      });
+      const items = [...mergeAttention(agentItems, pullRequestItems), ...roundItems];
       const keys = [...new Set(items.map((item) => item.ticketKey).filter(isPresent))];
       const tickets = await Promise.all(keys.map((key) => jiraAPI.getTicket(key).catch(() => null)));
       const statusOf = new Map(tickets.filter(isPresent).map((ticket: any) => [String(ticket.key), String(ticket.status)]));
@@ -393,9 +412,9 @@ export const resolvers = {
     elevenLabsKeys: async () => elevenLabsKeys.list().catch(elevenLabsError),
     elevenLabsQuota: async () => elevenLabsKeys.quota().catch(elevenLabsError),
     chatSessions: async (_: unknown, { source, limit }: { source?: string; limit?: number }) => {
-      return chatService.sessions(source, limit, CHAT_MACHINE).catch(orchestratorInputError);
+      return chatService.sessions(source, limit, CHAT_MACHINE).then(withReviewRounds).catch(orchestratorInputError);
     },
-    chatSession: async (_: unknown, { id }: { id: string }) => chatService.session(id, CHAT_MACHINE),
+    chatSession: async (_: unknown, { id }: { id: string }) => chatService.session(id, CHAT_MACHINE).then((session) => session && withReviewRounds([session]).then(([first]) => first)),
     chatSessionStates: async (_: unknown, { limit }: { limit?: number }) => chatService.sessionStates(limit, CHAT_MACHINE),
     chatMessages: async (_: unknown, args: { sessionId: string; afterId?: number; beforeId?: number; limit?: number }) => {
       return chatService.messages(args.sessionId, args.afterId, args.beforeId, args.limit)

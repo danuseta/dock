@@ -277,6 +277,24 @@ test('a turn that ends on its own announces itself; a stopped turn, a failed one
   assert.deepStrictEqual((await service.sessionStates(10)).filter((state) => state.id === cron.id), [{ id: cron.id, title: 'Cron', status: 'idle', statusDetail: null, origin: 'cron', ticketKey: null }]);
 });
 
+test('onTurnEnded fires for every turn end, a cron session and a failed turn included', async () => {
+  const { service } = clockedService();
+  await service.syncSession(syncBody(), 'laptop');
+  const ended: Array<{ sessionId: string; ticketKey: string | null; failed: boolean }> = [];
+  service.onTurnEnded = (turn) => { ended.push(turn); };
+  const turn = async (session: { id: string }, delta: Record<string, unknown>) => {
+    const sent = await service.sendMessage(session.id, 'go', MACHINES);
+    await service.claim({ wait: 0 }, undefined, 'laptop');
+    await service.delta({ sessionId: session.id, replyTo: sent.id, ...delta }, 'laptop');
+  };
+  const cron = await service.createSession({ title: 'Cron', origin: 'cron', ticketKey: 'QRD-1258' });
+  await turn(cron, { done: true });
+  assert.deepStrictEqual(ended, [{ sessionId: cron.id, ticketKey: 'QRD-1258', failed: false }]);
+  await turn(cron, { done: true, error: 'claude exited' });
+  assert.deepStrictEqual(ended.at(-1), { sessionId: cron.id, ticketKey: 'QRD-1258', failed: true });
+  assert.strictEqual(ended.length, 2);
+});
+
 test('a DOCK session takes one turn at a time and the bridge moves it through its states', async () => {
   const { service, sessions, advance } = clockedService();
   await service.syncSession(syncBody(), 'laptop');

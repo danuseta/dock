@@ -73,7 +73,7 @@ export class GitHubClient {
     if (reset !== undefined) this.rateLimit.reset = Number.parseInt(reset, 10);
   }
 
-  async searchPRsByTicketKey(repos: string[], ticketKey: string) {
+  async searchPRsByTicketKey(repos: string[], ticketKey: string, onIncomplete?: () => void) {
     const results = new Map<string, any>();
     try {
       const repoQuery = repos.map((repo) => `repo:${repo}`).join(' ');
@@ -85,6 +85,7 @@ export class GitHubClient {
       }
     } catch (error: any) {
       console.error('[GitHub] Search API failed:', error.message);
+      onIncomplete?.();
     }
 
     await Promise.all(repos.map(async (fullName) => {
@@ -100,6 +101,7 @@ export class GitHubClient {
         }
       } catch (error: any) {
         console.error(`[GitHub] Failed to inspect ${fullName}:`, error.message);
+        onIncomplete?.();
       }
     }));
     return [...results.values()];
@@ -264,8 +266,20 @@ export class GitHubService {
   private readonly lastRefresh = new Map<string, number>();
   private readonly inFlight = new Map<string, Promise<any[]>>();
   private readonly signalsInFlight = new Map<string, Promise<void>>();
+  private readonly incomplete = new Set<string>();
 
   constructor(private readonly storage = new StorageService()) {}
+
+  /** The cached search result only; null on a miss. Never calls GitHub. */
+  async cachedPRs(pat: string, repos: string[], ticketKey: string): Promise<any[] | null> {
+    const cached = await this.storage.getCache('github', buildPullRequestCacheKey(pat, repos, ticketKey)).catch(() => null);
+    return Array.isArray(cached) ? cached : null;
+  }
+
+  /** False when the last fetch for this ticket dropped a pull request it could not enrich, or failed outright. */
+  lastFetchComplete(pat: string, repos: string[], ticketKey: string): boolean {
+    return !this.incomplete.has(buildPullRequestCacheKey(pat, repos, ticketKey));
+  }
 
   async searchPRs(
     pat: string,
@@ -348,12 +362,14 @@ export class GitHubService {
   }
 
   private async fetchAndCachePRs(pat: string, repos: string[], ticketKey: string, cacheKey: string) {
+    this.incomplete.delete(cacheKey);
     try {
       const client = new GitHubClient(pat);
-      const pullRequests = await client.searchPRsByTicketKey(repos, ticketKey);
+      let searchFailed = false;
+      const pullRequests = await client.searchPRsByTicketKey(repos, ticketKey, () => { searchFailed = true; this.incomplete.add(cacheKey); });
       const enhanced = (await Promise.all(pullRequests.map(async (pr: any) => {
         const [owner, repo] = (pr.repository_url || '').split('/').slice(-2);
-        if (!owner || !repo) return null;
+        if (!owner || !repo) { this.incomplete.add(cacheKey); return null; }
         try {
           const [status, activity] = await Promise.all([
             client.getPRStatus(owner, repo, pr.number),
@@ -375,14 +391,16 @@ export class GitHubService {
           };
         } catch (error: any) {
           console.error(`[GitHub] Failed to enrich ${owner}/${repo}#${pr.number}:`, error.message);
+          this.incomplete.add(cacheKey);
           return null;
         }
       }))).filter(Boolean);
-      await this.storage.upsertCache('github', cacheKey, enhanced, 3600);
+      await this.storage.upsertCache('github', cacheKey, enhanced, searchFailed ? 300 : 3600);
       this.lastRefresh.set(cacheKey, Date.now());
       return enhanced;
     } catch (error: any) {
       console.error(`[GitHub] Failed to fetch PRs for ${ticketKey}:`, error.message);
+      this.incomplete.add(cacheKey);
       await this.storage.upsertCache('github', cacheKey, [], 300).catch(() => undefined);
       return [];
     }
