@@ -33,7 +33,7 @@ const MAX_LIVE_RUNS_PER_MACHINE = 300;
 const TICKET_KEY = /^[A-Z][A-Z0-9_]{0,31}-[1-9]\d{0,9}$/;
 // A free form card from the sous kit: CARD-<slug>, the slug kept lower case.
 const CARD_KEY = /^CARD-[a-z0-9][a-z0-9-]{0,63}$/;
-const MAX_AC = 50;
+const MAX_AC = 200;
 const MAX_DECISIONS = 100;
 const MAX_ISSUES = 100;
 const MAX_OPTIONS = 4;

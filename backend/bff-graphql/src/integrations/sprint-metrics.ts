@@ -65,7 +65,7 @@ export const DEFAULT_SPRINT_CONFIG: SprintConfig = {
   statusAliases: { 'Blocked': 'To Do', 'In Review': 'To Do', 'Move to IT': 'To Do', 'Revision': 'To Do' },
 };
 
-export const RULES_VERSION = 5;
+export const RULES_VERSION = 6;
 
 export type Tone = 'g' | 'a' | 'r';
 export type Bucket = 'Todo' | 'InP' | 'PR' | 'UATM' | 'UATC' | 'UATB' | 'RFP' | 'Done';
@@ -327,22 +327,22 @@ export function computeSprintMetrics(window: SprintWindow, rawIssues: SprintIssu
   const prefix = label.replace(/\d+$/, '');
   let noSprintLabel = 0;
   for (const i of issues) {
-    if (!i.labels.includes(label)) { noSprintLabel++; continue; }
+    if (i.type === 'Epic') continue;
     const J = Math.max(T0, i.createdT, joinTime(i));
     const assignee = i.assignee;
     const sp = num(i.sp) ?? firstSP(i);
     const dev = assignee ? devByFull.get(assignee) : undefined;
     if (!sprintsAt(i, FETCHED_AT).includes(window.name)) { exclude(i, assignee, sp, 'removed-from-sprint'); continue; }
+    if (!i.labels.includes(label)) noSprintLabel++;
     const endStatus = norm(valAt(i, 'status', CUTOFF, i.status));
     if (!dev) {
       const eb = BUCKET[endStatus];
       if (eb) offRoster.push({ sp: sp ?? 0, endBucket: eb });
       continue;
     }
-    const labelled = new Set(i.labels.filter((l) => l.startsWith(prefix)).map((l) => Number(l.slice(prefix.length))));
     const carried = sprintsAt(i, J).some((name) => {
       const earlier = Number((name.match(/(\d+)\s*$/) || [0, NaN])[1]);
-      return name !== window.name && earlier < sprintNum && labelled.has(earlier);
+      return name !== window.name && earlier < sprintNum;
     });
     const cls = carried ? 'carry' : i.type === 'Bug' ? 'bug' : 'alloc';
     const statusStart = norm(valAt(i, 'status', cls === 'bug' ? i.createdT : Math.max(T0, i.createdT), i.status));
@@ -443,6 +443,7 @@ export function computeSprintMetrics(window: SprintWindow, rawIssues: SprintIssu
   })];
   const issueByKey = new Map(passIssues.map((i) => [i.key, i]));
   const isSprintLabel = (l: string) => l.startsWith(prefix) && /^\d+$/.test(l.slice(prefix.length));
+  const inThisOrNeighbour = (i: { key: string; type: string; labels: string[] }) => i.labels.some(isSprintLabel) || (byKeyRaw.has(i.key) && i.type !== 'Epic' && sprintsAt(issueByKey.get(i.key)!, FETCHED_AT).includes(window.name));
   const passEvents: Array<{ key: string; reviewer: string; t: number }> = [];
   const nonSelfPass: Array<{ key: string; token: string; by: string | null }> = [];
   for (const i of passIssues) {
@@ -466,7 +467,7 @@ export function computeSprintMetrics(window: SprintWindow, rawIssues: SprintIssu
   for (const p of passEvents) {
     const m = byKey.get(p.key);
     const pi = issueByKey.get(p.key)!;
-    if (!pi.labels.some(isSprintLabel)) continue;
+    if (!inThisOrNeighbour(pi)) continue;
     if (p.t < T0) { prePassIgnored++; continue; }
     if (p.t > CUTOFF) continue;
     const r = rev.get(p.reviewer)!;
@@ -484,7 +485,7 @@ export function computeSprintMetrics(window: SprintWindow, rawIssues: SprintIssu
   let unattributedSP = 0;
   const unattributed = new Set<string>();
   for (const i of passIssues) {
-    if (!i.labels.some(isSprintLabel)) continue;
+    if (!inThisOrNeighbour(i)) continue;
     const m = byKey.get(i.key);
     const bounceSP = m ? m.sp : num(i.sp) ?? firstSP(i) ?? 0;
     for (const x of m ? m.tr : transitions(i)) {

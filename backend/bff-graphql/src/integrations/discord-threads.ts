@@ -65,6 +65,8 @@ export interface ThreadRow {
   prs: string[];
   /** The last "on it" in the thread. */
   claim: ThreadClaim | null;
+  /** The owner's own last "on it" in the thread, whoever said on it after. */
+  ownClaim: ThreadClaim | null;
   /** Everyone who said on it, first one first; in a PR thread the author of the pull request is left out. */
   onIt: string[];
   /** When the claimer wrote again after the claim. */
@@ -146,6 +148,8 @@ export interface PageThread extends Omit<ThreadView, 'tickets'> {
   tickets: Array<{ key: string } & Omit<JiraFacts, 'labels'>>;
   /** The Jira Pass labels of the thread's tickets, such as alvinPass. */
   passes: string[];
+  /** Why the auto review did not start for this thread, when it looked at it last. */
+  autoReviewSkip: string | null;
 }
 
 /** A label that names who approved the ticket, such as alvinPass; the Discord page reads them like lib/ticketApprovals.ts. */
@@ -157,7 +161,7 @@ const QUIET_MS = 3 * 24 * 3600 * 1000;
  * Adds what Jira says to each thread. A thread whose tickets Jira has all settled is HANDLED and no longer needs the
  * owner; one that still needs the owner but has been quiet for three days is `older`.
  */
-export function withJira(rows: ThreadView[], jira: Map<string, JiraFacts>, isSettled: (status: string | null) => boolean, now: Date): PageThread[] {
+export function withJira(rows: ThreadView[], jira: Map<string, JiraFacts>, isSettled: (status: string | null) => boolean, now: Date, skipReason: (threadId: string) => string | null = () => null): PageThread[] {
   return rows.map((row) => {
     const facts = row.tickets.map((key) => ({ key, ...(jira.get(key) ?? { status: null, assignee: null, sprint: null, sprintActive: false, labels: [] }) }));
     const tickets = facts.map(({ labels: _labels, ...ticket }) => ticket);
@@ -170,6 +174,7 @@ export function withJira(rows: ThreadView[], jira: Map<string, JiraFacts>, isSet
       ...row,
       tickets,
       passes,
+      autoReviewSkip: row.kind === 'pr' ? skipReason(row.id) : null,
       ...(handled ? { state: 'HANDLED' as const, why: `Jira says ${tickets[0].status}` } : {}),
       needsYou,
       older: needsYou && now.getTime() - Date.parse(row.lastActivity) > QUIET_MS,

@@ -274,6 +274,8 @@ export const typeDefs = gql`
     onIt: [String!]!
     """The Jira Pass labels of the thread's tickets, such as alvinPass."""
     passes: [String!]!
+    """Why the auto review did not start for this pull request thread."""
+    autoReviewSkip: String
     claimerRepliedAt: String
     mentionedAt: String
     repliedAt: String

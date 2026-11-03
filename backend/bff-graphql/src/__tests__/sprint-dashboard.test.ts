@@ -69,7 +69,7 @@ const issues: SprintIssue[] = [
     ],
   },
   { key: 'K-6', summary: 'Documentation: handbook', created: '2026-01-01T10:00:00.000+0800', type: 'Task', status: 'To Do', assignee: BOB, sp: 1, labels: ['QRD5'], events: [] },
-  { key: 'K-7', summary: 'In the sprint but never labelled', created: '2026-01-01T10:00:00.000+0800', type: 'Task', status: 'To Do', assignee: ANN, sp: 9, labels: [], events: [] },
+  { key: 'K-7', summary: 'Epic in the sprint', created: '2026-01-01T10:00:00.000+0800', type: 'Epic', status: 'To Do', assignee: ANN, sp: 9, labels: [], events: [] },
 ];
 
 test('computeSprintMetrics applies the sprint rules to a small synthetic sprint', () => {
@@ -83,7 +83,7 @@ test('computeSprintMetrics applies the sprint rules to a small synthetic sprint'
     result.notes.excluded.map((e) => [e.key, e.reason]),
     [['K-5', 'removed-from-sprint']],
   );
-  assert.strictEqual(result.notes.noSprintLabel, 1, 'K-7 has no QRD5 label, so it is not part of the sprint');
+  assert.strictEqual(result.notes.noSprintLabel, 0, 'K-7 is an Epic, so it is neither counted nor listed');
 
   const ann = result.pr.find((r) => r.dev === 'Ann')!;
   const bob = result.pr.find((r) => r.dev === 'Bob')!;
@@ -99,6 +99,28 @@ test('computeSprintMetrics applies the sprint rules to a small synthetic sprint'
   assert.strictEqual(result.reviewers.find((r) => r.dev === 'Ann')!.sp, 5);
 
   assert.ok(result.flags.some((f) => f.sev === 'R' && f.dev === 'Ann' && f.metric === 'pr'));
+});
+
+test('computeSprintMetrics counts a sprint member without the sprint label and skips an Epic', () => {
+  const unlabelled = issues.map((i) => i.key === 'K-7' ? { ...i, type: 'Task', summary: 'Member without a label' } : i);
+  const result = computeSprintMetrics(window, unlabelled, config);
+  assert.deepStrictEqual(
+    { total: result.overview.totalSP, alloc: result.overview.allocated },
+    { total: 20, alloc: 15 },
+    'K-7 (9 SP, no QRD5 label) is counted by sprint membership',
+  );
+  assert.strictEqual(result.notes.noSprintLabel, 1);
+  assert.deepStrictEqual(result.notes.excluded.map((e) => e.key), ['K-5'], 'K-5 is labelled but removed from the sprint, so it is still excluded');
+  const withEpic = computeSprintMetrics(window, issues, config);
+  assert.strictEqual(withEpic.overview.totalSP, 11, 'the Epic K-7 is not counted');
+  assert.ok(!withEpic.notes.excluded.some((e) => e.key === 'K-7'));
+});
+
+test('carryover follows membership of an earlier sprint, and a reviewer is credited on an unlabelled member', () => {
+  const changed = issues.map((i) => i.key === 'K-1' ? { ...i, labels: ['QRD5'] } : i.key === 'K-3' ? { ...i, labels: ['annPass'] } : i);
+  const result = computeSprintMetrics(window, changed, config);
+  assert.strictEqual(result.overview.carryover, 3, 'K-1 was in Sprint 4 without its QRD4 label');
+  assert.strictEqual(result.reviewers.find((r) => r.dev === 'Ann')!.sp, 5, 'K-3 carries no sprint label but is a member');
 });
 
 test('computeSprintMetrics uses the current assignee and SP, and a carried-over bug is carryover', () => {

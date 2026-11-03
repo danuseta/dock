@@ -65,6 +65,7 @@ const ticketOf = (row: ThreadRow) => row.tickets[0] ?? null;
  */
 export class AutoReview {
   private busy = false;
+  private readonly skipped = new Map<string, string>();
   private readonly deciding = new Set<string>();
 
   constructor(private readonly deps: AutoReviewDeps) {}
@@ -75,7 +76,10 @@ export class AutoReview {
     this.busy = true;
     try {
       const settings = await this.deps.settings();
-      if (!settings.enabled) return 0;
+      if (!settings.enabled) {
+        this.skipped.clear();
+        return 0;
+      }
       let started = 0;
       for (const row of await this.deps.rows()) started += await this.consider(row);
       return started;
@@ -84,33 +88,59 @@ export class AutoReview {
     }
   }
 
+  /** Why the last look at a thread did not start a review; null when it did or the thread was never skipped. */
+  skipReason(threadId: string): string | null {
+    return this.skipped.get(threadId) ?? null;
+  }
+
+  private skip(row: ThreadRow, reasons: string[]): 0 {
+    if (reasons.length) this.skipped.set(row.id, [...new Set(reasons)].join('; '));
+    return 0;
+  }
+
   /**
    * The pull requests of a thread the owner just said on it in, each reviewed once per head commit and once per "on it".
-   * The ones due go in one Review session for the ticket, BE and FE together, with one record per pull request.
+   * Only the owner's own "on it" counts, however many reviewers said it after. The ones due go in one Review session for
+   * the ticket, BE and FE together, with one record per pull request.
    */
   private async consider(row: ThreadRow): Promise<number> {
-    if (row.kind !== 'pr' || !row.claim?.mine) return 0;
-    const saidAt = Date.parse(row.claim.at);
-    if (!(this.deps.now().getTime() - saidAt <= ON_IT_WINDOW_MS)) return 0;
+    if (row.kind !== 'pr') return 0;
+    this.skipped.delete(row.id);
+    const ownClaim = row.ownClaim === undefined ? (row.claim?.mine ? row.claim : null) : row.ownClaim;
+    if (!ownClaim) return 0;
+    const saidAt = Date.parse(ownClaim.at);
+    if (!(this.deps.now().getTime() - saidAt <= ON_IT_WINDOW_MS)) return this.skip(row, ['older than 6 h']);
     const key = ticketOf(row);
-    if (!key) return 0;
+    if (!key) return this.skip(row, ['no ticket key']);
     const due: Array<{ url: string; headSha: string }> = [];
+    const reasons: string[] = [];
+    if (!row.prs.some((prUrl) => PULL.test(prUrl))) return this.skip(row, ['no pull request link']);
     for (const prUrl of row.prs) {
       const match = PULL.exec(prUrl);
       if (!match || due.some((pull) => pull.url === match[0])) continue;
       const url = match[0];
       const last = await this.deps.latest(url);
-      if (last && last.startedAt.getTime() >= saidAt) continue;
+      if (last && last.startedAt.getTime() >= saidAt) {
+        continue;
+      }
       let state: PullState;
       try {
         state = await this.deps.pull(match[1], match[2], Number(match[3]));
       } catch {
+        reasons.push('GitHub fetch failed');
         continue;
       }
-      if (!state.open || (last && last.headSha === state.headSha)) continue;
+      if (!state.open) {
+        reasons.push('pull request closed');
+        continue;
+      }
+      if (last && last.headSha === state.headSha) {
+        reasons.push('same head commit, already reviewed');
+        continue;
+      }
       due.push({ url, headSha: state.headSha });
     }
-    if (!due.length) return 0;
+    if (!due.length) return this.skip(row, reasons);
     const records: AutoReviewRecord[] = [];
     for (const pull of due) records.push(await this.deps.create({ prUrl: pull.url, headSha: pull.headSha, ticketKey: key, threadUrl: row.url, startedAt: this.deps.now() }));
     try {
@@ -120,7 +150,7 @@ export class AutoReview {
     } catch (error) {
       const detail = error instanceof Error ? error.message.slice(0, 300) : 'the session did not start';
       for (const record of records) await this.deps.update(record.id, { status: 'failed', detail, finishedAt: this.deps.now() });
-      return 0;
+      return this.skip(row, [`session did not start: ${detail}`]);
     }
   }
 

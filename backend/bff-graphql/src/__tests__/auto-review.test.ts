@@ -12,6 +12,7 @@ const row = (extra: Partial<ThreadRow> = {}): ThreadRow => ({
   state: 'FLOW_1', why: '', needsYou: false, createdBy: 'Indra', createdByAvatar: null, createdAt: NOW.toISOString(), lastActivity: NOW.toISOString(), lastMessageId: null,
   messageCount: 2, tags: [], slots: 2, tickets: ['QRD-1473'], prs: [`${PR}/files`],
   claim: { messageId: 'm2', authorId: 'me', author: 'Danu', mine: true, at: new Date(NOW.getTime() - 60_000).toISOString() },
+  ownClaim: { messageId: 'm2', authorId: 'me', author: 'Danu', mine: true, at: new Date(NOW.getTime() - 60_000).toISOString() },
   onIt: ['Danu'], claimerRepliedAt: null, mentionedAt: null, repliedAt: null, messages: [], ...extra,
 });
 
@@ -52,15 +53,58 @@ test('the owner\'s on it in a pr-review thread starts one Review session for the
 
   for (const quiet of [
     world({ enabled: false }),
-    world({ rows: [row({ claim: { messageId: 'm2', authorId: 'x', author: 'Aken', mine: false, at: NOW.toISOString() } })] }),
+    world({ rows: [row({ claim: { messageId: 'm2', authorId: 'x', author: 'Aken', mine: false, at: NOW.toISOString() }, ownClaim: null })] }),
     world({ rows: [row({ kind: 'bug' })] }),
-    world({ rows: [row({ claim: { messageId: 'm2', authorId: 'me', author: 'Danu', mine: true, at: new Date(NOW.getTime() - ON_IT_WINDOW_MS - 1).toISOString() } })] }),
+    world({ rows: [row({ ownClaim: { messageId: 'm2', authorId: 'me', author: 'Danu', mine: true, at: new Date(NOW.getTime() - ON_IT_WINDOW_MS - 1).toISOString() } })] }),
     world({ rows: [row({ tickets: [] })] }),
     world({ open: false }),
   ]) {
     assert.strictEqual(await quiet.review.tick(), 0);
     assert.strictEqual(quiet.opened.length, 0);
   }
+});
+
+test("a second reviewer saying on it later does not stop the review, and the 6 h window counts from the owner's on it", async () => {
+  const later = { messageId: 'm3', authorId: 'x', author: 'Aken', mine: false, at: NOW.toISOString() };
+  const w = world({ rows: [row({ claim: later })] });
+  assert.strictEqual(await w.review.tick(), 1);
+  assert.strictEqual(w.review.skipReason('t1'), null);
+
+  const old = new Date(NOW.getTime() - ON_IT_WINDOW_MS - 1).toISOString();
+  const stale = world({ rows: [row({ claim: later, ownClaim: { messageId: 'm2', authorId: 'me', author: 'Danu', mine: true, at: old } })] });
+  assert.strictEqual(await stale.review.tick(), 0, "the other reviewer's fresh on it does not restart the window");
+  assert.strictEqual(stale.review.skipReason('t1'), 'older than 6 h');
+});
+
+test('a skipped pull request thread records why', async () => {
+  const reasonOf = async (options: Parameters<typeof world>[0], extra: Partial<ThreadRow> = {}) => {
+    const w = world({ ...options, rows: [row(extra)] });
+    await w.review.tick();
+    return w.review.skipReason('t1');
+  };
+  assert.strictEqual(await reasonOf({}, { tickets: [] }), 'no ticket key');
+  assert.strictEqual(await reasonOf({}, { prs: [] }), 'no pull request link');
+  assert.strictEqual(await reasonOf({ open: false }), 'pull request closed');
+
+  const same = world();
+  await same.review.tick();
+  same.records[0].startedAt = new Date(NOW.getTime() - 3_600_000);
+  same.records[0].headSha = 'abc1234';
+  same.deps.rows = async () => [row({ ownClaim: { messageId: 'm9', authorId: 'me', author: 'Danu', mine: true, at: new Date(NOW.getTime() - 60_000).toISOString() } })];
+  await same.review.tick();
+  assert.strictEqual(same.review.skipReason('t1'), 'same head commit, already reviewed');
+
+  const noSlot = world({ failOpen: true });
+  await noSlot.review.tick();
+  assert.strictEqual(noSlot.review.skipReason('t1'), 'session did not start: No slot');
+
+  const older = world({ rows: [row({ ownClaim: undefined as unknown as ThreadRow['ownClaim'] })] });
+  assert.strictEqual(await older.review.tick(), 1, 'a row stored before ownClaim falls back to its own claim');
+
+  const failing = world();
+  failing.deps.pull = async () => { throw new Error('rate limit'); };
+  await failing.review.tick();
+  assert.strictEqual(failing.review.skipReason('t1'), 'GitHub fetch failed');
 });
 
 test('a new head commit needs a new on it; a new on it on the same commit does not review it again', async () => {

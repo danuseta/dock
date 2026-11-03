@@ -1097,6 +1097,7 @@ export const DISCORD_THREAD_FIELDS = gql`
       claim { author mine at }
       onIt
       passes
+      autoReviewSkip
       claimerRepliedAt
       mentionedAt
       repliedAt
