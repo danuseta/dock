@@ -838,6 +838,14 @@ export const resolvers = {
         throw new GraphQLError(error instanceof Error ? error.message : 'The switch failed', { extensions: { code: 'BAD_USER_INPUT' } });
       }
     },
+    refreshClaudeUsage: async () => {
+      if (!cycleAvailable()) throw new GraphQLError('This machine has no /cycle', { extensions: { code: 'BAD_USER_INPUT' } });
+      try {
+        return { available: true, ...(await claudeAccounts.refresh()) };
+      } catch (error) {
+        throw new GraphQLError(error instanceof Error ? error.message : 'The usage probe failed', { extensions: { code: 'BAD_USER_INPUT' } });
+      }
+    },
     setClaudeRotation: async (_: unknown, rule: { enabled: boolean; fiveHour: number; sevenDay: number; backToMain: boolean }) => {
       try {
         return { available: cycleAvailable(), ...(await claudeAccounts.setRotation(rule)) };
@@ -985,6 +993,7 @@ export const protectedMutations = [
   'checkMonitors',
   'createIngestToken',
   'useClaudeAccount',
+  'refreshClaudeUsage',
   'setClaudeRotation',
   'revokeIngestToken',
   'deleteDemoVideo',

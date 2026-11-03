@@ -1367,6 +1367,10 @@ export const typeDefs = gql`
     fiveHour: ClaudeUsageWindow
     sevenDay: ClaudeUsageWindow
     seenAt: String
+    "The last usage probe's verdict: allowed, rejected, no-token or error."
+    status: String
+    "When the probe last ran for this account."
+    checkedAt: String
   }
 
   type ClaudeRotation {
@@ -1579,6 +1583,8 @@ export const typeDefs = gql`
     submitDecisions(ticketKey: String!, answers: [IssueAnswerInput!]!, changes: [DecisionChangeInput!]!, confirms: [Int!]!): [Int!]!
     approveReview(ticketKey: String!): [ApprovalStep!]!
     useClaudeAccount(name: String!): ClaudeAccounts!
+    "Probe every account's usage now; within a minute of the last probe it returns the stored data."
+    refreshClaudeUsage: ClaudeAccounts!
     setClaudeRotation(enabled: Boolean!, fiveHour: Int!, sevenDay: Int!, backToMain: Boolean!): ClaudeAccounts!
     stopChatTurn(sessionId: ID!): ChatSession!
     requestDoctorRun(machine: String!): Boolean!

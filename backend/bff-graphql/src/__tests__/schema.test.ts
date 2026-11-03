@@ -175,6 +175,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'dismissOrchestration',
       'lockSession',
       'previewLibraryAgent',
+      'refreshClaudeUsage',
       'refreshData',
       'refreshDiscord',
       'refreshSprintDashboard',

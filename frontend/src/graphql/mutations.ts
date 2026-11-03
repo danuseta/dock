@@ -533,3 +533,9 @@ export const SET_CLAUDE_ROTATION = gql`
     setClaudeRotation(enabled: $enabled, fiveHour: $fiveHour, sevenDay: $sevenDay, backToMain: $backToMain) { ${CLAUDE_ACCOUNTS_FIELDS} }
   }
 `;
+
+export const REFRESH_CLAUDE_USAGE = gql`
+  mutation RefreshClaudeUsage {
+    refreshClaudeUsage { ${CLAUDE_ACCOUNTS_FIELDS} }
+  }
+`;

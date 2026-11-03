@@ -3,12 +3,28 @@ export const MAIN_ACCOUNT = 'main';
 export const ACCOUNT_NAME = /^[A-Za-z0-9_-]{1,30}$/;
 export const ROTATION_DEFAULTS = { enabled: false, fiveHour: 90, sevenDay: 95, backToMain: true };
 const LOG_SIZE = 20;
+const PROBE_FRESH_MS = 2 * 3_600_000;
+const REFRESH_MIN_MS = 60_000;
 
 export interface UsageWindow { usedPercentage: number; resetsAt: Date | null }
-export interface AccountUsage { fiveHour: UsageWindow | null; sevenDay: UsageWindow | null; receivedAt: Date }
+export interface AccountUsage { fiveHour: UsageWindow | null; sevenDay: UsageWindow | null; receivedAt: Date; status?: string; checkedAt?: Date }
+export interface ProbeRow { name: string; status: string; fiveHour: UsageWindow | null; sevenDay: UsageWindow | null }
 export interface Rotation { enabled: boolean; fiveHour: number; sevenDay: number; backToMain: boolean }
 export interface RotationEntry { at: Date; from: string; to: string; reason: string; auto: boolean }
 export interface CycleList { accounts: string[]; active: string | null }
+
+export const parseWindow = (value: unknown): UsageWindow | null => {
+  const raw = value as { usedPercentage?: unknown; resetsAt?: unknown } | null;
+  return raw && typeof raw.usedPercentage === 'number' ? { usedPercentage: raw.usedPercentage, resetsAt: typeof raw.resetsAt === 'string' ? new Date(raw.resetsAt) : null } : null;
+};
+
+/** `kit/account-usage.py`: a JSON array with one row per account; a row without a name or status is dropped. */
+export function parseProbe(output: string): ProbeRow[] {
+  const rows: unknown = JSON.parse(output);
+  if (!Array.isArray(rows)) throw new Error('The usage probe did not return a list');
+  return rows.flatMap((row: { name?: unknown; status?: unknown; fiveHour?: unknown; sevenDay?: unknown }) =>
+    typeof row?.name === 'string' && typeof row.status === 'string' ? [{ name: row.name, status: row.status, fiveHour: parseWindow(row.fiveHour), sevenDay: parseWindow(row.sevenDay) }] : []);
+}
 
 /** `cycle.py list`: `[1] * main  (your own login)`, one line per account, the active one marked with `*`. */
 export function parseCycleList(output: string): CycleList {
@@ -29,22 +45,12 @@ const current = (window: UsageWindow | null, now: Date) => (window && !(window.r
 /** Why an account is over the owner's limits, or null when it is not (an unknown or reset window is not over). */
 export function overLimit(usage: AccountUsage | undefined, rule: Rotation, now: Date): string | null {
   if (!usage) return null;
+  if (usage.status === 'rejected' && usage.checkedAt && now.getTime() - usage.checkedAt.getTime() < PROBE_FRESH_MS) return 'rejected by the usage probe';
   const fiveHour = current(usage.fiveHour, now);
   const sevenDay = current(usage.sevenDay, now);
   if (fiveHour && fiveHour.usedPercentage >= rule.fiveHour) return `5h at ${Math.round(fiveHour.usedPercentage)}%`;
   if (sevenDay && sevenDay.usedPercentage >= rule.sevenDay) return `7d at ${Math.round(sevenDay.usedPercentage)}%`;
   return null;
-}
-
-/**
- * The account a usage report belongs to. A turn started before a switch still reports its old account, so a report
- * whose 7 day reset time matches another account's is that account's: each account's weekly window resets at its own time.
- */
-export function attribute(report: AccountUsage, active: string, usage: Record<string, AccountUsage>): string {
-  const reset = report.sevenDay?.resetsAt?.getTime();
-  if (!reset) return active;
-  const owner = Object.entries(usage).find(([name, seen]) => name !== active && seen.sevenDay?.resetsAt?.getTime() === reset);
-  return owner ? owner[0] : active;
 }
 
 export type Decision = { to: string; reason: string } | { stuck: string } | null;
@@ -77,6 +83,8 @@ export interface ClaudeAccountsDeps {
   switchTo(name: string): Promise<void>;
   rotation(): Promise<Rotation>;
   saveRotation(rule: Rotation): Promise<void>;
+  /** One request per account through the kit script; null when this machine has none. */
+  probe(): Promise<ProbeRow[] | null>;
   usage(): Promise<Record<string, AccountUsage>>;
   saveUsage(usage: Record<string, AccountUsage>): Promise<void>;
   log(): Promise<RotationEntry[]>;
@@ -93,6 +101,7 @@ export interface ClaudeAccountsDeps {
 export class ClaudeAccounts {
   private busy = false;
   private stuck: string | null = null;
+  private lastProbe = 0;
 
   constructor(private readonly deps: ClaudeAccountsDeps) {}
 
@@ -116,6 +125,8 @@ export class ClaudeAccounts {
         fiveHour: window(usage[name]?.fiveHour ?? null),
         sevenDay: window(usage[name]?.sevenDay ?? null),
         seenAt: usage[name]?.receivedAt.toISOString() ?? null,
+        status: usage[name]?.status ?? null,
+        checkedAt: usage[name]?.checkedAt?.toISOString() ?? null,
       })),
       rotation: rule,
       log: log.map((entry) => ({ ...entry, at: entry.at.toISOString() })),
@@ -139,13 +150,40 @@ export class ClaudeAccounts {
     return this.state();
   }
 
-  /** One usage report from a turn on this machine: kept under its account, then auto rotate looks at it. */
+  /** Probe every account, keyed by the names `cycle.py list` gives; a row under another name is dropped and the old `main` is `claude1`. */
+  async probe() {
+    this.lastProbe = this.deps.now().getTime();
+    const [list, rows, saved] = await Promise.all([this.deps.list(), this.deps.probe(), this.deps.usage()]);
+    if (!rows) return;
+    const now = this.deps.now();
+    if (saved[MAIN_ACCOUNT] && !saved.claude1 && list.accounts.includes('claude1')) saved.claude1 = saved[MAIN_ACCOUNT];
+    const usage: Record<string, AccountUsage> = {};
+    for (const name of list.accounts) {
+      const row = rows.find((candidate) => candidate.name === name);
+      const old = saved[name];
+      if (!row) { if (old) usage[name] = old; continue; }
+      const measured = row.status === 'allowed' || row.status === 'rejected';
+      usage[name] = measured || !old
+        ? { fiveHour: row.fiveHour, sevenDay: row.sevenDay, receivedAt: now, status: row.status, checkedAt: now }
+        : { ...old, status: row.status, checkedAt: now };
+    }
+    await this.deps.saveUsage(usage);
+    await this.check(list, usage);
+  }
+
+  /** The owner's refresh button: at most one probe a minute, otherwise the stored data. */
+  async refresh() {
+    if (this.deps.now().getTime() - this.lastProbe >= REFRESH_MIN_MS) await this.probe();
+    return this.state();
+  }
+
+  /** One usage report from a turn on this machine: kept under the active account, then auto rotate looks at it. */
   async report(limits: { fiveHour: UsageWindow | null; sevenDay: UsageWindow | null }) {
     const list = await this.deps.list();
     if (!list.active) return;
     const usage = await this.deps.usage();
-    const report = { ...limits, receivedAt: this.deps.now() };
-    usage[attribute(report, list.active, usage)] = report;
+    const { status, checkedAt } = usage[list.active] ?? {};
+    usage[list.active] = { ...limits, receivedAt: this.deps.now(), status, checkedAt };
     await this.deps.saveUsage(usage);
     await this.check(list, usage);
   }

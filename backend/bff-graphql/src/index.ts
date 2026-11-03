@@ -30,6 +30,7 @@ const DISCORD_TOKEN_CHECK_MS = 60 * 1000;
 const AUTO_REVIEW_MS = 60 * 1000;
 /** How often auto rotate looks again without a turn, so back to main follows a reset. */
 const CLAUDE_ROTATE_MS = 5 * 60 * 1000;
+const CLAUDE_PROBE_MS = 30 * 60 * 1000;
 const RELEASE_SWEEP_MS = 5 * 60 * 1000;
 /** How often the stored pr-review threads are looked at for new findings of a teammate's review. */
 const REVIEW_FINDINGS_MS = 60 * 1000;
@@ -80,6 +81,9 @@ export async function startServer(): Promise<void> {
       const rotateClaude = () => (cycleAvailable() ? claudeAccounts.tick() : Promise.resolve())
         .catch((error) => console.warn('[ClaudeAccounts] rotate check failed:', error instanceof Error ? error.message : 'unknown error'));
       setInterval(rotateClaude, CLAUDE_ROTATE_MS).unref();
+      const probeClaude = () => (cycleAvailable() ? claudeAccounts.probe() : Promise.resolve())
+        .catch((error) => console.warn('[ClaudeAccounts] usage probe failed:', error instanceof Error ? error.message : 'unknown error'));
+      setInterval(probeClaude, CLAUDE_PROBE_MS).unref();
       // A build that went quiet with nothing waiting on the owner still goes up for review and out to Discord.
       const releaseQuiet = () => sweepReleases({ list: () => orchestratorService.list(), gate: decisionGate, broadcast: (run) => autoBroadcast.afterLedger(run) })
         .catch((error) => console.warn('[DecisionGate] sweep failed:', error instanceof Error ? error.message : 'unknown error'));
