@@ -1,5 +1,6 @@
 import React from 'react';
 import { cn } from '../../lib/cn';
+import { COPY_CODE } from '../CodeBlock';
 import { CopyButton } from '../CopyButton';
 import { Markdown } from '../Markdown';
 import { MessageAttachments } from '../interactions/MessageAttachments';
@@ -48,7 +49,7 @@ const LeadText: React.FC<{ message: ChatMessage }> = ({ message }) => {
     <li className="group/text my-2 min-w-0 font-body text-[0.84rem] leading-relaxed text-foreground first:mt-0 last:mb-0">
       <div className="min-w-0 break-words [overflow-wrap:anywhere]">
         <span className="sr-only">Claude: </span>
-        {message.text && <Markdown text={message.text} />}
+        {message.text && <Markdown text={message.text} overrides={COPY_CODE} />}
         {message.attachments && <div className="mt-1.5"><MessageAttachments attachments={message.attachments} align="left" /></div>}
         {message.text && <CopyButton text={message.text} />}
       </div>

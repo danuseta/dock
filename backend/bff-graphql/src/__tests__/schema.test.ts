@@ -143,6 +143,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'sprintTrend',
       'ticketChanges',
       'ticketDetail',
+      'ticketPullRequests',
       'ticketRelationGroup',
       'workspaceDir',
       'workspaceFile',

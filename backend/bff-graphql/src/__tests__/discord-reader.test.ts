@@ -465,6 +465,21 @@ test('a pull request with a Pass for every reviewer it asked for stops needing t
   assert.deepStrictEqual(withJira([{ ...pr, slots: 1 }, { ...pr, slots: 2 }], jira, () => false, NOW).map((row) => row.needsYou), [false, true]);
 });
 
+test('a pull request the owner is on and has not passed is reviewing', () => {
+  const own = { messageId: 'm', authorId: '1', author: 'Danu', mine: true, at: NOW.toISOString() };
+  const pr = { needsYou: true, dismissed: false, kind: 'pr', state: 'REVIEW_ASKED', why: '', slots: 2, lastActivity: NOW.toISOString(), tickets: ['QRD-9'], claim: own, ownClaim: own } as unknown as ThreadView;
+  const jira = (labels: string[]) => new Map([['QRD-9', { status: 'PR Review', assignee: null, sprint: null, sprintActive: false, labels }]]);
+  const reviewing = (row: ThreadView, labels: string[], ownerPass: string | null = 'danuPass') => withJira([row], jira(labels), () => false, NOW, () => null, ownerPass)[0].reviewing;
+  assert.strictEqual(reviewing(pr, ['alvinPass']), true);
+  assert.strictEqual(reviewing(pr, ['alvinPass', 'danuPass']), false);
+  assert.strictEqual(reviewing(pr, ['DanuPass']), false);
+  assert.strictEqual(reviewing({ ...pr, ownClaim: null } as ThreadView, []), false, 'a teammate only');
+  assert.strictEqual(reviewing({ ...pr, kind: 'bug' } as ThreadView, []), false);
+  assert.strictEqual(reviewing(pr, [], null), false);
+  const legacy = { ...pr, ownClaim: undefined } as unknown as ThreadView;
+  assert.strictEqual(reviewing({ ...legacy, claim: own } as ThreadView, []), true);
+});
+
 test('a changed tag builds the row again even when the last message is the same', async () => {
   const routes = routesFor() as Record<string, DiscordResponse | DiscordResponse[]>;
   routes['/channels/fb'] = ok({ ...forum('bug-report'), available_tags: [{ id: 'tr', name: 'Resolved' }] });

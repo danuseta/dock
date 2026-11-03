@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Check, Copy } from 'lucide-react';
+import { cn } from '../lib/cn';
 
 const COPIED_MS = 1500;
 
-export const CopyButton: React.FC<{ text: string }> = ({ text }) => {
+export const CopyButton: React.FC<{ text: string; label?: string; className?: string }> = ({ text, label: ariaLabel = 'Copy message', className }) => {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const timer = useRef(0);
   useEffect(() => () => window.clearTimeout(timer.current), []);
@@ -21,8 +22,8 @@ export const CopyButton: React.FC<{ text: string }> = ({ text }) => {
   return (
     <button
       type="button"
-      className="mt-0.5 inline-flex min-h-6 items-center gap-1 self-start rounded-xs px-1 font-mono text-[0.62rem] text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 max-[900px]:min-h-11 max-[900px]:px-2"
-      aria-label={state === 'idle' ? 'Copy message' : label}
+      className={cn('mt-0.5 inline-flex min-h-6 items-center gap-1 self-start rounded-xs px-1 font-mono text-[0.62rem] text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 max-[900px]:min-h-11 max-[900px]:px-2', className)}
+      aria-label={state === 'idle' ? ariaLabel : label}
       onClick={() => void copy()}
     >
       {state === 'copied' ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}

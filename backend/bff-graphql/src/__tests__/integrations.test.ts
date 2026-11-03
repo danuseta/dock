@@ -17,6 +17,7 @@ import { isValidServiceHealthRefreshSeconds, StorageAPI } from '../datasources/S
 import { JiraService } from '../integrations/jira';
 import { JiraAPI, JiraTicketLookupError } from '../datasources/JiraAPI';
 import { UpstreamMonitorService, validateMonitorTarget } from '../integrations/upstream-monitor';
+import { GitHubAPI } from '../datasources/GitHubAPI';
 import { DockerRuntimeService } from '../integrations/docker-runtime';
 
 test('internal integration behavior', async (t) => {
@@ -1051,4 +1052,70 @@ test('internal integration behavior', async (t) => {
     assert.match(requestedUrl, /tail=200$/);
     assert.match(logs, /ready/);
   });
+});
+
+test('pull requests of a ticket carry GitHub mergeable', async () => {
+  const api = new GitHubAPI() as any;
+  api.getAuth = async () => ({ headers: { Authorization: 'Bearer t' }, repos: 'o/r', hasToken: true });
+  api.githubService = { searchPRs: async () => [{ number: 1, mergeable: false }, { number: 2, mergeable: true }, { number: 3, mergeable: null }, { number: 4 }] };
+  const prs = await api.getPullRequestsForTicket('QRD-1');
+  assert.deepStrictEqual(prs.map((pr: any) => pr.mergeable), [false, true, null, null]);
+});
+
+test('the owner Pass label is kept, shared by calls in flight, and forgotten on reset', async () => {
+  const { ownerPassLabel, resetOwnerPassLabel } = await import('../integrations/review-approval');
+  const realNow = Date.now;
+  let now = 1_000_000;
+  Date.now = () => now;
+  try {
+    resetOwnerPassLabel();
+    let calls = 0;
+    const read = async () => { calls++; return 'danuPass'; };
+    assert.deepStrictEqual(await Promise.all([ownerPassLabel(read), ownerPassLabel(read)]), ['danuPass', 'danuPass']);
+    now += 9 * 60 * 1000;
+    assert.strictEqual(await ownerPassLabel(read), 'danuPass');
+    assert.strictEqual(calls, 1);
+    now += 2 * 60 * 1000;
+    await ownerPassLabel(read);
+    assert.strictEqual(calls, 2);
+    resetOwnerPassLabel();
+    await ownerPassLabel(read);
+    assert.strictEqual(calls, 3);
+
+    resetOwnerPassLabel();
+    let failures = 0;
+    const failing = async (): Promise<string> => { failures++; throw new Error('jira down'); };
+    assert.strictEqual(await ownerPassLabel(failing), null);
+    now += 30_000;
+    assert.strictEqual(await ownerPassLabel(failing), null);
+    assert.strictEqual(failures, 1);
+    now += 31_000;
+    assert.strictEqual(await ownerPassLabel(failing), null);
+    assert.strictEqual(failures, 2);
+  } finally {
+    Date.now = realNow;
+    resetOwnerPassLabel();
+  }
+});
+
+test('ticketPullRequests answers at most 10 distinct keys with their cached Jira labels', async () => {
+  const { resolvers } = await import('../resolvers');
+  const asked: string[] = [];
+  const getTickets = JiraAPI.prototype.getTickets;
+  const getPrs = GitHubAPI.prototype.getPullRequestsForTicket;
+  const hasPin = StorageAPI.prototype.hasMasterPin;
+  StorageAPI.prototype.hasMasterPin = async () => false;
+  JiraAPI.prototype.getTickets = async () => [{ key: 'QRD-1', labels: ['danuPass'] }] as any;
+  GitHubAPI.prototype.getPullRequestsForTicket = async (key: string) => { asked.push(key); return [{ id: key, mergeable: false }] as any; };
+  try {
+    const keys = Array.from({ length: 12 }, (_, i) => `QRD-${i + 1}`);
+    const rows = await (resolvers.Query as any).ticketPullRequests({}, { keys: ['QRD-1', ...keys] }, { request: { headers: {}, socket: {} }, authenticated: true });
+    assert.strictEqual(rows.length, 10);
+    assert.deepStrictEqual(asked, keys.slice(0, 10));
+    assert.deepStrictEqual([rows[0].labels, rows[1].labels, rows[0].pullRequests[0].mergeable], [['danuPass'], [], false]);
+  } finally {
+    JiraAPI.prototype.getTickets = getTickets;
+    GitHubAPI.prototype.getPullRequestsForTicket = getPrs;
+    StorageAPI.prototype.hasMasterPin = hasPin;
+  }
 });

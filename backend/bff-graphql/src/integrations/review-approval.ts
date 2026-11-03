@@ -109,6 +109,34 @@ export const liveApprovalDeps: ApprovalDeps = {
   event: (key, kind, detail) => orchestratorService.recordEvent(key, kind, detail),
 };
 
+const OWNER_PASS_TTL_MS = 10 * 60 * 1000;
+const OWNER_PASS_ERROR_TTL_MS = 60 * 1000;
+let ownerPass: { label: string | null; until: number } | null = null;
+let ownerPassPending: Promise<string | null> | null = null;
+
+/** Forgets the kept Pass label, for when the Jira account changes. */
+export function resetOwnerPassLabel(): void {
+  ownerPass = null;
+  ownerPassPending = null;
+}
+
+/** The owner's Pass label, kept for 10 minutes; null when it cannot be told, kept for 1 minute. */
+export function ownerPassLabel(read: () => Promise<string> = () => liveApprovalDeps.passLabel()): Promise<string | null> {
+  if (ownerPass && ownerPass.until > Date.now()) return Promise.resolve(ownerPass.label);
+  if (ownerPassPending) return ownerPassPending;
+  const pending: Promise<string | null> = read().then(
+    (label) => ({ label, until: Date.now() + OWNER_PASS_TTL_MS }),
+    () => ({ label: null, until: Date.now() + OWNER_PASS_ERROR_TTL_MS }),
+  ).then((kept) => {
+    if (ownerPassPending === pending) ownerPass = kept;
+    return kept.label;
+  }).finally(() => {
+    if (ownerPassPending === pending) ownerPassPending = null;
+  });
+  ownerPassPending = pending;
+  return pending;
+}
+
 export class ReviewApprovalError extends Error {}
 
 /**

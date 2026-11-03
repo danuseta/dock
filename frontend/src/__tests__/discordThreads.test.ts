@@ -7,7 +7,7 @@ import { NO_SPRINT, ago, channelLabel, channelTabs, countFor, discordAttention, 
 const thread = (id: string, extra: Partial<DiscordThread>): DiscordThread => ({
   id, channelId: 'cb', channel: 'bug-report', kind: 'bug', title: `Thread ${id}`, url: `https://discord.com/channels/g/${id}`, state: 'FLOW_1', why: 'New bug; nobody said on it',
   needsYou: true, older: false, dismissed: false, createdBy: 'Rina', createdByAvatar: null, createdAt: '2026-10-20T09:00:00.000Z', lastActivity: '2026-10-22T09:00:00.000Z',
-  messageCount: 1, tags: [], slots: 2, tickets: [], prs: [], claim: null, onIt: [], passes: [], autoReviewSkip: null, claimerRepliedAt: null, mentionedAt: null, repliedAt: null, messages: [], ...extra,
+  messageCount: 1, tags: [], slots: 2, reviewing: false, tickets: [], prs: [], claim: null, onIt: [], passes: [], autoReviewSkip: null, claimerRepliedAt: null, mentionedAt: null, repliedAt: null, messages: [], ...extra,
 });
 
 const rows = [
@@ -126,4 +126,11 @@ test('a text file opens in the viewer, a PDF in a tab, through DOCK; any other f
   assert.equal(fileOpening({ name: 'app.zip', type: 'application/zip' }), null);
   assert.equal(discordFileUrl('https://cdn.discordapp.com/attachments/1/2/a b.pdf?ex=1', 'a b.pdf', true), '/api/discord/file?url=https%3A%2F%2Fcdn.discordapp.com%2Fattachments%2F1%2F2%2Fa%20b.pdf%3Fex%3D1&name=a%20b.pdf&download=1');
   assert.match(readFileSync(new URL('../pages/DiscordPage.tsx', import.meta.url), 'utf8'), /useState<ThreadView>\('all'\)/);
+});
+
+test('the Discord page shows a Reviewing chip on threads the query marks reviewing', () => {
+  assert.match(readFileSync(new URL('../graphql/queries.ts', import.meta.url), 'utf8'), /slots\s+reviewing\s+tickets/);
+  const page = readFileSync(new URL('../pages/DiscordPage.tsx', import.meta.url), 'utf8');
+  assert.match(page, /row\.reviewing && <ReviewingChip \/>/);
+  assert.match(page, /thread\.reviewing && <ReviewingChip \/>/);
 });

@@ -59,6 +59,7 @@ export class GitHubAPI {
         owner: pr.owner || 'unknown',
         pullNumber: pr.pullNumber || pr.number || 0,
         headSha: pr.headSha || '',
+        mergeable: typeof pr.mergeable === 'boolean' ? pr.mergeable : null,
         number: pr.number || pr.pullNumber || 0,
         baseBranch: pr.baseBranch || 'main',
         headBranch: pr.headBranch || '',

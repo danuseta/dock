@@ -59,6 +59,12 @@ export const typeDefs = gql`
     blobUrl: String
   }
 
+  type TicketPullRequests {
+    key: String!
+    labels: [String!]!
+    pullRequests: [PullRequest!]!
+  }
+
   type PullRequest {
     id: ID!
     title: String!
@@ -68,6 +74,8 @@ export const typeDefs = gql`
     type: String!
     owner: String!
     pullNumber: Int!
+    """False when GitHub reports a merge conflict; null while GitHub is still computing or for a closed PR."""
+    mergeable: Boolean
     baseBranch: String
     headBranch: String
     commitsCount: Int
@@ -276,6 +284,8 @@ export const typeDefs = gql`
     passes: [String!]!
     """Why the auto review did not start for this pull request thread."""
     autoReviewSkip: String
+    """The owner said on it and the thread's ticket has no owner Pass label yet."""
+    reviewing: Boolean!
     claimerRepliedAt: String
     mentionedAt: String
     repliedAt: String
@@ -1383,6 +1393,8 @@ export const typeDefs = gql`
     pullFileLines(ticketKey: String!, url: String!, path: String!, ref: String!, from: Int!, to: Int!): [String!]!
     autoReviews: [AutoReview!]!
     claudeAccounts: ClaudeAccounts!
+    """Pull requests and Jira labels of up to 10 tickets by key; extra keys are ignored."""
+    ticketPullRequests(keys: [String!]!): [TicketPullRequests!]!
     settings: Settings
     jiraProjects(url: String, email: String, token: String): [JiraProject!]!
     githubRepos(token: String): [GitHubRepo!]!

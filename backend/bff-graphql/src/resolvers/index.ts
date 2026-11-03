@@ -27,7 +27,7 @@ import { DevServerError, devServers } from '../integrations/dev-servers';
 import { WorkspaceFilesError, workspaceFiles } from '../integrations/workspace-files';
 import { elevenLabsKeys } from '../integrations/elevenlabs-keys';
 import { broadcastDeps, sendBroadcast } from '../integrations/broadcast';
-import { ReviewApprovalError, approvalRecords, lgtmReview } from '../integrations/review-approval';
+import { ReviewApprovalError, approvalRecords, lgtmReview, ownerPassLabel, resetOwnerPassLabel } from '../integrations/review-approval';
 import { decisionGate } from '../integrations/decision-gate';
 import { doctorReports } from '../integrations/doctor';
 import { claudeUsage } from '../integrations/claude-usage';
@@ -64,7 +64,7 @@ async function discordThreadsView() {
     labels: Array.isArray(ticket.labels) ? ticket.labels.map(String) : [],
   }]));
   const error = status.error ?? discordGateway.error;
-  return { configured: Boolean(config), ownerSet: Boolean(owner), live: discordGateway.live, syncedAt: status.syncedAt, error, channels, rows: withJira(await discordReader.freshen(rows), jira, isSettledStatus, new Date(), (id) => autoReview.skipReason(id)) };
+  return { configured: Boolean(config), ownerSet: Boolean(owner), live: discordGateway.live, syncedAt: status.syncedAt, error, channels, rows: withJira(await discordReader.freshen(rows), jira, isSettledStatus, new Date(), (id) => autoReview.skipReason(id), await ownerPassLabel()) };
 }
 
 function channelKind(kind: string) {
@@ -240,6 +240,16 @@ export const resolvers = {
       return workspaceFiles.file(path).catch(workspaceFilesError);
     },
     ownerName: () => reporterName(),
+    ticketPullRequests: async (_: any, { keys }: { keys: string[] }) => {
+      const wanted = [...new Set(keys)].slice(0, 10);
+      const tickets = await jiraAPI.getTickets();
+      const labels = new Map<string, string[]>(tickets.map((ticket: any) => [String(ticket.key), Array.isArray(ticket.labels) ? ticket.labels.map(String) : []]));
+      return Promise.all(wanted.map(async (key) => ({
+        key,
+        labels: labels.get(key) ?? [],
+        pullRequests: await githubAPI.getPullRequestsForTicket(key, { staleWhileRevalidate: true }),
+      })));
+    },
     dashboard: async () => {
       // Scatter-gather parallel fetching
       const [tickets] = await Promise.all([
@@ -550,7 +560,9 @@ export const resolvers = {
       }
     },
     updateSettings: async (_: any, { input }: { input: any }) => {
-      return await storageAPI.updateSettings(input);
+      const saved = await storageAPI.updateSettings(input);
+      resetOwnerPassLabel();
+      return saved;
     },
     validateJira: async (_: any, { url, email, token }: { url?: string, email?: string, token?: string }) => {
       return await jiraAPI.validateJira(url, email, token);
@@ -825,7 +837,7 @@ export const resolvers = {
 };
 
 export const protectedQueries = [
-  'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'claudeAccounts', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
+  'dashboard', 'ticketPullRequests', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'claudeAccounts', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatSessionStates', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'agentLooks', 'libraryAgents', 'libraryAgent',

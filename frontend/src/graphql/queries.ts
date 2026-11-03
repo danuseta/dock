@@ -373,6 +373,16 @@ export const GET_HOME_CORE = gql`
   }
 `;
 
+export const GET_HOME_TICKET_PRS = gql`
+  query GetHomeTicketPrs($keys: [String!]!) {
+    ticketPullRequests(keys: $keys) {
+      key
+      labels
+      pullRequests { id url repo pullNumber status mergeable }
+    }
+  }
+`;
+
 export const GET_HOME_SECONDARY = gql`
   query GetHomeSecondary($calendar: Boolean = true, $docker: Boolean = true, $monitors: Boolean = true) {
     needsAttention {
@@ -1092,6 +1102,7 @@ export const DISCORD_THREAD_FIELDS = gql`
       messageCount
       tags
       slots
+      reviewing
       tickets { key status assignee sprint sprintActive }
       prs
       claim { author mine at }

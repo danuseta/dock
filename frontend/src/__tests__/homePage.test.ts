@@ -50,3 +50,10 @@ test('the workspace Home does not ask the BFF to check every monitor live', () =
   assert.match(home, /monitors\(refresh: true\) @include\(if: \$monitors\)/);
   assert.match(read('pages/HomePage.tsx'), /monitors: showMonitors/);
 });
+
+test('Home My tickets rows hold links beside the button and ask for mergeable', () => {
+  const home = read('pages/HomePage.tsx');
+  assert.doesNotMatch(home, /<button[^>]*>(?:(?!<\/button>).)*<a /s);
+  assert.match(home, /<PRBadge status="CONFLICT" \/>/);
+  assert.match(read('graphql/queries.ts'), /query GetHomeTicketPrs[\s\S]*?mergeable/);
+});

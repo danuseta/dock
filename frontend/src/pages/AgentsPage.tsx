@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowDown, ArrowUp, Building2, Check, ChevronLeft, ChevronRight, ClipboardList, Clock, ExternalLink, EyeOff, FileDiff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, RotateCcw, Square, Table2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Building2, ChevronLeft, ChevronRight, ClipboardList, Clock, ExternalLink, EyeOff, FileDiff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, RotateCcw, Square, Table2, X } from 'lucide-react';
 import { GET_AUTO_REVIEWS, GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
 import { APPROVE_REVIEW, CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
@@ -24,6 +24,8 @@ import { FILTER_KINDS, FLOW_RAIL, PARKED_TEXT, START_FAILED_TEXT, canLgtm, compl
 import { KindBadge } from '../agents/KindBadge';
 import { RunDecisions } from '../agents/RunDecisions';
 import { VerdictBadge } from '../agents/VerdictBadge';
+import { LgtmButton } from '../agents/lgtm';
+import { LGTM_CONFIRM, lgtmResult } from '../agents/lgtmCopy';
 import { AutoReviewBadge, AutoReviewList } from '../agents/AutoReviewList';
 import { latestByTicket, type AutoReviewRow } from '../agents/autoReviews';
 import { RAIL_STAGES, railIndex } from '../agents/office/layout';
@@ -102,17 +104,6 @@ const StageChip: React.FC<{ stage: string; kind?: string }> = ({ stage, kind }) 
     {stageName(stage, kind).toUpperCase()}
   </span>
 );
-
-/** LGTM on a review whose verdict is approve; "Approved" once DOCK labelled the ticket and approved its PRs. */
-const LgtmButton: React.FC<{ run: AgentRun; busy: boolean; onLgtm: (run: AgentRun) => void }> = ({ run, busy, onLgtm }) => {
-  if (run.kind === 'review' && run.approved) return <span className="inline-flex items-center gap-1 font-mono text-[0.68rem] font-semibold text-status-merged"><Check size={12} aria-hidden="true" />Approved</span>;
-  if (!canLgtm(run)) return null;
-  return (
-    <Button size="sm" variant="primary" className="h-7 px-2.5 max-[760px]:h-11" disabled={busy} title="Adds your Jira Pass label to the reviewed ticket and approves its pull requests on GitHub" onClick={(event) => { event.stopPropagation(); onLgtm(run); }}>
-      <Check size={13} aria-hidden="true" />LGTM
-    </Button>
-  );
-};
 
 // The detail panel already says these in its waiting box or its Activity section.
 const ACTIVITY_SHOWS = new Set<RunStatus>(['waiting', 'stalled', 'working', 'thinking', 'asleep']);
@@ -259,10 +250,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
     try {
       const res = await approveReview({ variables: { ticketKey: lgtmTarget.key } });
       const steps: { name: string; ok: boolean; detail: string }[] = res.data?.approveReview ?? [];
-      const failed = steps.filter((step) => !step.ok);
-      setToast(failed.length
-        ? { message: `${failed.length} of ${steps.length} steps failed: ${failed.map((step) => `${step.name} (${step.detail})`).join('; ')}`, type: 'error' }
-        : { message: `LGTM sent for ${lgtmTarget.key}: Jira Pass label added and the pull requests approved.`, type: 'success' });
+      setToast(lgtmResult(lgtmTarget.key, steps));
     } catch (lgtmError) {
       setToast({ message: lgtmError instanceof Error ? lgtmError.message : 'The LGTM could not be sent', type: 'error' });
     } finally {
@@ -772,7 +760,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
       <ConfirmDialog
         open={Boolean(lgtmTarget)}
         title={`LGTM ${lgtmTarget?.key ?? ''}?`}
-        description="DOCK adds your Jira Pass label to the reviewed ticket and submits an Approve review on each of its pull requests on GitHub. The review run then moves to done."
+        description={LGTM_CONFIRM.description}
         confirmLabel="LGTM"
         busyLabel="Sending..."
         busy={approving}
