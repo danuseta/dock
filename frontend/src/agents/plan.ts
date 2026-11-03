@@ -9,6 +9,7 @@ export interface PlanEdge {
   dependsOnKey: string;
   dependsOnTitle: string | null;
   dependsOnAssignee: string | null;
+  dependsOnStatus: string | null;
   source: string;
   reason: string | null;
   state: string;
