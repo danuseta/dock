@@ -1103,6 +1103,8 @@ test('ticketPullRequests answers at most 10 distinct keys with their cached Jira
   const asked: string[] = [];
   const getTickets = JiraAPI.prototype.getTickets;
   const getPrs = GitHubAPI.prototype.getPullRequestsForTicket;
+  const hasPin = StorageAPI.prototype.hasMasterPin;
+  StorageAPI.prototype.hasMasterPin = async () => false;
   JiraAPI.prototype.getTickets = async () => [{ key: 'QRD-1', labels: ['danuPass'] }] as any;
   GitHubAPI.prototype.getPullRequestsForTicket = async (key: string) => { asked.push(key); return [{ id: key, mergeable: false }] as any; };
   try {
@@ -1114,5 +1116,6 @@ test('ticketPullRequests answers at most 10 distinct keys with their cached Jira
   } finally {
     JiraAPI.prototype.getTickets = getTickets;
     GitHubAPI.prototype.getPullRequestsForTicket = getPrs;
+    StorageAPI.prototype.hasMasterPin = hasPin;
   }
 });
