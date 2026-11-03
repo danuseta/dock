@@ -35,7 +35,7 @@ test('the settings form round-trips the config, always saves sous on the workspa
   const config = {
     enabled: true, machine: 'laptop', parallel: 2, workStart: 9, workEnd: 17, workDays: [1, 2, 3, 4, 5], activeFrom: null, activeUntil: '2026-12-31',
     maxPerDay: 6, mode: 'manual', sprint: 'active', labels: ['be', 'fe'], todoStatuses: ['To Do'],
-    inProgressStatus: 'In Progress', model: 'opus', effort: 'high', usageBrakePercent: 70, engine: 'omc',
+    inProgressStatus: 'In Progress', model: 'opus', effort: 'high', usageBrakePercent: 70, weeklyBrakePercent: 85, engine: 'omc',
   };
   const saved = { ...config, machine: 'workspace', mode: null, model: null, effort: null, engine: 'sous' };
   const form = formFromConfig(JSON.stringify(config));
@@ -45,4 +45,15 @@ test('the settings form round-trips the config, always saves sous on the workspa
     JSON.parse(configFromForm({ ...form, workDays: [6, 1], labels: '', parallel: 'two' })),
     { ...saved, workDays: [1, 6], labels: [], parallel: 'two' },
   );
+});
+
+test('a config saved before the weekly brake loads it as 90', async () => {
+  const { configFromForm, formFromConfig } = await import('../agents/cronRound');
+  const config = {
+    enabled: true, parallel: 2, workStart: 9, workEnd: 17, workDays: [1], activeFrom: null, activeUntil: null,
+    maxPerDay: 6, sprint: 'active', labels: [], todoStatuses: ['To Do'], inProgressStatus: 'In Progress', usageBrakePercent: 70,
+  };
+  const form = formFromConfig(JSON.stringify(config));
+  assert.strictEqual(form.weeklyBrakePercent, '90');
+  assert.strictEqual(JSON.parse(configFromForm(form)).weeklyBrakePercent, 90);
 });

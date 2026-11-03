@@ -715,7 +715,7 @@ export const GET_SPRINT_PLAN = gql`
       groups
       tickets {
         key title status position held
-        edges { id ticketKey dependsOnKey dependsOnTitle dependsOnAssignee source reason state }
+        edges { id ticketKey dependsOnKey dependsOnTitle dependsOnAssignee dependsOnStatus source reason state }
       }
     }
   }
@@ -729,7 +729,7 @@ export const SPRINT_PLAN_MAP = gql`
 
 export const SPRINT_PLAN_EDGE_ACTION = gql`
   mutation SprintPlanEdgeAction($id: ID!, $action: String!) {
-    sprintPlanEdgeAction(id: $id, action: $action) { id ticketKey dependsOnKey dependsOnTitle dependsOnAssignee source reason state }
+    sprintPlanEdgeAction(id: $id, action: $action) { id ticketKey dependsOnKey dependsOnTitle dependsOnAssignee dependsOnStatus source reason state }
   }
 `;
 

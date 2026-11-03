@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@apollo/client';
 import { ArrowRightLeft, CheckCircle2, Circle, Info, RefreshCw, Users } from 'lucide-react';
 import { GET_CLAUDE_ACCOUNTS } from '../graphql/queries';
 import { SET_CLAUDE_ROTATION, USE_CLAUDE_ACCOUNT } from '../graphql/mutations';
-import { limitTone, toneClass } from '../chat/status';
+import { limitTone, resetLabel, toneClass } from '../chat/status';
 import { useNow } from '../chat/activity/useNow';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
@@ -16,21 +16,15 @@ interface Entry { at: string; from: string; to: string; reason: string; auto: bo
 interface State { available: boolean; accounts: Account[]; rotation: Rotation; log: Entry[] }
 
 const METER = { ok: 'bg-status-merged', warn: 'bg-amber-200', danger: 'bg-status-conflict' } as const;
-/** When a window resets: the time today, the day and time later. */
-const resetAt = (iso: string, now: number) => {
-  const at = new Date(iso);
-  const clock = at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return at.getTime() - now < 20 * 3_600_000 ? clock : `${at.toLocaleDateString([], { weekday: 'short' })} ${clock}`;
-};
 const time = (iso: string) => new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
-const Meter: React.FC<{ label: string; window: UsageWindow | null; now: number }> = ({ label, window, now }) => {
-  if (!window) return <span className="font-mono text-[0.7rem] text-muted-foreground">{label} -</span>;
+const Meter: React.FC<{ label: string; window: UsageWindow | null; seen: boolean; now: number }> = ({ label, window, seen, now }) => {
+  if (!window) return <span className="font-mono text-[0.7rem] text-muted-foreground">{label} {seen ? 'none' : '-'}</span>;
   const used = Math.min(100, Math.max(0, Math.round(window.usedPercentage)));
   const tone = limitTone(used);
   return (
     <span className="grid min-w-0 gap-1 font-mono text-[0.7rem]">
-      <span className="flex justify-between gap-2 whitespace-nowrap"><span className={toneClass[tone]}>{label} {used}%</span><span className="truncate text-muted-foreground">{window.resetsAt ? resetAt(window.resetsAt, now) : ''}</span></span>
+      <span className="flex justify-between gap-2 whitespace-nowrap"><span className={toneClass[tone]}>{label} {used}%</span><span className="truncate text-muted-foreground">{window.resetsAt ? resetLabel(window.resetsAt, now) : ''}</span></span>
       <span className="h-1.5 overflow-hidden rounded-pill bg-surface-2" role="meter" aria-label={`${label} used`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={used}><span className={cn('block h-full', METER[tone])} style={{ width: `${used}%` }} /></span>
     </span>
   );
@@ -90,8 +84,8 @@ export const ClaudeAccountSection: React.FC = () => {
                   <small className="block text-[0.68rem] text-muted-foreground">{account.seenAt ? `usage seen ${time(account.seenAt)}` : 'no usage seen yet'}</small></span>
                 {!account.active && <Button size="sm" className="ml-auto hidden max-[760px]:inline-flex" disabled={switching} onClick={() => void run(() => switchAccount({ variables: { name: account.name } }))}><ArrowRightLeft size={14} aria-hidden="true" />Use</Button>}
               </span>
-              <Meter label="5h" window={account.fiveHour} now={now} />
-              <Meter label="7d" window={account.sevenDay} now={now} />
+              <Meter label="5h" window={account.fiveHour} seen={Boolean(account.seenAt || account.sevenDay)} now={now} />
+              <Meter label="7d" window={account.sevenDay} seen={Boolean(account.seenAt || account.fiveHour)} now={now} />
               <span className="justify-self-end max-[760px]:hidden">
                 {!account.active && <Button size="sm" disabled={switching} onClick={() => void run(() => switchAccount({ variables: { name: account.name } }))}><ArrowRightLeft size={14} aria-hidden="true" />Use</Button>}
               </span>
@@ -113,6 +107,7 @@ export const ClaudeAccountSection: React.FC = () => {
         <div className={cn('grid grid-cols-3 gap-3 max-[760px]:grid-cols-2', !rotation?.enabled && 'opacity-60')}>
           <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">Rotate when 5h reaches (%)
             <Input type="number" inputMode="numeric" min={50} max={100} value={limits.fiveHour} onChange={(event) => setLimits((current) => ({ ...current, fiveHour: event.target.value }))} onBlur={() => savePercent('fiveHour')} />
+            <span className="text-[0.68rem]">Ultra accounts have no 5 hour window; they rotate on 7d only.</span>
           </label>
           <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">Rotate when 7d reaches (%)
             <Input type="number" inputMode="numeric" min={50} max={100} value={limits.sevenDay} onChange={(event) => setLimits((current) => ({ ...current, sevenDay: event.target.value }))} onBlur={() => savePercent('sevenDay')} />

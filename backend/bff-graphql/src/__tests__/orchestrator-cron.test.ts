@@ -14,6 +14,7 @@ const WED_0905 = new Date('2026-10-14T02:05:00.000Z');
 
 test('settings: defaults when nothing is saved, saved fields win, v1 keys are ignored, wrong values are refused', () => {
   assert.deepStrictEqual(parseCronSettings(null), DEFAULT_CRON_SETTINGS);
+  assert.strictEqual(DEFAULT_CRON_SETTINGS.weeklyBrakePercent, 90);
   assert.deepStrictEqual(
     [DEFAULT_CRON_SETTINGS.enabled, DEFAULT_CRON_SETTINGS.workStart, DEFAULT_CRON_SETTINGS.workEnd, DEFAULT_CRON_SETTINGS.workDays, DEFAULT_CRON_SETTINGS.maxPerDay, DEFAULT_CRON_SETTINGS.mode],
     [false, 9, 17, [1, 2, 3, 4, 5], 6, null],
@@ -24,7 +25,7 @@ test('settings: defaults when nothing is saved, saved fields win, v1 keys are ig
   for (const bad of [
     '{', '[]', '{"parallel":0}', '{"workStart":17,"workEnd":9}', '{"workEnd":25}', '{"workDays":[]}', '{"workDays":[8]}', '{"maxPerDay":0}',
     '{"activeFrom":"2026-10-20","activeUntil":"2026-10-01"}', '{"activeFrom":"14-10-2026"}', '{"mode":"bypassPermissions"}',
-    '{"sprint":"next"}', '{"todoStatuses":[]}', '{"usageBrakePercent":101}',
+    '{"sprint":"next"}', '{"todoStatuses":[]}', '{"usageBrakePercent":101}', '{"weeklyBrakePercent":101}', '{"weeklyBrakePercent":-1}',
     '{"enabled":"yes"}', '{"machine":""}', '{"engine":"codex"}',
   ]) {
     assert.throws(() => parseCronSettings(bad), CronInputError, bad);
@@ -93,6 +94,7 @@ interface Start {
   runs?: CronRun[];
   online?: boolean;
   used?: { usedPercentage: number; resetsAt: string | null } | null;
+  weekly?: { usedPercentage: number; resetsAt: string | null } | null;
   moves?: boolean;
   dependencies?: Array<{ ticketKey: string; dependsOnKey: string }>;
   held?: Set<string>;
@@ -152,7 +154,7 @@ function world(start: Start = {}) {
     slots: async () => ({ busy: state.sessions.filter((s) => s.state === 'running' && s.cronSlot !== false).length, waiting: state.sessions.filter((s) => s.state === 'queued' && s.cronSlot !== false).length }),
     machines: async () => ['laptop', 'workspace'],
     online: () => state.online,
-    fiveHourUsed: () => start.used ?? null,
+    limitsUsed: () => ({ fiveHour: start.used ?? null, sevenDay: start.weekly ?? null }),
     takenKeys: async () => state.runs.map((run) => run.key),
     deadStarts: async () => [...new Set(state.sessions.map((s) => s.ticketKey))]
       .map((key) => state.sessions.filter((s) => s.ticketKey === key).at(-1)!)
@@ -319,6 +321,17 @@ test('a fill is skipped when the machine is offline or the usage brake is reache
 
   const stale = world({ tickets: [ticket('QRD-1')], used: { usedPercentage: 99, resetsAt: '2026-10-14T01:00:00.000Z' } });
   assert.deepStrictEqual((await stale.cron.runFill()).started, ['QRD-1']);
+});
+
+test('the weekly brake stops a fill on a 7 day window alone; under the brake or past its reset it does not', async () => {
+  const braked = world({ tickets: [ticket('QRD-1')], used: null, weekly: { usedPercentage: 91.2, resetsAt: '2026-10-20T05:00:00.000Z' } });
+  assert.strictEqual((await braked.cron.runFill()).skipped, 'usage brake: 7 day usage is at 91%, the brake is 90%');
+
+  const under = world({ tickets: [ticket('QRD-1')], weekly: { usedPercentage: 89, resetsAt: '2026-10-20T05:00:00.000Z' } });
+  assert.deepStrictEqual((await under.cron.runFill()).started, ['QRD-1']);
+
+  const passed = world({ tickets: [ticket('QRD-1')], weekly: { usedPercentage: 99, resetsAt: '2026-10-14T01:00:00.000Z' } });
+  assert.deepStrictEqual((await passed.cron.runFill()).started, ['QRD-1']);
 });
 
 test('a ticket with a pending inferred edge is held and the next one starts; the wait is recorded once over two ticks', async () => {

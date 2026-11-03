@@ -13,8 +13,8 @@ const plan = (over: Partial<SprintPlan> = {}): SprintPlan => ({
   tickets: [
     { key: 'QRD-1', title: 'One', status: 'To Do', position: 1, held: false, edges: [] },
     { key: 'QRD-2', title: 'Two', status: 'To Do', position: 2, held: true, edges: [
-      { id: 'e1', ticketKey: 'QRD-2', dependsOnKey: 'QRD-1', dependsOnTitle: 'One', dependsOnAssignee: null, source: 'inferred', reason: 'same file', state: 'pending' },
-      { id: 'e2', ticketKey: 'QRD-2', dependsOnKey: 'QRD-9', dependsOnTitle: null, dependsOnAssignee: 'Ana', source: 'jira', reason: 'link', state: 'accepted' },
+      { id: 'e1', ticketKey: 'QRD-2', dependsOnKey: 'QRD-1', dependsOnTitle: 'One', dependsOnAssignee: null, dependsOnStatus: null, source: 'inferred', reason: 'same file', state: 'pending' },
+      { id: 'e2', ticketKey: 'QRD-2', dependsOnKey: 'QRD-9', dependsOnTitle: null, dependsOnAssignee: 'Ana', dependsOnStatus: 'PR Review', source: 'jira', reason: 'link', state: 'accepted' },
     ] },
   ],
   ...over,
@@ -62,5 +62,6 @@ test('the Agents page shows Sprint with Plan and Retro, Home opens the plan, and
   assert.match(source('../components/HomeAttention.tsx'), /\/agents\?tab=sprint&sub=plan/);
   assert.match(source('../lib/notificationEvents.ts'), /PLAN_DEPENDENCY: \{ prefix: 'plan', title: 'waits for your call' \}/);
   const tab = source('../agents/PlanTab.tsx');
+  assert.match(tab, /edge\.dependsOnStatus &&/);
   for (const text of ['Map again', 'Accept', 'Reject', 'Map now', 'Safe in parallel']) assert.ok(tab.includes(text), text);
 });

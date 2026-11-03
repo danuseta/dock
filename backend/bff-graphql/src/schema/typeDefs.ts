@@ -540,6 +540,8 @@ export const typeDefs = gql`
     dependsOnKey: String!
     dependsOnTitle: String
     dependsOnAssignee: String
+    """Jira status of the ticket it waits for, null when unknown."""
+    dependsOnStatus: String
     """jira or inferred."""
     source: String!
     reason: String

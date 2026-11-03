@@ -43,7 +43,10 @@ export const orchestratorCron = new OrchestratorCron({
   slots: (machine) => storage.countCronSlots(machine),
   machines: () => orchestratorService.machines(),
   online: (machine) => chatService.bridge(machine).online,
-  fiveHourUsed: (machine) => chatService.statusSnapshot(machine).limits?.fiveHour ?? null,
+  limitsUsed: (machine) => {
+    const limits = chatService.statusSnapshot(machine).limits;
+    return { fiveHour: limits?.fiveHour ?? null, sevenDay: limits?.sevenDay ?? null };
+  },
   // A ticket the laptop works on lives in the peer DOCK; an unreachable peer leaves only the local runs.
   takenKeys: async () => {
     const [local, peerRuns] = await Promise.all([storage.getOrchestratorRuns(), ledgerPeer ? ledgerPeer.runs() : []]);

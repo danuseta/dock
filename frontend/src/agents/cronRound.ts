@@ -62,6 +62,7 @@ export interface CronForm {
   todoStatuses: string;
   inProgressStatus: string;
   usageBrakePercent: string;
+  weeklyBrakePercent: string;
 }
 
 const list = (text: string) => text.split(',').map((item) => item.trim()).filter(Boolean);
@@ -82,6 +83,7 @@ export function formFromConfig(configJson: string): CronForm {
     todoStatuses: config.todoStatuses.join(', '),
     inProgressStatus: config.inProgressStatus,
     usageBrakePercent: String(config.usageBrakePercent),
+    weeklyBrakePercent: String(config.weeklyBrakePercent ?? 90),
   };
 }
 
@@ -109,6 +111,7 @@ export function configFromForm(form: CronForm): string {
     model: null,
     effort: null,
     usageBrakePercent: number(form.usageBrakePercent),
+    weeklyBrakePercent: number(form.weeklyBrakePercent),
     engine: 'sous',
   });
 }

@@ -9,6 +9,8 @@ import { edgeStateText, groupsText, hasMap, isMapping, mappedText, sourceLabel, 
 const head = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
 const chip = 'rounded-xs border px-1.5 font-mono text-[0.6rem] font-bold uppercase tracking-[0.08em]';
 
+const DONE_STATUSES = new Set(['uat merged', 'uat check', 'ready for production', 'rfp', 'done']);
+
 const EdgeRow: React.FC<{ edge: PlanEdge; busy: boolean; onAction: (id: string, action: 'accept' | 'reject') => void }> = ({ edge, busy, onAction }) => (
   <li className={cn('grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 border-t border-border py-2 max-[760px]:grid-cols-[minmax(0,1fr)]', edge.state === 'rejected' && 'opacity-70')}>
     <div className="min-w-0">
@@ -16,6 +18,7 @@ const EdgeRow: React.FC<{ edge: PlanEdge; busy: boolean; onAction: (id: string, 
         <span>waits for <span className="font-mono font-semibold text-foreground">{edge.dependsOnKey}</span></span>
         {edge.dependsOnTitle && <span className="min-w-0 truncate text-muted-foreground">{edge.dependsOnTitle}</span>}
         {edge.dependsOnAssignee && <span className="text-muted-foreground">· {edge.dependsOnAssignee}</span>}
+        {edge.dependsOnStatus && <span className={cn(chip, DONE_STATUSES.has(edge.dependsOnStatus.toLowerCase()) ? 'border-status-ok text-status-ok' : 'border-border text-secondary-foreground')}>{edge.dependsOnStatus}</span>}
         <span className={cn(chip, edge.source === 'jira' ? 'border-border text-secondary-foreground' : 'border-accent text-accent')}>{sourceLabel(edge.source)}</span>
       </p>
       {edge.reason && <p className="mt-1 text-pretty text-[0.76rem] text-muted-foreground">{edge.reason}</p>}

@@ -130,12 +130,12 @@ async function sprintPlanView() {
   const active = activeSprint(await jiraAPI.getTickets());
   if (!active) return null;
   const [plan, edges, orders] = await Promise.all([storageService.getSprintPlan(active.sprint), storageService.getPlanEdges(active.sprint), storageService.getTicketOrders()]);
-  const known = new Map<string, { title?: string; assignee?: string | null }>(active.tickets.map((ticket: any) => [ticket.key, ticket]));
+  const known = new Map<string, { title?: string; assignee?: string | null; status?: string | null }>(active.tickets.map((ticket: any) => [ticket.key, ticket]));
   const sprintId = (await sprintDashboardService.listSprints()).find((item) => item.name === active.sprint)?.id;
   if (sprintId != null) {
     try {
-      for (const issue of JSON.parse(await sprintDashboardService.issueEvents(sprintId)) as Array<{ key?: string; summary?: string; assignee?: string | null }>) {
-        if (issue.key && !known.has(issue.key)) known.set(issue.key, { title: issue.summary, assignee: issue.assignee });
+      for (const issue of JSON.parse(await sprintDashboardService.issueEvents(sprintId)) as Array<{ key?: string; summary?: string; assignee?: string | null; status?: string | null }>) {
+        if (issue.key && !known.has(issue.key)) known.set(issue.key, { title: issue.summary, assignee: issue.assignee, status: issue.status });
       }
     } catch { /* snapshot unreadable: parents show without a title */ }
   }
@@ -143,7 +143,7 @@ async function sprintPlanView() {
   const pending = new Set(edges.filter((edge) => edge.state === 'pending').map((edge) => edge.ticketKey));
   const edgeViews = edges.map((edge) => {
     const parent = lookup(edge.dependsOnKey);
-    return { id: edge.id, ticketKey: edge.ticketKey, dependsOnKey: edge.dependsOnKey, dependsOnTitle: parent?.title ?? null, dependsOnAssignee: parent?.assignee ?? null, source: edge.source, reason: edge.reason, state: edge.state };
+    return { id: edge.id, ticketKey: edge.ticketKey, dependsOnKey: edge.dependsOnKey, dependsOnTitle: parent?.title ?? null, dependsOnAssignee: parent?.assignee ?? null, dependsOnStatus: parent?.status ?? null, source: edge.source, reason: edge.reason, state: edge.state };
   });
   const rank = (key: string) => orders.get(key) ?? Number.MAX_SAFE_INTEGER;
   const ordered = [...active.tickets].sort((a: any, b: any) => rank(a.key) - rank(b.key));
@@ -585,7 +585,7 @@ export const resolvers = {
       if (!active) throw new GraphQLError('No active sprint', { extensions: { code: 'BAD_USER_INPUT' } });
       const edge = await sprintPlanner.decide(active.sprint, id, action).catch(orchestratorInputError);
       const parent: any = await jiraAPI.getTicket(edge.dependsOnKey).catch(() => null);
-      return { id: edge.id, ticketKey: edge.ticketKey, dependsOnKey: edge.dependsOnKey, dependsOnTitle: parent?.title ?? null, dependsOnAssignee: parent?.assignee ?? null, source: edge.source, reason: edge.reason, state: edge.state };
+      return { id: edge.id, ticketKey: edge.ticketKey, dependsOnKey: edge.dependsOnKey, dependsOnTitle: parent?.title ?? null, dependsOnAssignee: parent?.assignee ?? null, dependsOnStatus: parent?.status ?? null, source: edge.source, reason: edge.reason, state: edge.state };
     },
     retroItemAction: async (_: unknown, { id, action, text }: { id: string; action: string; text?: string | null }) => {
       const item = await storageService.getRetroItem(id);

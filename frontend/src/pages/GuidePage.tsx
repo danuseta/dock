@@ -100,7 +100,8 @@ const GuidePage: React.FC<GuidePageProps> = ({ onNavigate }) => (
           ['Tickets from', 'active sprint', 'active / any', 'Sprint yang diambil.'],
           ['Jira statuses to pick up', 'To Do', 'daftar', 'Status Jira yang dianggap siap dikerjakan.'],
           ['Move a started ticket to', 'In Progress', 'status', 'Status Jira setelah tiket mulai.'],
-          ['Usage brake (%)', '70', '0–100', 'Kalau usage 5 jam sudah segini, cron berhenti memulai tiket baru.'],
+          ['Usage brake (%)', '70', '0–100', 'Kalau usage 5 jam sudah segini, cron berhenti memulai tiket baru. Akun Ultra tidak punya window 5 jam, jadi batas ini dilewati.'],
+          ['Weekly brake (%)', '90', '0–100', 'Kalau usage 7 hari sudah segini, cron berhenti memulai tiket baru.'],
         ]} />
         <h3 className="mb-2 mt-4 font-semibold text-foreground">2. Tiket manual</h3>
         <p>Buka sesi dari chat panel atau dari tiket. Bedanya dengan cron: sesi manual berhenti di <b>gate</b> dan bertanya dulu sebelum menulis kode; cron jalan terus tanpa bertanya kalau AC tiketnya lengkap. Tiket tanpa AC diparkir dan menunggu kamu.</p>
@@ -143,6 +144,7 @@ const GuidePage: React.FC<GuidePageProps> = ({ onNavigate }) => (
           ['Rotate when 5h reaches', '90%', '50–100', ''],
           ['Rotate when 7d reaches', '95%', '50–100', ''],
           ['Back to main when it resets', 'on', 'on / off', 'Setelah rotasi otomatis, kembali ke main begitu main di bawah batas lagi.'],
+          ['Rotate when 5h reaches (%)', '-', '50–100', 'Akun Ultra tidak punya window 5 jam; akun itu hanya dirotasi lewat batas 7d.'],
         ]} />
         <p>Usage sebuah akun hanya diketahui saat akun itu dipakai. Akun yang belum pernah dipakai bertuliskan "no usage seen yet" sampai giliran pertamanya.</p>
       </Section>
