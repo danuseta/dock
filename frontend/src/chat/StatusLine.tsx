@@ -1,12 +1,12 @@
 import React from 'react';
 import { cn } from '../lib/cn';
 import { relativeTime } from './messages';
-import { limitTone, resetsIn, toneClass, type ChatLimit, type LimitTone } from './status';
+import { limitTone, resetLabel, toneClass, type ChatLimit, type LimitTone } from './status';
 import { useChatStatus } from './useChatStatus';
 
 const LimitText: React.FC<{ label: string; limit: ChatLimit | null | undefined; stale: boolean; now: number }> = ({ label, limit, stale, now }) => {
   if (!limit) return null;
-  const reset = limit.resetsAt ? resetsIn(limit.resetsAt, now) : '';
+  const reset = limit.resetsAt ? resetLabel(limit.resetsAt, now) : '';
   return (
     <span className="whitespace-nowrap">
       <span className={stale ? 'text-muted-foreground' : toneClass[limitTone(limit.usedPercentage)]}>{label} {Math.round(limit.usedPercentage)}%</span>
@@ -38,7 +38,7 @@ const LimitMeter: React.FC<{ label: string; limit: ChatLimit | null | undefined;
   if (!limit) return null;
   const used = Math.min(100, Math.max(0, Math.round(limit.usedPercentage)));
   const tone = limitTone(used);
-  const reset = limit.resetsAt ? resetsIn(limit.resetsAt, now) : '';
+  const reset = limit.resetsAt ? resetLabel(limit.resetsAt, now) : '';
   return (
     <div className="flex items-center gap-2" title={reset || undefined}>
       <span className="w-5 flex-none text-muted-foreground">{label}</span>
@@ -46,6 +46,7 @@ const LimitMeter: React.FC<{ label: string; limit: ChatLimit | null | undefined;
         <span className={cn('block h-full', stale ? 'bg-muted-foreground' : meterClass[tone])} style={{ width: `${used}%` }} />
       </span>
       <span className={cn('w-9 flex-none text-right', stale ? 'text-muted-foreground' : toneClass[tone])}>{used}%</span>
+      {reset && <span className="flex-none text-muted-foreground">{reset}</span>}
     </div>
   );
 };
@@ -57,8 +58,8 @@ export const LimitBars: React.FC<{ machine?: string | null }> = ({ machine }) =>
   if (!limits || (!limits.fiveHour && !limits.sevenDay)) return null;
   return (
     <span className="flex w-8 flex-col gap-[3px]" aria-hidden="true">
-      {[limits.fiveHour, limits.sevenDay].map((limit, index) => {
-        const used = Math.min(100, Math.max(0, Math.round(limit?.usedPercentage ?? 0)));
+      {[limits.fiveHour, limits.sevenDay].filter((limit): limit is ChatLimit => Boolean(limit)).map((limit, index) => {
+        const used = Math.min(100, Math.max(0, Math.round(limit.usedPercentage)));
         return (
           <span key={index} className="block h-1 overflow-hidden rounded-pill bg-surface-2">
             <span className={cn('block h-full', limits.stale ? 'bg-muted-foreground' : meterClass[limitTone(used)])} style={{ width: `${used}%` }} />

@@ -156,8 +156,11 @@ export const CronSettingsDialog = ({ open, onClose }: { open: boolean; onClose: 
                     <Field id="cron-inProgressStatus" label="Move a started ticket to">
                       <Input {...text('inProgressStatus')} />
                     </Field>
-                    <Field id="cron-usageBrakePercent" label="Usage brake (%)" hint="No new ticket while the 5 hour usage is at or above this.">
+                    <Field id="cron-usageBrakePercent" label="Usage brake (%)" hint="No new ticket while the 5 hour usage is at or above this. Ultra accounts have no 5 hour window; this one is then skipped.">
                       <Input {...text('usageBrakePercent')} inputMode="numeric" />
+                    </Field>
+                    <Field id="cron-weeklyBrakePercent" label="Weekly brake (%)" hint="No new ticket while the 7 day usage is at or above this.">
+                      <Input {...text('weeklyBrakePercent')} inputMode="numeric" />
                     </Field>
                   </div>
                 </Section>

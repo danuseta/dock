@@ -37,7 +37,13 @@ export interface CronSettings {
   model: string | null;
   effort: string | null;
   usageBrakePercent: number;
+  weeklyBrakePercent: number;
   engine: CronEngine;
+}
+
+export interface UsageWindow {
+  usedPercentage: number;
+  resetsAt: string | null;
 }
 
 export const DEFAULT_CRON_SETTINGS: CronSettings = {
@@ -58,6 +64,7 @@ export const DEFAULT_CRON_SETTINGS: CronSettings = {
   model: null,
   effort: null,
   usageBrakePercent: 70,
+  weeklyBrakePercent: 90,
   engine: 'sous',
 };
 
@@ -148,6 +155,7 @@ export function parseCronSettings(raw: string | null | undefined): CronSettings 
     model: optionalWord(merged.model, 'model'),
     effort: optionalWord(merged.effort, 'effort'),
     usageBrakePercent: integer(merged.usageBrakePercent, 'usageBrakePercent', 0, 100),
+    weeklyBrakePercent: integer(merged.weeklyBrakePercent, 'weeklyBrakePercent', 0, 100),
     engine: merged.engine as CronEngine,
   };
 }
@@ -347,7 +355,7 @@ export interface CronDeps {
   slots(machine: string): Promise<CronSlots>;
   machines(): Promise<string[]>;
   online(machine: string): boolean;
-  fiveHourUsed(machine: string): { usedPercentage: number; resetsAt: string | null } | null;
+  limitsUsed(machine: string): { fiveHour: UsageWindow | null; sevenDay: UsageWindow | null };
   /** Every run that ever existed, dismissed ones too: a ticket is picked once. */
   takenKeys(): Promise<string[]>;
   /** Tickets whose latest cron session ended its first turn without a single reply from the agent. */
@@ -453,10 +461,11 @@ export class OrchestratorCron {
     if (!this.deps.online(settings.machine)) return `machine ${settings.machine} is offline`;
     const window = ignoreWindow ? null : outsideWindow(now, settings);
     if (window) return window;
-    const used = this.deps.fiveHourUsed(settings.machine);
+    const { fiveHour, sevenDay } = this.deps.limitsUsed(settings.machine);
     // A limit whose window has already reset says nothing about now.
-    const current = used && (!used.resetsAt || new Date(used.resetsAt) > now);
-    if (used && current && used.usedPercentage >= settings.usageBrakePercent) return `usage brake: 5 hour usage is at ${Math.round(used.usedPercentage)}%, the brake is ${settings.usageBrakePercent}%`;
+    const current = (used: UsageWindow | null): used is UsageWindow => !!used && (!used.resetsAt || new Date(used.resetsAt) > now);
+    if (current(fiveHour) && fiveHour.usedPercentage >= settings.usageBrakePercent) return `usage brake: 5 hour usage is at ${Math.round(fiveHour.usedPercentage)}%, the brake is ${settings.usageBrakePercent}%`;
+    if (current(sevenDay) && sevenDay.usedPercentage >= settings.weeklyBrakePercent) return `usage brake: 7 day usage is at ${Math.round(sevenDay.usedPercentage)}%, the brake is ${settings.weeklyBrakePercent}%`;
     return null;
   }
 
