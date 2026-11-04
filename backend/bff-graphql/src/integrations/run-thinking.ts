@@ -39,6 +39,7 @@ const SHOWN_EVENTS: Record<string, { agent: string; text: (detail: string) => st
   RESUMED: { agent: 'DOCK', text: () => 'Session opened', topic: 'stage' },
   OWNER_REPLY: { agent: 'owner', text: (detail) => `Answered ${detail}`, topic: 'owner' },
   OWNER_CONFIRMED: { agent: 'owner', text: (detail) => `Confirmed ${detail}`, topic: 'owner' },
+  LEDGER_WRITE_FAILED: { agent: 'DOCK', text: (detail) => `Confirmation not written to the ledger: ${detail}`, topic: 'owner' },
   APPROVED: { agent: 'owner', text: () => 'LGTM', topic: 'owner' },
   PR_READY: { agent: 'DOCK', text: (detail) => `Marked ready: ${detail}`, topic: 'git' },
   PR_READY_FAILED: { agent: 'DOCK', text: (detail) => `Could not mark ready: ${detail}`, topic: 'git' },
