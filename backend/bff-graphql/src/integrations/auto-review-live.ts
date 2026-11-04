@@ -49,4 +49,8 @@ export const autoReview = new AutoReview({
   now: () => new Date(),
 });
 
-orchestratorService.onLedger = (run) => { void autoReview.ledger(run).catch((error) => console.warn('[AutoReview] verdict failed:', error instanceof Error ? error.message : 'unknown error')); };
+const previousLedger = orchestratorService.onLedger;
+orchestratorService.onLedger = (run) => {
+  previousLedger(run);
+  void autoReview.ledger(run).catch((error) => console.warn('[AutoReview] verdict failed:', error instanceof Error ? error.message : 'unknown error'));
+};

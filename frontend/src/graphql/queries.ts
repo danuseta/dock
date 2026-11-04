@@ -1220,6 +1220,23 @@ export const CLAUDE_ACCOUNTS_FIELDS = `
   log { at from to reason auto }
 `;
 
+export const QA_LOCAL_FIELDS = `
+  available
+  autoRun
+  trigger { at sessionId pullRequests error }
+  run {
+    runId state step verdict rule passed failed blocked error startedAt updatedAt finishedAt
+    steps { id label state }
+    testCases { id title ac state seconds video note }
+  }
+`;
+
+export const GET_QA_LOCAL = gql`
+  query GetQaLocal($ticketKey: String) {
+    qaLocal(ticketKey: $ticketKey) { ${QA_LOCAL_FIELDS} }
+  }
+`;
+
 export const GET_CLAUDE_ACCOUNTS = gql`
   query GetClaudeAccounts {
     claudeAccounts { ${CLAUDE_ACCOUNTS_FIELDS} }

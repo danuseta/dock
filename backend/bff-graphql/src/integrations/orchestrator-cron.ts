@@ -707,13 +707,13 @@ export class OrchestratorCron {
   }
 
   /**
-   * A `Review-<key>` session on the cron's machine with the cron's options. It waits for Turns at once, not for a cron
-   * slot. Removed again when its first message is refused. Resolves to the session id.
+   * A `Review-<key>` (or `QA-<key>`) session on the cron's machine with the cron's options. It waits for Turns at once,
+   * not for a cron slot. Removed again when its first message is refused. Resolves to the session id.
    */
-  async openReview(key: string, prompt: string): Promise<string> {
+  async openReview(key: string, prompt: string, kind: 'Review' | 'QA' = 'Review'): Promise<string> {
     const settings = await this.settings();
     const options = await this.deps.machineOptions(settings.machine, this.turnOptions(settings));
-    const session = await this.deps.openSession({ ticketKey: key, machine: settings.machine, title: ticketSessionTitle('Review', key), origin: 'cron', options });
+    const session = await this.deps.openSession({ ticketKey: key, machine: settings.machine, title: ticketSessionTitle(kind, key), origin: 'cron', options });
     try {
       await this.deps.send(session.id, prompt, options, { cronSlot: false });
     } catch (error) {

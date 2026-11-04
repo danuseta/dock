@@ -1,6 +1,6 @@
-/** The title of a session on a ticket: `Task-QRD-1230` builds it, `Review-QRD-1230` reviews its pull request. */
-export const TICKET_TITLE = /^(Task|Review)-[A-Z][A-Z0-9]+-\d+$/;
-export const ticketSessionTitle = (kind: 'Task' | 'Review', key: string) => `${kind}-${key}`;
+/** The title of a session on a ticket: `Task-QRD-1230` builds it, `Review-QRD-1230` reviews its pull request, `QA-QRD-1230` tests it locally. */
+export const TICKET_TITLE = /^(Task|Review|QA)-[A-Z][A-Z0-9]+-\d+$/;
+export const ticketSessionTitle = (kind: 'Task' | 'Review' | 'QA', key: string) => `${kind}-${key}`;
 /** `base` is a ticket title: letters, digits and dashes only, nothing to escape. */
 const numbered = (base: string) => new RegExp(`^${base}(?: \\((\\d+)\\))?$`);
 

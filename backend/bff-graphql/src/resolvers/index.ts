@@ -36,6 +36,8 @@ import { decisionGate } from '../integrations/decision-gate';
 import { doctorReports } from '../integrations/doctor';
 import { claudeUsage } from '../integrations/claude-usage';
 import { claudeAccounts, claudeAccountsState, cycleAvailable } from '../integrations/claude-accounts-live';
+import { latestQaRun, qaAuto, qaAvailable, qaEnabled, qaTrigger, QA_SETTING } from '../integrations/qa-local-live';
+import { isTicketKey, runPullRequests } from '../integrations/qa-local';
 import { agentLooks } from '../integrations/agent-looks';
 import { agentBridge } from '../integrations/agents-live';
 import type { AnswerInput } from '../integrations/chat-interactions';
@@ -208,6 +210,24 @@ function sprintError(error: unknown): never {
     throw new GraphQLError(error.message, { extensions: { code: error instanceof SprintBusyError ? 'CONFLICT' : 'BAD_USER_INPUT' } });
   }
   throw error;
+}
+
+async function qaLocalState(ticketKey?: string | null) {
+  if (!qaAvailable()) return { available: false, autoRun: false, trigger: null, run: null };
+  const key = (ticketKey ?? '').trim().toUpperCase();
+  const known = isTicketKey(key);
+  const [autoRun, trigger] = await Promise.all([qaEnabled(), known ? qaTrigger(key) : Promise.resolve(null)]);
+  const run = known ? latestQaRun(key) : null;
+  return {
+    available: true,
+    autoRun,
+    trigger: trigger ? { at: trigger.at, sessionId: trigger.sessionId, pullRequests: trigger.prs, error: trigger.error } : null,
+    run: run ? { ...run, testCases: run.tcs } : null,
+  };
+}
+
+function requireQa(): void {
+  if (!qaAvailable()) throw new GraphQLError('qonflo-qa-local is not installed on this DOCK', { extensions: { code: 'BAD_USER_INPUT' } });
 }
 
 function requireCron(): void {
@@ -393,6 +413,7 @@ export const resolvers = {
       pullChangesService.fileLines(args.ticketKey, args.url, args.path, args.ref, args.from, args.to).catch(changesInputError),
     autoReviews: async () => listedAutoReviews(await storageAPI.getAutoReviews()),
     claudeAccounts: () => claudeAccountsState(),
+    qaLocal: (_: unknown, { ticketKey }: { ticketKey?: string | null }) => qaLocalState(ticketKey),
     needsAttention: async () => {
       const [agentItems, pullRequestItems] = await Promise.all([
         Promise.all([
@@ -846,6 +867,23 @@ export const resolvers = {
         throw new GraphQLError(error instanceof Error ? error.message : 'The usage probe failed', { extensions: { code: 'BAD_USER_INPUT' } });
       }
     },
+    runQa: async (_: unknown, { ticketKey }: { ticketKey: string }) => {
+      requireQa();
+      const key = ticketKey.trim().toUpperCase();
+      if (!isTicketKey(key)) throw new GraphQLError('Not a ticket key', { extensions: { code: 'BAD_USER_INPUT' } });
+      const run = await orchestratorService.get(key);
+      const started = await qaAuto.start(key, run ? runPullRequests(run) : []);
+      if (!started) {
+        const trigger = await qaTrigger(key);
+        throw new GraphQLError(trigger?.error ?? 'A QA session for this ticket is already starting', { extensions: { code: 'BAD_USER_INPUT' } });
+      }
+      return qaLocalState(key);
+    },
+    setQaAutoRun: async (_: unknown, { on }: { on: boolean }) => {
+      requireQa();
+      await storageService.upsertSetting(QA_SETTING, String(on));
+      return qaLocalState(null);
+    },
     setClaudeRotation: async (_: unknown, rule: { enabled: boolean; fiveHour: number; sevenDay: number; backToMain: boolean }) => {
       try {
         return { available: cycleAvailable(), ...(await claudeAccounts.setRotation(rule)) };
@@ -948,7 +986,7 @@ export const resolvers = {
 };
 
 export const protectedQueries = [
-  'dashboard', 'ticketPullRequests', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'claudeAccounts', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
+  'dashboard', 'ticketPullRequests', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'claudeAccounts', 'qaLocal', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatSessionStates', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'agentLooks', 'libraryAgents', 'libraryAgent',
@@ -994,6 +1032,8 @@ export const protectedMutations = [
   'createIngestToken',
   'useClaudeAccount',
   'refreshClaudeUsage',
+  'runQa',
+  'setQaAutoRun',
   'setClaudeRotation',
   'revokeIngestToken',
   'deleteDemoVideo',
