@@ -1388,6 +1388,58 @@ export const typeDefs = gql`
     auto: Boolean!
   }
 
+  type QaStep {
+    id: String!
+    label: String!
+    state: String!
+  }
+
+  type QaTestCase {
+    id: String!
+    title: String!
+    ac: [Int!]!
+    "pending, running, passed, failed, skipped or blocked."
+    state: String!
+    seconds: Float
+    "Path of the video inside the run folder, served by /api/qa-local/<key>/<runId>/<video>."
+    video: String
+    note: String
+  }
+
+  type QaRun {
+    runId: String!
+    "running, done or failed."
+    state: String!
+    step: String!
+    steps: [QaStep!]!
+    testCases: [QaTestCase!]!
+    "LOLOS, REVISION or ESCALATED: the QA agent's verdict this run predicts."
+    verdict: String
+    rule: String
+    passed: Int!
+    failed: Int!
+    blocked: Int!
+    error: String
+    startedAt: String
+    updatedAt: String
+    finishedAt: String
+  }
+
+  type QaTrigger {
+    at: String!
+    sessionId: String
+    pullRequests: [String!]!
+    error: String
+  }
+
+  "Local QA with qonflo-qa-local; available only on a workspace DOCK where it is installed."
+  type QaLocal {
+    available: Boolean!
+    autoRun: Boolean!
+    trigger: QaTrigger
+    run: QaRun
+  }
+
   type ClaudeAccounts {
     "False when this machine has no /cycle: a laptop DOCK, or a workspace without it."
     available: Boolean!
@@ -1446,6 +1498,8 @@ export const typeDefs = gql`
     pullFileLines(ticketKey: String!, url: String!, path: String!, ref: String!, from: Int!, to: Int!): [String!]!
     autoReviews: [AutoReview!]!
     claudeAccounts: ClaudeAccounts!
+    "The local QA state, and the newest run and QA session of a ticket when one is given."
+    qaLocal(ticketKey: String): QaLocal!
     """Pull requests and Jira labels of up to 10 tickets by key; extra keys are ignored."""
     ticketPullRequests(keys: [String!]!): [TicketPullRequests!]!
     settings: Settings
@@ -1585,6 +1639,10 @@ export const typeDefs = gql`
     useClaudeAccount(name: String!): ClaudeAccounts!
     "Probe every account's usage now; within a minute of the last probe it returns the stored data."
     refreshClaudeUsage: ClaudeAccounts!
+    "Start a QA-<key> session that writes the ticket's tests when needed and runs qonflo-qa-local."
+    runQa(ticketKey: String!): QaLocal!
+    "Run QA on its own when a ticket built on this workspace gets its pull requests."
+    setQaAutoRun(on: Boolean!): QaLocal!
     setClaudeRotation(enabled: Boolean!, fiveHour: Int!, sevenDay: Int!, backToMain: Boolean!): ClaudeAccounts!
     stopChatTurn(sessionId: ID!): ChatSession!
     requestDoctorRun(machine: String!): Boolean!

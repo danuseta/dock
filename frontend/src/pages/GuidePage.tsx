@@ -134,6 +134,16 @@ const GuidePage: React.FC<GuidePageProps> = ({ onNavigate }) => (
           <li><b>LGTM</b>: label Pass-mu di Jira plus approve di GitHub. PR yang sudah merged cukup dapat label. Tidak ada yang diposting ke Discord, jadi balas sendiri di thread.</li>
           <li><b>Review manual</b>: minta lewat chat; memakai slot chat, bukan slot cron.</li>
         </ul>
+        <p><b>QA lokal.</b> Hanya muncul di DOCK workspace yang punya <code>qonflo-qa-local</code> (<code>~/qa-local</code>). Kartu <b>QA local</b> ada di panel kanan sesi tiket.</p>
+        <SettingsBlock rows={[
+          ['Run after PR', 'off', 'on / off', 'Tiket yang dibangun di mesin cron dapat PR → sesi QA-QRD-xxx jalan: tulis tes dari AC Jira (hanya baca) kalau belum ada, lalu qonflo-qa-local. Sekali per set PR; PR baru memicu lagi.'],
+        ]} />
+        <Flow steps={['PR', 'QA-QRD-xxx', 'tulis tes', 'stack lokal + Playwright', 'LOLOS / REVISION / ESCALATED']} />
+        <ul>
+          <li><b>Progres</b>: Stack, Login, Tests n/total, Verdict; tiap TC dengan status dan video.</li>
+          <li><b>Run again</b>: jalankan QA sekarang tanpa menunggu PR baru.</li>
+          <li>Tidak ada yang ditulis ke Jira, UAT, atau <code>~/qa</code>; verdict hanya prediksi.</li>
+        </ul>
       </Section>
 
       <Section id="akun" title="D. Akun Claude">
