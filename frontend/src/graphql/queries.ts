@@ -1215,7 +1215,7 @@ export const GET_AUTO_REVIEWS = gql`
 
 export const CLAUDE_ACCOUNTS_FIELDS = `
   available
-  accounts { name active seenAt status checkedAt fiveHour { usedPercentage resetsAt } sevenDay { usedPercentage resetsAt } }
+  accounts { name active seenAt status checkedAt source fiveHour { usedPercentage resetsAt } sevenDay { usedPercentage resetsAt } }
   rotation { enabled fiveHour sevenDay backToMain }
   log { at from to reason auto }
 `;

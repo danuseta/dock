@@ -4,13 +4,14 @@ import { ArrowRightLeft, CheckCircle2, Circle, Info, RefreshCw, Users } from 'lu
 import { GET_CLAUDE_ACCOUNTS } from '../graphql/queries';
 import { SET_CLAUDE_ROTATION, REFRESH_CLAUDE_USAGE, USE_CLAUDE_ACCOUNT } from '../graphql/mutations';
 import { limitTone, resetLabel, toneClass } from '../chat/status';
+import { usageSource } from './claudeAccountSource';
 import { useNow } from '../chat/activity/useNow';
 import { cn } from '../lib/cn';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 import { Button, Card, Checkbox, Input } from './ui';
 
 interface UsageWindow { usedPercentage: number; resetsAt: string | null }
-interface Account { name: string; active: boolean; seenAt: string | null; status: string | null; checkedAt: string | null; fiveHour: UsageWindow | null; sevenDay: UsageWindow | null }
+interface Account { name: string; active: boolean; seenAt: string | null; status: string | null; checkedAt: string | null; source?: string | null; fiveHour: UsageWindow | null; sevenDay: UsageWindow | null }
 interface Rotation { enabled: boolean; fiveHour: number; sevenDay: number; backToMain: boolean }
 interface Entry { at: string; from: string; to: string; reason: string; auto: boolean }
 interface State { available: boolean; accounts: Account[]; rotation: Rotation; log: Entry[] }
@@ -18,7 +19,6 @@ interface State { available: boolean; accounts: Account[]; rotation: Rotation; l
 const METER = { ok: 'bg-status-merged', warn: 'bg-amber-200', danger: 'bg-status-conflict' } as const;
 const time = (iso: string) => new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
-const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 const blockedUntil = (account: Account, now: number) => {
   const window = [account.sevenDay, account.fiveHour].find((candidate) => candidate && candidate.usedPercentage >= 100 && candidate.resetsAt) ?? account.sevenDay ?? account.fiveHour;
   return window?.resetsAt ? `Blocked until ${resetLabel(window.resetsAt, now).replace(/^resets /, '')}` : 'Blocked';
@@ -88,9 +88,9 @@ export const ClaudeAccountSection: React.FC = () => {
               <span className="flex min-w-0 items-center gap-2 max-[760px]:col-span-2">
                 {account.active ? <CheckCircle2 size={16} className="text-status-merged" aria-hidden="true" /> : <Circle size={16} className="text-muted-foreground" aria-hidden="true" />}
                 <span className="min-w-0"><strong className="font-mono text-sm">{account.name}</strong>{account.active && <span className="ml-2 rounded-xs bg-status-merged-bg px-1.5 py-px font-mono text-[0.6rem] font-bold text-status-merged">IN USE</span>}
-                  <small className="block text-[0.68rem] text-muted-foreground">{account.seenAt ? `usage seen ${time(account.seenAt)}` : 'no usage seen yet'}</small>
+                  <small className="block text-[0.68rem] text-muted-foreground">{usageSource(account)}</small>
                   {account.status === 'rejected' && <small className="block text-[0.68rem] font-bold text-status-conflict">{blockedUntil(account, now)}</small>}
-                  {account.checkedAt && <small className="block text-[0.68rem] text-muted-foreground">Checked {clock(account.checkedAt)}</small>}</span>
+                  {account.status === 'allowed_warning' && <small className="block text-[0.68rem] font-bold text-status-warn">Near the limit</small>}</span>
                 {!account.active && <Button size="sm" className="ml-auto hidden max-[760px]:inline-flex" disabled={switching} onClick={() => void run(() => switchAccount({ variables: { name: account.name } }))}><ArrowRightLeft size={14} aria-hidden="true" />Use</Button>}
               </span>
               <Meter label="5h" window={account.fiveHour} seen={Boolean(account.seenAt || account.sevenDay)} now={now} />
@@ -104,7 +104,7 @@ export const ClaudeAccountSection: React.FC = () => {
         <Button size="sm" className="self-start" disabled={refreshing} onClick={() => void run(() => refreshUsage())}><RefreshCw size={14} aria-hidden="true" />{refreshing ? 'Refreshing...' : 'Refresh usage'}</Button>
         <p className="flex items-start gap-2 rounded-sm border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
           <Info size={14} className="mt-0.5 flex-none" aria-hidden="true" />
-          <span>Each account's usage is probed every 30 minutes and on Refresh usage (once a minute), and the account in use also updates after each turn; a window past its reset shows none. Add or remove an account with the Coder parameters or <code className="font-mono">/cycle add</code> in a terminal, since that needs the token.</span>
+          <span>Each account's usage is probed every 30 minutes and on Refresh usage (once a minute). A turn also updates the account whose token it runs on, which after a switch can be an account other than the one in use. A window past its reset shows none. Add or remove an account with the Coder parameters or <code className="font-mono">/cycle add</code> in a terminal, since that needs the token.</span>
         </p>
       </Card>
 
@@ -125,7 +125,7 @@ export const ClaudeAccountSection: React.FC = () => {
           <label className="flex items-center gap-3 self-end pb-2.5 text-sm max-[760px]:col-span-2"><Checkbox checked={rotation?.backToMain ?? true} disabled={saving} onChange={(event) => void saveRotation({ backToMain: event.target.checked })} />Back to main when it resets</label>
         </div>
         <p className="text-xs text-muted-foreground">Rotates when either limit is reached</p>
-        <p className="text-xs text-muted-foreground">Checked after each turn from the usage that turn reports, and every 5 minutes. The next account is the first in the list below both limits by its last seen numbers. When every account is over a limit, DOCK stays on the current one and tells you.</p>
+        <p className="text-xs text-muted-foreground">Usage comes from the probe every 30 minutes (Refresh usage runs it now) and from each turn, credited to the account whose token that turn runs on. Rotation is checked after each turn and every 5 minutes. The next account is the first in the list below both limits by its last seen numbers. When every account is over a limit, DOCK stays on the current one and tells you.</p>
         {state.log.length > 0 && (
           <ol className="m-0 flex list-none flex-col gap-1.5 border-t border-border p-0 pt-3 font-mono text-[0.72rem]">
             {state.log.map((entry) => (

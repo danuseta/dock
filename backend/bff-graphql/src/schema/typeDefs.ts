@@ -1371,6 +1371,8 @@ export const typeDefs = gql`
     status: String
     "When the probe last ran for this account."
     checkedAt: String
+    "Where the windows come from: probe (the usage probe) or status (a turn that ran on this account's token)."
+    source: String
   }
 
   type ClaudeRotation {

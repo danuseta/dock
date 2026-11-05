@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { dockMode } from '../mode';
 import { StorageService } from '../storage/service';
 import { chatService } from './chat';
-import { ClaudeAccounts, ROTATION_DEFAULTS, parseCycleList, parseProbe, parseWindow, type AccountUsage, type CycleList, type Rotation, type RotationEntry } from './claude-accounts';
+import { ACCOUNT_FP, ClaudeAccounts, ROTATION_DEFAULTS, parseCycleList, parseProbe, parseWindow, type AccountUsage, type CycleList, type Rotation, type RotationEntry } from './claude-accounts';
 import { eventPush } from './push';
 
 const run = promisify(execFile);
@@ -38,8 +38,18 @@ async function probe() {
 }
 
 async function usage(): Promise<Record<string, AccountUsage>> {
-  const saved = (await storage.getCache(CACHE, 'usage')) as Record<string, { fiveHour: unknown; sevenDay: unknown; receivedAt: string; status?: string; checkedAt?: string }> | null;
-  return Object.fromEntries(Object.entries(saved ?? {}).map(([name, seen]) => [name, { fiveHour: parseWindow(seen.fiveHour), sevenDay: parseWindow(seen.sevenDay), receivedAt: new Date(seen.receivedAt), status: seen.status, checkedAt: seen.checkedAt ? new Date(seen.checkedAt) : undefined }]));
+  const saved = (await storage.getCache(CACHE, 'usage')) as Record<string, { fiveHour: unknown; sevenDay: unknown; receivedAt: string; status?: string; checkedAt?: string; fp?: string; source?: string }> | null;
+  // A row stored before fingerprints may hold another account's numbers (credited to the active one); it is dropped
+  // and the next probe fills the account again.
+  return Object.fromEntries(Object.entries(saved ?? {}).filter(([, seen]) => typeof seen.fp === 'string' && ACCOUNT_FP.test(seen.fp)).map(([name, seen]) => [name, {
+    fiveHour: parseWindow(seen.fiveHour),
+    sevenDay: parseWindow(seen.sevenDay),
+    receivedAt: new Date(seen.receivedAt),
+    status: seen.status,
+    checkedAt: seen.checkedAt ? new Date(seen.checkedAt) : undefined,
+    fp: seen.fp,
+    source: seen.source === 'status' ? 'status' as const : 'probe' as const,
+  }]));
 }
 
 async function log(): Promise<RotationEntry[]> {
@@ -82,15 +92,14 @@ export const claudeAccounts = new ClaudeAccounts({
   log,
   saveLog: async (value) => { await storage.upsertCache(CACHE, 'log', value, 0); },
   switched: () => { void chatService.forgetLimits(dockMode()); },
-  machineUsage: () => chatService.lastLimits(dockMode()),
   push: (message) => eventPush.send('needsYou', message),
   now: () => new Date(),
 });
 
 /** The rotation follows only this machine's own turns, the ones `/cycle` here decides the account of. */
-chatService.onLimits = (machine, limits) => {
+chatService.onLimits = (machine, limits, accountFp) => {
   if (machine !== dockMode() || !cycleAvailable()) return;
-  void claudeAccounts.report(limits).catch((error) => console.warn('[ClaudeAccounts] report failed:', error instanceof Error ? error.message : 'unknown error'));
+  void claudeAccounts.report(limits, accountFp).catch((error) => console.warn('[ClaudeAccounts] report failed:', error instanceof Error ? error.message : 'unknown error'));
 };
 
 /** What the Settings section reads; a machine without `/cycle` lists no account. */

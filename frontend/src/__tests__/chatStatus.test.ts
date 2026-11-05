@@ -55,6 +55,7 @@ test('the account list shows the probe verdict, the check time and a throttled r
   const account = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'components', 'ClaudeAccountSection.tsx'), 'utf8');
   assert.match(account, /account\.status === 'rejected'/);
   assert.match(account, /Blocked until \$\{resetLabel/);
-  assert.match(account, /Checked \{clock\(account\.checkedAt\)\}/);
+  assert.match(account, /\{usageSource\(account\)\}/);
+  assert.match(account, /account\.status === 'allowed_warning'.*Near the limit/);
   assert.match(account, /disabled=\{refreshing\}/);
 });

@@ -7,8 +7,12 @@ const PROBE_FRESH_MS = 2 * 3_600_000;
 const REFRESH_MIN_MS = 60_000;
 
 export interface UsageWindow { usedPercentage: number; resetsAt: Date | null }
-export interface AccountUsage { fiveHour: UsageWindow | null; sevenDay: UsageWindow | null; receivedAt: Date; status?: string; checkedAt?: Date }
-export interface ProbeRow { name: string; status: string; fiveHour: UsageWindow | null; sevenDay: UsageWindow | null }
+/** `fp` is the first 12 hex of sha256 of the account's token; `source` says whether the windows came from the probe or a turn. */
+export interface AccountUsage { fiveHour: UsageWindow | null; sevenDay: UsageWindow | null; receivedAt: Date; status?: string; checkedAt?: Date; fp?: string; source?: 'probe' | 'status' }
+export interface ProbeRow { name: string; status: string; fiveHour: UsageWindow | null; sevenDay: UsageWindow | null; fp: string | null }
+export const ACCOUNT_FP = /^[0-9a-f]{12}$/;
+/** Probe statuses whose windows are a real measurement; `allowed_warning` is an account near its limit. */
+const MEASURED = new Set(['allowed', 'allowed_warning', 'rejected']);
 export interface Rotation { enabled: boolean; fiveHour: number; sevenDay: number; backToMain: boolean }
 export interface RotationEntry { at: Date; from: string; to: string; reason: string; auto: boolean }
 export interface CycleList { accounts: string[]; active: string | null }
@@ -22,8 +26,10 @@ export const parseWindow = (value: unknown): UsageWindow | null => {
 export function parseProbe(output: string): ProbeRow[] {
   const rows: unknown = JSON.parse(output);
   if (!Array.isArray(rows)) throw new Error('The usage probe did not return a list');
-  return rows.flatMap((row: { name?: unknown; status?: unknown; fiveHour?: unknown; sevenDay?: unknown }) =>
-    typeof row?.name === 'string' && typeof row.status === 'string' ? [{ name: row.name, status: row.status, fiveHour: parseWindow(row.fiveHour), sevenDay: parseWindow(row.sevenDay) }] : []);
+  return rows.flatMap((row: { name?: unknown; status?: unknown; fiveHour?: unknown; sevenDay?: unknown; fp?: unknown }) =>
+    typeof row?.name === 'string' && typeof row.status === 'string'
+      ? [{ name: row.name, status: row.status, fiveHour: parseWindow(row.fiveHour), sevenDay: parseWindow(row.sevenDay), fp: typeof row.fp === 'string' && ACCOUNT_FP.test(row.fp) ? row.fp : null }]
+      : []);
 }
 
 /** `cycle.py list`: `[1] * main  (your own login)`, one line per account, the active one marked with `*`. */
@@ -91,8 +97,6 @@ export interface ClaudeAccountsDeps {
   saveLog(log: RotationEntry[]): Promise<void>;
   /** A switch makes the machine's last usage snapshot belong to the old account. */
   switched(): void;
-  /** The machine's last usage snapshot from before the accounts were tracked. */
-  machineUsage(): AccountUsage | null;
   push(message: { title: string; body: string; url: string; tag: string }): Promise<unknown>;
   now(): Date;
 }
@@ -108,12 +112,6 @@ export class ClaudeAccounts {
   async state() {
     const [list, usage, rule, log] = await Promise.all([this.deps.list(), this.deps.usage(), this.deps.rotation(), this.deps.log()]);
     const now = this.deps.now();
-    // Before the first switch, the machine's last snapshot can only be the active account's: it starts the tracking.
-    const seed = list.active && !usage[list.active] && log.length === 0 ? this.deps.machineUsage() : null;
-    if (seed && list.active) {
-      usage[list.active] = seed;
-      await this.deps.saveUsage(usage);
-    }
     const window = (value: UsageWindow | null) => {
       const live = current(value, now);
       return live && { usedPercentage: live.usedPercentage, resetsAt: live.resetsAt?.toISOString() ?? null };
@@ -127,6 +125,7 @@ export class ClaudeAccounts {
         seenAt: usage[name]?.receivedAt.toISOString() ?? null,
         status: usage[name]?.status ?? null,
         checkedAt: usage[name]?.checkedAt?.toISOString() ?? null,
+        source: usage[name]?.source ?? null,
       })),
       rotation: rule,
       log: log.map((entry) => ({ ...entry, at: entry.at.toISOString() })),
@@ -162,10 +161,10 @@ export class ClaudeAccounts {
       const row = rows.find((candidate) => candidate.name === name);
       const old = saved[name];
       if (!row) { if (old) usage[name] = old; continue; }
-      const measured = row.status === 'allowed' || row.status === 'rejected';
-      usage[name] = measured || !old
-        ? { fiveHour: row.fiveHour, sevenDay: row.sevenDay, receivedAt: now, status: row.status, checkedAt: now }
-        : { ...old, status: row.status, checkedAt: now };
+      const fp = row.fp ?? old?.fp;
+      usage[name] = MEASURED.has(row.status) || !old
+        ? { fiveHour: row.fiveHour, sevenDay: row.sevenDay, receivedAt: now, status: row.status, checkedAt: now, fp, source: 'probe' }
+        : { ...old, status: row.status, checkedAt: now, fp };
     }
     await this.deps.saveUsage(usage);
     await this.check(list, usage);
@@ -177,13 +176,19 @@ export class ClaudeAccounts {
     return this.state();
   }
 
-  /** One usage report from a turn on this machine: kept under the active account, then auto rotate looks at it. */
-  async report(limits: { fiveHour: UsageWindow | null; sevenDay: UsageWindow | null }) {
+  /**
+   * One usage report from a turn on this machine, kept under the account whose token the turn runs on (its fingerprint
+   * against the probe's). A turn keeps the account it started on after a switch, so the active account is never assumed:
+   * a report with no fingerprint, or one the probe has not seen, updates no account.
+   */
+  async report(limits: { fiveHour: UsageWindow | null; sevenDay: UsageWindow | null }, fp?: string | null) {
+    if (!fp || !ACCOUNT_FP.test(fp)) return;
     const list = await this.deps.list();
-    if (!list.active) return;
     const usage = await this.deps.usage();
-    const { status, checkedAt } = usage[list.active] ?? {};
-    usage[list.active] = { ...limits, receivedAt: this.deps.now(), status, checkedAt };
+    const name = list.accounts.find((account) => usage[account]?.fp === fp);
+    if (!name) return;
+    const { status, checkedAt } = usage[name] ?? {};
+    usage[name] = { ...limits, receivedAt: this.deps.now(), status, checkedAt, fp, source: 'status' };
     await this.deps.saveUsage(usage);
     await this.check(list, usage);
   }
