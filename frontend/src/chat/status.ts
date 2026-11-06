@@ -53,6 +53,17 @@ export function resetsIn(resetsAt: string, now: number): string {
   return `resets in ${Math.round(hours / 24)} d`;
 }
 
+export function resetLabel(resetsAt: string, now: number): string {
+  const at = Date.parse(resetsAt);
+  const minutes = Math.round((at - now) / 60000);
+  if (!Number.isFinite(minutes)) return '';
+  if (minutes <= 0) return 'reset due';
+  if (minutes < 60) return `resets in ${minutes} min`;
+  const date = new Date(at);
+  const clock = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  return minutes < 20 * 60 ? `resets ${clock}` : `resets ${date.toLocaleDateString('en-US', { weekday: 'short' })} ${clock}`;
+}
+
 export function contextText(status: ChatSessionStatus): string | null {
   if (status.contextPercentage == null) return null;
   const detail = status.contextTokens != null && status.contextSize != null ? ` ${formatTokens(status.contextTokens)}/${formatTokens(status.contextSize)}` : '';

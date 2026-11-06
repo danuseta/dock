@@ -3,6 +3,7 @@ import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Markdown } from '../chat/Markdown';
+import { COPY_CODE, codeText } from '../chat/CodeBlock';
 import { CACHED_MESSAGES, CACHED_SESSIONS, recallMessages, rememberMessages } from '../chat/messageCache';
 import { opensTurn, type ChatMessage, type ChatSession } from '../chat/messages';
 import { SessionRow } from '../chat/SessionRow';
@@ -148,4 +149,14 @@ test('a search hit row shows the same markers as the session list row', () => {
   assert.match(listRow, /last reply/);
   assert.match(hitRow, /matched text/);
   assert.doesNotMatch(hitRow, /last reply/);
+});
+
+test('each fenced block gets a Copy code button, inline code gets none', () => {
+  const html = renderToStaticMarkup(React.createElement(Markdown, { text: 'a `inline`\n\n```ts\nconst x = 1;\n```\n\n- item\n\n  ```sh\n  ls\n  ```\n', overrides: COPY_CODE }));
+  assert.strictEqual((html.match(/aria-label="Copy code"/g) ?? []).length, 2);
+});
+
+test('codeText joins the text of a code block without the trailing newline', () => {
+  assert.strictEqual(codeText({ type: 'element', children: [{ type: 'element', children: [{ type: 'text', value: 'const x = 1;\n' }] }] }), 'const x = 1;');
+  assert.strictEqual(codeText(undefined), '');
 });

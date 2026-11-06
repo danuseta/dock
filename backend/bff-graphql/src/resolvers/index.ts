@@ -11,14 +11,17 @@ import { OrchestratorInputError, attentionItems, normalizeTicketKey, orchestrato
 import { CHAT_MACHINE, chatService } from '../integrations/chat';
 import { retroApplyPrompt, retroNumbers, retroProblems, retroTickets } from '../integrations/retro';
 import { StorageService } from '../storage/service';
-import { isSettledStatus, mergeAttention, withoutSettledTickets } from '../integrations/attention';
+import { activeSprint } from '../integrations/sprint-plan';
+import { lookupDependencies } from '../integrations/dependency-lookup';
+import { sprintPlanner } from '../integrations/sprint-plan-live';
+import { isSettledStatus, mergeAttention, planAttentionItems, withoutSettledTickets } from '../integrations/attention';
 import { discordGateway, discordReader } from '../integrations/discord-reader-live';
 import { isTeamChannel } from '../integrations/discord-team';
 import { ChannelInputError, channelStore, isChannelKind, threadService, withJira } from '../integrations/discord-threads';
 import { DiscordReaderError, ROW_VERSION } from '../integrations/discord-reader';
 import { CronInputError, type OwnerAnswer, type OwnerChange } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
-import { listedAutoReviews } from '../integrations/auto-review-live';
+import { autoReview, listedAutoReviews } from '../integrations/auto-review-live';
 import { labelOrder } from '../integrations/orchestrator-cron';
 import { pushService } from '../integrations/push';
 import { demoVideos, withTitles } from '../integrations/demo-videos';
@@ -27,11 +30,14 @@ import { DevServerError, devServers } from '../integrations/dev-servers';
 import { WorkspaceFilesError, workspaceFiles } from '../integrations/workspace-files';
 import { elevenLabsKeys } from '../integrations/elevenlabs-keys';
 import { broadcastDeps, sendBroadcast } from '../integrations/broadcast';
-import { ReviewApprovalError, approvalRecords, lgtmReview } from '../integrations/review-approval';
+import { ReviewApprovalError, approvalRecords, lgtmReview, ownerPassLabel, resetOwnerPassLabel } from '../integrations/review-approval';
+import { MAX_ROUND_ATTEMPTS, roundSummary } from '../integrations/review-findings';
 import { decisionGate } from '../integrations/decision-gate';
 import { doctorReports } from '../integrations/doctor';
 import { claudeUsage } from '../integrations/claude-usage';
 import { claudeAccounts, claudeAccountsState, cycleAvailable } from '../integrations/claude-accounts-live';
+import { latestQaRun, qaAuto, qaAvailable, qaEnabled, qaTrigger, QA_SETTING } from '../integrations/qa-local-live';
+import { isTicketKey, runPullRequests } from '../integrations/qa-local';
 import { agentLooks } from '../integrations/agent-looks';
 import { agentBridge } from '../integrations/agents-live';
 import type { AnswerInput } from '../integrations/chat-interactions';
@@ -46,6 +52,15 @@ const githubAPI = new GitHubAPI();
 const discordAPI = new DiscordAPI();
 const storageAPI = new StorageAPI();
 const storageService = new StorageService();
+
+/** The newest review round of each listed session, from one query. */
+async function withReviewRounds<T extends { id: string }>(sessions: T[]) {
+  const rounds = await storageService.roundsForSessions(sessions.map((session) => session.id));
+  return sessions.map((session) => {
+    const round = rounds.get(session.id);
+    return { ...session, reviewRound: round ? { status: round.status, summary: `${round.ticketKey}: ${roundSummary(round)}`, threadUrl: round.threadUrl, at: (round.reportedAt ?? round.lastMessageAt).toISOString() } : null };
+  });
+}
 const isPresent = <T>(value: T | null | undefined): value is T => value != null;
 
 async function discordThreadsView() {
@@ -64,7 +79,7 @@ async function discordThreadsView() {
     labels: Array.isArray(ticket.labels) ? ticket.labels.map(String) : [],
   }]));
   const error = status.error ?? discordGateway.error;
-  return { configured: Boolean(config), ownerSet: Boolean(owner), live: discordGateway.live, syncedAt: status.syncedAt, error, channels, rows: withJira(await discordReader.freshen(rows), jira, isSettledStatus, new Date()) };
+  return { configured: Boolean(config), ownerSet: Boolean(owner), live: discordGateway.live, syncedAt: status.syncedAt, error, channels, rows: withJira(await discordReader.freshen(rows), jira, isSettledStatus, new Date(), (id) => autoReview.skipReason(id), await ownerPassLabel()) };
 }
 
 function channelKind(kind: string) {
@@ -89,11 +104,71 @@ const retroItemView = (row: { id: string; kind: string; text: string; evidence: 
 };
 
 /** The runs of one sprint, read from the sprint dashboard's issue list. */
-async function sprintRuns(sprintId: number) {
-  let keys: string[] = [];
-  try { keys = (JSON.parse(await sprintDashboardService.issueEvents(sprintId)) as Array<{ key?: unknown }>).map((issue) => String(issue.key)); } catch { keys = []; }
+async function sprintKeyList(sprintId: number) {
+  try { return (JSON.parse(await sprintDashboardService.issueEvents(sprintId)) as Array<{ key?: unknown }>).map((issue) => String(issue.key)); } catch { return []; }
+}
+
+async function sprintRuns(keys: string[]) {
   const wanted = new Set(keys);
   return (await orchestratorService.list()).filter((run) => wanted.has(run.key));
+}
+
+async function sprintLoad(sprint: { id: number; startDate: string; endDate: string }) {
+  const keys = await sprintKeyList(sprint.id);
+  const runs = await sprintRuns(keys);
+  return { runs, numbers: await sprintRetroNumbers(sprint, runs, keys) };
+}
+
+async function sprintRetroNumbers(sprint: { id: number; startDate: string; endDate: string }, runs: Awaited<ReturnType<typeof sprintRuns>>, keys: string[]) {
+  const from = new Date(sprint.startDate);
+  const to = new Date(sprint.endDate);
+  const [blockedWaits, mergeConflicts] = await Promise.all([
+    storageService.countEventTickets('DEP_WAIT', keys, from, to),
+    storageService.countEventTickets('CONFLICT', keys, from, to, 'detail'),
+  ]);
+  return retroNumbers(runs, { blockedWaits, mergeConflicts });
+}
+
+async function sprintPlanView() {
+  const active = activeSprint(await jiraAPI.getTickets());
+  if (!active) return null;
+  const [plan, edges, orders] = await Promise.all([storageService.getSprintPlan(active.sprint), storageService.getPlanEdges(active.sprint), storageService.getTicketOrders()]);
+  const known = new Map<string, { title?: string; assignee?: string | null; status?: string | null }>(active.tickets.map((ticket: any) => [ticket.key, ticket]));
+  const sprintId = (await sprintDashboardService.listSprints()).find((item) => item.name === active.sprint)?.id;
+  if (sprintId != null) {
+    try {
+      for (const issue of JSON.parse(await sprintDashboardService.issueEvents(sprintId)) as Array<{ key?: string; summary?: string; assignee?: string | null; status?: string | null }>) {
+        if (issue.key && !known.has(issue.key)) known.set(issue.key, { title: issue.summary, assignee: issue.assignee, status: issue.status });
+      }
+    } catch { /* snapshot unreadable: parents show without a title */ }
+  }
+  const outside = await lookupDependencies(edges.map((edge) => edge.dependsOnKey).filter((key) => !known.has(key)), (key) => jiraAPI.getTicket(key));
+  const lookup = (key: string) => known.get(key) ?? outside.get(key) ?? null;
+  const pending = new Set(edges.filter((edge) => edge.state === 'pending').map((edge) => edge.ticketKey));
+  const edgeViews = edges.map((edge) => {
+    const parent = lookup(edge.dependsOnKey);
+    return { id: edge.id, ticketKey: edge.ticketKey, dependsOnKey: edge.dependsOnKey, dependsOnTitle: parent?.title ?? null, dependsOnAssignee: parent?.assignee ?? null, dependsOnStatus: parent?.status ?? null, source: edge.source, reason: edge.reason, state: edge.state };
+  });
+  const rank = (key: string) => orders.get(key) ?? Number.MAX_SAFE_INTEGER;
+  const ordered = [...active.tickets].sort((a: any, b: any) => rank(a.key) - rank(b.key));
+  let groups: string[][] = [];
+  try { groups = JSON.parse(plan?.groups ?? '[]'); } catch { groups = []; }
+  return {
+    sprint: active.sprint,
+    status: plan?.status ?? 'idle',
+    error: plan?.error ?? null,
+    sessionId: plan?.sessionId ?? null,
+    mappedAt: plan?.mappedAt?.toISOString() ?? null,
+    groups,
+    tickets: ordered.map((ticket: any, index) => ({
+      key: ticket.key,
+      title: ticket.title,
+      status: ticket.status,
+      position: index + 1,
+      held: pending.has(ticket.key),
+      edges: edgeViews.filter((edge) => edge.ticketKey === ticket.key),
+    })),
+  };
 }
 
 async function retroView(sprintId?: number | null) {
@@ -101,13 +176,13 @@ async function retroView(sprintId?: number | null) {
   const sprint = sprintId != null ? sprints.find((item) => item.id === sprintId) : sprints.find((item) => item.state === 'active') ?? sprints[sprints.length - 1];
   if (!sprint) return null;
   const previous = sprints[sprints.indexOf(sprint) - 1] ?? null;
-  const [runs, before, items] = await Promise.all([sprintRuns(sprint.id), previous ? sprintRuns(previous.id) : Promise.resolve(null), storageService.getRetroItems(sprint.name)]);
+  const [{ runs, numbers }, before, items] = await Promise.all([sprintLoad(sprint), previous ? sprintLoad(previous).then((load) => load.numbers) : Promise.resolve(null), storageService.getRetroItems(sprint.name)]);
   return {
     sprint: sprint.name,
     sprintId: sprint.id,
     previous: previous?.name ?? null,
-    numbers: retroNumbers(runs),
-    previousNumbers: before ? retroNumbers(before) : null,
+    numbers,
+    previousNumbers: before,
     problems: retroProblems(runs),
     tickets: retroTickets(runs),
     items: items.map(retroItemView),
@@ -135,6 +210,24 @@ function sprintError(error: unknown): never {
     throw new GraphQLError(error.message, { extensions: { code: error instanceof SprintBusyError ? 'CONFLICT' : 'BAD_USER_INPUT' } });
   }
   throw error;
+}
+
+async function qaLocalState(ticketKey?: string | null) {
+  if (!qaAvailable()) return { available: false, autoRun: false, trigger: null, run: null };
+  const key = (ticketKey ?? '').trim().toUpperCase();
+  const known = isTicketKey(key);
+  const [autoRun, trigger] = await Promise.all([qaEnabled(), known ? qaTrigger(key) : Promise.resolve(null)]);
+  const run = known ? latestQaRun(key) : null;
+  return {
+    available: true,
+    autoRun,
+    trigger: trigger ? { at: trigger.at, sessionId: trigger.sessionId, pullRequests: trigger.prs, error: trigger.error } : null,
+    run: run ? { ...run, testCases: run.tcs } : null,
+  };
+}
+
+function requireQa(): void {
+  if (!qaAvailable()) throw new GraphQLError('qonflo-qa-local is not installed on this DOCK', { extensions: { code: 'BAD_USER_INPUT' } });
 }
 
 function requireCron(): void {
@@ -229,6 +322,7 @@ export const resolvers = {
     dockIssue: async (_: unknown, { number }: { number: number }) => githubAPI.getDockIssue(number),
     dockIssueDraftUrl: (_: unknown, draft: IssueDraft) => draftUrl(issuesRepo(), draft, issueEnvironment(draft.page)),
     retro: (_: unknown, { sprintId }: { sprintId?: number | null }) => retroView(sprintId),
+    sprintPlan: () => sprintPlanView(),
     runThinking: async (_: unknown, { key }: { key: string }) => (await orchestratorService.thinking(key).catch(orchestratorInputError)) ?? [],
     runThinkingRaw: (_: unknown, { key, at, until }: { key: string; at: string; until?: string | null }) => orchestratorService.thinkingRaw(key, at, until).catch(orchestratorInputError),
     workspaceDir: async (_: unknown, { path }: { path?: string | null }) => {
@@ -240,6 +334,16 @@ export const resolvers = {
       return workspaceFiles.file(path).catch(workspaceFilesError);
     },
     ownerName: () => reporterName(),
+    ticketPullRequests: async (_: any, { keys }: { keys: string[] }) => {
+      const wanted = [...new Set(keys)].slice(0, 10);
+      const tickets = await jiraAPI.getTickets();
+      const labels = new Map<string, string[]>(tickets.map((ticket: any) => [String(ticket.key), Array.isArray(ticket.labels) ? ticket.labels.map(String) : []]));
+      return Promise.all(wanted.map(async (key) => ({
+        key,
+        labels: labels.get(key) ?? [],
+        pullRequests: await githubAPI.getPullRequestsForTicket(key, { staleWhileRevalidate: true }),
+      })));
+    },
     dashboard: async () => {
       // Scatter-gather parallel fetching
       const [tickets] = await Promise.all([
@@ -309,15 +413,33 @@ export const resolvers = {
       pullChangesService.fileLines(args.ticketKey, args.url, args.path, args.ref, args.from, args.to).catch(changesInputError),
     autoReviews: async () => listedAutoReviews(await storageAPI.getAutoReviews()),
     claudeAccounts: () => claudeAccountsState(),
+    qaLocal: (_: unknown, { ticketKey }: { ticketKey?: string | null }) => qaLocalState(ticketKey),
     needsAttention: async () => {
       const [agentItems, pullRequestItems] = await Promise.all([
-        orchestratorService.list().then((runs) => attentionItems(ownRuns(runs))).catch((error) => {
+        Promise.all([
+          orchestratorService.list().then((runs) => attentionItems(ownRuns(runs))),
+          jiraAPI.getTickets().then(async (tickets) => {
+            const active = activeSprint(tickets);
+            return active ? planAttentionItems([...await storageService.getPendingPlanKeys(active.sprint)].map((ticketKey) => ({ ticketKey }))) : [];
+          }),
+        ]).then(([runItems, planItems]) => [...runItems, ...planItems]).catch((error) => {
           console.error('[BFF Orchestrator] Failed to load attention items:', error instanceof Error ? error.message : 'unknown error');
           return [];
         }),
         githubAPI.getNeedsAttention(),
       ]);
-      const items = mergeAttention(agentItems, pullRequestItems);
+      const roundItems = await storageService.openReviewRounds(MAX_ROUND_ATTEMPTS).then((rounds) => rounds.map((round) => ({
+        id: `review-round-${round.id}`,
+        type: round.status === 'reported' ? 'REVIEW_REVISED' : 'REVIEW_ROUND_FAILED',
+        message: round.status === 'reported' ? `${round.ticketKey}: ${roundSummary(round)}` : `${round.ticketKey}: review findings did not reach the session`,
+        ticketKey: round.ticketKey,
+      }))).catch((error) => {
+        console.error('[BFF ReviewFindings] Failed to load review rounds:', error instanceof Error ? error.message : 'unknown error');
+        return [];
+      });
+      const items = [...mergeAttention(agentItems, pullRequestItems), ...roundItems];
+      await Promise.all(pullRequestItems.filter((item: any) => item.type === 'CONFLICT' && item.ticketKey).map((item: any) =>
+        storageService.addOrchestratorEventOnce(item.ticketKey, 'CONFLICT', item.prUrl || null).catch(() => null)));
       const keys = [...new Set(items.map((item) => item.ticketKey).filter(isPresent))];
       const tickets = await Promise.all(keys.map((key) => jiraAPI.getTicket(key).catch(() => null)));
       const statusOf = new Map(tickets.filter(isPresent).map((ticket: any) => [String(ticket.key), String(ticket.status)]));
@@ -383,9 +505,9 @@ export const resolvers = {
     elevenLabsKeys: async () => elevenLabsKeys.list().catch(elevenLabsError),
     elevenLabsQuota: async () => elevenLabsKeys.quota().catch(elevenLabsError),
     chatSessions: async (_: unknown, { source, limit }: { source?: string; limit?: number }) => {
-      return chatService.sessions(source, limit, CHAT_MACHINE).catch(orchestratorInputError);
+      return chatService.sessions(source, limit, CHAT_MACHINE).then(withReviewRounds).catch(orchestratorInputError);
     },
-    chatSession: async (_: unknown, { id }: { id: string }) => chatService.session(id, CHAT_MACHINE),
+    chatSession: async (_: unknown, { id }: { id: string }) => chatService.session(id, CHAT_MACHINE).then((session) => session && withReviewRounds([session]).then(([first]) => first)),
     chatSessionStates: async (_: unknown, { limit }: { limit?: number }) => chatService.sessionStates(limit, CHAT_MACHINE),
     chatMessages: async (_: unknown, args: { sessionId: string; afterId?: number; beforeId?: number; limit?: number }) => {
       return chatService.messages(args.sessionId, args.afterId, args.beforeId, args.limit)
@@ -476,6 +598,18 @@ export const resolvers = {
       if (!sprint) throw new GraphQLError('Unknown sprint', { extensions: { code: 'BAD_USER_INPUT' } });
       return runSousPrompt(`Retro-${sprint.name}`, `Pakai skill sous: retro ${sprint.name}`);
     },
+    sprintPlanMap: () => {
+      requireAgentControls();
+      return sprintPlanner.map().catch(orchestratorInputError);
+    },
+    sprintPlanEdgeAction: async (_: unknown, { id, action }: { id: string; action: string }) => {
+      requireAgentControls();
+      const active = activeSprint(await jiraAPI.getTickets());
+      if (!active) throw new GraphQLError('No active sprint', { extensions: { code: 'BAD_USER_INPUT' } });
+      const edge = await sprintPlanner.decide(active.sprint, id, action).catch(orchestratorInputError);
+      const parent: any = await jiraAPI.getTicket(edge.dependsOnKey).catch(() => null);
+      return { id: edge.id, ticketKey: edge.ticketKey, dependsOnKey: edge.dependsOnKey, dependsOnTitle: parent?.title ?? null, dependsOnAssignee: parent?.assignee ?? null, dependsOnStatus: parent?.status ?? null, source: edge.source, reason: edge.reason, state: edge.state };
+    },
     retroItemAction: async (_: unknown, { id, action, text }: { id: string; action: string; text?: string | null }) => {
       const item = await storageService.getRetroItem(id);
       if (!item) throw new GraphQLError('No such retro line', { extensions: { code: 'BAD_USER_INPUT' } });
@@ -550,7 +684,9 @@ export const resolvers = {
       }
     },
     updateSettings: async (_: any, { input }: { input: any }) => {
-      return await storageAPI.updateSettings(input);
+      const saved = await storageAPI.updateSettings(input);
+      resetOwnerPassLabel();
+      return saved;
     },
     validateJira: async (_: any, { url, email, token }: { url?: string, email?: string, token?: string }) => {
       return await jiraAPI.validateJira(url, email, token);
@@ -723,6 +859,31 @@ export const resolvers = {
         throw new GraphQLError(error instanceof Error ? error.message : 'The switch failed', { extensions: { code: 'BAD_USER_INPUT' } });
       }
     },
+    refreshClaudeUsage: async () => {
+      if (!cycleAvailable()) throw new GraphQLError('This machine has no /cycle', { extensions: { code: 'BAD_USER_INPUT' } });
+      try {
+        return { available: true, ...(await claudeAccounts.refresh()) };
+      } catch (error) {
+        throw new GraphQLError(error instanceof Error ? error.message : 'The usage probe failed', { extensions: { code: 'BAD_USER_INPUT' } });
+      }
+    },
+    runQa: async (_: unknown, { ticketKey }: { ticketKey: string }) => {
+      requireQa();
+      const key = ticketKey.trim().toUpperCase();
+      if (!isTicketKey(key)) throw new GraphQLError('Not a ticket key', { extensions: { code: 'BAD_USER_INPUT' } });
+      const run = await orchestratorService.get(key);
+      const started = await qaAuto.start(key, run ? runPullRequests(run) : []);
+      if (!started) {
+        const trigger = await qaTrigger(key);
+        throw new GraphQLError(trigger?.error ?? 'A QA session for this ticket is already starting', { extensions: { code: 'BAD_USER_INPUT' } });
+      }
+      return qaLocalState(key);
+    },
+    setQaAutoRun: async (_: unknown, { on }: { on: boolean }) => {
+      requireQa();
+      await storageService.upsertSetting(QA_SETTING, String(on));
+      return qaLocalState(null);
+    },
     setClaudeRotation: async (_: unknown, rule: { enabled: boolean; fiveHour: number; sevenDay: number; backToMain: boolean }) => {
       try {
         return { available: cycleAvailable(), ...(await claudeAccounts.setRotation(rule)) };
@@ -825,15 +986,17 @@ export const resolvers = {
 };
 
 export const protectedQueries = [
-  'dashboard', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'claudeAccounts', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
+  'dashboard', 'ticketPullRequests', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'claudeAccounts', 'qaLocal', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatSessionStates', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'agentLooks', 'libraryAgents', 'libraryAgent',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
-  'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro',
+  'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro', 'sprintPlan',
 ] as const;
 export const protectedMutations = [
   'retroBuild',
+  'sprintPlanMap',
+  'sprintPlanEdgeAction',
   'retroItemAction',
   'workspaceMkdir',
   'workspaceRename',
@@ -868,6 +1031,9 @@ export const protectedMutations = [
   'checkMonitors',
   'createIngestToken',
   'useClaudeAccount',
+  'refreshClaudeUsage',
+  'runQa',
+  'setQaAutoRun',
   'setClaudeRotation',
   'revokeIngestToken',
   'deleteDemoVideo',

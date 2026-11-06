@@ -1,4 +1,5 @@
-import { Prisma, type PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient, type ReviewRound } from '@prisma/client';
+import { EXPIRED_DETAIL } from '../integrations/review-findings';
 import { prisma } from './client';
 import { decrypt, encrypt, hashPin, verifyPin } from './crypto';
 
@@ -6,7 +7,10 @@ const RUN_WITHOUT_LEDGER = {
   key: true, title: true, stage: true, waiting: true, payload: true, activity: true, activityDetail: true, activityEndedAt: true,
   lastEventAt: true, ledgerUpdatedAt: true, transcriptAt: true, dismissedAt: true, machine: true, jiraStatus: true, jiraStage: true, stalledDetail: true, stalledAt: true, createdAt: true, updatedAt: true,
 } as const;
-const KEPT_EVENT_KINDS = ['STAGE', 'WAITING'];
+const KEPT_EVENT_KINDS = ['STAGE', 'WAITING', 'DEP_WAIT', 'CONFLICT'];
+
+export interface PlanEdgeInput { ticketKey: string; dependsOnKey: string; reason?: string | null }
+export interface SprintPlanData { status?: string; mappingKeys?: string[]; sessionId?: string | null; mappedKeys?: string[]; groups?: string[][]; error?: string | null; startedAt?: Date | null; mappedAt?: Date | null }
 
 const SENSITIVE_KEYS = new Set([
   'jiraApiToken',
@@ -338,6 +342,90 @@ export class StorageService {
     return [...tools, ...members].sort((a, b) => b.id - a.id);
   }
 
+  /** Records an event once per (ticket, kind, detail), counting only events since `since` when given. */
+  async addOrchestratorEventOnce(ticketKey: string, kind: string, detail: string | null, since?: Date) {
+    if (await this.db.orchestratorEvent.findFirst({ where: { ticketKey, kind, detail, ...(since ? { createdAt: { gte: since } } : {}) }, select: { id: true } })) return null;
+    return this.db.orchestratorEvent.create({ data: { ticketKey, kind, detail } });
+  }
+
+  /** Distinct tickets (or distinct details) with an event of `kind` for one of `keys` between `from` and `to`. */
+  async countEventTickets(kind: string, keys: string[], from: Date, to: Date, by: 'ticketKey' | 'detail' = 'ticketKey') {
+    const rows = await this.db.orchestratorEvent.findMany({
+      where: { kind, ticketKey: { in: keys }, createdAt: { gte: from, lte: to } }, select: { ticketKey: true, detail: true },
+    });
+    return new Set(rows.map((row) => row[by])).size;
+  }
+
+  getSprintPlan(sprint: string) {
+    return this.db.sprintPlan.findUnique({ where: { sprint } });
+  }
+
+  saveSprintPlan(sprint: string, data: SprintPlanData) {
+    const { mappingKeys, mappedKeys, groups, ...rest } = data;
+    const fields = {
+      ...rest,
+      ...(mappingKeys ? { mappingKeys: JSON.stringify(mappingKeys) } : {}),
+      ...(mappedKeys ? { mappedKeys: JSON.stringify(mappedKeys) } : {}),
+      ...(groups ? { groups: JSON.stringify(groups) } : {}),
+    };
+    return this.db.sprintPlan.upsert({ where: { sprint }, update: fields, create: { sprint, ...fields } });
+  }
+
+  getPlanEdges(sprint: string) {
+    return this.db.sprintPlanEdge.findMany({ where: { sprint }, orderBy: [{ ticketKey: 'asc' }, { createdAt: 'asc' }] });
+  }
+
+  /** Jira links apply at once: stale jira rows go, the rest are accepted. Inferred rows stay. */
+  async replaceJiraEdges(sprint: string, edges: PlanEdgeInput[]) {
+    const now = new Date();
+    await this.db.$transaction(async (tx) => {
+      const current = await tx.sprintPlanEdge.findMany({ where: { sprint, source: 'jira' } });
+      const wanted = new Set(edges.map((edge) => `${edge.ticketKey}|${edge.dependsOnKey}`));
+      const stale = current.filter((row) => !wanted.has(`${row.ticketKey}|${row.dependsOnKey}`)).map((row) => row.id);
+      if (stale.length > 0) await tx.sprintPlanEdge.deleteMany({ where: { id: { in: stale } } });
+      for (const edge of edges) {
+        const reason = edge.reason ?? null;
+        const row = current.find((item) => item.ticketKey === edge.ticketKey && item.dependsOnKey === edge.dependsOnKey);
+        if (row?.state === 'accepted' && row.reason === reason) continue;
+        const data = { source: 'jira', reason, state: 'accepted', decidedAt: now };
+        await tx.sprintPlanEdge.upsert({
+          where: { sprint_ticketKey_dependsOnKey: { sprint, ticketKey: edge.ticketKey, dependsOnKey: edge.dependsOnKey } },
+          update: data,
+          create: { sprint, ticketKey: edge.ticketKey, dependsOnKey: edge.dependsOnKey, ...data },
+        });
+      }
+    });
+  }
+
+  /** New edges are pending; accepted and rejected ones keep their state, a pending one the draft dropped is deleted (only for `scope` tickets when given), a jira edge is skipped. */
+  async applyInferredEdges(sprint: string, edges: PlanEdgeInput[], scope?: string[]) {
+    await this.db.$transaction(async (tx) => {
+      const current = await tx.sprintPlanEdge.findMany({ where: { sprint } });
+      const id = (edge: PlanEdgeInput) => `${edge.ticketKey}|${edge.dependsOnKey}`;
+      const held = new Map(current.map((row) => [id(row), row]));
+      const wanted = new Set(edges.map(id));
+      const stale = current.filter((row) => row.source === 'inferred' && row.state === 'pending' && !wanted.has(id(row)) && (!scope || scope.includes(row.ticketKey))).map((row) => row.id);
+      if (stale.length > 0) await tx.sprintPlanEdge.deleteMany({ where: { id: { in: stale } } });
+      for (const edge of edges) {
+        const row = held.get(id(edge));
+        if (!row) await tx.sprintPlanEdge.create({ data: { sprint, ticketKey: edge.ticketKey, dependsOnKey: edge.dependsOnKey, source: 'inferred', reason: edge.reason ?? null } });
+        else if (row.source === 'inferred' && row.state === 'pending') await tx.sprintPlanEdge.update({ where: { id: row.id }, data: { reason: edge.reason ?? null } });
+      }
+    });
+  }
+
+  setPlanEdgeState(id: string, state: 'accepted' | 'rejected') {
+    return this.db.sprintPlanEdge.update({ where: { id }, data: { state, decidedAt: new Date() } });
+  }
+
+  getAcceptedPlanEdges(sprint: string) {
+    return this.db.sprintPlanEdge.findMany({ where: { sprint, state: 'accepted' } });
+  }
+
+  async getPendingPlanKeys(sprint: string): Promise<Set<string>> {
+    return new Set((await this.db.sprintPlanEdge.findMany({ where: { sprint, state: 'pending' }, select: { ticketKey: true } })).map((row) => row.ticketKey));
+  }
+
   getRetroItems(sprint: string) {
     return this.db.retroItem.findMany({ where: { sprint }, orderBy: { createdAt: 'asc' } });
   }
@@ -485,6 +573,89 @@ export class StorageService {
     return this.db.autoReview.update({ where: { id }, data });
   }
 
+  createReviewRound(data: { threadId: string; ticketKey: string; threadUrl: string; prUrls: string; messageIds: string; findings?: string; lastMessageId: string; lastMessageAt: Date }) {
+    return this.db.reviewRound.create({ data });
+  }
+
+  updateReviewRound(id: string, data: {
+    sessionId?: string | null; opened?: boolean; status?: string; attempts?: number;
+    valid?: number | null; invalid?: number | null; pushed?: boolean | null; detail?: string | null; reportedAt?: Date | null;
+  }) {
+    return this.db.reviewRound.update({ where: { id }, data });
+  }
+
+  /** Sessions owing a result: `sending` and `sent` rounds, and rounds expired in the last 24 h whose late marker may still arrive. */
+  async pendingReviewSessions() {
+    const day = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const rows = await this.db.reviewRound.findMany({
+      where: {
+        sessionId: { not: null },
+        OR: [{ status: { in: ['sending', 'sent'] } }, { status: 'failed', detail: EXPIRED_DETAIL, createdAt: { gte: day } }],
+      },
+      select: { sessionId: true },
+    });
+    return rows.map((row) => row.sessionId as string);
+  }
+
+  getReviewRound(id: string) {
+    return this.db.reviewRound.findUnique({ where: { id } });
+  }
+
+  /** The newest round of each thread, by its last finding message. */
+  async latestRoundsByThread(threadIds: string[]) {
+    const latest = new Map<string, ReviewRound>();
+    if (threadIds.length === 0) return latest;
+    const rows = await this.db.reviewRound.findMany({ where: { threadId: { in: threadIds } }, orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }] });
+    for (const row of rows) if (!latest.has(row.threadId)) latest.set(row.threadId, row);
+    return latest;
+  }
+
+  /** The newest round of each session. */
+  async roundsForSessions(sessionIds: string[]) {
+    const latest = new Map<string, ReviewRound>();
+    if (sessionIds.length === 0) return latest;
+    const rows = await this.db.reviewRound.findMany({ where: { sessionId: { in: sessionIds } }, orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }] });
+    for (const row of rows) if (row.sessionId && !latest.has(row.sessionId)) latest.set(row.sessionId, row);
+    return latest;
+  }
+
+  /** The round a session still owes a result for, newest first. */
+  getSentRoundForSession(sessionId: string) {
+    return this.db.reviewRound.findFirst({ where: { sessionId, status: 'sent' }, orderBy: { lastMessageAt: 'desc' } });
+  }
+
+  /** Failed rounds with attempts left, and rounds left in `sending` with no session for over a minute (a crash between create and send). */
+  getRoundsToSend(maxAttempts: number) {
+    return this.db.reviewRound.findMany({
+      where: { OR: [{ status: 'failed', attempts: { lt: maxAttempts } }, { status: 'sending', sessionId: null, createdAt: { lt: new Date(Date.now() - 60_000) } }] },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  /** Marks `sending` and `sent` rounds created before the cutoff as failed with attempts at the cap, so they are not retried. */
+  async expireSentRounds(before: Date, maxAttempts: number, detail: string) {
+    const stale = await this.db.reviewRound.findMany({ where: { status: { in: ['sending', 'sent'] }, createdAt: { lt: before } } });
+    if (stale.length === 0) return stale;
+    await this.db.reviewRound.updateMany({ where: { id: { in: stale.map((row) => row.id) } }, data: { status: 'failed', attempts: maxAttempts, detail } });
+    return stale;
+  }
+
+  /** Reported rounds, and failed rounds that ran out of attempts, from the last 14 days that no newer round on the same thread has replaced. */
+  async openReviewRounds(maxAttempts: number) {
+    const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    const rows = await this.db.reviewRound.findMany({
+      where: {
+        AND: [
+          { OR: [{ status: 'reported' }, { status: 'failed', attempts: { gte: maxAttempts } }] },
+          { OR: [{ lastMessageAt: { gte: since } }, { reportedAt: { gte: since } }] },
+        ],
+      },
+      orderBy: { lastMessageAt: 'desc' },
+    });
+    const latest = await this.latestRoundsByThread([...new Set(rows.map((row) => row.threadId))]);
+    return rows.filter((row) => latest.get(row.threadId)?.id === row.id);
+  }
+
   getChatSessionTitles(prefix: string) {
     return this.db.chatSession.findMany({ where: { title: { startsWith: prefix } }, select: { title: true } }).then((rows) => rows.map((row) => row.title));
   }
@@ -583,11 +754,12 @@ export class StorageService {
       let used = await tx.chatActivity.count({ where: { sessionId, turnId, eventId: { not: droppedId } } });
       let accepted = 0;
       let dropped = 0;
+      let noSpare = false;
       for (const event of events) {
         const row = known.get(event.eventId);
         if (!row) {
           if (used >= maxRows && event.kind !== 'agent') {
-            const spare = await tx.chatActivity.findFirst({
+            const spare = noSpare ? null : await tx.chatActivity.findFirst({
               where: {
                 sessionId, turnId, status: { not: 'running' }, eventId: { not: droppedId },
                 OR: [{ kind: 'hook' }, { kind: 'note', name: { notIn: ['dropped', 'subagent'] } }],
@@ -596,7 +768,10 @@ export class StorageService {
               select: { id: true, eventId: true },
             });
             dropped += 1;
-            if (!spare) continue;
+            if (!spare) {
+              noSpare = true;
+              continue;
+            }
             await tx.chatActivity.delete({ where: { id: spare.id } });
             known.delete(spare.eventId);
             used -= 1;
@@ -604,6 +779,7 @@ export class StorageService {
           used += 1;
           seq += 1;
           known.set(event.eventId, await tx.chatActivity.create({ data: { sessionId, turnId, ...event, seq } }));
+          noSpare = false;
         } else if (row.status !== 'running' && event.status === 'running') {
           accepted += 1;
           continue;
@@ -620,6 +796,7 @@ export class StorageService {
           if (changed) {
             seq += 1;
             known.set(event.eventId, await tx.chatActivity.update({ where: { id: row.id }, data: { ...next, seq } }));
+            noSpare = false;
           }
         }
         accepted += 1;

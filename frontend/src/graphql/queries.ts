@@ -277,6 +277,7 @@ export const GET_SETTINGS = gql`
       discordUserId
       autoReviewOnIt
       autoLgtm
+      reviewFindingsToTask
       discordMessageTemplate
       hasGoogleClientSecret
       googleCalendarConnected
@@ -369,6 +370,16 @@ export const GET_HOME_CORE = gql`
         sprintName
         storyPoints
       }
+    }
+  }
+`;
+
+export const GET_HOME_TICKET_PRS = gql`
+  query GetHomeTicketPrs($keys: [String!]!) {
+    ticketPullRequests(keys: $keys) {
+      key
+      labels
+      pullRequests { id url repo pullNumber status mergeable }
     }
   }
 `;
@@ -684,12 +695,41 @@ export const GET_RETRO = gql`
       sprint
       sprintId
       previous
-      numbers { tickets medianHours fixRounds replans ownerIssues medianOwnerWaitHours reviews requestChanges }
-      previousNumbers { tickets medianHours fixRounds replans ownerIssues medianOwnerWaitHours reviews requestChanges }
+      numbers { tickets medianHours fixRounds replans ownerIssues medianOwnerWaitHours reviews requestChanges blockedWaits mergeConflicts stackedRebases }
+      previousNumbers { tickets medianHours fixRounds replans ownerIssues medianOwnerWaitHours reviews requestChanges blockedWaits mergeConflicts stackedRebases }
       problems { label count tickets }
       tickets { key title kind hours rounds issues ownerWaitHours result }
       items { id kind text evidence dest status sessionId updatedAt }
     }
+  }
+`;
+
+export const GET_SPRINT_PLAN = gql`
+  query GetSprintPlan {
+    sprintPlan {
+      sprint
+      status
+      error
+      sessionId
+      mappedAt
+      groups
+      tickets {
+        key title status position held
+        edges { id ticketKey dependsOnKey dependsOnTitle dependsOnAssignee dependsOnStatus source reason state }
+      }
+    }
+  }
+`;
+
+export const SPRINT_PLAN_MAP = gql`
+  mutation SprintPlanMap {
+    sprintPlanMap
+  }
+`;
+
+export const SPRINT_PLAN_EDGE_ACTION = gql`
+  mutation SprintPlanEdgeAction($id: ID!, $action: String!) {
+    sprintPlanEdgeAction(id: $id, action: $action) { id ticketKey dependsOnKey dependsOnTitle dependsOnAssignee dependsOnStatus source reason state }
   }
 `;
 
@@ -753,6 +793,7 @@ export const CHAT_SESSION_FIELDS = `
   lastText
   waiting
   workerCount
+  reviewRound { status summary threadUrl at }
 `;
 
 export const CHAT_INTERACTION_FIELDS = `
@@ -1092,11 +1133,13 @@ export const DISCORD_THREAD_FIELDS = gql`
       messageCount
       tags
       slots
+      reviewing
       tickets { key status assignee sprint sprintActive }
       prs
       claim { author mine at }
       onIt
       passes
+      autoReviewSkip
       claimerRepliedAt
       mentionedAt
       repliedAt
@@ -1172,9 +1215,26 @@ export const GET_AUTO_REVIEWS = gql`
 
 export const CLAUDE_ACCOUNTS_FIELDS = `
   available
-  accounts { name active seenAt fiveHour { usedPercentage resetsAt } sevenDay { usedPercentage resetsAt } }
+  accounts { name active seenAt status checkedAt source fiveHour { usedPercentage resetsAt } sevenDay { usedPercentage resetsAt } }
   rotation { enabled fiveHour sevenDay backToMain }
   log { at from to reason auto }
+`;
+
+export const QA_LOCAL_FIELDS = `
+  available
+  autoRun
+  trigger { at sessionId pullRequests error }
+  run {
+    runId state step verdict rule passed failed blocked error startedAt updatedAt finishedAt
+    steps { id label state }
+    testCases { id title ac state seconds video note }
+  }
+`;
+
+export const GET_QA_LOCAL = gql`
+  query GetQaLocal($ticketKey: String) {
+    qaLocal(ticketKey: $ticketKey) { ${QA_LOCAL_FIELDS} }
+  }
 `;
 
 export const GET_CLAUDE_ACCOUNTS = gql`

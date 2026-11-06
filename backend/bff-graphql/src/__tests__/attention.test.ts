@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { isSettledStatus, mergeAttention, pullRequestProblems, withoutSettledTickets } from '../integrations/attention';
+import { isSettledStatus, mergeAttention, planAttentionItems, pullRequestProblems, withoutSettledTickets } from '../integrations/attention';
 
 const item = (type: string, ticketKey: string | null) => ({ id: `${type}-${ticketKey}`, type, message: type, ticketKey });
 
@@ -31,4 +31,11 @@ test('every item of a settled ticket is hidden, whatever its type; unknown ticke
   const items = [item('AGENT_WAITING', 'QRD-1'), item('AGENT_AC_FAILED', 'QRD-1'), item('CONFLICT', 'QRD-2'), item('PR_CHECKS_FAILING', 'QRD-3'), item('AGENT_STALLED', 'QRD-4'), item('CONFLICT', null)];
   const statusOf = new Map([['QRD-1', 'Done / MERGED'], ['QRD-2', 'UAT CHECK'], ['QRD-3', 'PR Review']]);
   assert.deepStrictEqual(withoutSettledTickets(items, statusOf).map((entry) => entry.id), ['PR_CHECKS_FAILING-QRD-3', 'AGENT_STALLED-QRD-4', 'CONFLICT-null']);
+});
+
+test('a pending inferred edge puts one dependency row per ticket in Needs you', () => {
+  assert.deepStrictEqual(planAttentionItems([{ ticketKey: 'QRD-1' }, { ticketKey: 'QRD-1' }, { ticketKey: 'QRD-2' }]), [
+    { id: 'plan-dependency-QRD-1', type: 'PLAN_DEPENDENCY', message: 'QRD-1 waits for your call on its dependency', ticketKey: 'QRD-1' },
+    { id: 'plan-dependency-QRD-2', type: 'PLAN_DEPENDENCY', message: 'QRD-2 waits for your call on its dependency', ticketKey: 'QRD-2' },
+  ]);
 });

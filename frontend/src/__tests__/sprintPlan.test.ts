@@ -1,0 +1,67 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import test from 'node:test';
+import { agentsRoute, edgeStateText, groupsText, hasMap, isMapping, mappedText, pendingEdges, sourceLabel, type SprintPlan } from '../agents/plan';
+import { RETRO_NUMBERS } from '../agents/retro';
+import { signalOf } from '../lib/attention';
+
+const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
+
+const plan = (over: Partial<SprintPlan> = {}): SprintPlan => ({
+  sprint: 'Sprint 12', status: 'idle', error: null, sessionId: null, mappedAt: '2026-11-03T08:00:00.000Z', groups: [['QRD-1', 'QRD-2'], ['QRD-3']],
+  tickets: [
+    { key: 'QRD-1', title: 'One', status: 'To Do', position: 1, held: false, edges: [] },
+    { key: 'QRD-2', title: 'Two', status: 'To Do', position: 2, held: true, edges: [
+      { id: 'e1', ticketKey: 'QRD-2', dependsOnKey: 'QRD-1', dependsOnTitle: 'One', dependsOnAssignee: null, dependsOnStatus: null, source: 'inferred', reason: 'same file', state: 'pending' },
+      { id: 'e2', ticketKey: 'QRD-2', dependsOnKey: 'QRD-9', dependsOnTitle: null, dependsOnAssignee: 'Ana', dependsOnStatus: 'PR Review', source: 'jira', reason: 'link', state: 'accepted' },
+    ] },
+  ],
+  ...over,
+});
+
+test('agentsRoute opens Sprint > Retro for the old tab=retro link and Plan by default', () => {
+  assert.deepEqual(agentsRoute('?tab=retro'), { tab: 'sprint', sub: 'retro' });
+  assert.deepEqual(agentsRoute('?tab=sprint'), { tab: 'sprint', sub: 'plan' });
+  assert.deepEqual(agentsRoute('?tab=sprint&sub=plan'), { tab: 'sprint', sub: 'plan' });
+  assert.deepEqual(agentsRoute('?tab=sprint&sub=retro'), { tab: 'sprint', sub: 'retro' });
+  assert.deepEqual(agentsRoute('?tab=library'), { tab: 'library', sub: 'plan' });
+  assert.deepEqual(agentsRoute(''), { tab: 'office', sub: 'plan' });
+});
+
+test('plan helpers label the source, the state and the map', () => {
+  assert.equal(sourceLabel('jira'), 'Jira');
+  assert.equal(sourceLabel('inferred'), 'Inferred');
+  assert.equal(edgeStateText('accepted'), 'Accepted');
+  assert.equal(edgeStateText('rejected'), 'Rejected');
+  assert.equal(edgeStateText('pending'), 'Waiting for your call');
+  assert.equal(isMapping(plan({ status: 'mapping' })), true);
+  assert.equal(isMapping(plan()), false);
+  assert.equal(isMapping(null), false);
+  assert.equal(mappedText(null, new Date()), 'Not mapped yet');
+  assert.equal(mappedText('2026-11-03T08:00:00.000Z', new Date('2026-11-03T09:00:00.000Z')), 'Mapped 1h ago');
+  assert.deepEqual(pendingEdges(plan()).map((edge) => edge.id), ['e1']);
+  assert.equal(hasMap(plan()), true);
+  assert.equal(hasMap(plan({ mappedAt: null })), false);
+  assert.equal(hasMap(null), false);
+  assert.deepEqual(groupsText(plan().groups), ['QRD-1 · QRD-2']);
+});
+
+test('the retro lists the three dependency numbers and Home ranks PLAN_DEPENDENCY', () => {
+  const fields = RETRO_NUMBERS.map(([field]) => field);
+  for (const field of ['blockedWaits', 'mergeConflicts', 'stackedRebases']) assert.ok(fields.includes(field as never), field);
+  assert.deepEqual(signalOf('PLAN_DEPENDENCY'), { rank: 6, group: 'answer', label: 'DEPENDENCY' });
+});
+
+test('the Agents page shows Sprint with Plan and Retro, Home opens the plan, and the phone ping is wired', () => {
+  const page = source('../pages/AgentsPage.tsx');
+  assert.match(page, /\['sprint', 'Sprint', CalendarRange\]/);
+  assert.match(page, /<PlanTab \/> : <RetroTab \/>/);
+  assert.doesNotMatch(page, /current="retro"/);
+  assert.match(source('../agents/PhoneTabs.tsx'), /\['sprint', 'Sprint', undefined\]/);
+  assert.match(source('../components/HomeAttention.tsx'), /\/agents\?tab=sprint&sub=plan/);
+  assert.match(source('../lib/notificationEvents.ts'), /PLAN_DEPENDENCY: \{ prefix: 'plan', title: 'waits for your call' \}/);
+  const tab = source('../agents/PlanTab.tsx');
+  assert.match(tab, /edge\.dependsOnStatus &&/);
+  for (const text of ['Map again', 'Accept', 'Reject', 'Map now', 'Safe in parallel']) assert.ok(tab.includes(text), text);
+});

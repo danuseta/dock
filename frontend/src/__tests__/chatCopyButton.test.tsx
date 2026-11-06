@@ -21,3 +21,9 @@ test('the Copy button writes the raw markdown to the clipboard', async () => {
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepStrictEqual(written, [markdown]);
 });
+
+test('label sets the aria-label of the Copy button', () => {
+  const html = renderToStaticMarkup(<CopyButton text="x" label="Copy code" />);
+  assert.match(html, /aria-label="Copy code"/);
+  assert.match(renderToStaticMarkup(<CopyButton text="x" />), /aria-label="Copy message"/);
+});

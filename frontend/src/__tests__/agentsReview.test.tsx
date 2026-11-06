@@ -27,3 +27,28 @@ test('a resolved finding is struck through with its reason and labelled resolved
   assert.match(page, /finding\.resolvedAt \? 'resolved' : finding\.severity/);
   assert.match(readFileSync(new URL('../graphql/queries.ts', import.meta.url), 'utf8'), /findings \{ at severity text resolvedAt resolvedWhy \}/);
 });
+
+test('LgtmButton shows LGTM for an approve verdict, Approved once approved, and nothing for request-change', async () => {
+  const { LgtmButton } = await import('../agents/lgtm');
+  const render = (run: Record<string, unknown>) => renderToStaticMarkup(<LgtmButton run={{ key: 'QRD-1', kind: 'review', ...run } as never} busy={false} onLgtm={() => undefined} />);
+  assert.match(render({ verdict: 'approve', blockers: 0 }), />LGTM</);
+  assert.match(render({ verdict: 'approve', blockers: 0, approved: true }), />Approved</);
+  assert.equal(render({ verdict: 'request-change', blockers: 2 }), '');
+});
+
+test('lgtmResult reports success and the failed steps', async () => {
+  const { lgtmResult } = await import('../agents/lgtmCopy');
+  assert.deepEqual(lgtmResult('QRD-1', [{ name: 'label', ok: true, detail: '' }]), { message: 'LGTM sent for QRD-1: Jira Pass label added and the pull requests approved.', type: 'success' });
+  const partial = lgtmResult('QRD-1', [{ name: 'label', ok: true, detail: '' }, { name: 'approve', ok: false, detail: 'no token' }]);
+  assert.equal(partial.type, 'error');
+  assert.equal(partial.message, '1 of 2 steps failed: approve (no token)');
+});
+
+test('the session inspector runs APPROVE_REVIEW and shows the verdict badge, hidden on the monitor-only DOCK', async () => {
+  const { readFileSync } = await import('node:fs');
+  const inspector = readFileSync(new URL('../chat/SessionInspector.tsx', import.meta.url), 'utf8');
+  assert.match(inspector, /useMutation\(APPROVE_REVIEW/);
+  assert.match(inspector, /<VerdictBadge run=\{run\} \/>/);
+  assert.match(inspector, /!monitorsOnly\(mode\)/);
+  assert.match(readFileSync(new URL('../pages/AgentsPage.tsx', import.meta.url), 'utf8'), /from '\.\.\/agents\/lgtm'/);
+});

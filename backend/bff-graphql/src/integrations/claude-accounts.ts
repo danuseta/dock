@@ -3,12 +3,34 @@ export const MAIN_ACCOUNT = 'main';
 export const ACCOUNT_NAME = /^[A-Za-z0-9_-]{1,30}$/;
 export const ROTATION_DEFAULTS = { enabled: false, fiveHour: 90, sevenDay: 95, backToMain: true };
 const LOG_SIZE = 20;
+const PROBE_FRESH_MS = 2 * 3_600_000;
+const REFRESH_MIN_MS = 60_000;
 
 export interface UsageWindow { usedPercentage: number; resetsAt: Date | null }
-export interface AccountUsage { fiveHour: UsageWindow | null; sevenDay: UsageWindow | null; receivedAt: Date }
+/** `fp` is the first 12 hex of sha256 of the account's token; `source` says whether the windows came from the probe or a turn. */
+export interface AccountUsage { fiveHour: UsageWindow | null; sevenDay: UsageWindow | null; receivedAt: Date; status?: string; checkedAt?: Date; fp?: string; source?: 'probe' | 'status' }
+export interface ProbeRow { name: string; status: string; fiveHour: UsageWindow | null; sevenDay: UsageWindow | null; fp: string | null }
+export const ACCOUNT_FP = /^[0-9a-f]{12}$/;
+/** Probe statuses whose windows are a real measurement; `allowed_warning` is an account near its limit. */
+const MEASURED = new Set(['allowed', 'allowed_warning', 'rejected']);
 export interface Rotation { enabled: boolean; fiveHour: number; sevenDay: number; backToMain: boolean }
 export interface RotationEntry { at: Date; from: string; to: string; reason: string; auto: boolean }
 export interface CycleList { accounts: string[]; active: string | null }
+
+export const parseWindow = (value: unknown): UsageWindow | null => {
+  const raw = value as { usedPercentage?: unknown; resetsAt?: unknown } | null;
+  return raw && typeof raw.usedPercentage === 'number' ? { usedPercentage: raw.usedPercentage, resetsAt: typeof raw.resetsAt === 'string' ? new Date(raw.resetsAt) : null } : null;
+};
+
+/** `kit/account-usage.py`: a JSON array with one row per account; a row without a name or status is dropped. */
+export function parseProbe(output: string): ProbeRow[] {
+  const rows: unknown = JSON.parse(output);
+  if (!Array.isArray(rows)) throw new Error('The usage probe did not return a list');
+  return rows.flatMap((row: { name?: unknown; status?: unknown; fiveHour?: unknown; sevenDay?: unknown; fp?: unknown }) =>
+    typeof row?.name === 'string' && typeof row.status === 'string'
+      ? [{ name: row.name, status: row.status, fiveHour: parseWindow(row.fiveHour), sevenDay: parseWindow(row.sevenDay), fp: typeof row.fp === 'string' && ACCOUNT_FP.test(row.fp) ? row.fp : null }]
+      : []);
+}
 
 /** `cycle.py list`: `[1] * main  (your own login)`, one line per account, the active one marked with `*`. */
 export function parseCycleList(output: string): CycleList {
@@ -29,22 +51,12 @@ const current = (window: UsageWindow | null, now: Date) => (window && !(window.r
 /** Why an account is over the owner's limits, or null when it is not (an unknown or reset window is not over). */
 export function overLimit(usage: AccountUsage | undefined, rule: Rotation, now: Date): string | null {
   if (!usage) return null;
+  if (usage.status === 'rejected' && usage.checkedAt && now.getTime() - usage.checkedAt.getTime() < PROBE_FRESH_MS) return 'rejected by the usage probe';
   const fiveHour = current(usage.fiveHour, now);
   const sevenDay = current(usage.sevenDay, now);
   if (fiveHour && fiveHour.usedPercentage >= rule.fiveHour) return `5h at ${Math.round(fiveHour.usedPercentage)}%`;
   if (sevenDay && sevenDay.usedPercentage >= rule.sevenDay) return `7d at ${Math.round(sevenDay.usedPercentage)}%`;
   return null;
-}
-
-/**
- * The account a usage report belongs to. A turn started before a switch still reports its old account, so a report
- * whose 7 day reset time matches another account's is that account's: each account's weekly window resets at its own time.
- */
-export function attribute(report: AccountUsage, active: string, usage: Record<string, AccountUsage>): string {
-  const reset = report.sevenDay?.resetsAt?.getTime();
-  if (!reset) return active;
-  const owner = Object.entries(usage).find(([name, seen]) => name !== active && seen.sevenDay?.resetsAt?.getTime() === reset);
-  return owner ? owner[0] : active;
 }
 
 export type Decision = { to: string; reason: string } | { stuck: string } | null;
@@ -77,14 +89,14 @@ export interface ClaudeAccountsDeps {
   switchTo(name: string): Promise<void>;
   rotation(): Promise<Rotation>;
   saveRotation(rule: Rotation): Promise<void>;
+  /** One request per account through the kit script; null when this machine has none. */
+  probe(): Promise<ProbeRow[] | null>;
   usage(): Promise<Record<string, AccountUsage>>;
   saveUsage(usage: Record<string, AccountUsage>): Promise<void>;
   log(): Promise<RotationEntry[]>;
   saveLog(log: RotationEntry[]): Promise<void>;
   /** A switch makes the machine's last usage snapshot belong to the old account. */
   switched(): void;
-  /** The machine's last usage snapshot from before the accounts were tracked. */
-  machineUsage(): AccountUsage | null;
   push(message: { title: string; body: string; url: string; tag: string }): Promise<unknown>;
   now(): Date;
 }
@@ -93,18 +105,13 @@ export interface ClaudeAccountsDeps {
 export class ClaudeAccounts {
   private busy = false;
   private stuck: string | null = null;
+  private lastProbe = 0;
 
   constructor(private readonly deps: ClaudeAccountsDeps) {}
 
   async state() {
     const [list, usage, rule, log] = await Promise.all([this.deps.list(), this.deps.usage(), this.deps.rotation(), this.deps.log()]);
     const now = this.deps.now();
-    // Before the first switch, the machine's last snapshot can only be the active account's: it starts the tracking.
-    const seed = list.active && !usage[list.active] && log.length === 0 ? this.deps.machineUsage() : null;
-    if (seed && list.active) {
-      usage[list.active] = seed;
-      await this.deps.saveUsage(usage);
-    }
     const window = (value: UsageWindow | null) => {
       const live = current(value, now);
       return live && { usedPercentage: live.usedPercentage, resetsAt: live.resetsAt?.toISOString() ?? null };
@@ -116,6 +123,9 @@ export class ClaudeAccounts {
         fiveHour: window(usage[name]?.fiveHour ?? null),
         sevenDay: window(usage[name]?.sevenDay ?? null),
         seenAt: usage[name]?.receivedAt.toISOString() ?? null,
+        status: usage[name]?.status ?? null,
+        checkedAt: usage[name]?.checkedAt?.toISOString() ?? null,
+        source: usage[name]?.source ?? null,
       })),
       rotation: rule,
       log: log.map((entry) => ({ ...entry, at: entry.at.toISOString() })),
@@ -139,13 +149,46 @@ export class ClaudeAccounts {
     return this.state();
   }
 
-  /** One usage report from a turn on this machine: kept under its account, then auto rotate looks at it. */
-  async report(limits: { fiveHour: UsageWindow | null; sevenDay: UsageWindow | null }) {
+  /** Probe every account, keyed by the names `cycle.py list` gives; a row under another name is dropped and the old `main` is `claude1`. */
+  async probe() {
+    this.lastProbe = this.deps.now().getTime();
+    const [list, rows, saved] = await Promise.all([this.deps.list(), this.deps.probe(), this.deps.usage()]);
+    if (!rows) return;
+    const now = this.deps.now();
+    if (saved[MAIN_ACCOUNT] && !saved.claude1 && list.accounts.includes('claude1')) saved.claude1 = saved[MAIN_ACCOUNT];
+    const usage: Record<string, AccountUsage> = {};
+    for (const name of list.accounts) {
+      const row = rows.find((candidate) => candidate.name === name);
+      const old = saved[name];
+      if (!row) { if (old) usage[name] = old; continue; }
+      const fp = row.fp ?? old?.fp;
+      usage[name] = MEASURED.has(row.status) || !old
+        ? { fiveHour: row.fiveHour, sevenDay: row.sevenDay, receivedAt: now, status: row.status, checkedAt: now, fp, source: 'probe' }
+        : { ...old, status: row.status, checkedAt: now, fp };
+    }
+    await this.deps.saveUsage(usage);
+    await this.check(list, usage);
+  }
+
+  /** The owner's refresh button: at most one probe a minute, otherwise the stored data. */
+  async refresh() {
+    if (this.deps.now().getTime() - this.lastProbe >= REFRESH_MIN_MS) await this.probe();
+    return this.state();
+  }
+
+  /**
+   * One usage report from a turn on this machine, kept under the account whose token the turn runs on (its fingerprint
+   * against the probe's). A turn keeps the account it started on after a switch, so the active account is never assumed:
+   * a report with no fingerprint, or one the probe has not seen, updates no account.
+   */
+  async report(limits: { fiveHour: UsageWindow | null; sevenDay: UsageWindow | null }, fp?: string | null) {
+    if (!fp || !ACCOUNT_FP.test(fp)) return;
     const list = await this.deps.list();
-    if (!list.active) return;
     const usage = await this.deps.usage();
-    const report = { ...limits, receivedAt: this.deps.now() };
-    usage[attribute(report, list.active, usage)] = report;
+    const name = list.accounts.find((account) => usage[account]?.fp === fp);
+    if (!name) return;
+    const { status, checkedAt } = usage[name] ?? {};
+    usage[name] = { ...limits, receivedAt: this.deps.now(), status, checkedAt, fp, source: 'status' };
     await this.deps.saveUsage(usage);
     await this.check(list, usage);
   }

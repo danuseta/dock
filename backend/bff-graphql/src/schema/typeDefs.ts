@@ -59,6 +59,12 @@ export const typeDefs = gql`
     blobUrl: String
   }
 
+  type TicketPullRequests {
+    key: String!
+    labels: [String!]!
+    pullRequests: [PullRequest!]!
+  }
+
   type PullRequest {
     id: ID!
     title: String!
@@ -68,6 +74,8 @@ export const typeDefs = gql`
     type: String!
     owner: String!
     pullNumber: Int!
+    """False when GitHub reports a merge conflict; null while GitHub is still computing or for a closed PR."""
+    mergeable: Boolean
     baseBranch: String
     headBranch: String
     commitsCount: Int
@@ -170,6 +178,7 @@ export const typeDefs = gql`
     discordUserId: String
     autoReviewOnIt: Boolean!
     autoLgtm: Boolean!
+    reviewFindingsToTask: Boolean!
     hasGoogleClientSecret: Boolean!
     googleCalendarConnected: Boolean!
     googleCalendarError: String
@@ -274,6 +283,10 @@ export const typeDefs = gql`
     onIt: [String!]!
     """The Jira Pass labels of the thread's tickets, such as alvinPass."""
     passes: [String!]!
+    """Why the auto review did not start for this pull request thread."""
+    autoReviewSkip: String
+    """The owner said on it and the thread's ticket has no owner Pass label yet."""
+    reviewing: Boolean!
     claimerRepliedAt: String
     mentionedAt: String
     repliedAt: String
@@ -516,6 +529,45 @@ export const typeDefs = gql`
     medianOwnerWaitHours: Float
     reviews: Int!
     requestChanges: Int!
+    blockedWaits: Int!
+    mergeConflicts: Int!
+    stackedRebases: Int!
+  }
+
+  type SprintPlanEdge {
+    id: ID!
+    ticketKey: String!
+    dependsOnKey: String!
+    dependsOnTitle: String
+    dependsOnAssignee: String
+    """Jira status of the ticket it waits for, null when unknown."""
+    dependsOnStatus: String
+    """jira or inferred."""
+    source: String!
+    reason: String
+    """pending, accepted or rejected."""
+    state: String!
+  }
+
+  type SprintPlanTicket {
+    key: String!
+    title: String!
+    status: String!
+    position: Int!
+    """A pending inferred dependency holds this ticket."""
+    held: Boolean!
+    edges: [SprintPlanEdge!]!
+  }
+
+  """The active sprint's dependency map and work order. Status is idle, mapping or failed."""
+  type SprintPlan {
+    sprint: String!
+    status: String!
+    error: String
+    sessionId: String
+    mappedAt: String
+    groups: [[String!]!]!
+    tickets: [SprintPlanTicket!]!
   }
 
   type RetroProblem {
@@ -941,6 +993,14 @@ export const typeDefs = gql`
     pending: [ChatInteraction!]!
     settled: [ChatSettled!]!
     options: ChatTurnOptions
+    reviewRound: ReviewRoundInfo
+  }
+
+  type ReviewRoundInfo {
+    status: String!
+    summary: String!
+    threadUrl: String!
+    at: String!
   }
 
   type ChatSessionState {
@@ -1165,6 +1225,7 @@ export const typeDefs = gql`
     discordUserId: String
     autoReviewOnIt: String
     autoLgtm: String
+    reviewFindingsToTask: String
     googleClientId: String
     googleClientSecret: String
     googleCalendarId: String
@@ -1306,6 +1367,12 @@ export const typeDefs = gql`
     fiveHour: ClaudeUsageWindow
     sevenDay: ClaudeUsageWindow
     seenAt: String
+    "The last usage probe's verdict: allowed, rejected, no-token or error."
+    status: String
+    "When the probe last ran for this account."
+    checkedAt: String
+    "Where the windows come from: probe (the usage probe) or status (a turn that ran on this account's token)."
+    source: String
   }
 
   type ClaudeRotation {
@@ -1321,6 +1388,58 @@ export const typeDefs = gql`
     to: String!
     reason: String!
     auto: Boolean!
+  }
+
+  type QaStep {
+    id: String!
+    label: String!
+    state: String!
+  }
+
+  type QaTestCase {
+    id: String!
+    title: String!
+    ac: [Int!]!
+    "pending, running, passed, failed, skipped or blocked."
+    state: String!
+    seconds: Float
+    "Path of the video inside the run folder, served by /api/qa-local/<key>/<runId>/<video>."
+    video: String
+    note: String
+  }
+
+  type QaRun {
+    runId: String!
+    "running, done or failed."
+    state: String!
+    step: String!
+    steps: [QaStep!]!
+    testCases: [QaTestCase!]!
+    "LOLOS, REVISION or ESCALATED: the QA agent's verdict this run predicts."
+    verdict: String
+    rule: String
+    passed: Int!
+    failed: Int!
+    blocked: Int!
+    error: String
+    startedAt: String
+    updatedAt: String
+    finishedAt: String
+  }
+
+  type QaTrigger {
+    at: String!
+    sessionId: String
+    pullRequests: [String!]!
+    error: String
+  }
+
+  "Local QA with qonflo-qa-local; available only on a workspace DOCK where it is installed."
+  type QaLocal {
+    available: Boolean!
+    autoRun: Boolean!
+    trigger: QaTrigger
+    run: QaRun
   }
 
   type ClaudeAccounts {
@@ -1381,6 +1500,10 @@ export const typeDefs = gql`
     pullFileLines(ticketKey: String!, url: String!, path: String!, ref: String!, from: Int!, to: Int!): [String!]!
     autoReviews: [AutoReview!]!
     claudeAccounts: ClaudeAccounts!
+    "The local QA state, and the newest run and QA session of a ticket when one is given."
+    qaLocal(ticketKey: String): QaLocal!
+    """Pull requests and Jira labels of up to 10 tickets by key; extra keys are ignored."""
+    ticketPullRequests(keys: [String!]!): [TicketPullRequests!]!
     settings: Settings
     jiraProjects(url: String, email: String, token: String): [JiraProject!]!
     githubRepos(token: String): [GitHubRepo!]!
@@ -1435,6 +1558,7 @@ export const typeDefs = gql`
     runThinking(key: String!): [ThinkingRow!]!
     """The retro of a sprint from the sprint dashboard's list; no id is the active sprint."""
     retro(sprintId: Int): Retro
+    sprintPlan: SprintPlan
     """The tools, agents and thinking notes behind one Thinking row, from two minutes before it to until."""
     runThinkingRaw(key: String!, at: String!, until: String): [ThinkingRawLine!]!
     """A folder under the home of the workspace; no path is the home itself."""
@@ -1447,6 +1571,8 @@ export const typeDefs = gql`
     lockSession: Boolean!
     """Asks sous for a new Keep / Problem / Try draft of the sprint, in a new session. Returns the session id."""
     retroBuild(sprintId: Int!): String!
+    sprintPlanMap: String!
+    sprintPlanEdgeAction(id: ID!, action: String!): SprintPlanEdge!
     """accept, close, reopen or edit (with text). Accepting a line that goes to kit, memory or dock asks sous to apply it."""
     retroItemAction(id: ID!, action: String!, text: String): RetroItem!
     """A new folder under the home of the workspace. Secrets stay read only; file content goes through PUT /api/workspace/file."""
@@ -1513,6 +1639,12 @@ export const typeDefs = gql`
     submitDecisions(ticketKey: String!, answers: [IssueAnswerInput!]!, changes: [DecisionChangeInput!]!, confirms: [Int!]!): [Int!]!
     approveReview(ticketKey: String!): [ApprovalStep!]!
     useClaudeAccount(name: String!): ClaudeAccounts!
+    "Probe every account's usage now; within a minute of the last probe it returns the stored data."
+    refreshClaudeUsage: ClaudeAccounts!
+    "Start a QA-<key> session that writes the ticket's tests when needed and runs qonflo-qa-local."
+    runQa(ticketKey: String!): QaLocal!
+    "Run QA on its own when a ticket built on this workspace gets its pull requests."
+    setQaAutoRun(on: Boolean!): QaLocal!
     setClaudeRotation(enabled: Boolean!, fiveHour: Int!, sevenDay: Int!, backToMain: Boolean!): ClaudeAccounts!
     stopChatTurn(sessionId: ID!): ChatSession!
     requestDoctorRun(machine: String!): Boolean!

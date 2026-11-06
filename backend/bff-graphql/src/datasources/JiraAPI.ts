@@ -55,6 +55,17 @@ export class JiraAPI {
     }
   }
 
+  /** The status Jira holds now, not the cached one; null when the ticket is gone, throws on a Jira error. */
+  async statusNow(key: string): Promise<string | null> {
+    const { credentials } = await this.getConfiguration();
+    try {
+      return (await this.jiraService.getTicketNow(credentials, key))?.status ?? null;
+    } catch (error: any) {
+      if (error?.response?.status === 404) return null;
+      throw error;
+    }
+  }
+
   /** True when the ticket was moved; a missing transition or a Jira error is false, never a throw. */
   async transitionTicket(key: string, statusName: string): Promise<boolean> {
     try {
@@ -63,6 +74,17 @@ export class JiraAPI {
     } catch (error: any) {
       console.error(`[BFF JiraAPI] Error moving ${key} to ${statusName}:`, error?.response?.status || error?.code || error?.message || 'unknown error');
       return false;
+    }
+  }
+
+  /** Tells a missing transition apart from a Jira error. */
+  async tryTransition(key: string, statusName: string): Promise<'moved' | 'not-offered' | 'error'> {
+    try {
+      const { credentials } = await this.getConfiguration();
+      return (await this.jiraService.transitionTo(credentials, key, statusName)) ? 'moved' : 'not-offered';
+    } catch (error: any) {
+      console.error(`[BFF JiraAPI] Error moving ${key} to ${statusName}:`, error?.response?.status || error?.code || error?.message || 'unknown error');
+      return 'error';
     }
   }
 

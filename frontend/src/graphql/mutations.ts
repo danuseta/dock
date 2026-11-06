@@ -1,5 +1,5 @@
 import { gql } from '@apollo/client';
-import { CHAT_INTERACTION_FIELDS, CHAT_MESSAGE_FIELDS, CHAT_SESSION_FIELDS, CLAUDE_ACCOUNTS_FIELDS, DISCORD_THREAD_FIELDS } from './queries';
+import { CHAT_INTERACTION_FIELDS, CHAT_MESSAGE_FIELDS, CHAT_SESSION_FIELDS, CLAUDE_ACCOUNTS_FIELDS, DISCORD_THREAD_FIELDS, QA_LOCAL_FIELDS } from './queries';
 
 export const SAVE_DEMO_LINK = gql`
   mutation SaveDemoLink($ticketKey: String!, $url: String!) {
@@ -531,5 +531,23 @@ export const USE_CLAUDE_ACCOUNT = gql`
 export const SET_CLAUDE_ROTATION = gql`
   mutation SetClaudeRotation($enabled: Boolean!, $fiveHour: Int!, $sevenDay: Int!, $backToMain: Boolean!) {
     setClaudeRotation(enabled: $enabled, fiveHour: $fiveHour, sevenDay: $sevenDay, backToMain: $backToMain) { ${CLAUDE_ACCOUNTS_FIELDS} }
+  }
+`;
+
+export const REFRESH_CLAUDE_USAGE = gql`
+  mutation RefreshClaudeUsage {
+    refreshClaudeUsage { ${CLAUDE_ACCOUNTS_FIELDS} }
+  }
+`;
+
+export const RUN_QA = gql`
+  mutation RunQa($ticketKey: String!) {
+    runQa(ticketKey: $ticketKey) { ${QA_LOCAL_FIELDS} }
+  }
+`;
+
+export const SET_QA_AUTO_RUN = gql`
+  mutation SetQaAutoRun($on: Boolean!) {
+    setQaAutoRun(on: $on) { ${QA_LOCAL_FIELDS} }
   }
 `;

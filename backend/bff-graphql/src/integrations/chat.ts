@@ -323,12 +323,13 @@ export function parseStatus(input: unknown) {
     cacheHitRatio: optionalNumber(input.cacheHitRatio, 'cacheHitRatio'),
     fiveHour: limitWindow(input.fiveHour, 'fiveHour'),
     sevenDay: limitWindow(input.sevenDay, 'sevenDay'),
+    accountFp: typeof input.accountFp === 'string' && /^[0-9a-f]{12}$/.test(input.accountFp) ? input.accountFp : null,
     files: fileChanges(input.files),
   };
 }
 
 type FileChange = { path: string; added: number; removed: number };
-type ParsedStatus = Omit<ReturnType<typeof parseStatus>, 'turnCostUsd'>;
+type ParsedStatus = Omit<ReturnType<typeof parseStatus>, 'turnCostUsd' | 'accountFp'>;
 type SavedStatus = ParsedStatus & { receivedAt: Date };
 type LimitWindow = NonNullable<ReturnType<typeof limitWindow>>;
 type LimitsSeen = { fiveHour: LimitWindow | null; sevenDay: LimitWindow | null; receivedAt: Date };
@@ -448,7 +449,7 @@ export class ChatService {
   private readonly sessionStatus = new Map<string, Map<string, SavedStatus>>();
   private readonly limitsSeen = new Map<string, LimitsSeen>();
   /** Each usage report of a machine's turn, for the Claude account rotation. */
-  onLimits: (machine: string, limits: { fiveHour: LimitWindow | null; sevenDay: LimitWindow | null }) => void = () => undefined;
+  onLimits: (machine: string, limits: { fiveHour: LimitWindow | null; sevenDay: LimitWindow | null }, accountFp: string | null) => void = () => undefined;
   private lastActivityPruneAt = 0;
   private lastAttachmentPruneAt = 0;
   private readonly notifier = new TurnNotifier();
@@ -462,6 +463,8 @@ export class ChatService {
   onAsk: (ask: { sessionId: string; sessionTitle: string; id: number; kind: string; title: string; tool: string | null; summary: string | null }) => void = () => undefined;
   /** Hears of every turn that ends on its own, for the phone notification. It must not throw. */
   onTurnDone: (turn: { sessionId: string; sessionTitle: string }) => void = () => undefined;
+  /** Hears of every turn that ends, whatever its origin and whether it failed or was stopped. It must not throw. */
+  onTurnEnded: (turn: { sessionId: string; ticketKey: string | null; failed: boolean }) => void = () => undefined;
   /** Agent file jobs waiting for a machine's bridge, handed out once on a claim. Wired by the agents bridge like cronLimit. */
   agentJobs: (machine: string) => Array<{ id: string; op: string; input: unknown }> = () => [];
 
@@ -859,7 +862,7 @@ export class ChatService {
   }
 
   async ingestStatus(input: unknown, machine: string) {
-    const { turnCostUsd, ...parsed } = parseStatus(input);
+    const { turnCostUsd, accountFp, ...parsed } = parseStatus(input);
     const known = await this.storage.getChatSession(parsed.sessionId);
     if (known && known.machine !== machine) return { sessionId: parsed.sessionId, ignored: true, owner: known.machine };
     const receivedAt = this.now();
@@ -873,7 +876,7 @@ export class ChatService {
     if (status.fiveHour || status.sevenDay) {
       this.limitsSeen.set(machine, { fiveHour: status.fiveHour, sevenDay: status.sevenDay, receivedAt });
       await this.storage.upsertCache('chat', 'limits', Object.fromEntries(this.limitsSeen), LIMITS_KEEP_SECONDS).catch(() => undefined);
-      this.onLimits(machine, { fiveHour: status.fiveHour, sevenDay: status.sevenDay });
+      this.onLimits(machine, { fiveHour: status.fiveHour, sevenDay: status.sevenDay }, accountFp);
     }
     return { sessionId: status.sessionId };
   }
@@ -943,7 +946,7 @@ export class ChatService {
       this.sessionStatus.set(machine, mine);
       for (const line of lines.slice(-MAX_STATUS_SESSIONS)) {
         try {
-          const { turnCostUsd, ...status } = parseStatus(line);
+          const { turnCostUsd, accountFp, ...status } = parseStatus(line);
           const receivedAt = new Date(isRecord(line) ? String(line.receivedAt) : '');
           if (!mine.has(status.sessionId) && !Number.isNaN(receivedAt.getTime())) mine.set(status.sessionId, { ...status, receivedAt });
         } catch {
@@ -1477,6 +1480,7 @@ export class ChatService {
         await this.cronTurn(session.ticketKey, detail, true).catch(() => undefined);
       }
       if (ended && !delta.error && !delta.stopped && session.origin !== 'cron') this.onTurnDone({ sessionId: session.id, sessionTitle: session.title });
+      if (ended) this.onTurnEnded({ sessionId: session.id, ticketKey: session.ticketKey ?? null, failed: Boolean(delta.error) });
       return { id: updated.id, status: updated.status, messageCount };
     } finally {
       if (ended) await this.closeActivity(session.id, replyTo.id);

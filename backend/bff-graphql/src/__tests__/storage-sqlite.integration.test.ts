@@ -293,6 +293,32 @@ test('SQLite storage keeps chat activity per turn with its own seq and removes i
   assert.strictEqual(await prisma.chatActivity.count({ where: { sessionId } }), 0);
 });
 
+test('SQLite storage gives two concurrent activity batches of one session distinct, increasing seq', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }] = await Promise.all([
+    import('../storage/service'),
+    import('../storage/client'),
+  ]);
+  const storage = new StorageService(prisma);
+  t.after(() => prisma.$disconnect());
+
+  const at = new Date('2026-10-11T03:00:00.000Z');
+  const sessionId = 'aaaaaaaa-0000-4000-8000-000000000012';
+  await storage.createChatSession({ id: sessionId, source: 'dock', title: 'ZED-102', ticketKey: 'ZED-102', startedAt: at, lastMessageAt: at });
+  const turn = await storage.createChatMessage({ sessionId, role: 'user', text: 'one', state: 'done', at });
+  const row = (eventId: string) => ({
+    eventId, parentId: null, kind: 'tool', agent: 'main', name: 'Bash', label: 'Bash', summary: 'ls', detail: null, status: 'running', startedAt: at, endedAt: null,
+  });
+  const batch = (prefix: string) => storage.upsertChatActivity(sessionId, turn.id, [row(`${prefix}1`), row(`${prefix}2`)], 400, 'dropped-server', at);
+
+  const results = await Promise.all([batch('a'), batch('b')]);
+  assert.deepStrictEqual(results.map((result) => result.accepted), [2, 2]);
+  assert.deepStrictEqual(results.map((result) => result.seq).sort((a, b) => a - b), [2, 4]);
+  const seqs = (await storage.getChatActivity(sessionId, {}, 10)).map((item) => item.seq);
+  assert.deepStrictEqual(seqs, [1, 2, 3, 4]);
+});
+
 test('SQLite storage keeps chat interactions unique per request, caps them, and removes them with the turn or the session', {
   skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
 }, async (t) => {
@@ -889,4 +915,113 @@ test('SQLite storage removes a reset run with its events and keeps the reset', {
   assert.strictEqual((await storage.getOrchestratorReset('ZED-480'))?.resetAt.getTime(), at.getTime());
   assert.deepStrictEqual((await storage.getOrchestratorResets('workspace')).map((reset) => reset.key), ['ZED-480']);
   assert.deepStrictEqual(await storage.getOrchestratorResets('laptop'), []);
+});
+
+test('SQLite storage keeps one review round per thread and last message', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }] = await Promise.all([import('../storage/service'), import('../storage/client')]);
+  const storage = new StorageService(prisma);
+  t.after(() => prisma.$disconnect());
+  const now = Date.now();
+  const round = (lastMessageId: string, at: number) => ({
+    threadId: 'thread-1', ticketKey: 'ZED-500', threadUrl: 'https://discord.test/1', prUrls: '[]', messageIds: `["${lastMessageId}"]`, lastMessageId, lastMessageAt: new Date(at),
+  });
+  const first = await storage.createReviewRound(round('m1', now - 2000));
+  await assert.rejects(storage.createReviewRound(round('m1', now - 2000)), { code: 'P2002' });
+  assert.strictEqual(await prisma.reviewRound.count({ where: { threadId: 'thread-1' } }), 1);
+
+  await storage.updateReviewRound(first.id, { sessionId: 'session-1', status: 'sent' });
+  assert.strictEqual((await storage.getSentRoundForSession('session-1'))?.id, first.id);
+  assert.strictEqual((await storage.roundsForSessions(['session-1'])).get('session-1')?.id, first.id);
+
+  await storage.updateReviewRound(first.id, { status: 'reported', valid: 2, invalid: 1, pushed: true, reportedAt: new Date() });
+  assert.deepStrictEqual((await storage.openReviewRounds(3)).map((row) => row.id), [first.id]);
+  const second = await storage.createReviewRound(round('m2', now - 1000));
+  assert.strictEqual((await storage.latestRoundsByThread(['thread-1'])).get('thread-1')?.id, second.id);
+  assert.deepStrictEqual(await storage.openReviewRounds(3), [], 'a newer round replaces the reported one');
+
+  await storage.updateReviewRound(second.id, { status: 'sent', sessionId: 'session-2' });
+  const expired = await storage.expireSentRounds(new Date(Date.now() + 1000), 3, 'no result');
+  assert.deepStrictEqual(expired.map((row) => row.id), [second.id]);
+  assert.deepStrictEqual((await storage.getRoundsToSend(3)), []);
+  assert.deepStrictEqual((await storage.openReviewRounds(3)).map((row) => row.id), [second.id]);
+
+  const old = await storage.createReviewRound({ ...round('m0', 0), threadId: 'thread-old', findings: '["a"]' });
+  await storage.updateReviewRound(old.id, { status: 'reported' });
+  assert.ok(!(await storage.openReviewRounds(3)).some((row) => row.id === old.id), 'a round older than 14 days is not open');
+  assert.strictEqual((await storage.getReviewRound(old.id))?.findings, '["a"]');
+});
+
+test('SQLite storage expires review rounds stuck in sending', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }] = await Promise.all([import('../storage/service'), import('../storage/client')]);
+  const storage = new StorageService(prisma);
+  t.after(() => prisma.$disconnect());
+  const stuck = await storage.createReviewRound({ threadId: 'thread-2', ticketKey: 'ZED-501', threadUrl: 'https://discord.test/2', prUrls: '[]', messageIds: '["m1"]', lastMessageId: 'm1', lastMessageAt: new Date(1000) });
+  assert.strictEqual((await storage.getReviewRound(stuck.id))?.status, 'sending');
+  assert.ok(!(await storage.pendingReviewSessions()).includes('session-3'));
+  await storage.updateReviewRound(stuck.id, { sessionId: 'session-3' });
+  assert.ok((await storage.pendingReviewSessions()).includes('session-3'), 'a sending round with a session is pending');
+  await storage.updateReviewRound(stuck.id, { sessionId: null });
+  assert.ok(!(await storage.getRoundsToSend(3)).some((row) => row.id === stuck.id), 'a fresh sending round is not resent');
+  await prisma.reviewRound.update({ where: { id: stuck.id }, data: { createdAt: new Date(Date.now() - 120_000) } });
+  assert.ok((await storage.getRoundsToSend(3)).some((row) => row.id === stuck.id), 'a sending round with no session for over 60 s is resent');
+  await storage.updateReviewRound(stuck.id, { sessionId: 'session-3' });
+  assert.strictEqual(await storage.getReviewRound('missing'), null);
+  const expired = await storage.expireSentRounds(new Date(Date.now() + 1000), 3, 'no result');
+  assert.ok(expired.some((row) => row.id === stuck.id));
+  const after = await storage.getReviewRound(stuck.id);
+  assert.deepStrictEqual([after?.status, after?.attempts, after?.detail], ['failed', 3, 'no result']);
+
+  const { EXPIRED_DETAIL } = await import('../integrations/review-findings');
+  await storage.updateReviewRound(stuck.id, { detail: EXPIRED_DETAIL });
+  assert.ok((await storage.pendingReviewSessions()).includes('session-3'), 'a round expired in the last day is still pending');
+  await prisma.reviewRound.update({ where: { id: stuck.id }, data: { createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000) } });
+  assert.ok(!(await storage.pendingReviewSessions()).includes('session-3'), 'an expired round older than a day is not pending');
+});
+
+test('SQLite storage keeps sprint plan edges, their state across a re-map, and mapped-at per sprint', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }] = await Promise.all([import('../storage/service'), import('../storage/client')]);
+  const storage = new StorageService(prisma);
+  t.after(() => prisma.$disconnect());
+  const states = async (sprint: string) => (await storage.getPlanEdges(sprint)).map((row) => `${row.ticketKey}>${row.dependsOnKey}:${row.source}:${row.state}`).sort();
+
+  await storage.replaceJiraEdges('S1', [{ ticketKey: 'P-1', dependsOnKey: 'P-9' }, { ticketKey: 'P-1', dependsOnKey: 'P-9' }]);
+  assert.deepStrictEqual(await states('S1'), ['P-1>P-9:jira:accepted'], 'an edge is stored once per sprint, ticket and dependsOn');
+  await storage.applyInferredEdges('S1', [{ ticketKey: 'P-1', dependsOnKey: 'P-9', reason: 'same' }, { ticketKey: 'P-2', dependsOnKey: 'P-3' }, { ticketKey: 'P-4', dependsOnKey: 'P-5' }, { ticketKey: 'P-6', dependsOnKey: 'P-7' }]);
+  assert.deepStrictEqual(await states('S1'), ['P-1>P-9:jira:accepted', 'P-2>P-3:inferred:pending', 'P-4>P-5:inferred:pending', 'P-6>P-7:inferred:pending'], 'a jira edge is not duplicated as inferred');
+  const rows = await storage.getPlanEdges('S1');
+  await storage.setPlanEdgeState(rows.find((row) => row.ticketKey === 'P-2')!.id, 'accepted');
+  await storage.setPlanEdgeState(rows.find((row) => row.ticketKey === 'P-4')!.id, 'rejected');
+  assert.deepStrictEqual([...(await storage.getPendingPlanKeys('S1'))], ['P-6']);
+  assert.strictEqual((await storage.getPendingPlanKeys('S2')).size, 0, 'pending is scoped by sprint');
+  await storage.applyInferredEdges('S1', [{ ticketKey: 'P-8', dependsOnKey: 'P-5' }], ['P-8']);
+  assert.deepStrictEqual([...(await storage.getPendingPlanKeys('S1'))].sort(), ['P-6', 'P-8'], 'ticket mode keeps other tickets pending edges');
+  await storage.applyInferredEdges('S1', [], ['P-8']);
+  assert.deepStrictEqual([...(await storage.getPendingPlanKeys('S1'))], ['P-6']);
+  await storage.applyInferredEdges('S1', [{ ticketKey: 'P-2', dependsOnKey: 'P-3' }, { ticketKey: 'P-4', dependsOnKey: 'P-5' }]);
+  assert.deepStrictEqual(await states('S1'), ['P-1>P-9:jira:accepted', 'P-2>P-3:inferred:accepted', 'P-4>P-5:inferred:rejected'], 'a re-map keeps decisions and drops the stale pending row');
+  await storage.replaceJiraEdges('S1', []);
+  assert.deepStrictEqual(await states('S1'), ['P-2>P-3:inferred:accepted', 'P-4>P-5:inferred:rejected'], 'replaceJiraEdges keeps inferred rows');
+  assert.strictEqual((await storage.getAcceptedPlanEdges('S1')).length, 1);
+  assert.strictEqual((await storage.getAcceptedPlanEdges('S2')).length, 0, 'accepted is scoped by sprint');
+
+  const mappedAt = new Date('2026-11-03T08:00:00Z');
+  await storage.saveSprintPlan('S1', { status: 'idle', mappedKeys: ['P-1'], groups: [['P-1', 'P-2']], mappedAt });
+  await storage.saveSprintPlan('S2', { status: 'mapping', mappingKeys: ['P-8'] });
+  assert.strictEqual((await storage.getSprintPlan('S1'))?.mappedAt?.toISOString(), mappedAt.toISOString());
+  assert.strictEqual((await storage.getSprintPlan('S2'))?.mappedAt, null, 'mapped-at is per sprint');
+  await storage.saveSprintPlan('S1', { error: 'x' });
+  const kept = await storage.getSprintPlan('S1');
+  assert.deepStrictEqual([kept?.groups, kept?.mappedAt?.toISOString()], ['[["P-1","P-2"]]', mappedAt.toISOString()], 'a partial save keeps other fields');
+
+  assert.ok(await storage.addOrchestratorEventOnce('P-2', 'DEP_WAIT', 'P-3'));
+  assert.strictEqual(await storage.addOrchestratorEventOnce('P-2', 'DEP_WAIT', 'P-3'), null);
+  assert.ok(await storage.addOrchestratorEventOnce('P-2', 'DEP_WAIT', 'P-3', new Date(Date.now() + 60_000)), 'an older event does not count when since is later');
+  for (let i = 0; i < 5; i += 1) await storage.addOrchestratorEvent('P-2', 'ACTIVITY', String(i), 2);
+  assert.strictEqual(await storage.countEventTickets('DEP_WAIT', ['P-2', 'P-3'], new Date(Date.now() - 60_000), new Date(Date.now() + 60_000)), 1, 'DEP_WAIT survives the trim');
 });

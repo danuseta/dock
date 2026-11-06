@@ -100,7 +100,8 @@ const GuidePage: React.FC<GuidePageProps> = ({ onNavigate }) => (
           ['Tickets from', 'active sprint', 'active / any', 'Sprint yang diambil.'],
           ['Jira statuses to pick up', 'To Do', 'daftar', 'Status Jira yang dianggap siap dikerjakan.'],
           ['Move a started ticket to', 'In Progress', 'status', 'Status Jira setelah tiket mulai.'],
-          ['Usage brake (%)', '70', '0–100', 'Kalau usage 5 jam sudah segini, cron berhenti memulai tiket baru.'],
+          ['Usage brake (%)', '70', '0–100', 'Kalau usage 5 jam sudah segini, cron berhenti memulai tiket baru. Akun Ultra tidak punya window 5 jam, jadi batas ini dilewati.'],
+          ['Weekly brake (%)', '90', '0–100', 'Kalau usage 7 hari sudah segini, cron berhenti memulai tiket baru.'],
         ]} />
         <h3 className="mb-2 mt-4 font-semibold text-foreground">2. Tiket manual</h3>
         <p>Buka sesi dari chat panel atau dari tiket. Bedanya dengan cron: sesi manual berhenti di <b>gate</b> dan bertanya dulu sebelum menulis kode; cron jalan terus tanpa bertanya kalau AC tiketnya lengkap. Tiket tanpa AC diparkir dan menunggu kamu.</p>
@@ -133,16 +134,27 @@ const GuidePage: React.FC<GuidePageProps> = ({ onNavigate }) => (
           <li><b>LGTM</b>: label Pass-mu di Jira plus approve di GitHub. PR yang sudah merged cukup dapat label. Tidak ada yang diposting ke Discord, jadi balas sendiri di thread.</li>
           <li><b>Review manual</b>: minta lewat chat; memakai slot chat, bukan slot cron.</li>
         </ul>
+        <p><b>QA lokal.</b> Hanya muncul di DOCK workspace yang punya <code>qonflo-qa-local</code> (<code>~/qa-local</code>). Kartu <b>QA local</b> ada di panel kanan sesi tiket.</p>
+        <SettingsBlock rows={[
+          ['Run after PR', 'off', 'on / off', 'Tiket yang dibangun di mesin cron dapat PR → sesi QA-QRD-xxx jalan: tulis tes dari AC Jira (hanya baca) kalau belum ada, lalu qonflo-qa-local. Sekali per set PR; PR baru memicu lagi.'],
+        ]} />
+        <Flow steps={['PR', 'QA-QRD-xxx', 'tulis tes', 'stack lokal + Playwright', 'LOLOS / REVISION / ESCALATED']} />
+        <ul>
+          <li><b>Progres</b>: Stack, Login, Tests n/total, Verdict; tiap TC dengan status dan video.</li>
+          <li><b>Run again</b>: jalankan QA sekarang tanpa menunggu PR baru.</li>
+          <li>Tidak ada yang ditulis ke Jira, UAT, atau <code>~/qa</code>; verdict hanya prediksi.</li>
+        </ul>
       </Section>
 
       <Section id="akun" title="D. Akun Claude">
         <p>Di <Go to="/settings?section=claude" label="Settings → Claude account" onNavigate={onNavigate} />. Akun berasal dari <code className="font-mono text-xs">/cycle</code> di workspace (parameter token Coder).</p>
         <SettingsBlock rows={[
           ['Use', '–', 'per akun', 'Pindah akun. Berlaku untuk giliran berikutnya; giliran yang sedang jalan selesai di akun lama.'],
-          ['Rotate automatically', 'off', 'on / off', 'Pindah ke akun berikutnya kalau akun aktif melewati batas.'],
+          ['Rotate automatically', 'off', 'on / off', 'Pindah ke akun berikutnya kalau akun aktif mencapai batas 5h atau batas 7d, mana saja yang lebih dulu.'],
           ['Rotate when 5h reaches', '90%', '50–100', ''],
           ['Rotate when 7d reaches', '95%', '50–100', ''],
           ['Back to main when it resets', 'on', 'on / off', 'Setelah rotasi otomatis, kembali ke main begitu main di bawah batas lagi.'],
+          ['Rotate when 5h reaches (%)', '-', '50–100', 'Akun Ultra tidak punya window 5 jam; akun itu hanya dirotasi lewat batas 7d.'],
         ]} />
         <p>Usage sebuah akun hanya diketahui saat akun itu dipakai. Akun yang belum pernah dipakai bertuliskan "no usage seen yet" sampai giliran pertamanya.</p>
       </Section>

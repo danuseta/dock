@@ -47,6 +47,14 @@ test('a bug report thread follows who took it and who spoke last', () => {
   assert.strictEqual(sorted('bug', [msg(RINA, 'x')], RINA.id, true).state, 'CLOSED');
 });
 
+test("the owner's own on it is kept beside the claim when a second reviewer says on it later", () => {
+  const both = sorted('pr', [msg(RINA, 'PR please'), msg(DANU, 'on it'), msg(HAMZAH, 'on it')], RINA.id);
+  assert.strictEqual(both.claim?.author, 'Hamzah');
+  assert.strictEqual(both.ownClaim?.author, 'Danu');
+  assert.strictEqual(both.ownClaim?.mine, true);
+  assert.strictEqual(sorted('pr', [msg(RINA, 'PR please'), msg(HAMZAH, 'on it')], RINA.id).ownClaim, null);
+});
+
 test('the claimer writing again is what counts as a reply to the claim', () => {
   const others = sorted('pr', [msg(DANU, 'Review please'), msg(HAMZAH, 'on it'), msg(RINA, 'video for context')], ME);
   assert.strictEqual(others.claimerRepliedAt, null, 'a message from someone else is not a reply to the claim');
@@ -102,6 +110,9 @@ test('a row names its tickets, pull requests and mentions', () => {
   assert.strictEqual(row.messages[0].text, 'Repro @Danu');
   assert.deepStrictEqual(row.messages[0].mentions, [{ id: ME, name: 'Danu', me: true, role: false }]);
   assert.strictEqual(row.createdBy, 'Rina');
+  assert.strictEqual(row.createdById, RINA.id);
+  assert.deepStrictEqual(row.posterPrs, [], 'a link from someone other than the poster is not the poster PR');
+  assert.strictEqual(ROW_VERSION, 8);
   assert.deepStrictEqual([row.channelId, row.channel, row.kind], ['f1', 'bug-report', 'bug']);
   assert.strictEqual(row.needsYou, false, 'the owner replied last');
 });
@@ -455,6 +466,21 @@ test('a pull request with a Pass for every reviewer it asked for stops needing t
   const pr = { needsYou: true, dismissed: false, kind: 'pr', state: 'REVIEW_ASKED', why: '', lastActivity: NOW.toISOString(), tickets: ['QRD-9'] } as unknown as ThreadView;
   const jira = new Map([['QRD-9', { status: 'PR Review', assignee: null, sprint: null, sprintActive: false, labels: ['alvinPass'] }]]);
   assert.deepStrictEqual(withJira([{ ...pr, slots: 1 }, { ...pr, slots: 2 }], jira, () => false, NOW).map((row) => row.needsYou), [false, true]);
+});
+
+test('a pull request the owner is on and has not passed is reviewing', () => {
+  const own = { messageId: 'm', authorId: '1', author: 'Danu', mine: true, at: NOW.toISOString() };
+  const pr = { needsYou: true, dismissed: false, kind: 'pr', state: 'REVIEW_ASKED', why: '', slots: 2, lastActivity: NOW.toISOString(), tickets: ['QRD-9'], claim: own, ownClaim: own } as unknown as ThreadView;
+  const jira = (labels: string[]) => new Map([['QRD-9', { status: 'PR Review', assignee: null, sprint: null, sprintActive: false, labels }]]);
+  const reviewing = (row: ThreadView, labels: string[], ownerPass: string | null = 'danuPass') => withJira([row], jira(labels), () => false, NOW, () => null, ownerPass)[0].reviewing;
+  assert.strictEqual(reviewing(pr, ['alvinPass']), true);
+  assert.strictEqual(reviewing(pr, ['alvinPass', 'danuPass']), false);
+  assert.strictEqual(reviewing(pr, ['DanuPass']), false);
+  assert.strictEqual(reviewing({ ...pr, ownClaim: null } as ThreadView, []), false, 'a teammate only');
+  assert.strictEqual(reviewing({ ...pr, kind: 'bug' } as ThreadView, []), false);
+  assert.strictEqual(reviewing(pr, [], null), false);
+  const legacy = { ...pr, ownClaim: undefined } as unknown as ThreadView;
+  assert.strictEqual(reviewing({ ...legacy, claim: own } as ThreadView, []), true);
 });
 
 test('a changed tag builds the row again even when the last message is the same', async () => {

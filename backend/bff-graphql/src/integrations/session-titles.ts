@@ -1,6 +1,6 @@
-/** The title of a session on a ticket: `Task-QRD-1230` builds it, `Review-QRD-1230` reviews its pull request. */
-export const TICKET_TITLE = /^(Task|Review)-[A-Z][A-Z0-9]+-\d+$/;
-export const ticketSessionTitle = (kind: 'Task' | 'Review', key: string) => `${kind}-${key}`;
+/** The title of a session on a ticket: `Task-QRD-1230` builds it, `Review-QRD-1230` reviews its pull request, `QA-QRD-1230` tests it locally. */
+export const TICKET_TITLE = /^(Task|Review|QA)-[A-Z][A-Z0-9]+-\d+$/;
+export const ticketSessionTitle = (kind: 'Task' | 'Review' | 'QA', key: string) => `${kind}-${key}`;
 /** `base` is a ticket title: letters, digits and dashes only, nothing to escape. */
 const numbered = (base: string) => new RegExp(`^${base}(?: \\((\\d+)\\))?$`);
 
@@ -20,12 +20,13 @@ const BUILD_WORDS = /\b(kerjakan|kerjain|build|implement\w*|lanjutkan|bikin)\b/i
 
 /**
  * A chat opened by hand on one ticket gets the cron's title for it: "review QRD-1491" is `Review-QRD-1491`, "kerjakan
- * QRD-1491" is `Task-QRD-1491`. Null when the first message names no ticket or no review or build.
+ * QRD-1491" is `Task-QRD-1491`. Null when the first line of the first message names no ticket or no review or build.
  */
 export function ticketTitleFromText(text: string): { kind: 'Task' | 'Review'; key: string } | null {
-  const key = TICKET_IN_TEXT.exec(text)?.[1];
+  const line = text.split(/\r?\n/).find((l) => l.trim()) ?? '';
+  const key = TICKET_IN_TEXT.exec(line)?.[1];
   if (!key || key.startsWith('CARD-')) return null;
-  if (REVIEW_WORDS.test(text)) return { kind: 'Review', key };
-  if (BUILD_WORDS.test(text)) return { kind: 'Task', key };
+  if (REVIEW_WORDS.test(line)) return { kind: 'Review', key };
+  if (BUILD_WORDS.test(line)) return { kind: 'Task', key };
   return null;
 }

@@ -14,6 +14,7 @@ const WED_0905 = new Date('2026-10-14T02:05:00.000Z');
 
 test('settings: defaults when nothing is saved, saved fields win, v1 keys are ignored, wrong values are refused', () => {
   assert.deepStrictEqual(parseCronSettings(null), DEFAULT_CRON_SETTINGS);
+  assert.strictEqual(DEFAULT_CRON_SETTINGS.weeklyBrakePercent, 90);
   assert.deepStrictEqual(
     [DEFAULT_CRON_SETTINGS.enabled, DEFAULT_CRON_SETTINGS.workStart, DEFAULT_CRON_SETTINGS.workEnd, DEFAULT_CRON_SETTINGS.workDays, DEFAULT_CRON_SETTINGS.maxPerDay, DEFAULT_CRON_SETTINGS.mode],
     [false, 9, 17, [1, 2, 3, 4, 5], 6, null],
@@ -24,7 +25,7 @@ test('settings: defaults when nothing is saved, saved fields win, v1 keys are ig
   for (const bad of [
     '{', '[]', '{"parallel":0}', '{"workStart":17,"workEnd":9}', '{"workEnd":25}', '{"workDays":[]}', '{"workDays":[8]}', '{"maxPerDay":0}',
     '{"activeFrom":"2026-10-20","activeUntil":"2026-10-01"}', '{"activeFrom":"14-10-2026"}', '{"mode":"bypassPermissions"}',
-    '{"sprint":"next"}', '{"todoStatuses":[]}', '{"usageBrakePercent":101}',
+    '{"sprint":"next"}', '{"todoStatuses":[]}', '{"usageBrakePercent":101}', '{"weeklyBrakePercent":101}', '{"weeklyBrakePercent":-1}',
     '{"enabled":"yes"}', '{"machine":""}', '{"engine":"codex"}',
   ]) {
     assert.throws(() => parseCronSettings(bad), CronInputError, bad);
@@ -93,8 +94,10 @@ interface Start {
   runs?: CronRun[];
   online?: boolean;
   used?: { usedPercentage: number; resetsAt: string | null } | null;
+  weekly?: { usedPercentage: number; resetsAt: string | null } | null;
   moves?: boolean;
   dependencies?: Array<{ ticketKey: string; dependsOnKey: string }>;
+  held?: Set<string>;
   pushDevices?: boolean;
   dockOrder?: Map<string, number>;
   manual?: Set<string>;
@@ -123,6 +126,8 @@ function world(start: Start = {}) {
     stopped: [] as string[],
     pushes: [] as Array<{ title: string; body: string; url: string }>,
     clock: 0,
+    waits: [] as Array<[string, string]>,
+    watched: 0,
     ownerStopped: new Set<string>(),
     otherActive: new Set<string>(),
     failSend: false,
@@ -141,12 +146,15 @@ function world(start: Start = {}) {
     ticket: async (key) => state.tickets.find((item) => item.key === key) ?? null,
     moveTicket: async (key, statusName) => { state.moved.push(key); state.movedTo.push([key, statusName]); return start.moves ?? true; },
     dependencies: async () => start.dependencies ?? [],
+    heldKeys: async () => start.held ?? new Set(),
+    planWatch: async () => { state.watched += 1; },
+    recordWait: async (key, dependsOn) => { if (!state.waits.some(([k, d]) => k === key && d === dependsOn)) state.waits.push([key, dependsOn]); },
     dockOrder: async () => start.dockOrder ?? new Map(),
     manualKeys: async () => start.manual ?? new Set(),
     slots: async () => ({ busy: state.sessions.filter((s) => s.state === 'running' && s.cronSlot !== false).length, waiting: state.sessions.filter((s) => s.state === 'queued' && s.cronSlot !== false).length }),
     machines: async () => ['laptop', 'workspace'],
     online: () => state.online,
-    fiveHourUsed: () => start.used ?? null,
+    limitsUsed: () => ({ fiveHour: start.used ?? null, sevenDay: start.weekly ?? null }),
     takenKeys: async () => state.runs.map((run) => run.key),
     deadStarts: async () => [...new Set(state.sessions.map((s) => s.ticketKey))]
       .map((key) => state.sessions.filter((s) => s.ticketKey === key).at(-1)!)
@@ -313,6 +321,38 @@ test('a fill is skipped when the machine is offline or the usage brake is reache
 
   const stale = world({ tickets: [ticket('QRD-1')], used: { usedPercentage: 99, resetsAt: '2026-10-14T01:00:00.000Z' } });
   assert.deepStrictEqual((await stale.cron.runFill()).started, ['QRD-1']);
+});
+
+test('the weekly brake stops a fill on a 7 day window alone; under the brake or past its reset it does not', async () => {
+  const braked = world({ tickets: [ticket('QRD-1')], used: null, weekly: { usedPercentage: 91.2, resetsAt: '2026-10-20T05:00:00.000Z' } });
+  assert.strictEqual((await braked.cron.runFill()).skipped, 'usage brake: 7 day usage is at 91%, the brake is 90%');
+
+  const under = world({ tickets: [ticket('QRD-1')], weekly: { usedPercentage: 89, resetsAt: '2026-10-20T05:00:00.000Z' } });
+  assert.deepStrictEqual((await under.cron.runFill()).started, ['QRD-1']);
+
+  const passed = world({ tickets: [ticket('QRD-1')], weekly: { usedPercentage: 99, resetsAt: '2026-10-14T01:00:00.000Z' } });
+  assert.deepStrictEqual((await passed.cron.runFill()).started, ['QRD-1']);
+});
+
+test('a ticket with a pending inferred edge is held and the next one starts; the wait is recorded once over two ticks', async () => {
+  const w = world({ tickets: [ticket('QRD-1'), ticket('QRD-2')], held: new Set(['QRD-1']), config: { parallel: 2 } });
+  assert.deepStrictEqual((await w.cron.runFill()).started, ['QRD-2']);
+  await w.cron.runFill();
+  assert.deepStrictEqual(w.state.waits, [['QRD-1', 'pending']]);
+});
+
+test('an accepted plan edge blocks like a hand-set dependency, and two unsettled dependencies block instead of stacking', async () => {
+  const dependencies = [{ ticketKey: 'QRD-1', dependsOnKey: 'QRD-10' }, { ticketKey: 'QRD-2', dependsOnKey: 'QRD-10' }, { ticketKey: 'QRD-2', dependsOnKey: 'QRD-12' }];
+  const w = world({ tickets: [ticket('QRD-1'), ticket('QRD-2'), ticket('QRD-10', { status: 'PR Review' }), ticket('QRD-12', { status: 'PR Review' })], dependencies, config: { engine: 'sous', parallel: 3 } });
+  const log = await w.cron.runFill();
+  assert.deepStrictEqual(log.started, ['QRD-1']);
+  assert.deepStrictEqual(w.state.waits, [['QRD-2', 'QRD-10']]);
+});
+
+test('the tick lets the planner watch the tickets while the cron is off', async () => {
+  const w = world({ tickets: [ticket('QRD-1')], config: { enabled: false } });
+  await w.cron.tick();
+  assert.strictEqual(w.state.watched, 1);
 });
 
 test('a ticket whose dependency is not settled waits; a ticket Jira would not move still starts and is reported', async () => {
@@ -696,6 +736,8 @@ test('a chat opened by hand on one ticket takes the cron title for it', () => {
   assert.strictEqual(ticketTitleFromText('cek QRD-1491 statusnya'), null);
   assert.strictEqual(ticketTitleFromText('review the login redirect'), null);
   assert.strictEqual(ticketTitleFromText('review CARD-audit-log'), null);
+  assert.strictEqual(ticketTitleFromText('tolong cek prompt ini\n\nreview QRD-1491 di bawah'), null);
+  assert.deepStrictEqual(ticketTitleFromText('\n\nkerjakan QRD-7\nlalu review'), { kind: 'Task', key: 'QRD-7' });
 });
 
 test('an auto review opens a Review-KEY session on the cron machine with the cron options; a refused first message removes it', async () => {
@@ -732,4 +774,21 @@ test('with Settings on last session an owner answer queues in the ticket last Ta
   await w.cron.submit('QRD-9', [], [{ n: 2, choice: 'no' }]);
   assert.strictEqual(w.state.sessions.length, 1, 'later answers go to that session, even while it runs');
   assert.deepStrictEqual(w.state.sent.slice(1).map((sent) => [sent.sessionId, sent.extra]), [['s-1', { cronSlot: false, queue: true }], ['s-1', { cronSlot: false, queue: true }]]);
+});
+
+test('review findings queue in the last Task session; with none a Task-KEY session opens on the cron machine and is removed when refused', async () => {
+  const w = world({ config: { machine: 'workspace' } });
+  w.state.sessions.push({ id: 'task-1', ticketKey: 'QRD-1292', machine: 'laptop', title: 'Task-QRD-1292', origin: 'cron', options: {}, state: 'running', queuedAt: 0, replied: true });
+  assert.deepStrictEqual(await w.cron.taskMessage('QRD-1292', 'findings'), { sessionId: 'task-1', opened: false });
+  assert.deepStrictEqual([w.state.sent[0].sessionId, w.state.sent[0].text, w.state.sent[0].extra], ['task-1', 'findings', { cronSlot: false, queue: true }]);
+  const fresh = world({ config: { machine: 'workspace' } });
+  const result = await fresh.cron.taskMessage('QRD-7', 'findings');
+  const session = fresh.state.sessions.find((item) => item.id === result.sessionId)!;
+  assert.strictEqual(result.opened, true);
+  assert.deepStrictEqual([session.ticketKey, session.machine, session.title, session.origin], ['QRD-7', 'workspace', 'Task-QRD-7', 'cron']);
+  assert.strictEqual(fresh.state.sent[0].extra?.cronSlot, false);
+  const refused = world();
+  refused.state.failSend = true;
+  await assert.rejects(refused.cron.taskMessage('QRD-7', 'findings'), /send refused/);
+  assert.strictEqual(refused.state.sessions.length, 0);
 });

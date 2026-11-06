@@ -2,14 +2,15 @@ import { GitHubAPI } from '../datasources/GitHubAPI';
 import { dockMode } from '../mode';
 import { StorageService } from '../storage/service';
 import { autoBroadcast } from './broadcast';
-import { STALE_ACTIVE_MS, orchestratorService, type Orchestration } from './orchestrator';
+import { liveLedgerConfirm, writeConfirmations, type ConfirmedDecision } from './ledger-confirm';
+import { DEFAULT_MACHINE, STALE_ACTIVE_MS, orchestratorService, type Orchestration } from './orchestrator';
 
 /** Decisions sous took on the owner's behalf: the owner confirms or changes each one before the pull requests are reviewed. */
 const GUESSED = new Set(['GUESS', 'USULAN']);
 const GATE_CACHE = 'decision-gate';
 const PR_URL = /github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/;
 
-type GateRun = Pick<Orchestration, 'key' | 'kind' | 'prBe' | 'prFe' | 'issues' | 'decisions'> & Partial<Pick<Orchestration, 'activity' | 'activityDetail' | 'eventIdleSeconds'>>;
+type GateRun = Pick<Orchestration, 'key' | 'kind' | 'prBe' | 'prFe' | 'issues' | 'decisions'> & Partial<Pick<Orchestration, 'activity' | 'activityDetail' | 'eventIdleSeconds' | 'machine'>>;
 
 /** A run sous is still working on: an owner's answer just reopened it, or a turn is under way. Its pull requests are not released. */
 export const stillWorking = (run: Partial<Pick<Orchestration, 'activity' | 'activityDetail' | 'eventIdleSeconds'>>) =>
@@ -34,6 +35,8 @@ export interface GateDeps {
   event(key: string, kind: string, detail: string | null): Promise<unknown>;
   /** Runs once a pull request went up for review, so the automatic broadcast sees it. */
   afterReady(run: GateRun): Promise<unknown>;
+  /** Writes confirmations into the ticket's ledger where it lives; 'skipped' when the ledger is on another machine. */
+  writeLedger?(key: string, machine: string, decisions: ConfirmedDecision[]): Promise<'written' | 'skipped'>;
 }
 
 const numbers = (value: unknown) => (Array.isArray(value) ? value.filter((item): item is number => Number.isInteger(item) && item > 0) : []);
@@ -46,7 +49,8 @@ const reason = (error: unknown) => {
 /**
  * The owner's confirmations of guessed decisions, and the gate that marks a build's draft pull requests ready once
 * every issue is answered and every guessed decision confirmed, and only while sous is not working on the build. A
- * confirmation is only recorded: no session runs.
+ * confirmation is recorded here and written into the ticket's ledger as an owner decision, so the session reads it; no
+ * session runs.
  */
 export class DecisionGate {
   constructor(private readonly deps: GateDeps) {}
@@ -70,6 +74,11 @@ export class DecisionGate {
     const confirmed = [...new Set([...record.confirmed, ...ns])].sort((a, b) => a - b);
     await this.deps.upsertCache(GATE_CACHE, run.key, { ...record, confirmed }, 0);
     await this.deps.event(run.key, 'OWNER_CONFIRMED', ns.map((n) => `D-${n}`).join(', ')).catch(() => undefined);
+    if (this.deps.writeLedger) {
+      const decisions = run.decisions.filter((decision) => ns.includes(decision.n)).map((decision) => ({ n: decision.n, text: decision.text }));
+      await this.deps.writeLedger(run.key, run.machine ?? DEFAULT_MACHINE, decisions)
+        .catch((error) => this.deps.event(run.key, 'LEDGER_WRITE_FAILED', `${decisions.map((decision) => `D-${decision.n}`).join(', ')}: ${reason(error)}`).catch(() => undefined));
+    }
     return confirmed;
   }
 
@@ -125,4 +134,5 @@ export const decisionGate = new DecisionGate({
   markReady: (owner, repo, pullNumber) => githubAPI.markReadyForReview(owner, repo, pullNumber),
   event: (key, kind, detail) => orchestratorService.recordEvent(key, kind, detail),
   afterReady: (run) => (dockMode() === 'workspace' ? autoBroadcast.afterLedger(run) : Promise.resolve()),
+  writeLedger: (key, machine, decisions) => writeConfirmations(liveLedgerConfirm((ledger, from) => orchestratorService.ingestLedger(ledger, new Date(), from)), key, machine, decisions),
 });

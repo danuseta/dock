@@ -15,7 +15,9 @@ test('numbers count builds and reviews apart, with medians of hours and of the w
     run('QRD-3', { kind: 'review', verdict: 'request-change' }),
     run('QRD-4', { kind: 'review', verdict: 'approve' }),
   ];
-  assert.deepStrictEqual(retroNumbers(runs), { tickets: 2, medianHours: 7, fixRounds: 2, replans: 0.5, ownerIssues: 3, medianOwnerWaitHours: 4, reviews: 2, requestChanges: 1 });
+  assert.deepStrictEqual(retroNumbers(runs), { tickets: 2, medianHours: 7, fixRounds: 2, replans: 0.5, ownerIssues: 3, medianOwnerWaitHours: 4, reviews: 2, requestChanges: 1, blockedWaits: 0, mergeConflicts: 0, stackedRebases: 0 });
+  const stacked = [run('QRD-5', { stackedOn: { key: 'QRD-1', be: { retargetedAt: '2026-10-28T00:00:00Z' }, fe: { retargetedAt: null } } }), run('QRD-6', { stackedOn: { key: 'QRD-1', be: null, fe: { retargetedAt: '2026-10-29T00:00:00Z' } } })];
+  assert.deepStrictEqual(retroNumbers(stacked, { blockedWaits: 3, mergeConflicts: 2 }), { ...retroNumbers([]), tickets: 2, fixRounds: 0, replans: 0, blockedWaits: 3, mergeConflicts: 2, stackedRebases: 2 });
   assert.strictEqual(median([]), null);
 });
 

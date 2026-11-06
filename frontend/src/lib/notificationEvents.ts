@@ -33,6 +33,7 @@ export interface AttentionSignal { id: string; type: string; message: string; ti
 const ATTENTION_TAG: Record<string, { prefix: string; title: string }> = {
   AGENT_STALLED: { prefix: 'stalled', title: 'is stalled' },
   AGENT_WAITING: { prefix: 'wait', title: 'waits on you' },
+  PLAN_DEPENDENCY: { prefix: 'plan', title: 'waits for your call' },
 };
 
 /**

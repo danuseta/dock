@@ -5,6 +5,8 @@ import { STOPPED_QUEUED_TEXT, STOPPED_TEXT, chatService } from './chat';
 import { ledgerPeer } from './ledger-peer';
 import { DEFAULT_MACHINE, orchestratorService } from './orchestrator';
 import { CRON_CACHE, OrchestratorCron } from './orchestrator-cron';
+import { activeSprint } from './sprint-plan';
+import { sprintPlanner } from './sprint-plan-live';
 import { isTaskTitle } from './session-titles';
 import { eventPush, pushService } from './push';
 import { askNotice, runDoneNotice, turnDoneNotice } from './push-notices';
@@ -12,6 +14,7 @@ import { askNotice, runDoneNotice, turnDoneNotice } from './push-notices';
 const storage = new StorageService();
 const jira = new JiraAPI();
 const SESSIONS_LOOKED_AT = 200;
+const activeSprintName = async () => activeSprint(await jira.getTickets())?.sprint ?? null;
 const DEAD_START_LOOKBACK_MS = 2 * 24 * 3600 * 1000;
 
 /** The cron wired to the real storage, Jira, chat and orchestrator services. */
@@ -25,13 +28,25 @@ export const orchestratorCron = new OrchestratorCron({
   tickets: () => jira.getTickets(),
   ticket: (key) => jira.getTicket(key),
   moveTicket: (key, statusName) => jira.transitionTicket(key, statusName),
-  dependencies: () => storage.getTicketDependencies(),
+  dependencies: async () => {
+    const sprint = await activeSprintName();
+    return [...await storage.getTicketDependencies(), ...(sprint ? await storage.getAcceptedPlanEdges(sprint) : [])];
+  },
+  heldKeys: async () => {
+    const sprint = await activeSprintName();
+    return sprint ? storage.getPendingPlanKeys(sprint) : new Set<string>();
+  },
+  planWatch: (tickets) => sprintPlanner.watch(tickets),
+  recordWait: (key, dependsOn) => storage.addOrchestratorEventOnce(key, 'DEP_WAIT', dependsOn),
   dockOrder: () => storage.getTicketOrders(),
   manualKeys: () => storage.getManualTicketKeys(),
   slots: (machine) => storage.countCronSlots(machine),
   machines: () => orchestratorService.machines(),
   online: (machine) => chatService.bridge(machine).online,
-  fiveHourUsed: (machine) => chatService.statusSnapshot(machine).limits?.fiveHour ?? null,
+  limitsUsed: (machine) => {
+    const limits = chatService.statusSnapshot(machine).limits;
+    return { fiveHour: limits?.fiveHour ?? null, sevenDay: limits?.sevenDay ?? null };
+  },
   // A ticket the laptop works on lives in the peer DOCK; an unreachable peer leaves only the local runs.
   takenKeys: async () => {
     const [local, peerRuns] = await Promise.all([storage.getOrchestratorRuns(), ledgerPeer ? ledgerPeer.runs() : []]);

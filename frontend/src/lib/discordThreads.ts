@@ -39,6 +39,8 @@ export interface DiscordThread {
   tags: string[];
   /** Reviewers a pull request asks for, from "-1" or "-2" in its first message or tags; two otherwise. */
   slots: number;
+  /** The owner said on it and the thread's ticket has no owner Pass label yet. */
+  reviewing: boolean;
   tickets: Array<{ key: string; status: string | null; assignee: string | null; sprint: string | null; sprintActive: boolean }>;
   prs: string[];
   claim: { author: string; mine: boolean; at: string } | null;
@@ -46,6 +48,8 @@ export interface DiscordThread {
   onIt: string[];
   /** The Jira Pass labels of the thread's tickets. */
   passes: string[];
+  /** Why the auto review did not start for this pull request thread. */
+  autoReviewSkip: string | null;
   claimerRepliedAt: string | null;
   mentionedAt: string | null;
   repliedAt: string | null;

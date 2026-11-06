@@ -33,3 +33,10 @@ export function mergeAttention<A extends AttentionItem, P extends AttentionItem>
 export function withoutSettledTickets<T extends AttentionItem>(items: T[], statusOf: Map<string, string>): T[] {
   return items.filter((item) => !item.ticketKey || !isSettledStatus(statusOf.get(item.ticketKey)));
 }
+
+/** One Needs you row per ticket held by a pending inferred dependency. */
+export function planAttentionItems(pendingEdges: Array<{ ticketKey: string }>): AttentionItem[] {
+  return [...new Set(pendingEdges.map((edge) => edge.ticketKey))].map((ticketKey) => ({
+    id: `plan-dependency-${ticketKey}`, type: 'PLAN_DEPENDENCY', message: `${ticketKey} waits for your call on its dependency`, ticketKey,
+  }));
+}

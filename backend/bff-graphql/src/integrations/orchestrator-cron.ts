@@ -1,3 +1,4 @@
+import type { TicketLink } from './jira';
 import type { PushMessage } from './push';
 import { stalledNotice, waitingNotice } from './push-notices';
 import { isSettledStatus } from './attention';
@@ -36,7 +37,13 @@ export interface CronSettings {
   model: string | null;
   effort: string | null;
   usageBrakePercent: number;
+  weeklyBrakePercent: number;
   engine: CronEngine;
+}
+
+export interface UsageWindow {
+  usedPercentage: number;
+  resetsAt: string | null;
 }
 
 export const DEFAULT_CRON_SETTINGS: CronSettings = {
@@ -57,6 +64,7 @@ export const DEFAULT_CRON_SETTINGS: CronSettings = {
   model: null,
   effort: null,
   usageBrakePercent: 70,
+  weeklyBrakePercent: 90,
   engine: 'sous',
 };
 
@@ -147,6 +155,7 @@ export function parseCronSettings(raw: string | null | undefined): CronSettings 
     model: optionalWord(merged.model, 'model'),
     effort: optionalWord(merged.effort, 'effort'),
     usageBrakePercent: integer(merged.usageBrakePercent, 'usageBrakePercent', 0, 100),
+    weeklyBrakePercent: integer(merged.weeklyBrakePercent, 'weeklyBrakePercent', 0, 100),
     engine: merged.engine as CronEngine,
   };
 }
@@ -159,7 +168,7 @@ export function hasAcceptanceCriteria(description: string | null | undefined): b
   return text.slice(at).split('\n').slice(1).some((line) => (line.match(/[\p{L}\p{N}]+/gu) || []).length >= 2);
 }
 
-export interface CronTicket { key: string; title: string; description?: string | null; acceptanceCriteria?: string | null; status: string; sprintState?: string | null; labels?: string[]; parentKey?: string | null }
+export interface CronTicket { key: string; title: string; description?: string | null; acceptanceCriteria?: string | null; status: string; sprintState?: string | null; labels?: string[]; parentKey?: string | null; sprintName?: string | null; issueType?: string | null; links?: TicketLink[] }
 
 /** The Jira Acceptance Criteria field when it holds a criterion, else an "Acceptance criteria" heading in the description. */
 export function ticketHasAcceptanceCriteria(ticket: Pick<CronTicket, 'description' | 'acceptanceCriteria'>): boolean {
@@ -332,6 +341,12 @@ export interface CronDeps {
   ticket(key: string): Promise<CronTicket | null>;
   moveTicket(key: string, statusName: string): Promise<boolean>;
   dependencies(): Promise<Array<{ ticketKey: string; dependsOnKey: string }>>;
+  /** Tickets with a pending inferred dependency: held until the owner decides. */
+  heldKeys(): Promise<Set<string>>;
+  /** Lets the sprint planner see the tickets the cron fetched. */
+  planWatch(tickets: CronTicket[]): Promise<unknown>;
+  /** Notes once that a ticket waits: on `dependsOn`, or `pending` for an undecided inferred edge. */
+  recordWait(key: string, dependsOn: string): Promise<unknown>;
   /** Work order numbers set in DOCK, by ticket key. */
   dockOrder(): Promise<Map<string, number>>;
   /** Tickets the owner works by hand: never picked, never resumed. */
@@ -340,7 +355,7 @@ export interface CronDeps {
   slots(machine: string): Promise<CronSlots>;
   machines(): Promise<string[]>;
   online(machine: string): boolean;
-  fiveHourUsed(machine: string): { usedPercentage: number; resetsAt: string | null } | null;
+  limitsUsed(machine: string): { fiveHour: UsageWindow | null; sevenDay: UsageWindow | null };
   /** Every run that ever existed, dismissed ones too: a ticket is picked once. */
   takenKeys(): Promise<string[]>;
   /** Tickets whose latest cron session ended its first turn without a single reply from the agent. */
@@ -362,7 +377,7 @@ export interface CronDeps {
   /** Settings: where an owner answer goes, a new session or the ticket's last Task session. */
   ownerReplySession(): Promise<'new' | 'last'>;
   /** The newest Task session the cron or an owner answer opened for the ticket, or null. */
-  lastTaskSession(key: string): Promise<{ id: string } | null>;
+  lastTaskSession(key: string): Promise<{ id: string; machine?: string } | null>;
   runningSessions(): Promise<string[]>;
   stopTurn(sessionId: string): Promise<unknown>;
   hasPushDevices(): Promise<boolean>;
@@ -446,10 +461,11 @@ export class OrchestratorCron {
     if (!this.deps.online(settings.machine)) return `machine ${settings.machine} is offline`;
     const window = ignoreWindow ? null : outsideWindow(now, settings);
     if (window) return window;
-    const used = this.deps.fiveHourUsed(settings.machine);
+    const { fiveHour, sevenDay } = this.deps.limitsUsed(settings.machine);
     // A limit whose window has already reset says nothing about now.
-    const current = used && (!used.resetsAt || new Date(used.resetsAt) > now);
-    if (used && current && used.usedPercentage >= settings.usageBrakePercent) return `usage brake: 5 hour usage is at ${Math.round(used.usedPercentage)}%, the brake is ${settings.usageBrakePercent}%`;
+    const current = (used: UsageWindow | null): used is UsageWindow => !!used && (!used.resetsAt || new Date(used.resetsAt) > now);
+    if (current(fiveHour) && fiveHour.usedPercentage >= settings.usageBrakePercent) return `usage brake: 5 hour usage is at ${Math.round(fiveHour.usedPercentage)}%, the brake is ${settings.usageBrakePercent}%`;
+    if (current(sevenDay) && sevenDay.usedPercentage >= settings.weeklyBrakePercent) return `usage brake: 7 day usage is at ${Math.round(sevenDay.usedPercentage)}%, the brake is ${settings.weeklyBrakePercent}%`;
     return null;
   }
 
@@ -458,12 +474,16 @@ export class OrchestratorCron {
    * A slot waited for by a queued message (an owner's answer, a confirmed ticket) is not free: that message goes first.
    */
   private async pick(settings: CronSettings, now: Date, log: FillLog, day: DayCount): Promise<void> {
-    const [tickets, taken, { blocked, stacked }, dockOrder, slots, manual] = await Promise.all([
-      this.deps.tickets(), this.deps.takenKeys(), this.dependencyState(settings), this.deps.dockOrder(), this.deps.slots(settings.machine), this.deps.manualKeys(),
+    const [tickets, taken, { blocked, stacked, waitsOn }, dockOrder, slots, manual, held] = await Promise.all([
+      this.deps.tickets(), this.deps.takenKeys(), this.dependencyState(settings), this.deps.dockOrder(), this.deps.slots(settings.machine), this.deps.manualKeys(), this.deps.heldKeys(),
     ]);
     let free = Math.max(0, settings.parallel - slots.busy - slots.waiting);
     const defer = (key: string, reason: string) => { if (log.deferred.length < MAX_DEFERRED_LOGGED) log.deferred.push({ key, reason }); };
-    for (const ticket of candidates(tickets, new Set(taken), blocked, settings, dockOrder, manual)) {
+    for (const ticket of candidates(tickets, new Set(taken), new Set(), settings, dockOrder, manual)) {
+      if (held.has(ticket.key) || blocked.has(ticket.key)) {
+        await this.deps.recordWait(ticket.key, held.has(ticket.key) ? 'pending' : waitsOn.get(ticket.key) ?? '').catch(() => undefined);
+        continue;
+      }
       try {
         if (!ticketHasAcceptanceCriteria(ticket)) {
           if (day.parked.length >= settings.maxPerDay) { defer(ticket.key, `daily cap reached: ${settings.maxPerDay} parked today`); continue; }
@@ -555,20 +575,28 @@ export class OrchestratorCron {
 
   /**
    * Tickets whose dependency is not settled yet are blocked, unless the dependency is stackable on engine sous:
-   * then the ticket runs stacked on its parent, and `stacked` names that parent.
+   * then the ticket runs stacked on its parent, and `stacked` names that parent. A ticket with more than one unsettled
+   * dependency is blocked, never stacked. `waitsOn` names the first dependency a blocked ticket waits for.
    */
-  private async dependencyState(settings: CronSettings): Promise<{ blocked: Set<string>; stacked: Map<string, string> }> {
+  private async dependencyState(settings: CronSettings): Promise<{ blocked: Set<string>; stacked: Map<string, string>; waitsOn: Map<string, string> }> {
     const blocked = new Set<string>();
     const stacked = new Map<string, string>();
+    const waitsOn = new Map<string, string>();
+    const open = new Map<string, string[]>();
     const dependencies = await this.deps.dependencies();
     const runs = settings.engine === 'sous' && dependencies.length ? await this.deps.runs() : [];
     for (const { ticketKey, dependsOnKey } of dependencies) {
       const dependency = await this.deps.ticket(dependsOnKey).catch(() => null);
       if (dependency && isSettledStatus(dependency.status)) continue;
+      open.set(ticketKey, [...new Set([...(open.get(ticketKey) ?? []), dependsOnKey])]);
       if (dependency && settings.engine === 'sous' && isStackable(dependency.status, runs.find((run) => run.key === dependsOnKey))) stacked.set(ticketKey, dependsOnKey);
       else blocked.add(ticketKey);
     }
-    return { blocked, stacked };
+    for (const [ticketKey, keys] of open) {
+      if (keys.length > 1) { stacked.delete(ticketKey); blocked.add(ticketKey); }
+      if (blocked.has(ticketKey)) waitsOn.set(ticketKey, keys[0]);
+    }
+    return { blocked, stacked, waitsOn };
   }
 
   private saveRun(ticket: Pick<CronTicket, 'key' | 'title'>, machine: string, now: Date, waiting: string, engine?: CronEngine) {
@@ -679,13 +707,13 @@ export class OrchestratorCron {
   }
 
   /**
-   * A `Review-<key>` session on the cron's machine with the cron's options. It waits for Turns at once, not for a cron
-   * slot. Removed again when its first message is refused. Resolves to the session id.
+   * A `Review-<key>` (or `QA-<key>`) session on the cron's machine with the cron's options. It waits for Turns at once,
+   * not for a cron slot. Removed again when its first message is refused. Resolves to the session id.
    */
-  async openReview(key: string, prompt: string): Promise<string> {
+  async openReview(key: string, prompt: string, kind: 'Review' | 'QA' = 'Review'): Promise<string> {
     const settings = await this.settings();
     const options = await this.deps.machineOptions(settings.machine, this.turnOptions(settings));
-    const session = await this.deps.openSession({ ticketKey: key, machine: settings.machine, title: ticketSessionTitle('Review', key), origin: 'cron', options });
+    const session = await this.deps.openSession({ ticketKey: key, machine: settings.machine, title: ticketSessionTitle(kind, key), origin: 'cron', options });
     try {
       await this.deps.send(session.id, prompt, options, { cronSlot: false });
     } catch (error) {
@@ -693,6 +721,29 @@ export class OrchestratorCron {
       throw error;
     }
     return session.id;
+  }
+
+  /**
+   * A message for the ticket's last Task session, queued behind its running turn; without one, a new `Task-<key>` session
+   * on the cron's machine, removed again when its first message is refused.
+   */
+  async taskMessage(key: string, prompt: string): Promise<{ sessionId: string; opened: boolean }> {
+    const settings = await this.settings();
+    const last = await this.deps.lastTaskSession(key);
+    if (last) {
+      const options = await this.deps.machineOptions(last.machine ?? settings.machine, this.turnOptions(settings));
+      await this.deps.send(last.id, prompt, options, { cronSlot: false, queue: true });
+      return { sessionId: last.id, opened: false };
+    }
+    const options = await this.deps.machineOptions(settings.machine, this.turnOptions(settings));
+    const session = await this.deps.openSession({ ticketKey: key, machine: settings.machine, title: ticketSessionTitle('Task', key), origin: 'cron', options });
+    try {
+      await this.deps.send(session.id, prompt, options, { cronSlot: false });
+    } catch (error) {
+      await this.deps.deleteSession(session.id).catch(() => undefined);
+      throw error;
+    }
+    return { sessionId: session.id, opened: true };
   }
 
   async stopAll(): Promise<number> {
@@ -745,6 +796,7 @@ ${run.stalledDetail ?? ''}`, stalledNotice);
     } catch (error) {
       console.error('[Orchestrator cron] Ping failed:', error instanceof Error ? error.message : 'unknown error');
     }
+    await this.deps.planWatch(await this.deps.tickets()).catch((error) => console.error('[Orchestrator cron] Plan watch failed:', error instanceof Error ? error.message : 'unknown error'));
     if ((await this.settings()).enabled) await this.runFill();
   }
 }

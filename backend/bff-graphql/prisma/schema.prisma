@@ -375,6 +375,38 @@ model AutoReview {
   @@index([status])
 }
 
+/// Review findings DOCK sent back to the Task session: one per pr-review thread and last finding message, so a round reaches the session once.
+model ReviewRound {
+  id            String    @id @default(uuid())
+  threadId      String
+  ticketKey     String
+  threadUrl     String
+  /// JSON array of pull request urls
+  prUrls        String
+  /// JSON array of the finding message ids
+  messageIds    String
+  /// JSON array of the finding lines captured when the round was created
+  findings      String?
+  lastMessageId String
+  lastMessageAt DateTime
+  sessionId     String?
+  opened        Boolean   @default(false)
+  /// sending, sent, reported, answered, failed
+  status        String    @default("sending")
+  attempts      Int       @default(0)
+  valid         Int?
+  invalid       Int?
+  pushed        Boolean?
+  detail        String?
+  createdAt     DateTime  @default(now())
+  reportedAt    DateTime?
+
+  @@unique([threadId, lastMessageId])
+  @@index([threadId, lastMessageAt])
+  @@index([sessionId])
+  @@index([status])
+}
+
 /// A Keep / Problem / Try line of a sprint retro, drafted by sous and accepted, edited or closed by the owner.
 model RetroItem {
   id        String   @id @default(uuid())
@@ -389,4 +421,35 @@ model RetroItem {
   updatedAt DateTime @updatedAt
 
   @@index([sprint])
+}
+
+/// One sprint's dependency map. sprint is the sprint name, like RetroItem.sprint.
+model SprintPlan {
+  sprint      String    @id
+  status      String    @default("idle") /// idle | mapping | failed
+  mappingKeys String    @default("[]") /// owner tickets the run in flight maps
+  sessionId   String?
+  mappedKeys  String    @default("[]")
+  groups      String    @default("[]") /// [[keys safe in parallel]]
+  error       String?
+  startedAt   DateTime?
+  mappedAt    DateTime?
+  updatedAt   DateTime  @updatedAt
+}
+
+/// A ticket waits for dependsOnKey. Jira links are accepted on write; inferred ones wait for the owner.
+model SprintPlanEdge {
+  id           String    @id @default(uuid())
+  sprint       String
+  ticketKey    String
+  dependsOnKey String
+  source       String /// jira | inferred
+  reason       String?
+  state        String    @default("pending") /// pending | accepted | rejected
+  decidedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([sprint, ticketKey, dependsOnKey])
+  @@index([state])
 }

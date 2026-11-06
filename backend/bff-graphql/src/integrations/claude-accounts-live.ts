@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { dockMode } from '../mode';
 import { StorageService } from '../storage/service';
 import { chatService } from './chat';
-import { ClaudeAccounts, ROTATION_DEFAULTS, parseCycleList, type AccountUsage, type CycleList, type Rotation, type RotationEntry, type UsageWindow } from './claude-accounts';
+import { ACCOUNT_FP, ClaudeAccounts, ROTATION_DEFAULTS, parseCycleList, parseProbe, parseWindow, type AccountUsage, type CycleList, type Rotation, type RotationEntry } from './claude-accounts';
 import { eventPush } from './push';
 
 const run = promisify(execFile);
@@ -18,6 +18,7 @@ export const ROTATION_KEYS = ['claudeRotate', 'claudeRotateFiveHour', 'claudeRot
 /** `/cycle`'s script on this machine, in the Claude Code config folder the bridge uses. */
 export const cycleScript = () => path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'account-cycle', 'cycle.py');
 export const cycleAvailable = () => dockMode() === 'workspace' && fs.existsSync(cycleScript());
+export const usageScript = () => path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'kit', 'account-usage.py');
 const python = process.platform === 'win32' ? 'python' : 'python3';
 
 let listed: { at: number; list: CycleList } | null = null;
@@ -30,15 +31,25 @@ async function list(): Promise<CycleList> {
   return listed.list;
 }
 
-const date = (value: unknown) => (typeof value === 'string' ? new Date(value) : null);
-const window = (value: unknown): UsageWindow | null => {
-  const raw = value as { usedPercentage?: unknown; resetsAt?: unknown } | null;
-  return raw && typeof raw.usedPercentage === 'number' ? { usedPercentage: raw.usedPercentage, resetsAt: date(raw.resetsAt) } : null;
-};
+async function probe() {
+  if (!cycleAvailable() || !fs.existsSync(usageScript())) return null;
+  const { stdout } = await run(python, [usageScript()], { timeout: 120_000, maxBuffer: 1 << 20 });
+  return parseProbe(stdout);
+}
 
 async function usage(): Promise<Record<string, AccountUsage>> {
-  const saved = (await storage.getCache(CACHE, 'usage')) as Record<string, { fiveHour: unknown; sevenDay: unknown; receivedAt: string }> | null;
-  return Object.fromEntries(Object.entries(saved ?? {}).map(([name, seen]) => [name, { fiveHour: window(seen.fiveHour), sevenDay: window(seen.sevenDay), receivedAt: new Date(seen.receivedAt) }]));
+  const saved = (await storage.getCache(CACHE, 'usage')) as Record<string, { fiveHour: unknown; sevenDay: unknown; receivedAt: string; status?: string; checkedAt?: string; fp?: string; source?: string }> | null;
+  // A row stored before fingerprints may hold another account's numbers (credited to the active one); it is dropped
+  // and the next probe fills the account again.
+  return Object.fromEntries(Object.entries(saved ?? {}).filter(([, seen]) => typeof seen.fp === 'string' && ACCOUNT_FP.test(seen.fp)).map(([name, seen]) => [name, {
+    fiveHour: parseWindow(seen.fiveHour),
+    sevenDay: parseWindow(seen.sevenDay),
+    receivedAt: new Date(seen.receivedAt),
+    status: seen.status,
+    checkedAt: seen.checkedAt ? new Date(seen.checkedAt) : undefined,
+    fp: seen.fp,
+    source: seen.source === 'status' ? 'status' as const : 'probe' as const,
+  }]));
 }
 
 async function log(): Promise<RotationEntry[]> {
@@ -75,20 +86,20 @@ export const claudeAccounts = new ClaudeAccounts({
       storage.upsertSetting('claudeRotateBackToMain', String(rule.backToMain)),
     ]);
   },
+  probe,
   usage,
   saveUsage: async (value) => { await storage.upsertCache(CACHE, 'usage', value, 0); },
   log,
   saveLog: async (value) => { await storage.upsertCache(CACHE, 'log', value, 0); },
   switched: () => { void chatService.forgetLimits(dockMode()); },
-  machineUsage: () => chatService.lastLimits(dockMode()),
   push: (message) => eventPush.send('needsYou', message),
   now: () => new Date(),
 });
 
 /** The rotation follows only this machine's own turns, the ones `/cycle` here decides the account of. */
-chatService.onLimits = (machine, limits) => {
+chatService.onLimits = (machine, limits, accountFp) => {
   if (machine !== dockMode() || !cycleAvailable()) return;
-  void claudeAccounts.report(limits).catch((error) => console.warn('[ClaudeAccounts] report failed:', error instanceof Error ? error.message : 'unknown error'));
+  void claudeAccounts.report(limits, accountFp).catch((error) => console.warn('[ClaudeAccounts] report failed:', error instanceof Error ? error.message : 'unknown error'));
 };
 
 /** What the Settings section reads; a machine without `/cycle` lists no account. */
