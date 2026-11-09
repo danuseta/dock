@@ -11,6 +11,7 @@ import { Toast } from '../components/Toast';
 import { Badge, Button, Card, ConfirmDialog, Dialog, Page, PageHeader, PhoneCards } from '../components/ui';
 import { RetroTab } from '../agents/RetroTab';
 import { PlanTab } from '../agents/PlanTab';
+import { PlanningTab } from '../agents/PlanningTab';
 import { agentsRoute, type AgentsTab, type SprintSub } from '../agents/plan';
 import { PhoneFold } from '../agents/PhoneFold';
 import { PhoneTabs, type PhoneTab } from '../agents/PhoneTabs';
@@ -824,7 +825,7 @@ const AgentsPage: React.FC<AgentsPageProps> = (props) => {
       {tabs}
       <PhoneTabs current="sprint" library={library} onPick={pickPhoneTab} />
       <div className="mb-4 flex flex-wrap gap-1.5" role="group" aria-label="Sprint view">
-        {([['plan', 'Plan'], ['retro', 'Retro']] as const).map(([id, label]) => (
+        {([['planning', 'Planning'], ['plan', 'Plan'], ['retro', 'Retro']] as const).map(([id, label]) => (
           <button
             key={id}
             type="button"
@@ -836,7 +837,7 @@ const AgentsPage: React.FC<AgentsPageProps> = (props) => {
           </button>
         ))}
       </div>
-      {sub === 'plan' ? <PlanTab /> : <RetroTab />}
+      {sub === 'planning' ? <PlanningTab /> : sub === 'plan' ? <PlanTab /> : <RetroTab />}
     </Page>
   );
   return (

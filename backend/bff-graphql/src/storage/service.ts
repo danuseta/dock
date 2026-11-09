@@ -10,6 +10,11 @@ const RUN_WITHOUT_LEDGER = {
 const KEPT_EVENT_KINDS = ['STAGE', 'WAITING', 'DEP_WAIT', 'CONFLICT'];
 
 export interface PlanEdgeInput { ticketKey: string; dependsOnKey: string; reason?: string | null }
+export interface SprintDraftInput { sprint: string; sprintId: number; sprintDays: number; startDate: Date | null; createdBy: string | null; refStatuses: string }
+export interface SprintDraftTicketInput {
+  key: string; summary: string; dev: string | null; sp: number | null; wave: number | null; status: string;
+  ac: string[]; jiraAc: string[]; jiraDev: string | null; dependsOn: string[];
+}
 export interface SprintPlanData { status?: string; mappingKeys?: string[]; sessionId?: string | null; mappedKeys?: string[]; groups?: string[][]; error?: string | null; startedAt?: Date | null; mappedAt?: Date | null }
 
 const SENSITIVE_KEYS = new Set([
@@ -424,6 +429,48 @@ export class StorageService {
 
   async getPendingPlanKeys(sprint: string): Promise<Set<string>> {
     return new Set((await this.db.sprintPlanEdge.findMany({ where: { sprint, state: 'pending' }, select: { ticketKey: true } })).map((row) => row.ticketKey));
+  }
+
+  async getSprintDraft(sprint: string) {
+    const draft = await this.db.sprintDraft.findUnique({ where: { sprint } });
+    if (!draft) return null;
+    return { ...draft, tickets: await this.db.sprintDraftTicket.findMany({ where: { draftSprint: sprint }, orderBy: { position: 'asc' } }) };
+  }
+
+  /** A load from Jira replaces the tickets and leaves the draft unpublished; decisions stay and apply to the lines that still match. */
+  async replaceSprintDraft(draft: SprintDraftInput, tickets: SprintDraftTicketInput[]) {
+    const { sprint, ...fields } = draft;
+    const reset = { ...fields, status: 'draft', publishedAt: null, loadedAt: new Date() };
+    const rows = tickets.map((ticket, position) => ({
+      draftSprint: sprint, key: ticket.key, summary: ticket.summary, dev: ticket.dev, sp: ticket.sp, wave: ticket.wave, status: ticket.status,
+      ac: JSON.stringify(ticket.ac), jiraAc: JSON.stringify(ticket.jiraAc), jiraDev: ticket.jiraDev, dependsOn: JSON.stringify(ticket.dependsOn), position,
+    }));
+    await this.db.$transaction([
+      this.db.sprintDraft.upsert({ where: { sprint }, update: reset, create: { sprint, ...reset } }),
+      this.db.sprintDraftTicket.deleteMany({ where: { draftSprint: sprint } }),
+      ...rows.map((data) => this.db.sprintDraftTicket.create({ data })),
+    ]);
+  }
+
+  updateSprintDraftTicket(sprint: string, key: string, data: { dev?: string | null; sp?: number | null; wave?: number | null; ac?: string[]; jiraAc?: string[]; jiraDev?: string | null; prediction?: string | null }) {
+    const { ac, jiraAc, ...rest } = data;
+    return this.db.sprintDraftTicket.update({
+      where: { draftSprint_key: { draftSprint: sprint, key } },
+      data: { ...rest, ...(ac ? { ac: JSON.stringify(ac) } : {}), ...(jiraAc ? { jiraAc: JSON.stringify(jiraAc) } : {}) },
+    });
+  }
+
+  updateSprintDraft(sprint: string, data: { decisions?: string; qaReason?: string | null; status?: string; publishedAt?: Date | null }) {
+    return this.db.sprintDraft.update({ where: { sprint }, data });
+  }
+
+  /** The predictions of one run: a ticket the script did not answer for loses its old one. */
+  async saveSprintDraftPredictions(sprint: string, predictions: Map<string, string> | null, qaReason: string | null) {
+    await this.db.$transaction([
+      this.db.sprintDraft.update({ where: { sprint }, data: { qaReason } }),
+      this.db.sprintDraftTicket.updateMany({ where: { draftSprint: sprint }, data: { prediction: null } }),
+      ...[...(predictions || new Map<string, string>()).entries()].map(([key, prediction]) => this.db.sprintDraftTicket.updateMany({ where: { draftSprint: sprint, key }, data: { prediction } })),
+    ]);
   }
 
   getRetroItems(sprint: string) {

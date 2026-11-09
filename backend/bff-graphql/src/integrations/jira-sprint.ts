@@ -1,10 +1,11 @@
 import axios from 'axios';
-import type { JiraCredentials } from './jira';
+import { blockLinks, type JiraCredentials, type TicketLink } from './jira';
 import type { SprintEvent, SprintIssue } from './sprint-metrics';
 
 export interface JiraHttp {
   get(url: string, params?: Record<string, unknown>): Promise<any>;
   post(url: string, body: unknown): Promise<any>;
+  put?(url: string, body: unknown): Promise<any>;
 }
 
 export interface BoardSprint {
@@ -15,6 +16,31 @@ export interface BoardSprint {
   endDate: string;
   completeDate: string | null;
 }
+
+/** A sprint Planning can load: one not started yet, or the active one. A future sprint often has no dates. */
+export interface PlanningSprint {
+  id: number;
+  name: string;
+  state: 'active' | 'future';
+  startDate: string | null;
+  endDate: string | null;
+}
+
+/** A ticket as Planning needs it; acRaw is the AC field exactly as Jira returned it (ADF or text). */
+export interface PlanningIssue {
+  key: string;
+  summary: string;
+  type: string;
+  status: string;
+  assignee: string | null;
+  sp: number | null;
+  acRaw: unknown;
+  links: TicketLink[];
+}
+
+export const AC_FIELD = 'customfield_10332';
+const SP_FIELDS = ['story_points', 'customfield_10016', 'customfield_10028', 'customfield_10034'];
+const PLANNING_FIELDS = ['summary', 'issuetype', 'status', 'assignee', 'issuelinks', AC_FIELD, ...SP_FIELDS];
 
 const TRACKED_FIELDS = new Set(['status', 'labels', 'Sprint', 'Story point estimate', 'assignee']);
 const ISSUE_FIELDS = [
@@ -57,6 +83,7 @@ export function createJiraHttp(credentials: JiraCredentials, sleep: (ms: number)
   return {
     get: (url, params) => retryOn429(() => client.get(url, { params }), sleep),
     post: (url, body) => retryOn429(() => client.post(url, body), sleep),
+    put: (url, body) => retryOn429(() => client.put(url, body), sleep),
   };
 }
 
@@ -90,10 +117,28 @@ function historiesToEvents(histories: any[]): SprintEvent[] {
   return events;
 }
 
+function storyPoints(fields: any): number | null {
+  const value = SP_FIELDS.map((field) => fields[field]).find((item) => typeof item === 'number' && !Number.isNaN(item));
+  return typeof value === 'number' ? value : null;
+}
+
+export function planningIssue(issue: any): PlanningIssue {
+  const fields = issue.fields || {};
+  return {
+    key: issue.key,
+    summary: fields.summary || issue.key,
+    type: fields.issuetype?.name || '',
+    status: fields.status?.name || '',
+    assignee: fields.assignee?.displayName ?? null,
+    sp: storyPoints(fields),
+    acRaw: fields[AC_FIELD] ?? null,
+    links: blockLinks(fields.issuelinks),
+  };
+}
+
 export function compactIssue(issue: any, histories: any[]): SprintIssue {
   const fields = issue.fields || {};
-  const spValue = [fields.story_points, fields.customfield_10016, fields.customfield_10028, fields.customfield_10034]
-    .find((value) => typeof value === 'number' && !Number.isNaN(value));
+  const spValue = storyPoints(fields);
   return {
     key: issue.key,
     summary: fields.summary || issue.key,
@@ -139,6 +184,77 @@ export class JiraSprintClient {
       if ((active.values || []).length) return String(board.id);
     }
     return boards.length ? String(boards[0].id) : null;
+  }
+
+  async listPlanningSprints(boardId: string): Promise<PlanningSprint[]> {
+    const sprints: PlanningSprint[] = [];
+    for (let startAt = 0; ; ) {
+      const page = await this.http.get(`/rest/agile/1.0/board/${encodeURIComponent(boardId)}/sprint`, { state: 'active,future', startAt, maxResults: 50 });
+      for (const sprint of page.values || []) {
+        sprints.push({
+          id: sprint.id, name: sprint.name, state: sprint.state === 'active' ? 'active' : 'future',
+          startDate: sprint.startDate ?? null, endDate: sprint.endDate ?? null,
+        });
+      }
+      if (page.isLast !== false || !(page.values || []).length) return sprints;
+      startAt += (page.values || []).length;
+    }
+  }
+
+  /** The sprint's tickets with AC and block links; Epics and sub-tasks are left out. */
+  async fetchPlanningIssues(sprintId: number): Promise<PlanningIssue[]> {
+    return (await this.searchPlanning(`sprint = ${Number(sprintId)} ORDER BY rank ASC`))
+      .filter((issue) => !/^(epic|sub-?task)$/i.test(issue.type));
+  }
+
+  /** Status by key, for tickets outside the sprint that an AC line or a link names. */
+  async statusesOf(keys: string[]): Promise<Map<string, string>> {
+    const safe = keys.filter((key) => /^[A-Z][A-Z0-9_]*-\d+$/.test(key));
+    const statuses = new Map<string, string>();
+    for (let index = 0; index < safe.length; index += PAGE_SIZE) {
+      for (const issue of await this.searchPlanning(`key in (${safe.slice(index, index + PAGE_SIZE).join(', ')})`)) statuses.set(issue.key, issue.status);
+    }
+    return statuses;
+  }
+
+  /** The ticket as Jira holds it now; null when it is gone. */
+  async planningIssueNow(key: string): Promise<PlanningIssue | null> {
+    try {
+      return planningIssue(await this.http.get(`/rest/api/3/issue/${encodeURIComponent(key)}`, { fields: PLANNING_FIELDS.join(',') }));
+    } catch (error: any) {
+      if (error?.response?.status === 404) return null;
+      throw error;
+    }
+  }
+
+  /** The account ids of users assignable to the ticket whose display name is exactly `name`. */
+  async assignableAccounts(key: string, name: string): Promise<string[]> {
+    const users = await this.http.get('/rest/api/3/user/assignable/search', { issueKey: key, query: name, maxResults: 50 });
+    const wanted = name.trim().toLowerCase();
+    return (Array.isArray(users) ? users : [])
+      .filter((user: any) => String(user?.displayName ?? '').trim().toLowerCase() === wanted && typeof user?.accountId === 'string')
+      .map((user: any) => user.accountId as string);
+  }
+
+  async setAcField(key: string, value: unknown): Promise<void> {
+    if (!this.http.put) throw new Error('This Jira connection cannot write');
+    await this.http.put(`/rest/api/3/issue/${encodeURIComponent(key)}`, { fields: { [AC_FIELD]: value } });
+  }
+
+  async setAssignee(key: string, accountId: string): Promise<void> {
+    if (!this.http.put) throw new Error('This Jira connection cannot write');
+    await this.http.put(`/rest/api/3/issue/${encodeURIComponent(key)}/assignee`, { accountId });
+  }
+
+  private async searchPlanning(jql: string): Promise<PlanningIssue[]> {
+    const issues: PlanningIssue[] = [];
+    let nextPageToken: string | undefined;
+    for (let pages = 0; pages === 0 || (nextPageToken && pages < MAX_LABEL_PAGES); pages++) {
+      const page = await this.http.post('/rest/api/3/search/jql', { jql, fields: PLANNING_FIELDS, maxResults: PAGE_SIZE, ...(nextPageToken ? { nextPageToken } : {}) });
+      issues.push(...(page.issues || []).map(planningIssue));
+      nextPageToken = page.nextPageToken;
+    }
+    return issues;
   }
 
   private async fullChangelog(key: string): Promise<any[]> {

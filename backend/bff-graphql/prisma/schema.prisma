@@ -453,3 +453,38 @@ model SprintPlanEdge {
   @@unique([sprint, ticketKey, dependsOnKey])
   @@index([state])
 }
+
+/// A sprint being planned in Agents > Sprint > Planning, loaded from Jira and published back to it.
+model SprintDraft {
+  sprint      String    @id /// the Jira sprint name
+  sprintId    Int
+  status      String    @default("draft") /// draft | published
+  sprintDays  Int       @default(10)
+  startDate   DateTime?
+  decisions   String    @default("{}") /// {findingId: {action, note, by, at}}
+  qaReason    String? /// why there is no QA prediction, null when predict.mjs answered
+  refStatuses String    @default("{}") /// {key: Jira status} of tickets the AC or links name outside the sprint
+  createdBy   String?
+  loadedAt    DateTime  @default(now())
+  publishedAt DateTime?
+  updatedAt   DateTime  @updatedAt
+}
+
+/// One ticket of a SprintDraft: the planner's values next to what Jira held when it was loaded.
+model SprintDraftTicket {
+  draftSprint String
+  key         String
+  summary     String
+  dev         String?
+  sp          Float?
+  wave        Int?
+  ac          String  @default("[]") /// AC lines as planned
+  jiraAc      String  @default("[]") /// AC lines as Jira held them at load or last publish
+  jiraDev     String?
+  dependsOn   String  @default("[]")
+  status      String
+  prediction  String? /// {prediction, reasons, fix}
+  position    Int     @default(0)
+
+  @@id([draftSprint, key])
+}
