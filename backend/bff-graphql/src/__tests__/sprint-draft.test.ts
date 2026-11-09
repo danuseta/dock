@@ -212,3 +212,19 @@ test('ticket changes are checked and the SP per day setting changes the schedule
   assert.equal((await service.view('QRD Sprint 26'))!.tickets.find((ticket) => ticket.key === 'QRD-1490')!.dur, 2);
   assert.equal(await service.view('QRD Sprint 99'), null);
 });
+
+test('tickets already past merge stay out of the schedule and the AC check, and a line naming one lands first', async () => {
+  const store = new MemoryStore();
+  const jira = new FakeJira([
+    issue('QRD-1', { status: 'Done / MERGED', sp: 8 }),
+    issue('QRD-2', { status: 'ReadyForProduction', sp: 8 }),
+    issue('QRD-3', { acRaw: '- Opens the page built in QRD-1\n- Works with QRD-2' }),
+  ]);
+  const service = new SprintDraftService(store, async () => jira, predictions({}), () => new Date('2026-11-09T10:00:00Z'));
+  const view = await service.load(26, 'Danu');
+  assert.deepEqual(view.tickets.map((ticket) => ticket.key), ['QRD-3']);
+  assert.equal(view.landed, 2);
+  assert.equal(view.tickets[0].start, 0);
+  assert.deepEqual(view.findings.map((finding) => [finding.refKey, finding.kind]), [['QRD-1', 'lands-first'], ['QRD-2', 'lands-first']]);
+  assert.equal(view.canPublish, true);
+});

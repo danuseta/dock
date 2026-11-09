@@ -22,11 +22,12 @@ export interface AcFinding {
   ownEnd: number | null;
 }
 
-export const DONE_STATUSES = ['uat check', 'uat merged', 'ready for production', 'done'];
+/** Statuses past merge, compared letters only: Jira names them "Done / MERGED", "ReadyForProduction", "UAT CHECK". */
+export const DONE_STATUSES = ['uatcheck', 'uatmerged', 'readyforproduction', 'rfp', 'done', 'donemerged', 'merged'];
 const KEY_REF = /\bQRD-\d+\b/gi;
 const BULLET = /^(?:[-*•]\s+|\d+[.)]\s+|\[[ xX]?\]\s+)/;
 
-export const isDoneStatus = (status: string | null | undefined) => DONE_STATUSES.includes(String(status ?? '').trim().toLowerCase());
+export const isDoneStatus = (status: string | null | undefined) => DONE_STATUSES.includes(String(status ?? '').toLowerCase().replace(/[^a-z]/g, ''));
 
 /** One AC line as compared everywhere: bullets and numbering dropped, spaces collapsed. */
 export function normalizeAcLine(line: string): string {

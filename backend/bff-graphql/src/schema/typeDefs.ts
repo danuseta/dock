@@ -651,6 +651,8 @@ export const typeDefs = gql`
     findings: [SprintDraftFinding!]!
     blockers: [String!]!
     canPublish: Boolean!
+    """Tickets already past merge (UAT CHECK and later): out of the schedule and the AC check."""
+    landed: Int!
   }
 
   """What Publish would write to one ticket. refused says why the ticket is skipped."""

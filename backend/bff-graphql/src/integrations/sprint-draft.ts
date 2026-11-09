@@ -2,7 +2,7 @@
 // developer, wave, SP and AC, the schedule and AC check computed from them, the QA bot's prediction, and the decisions
 // the planner made. Publish writes back only what differs from Jira, and refuses a ticket whose AC moved in Jira since
 // it was loaded, so a teammate's edit is never overwritten.
-import { acFindings, normalizeAcLine, splitAc, type AcFinding } from './ac-scope';
+import { acFindings, isDoneStatus, normalizeAcLine, splitAc, type AcFinding } from './ac-scope';
 import type { PlanningIssue, PlanningSprint } from './jira-sprint';
 import { predictQa, type QaInputTicket, type QaPrediction, type QaRun } from './qa-predict';
 import { DEFAULT_SP_PER_DAY, DEFAULT_SPRINT_DAYS, scheduleSprint, workingDays, type ScheduledTicket } from './scope-cut';
@@ -56,6 +56,8 @@ export interface DraftView {
   sprint: string; sprintId: number; status: string; sprintDays: number; startDate: string | null; spPerDay: number;
   createdBy: string | null; loadedAt: string; publishedAt: string | null; qaReason: string | null;
   devs: string[]; tickets: DraftTicketView[]; findings: DraftFindingView[]; blockers: string[]; canPublish: boolean;
+  /** Tickets of the sprint already past merge: left out of the schedule and the AC check. */
+  landed: number;
 }
 export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; refused: string | null }
 export interface PublishResult { key: string; status: 'updated' | 'refused' | 'failed'; detail: string | null }
@@ -274,16 +276,17 @@ export class SprintDraftService {
   private compute(row: DraftRow, spPerDay: number): DraftView {
     const decisions = parse<Decisions>(row.decisions, {});
     const refStatuses = parse<Record<string, string>>(row.refStatuses, {});
-    const tickets = row.tickets.map((ticket) => ({
+    const all = row.tickets.map((ticket) => ({
       ...ticket, ac: parse<string[]>(ticket.ac, []), jiraAc: parse<string[]>(ticket.jiraAc, []), dependsOn: parse<string[]>(ticket.dependsOn, []),
       prediction: parse<QaPrediction | null>(ticket.prediction, null),
     }));
+    const tickets = all.filter((ticket) => !isDoneStatus(ticket.status));
     const schedule = new Map(scheduleSprint(
       tickets.map((ticket) => ({ key: ticket.key, dev: ticket.dev, sp: ticket.sp, wave: ticket.wave, dependsOn: ticket.dependsOn })),
       { sprintDays: row.sprintDays, spPerDay },
     ).map((item) => [item.key, item]));
     const ends = new Map([...schedule.values()].map((item) => [item.key, item.end]));
-    const status = new Map(tickets.map((ticket) => [ticket.key, ticket.status]));
+    const status = new Map(all.map((ticket) => [ticket.key, ticket.status]));
     const findings = acFindings(tickets, ends, (key) => status.get(key) ?? refStatuses[key] ?? null)
       .map((finding) => ({ ...finding, decision: decisions[finding.id] ?? null }));
     const blockers = publishBlockers(findings, tickets, decisions);
@@ -291,7 +294,7 @@ export class SprintDraftService {
     return {
       sprint: row.sprint, sprintId: row.sprintId, status: row.status, sprintDays: row.sprintDays, startDate: row.startDate?.toISOString() ?? null,
       spPerDay, createdBy: row.createdBy, loadedAt: row.loadedAt.toISOString(), publishedAt: row.publishedAt?.toISOString() ?? null, qaReason: row.qaReason,
-      devs,
+      devs, landed: all.length - tickets.length,
       tickets: tickets.map((ticket) => {
         const placed = schedule.get(ticket.key)!;
         return {
