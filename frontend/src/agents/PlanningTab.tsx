@@ -9,7 +9,7 @@ import {
 } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import {
-  UNASSIGNED, barPlace, changeCount, dayOf, decisionLabel, findingKindLabel, handOffs, landingDay, lanes, openQuestionsOf, parseWave, ranks, softColor, teamStats, waitersOf, predictionTone, publishHint, scopeSummary, sortFindings,
+  UNASSIGNED, barPlace, changeCount, dayOf, decisionLabel, findingKindLabel, forecastOf, handOffs, lateDays, lateText, shortDate, underWay, landingDay, lanes, openQuestionsOf, parseWave, ranks, softColor, teamStats, waitersOf, predictionTone, publishHint, scopeSummary, sortFindings,
   questionsLine, spanOf, storyboardDecisionId, storyboardLine, tcsToText, textToTcs, uncheckedStoryboard, waveRows, workingDayLabels,
   type DraftChange, type DraftFinding, type DraftTc, type DraftTicket, type PlanningPanel, type PlanningSprint, type PublishResult, type SprintDraft,
 } from './planning';
@@ -186,6 +186,16 @@ const TeamPanel: React.FC<{ draft: SprintDraft }> = ({ draft }) => {
   const starts = (start: number) => { const day = Math.floor(start + 1e-9) + 1; return `day ${day}${dateOf(day) ? ` · ${dateOf(day)}` : ''}`; };
   const after = (ticket: DraftTicket) => ticket.end > draft.sprintDays + 1e-9;
   const today = draft.today && draft.today <= span ? draft.today : null;
+  const forecast = forecastOf(draft);
+  const live = underWay(draft);
+  const dayDate = (day: number) => dateOf(day) ?? `day ${day}`;
+  const shortDay = (day: number) => { const label = dateOf(day); return label ? shortDate(label) : `day ${day}`; };
+  const forecastColor = forecast.late > 0 ? 'var(--color-status-conflict)' : 'var(--color-status-merged)';
+  const lateTone = forecast.late > 0 ? 'text-status-conflict' : 'text-status-merged';
+  // A line at the very end of the span stays inside its clipped row.
+  const lineAt = (days: number) => `min(${pct(days)}, calc(100% - 2px))`;
+  const dueLabel = `Sprint ends · ${dayDate(forecast.due)}`;
+  const forecastLabel = `Forecast · ${dayDate(forecast.day)}`;
   const selected = picked ? byKey.get(picked) ?? null : null;
   const waitsOn = selected ? selected.dependsOn.filter((key) => byKey.has(key)) : [];
   const waiting = selected ? (waiters.get(selected.key) ?? []).map((ticket) => ticket.key) : [];
@@ -200,6 +210,9 @@ const TeamPanel: React.FC<{ draft: SprintDraft }> = ({ draft }) => {
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6">
       <section aria-label="Load per developer" className="min-w-0">
         <h3 className={head}>Team map · load per developer</h3>
+        <p className="mt-2 text-pretty font-mono text-[0.78rem] text-secondary-foreground">
+          Due <b className="text-foreground">{dayDate(forecast.due)}</b> · forecast <b className="text-foreground">{dayDate(forecast.day)}</b> · <b className={lateTone}>{lateText(forecast.late)}</b>
+        </p>
         <p className="mt-2 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">
           <b className="text-foreground">{stats.cards} cards, {stats.sp} SP</b> across <b className="text-foreground">{stats.devs} {stats.devs === 1 ? 'developer' : 'developers'}</b>, a target of <b className="text-foreground">{fmt(stats.target)} SP</b> each.{' '}
           <b className="text-foreground">{stats.landCards} {stats.landCards === 1 ? 'card' : 'cards'} ({stats.landSp} SP)</b> land by day {draft.sprintDays}{dateOf(draft.sprintDays) ? ` (${dateOf(draft.sprintDays)})` : ''}. The heaviest and the lightest lane are <b className="text-foreground">{stats.spread} SP</b> apart.
@@ -213,17 +226,25 @@ const TeamPanel: React.FC<{ draft: SprintDraft }> = ({ draft }) => {
           <span><b className="text-secondary-foreground">{asked}</b> {asked === 1 ? 'card' : 'cards'} with open questions</span>
         </p>
         <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(min(170px,100%),1fr))] gap-2.5">
-          {rows.map((lane) => (
+          {rows.map((lane) => {
+            const laneDay = landingDay(lane.end);
+            const laneLate = lateDays(draft.sprintDays, laneDay);
+            return (
             <div key={lane.dev} className="min-w-0 rounded-md border border-border border-t-[3px] bg-surface-0 px-3 py-2.5" style={{ borderTopColor: lane.color }}>
               <b className="block truncate font-display text-[0.9rem]" style={{ color: lane.color }}>{lane.dev}</b>
               <p className="mt-1.5 font-mono text-[1.2rem] font-semibold tabular-nums">{lane.sp}<span className="text-[0.7rem] font-normal text-muted-foreground"> SP · {lane.tickets.length} {lane.tickets.length === 1 ? 'card' : 'cards'}</span></p>
+              {live && <p className="font-mono text-[0.68rem] text-muted-foreground">left <b className="text-secondary-foreground">{fmt(lane.left)}</b> of {fmt(lane.sp)} SP</p>}
               <span className="relative mt-2 block h-1.5 overflow-hidden rounded-sm bg-surface-2" aria-hidden="true">
                 <span className="absolute inset-y-0 left-0" style={{ width: pct(lane.end), background: lane.color }} />
                 <span className="absolute -inset-y-0.5 w-0.5 bg-foreground" style={{ left: pct(draft.sprintDays) }} />
               </span>
               <p className="mt-2 text-[0.72rem] text-muted-foreground">Ends <b className="text-secondary-foreground">{lands(lane.end)}</b>. In sprint: <b className="text-secondary-foreground">{lane.inSprintSp} SP</b>.</p>
+              <p className="mt-1 font-mono text-[0.66rem] text-muted-foreground">
+                Due {shortDay(draft.sprintDays)} · forecast {shortDay(laneDay)}{laneLate > 0 && <b className="text-status-conflict"> · {lateText(laneLate)}</b>}
+              </p>
             </div>
-          ))}
+            );
+          })}
         </div>
       </section>
 
@@ -238,7 +259,8 @@ const TeamPanel: React.FC<{ draft: SprintDraft }> = ({ draft }) => {
                 {row.tickets.map((ticket) => (
                   <span key={ticket.key} title={`${ticket.key} · ${ticket.dev ?? UNASSIGNED}`} className="absolute inset-y-[3px] rounded-[3px] opacity-85" style={{ left: pct(ticket.start), width: `max(2px, calc(${pct(ticket.dur)} - 1px))`, background: color(ticket.dev) }} />
                 ))}
-                <span className="absolute inset-y-0 w-0.5 bg-foreground" style={{ left: pct(draft.sprintDays) }} />
+                <span className="absolute inset-y-0 w-0.5 bg-foreground" style={{ left: lineAt(draft.sprintDays) }} title={dueLabel} />
+                <span className="absolute inset-y-0 border-l-2 border-dashed" style={{ left: lineAt(forecast.end), borderColor: forecastColor }} title={forecastLabel} />
               </span>
               <span className="text-right font-mono text-[0.68rem] text-secondary-foreground max-[760px]:col-span-2 max-[760px]:text-left">
                 closes day {landingDay(row.closes)}
@@ -247,6 +269,10 @@ const TeamPanel: React.FC<{ draft: SprintDraft }> = ({ draft }) => {
             </li>
           ))}
         </ul>
+        <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5 text-[0.7rem] text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-0.5 bg-foreground" aria-hidden="true" />{dueLabel}</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 border-l-2 border-dashed" style={{ borderColor: forecastColor }} aria-hidden="true" />{forecastLabel}</span>
+        </p>
       </section>
 
       <section aria-label="Schedule" className="min-w-0">
@@ -262,6 +288,16 @@ const TeamPanel: React.FC<{ draft: SprintDraft }> = ({ draft }) => {
                   </div>
                 ))}
               </div>
+              <div className="flex border-b border-border">
+                <div className="w-[112px] flex-none border-r border-border bg-surface-1" />
+                <div className="relative h-9 flex-1">
+                  <span className="absolute inset-y-0 z-[2] w-0.5 bg-foreground/75" style={{ left: lineAt(draft.sprintDays) }} aria-hidden="true" />
+                  <span className="absolute inset-y-0 z-[2] border-l-2 border-dashed" style={{ left: lineAt(forecast.end), borderColor: forecastColor }} aria-hidden="true" />
+                  {([[draft.sprintDays, dueLabel, 'var(--color-foreground)', 3], [forecast.end, forecastLabel, forecastColor, 19]] as const).map(([at, text, tone, top]) => (
+                    <span key={text} className="absolute whitespace-nowrap font-mono text-[0.6rem] font-semibold" style={{ top, left: pct(at), color: tone, transform: at / span > 0.5 ? 'translateX(calc(-100% - 5px))' : 'translateX(5px)' }}>{text}</span>
+                  ))}
+                </div>
+              </div>
               {rows.map((lane) => (
                 <div key={lane.dev} className="flex min-h-[58px] border-b border-border last:border-b-0">
                   <div className="w-[112px] flex-none border-r border-border bg-surface-1 px-3 py-2.5">
@@ -270,7 +306,8 @@ const TeamPanel: React.FC<{ draft: SprintDraft }> = ({ draft }) => {
                   </div>
                   <div className="relative flex-1">
                     {Array.from({ length: span }, (_, index) => <span key={index} className="absolute inset-y-0 w-px bg-border/60" style={{ left: pct(index) }} aria-hidden="true" />)}
-                    <span className="absolute inset-y-0 z-[2] w-0.5 bg-foreground/75" style={{ left: pct(draft.sprintDays) }} aria-hidden="true" />
+                    <span className="absolute inset-y-0 z-[2] w-0.5 bg-foreground/75" style={{ left: lineAt(draft.sprintDays) }} aria-hidden="true" />
+                    <span className="absolute inset-y-0 z-[2] border-l-2 border-dashed" style={{ left: lineAt(forecast.end), borderColor: forecastColor }} aria-hidden="true" />
                     {today && <span className="absolute inset-y-0 z-[2] w-0.5 bg-accent" style={{ left: pct(today - 1) }} aria-hidden="true" />}
                     {lane.tickets.map((ticket) => {
                       const place = barPlace(ticket, span);
@@ -335,7 +372,8 @@ const TeamPanel: React.FC<{ draft: SprintDraft }> = ({ draft }) => {
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[0.7rem] text-muted-foreground">
           <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] border border-status-conflict bg-status-conflict-bg shadow-[inset_3px_0_0_var(--color-status-conflict)]" aria-hidden="true" />red left edge = open question</span>
-          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-0.5 bg-foreground" aria-hidden="true" />end of the sprint</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-0.5 bg-foreground" aria-hidden="true" />{dueLabel}</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 border-l-2 border-dashed" style={{ borderColor: forecastColor }} aria-hidden="true" />{forecastLabel}</span>
           {today && <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-0.5 bg-accent" aria-hidden="true" />today</span>}
           <span className="inline-flex items-center gap-1.5"><span className="rounded-xs border border-secondary-foreground px-1 font-mono text-[0.6rem] font-semibold text-secondary-foreground">#1·W1</span>owner's first card, wave 1</span>
           <span>1 SP = {fmt(1 / draft.spPerDay)} day</span>
