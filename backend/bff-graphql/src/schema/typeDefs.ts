@@ -1884,6 +1884,8 @@ export const typeDefs = gql`
     sprintDriftAction(id: ID!, action: String!, note: String): SprintDrift!
     "accept (adds the line to the AC of to) or decline (with a reason) an AC line a teammate offers."
     acInAction(to: String!, id: ID!, action: String!, reason: String): [AcIn!]!
+    "Opens the chat session Planning-<sprint> on the workspace with a first message that runs the kit skill sprint-planner. Returns the session id."
+    openPlanningChat(sprint: String!): String!
     """accept, close, reopen or edit (with text). Accepting a line that goes to kit, memory or dock asks sous to apply it."""
     retroItemAction(id: ID!, action: String!, text: String): RetroItem!
     """A new folder under the home of the workspace. Secrets stay read only; file content goes through PUT /api/workspace/file."""

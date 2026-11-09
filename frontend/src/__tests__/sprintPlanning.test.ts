@@ -91,6 +91,8 @@ test('Planning opens a Planning-<sprint> chat beside the panel, which polls the 
   assert.match(chat, /h-\[620px\]/);
   assert.match(chat, /xl:sticky/);
   assert.match(chat, /<ChatThread /);
+  assert.match(chat, /OPEN_PLANNING_CHAT/);
+  assert.ok(chat.includes('create({ variables: { sprint } })'));
 });
 
 test('test cases read back from the text the planner edits', () => {

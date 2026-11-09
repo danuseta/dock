@@ -811,6 +811,12 @@ export const SPRINT_DRIFT_FIELDS = `
   storyboard { key version frames held checked }
 `;
 
+export const OPEN_PLANNING_CHAT = gql`
+  mutation OpenPlanningChat($sprint: String!) {
+    openPlanningChat(sprint: $sprint)
+  }
+`;
+
 export const GET_AC_INCOMING = gql`
   query GetAcIncoming {
     acIncoming { id from to line text by at }

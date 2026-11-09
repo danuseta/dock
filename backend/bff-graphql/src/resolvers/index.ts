@@ -15,6 +15,7 @@ import { activeSprint } from '../integrations/sprint-plan';
 import { lookupDependencies } from '../integrations/dependency-lookup';
 import { sprintPlanner } from '../integrations/sprint-plan-live';
 import { acDriftService, acInService, sprintDraftService } from '../integrations/sprint-draft-live';
+import { planningChatPrompt, planningChatTitle } from '../integrations/planning-ingest';
 import { isSettledStatus, mergeAttention, planAttentionItems, withoutSettledTickets } from '../integrations/attention';
 import { discordGateway, discordReader } from '../integrations/discord-reader-live';
 import { isTeamChannel } from '../integrations/discord-team';
@@ -661,6 +662,13 @@ export const resolvers = {
       sprintDraftService.answer(sprint, id, answered, reporterName()).catch(planningError)
     ),
     publishSprintDraft: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.publish(sprint, reporterName()).catch(planningError),
+    openPlanningChat: async (_: unknown, { sprint }: { sprint: string }) => {
+      const name = sprint.trim();
+      if (!name) throw new GraphQLError('sprint is required', { extensions: { code: 'BAD_USER_INPUT' } });
+      const draft = await sprintDraftService.view(name).catch(() => null);
+      const epics = (draft?.tickets ?? []).map((ticket) => ticket.epic).filter((epic): epic is string => !!epic);
+      return runSousPrompt(planningChatTitle(name), planningChatPrompt(name, epics));
+    },
     acInAction: (_: unknown, { to, id, action, reason }: { to: string; id: string; action: string; reason?: string | null }) => (
       acInService.act(to.trim().toUpperCase(), id, action, reason ?? null, reporterName()).catch(planningError)
     ),
@@ -1067,6 +1075,7 @@ export const protectedMutations = [
   'publishSprintDraft',
   'sprintDriftAction',
   'acInAction',
+  'openPlanningChat',
   'retroItemAction',
   'workspaceMkdir',
   'workspaceRename',

@@ -69,3 +69,17 @@ export async function planningIngest(deps: PlanningIngestDeps, route: PlanningRo
     throw error;
   }
 }
+
+/** The chat session Planning opens for a sprint; the kit skill reads the sprint from this title. */
+export const planningChatTitle = (sprint: string) => `Planning-${sprint}`;
+
+/** The first message of the Planning chat: runs the kit skill sprint-planner with the sprint and the epics DOCK knows. */
+export function planningChatPrompt(sprint: string, epics: string[]): string {
+  const list = [...new Set(epics.filter(Boolean))].sort();
+  return [
+    `Pakai skill sprint-planner: ${sprint}${list.length ? ` epic ${list.join(', ')}` : ''}`,
+    `Sprint: ${sprint}`,
+    `Epic: ${list.length ? list.join(', ') : 'belum diketahui, tanyakan ke planner atau ambil dari parent tiket'}`,
+    'Draft ada di DOCK; ubah hanya lewat kit/sprint-draft.cjs. Jangan publish, jangan tulis ke Jira atau Confluence.',
+  ].join('\n');
+}

@@ -3,7 +3,9 @@ import http from 'node:http';
 import test from 'node:test';
 import express from 'express';
 import { PinRateLimiter } from '../auth/session';
-import { planningIngest, type PlanningIngestDeps } from '../integrations/planning-ingest';
+import { planningChatPrompt, planningChatTitle, planningIngest, type PlanningIngestDeps } from '../integrations/planning-ingest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { SprintInputError } from '../integrations/sprint-dashboard';
 import type { DraftView } from '../integrations/sprint-draft';
 import { StoryboardMissing } from '../integrations/storyboard';
@@ -72,4 +74,16 @@ test('the routes sit behind the ingest token and answer {result}', async () => {
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test('the Planning chat opens with a first message that runs the kit skill sprint-planner with the sprint and its epics', () => {
+  assert.equal(planningChatTitle('QRD Sprint 27'), 'Planning-QRD Sprint 27');
+  const prompt = planningChatPrompt('QRD Sprint 27', ['QRD-1300', 'QRD-1233', 'QRD-1233']);
+  assert.equal(prompt.split('\n')[0], 'Pakai skill sprint-planner: QRD Sprint 27 epic QRD-1233, QRD-1300');
+  assert.match(prompt, /^Sprint: QRD Sprint 27$/m);
+  assert.match(prompt, /^Epic: QRD-1233, QRD-1300$/m);
+  assert.equal(planningChatPrompt('QRD Sprint 27', []).split('\n')[0], 'Pakai skill sprint-planner: QRD Sprint 27');
+  // Opened like the Plan-<sprint> map session: a workspace session, then the prompt as its first message.
+  const resolvers = readFileSync(path.join(__dirname, '../resolvers/index.ts'), 'utf8');
+  assert.match(resolvers, /openPlanningChat: async[\s\S]{0,400}runSousPrompt\(planningChatTitle\(name\), planningChatPrompt\(name, epics\)\)/);
 });
