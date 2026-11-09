@@ -285,8 +285,8 @@ const QaPanel: React.FC<{ draft: SprintDraft; busy: boolean; onDecide: (id: stri
 };
 
 const PublishDialog: React.FC<{
-  open: boolean; changes: DraftChange[] | null; results: PublishResult[] | null; loading: boolean; publishing: boolean; error: string | null; onConfirm: () => void; onClose: () => void;
-}> = ({ open, changes, results, loading, publishing, error, onConfirm, onClose }) => {
+  open: boolean; sprint: string; changes: DraftChange[] | null; results: PublishResult[] | null; loading: boolean; publishing: boolean; error: string | null; onConfirm: () => void; onClose: () => void;
+}> = ({ open, sprint, changes, results, loading, publishing, error, onConfirm, onClose }) => {
   const id = useId();
   const count = changes ? changeCount(changes) : 0;
   return (
@@ -298,17 +298,17 @@ const PublishDialog: React.FC<{
         {results ? (
           <ul className="mt-3 max-h-[50vh] overflow-y-auto">
             {results.map((result) => (
-              <li key={result.key} className="flex flex-wrap items-baseline gap-2 border-b border-border py-2 text-[0.8rem] last:border-b-0">
+              <li key={`${result.kind}|${result.key}`} className="flex flex-wrap items-baseline gap-2 border-b border-border py-2 text-[0.8rem] last:border-b-0">
                 <span className="font-mono font-semibold">{result.key}</span>
-                <span className={cn(chip, result.status === 'updated' ? TONE.ok : TONE.conflict)}>{result.status}</span>
+                <span className={cn(chip, result.status === 'updated' ? TONE.ok : result.status === 'skipped' ? TONE.none : TONE.conflict)}>{result.status}</span>
                 {result.detail && <span className="text-muted-foreground">{result.detail}</span>}
               </li>
             ))}
-            {results.length === 0 && <li className="py-2 text-sm text-muted-foreground">Jira already matched the plan; nothing was written.</li>}
+            {!results.some((result) => result.kind === 'ticket') && <li className="py-2 text-sm text-muted-foreground">Jira already matched the plan; no ticket field was written.</li>}
           </ul>
         ) : changes && (
           <>
-            <p className="mt-2 text-pretty text-sm text-muted-foreground">Only what differs from Jira now is written: AC lines and assignees. A ticket whose AC changed in Jira since it was loaded is skipped.</p>
+            <p className="mt-2 text-pretty text-sm text-muted-foreground">Only what differs from Jira now is written: AC lines and assignees. A ticket whose AC changed in Jira since it was loaded is skipped. The Confluence page "Sprint contract {sprint}" is written too, under the parent page set in Settings › Jira.</p>
             <ul className="mt-3 max-h-[50vh] overflow-y-auto">
               {changes.map((change) => (
                 <li key={change.key} className="border-b border-border py-2 text-[0.8rem] last:border-b-0">
@@ -322,13 +322,13 @@ const PublishDialog: React.FC<{
                   {change.acAdded.map((line) => <p key={`+${line}`} className="mt-1 flex gap-1.5 text-pretty text-status-merged"><Plus size={13} className="mt-0.5 flex-none" aria-hidden="true" />{line}</p>)}
                 </li>
               ))}
-              {changes.length === 0 && <li className="py-2 text-sm text-muted-foreground">Jira already matches the plan.</li>}
+              {changes.length === 0 && <li className="py-2 text-sm text-muted-foreground">Jira tickets already match the plan.</li>}
             </ul>
           </>
         )}
         <div className="mt-6 flex justify-end gap-2">
           <Button onClick={onClose} disabled={publishing}>{results ? 'Close' : 'Cancel'}</Button>
-          {!results && <Button variant="primary" onClick={onConfirm} disabled={publishing || loading || !changes || count === 0}><Send size={14} aria-hidden="true" />{publishing ? 'Publishing...' : `Publish ${count} ${count === 1 ? 'ticket' : 'tickets'}`}</Button>}
+          {!results && <Button variant="primary" onClick={onConfirm} disabled={publishing || loading || !changes}><Send size={14} aria-hidden="true" />{publishing ? 'Publishing...' : count ? `Publish ${count} ${count === 1 ? 'ticket' : 'tickets'}` : 'Publish'}</Button>}
         </div>
       </Card>
     </Dialog>
@@ -435,6 +435,7 @@ export const PlanningTab: React.FC = () => {
       )}
       <PublishDialog
         open={publishOpen}
+        sprint={draft?.sprint ?? ''}
         changes={previewing.loading ? null : previewing.data?.previewSprintDraftPublish ?? null}
         results={results}
         loading={previewing.loading}

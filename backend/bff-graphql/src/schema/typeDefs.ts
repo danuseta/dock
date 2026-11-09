@@ -195,6 +195,8 @@ export const typeDefs = gql`
     ownerReplySession: String!
     """JSON: the volume and, per event, whether it notifies and with which bundled sound."""
     notificationPrefs: String!
+    """Confluence page id the sprint contract page of Planning goes under; null skips the page."""
+    planningConfluenceParent: String
   }
 
   type DiscordAttachment {
@@ -668,6 +670,9 @@ export const typeDefs = gql`
   """The outcome of Publish for one ticket: updated, refused or failed."""
   type SprintDraftPublishResult {
     key: String!
+    "ticket, or contract for the Confluence page"
+    kind: String!
+    "updated, refused, failed or skipped"
     status: String!
     detail: String
   }
@@ -1340,6 +1345,7 @@ export const typeDefs = gql`
     chatParallelTurns: String
     ownerReplySession: String
     notificationPrefs: String
+    planningConfluenceParent: String
   }
 
   input QuickLinkInput {

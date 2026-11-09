@@ -292,6 +292,7 @@ export const GET_SETTINGS = gql`
       chatParallelTurns
       ownerReplySession
       notificationPrefs
+      planningConfluenceParent
     }
   }
 `;
@@ -799,7 +800,7 @@ export const REFRESH_SPRINT_DRAFT_QA = gql`
 
 export const PUBLISH_SPRINT_DRAFT = gql`
   mutation PublishSprintDraft($sprint: String!) {
-    publishSprintDraft(sprint: $sprint) { key status detail }
+    publishSprintDraft(sprint: $sprint) { key kind status detail }
   }
 `;
 

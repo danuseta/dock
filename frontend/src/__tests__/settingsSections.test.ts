@@ -37,7 +37,7 @@ test('saved values start secrets blank and show a whole-minute interval in minut
 
 test('a section sends only its own keys, and General sends seconds', () => {
   assert.deepStrictEqual(sectionInput('general', { healthValue: '3', healthUnit: 'minutes' }), { serviceHealthRefreshSeconds: 180 });
-  assert.deepStrictEqual(Object.keys(sectionInput('jira', savedValues({}).jira)), ['jiraUrl', 'jiraEmail', 'jiraApiToken', 'jiraProjectKeys']);
+  assert.deepStrictEqual(Object.keys(sectionInput('jira', savedValues({}).jira)), ['jiraUrl', 'jiraEmail', 'jiraApiToken', 'jiraProjectKeys', 'planningConfluenceParent']);
 });
 
 test('errors belong to their own section only', () => {

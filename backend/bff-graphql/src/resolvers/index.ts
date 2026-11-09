@@ -635,7 +635,7 @@ export const resolvers = {
       sprintDraftService.decide(sprint, id, action, note ?? null, reporterName()).catch(planningError)
     ),
     refreshSprintDraftQa: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.refreshQa(sprint).catch(planningError),
-    publishSprintDraft: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.publish(sprint).catch(planningError),
+    publishSprintDraft: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.publish(sprint, reporterName()).catch(planningError),
     retroItemAction: async (_: unknown, { id, action, text }: { id: string; action: string; text?: string | null }) => {
       const item = await storageService.getRetroItem(id);
       if (!item) throw new GraphQLError('No such retro line', { extensions: { code: 'BAD_USER_INPUT' } });

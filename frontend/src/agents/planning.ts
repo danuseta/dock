@@ -17,7 +17,7 @@ export interface SprintDraft {
   tickets: DraftTicket[]; findings: DraftFinding[];
 }
 export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; refused: string | null }
-export interface PublishResult { key: string; status: string; detail: string | null }
+export interface PublishResult { key: string; kind: string; status: string; detail: string | null }
 
 export type PlanningPanel = 'team' | 'scope' | 'ac' | 'qa';
 export const UNASSIGNED = 'Unassigned';

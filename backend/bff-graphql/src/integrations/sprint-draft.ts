@@ -7,6 +7,7 @@ import type { PlanningIssue, PlanningSprint } from './jira-sprint';
 import { predictQa, type QaInputTicket, type QaPrediction, type QaRun } from './qa-predict';
 import { DEFAULT_SP_PER_DAY, DEFAULT_SPRINT_DAYS, scheduleSprint, workingDays, type ScheduledTicket } from './scope-cut';
 import { SprintInputError } from './sprint-dashboard';
+import { writeContract, type ContractClient } from './sprint-contract';
 import type { SprintDraftInput, SprintDraftTicketInput } from '../storage/service';
 
 export const SP_PER_DAY_KEY = 'planningSpPerDay';
@@ -60,7 +61,9 @@ export interface DraftView {
   landed: number;
 }
 export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; refused: string | null }
-export interface PublishResult { key: string; status: 'updated' | 'refused' | 'failed'; detail: string | null }
+/** One line of a publish: a ticket's AC and assignee, or the Confluence contract page. */
+export interface PublishResult { key: string; kind: 'ticket' | 'contract'; status: 'updated' | 'refused' | 'failed' | 'skipped'; detail: string | null }
+export interface ContractTarget { client: ContractClient | null; parentId: string | null }
 
 const parse = <T>(raw: string | null | undefined, fallback: T): T => {
   try { return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; }
@@ -220,6 +223,7 @@ export class SprintDraftService {
     private readonly jira: () => Promise<DraftJira>,
     private readonly predict: (tickets: QaInputTicket[]) => Promise<QaRun> = (tickets) => predictQa(tickets),
     private readonly now: () => Date = () => new Date(),
+    private readonly contract: () => Promise<ContractTarget> = async () => ({ client: null, parentId: null }),
   ) {}
 
   async sprints(): Promise<PlanningSprint[]> {
@@ -403,8 +407,8 @@ export class SprintDraftService {
     }).then((rows) => rows.filter(({ change }) => change.refused || change.assigneeTo || change.acRemoved.length || change.acAdded.length));
   }
 
-  /** Writes the previewed changes ticket by ticket. Held while a blocker has no decision. */
-  async publish(sprint: string): Promise<PublishResult[]> {
+  /** Writes the previewed changes ticket by ticket, then the contract page. Held while a blocker has no decision. */
+  async publish(sprint: string, by: string | null = null): Promise<PublishResult[]> {
     const view = (await this.view(sprint));
     if (!view) throw new SprintInputError(`No draft for ${sprint}; load it from Jira first`);
     if (!view.canPublish) throw new SprintInputError(`${view.blockers.length} AC line or QA prediction still needs a decision before publish`);
@@ -412,7 +416,7 @@ export class SprintDraftService {
     const results: PublishResult[] = [];
     for (const { change, final, dev, now } of await this.plannedChanges(sprint)) {
       if (change.refused) {
-        results.push({ key: change.key, status: 'refused', detail: change.refused });
+        results.push({ key: change.key, kind: 'ticket', status: 'refused', detail: change.refused });
         continue;
       }
       try {
@@ -432,14 +436,18 @@ export class SprintDraftService {
           update.jiraDev = dev;
         }
         await this.store.updateSprintDraftTicket(sprint, change.key, update);
-        results.push({ key: change.key, status: 'updated', detail: null });
+        results.push({ key: change.key, kind: 'ticket', status: 'updated', detail: null });
       } catch (error: any) {
         const status = error?.response?.status;
         const message = error instanceof Error ? error.message : String(error);
-        results.push({ key: change.key, status: 'failed', detail: status ? `Jira responded ${status}: ${message}` : message });
+        results.push({ key: change.key, kind: 'ticket', status: 'failed', detail: status ? `Jira responded ${status}: ${message}` : message });
       }
     }
-    if (results.every((result) => result.status === 'updated')) await this.store.updateSprintDraft(sprint, { status: 'published', publishedAt: this.now() });
+    const tickets = results.filter((result) => result.kind === 'ticket');
+    const target = await this.contract().catch((): ContractTarget => ({ client: null, parentId: null }));
+    const contract = await writeContract(target.client, target.parentId, (await this.view(sprint))!, by, this.now());
+    results.push({ key: 'Confluence', kind: 'contract', status: contract.status, detail: contract.detail });
+    if (tickets.every((result) => result.status === 'updated')) await this.store.updateSprintDraft(sprint, { status: 'published', publishedAt: this.now() });
     return results;
   }
 }

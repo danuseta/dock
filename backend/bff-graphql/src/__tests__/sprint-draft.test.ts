@@ -176,7 +176,7 @@ test('preview lists only what differs from Jira, and publish writes it in Jira f
   assert.deepEqual(jira.writes, [], 'preview writes nothing');
 
   const results = await service.publish('QRD Sprint 26');
-  assert.deepEqual(results.map((result) => [result.key, result.status]), [['QRD-1489', 'updated'], ['QRD-1511', 'updated'], ['QRD-1490', 'updated']]);
+  assert.deepEqual(results.map((result) => [result.key, result.status]), [['QRD-1489', 'updated'], ['QRD-1511', 'updated'], ['QRD-1490', 'updated'], ['Confluence', 'skipped']]);
   assert.deepEqual(jira.writes[0], ['assignee', 'QRD-1489', 'acc-danu']);
   assert.deepEqual(jira.writes[1], ['ac', 'QRD-1511', adf(para(text('Cursor shows', [{ type: 'strong' }])), bullets('Works after QRD-1363'))]);
   assert.deepEqual(jira.writes[2], ['ac', 'QRD-1490', '- Edits wait for the owner\n- Owner publishes\n- An Edit client sees the cursor (QRD-1490)']);
@@ -194,8 +194,9 @@ test('publish refuses a ticket whose AC changed in Jira since load and names an 
   assert.equal(preview.find((change) => change.key === 'QRD-1511')!.refused, 'The AC changed in Jira after it was loaded; load the sprint again');
   const results = await service.publish('QRD Sprint 26');
   assert.deepEqual(results, [
-    { key: 'QRD-1511', status: 'refused', detail: 'The AC changed in Jira after it was loaded; load the sprint again' },
-    { key: 'QRD-1490', status: 'failed', detail: 'No assignable Jira user is named Nobody' },
+    { key: 'QRD-1511', kind: 'ticket', status: 'refused', detail: 'The AC changed in Jira after it was loaded; load the sprint again' },
+    { key: 'QRD-1490', kind: 'ticket', status: 'failed', detail: 'No assignable Jira user is named Nobody' },
+    { key: 'Confluence', kind: 'contract', status: 'skipped', detail: 'No Confluence parent page is set (Settings planningConfluenceParent); the contract page was not written' },
   ]);
   assert.deepEqual(jira.writes, []);
   assert.equal(store.draft.status, 'draft');

@@ -1,7 +1,9 @@
 import { StorageService } from '../storage/service';
 import { JiraSprintClient, createJiraHttp } from './jira-sprint';
 import { SprintInputError, sprintDashboardService } from './sprint-dashboard';
-import { SprintDraftService, type DraftJira } from './sprint-draft';
+import { SprintDraftService, type ContractTarget, type DraftJira } from './sprint-draft';
+import { confluenceFrom } from './confluence';
+import { CONTRACT_PARENT_KEY } from './sprint-contract';
 
 const storage = new StorageService();
 
@@ -27,4 +29,13 @@ async function planningJira(): Promise<DraftJira> {
   };
 }
 
-export const sprintDraftService = new SprintDraftService(storage, planningJira);
+/** Confluence on the Jira site, and the page the contract goes under; no credentials leave the client null. */
+async function planningContract(): Promise<ContractTarget> {
+  const settings = await storage.getSettings();
+  const value = (key: string) => settings.find((setting) => setting.key === key)?.value?.trim() || '';
+  const credentials = { domain: value('jiraUrl'), email: value('jiraEmail'), apiToken: value('jiraApiToken') };
+  const ready = credentials.domain && credentials.email && credentials.apiToken;
+  return { client: ready ? confluenceFrom(credentials) : null, parentId: value(CONTRACT_PARENT_KEY) || null };
+}
+
+export const sprintDraftService = new SprintDraftService(storage, planningJira, undefined, undefined, planningContract);
