@@ -1041,3 +1041,11 @@ test('a "Ready for review" ledger line stops waiting on the owner once every pul
   const review = { ...row, payload: JSON.stringify({ ac: [], kind: 'review' }), waiting: 'Review request-change: tell the author' };
   assert.strictEqual(toOrchestration(review, now, [pr(1082, 'open')]).activity, 'WAITING', 'a review verdict still waits on the owner');
 });
+
+test('a review verdict carries readyForQa from the verdict or the ledger; a malformed one is no answer', () => {
+  const review = { ...ledger, kind: 'review' };
+  assert.deepStrictEqual(parseLedger({ ...review, verdict: { value: 'approve', readyForQa: { ready: false, reasons: ['AC 3 has no path:line', '', 7] } } }).readyForQa, { ready: false, reasons: ['AC 3 has no path:line'] });
+  assert.deepStrictEqual(parseLedger({ ...review, readyForQa: { ready: true } }).readyForQa, { ready: true, reasons: [] });
+  assert.strictEqual(parseLedger({ ...review, verdict: { value: 'approve', readyForQa: { ready: 'yes' } } }).readyForQa, null);
+  assert.strictEqual(parseLedger(review).readyForQa, null);
+});

@@ -3,10 +3,17 @@
 export interface PlanningSprint { id: number; name: string; state: string; startDate: string | null; endDate: string | null }
 export interface DraftDecision { action: string; note: string | null; by: string | null; at: string }
 export interface QaPrediction { prediction: string; reasons: string[]; fix: string | null }
+export interface StoryboardFlag { version: number; frames: string[]; held: boolean; checked: DraftDecision | null }
+export interface DraftTc { id: string; ac: number; title: string; steps: string[]; expected: string }
 export interface DraftTicket {
   key: string; summary: string; dev: string | null; jiraDev: string | null; sp: number | null; wave: number; waveSet: boolean; status: string;
   ac: string[]; dependsOn: string[]; start: number; dur: number; end: number; inSprint: boolean; split: number[] | null;
-  prediction: QaPrediction | null; qaDecision: DraftDecision | null;
+  prediction: QaPrediction | null; qaDecision: DraftDecision | null; epic: string | null; frames: string[]; storyboard: StoryboardFlag | null;
+  tcs: DraftTc[]; tcStale: boolean; tcPending: boolean;
+}
+export interface StoryboardState {
+  epic: string; version: number | null; previous: number | null; path: string | null; page: string | null; frames: number; changed: string[];
+  changedAt: string | null; checkedAt: string; error: string | null;
 }
 export interface DraftFinding {
   id: string; key: string; line: number; text: string; refKey: string; kind: string; refEnd: number | null; ownEnd: number | null; decision: DraftDecision | null;
@@ -14,12 +21,22 @@ export interface DraftFinding {
 export interface SprintDraft {
   sprint: string; sprintId: number; status: string; sprintDays: number; startDate: string | null; spPerDay: number; createdBy: string | null;
   loadedAt: string; publishedAt: string | null; qaReason: string | null; devs: string[]; blockers: string[]; canPublish: boolean; landed: number;
-  tickets: DraftTicket[]; findings: DraftFinding[];
+  tickets: DraftTicket[]; findings: DraftFinding[]; storyboards: StoryboardState[]; questions: DraftQuestion[];
+}
+export interface DraftQuestion { id: string; text: string; key: string | null; askedAt: string; answered: boolean; answeredBy: string | null; answeredAt: string | null }
+
+/** The chat session Planning opens for a sprint; the planning agent and the kit find it by this title. */
+export const planningChatTitle = (sprint: string) => `Planning-${sprint}`;
+
+/** "3/9 answered", or null when the chat raised none. */
+export function questionsLine(questions: DraftQuestion[]): string | null {
+  if (!questions.length) return null;
+  return `${questions.filter((question) => question.answered).length}/${questions.length} answered`;
 }
 export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; refused: string | null }
-export interface PublishResult { key: string; status: string; detail: string | null }
+export interface PublishResult { key: string; kind: string; status: string; detail: string | null }
 
-export type PlanningPanel = 'team' | 'scope' | 'ac' | 'qa';
+export type PlanningPanel = 'team' | 'scope' | 'ac' | 'qa' | 'tc' | 'storyboard';
 export const UNASSIGNED = 'Unassigned';
 const LANE_COLORS = ['--color-accent', '--color-status-merged', '--color-status-discord', '--color-status-warn', '--color-status-open', '--color-status-draft', '--color-status-conflict'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -114,4 +131,39 @@ export const changeCount = (changes: DraftChange[]) => changes.filter((change) =
 export function parseWave(text: string): number | null {
   const value = Number(text.trim());
   return text.trim() !== '' && Number.isInteger(value) && value >= 0 && value <= 50 ? value : null;
+}
+
+/** The id a storyboard check is recorded under, as the BFF builds it. */
+export const storyboardDecisionId = (key: string, version: number) => `sb|${key}|v${version}`;
+
+/** One line on a storyboard: its version and what changed, or why there is none. */
+export function storyboardLine(board: StoryboardState): string {
+  if (board.error) return board.error;
+  if (board.version === null) return 'Not read yet';
+  const changed = board.previous === null ? 'first version saved' : board.changed.length ? `${board.changed.length} ${board.changed.length === 1 ? 'frame' : 'frames'} changed since v${board.previous}: ${board.changed.join(', ')}` : `no frame changed since v${board.previous}`;
+  return `v${board.version} · ${board.frames} frames · ${changed}`;
+}
+
+/** Tickets whose AC needs a check after a storyboard change and nobody marked it checked. */
+export const uncheckedStoryboard = (draft: Pick<SprintDraft, 'tickets'>) => draft.tickets.filter((ticket) => ticket.storyboard && !ticket.storyboard.checked);
+
+/** Test cases as the planner edits them: "TC-1 · AC 2 · Title", "- step" lines, "Expected: ...", a blank line between. */
+export function tcsToText(tcs: DraftTc[]): string {
+  return tcs.map((tc) => [`${tc.id} · AC ${tc.ac} · ${tc.title}`, ...tc.steps.map((step) => `- ${step}`), `Expected: ${tc.expected}`].join('\n')).join('\n\n');
+}
+
+/** The text back into test cases; an error names the block that does not read. */
+export function textToTcs(text: string): { tcs: DraftTc[]; error: string | null } {
+  const blocks = text.split(/\n\s*\n/).map((block) => block.trim()).filter(Boolean);
+  const tcs: DraftTc[] = [];
+  for (const [index, block] of blocks.entries()) {
+    const [head, ...rest] = block.split('\n').map((line) => line.trim());
+    const match = /^(TC-\d+)\s*[·|-]\s*AC\s*(\d+)\s*[·|-]\s*(.+)$/i.exec(head);
+    if (!match) return { tcs, error: `Test case ${index + 1}: the first line reads "TC-1 · AC 1 · Title"` };
+    const steps = rest.filter((line) => /^[-*]\s+/.test(line)).map((line) => line.replace(/^[-*]\s+/, ''));
+    const expected = rest.filter((line) => !/^[-*]\s+/.test(line)).join(' ').replace(/^expected:\s*/i, '').trim();
+    if (!expected) return { tcs, error: `${match[1].toUpperCase()}: add an "Expected: ..." line` };
+    tcs.push({ id: match[1].toUpperCase(), ac: Number(match[2]), title: match[3].trim(), steps, expected });
+  }
+  return { tcs, error: null };
 }

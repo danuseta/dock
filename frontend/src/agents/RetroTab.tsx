@@ -4,10 +4,13 @@ import { Check, Pencil, RotateCcw, Sparkles, X } from 'lucide-react';
 import { Button, Select, Textarea } from '../components/ui';
 import { GET_RETRO, GET_SPRINT_LIST, RETRO_BUILD, RETRO_ITEM_ACTION } from '../graphql/queries';
 import { cn } from '../lib/cn';
-import { RETRO_NUMBERS, numberDelta, type Retro, type RetroItem } from './retro';
+import { RETRO_NUMBERS, causeShare, numberDelta, type Retro, type RetroEscalations, type RetroItem } from './retro';
 
 const KIND_LABEL: Record<string, string> = { keep: 'Keep', problem: 'Problem', try: 'Try' };
-const DEST_LABEL: Record<string, string> = { kit: 'kit PR', memory: 'memory', dock: 'DOCK issue', note: 'note only' };
+const DEST_LABEL: Record<string, string> = { kit: 'kit PR', memory: 'memory', dock: 'DOCK issue', note: 'note only', 'qa-agent': 'QA bot triage rule (PR by a developer)' };
+const CAUSE_COLOR: Record<string, string> = {
+  dependency: 'var(--color-status-warn)', access: 'var(--color-status-discord)', data: 'var(--color-secondary-foreground)', environment: 'var(--color-status-conflict)', unspecified: 'var(--color-muted-foreground)',
+};
 const head = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
 
 const Line: React.FC<{ item: RetroItem; onAction: (id: string, action: string, text?: string) => Promise<void>; busy: boolean }> = ({ item, onAction, busy }) => {
@@ -24,7 +27,7 @@ const Line: React.FC<{ item: RetroItem; onAction: (id: string, action: string, t
         <p className="mt-1 text-[0.72rem] text-muted-foreground">{item.evidence.join(' · ')}</p>
         <p className="mt-1 font-mono text-[0.64rem] text-muted-foreground">
           goes to {DEST_LABEL[item.dest] ?? item.dest}
-          {item.status === 'accepted' && <span className="text-status-merged"> · accepted{item.sessionId ? ', sous is applying it' : ''}</span>}
+          {item.status === 'accepted' && <span className="text-status-merged"> · accepted{item.sessionId ? ', sous is applying it' : item.dest === 'qa-agent' ? ', open a PR to the QA bot repo with it' : ''}</span>}
           {item.status === 'closed' && <span> · closed</span>}
         </p>
       </div>
@@ -47,6 +50,32 @@ const Line: React.FC<{ item: RetroItem; onAction: (id: string, action: string, t
     </li>
   );
 };
+
+/** QA escalations of the whole team by cause, and the ones Planning did not see coming. */
+const Escalations: React.FC<{ escalations: RetroEscalations }> = ({ escalations }) => (
+  <section aria-label="QA escalations by cause" className="min-w-0">
+    <h3 className={head}>QA escalations by cause · team-wide <span className="font-medium normal-case tracking-normal">· {escalations.tickets} {escalations.tickets === 1 ? 'ticket' : 'tickets'}</span></h3>
+    {escalations.causes.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">No ticket of this sprint carries a QA escalation label.</p> : (
+      <ul className="mt-2">
+        {escalations.causes.map((row) => (
+          <li key={row.cause} className="grid grid-cols-[180px_minmax(0,1fr)_32px] items-center gap-3 border-b border-border py-2 text-[0.8rem] last:border-b-0 max-[760px]:grid-cols-[minmax(0,1fr)_32px]">
+            <span>{row.label}</span>
+            <span className="h-2 overflow-hidden rounded-pill bg-surface-2 max-[760px]:col-span-2 max-[760px]:row-start-2" aria-hidden="true"><span className="block h-full" style={{ width: `${causeShare(row.count, escalations.causes)}%`, background: CAUSE_COLOR[row.cause] }} /></span>
+            <span className="text-right font-mono tabular-nums">{row.count}</span>
+            <span className="col-span-3 break-words font-mono text-[0.64rem] text-muted-foreground max-[760px]:col-span-2">{row.tickets.join(' · ')}</span>
+          </li>
+        ))}
+      </ul>
+    )}
+    {!escalations.planned
+      ? <p className="mt-2 text-pretty text-[0.76rem] text-muted-foreground">This sprint was not planned in DOCK Planning, so there is no QA prediction to compare with.</p>
+      : escalations.unpredicted.length > 0 && (
+        <p className="mt-2 text-pretty text-[0.76rem] text-muted-foreground">
+          Planning did not predict {escalations.unpredicted.map((item) => item.key).join(', ')}. Each missed cause is proposed below as a triage rule for the QA bot.
+        </p>
+      )}
+  </section>
+);
 
 /** A sprint's retro of the agents' work: numbers against the sprint before, what recurred, each ticket, and sous's Keep / Problem / Try. */
 export const RetroTab: React.FC = () => {
@@ -86,7 +115,7 @@ export const RetroTab: React.FC = () => {
   const open = retro.items.filter((item) => item.status === 'open').length;
 
   return (
-    <div className="grid gap-5">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5">
       <div className="flex flex-wrap items-center gap-3">
         <Select aria-label="Sprint" className="w-[280px] max-[760px]:w-full" value={String(retro.sprintId)} onValueChange={(value) => setSprintId(Number(value))} options={options.length ? options : [{ value: String(retro.sprintId), label: retro.sprint }]} />
         <span className="text-sm text-muted-foreground">{retro.previous ? `compared with ${retro.previous}` : 'no earlier sprint to compare with'}</span>
@@ -145,6 +174,8 @@ export const RetroTab: React.FC = () => {
           )}
         </section>
       </div>
+
+      <Escalations escalations={retro.escalations} />
 
       <section aria-label="Keep, Problem, Try">
         <h3 className={head}>Keep · Problem · Try {retro.items.length > 0 && <span className="font-medium normal-case tracking-normal">· {open} waiting on you</span>}</h3>

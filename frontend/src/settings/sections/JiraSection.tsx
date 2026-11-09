@@ -72,6 +72,10 @@ export const JiraSection = ({ values, set, settings, test, onTested }: {
             </div>
           ) : <p className="text-pretty text-sm text-muted-foreground">{selected.length ? `Saved selection: ${selected.join(', ')}. ` : ''}{connected ? 'Jira returned no projects.' : 'Projects load once the account is saved.'}</p>}
       </SettingsCard>
+
+      <SettingsCard title="Sprint contract" caption="Publish in Agents › Sprint › Planning writes the page &quot;Sprint contract <sprint>&quot; under this Confluence page, in its space. Empty skips the page.">
+        <Field label="Parent page id"><Input className="font-mono" inputMode="numeric" placeholder="474742785" value={values.planningConfluenceParent} onChange={(event) => set('planningConfluenceParent', event.target.value.trim())} /></Field>
+      </SettingsCard>
     </div>
   );
 };

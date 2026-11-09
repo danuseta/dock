@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { agentsRoute } from '../agents/plan';
 import {
   UNASSIGNED, barPlace, changeCount, dayOf, decisionLabel, findingKindLabel, lanes, parseWave, predictionTone, publishHint, scopeSummary, sortFindings,
-  spanOf, waveRows, workingDayLabels, type DraftFinding, type DraftTicket,
+  planningChatTitle, questionsLine, spanOf, storyboardDecisionId, storyboardLine, tcsToText, textToTcs, waveRows, workingDayLabels, type DraftFinding, type DraftTicket,
 } from '../agents/planning';
 
 const ticket = (over: Partial<DraftTicket>): DraftTicket => ({
@@ -66,4 +68,41 @@ test('QA tone, publish hint, change count and wave input', () => {
     { key: 'B', assigneeFrom: null, assigneeTo: null, acRemoved: ['x'], acAdded: [], refused: 'AC changed' },
   ]), 1);
   assert.deepEqual(['2', '0', ' 3 ', '1.5', '', '-1', '51'].map(parseWave), [2, 0, 3, null, null, null, null]);
+});
+
+test('a storyboard line names its version and changed frames, or why there is none', () => {
+  const board = { epic: 'QRD-1233', version: 8, previous: 7, path: null, page: '11', frames: 62, changed: ['F7.3'], changedAt: null, checkedAt: '2026-11-09T00:00:00.000Z', error: null };
+  assert.equal(storyboardLine(board), 'v8 · 62 frames · 1 frame changed since v7: F7.3');
+  assert.equal(storyboardLine({ ...board, previous: null, changed: [] }), 'v8 · 62 frames · first version saved');
+  assert.equal(storyboardLine({ ...board, error: 'No Confluence page titled "Storyboard" for QRD-1233.' }), 'No Confluence page titled "Storyboard" for QRD-1233.');
+  assert.equal(storyboardDecisionId('QRD-1312', 8), 'sb|QRD-1312|v8');
+});
+
+test('Planning opens a Planning-<sprint> chat beside the panel, which polls the draft, and lists the open questions', () => {
+  assert.equal(planningChatTitle('QRD Sprint 27'), 'Planning-QRD Sprint 27');
+  assert.equal(questionsLine([]), null);
+  const question = { id: 'q1', text: 'Both tabs?', key: null, askedAt: 'a', answered: true, answeredBy: 'Alvin', answeredAt: 'b' };
+  assert.equal(questionsLine([question, { ...question, id: 'q2', answered: false }]), '1/2 answered');
+  const tab = readFileSync(fileURLToPath(new URL('../agents/PlanningTab.tsx', import.meta.url)), 'utf8');
+  assert.match(tab, /<PlanningChat sprint=\{chosen\.name\} \/>/);
+  assert.match(tab, /pollInterval: 10000/);
+  assert.match(tab, /xl:grid-cols-\[420px_minmax\(0,1fr\)\]/);
+  const chat = readFileSync(fileURLToPath(new URL('../agents/PlanningChat.tsx', import.meta.url)), 'utf8');
+  assert.match(chat, /h-\[620px\]/);
+  assert.match(chat, /xl:sticky/);
+  assert.match(chat, /<ChatThread /);
+  assert.match(chat, /OPEN_PLANNING_CHAT/);
+  assert.ok(chat.includes('create({ variables: { sprint } })'));
+});
+
+test('test cases read back from the text the planner edits', () => {
+  const tcs = [
+    { id: 'TC-1', ac: 2, title: 'Client sees the cursor', steps: ['Open as owner', 'Open as client'], expected: 'Both cursors show' },
+    { id: 'TC-2', ac: 3, title: 'No steps', steps: [], expected: 'Shown' },
+  ];
+  const text = tcsToText(tcs);
+  assert.equal(text.split('\n')[0], 'TC-1 · AC 2 · Client sees the cursor');
+  assert.deepEqual(textToTcs(text), { tcs, error: null });
+  assert.match(textToTcs('TC-1 AC 1 Title\nExpected: x').error ?? '', /first line reads/);
+  assert.match(textToTcs('tc-3 | AC 1 | Title\n- step').error ?? '', /TC-3: add an "Expected: \.\.\." line/);
 });

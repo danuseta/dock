@@ -195,6 +195,8 @@ export const typeDefs = gql`
     ownerReplySession: String!
     """JSON: the volume and, per event, whether it notifies and with which bundled sound."""
     notificationPrefs: String!
+    """Confluence page id the sprint contract page of Planning goes under; null skips the page."""
+    planningConfluenceParent: String
   }
 
   type DiscordAttachment {
@@ -617,6 +619,14 @@ export const typeDefs = gql`
     split: [Float!]
     prediction: QaPrediction
     qaDecision: SprintDraftDecision
+    epic: String
+    frames: [String!]!
+    storyboard: SprintDraftStoryboardFlag
+    tcs: [SprintDraftTc!]!
+    "A frame of the ticket changed in the storyboard after the test cases were written."
+    tcStale: Boolean!
+    "Publish posts the test cases: they differ from the last comment."
+    tcPending: Boolean!
   }
 
   """An AC line that names another ticket. kind is after-it (that ticket lands later), lands-first or outside-plan."""
@@ -649,6 +659,8 @@ export const typeDefs = gql`
     devs: [String!]!
     tickets: [SprintDraftTicket!]!
     findings: [SprintDraftFinding!]!
+    storyboards: [SprintStoryboard!]!
+    questions: [SprintDraftQuestion!]!
     blockers: [String!]!
     canPublish: Boolean!
     """Tickets already past merge (UAT CHECK and later): out of the schedule and the AC check."""
@@ -666,8 +678,120 @@ export const typeDefs = gql`
   }
 
   """The outcome of Publish for one ticket: updated, refused or failed."""
+  type SprintDriftDecision {
+    "move, not-tested, wait or needs-po"
+    action: String!
+    "moved, move-pending, not-tested, wait or needs-po"
+    state: String!
+    note: String
+    by: String
+    at: String!
+  }
+
+  "An AC line of one of the owner's tickets, in the published plan, that needs a ticket which has not landed."
+  type SprintDriftRow {
+    id: ID!
+    key: String!
+    line: Int!
+    text: String!
+    refKey: String!
+    refStatus: String
+    refDev: String
+    refEnd: Float
+    ownEnd: Float
+    "after-it, slipped (the ticket it needs is past its planned day) or outside-plan"
+    reason: String!
+    "held until the owner makes a call"
+    state: String!
+    decision: SprintDriftDecision
+  }
+
+  "An AC line a teammate offers to one of the owner's tickets (label ac-move-pending, comment QONFLO-AC-MOVE v1)."
+  type AcIn {
+    id: ID!
+    from: String!
+    to: String!
+    line: Int!
+    text: String!
+    by: String
+    at: String!
+  }
+
+  type SprintDriftStoryboard {
+    key: String!
+    version: Int!
+    frames: [String!]!
+    held: Boolean!
+    checked: Boolean!
+  }
+
+  type SprintDrift {
+    sprint: String!
+    publishedAt: String
+    "The working day of the sprint today, 1-based."
+    today: Int
+    rows: [SprintDriftRow!]!
+    "The owner's tickets naming a storyboard frame that changed in the newest version: their AC needs a check."
+    storyboard: [SprintDriftStoryboard!]!
+  }
+
+  "A ticket naming a frame (F<n>.<m>) that changed in the newest storyboard version."
+  type SprintDraftStoryboardFlag {
+    version: Int!
+    frames: [String!]!
+    "Work has not started, so the ticket waits for the check."
+    held: Boolean!
+    checked: SprintDraftDecision
+  }
+
+  "A draft test case; Publish posts a ticket's set as a QONFLO-TC v1 comment the QA bot reads."
+  type SprintDraftTc {
+    id: String!
+    "The AC line it checks, 1-based."
+    ac: Int!
+    title: String!
+    steps: [String!]!
+    expected: String!
+  }
+
+  input SprintDraftTcInput {
+    id: String!
+    ac: Int!
+    title: String!
+    steps: [String!]!
+    expected: String!
+  }
+
+  "A question the planning chat raised; the planner marks it answered."
+  type SprintDraftQuestion {
+    id: ID!
+    text: String!
+    key: String
+    askedAt: String!
+    answered: Boolean!
+    answeredBy: String
+    answeredAt: String
+  }
+
+  type SprintStoryboard {
+    epic: String!
+    version: Int
+    previous: Int
+    path: String
+    page: String
+    frames: Int!
+    changed: [String!]!
+    changedAt: String
+    checkedAt: String!
+    "Why there is no storyboard, such as no page or no HTML attachment."
+    error: String
+  }
+
   type SprintDraftPublishResult {
     key: String!
+    "ticket, tc for a QONFLO-TC comment, or contract for the Confluence page"
+    kind: String!
+    "updated, refused, failed or skipped"
     status: String!
     detail: String
   }
@@ -701,6 +825,31 @@ export const typeDefs = gql`
     updatedAt: String!
   }
 
+  type RetroEscalationCause {
+    "dependency, access, data, environment or unspecified"
+    cause: String!
+    label: String!
+    count: Int!
+    tickets: [String!]!
+  }
+
+  type RetroUnpredicted {
+    key: String!
+    summary: String!
+    causes: [String!]!
+    "What Planning predicted; null when it said nothing."
+    prediction: String
+  }
+
+  "QA escalations of the whole team in the sprint, by cause, from the QA labels on the sprint dashboard's tickets."
+  type RetroEscalations {
+    tickets: Int!
+    causes: [RetroEscalationCause!]!
+    unpredicted: [RetroUnpredicted!]!
+    "Whether the sprint was planned in DOCK Planning, so its predictions can be compared."
+    planned: Boolean!
+  }
+
   type Retro {
     sprint: String!
     sprintId: Int!
@@ -710,6 +859,7 @@ export const typeDefs = gql`
     problems: [RetroProblem!]!
     tickets: [RetroTicket!]!
     items: [RetroItem!]!
+    escalations: RetroEscalations!
   }
 
   type ThinkingRawLine {
@@ -1011,6 +1161,11 @@ export const typeDefs = gql`
     text: String!
   }
 
+  type ReadyForQa {
+    ready: Boolean!
+    reasons: [String!]!
+  }
+
   type Orchestration {
     key: ID!
     kind: String!
@@ -1039,6 +1194,8 @@ export const typeDefs = gql`
     findings: [OrchestrationFinding!]!
     lgtm: [OrchestrationLgtm!]!
     verdict: String
+    "The review runner's call on whether the ticket is ready for QA, with the reasons it is not."
+    readyForQa: ReadyForQa
     engine: String
     rounds: OrchestrationRounds
     stackedOn: OrchestrationStack
@@ -1340,6 +1497,7 @@ export const typeDefs = gql`
     chatParallelTurns: String
     ownerReplySession: String
     notificationPrefs: String
+    planningConfluenceParent: String
   }
 
   input QuickLinkInput {
@@ -1689,6 +1847,10 @@ export const typeDefs = gql`
     sprintDraft(sprint: String!): SprintDraft
     """The changes Publish would make, each ticket read from Jira again; writes nothing."""
     previewSprintDraftPublish(sprint: String!): [SprintDraftChange!]!
+    "The owner's held AC lines in the active sprint's published plan; null when it was not published from Planning."
+    sprintDrift: SprintDrift
+    "AC lines teammates offer to the owner's tickets, waiting for accept or decline."
+    acIncoming: [AcIn!]!
     """The tools, agents and thinking notes behind one Thinking row, from two minutes before it to until."""
     runThinkingRaw(key: String!, at: String!, until: String): [ThinkingRawLine!]!
     """A folder under the home of the workspace; no path is the home itself."""
@@ -1710,8 +1872,20 @@ export const typeDefs = gql`
     """Records a decision on a finding or a qa|KEY prediction; action clear removes it."""
     decideSprintDraft(sprint: String!, id: ID!, action: String!, note: String): SprintDraft!
     refreshSprintDraftQa(sprint: String!): SprintDraft!
+    "Reads the newest storyboard of each epic of the draft from Confluence and saves it under the blackboard."
+    checkSprintStoryboards(sprint: String!): SprintDraft!
+    "Marks an open question of the planning chat answered, or open again."
+    answerSprintDraftQuestion(sprint: String!, id: ID!, answered: Boolean!): SprintDraft!
+    "Replaces a ticket's draft test cases."
+    setSprintDraftTcs(sprint: String!, key: String!, tcs: [SprintDraftTcInput!]!): SprintDraft!
     """Writes AC lines and assignees that differ from Jira. Refused while a blocker has no decision."""
     publishSprintDraft(sprint: String!): [SprintDraftPublishResult!]!
+    "move, not-tested, wait, needs-po or clear on a held AC line of the owner's ticket."
+    sprintDriftAction(id: ID!, action: String!, note: String): SprintDrift!
+    "accept (adds the line to the AC of to) or decline (with a reason) an AC line a teammate offers."
+    acInAction(to: String!, id: ID!, action: String!, reason: String): [AcIn!]!
+    "Opens the chat session Planning-<sprint> on the workspace with a first message that runs the kit skill sprint-planner. Returns the session id."
+    openPlanningChat(sprint: String!): String!
     """accept, close, reopen or edit (with text). Accepting a line that goes to kit, memory or dock asks sous to apply it."""
     retroItemAction(id: ID!, action: String!, text: String): RetroItem!
     """A new folder under the home of the workspace. Secrets stay read only; file content goes through PUT /api/workspace/file."""

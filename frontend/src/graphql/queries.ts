@@ -292,6 +292,7 @@ export const GET_SETTINGS = gql`
       chatParallelTurns
       ownerReplySession
       notificationPrefs
+      planningConfluenceParent
     }
   }
 `;
@@ -636,6 +637,7 @@ export const ORCHESTRATION_FIELDS = `
   findings { at severity text resolvedAt resolvedWhy }
   lgtm { at text }
   verdict
+  readyForQa { ready reasons }
   engine
   rounds { used max }
   stackedOn { key be { pr branch base retargetedAt } fe { pr branch base retargetedAt } }
@@ -699,6 +701,7 @@ export const GET_RETRO = gql`
       previousNumbers { tickets medianHours fixRounds replans ownerIssues medianOwnerWaitHours reviews requestChanges blockedWaits mergeConflicts stackedRebases }
       problems { label count tickets }
       tickets { key title kind hours rounds issues ownerWaitHours result }
+      escalations { tickets planned causes { cause label count tickets } unpredicted { key summary causes prediction } }
       items { id kind text evidence dest status sessionId updatedAt }
     }
   }
@@ -751,8 +754,13 @@ export const SPRINT_DRAFT_FIELDS = `
     key summary dev jiraDev sp wave waveSet status ac dependsOn start dur end inSprint split
     prediction { prediction reasons fix }
     qaDecision { action note by at }
+    epic frames
+    storyboard { version frames held checked { action note by at } }
+    tcs { id ac title steps expected } tcStale tcPending
   }
   findings { id key line text refKey kind refEnd ownEnd decision { action note by at } }
+  storyboards { epic version previous path page frames changed changedAt checkedAt error }
+  questions { id text key askedAt answered answeredBy answeredAt }
 `;
 
 export const GET_PLANNING_SPRINTS = gql`
@@ -797,9 +805,63 @@ export const REFRESH_SPRINT_DRAFT_QA = gql`
   }
 `;
 
+export const SPRINT_DRIFT_FIELDS = `
+  sprint publishedAt today
+  rows { id key line text refKey refStatus refDev refEnd ownEnd reason state decision { action state note by at } }
+  storyboard { key version frames held checked }
+`;
+
+export const OPEN_PLANNING_CHAT = gql`
+  mutation OpenPlanningChat($sprint: String!) {
+    openPlanningChat(sprint: $sprint)
+  }
+`;
+
+export const GET_AC_INCOMING = gql`
+  query GetAcIncoming {
+    acIncoming { id from to line text by at }
+  }
+`;
+
+export const AC_IN_ACTION = gql`
+  mutation AcInAction($to: String!, $id: ID!, $action: String!, $reason: String) {
+    acInAction(to: $to, id: $id, action: $action, reason: $reason) { id from to line text by at }
+  }
+`;
+
+export const GET_SPRINT_DRIFT = gql`
+  query GetSprintDrift {
+    sprintDrift { ${SPRINT_DRIFT_FIELDS} }
+  }
+`;
+
+export const SPRINT_DRIFT_ACTION = gql`
+  mutation SprintDriftAction($id: ID!, $action: String!, $note: String) {
+    sprintDriftAction(id: $id, action: $action, note: $note) { ${SPRINT_DRIFT_FIELDS} }
+  }
+`;
+
+export const SET_SPRINT_DRAFT_TCS = gql`
+  mutation SetSprintDraftTcs($sprint: String!, $key: String!, $tcs: [SprintDraftTcInput!]!) {
+    setSprintDraftTcs(sprint: $sprint, key: $key, tcs: $tcs) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const ANSWER_SPRINT_DRAFT_QUESTION = gql`
+  mutation AnswerSprintDraftQuestion($sprint: String!, $id: ID!, $answered: Boolean!) {
+    answerSprintDraftQuestion(sprint: $sprint, id: $id, answered: $answered) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const CHECK_SPRINT_STORYBOARDS = gql`
+  mutation CheckSprintStoryboards($sprint: String!) {
+    checkSprintStoryboards(sprint: $sprint) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
 export const PUBLISH_SPRINT_DRAFT = gql`
   mutation PublishSprintDraft($sprint: String!) {
-    publishSprintDraft(sprint: $sprint) { key status detail }
+    publishSprintDraft(sprint: $sprint) { key kind status detail }
   }
 `;
 

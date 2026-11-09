@@ -3,7 +3,9 @@
 import { OrchestratorInputError, type Orchestration } from './orchestrator';
 
 export const RETRO_KINDS = ['keep', 'problem', 'try'] as const;
-export const RETRO_DESTS = ['kit', 'memory', 'dock', 'note'] as const;
+export const RETRO_DESTS = ['kit', 'memory', 'dock', 'note', 'qa-agent'] as const;
+/** Lines that go to the QA bot's repo are its owner's to apply; DOCK never opens a session or a PR for them. */
+export const MANUAL_DESTS: readonly string[] = ['note', 'qa-agent'];
 export type RetroKind = typeof RETRO_KINDS[number];
 export type RetroDest = typeof RETRO_DESTS[number];
 export interface RetroDraftItem { kind: RetroKind; text: string; evidence: string[]; dest: RetroDest }
@@ -108,4 +110,79 @@ export function parseRetroDraft(input: unknown): { sprint: string; items: RetroD
 /** What DOCK asks sous to do when the owner accepts a line that has somewhere to go. */
 export function retroApplyPrompt(item: { id: string; text: string; dest: string; evidence: string[] }): string {
   return [`Pakai skill sous: retro apply ${item.id}`, `Dest: ${item.dest}`, `Text: ${item.text}`, `Evidence: ${item.evidence.join('; ')}`].join('\n');
+}
+
+// ---- QA escalations by cause ---------------------------------------------------------------------------------------
+// The QA bot labels a ticket it could not pass: QA-BLOCKED-<REASON> (blockedReason dependency, access, data,
+// environment), QA-MANUAL for access, QA-ESCALATED for a mix. The retro counts them for the whole team from the sprint
+// dashboard's tickets, and an escalation Planning did not predict becomes a triage rule to propose to the QA bot.
+
+export const ESCALATION_CAUSES = ['dependency', 'access', 'data', 'environment', 'unspecified'] as const;
+export type EscalationCause = typeof ESCALATION_CAUSES[number];
+export interface EscalationCauseRow { cause: EscalationCause; label: string; count: number; tickets: string[] }
+export interface UnpredictedEscalation { key: string; summary: string; causes: EscalationCause[]; prediction: string | null }
+export interface RetroEscalations { tickets: number; causes: EscalationCauseRow[]; unpredicted: UnpredictedEscalation[]; planned: boolean }
+interface EscalationIssue { key: string; summary?: string; labels?: string[]; events?: Array<{ field: string; to: string | null }> }
+
+export const CAUSE_LABEL: Record<EscalationCause, string> = {
+  dependency: 'AC needs another ticket', access: 'QA bot has no access', data: 'Test data not prepared', environment: 'Environment not ready', unspecified: 'Escalated, cause not given',
+};
+
+/** A proposed triage rule per cause, phrased as what predict.mjs should answer. */
+export const TRIAGE_RULE: Record<EscalationCause, string> = {
+  dependency: 'Triage rule: an AC line that names another ticket, or a flow another ticket builds, that is not in UAT when this ticket reaches QA predicts ESCALATED (blockedReason dependency).',
+  access: 'Triage rule: an AC that needs an account, a second user, a channel or a third-party API the QA bot does not hold predicts ESCALATED (blockedReason access).',
+  data: 'Triage rule: an AC that needs data the UI cannot create (published items, seeded records, past dates) predicts ESCALATED (blockedReason data) unless the ticket names a fixture.',
+  environment: 'Triage rule: an AC that needs a service, flag or config UAT does not have predicts ESCALATED (blockedReason environment).',
+  unspecified: 'Triage rule: the QA bot labels every Blocked line with its blockedReason, so an escalation can be predicted next sprint.',
+};
+
+/** The causes a QA label names, upper or lower case. */
+export function labelCauses(label: string): EscalationCause[] {
+  const value = label.trim().toUpperCase().replace(/_/g, '-');
+  const blocked = /^QA-BLOCKED-(DEPENDENCY|ACCESS|DATA|ENV|ENVIRONMENT)$/.exec(value);
+  if (blocked) return [blocked[1] === 'ENV' ? 'environment' : blocked[1].toLowerCase() as EscalationCause];
+  if (value === 'QA-MANUAL') return ['access'];
+  if (value === 'QA-ESCALATED' || value === 'QA-BLOCKED') return ['unspecified'];
+  return [];
+}
+
+/** Every label a ticket held during the sprint: the ones it has now and the ones a label change added. */
+function sprintLabels(issue: EscalationIssue): string[] {
+  const added = (issue.events || []).filter((event) => event.field === 'labels' && event.to).flatMap((event) => String(event.to).split(/\s+/));
+  return [...new Set([...(issue.labels || []), ...added].filter(Boolean))];
+}
+
+export function qaEscalations(issues: EscalationIssue[], predictions: Map<string, string | null> | null): RetroEscalations {
+  const byCause = new Map<EscalationCause, Set<string>>();
+  const unpredicted: UnpredictedEscalation[] = [];
+  let tickets = 0;
+  for (const issue of issues) {
+    let causes = [...new Set(sprintLabels(issue).flatMap(labelCauses))];
+    if (!causes.length) continue;
+    // A ticket with a named cause is not also counted as unspecified for its QA-ESCALATED label.
+    if (causes.length > 1) causes = causes.filter((cause) => cause !== 'unspecified');
+    tickets += 1;
+    for (const cause of causes) byCause.set(cause, (byCause.get(cause) ?? new Set()).add(issue.key));
+    const prediction = predictions?.has(issue.key) ? predictions.get(issue.key) ?? null : null;
+    if (predictions && prediction !== 'ESCALATED') unpredicted.push({ key: issue.key, summary: issue.summary ?? issue.key, causes, prediction });
+  }
+  return {
+    tickets,
+    causes: ESCALATION_CAUSES.filter((cause) => byCause.has(cause)).map((cause) => ({ cause, label: CAUSE_LABEL[cause], count: byCause.get(cause)!.size, tickets: [...byCause.get(cause)!].sort() }))
+      .sort((a, b) => b.count - a.count),
+    unpredicted: unpredicted.sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true })),
+    planned: !!predictions,
+  };
+}
+
+/** One proposed triage rule per cause Planning missed, with the tickets as evidence. */
+export function triageSuggestions(escalations: RetroEscalations): Array<{ kind: 'try'; text: string; evidence: string[]; dest: 'qa-agent' }> {
+  const causes = ESCALATION_CAUSES.filter((cause) => escalations.unpredicted.some((item) => item.causes.includes(cause)));
+  return causes.map((cause) => ({
+    kind: 'try' as const,
+    text: TRIAGE_RULE[cause],
+    evidence: escalations.unpredicted.filter((item) => item.causes.includes(cause)).map((item) => `${item.key} escalated (${cause}); Planning predicted ${item.prediction ?? 'nothing'}`).slice(0, 10),
+    dest: 'qa-agent' as const,
+  }));
 }
