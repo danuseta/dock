@@ -637,6 +637,7 @@ export const ORCHESTRATION_FIELDS = `
   findings { at severity text resolvedAt resolvedWhy }
   lgtm { at text }
   verdict
+  readyForQa { ready reasons }
   engine
   rounds { used max }
   stackedOn { key be { pr branch base retargetedAt } fe { pr branch base retargetedAt } }

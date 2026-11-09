@@ -63,6 +63,7 @@ export interface AgentRun {
   findings?: { at: string; severity: string; text: string; resolvedAt?: string | null; resolvedWhy?: string | null }[];
   lgtm?: { at: string; text: string }[];
   verdict?: 'approve' | 'request-change' | null;
+  readyForQa?: { ready: boolean; reasons: string[] } | null;
   engine?: string | null;
   rounds?: { used: number; max: number } | null;
   stackedOn?: AgentStack | null;
@@ -305,3 +306,11 @@ const SEVERITY_ORDER = ['blocker', 'non-blocking', 'nit'];
 export const reviewFindings = <T extends { severity: string }>(findings: T[]): T[] => (
   [...findings].sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity))
 );
+
+/** The QA readiness chip beside a review verdict: Ready for QA, or why it is not; null before the reviewer says. */
+export function readyForQaChip(run: Pick<AgentRun, 'kind' | 'verdict' | 'readyForQa'>): { text: string; ready: boolean; reasons: string[] } | null {
+  if (run.kind !== 'review' || !run.readyForQa) return null;
+  const { ready, reasons } = run.readyForQa;
+  if (ready) return { text: 'Ready for QA', ready, reasons };
+  return { text: run.verdict === 'approve' ? 'Pass · not ready for QA' : 'Not ready for QA', ready, reasons };
+}

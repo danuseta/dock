@@ -52,3 +52,13 @@ test('the session inspector runs APPROVE_REVIEW and shows the verdict badge, hid
   assert.match(inspector, /!monitorsOnly\(mode\)/);
   assert.match(readFileSync(new URL('../pages/AgentsPage.tsx', import.meta.url), 'utf8'), /from '\.\.\/agents\/lgtm'/);
 });
+
+test('a review verdict shows Ready for QA, or Pass · not ready for QA with the reasons', () => {
+  const pass = renderToStaticMarkup(<VerdictBadge run={{ kind: 'review', verdict: 'approve', blockers: 0, readyForQa: { ready: false, reasons: ['QRD-1489 is not in UAT'] } }} />);
+  assert.match(pass, />LGTM</);
+  assert.match(pass, />Pass · not ready for QA</);
+  assert.match(pass, /title="QRD-1489 is not in UAT"/);
+  assert.match(pass, /<li>QRD-1489 is not in UAT<\/li>/);
+  assert.match(renderToStaticMarkup(<VerdictBadge run={{ kind: 'review', verdict: 'approve', blockers: 0, readyForQa: { ready: true, reasons: [] } }} />), />Ready for QA</);
+  assert.match(renderToStaticMarkup(<VerdictBadge run={{ kind: 'review', verdict: null, blockers: 0, readyForQa: { ready: false, reasons: [] } }} />), />Not ready for QA</);
+});

@@ -101,6 +101,15 @@ export type ReviewVerdict = typeof REVIEW_VERDICTS[number];
 /** resolvedAt and resolvedWhy are set once the reviewer marks the finding as no longer applying; it is kept, not counted. */
 export interface LedgerFinding { at: string; severity: FindingSeverity; text: string; resolvedAt: string | null; resolvedWhy: string | null }
 export interface LedgerLgtm { at: string; text: string }
+export interface ReadyForQa { ready: boolean; reasons: string[] }
+
+/** `readyForQa: { ready, reasons }` from the verdict, or from the ledger itself; anything else is no answer. */
+export function parseReadyForQa(input: Record<string, unknown>): ReadyForQa | null {
+  const raw = isRecord(input.verdict) && isRecord(input.verdict.readyForQa) ? input.verdict.readyForQa : isRecord(input.readyForQa) ? input.readyForQa : null;
+  if (!raw || typeof raw.ready !== 'boolean') return null;
+  const reasons = (Array.isArray(raw.reasons) ? raw.reasons : []).map((reason) => text(reason, 500)).filter(Boolean).slice(0, 20);
+  return { ready: raw.ready, reasons };
+}
 const MAX_FINDINGS = 50;
 
 export interface Ledger {
@@ -125,6 +134,8 @@ export interface Ledger {
   findings: LedgerFinding[];
   lgtm: LedgerLgtm[];
   verdict: ReviewVerdict | null;
+  /** Whether the reviewed ticket is ready for QA, with what stops it (AC without path:line, a dependency not in UAT, no test data). */
+  readyForQa: ReadyForQa | null;
   /** The ticket a review run approves and its pull requests, from the verdict; null and empty mean the ledger key and a lookup. */
   reviewTicket: string | null;
   reviewPrs: string[];
@@ -386,6 +397,7 @@ export function parseLedger(input: unknown, now = new Date()): Ledger {
     findings,
     lgtm,
     verdict,
+    readyForQa: parseReadyForQa(input),
     reviewTicket,
     reviewPrs,
     rounds: rounds(input.rounds),
@@ -648,6 +660,7 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     findings: Array.isArray(ledger.findings) ? ledger.findings : [],
     lgtm: Array.isArray(ledger.lgtm) ? ledger.lgtm : [],
     verdict: ledger.verdict ?? null,
+    readyForQa: ledger.readyForQa ?? null,
     reviewTicket: ledger.reviewTicket ?? null,
     reviewPrs: Array.isArray(ledger.reviewPrs) ? ledger.reviewPrs : [],
     rounds: ledger.rounds ?? null,

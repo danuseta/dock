@@ -1124,6 +1124,11 @@ export const typeDefs = gql`
     text: String!
   }
 
+  type ReadyForQa {
+    ready: Boolean!
+    reasons: [String!]!
+  }
+
   type Orchestration {
     key: ID!
     kind: String!
@@ -1152,6 +1157,8 @@ export const typeDefs = gql`
     findings: [OrchestrationFinding!]!
     lgtm: [OrchestrationLgtm!]!
     verdict: String
+    "The review runner's call on whether the ticket is ready for QA, with the reasons it is not."
+    readyForQa: ReadyForQa
     engine: String
     rounds: OrchestrationRounds
     stackedOn: OrchestrationStack
