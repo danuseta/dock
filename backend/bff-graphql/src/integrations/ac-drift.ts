@@ -6,6 +6,7 @@ import { acFindings, findingId, isDoneStatus, normalizeAcLine } from './ac-scope
 import type { PlanningIssue } from './jira-sprint';
 import { SprintInputError } from './sprint-dashboard';
 import { acValueLines, rewriteAcValue, type DraftJira, type DraftStore, type DraftView } from './sprint-draft';
+import { workingDayOf } from './scope-cut';
 import { MOVE_MARKER, MOVE_PENDING_LABEL, moveAnswer, moveId, type AcMoveJira } from './ac-move';
 
 export const DRIFT_ACTIONS = ['move', 'not-tested', 'wait', 'needs-po', 'clear'] as const;
@@ -40,16 +41,8 @@ const parse = <T>(raw: string | null | undefined, fallback: T): T => {
 const sameLines = (a: string[], b: string[]) => a.length === b.length && a.every((line, index) => line === b[index]);
 const sameName = (a: string | null | undefined, b: string | null | undefined) => !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
 
-/** The working day of the sprint `now` falls on, 1-based; null before the start or without one. */
-export function sprintDay(startDate: string | null, now: Date): number | null {
-  const start = startDate ? new Date(startDate) : null;
-  if (!start || Number.isNaN(start.getTime()) || now < start) return null;
-  let count = 0;
-  const day = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
-  const last = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  for (; day.getTime() <= last; day.setUTCDate(day.getUTCDate() + 1)) if (day.getUTCDay() !== 0 && day.getUTCDay() !== 6) count++;
-  return count || null;
-}
+/** The working day of the sprint `now` falls on, 1-based, on the +08:00 calendar; null before the start or without one. */
+export const sprintDay = (startDate: string | null, now: Date): number | null => workingDayOf(startDate, now, false);
 
 /** The held lines of the owner's tickets in the published plan, with what the owner already did about each. */
 export function driftRows(view: DraftView, jiraAc: Map<string, string[]>, ownerKeys: Set<string>, statuses: Map<string, string>, decisions: Record<string, DriftDecision>, today: number | null): DriftRow[] {

@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useState } from 'react';
 import { useLazyQuery, useMutation, useQuery } from '@apollo/client';
-import { ArrowRightLeft, Check, Clock, Download, EyeOff, FileSearch, Minus, Plus, RefreshCw, Scissors, Send, ShieldAlert, ShieldCheck, Undo2 } from 'lucide-react';
+import { ArrowRightLeft, Check, Clock, Download, EyeOff, FileSearch, Minus, Plus, RefreshCw, Scissors, Send, ShieldAlert, ShieldCheck, Undo2, X } from 'lucide-react';
 import { Button, Card, Dialog, Input, Select, Textarea } from '../components/ui';
 import { PlanningChat } from './PlanningChat';
 import {
@@ -9,7 +9,7 @@ import {
 } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import {
-  UNASSIGNED, barPlace, changeCount, dayOf, decisionLabel, findingKindLabel, lanes, parseWave, predictionTone, publishHint, scopeSummary, sortFindings,
+  UNASSIGNED, barPlace, changeCount, dayOf, decisionLabel, findingKindLabel, handOffs, landingDay, lanes, openQuestionsOf, parseWave, ranks, softColor, teamStats, waitersOf, predictionTone, publishHint, scopeSummary, sortFindings,
   questionsLine, spanOf, storyboardDecisionId, storyboardLine, tcsToText, textToTcs, uncheckedStoryboard, waveRows, workingDayLabels,
   type DraftChange, type DraftFinding, type DraftTc, type DraftTicket, type PlanningPanel, type PlanningSprint, type PublishResult, type SprintDraft,
 } from './planning';
@@ -161,76 +161,144 @@ const TcPanel: React.FC<{ draft: SprintDraft; busy: boolean; onSave: (key: strin
   </section>
 );
 
+const fmt = (value: number) => String(Math.round(value * 10) / 10);
+const plainSummary = (summary: string) => summary.replace(/^(\[[^\]]+\]\s*)+/, '');
+const HATCH = 'repeating-linear-gradient(135deg, transparent 0 5px, var(--color-border) 5px 6px)';
+
+/** The team map: load per developer, wave progress, the day-by-day board, each person's order of work and the hand-offs. */
 const TeamPanel: React.FC<{ draft: SprintDraft }> = ({ draft }) => {
+  const [picked, setPicked] = useState<string | null>(null);
   const span = spanOf(draft);
   const labels = workingDayLabels(draft.startDate, span);
   const rows = lanes(draft);
+  const colorOf = new Map(rows.map((lane) => [lane.dev, lane.color]));
+  const color = (dev: string | null) => colorOf.get(dev ?? UNASSIGNED) ?? 'var(--color-muted-foreground)';
   const waves = waveRows(draft);
+  const rank = ranks(draft.tickets);
+  const waiters = waitersOf(draft.tickets);
+  const questions = openQuestionsOf(draft.questions);
+  const stats = teamStats(draft);
+  const hand = handOffs(draft.tickets);
+  const byKey = new Map(draft.tickets.map((ticket) => [ticket.key, ticket]));
+  const pct = (days: number) => `${(days / span) * 100}%`;
+  const dateOf = (day: number) => labels[day - 1] ?? null;
+  const lands = (end: number) => { const day = landingDay(end); return `day ${day}${dateOf(day) ? ` · ${dateOf(day)}` : ''}`; };
+  const starts = (start: number) => { const day = Math.floor(start + 1e-9) + 1; return `day ${day}${dateOf(day) ? ` · ${dateOf(day)}` : ''}`; };
+  const after = (ticket: DraftTicket) => ticket.end > draft.sprintDays + 1e-9;
+  const today = draft.today && draft.today <= span ? draft.today : null;
+  const selected = picked ? byKey.get(picked) ?? null : null;
+  const waitsOn = selected ? selected.dependsOn.filter((key) => byKey.has(key)) : [];
+  const waiting = selected ? (waiters.get(selected.key) ?? []).map((ticket) => ticket.key) : [];
+  const zeroFloat = hand.filter((row) => row.float <= 0).length;
+  const asked = [...questions.keys()].filter((key) => byKey.has(key)).length;
+  const keyChip = (key: string, risk = false) => {
+    const ticket = byKey.get(key);
+    return <span key={key} className={cn('rounded-xs border bg-surface-0 px-1.5 py-px font-mono text-[0.64rem]', risk ? 'border-status-conflict text-status-conflict' : 'border-border text-secondary-foreground')}>{key}{ticket ? ` · ${ticket.dev ?? UNASSIGNED}` : ''}</span>;
+  };
+
   return (
-    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5">
-      <section aria-label="Load per developer">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6">
+      <section aria-label="Load per developer" className="min-w-0">
         <h3 className={head}>Team map · load per developer</h3>
-        <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2.5">
+        <p className="mt-2 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">
+          <b className="text-foreground">{stats.cards} cards, {stats.sp} SP</b> across <b className="text-foreground">{stats.devs} {stats.devs === 1 ? 'developer' : 'developers'}</b>, a target of <b className="text-foreground">{fmt(stats.target)} SP</b> each.{' '}
+          <b className="text-foreground">{stats.landCards} {stats.landCards === 1 ? 'card' : 'cards'} ({stats.landSp} SP)</b> land by day {draft.sprintDays}{dateOf(draft.sprintDays) ? ` (${dateOf(draft.sprintDays)})` : ''}. The heaviest and the lightest lane are <b className="text-foreground">{stats.spread} SP</b> apart.
+        </p>
+        <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[0.66rem] text-muted-foreground">
+          <span>1 SP = {fmt(1 / draft.spPerDay)} day</span>
+          {labels[0] && <span>day 1 = <b className="text-secondary-foreground">{labels[0]}</b></span>}
+          <span>sprint ends <b className="text-secondary-foreground">day {draft.sprintDays}</b></span>
+          {today && <span>today = <b className="text-accent">day {today}</b></span>}
+          <span><b className="text-secondary-foreground">{hand.length}</b> hand-offs</span>
+          <span><b className="text-secondary-foreground">{asked}</b> {asked === 1 ? 'card' : 'cards'} with open questions</span>
+        </p>
+        <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(min(170px,100%),1fr))] gap-2.5">
           {rows.map((lane) => (
-            <div key={lane.dev} className="rounded-md border border-border bg-surface-0 px-3 py-2.5">
-              <b className="block font-display text-[0.84rem]" style={{ color: lane.color }}>{lane.dev}</b>
-              <span className="font-mono text-[0.68rem] text-muted-foreground">{lane.sp} SP · {lane.tickets.length} tickets{lane.backlog ? ` · ${lane.backlog} backlog` : ''}</span>
+            <div key={lane.dev} className="min-w-0 rounded-md border border-border border-t-[3px] bg-surface-0 px-3 py-2.5" style={{ borderTopColor: lane.color }}>
+              <b className="block truncate font-display text-[0.9rem]" style={{ color: lane.color }}>{lane.dev}</b>
+              <p className="mt-1.5 font-mono text-[1.2rem] font-semibold tabular-nums">{lane.sp}<span className="text-[0.7rem] font-normal text-muted-foreground"> SP · {lane.tickets.length} {lane.tickets.length === 1 ? 'card' : 'cards'}</span></p>
+              <span className="relative mt-2 block h-1.5 overflow-hidden rounded-sm bg-surface-2" aria-hidden="true">
+                <span className="absolute inset-y-0 left-0" style={{ width: pct(lane.end), background: lane.color }} />
+                <span className="absolute -inset-y-0.5 w-0.5 bg-foreground" style={{ left: pct(draft.sprintDays) }} />
+              </span>
+              <p className="mt-2 text-[0.72rem] text-muted-foreground">Ends <b className="text-secondary-foreground">{lands(lane.end)}</b>. In sprint: <b className="text-secondary-foreground">{lane.inSprintSp} SP</b>.</p>
             </div>
           ))}
         </div>
       </section>
-      <section aria-label="Waves">
-        <h3 className={head}>Waves · release order</h3>
+
+      <section aria-label="Wave progress" className="min-w-0">
+        <h3 className={head}>Wave progress</h3>
+        <p className="mt-2 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">A wave is a card's depth in the Blocks chain: wave 1 waits on nothing in the plan, wave 2 waits on a wave 1 card. Each segment is one card at its scheduled days, in its owner's colour.</p>
         <ul className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
           {waves.map((row) => (
-            <li key={row.wave} className="grid grid-cols-[90px_minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-3 py-2 last:border-b-0 max-[760px]:grid-cols-[90px_minmax(0,1fr)]">
-              <span className="font-mono text-[0.72rem] font-bold">Wave {row.wave}<span className="block text-[0.62rem] font-normal text-muted-foreground">{row.count} tickets · {row.sp} SP</span></span>
-              <span className="relative h-[10px] overflow-hidden rounded-sm bg-surface-2" aria-hidden="true">
-                <span className="absolute inset-y-0 left-0 bg-accent/60" style={{ width: `${Math.min(100, (row.closes / span) * 100)}%` }} />
-                <span className="absolute inset-y-0 w-0.5 bg-foreground/60" style={{ left: `${(draft.sprintDays / span) * 100}%` }} />
+            <li key={row.wave} className="grid grid-cols-[90px_minmax(0,1fr)_150px] items-center gap-x-3 gap-y-1 border-b border-border px-3 py-2.5 last:border-b-0 max-[760px]:grid-cols-[76px_minmax(0,1fr)]">
+              <span className="font-mono text-[0.72rem] font-bold">Wave {row.wave}<span className="block text-[0.62rem] font-normal text-muted-foreground">{row.count} {row.count === 1 ? 'card' : 'cards'} · {row.sp} SP</span></span>
+              <span className="relative h-[22px] overflow-hidden rounded-sm bg-surface-2" aria-hidden="true">
+                {row.tickets.map((ticket) => (
+                  <span key={ticket.key} title={`${ticket.key} · ${ticket.dev ?? UNASSIGNED}`} className="absolute inset-y-[3px] rounded-[3px] opacity-85" style={{ left: pct(ticket.start), width: `max(2px, calc(${pct(ticket.dur)} - 1px))`, background: color(ticket.dev) }} />
+                ))}
+                <span className="absolute inset-y-0 w-0.5 bg-foreground" style={{ left: pct(draft.sprintDays) }} />
               </span>
-              <span className={cn('text-right font-mono text-[0.68rem] max-[760px]:col-span-2 max-[760px]:text-left', row.late ? 'text-status-conflict' : 'text-muted-foreground')}>
-                closes {dayOf(row.closes)}{row.late ? ' · after sprint' : ''}
+              <span className="text-right font-mono text-[0.68rem] text-secondary-foreground max-[760px]:col-span-2 max-[760px]:text-left">
+                closes day {landingDay(row.closes)}
+                <span className={cn('block text-[0.62rem]', row.late ? 'text-status-conflict' : 'text-muted-foreground')}>{row.late ? 'after the sprint' : 'inside the sprint'}{dateOf(landingDay(row.closes)) ? ` · ${dateOf(landingDay(row.closes))}` : ''}</span>
               </span>
             </li>
           ))}
         </ul>
       </section>
-      <section aria-label="Schedule">
+
+      <section aria-label="Schedule" className="min-w-0">
         <h3 className={head}>Schedule · every developer</h3>
+        <p className="mt-2 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">One row per developer from day 1. The tag is the owner's rank and the card's wave: <b className="text-foreground">#3·W2</b> is that person's third card, from wave 2. The hatched days are after the sprint. Click a card to see what it waits on and what waits on it.</p>
         <div className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
           <div className="overflow-x-auto">
-            <div style={{ minWidth: `${112 + span * 64}px` }}>
+            <div style={{ minWidth: `${112 + span * 58}px` }}>
               <div className="flex border-b border-border bg-surface-1 pl-[112px]">
                 {Array.from({ length: span }, (_, index) => (
-                  <div key={index} className={cn('flex-1 border-l border-border px-1.5 py-1.5 font-mono text-[0.6rem] text-muted-foreground', index >= draft.sprintDays && 'bg-surface-2')}>
-                    <b className="block text-secondary-foreground">D{index + 1}</b>{labels[index] ?? ''}
+                  <div key={index} className={cn('min-w-0 flex-1 overflow-hidden whitespace-nowrap border-l border-border px-1.5 py-1.5 font-mono text-[0.58rem] text-muted-foreground', today === index + 1 && 'text-accent')} style={index >= draft.sprintDays ? { backgroundImage: HATCH } : undefined}>
+                    <b className={cn('block', today === index + 1 ? 'text-accent' : 'text-secondary-foreground')}>D{index + 1}{today === index + 1 ? ' · today' : ''}</b>{labels[index] ?? ''}
                   </div>
                 ))}
               </div>
               {rows.map((lane) => (
-                <div key={lane.dev} className="flex min-h-[52px] border-b border-border last:border-b-0">
-                  <div className="w-[112px] flex-none border-r border-border px-3 py-2.5">
+                <div key={lane.dev} className="flex min-h-[58px] border-b border-border last:border-b-0">
+                  <div className="w-[112px] flex-none border-r border-border bg-surface-1 px-3 py-2.5">
                     <b className="block truncate font-display text-[0.84rem]" style={{ color: lane.color }}>{lane.dev}</b>
                     <span className="font-mono text-[0.6rem] text-muted-foreground">{lane.sp} SP</span>
                   </div>
                   <div className="relative flex-1">
-                    <span className="absolute inset-y-0 z-[1] w-0.5 bg-foreground/50" style={{ left: `${(draft.sprintDays / span) * 100}%` }} aria-hidden="true" />
+                    {Array.from({ length: span }, (_, index) => <span key={index} className="absolute inset-y-0 w-px bg-border/60" style={{ left: pct(index) }} aria-hidden="true" />)}
+                    <span className="absolute inset-y-0 z-[2] w-0.5 bg-foreground/75" style={{ left: pct(draft.sprintDays) }} aria-hidden="true" />
+                    {today && <span className="absolute inset-y-0 z-[2] w-0.5 bg-accent" style={{ left: pct(today - 1) }} aria-hidden="true" />}
                     {lane.tickets.map((ticket) => {
                       const place = barPlace(ticket, span);
-                      const flagged = draft.findings.some((finding) => finding.key === ticket.key && finding.kind === 'after-it');
+                      const asks = questions.get(ticket.key)?.length ?? 0;
+                      const isPicked = picked === ticket.key;
+                      const related = !selected || isPicked || waitsOn.includes(ticket.key) || waiting.includes(ticket.key);
                       return (
-                        <div
+                        <button
                           key={ticket.key}
-                          className={cn('absolute top-[7px] h-[38px] overflow-hidden rounded-[6px] border px-1.5 py-[3px]', !ticket.inSprint && 'opacity-60', flagged && 'shadow-[inset_3px_0_0_var(--color-status-warn)]')}
-                          style={{ left: `calc(${place.left} + 2px)`, width: `calc(${place.width} - 4px)`, borderColor: lane.color, background: `color-mix(in oklch, ${lane.color} 14%, transparent)` }}
-                          title={`${ticket.key} · ${ticket.summary} · ${dayOf(ticket.start + 0.001)} to ${dayOf(ticket.end)}`}
+                          type="button"
+                          aria-pressed={isPicked}
+                          onClick={() => setPicked(isPicked ? null : ticket.key)}
+                          className={cn(
+                            'absolute top-[9px] z-[3] h-10 overflow-hidden rounded-[7px] border px-1.5 py-1 text-left transition-[opacity,transform] hover:-translate-y-px',
+                            !related && 'opacity-25',
+                            isPicked && 'outline outline-2 outline-offset-1 outline-foreground',
+                          )}
+                          style={{
+                            left: `calc(${place.left} + 2px)`, width: `calc(${place.width} - 4px)`, borderColor: lane.color, background: softColor(lane.color),
+                            boxShadow: [asks ? 'inset 3px 0 0 var(--color-status-conflict)' : '', selected && waitsOn.includes(ticket.key) ? 'inset 0 0 0 2px var(--color-status-conflict)' : ''].filter(Boolean).join(', ') || undefined,
+                          }}
+                          title={`${ticket.key} · ${ticket.summary}`}
                         >
-                          <div className="flex justify-between gap-1 whitespace-nowrap font-mono text-[10px] font-semibold" style={{ color: lane.color }}>
-                            <span>{ticket.key.replace(/^[A-Z]+-/, '')}</span><span>W{ticket.wave}</span>
-                          </div>
-                          <div className="truncate text-[10px] leading-tight text-secondary-foreground">{ticket.summary}</div>
-                        </div>
+                          <span className="flex justify-between gap-1 whitespace-nowrap font-mono text-[10px] font-semibold" style={{ color: lane.color }}>
+                            <span>{ticket.key.replace(/^[A-Z]+-/, '')}</span><span className="opacity-75">#{rank.get(ticket.key)}·W{ticket.wave}</span>
+                          </span>
+                          <span className="line-clamp-2 block text-[10px] leading-tight text-secondary-foreground">{plainSummary(ticket.summary)}</span>
+                        </button>
                       );
                     })}
                   </div>
@@ -238,8 +306,110 @@ const TeamPanel: React.FC<{ draft: SprintDraft }> = ({ draft }) => {
               ))}
             </div>
           </div>
+          <div className="min-h-[72px] border-t border-border bg-surface-1 px-4 py-3" aria-live="polite">
+            {!selected ? (
+              <p className="font-mono text-[0.68rem] text-muted-foreground">Click a card to see its blockers, the cards waiting on it and its open questions.</p>
+            ) : (
+              <div className="grid gap-2">
+                <div className="flex items-start gap-2">
+                  <p className="min-w-0 flex-1 font-mono text-[0.68rem] text-muted-foreground">
+                    <b className="text-[0.74rem]" style={{ color: color(selected.dev) }}>{selected.key}</b> · {selected.dev ?? UNASSIGNED} · {selected.sp ?? '?'} SP · wave {selected.wave} · #{rank.get(selected.key)}
+                  </p>
+                  <Button size="sm" variant="ghost" onClick={() => setPicked(null)} aria-label="Close the card details"><X size={13} aria-hidden="true" /></Button>
+                </div>
+                <h4 className="text-balance font-display text-[0.95rem] font-semibold">{selected.summary}</h4>
+                <p className="text-pretty text-[0.8rem] text-secondary-foreground">Starts {starts(selected.start)}, lands {lands(selected.end)}.{after(selected) && <b className="text-foreground"> Runs past the sprint.</b>}</p>
+                <div className="flex flex-wrap gap-x-5 gap-y-2 text-[0.72rem] text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-1.5"><b className="font-mono text-[0.6rem] uppercase tracking-[0.07em]">Waits on</b>{waitsOn.length ? waitsOn.map((key) => keyChip(key, true)) : <span>nothing in the plan</span>}</div>
+                  <div className="flex flex-wrap items-center gap-1.5"><b className="font-mono text-[0.6rem] uppercase tracking-[0.07em]">Waiting on it</b>{waiting.length ? waiting.map((key) => keyChip(key)) : <span>nothing in the plan</span>}</div>
+                </div>
+                {(questions.get(selected.key) ?? []).length > 0 && (
+                  <div className="text-[0.76rem]">
+                    <b className="font-mono text-[0.6rem] uppercase tracking-[0.07em] text-status-conflict">Open questions</b>
+                    <ul className="mt-1 grid gap-1">{questions.get(selected.key)!.map((question) => <li key={question.id} className="text-pretty text-secondary-foreground">{question.text}</li>)}</ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
-        <p className="mt-1.5 text-[0.7rem] text-muted-foreground">1 SP = {1 / draft.spPerDay} day. The line marks the end of the sprint; bars past it are backlog.</p>
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[0.7rem] text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] border border-status-conflict bg-status-conflict-bg shadow-[inset_3px_0_0_var(--color-status-conflict)]" aria-hidden="true" />red left edge = open question</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-0.5 bg-foreground" aria-hidden="true" />end of the sprint</span>
+          {today && <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-0.5 bg-accent" aria-hidden="true" />today</span>}
+          <span className="inline-flex items-center gap-1.5"><span className="rounded-xs border border-secondary-foreground px-1 font-mono text-[0.6rem] font-semibold text-secondary-foreground">#1·W1</span>owner's first card, wave 1</span>
+          <span>1 SP = {fmt(1 / draft.spPerDay)} day</span>
+        </div>
+      </section>
+
+      <section aria-label="Order of work, per person" className="min-w-0">
+        <h3 className={head}>Order of work, per person</h3>
+        <p className="mt-2 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Work top to bottom; start days already respect blockers and wave order. The grey line names who waits on each card. Cards tagged <b className="text-foreground">after sprint</b> finish past day {draft.sprintDays}.</p>
+        <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(min(260px,100%),1fr))] gap-3">
+          {rows.map((lane) => (
+            <div key={lane.dev} className="min-w-0 rounded-md border border-border bg-surface-0 px-3.5 py-3">
+              <div className="flex items-baseline justify-between gap-2 border-b border-border pb-2">
+                <b className="truncate font-display text-[0.9rem]" style={{ color: lane.color }}>{lane.dev}</b>
+                <span className="flex-none font-mono text-[0.66rem] text-muted-foreground">{lane.sp} SP · ends day {landingDay(lane.end)}</span>
+              </div>
+              <ol>
+                {lane.tickets.map((ticket) => {
+                  const next = waiters.get(ticket.key) ?? [];
+                  const asks = questions.get(ticket.key)?.length ?? 0;
+                  return (
+                    <li key={ticket.key} className="flex gap-2.5 border-b border-dashed border-border py-2 last:border-b-0">
+                      <span className="w-4 flex-none pt-0.5 font-mono text-[0.62rem] text-muted-foreground">{rank.get(ticket.key)}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                          <span className="font-mono text-[0.7rem] font-semibold" style={{ color: lane.color }}>{ticket.key}</span>
+                          <span className="font-mono text-[0.62rem] text-muted-foreground">{ticket.sp ?? '?'} SP</span>
+                          <span className="rounded-xs border px-1 font-mono text-[0.58rem] font-semibold" style={{ borderColor: lane.color, color: lane.color }}>W{ticket.wave}</span>
+                          {asks > 0 && <span className="rounded-xs border border-status-conflict px-1 font-mono text-[0.58rem] font-semibold text-status-conflict">{asks} open Q</span>}
+                          {after(ticket) && <span className="rounded-xs border border-dashed border-muted-foreground px-1 font-mono text-[0.58rem] font-semibold text-muted-foreground">after sprint</span>}
+                        </p>
+                        <p className={cn('mt-0.5 text-pretty text-[0.78rem] leading-snug', after(ticket) ? 'text-secondary-foreground' : 'text-foreground')}>{plainSummary(ticket.summary)}</p>
+                        <p className="mt-1 text-pretty text-[0.68rem] text-muted-foreground">
+                          {starts(ticket.start)} to {lands(ticket.end)}. {next.length ? <>Waiting on it: <b className="text-secondary-foreground">{next.map((item) => `${item.key.replace(/^[A-Z]+-/, '')} ${item.dev ?? UNASSIGNED}`).join(', ')}</b></> : 'Nothing in the plan waits on it.'}
+                        </p>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section aria-label="Hand-offs" className="min-w-0">
+        <h3 className={head}>Hand-offs</h3>
+        <p className="mt-2 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">A hand-off is a blocker finished by one developer that unblocks a card of another. Float is how many days the finishing card can slip before the next one starts late. <b className="text-foreground">{hand.length} {hand.length === 1 ? 'hand-off' : 'hand-offs'}; {zeroFloat} with no float.</b></p>
+        {hand.length === 0 ? (
+          <p className="mt-2 text-sm text-muted-foreground">No card waits on another developer's card.</p>
+        ) : (
+          <div className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[520px] border-collapse text-[0.76rem]">
+                <thead>
+                  <tr className="border-b border-border bg-surface-1 text-left">
+                    {['Lands', 'Finishes', 'Unblocks', 'For', 'Float'].map((label) => <th key={label} className={cn(head, 'px-3 py-2 font-semibold')}>{label}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {hand.map((row) => (
+                    <tr key={`${row.from}|${row.to}`} className="border-b border-border align-top last:border-b-0">
+                      <td className="whitespace-nowrap px-3 py-2 font-mono text-[0.7rem] text-foreground">{lands(row.lands)}</td>
+                      <td className="px-3 py-2"><span className="font-mono font-semibold" style={{ color: color(row.fromDev) }}>{row.from}</span> <span className="font-semibold" style={{ color: color(row.fromDev) }}>{row.fromDev}</span></td>
+                      <td className="px-3 py-2 font-mono font-semibold" style={{ color: color(row.toDev) }}>{row.to}</td>
+                      <td className="px-3 py-2 font-semibold" style={{ color: color(row.toDev) }}>{row.toDev}</td>
+                      <td className={cn('whitespace-nowrap px-3 py-2 font-mono', row.float <= 0 ? 'font-semibold text-status-conflict' : 'text-secondary-foreground')}>{fmt(row.float)} d</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );

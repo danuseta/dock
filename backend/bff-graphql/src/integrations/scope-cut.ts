@@ -85,9 +85,10 @@ export function splitParts(sp: number | null): number[] | null {
  * Lays every ticket on its developer's lane. Order per developer: wave, then the ticket more tickets wait on, then the
  * larger one, then the key. A ticket starts when its developer is free and every dependency in the plan has ended.
  */
-export function scheduleSprint(tickets: ScopeTicket[], options: { sprintDays?: number; spPerDay?: number } = {}): ScheduledTicket[] {
+export function scheduleSprint(tickets: ScopeTicket[], options: { sprintDays?: number; spPerDay?: number; from?: number } = {}): ScheduledTicket[] {
   const sprintDays = options.sprintDays && options.sprintDays > 0 ? options.sprintDays : DEFAULT_SPRINT_DAYS;
   const spPerDay = options.spPerDay && options.spPerDay > 0 ? options.spPerDay : DEFAULT_SP_PER_DAY;
+  const from = options.from && options.from > 0 ? options.from : 0;
   const computed = computeWaves(tickets);
   const waveOf = (ticket: ScopeTicket) => (ticket.wave && ticket.wave > 0 ? ticket.wave : computed.get(ticket.key) || 1);
   const downstream = downstreamCounts(tickets);
@@ -112,7 +113,7 @@ export function scheduleSprint(tickets: ScopeTicket[], options: { sprintDays?: n
     const lane = ticket.dev || UNASSIGNED;
     queues.get(lane)!.shift();
     const depsEnd = Math.max(0, ...ticket.dependsOn.map((dep) => ends.get(dep) ?? 0));
-    const start = round(Math.max(free.get(lane) ?? 0, depsEnd));
+    const start = round(Math.max(free.get(lane) ?? from, depsEnd, from));
     const dur = round((ticket.sp && ticket.sp > 0 ? ticket.sp : 0) / spPerDay);
     const end = round(start + dur);
     ends.set(ticket.key, end);
@@ -122,17 +123,53 @@ export function scheduleSprint(tickets: ScopeTicket[], options: { sprintDays?: n
   return order.map((ticket) => placed.get(ticket.key)!);
 }
 
-/** Working days (Monday to Friday) from start to end, both included; null when either date is missing or unreadable. */
+/** DOCK's calendar is +08:00, as on the sprint dashboard: a day starts at 00:00 +08:00. */
+export const CALENDAR_OFFSET_HOURS = 8;
+const DAY_MS = 86_400_000;
+const OFFSET_MS = CALENDAR_OFFSET_HOURS * 3_600_000;
+/** How long after the previous sprint's end a late Start sprint click still counts from the day after that end. */
+const LATE_START_DAYS = 4;
+
+/** The +08:00 calendar day of an instant, as a day number (days since 1970-01-01). */
+const calendarDay = (time: number) => Math.floor((time + OFFSET_MS) / DAY_MS);
+const isWorkingDay = (day: number) => { const weekday = new Date(day * DAY_MS).getUTCDay(); return weekday !== 0 && weekday !== 6; };
+const nextWorkingDay = (day: number) => { let next = day; while (!isWorkingDay(next)) next++; return next; };
+const readTime = (value: string | null | undefined) => { const time = value ? Date.parse(value) : NaN; return Number.isNaN(time) ? null : time; };
+
+/** Working days (Monday to Friday) on the +08:00 calendar from start to end, both included; null when either date is missing or unreadable. */
 export function workingDays(startDate: string | null | undefined, endDate: string | null | undefined): number | null {
-  const start = startDate ? new Date(startDate) : null;
-  const end = endDate ? new Date(endDate) : null;
-  if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return null;
+  const start = readTime(startDate);
+  const end = readTime(endDate);
+  if (start === null || end === null || end < start) return null;
   let count = 0;
-  const day = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
-  const last = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
-  for (; day.getTime() <= last; day.setUTCDate(day.getUTCDate() + 1)) {
-    const weekday = day.getUTCDay();
-    if (weekday !== 0 && weekday !== 6) count++;
+  for (let day = calendarDay(start), last = calendarDay(end); day <= last; day++) if (isWorkingDay(day)) count++;
+  return count || null;
+}
+
+/**
+ * Day 1 of a sprint, as 00:00 +08:00 of that day. Jira's startDate is when someone pressed Start sprint, often the
+ * morning after the previous sprint closed; the plan's day 1 is the first working day after the previous sprint's end
+ * when that is earlier and at most a few days before the click. Null when the sprint has no start.
+ */
+export function planStart(startDate: string | null | undefined, previousEnd?: string | null): string | null {
+  const start = readTime(startDate);
+  if (start === null) return null;
+  let day = nextWorkingDay(calendarDay(start));
+  const end = readTime(previousEnd);
+  if (end !== null) {
+    const after = nextWorkingDay(calendarDay(end) + 1);
+    if (after < day && day - after <= LATE_START_DAYS) day = after;
   }
+  return new Date(day * DAY_MS - OFFSET_MS).toISOString();
+}
+
+/** The working day `now` falls on, counted from day 1 of the plan, 1-based; a weekend counts as the Monday after, or the Friday before when rollWeekend is false. Null before day 1. */
+export function workingDayOf(startDate: string | null | undefined, now: Date, rollWeekend = true): number | null {
+  const start = readTime(startDate);
+  if (start === null || now.getTime() < start) return null;
+  const first = calendarDay(start);
+  const today = rollWeekend ? nextWorkingDay(calendarDay(now.getTime())) : calendarDay(now.getTime());
+  let count = 0;
+  for (let day = first; day <= today; day++) if (isWorkingDay(day)) count++;
   return count || null;
 }

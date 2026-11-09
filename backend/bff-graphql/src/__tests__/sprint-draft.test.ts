@@ -41,6 +41,7 @@ function issue(key: string, over: Partial<PlanningIssue> = {}): PlanningIssue {
 }
 
 class FakeJira implements DraftJira {
+  previousSprintEnd?: DraftJira['previousSprintEnd'];
   writes: Array<[string, string, unknown]> = [];
   issues: PlanningIssue[];
   now = new Map<string, PlanningIssue>();
@@ -70,7 +71,7 @@ function setup(verdicts: Record<string, string> = {}) {
   ]);
   let seen: QaInputTicket[] = [];
   const predict = async (tickets: QaInputTicket[]) => { seen = tickets; return predictions(verdicts)(tickets); };
-  const service = new SprintDraftService(store, async () => jira, predict, () => new Date('2026-11-09T10:00:00Z'));
+  const service = new SprintDraftService(store, async () => jira, predict, () => new Date('2026-10-26T10:00:00Z'));
   return { store, jira, service, seen: () => seen };
 }
 
@@ -224,7 +225,7 @@ test('tickets already past merge stay out of the schedule and the AC check, and 
     issue('QRD-2', { status: 'ReadyForProduction', sp: 8 }),
     issue('QRD-3', { acRaw: '- Opens the page built in QRD-1\n- Works with QRD-2' }),
   ]);
-  const service = new SprintDraftService(store, async () => jira, predictions({}), () => new Date('2026-11-09T10:00:00Z'));
+  const service = new SprintDraftService(store, async () => jira, predictions({}), () => new Date('2026-10-26T10:00:00Z'));
   const view = await service.load(26, 'Danu');
   assert.deepEqual(view.tickets.map((ticket) => ticket.key), ['QRD-3']);
   assert.equal(view.landed, 2);
@@ -245,7 +246,7 @@ test('a frame changed in the newest storyboard flags the tickets naming it, Held
     if (epic === 'QRD-1300') throw new StoryboardMissing('No Confluence page titled "Storyboard" for QRD-1300.');
     return { epic, version: 8, previous: 7, path: '/b/QRD-1233/materials/storyboard/v8.html', page: '11', frames: [{ id: 'F7.3', text: '' }], changed: ['F7.3'] };
   };
-  const service = new SprintDraftService(store, async () => jira, predictions({}), () => new Date('2026-11-09T10:00:00Z'), undefined, storyboard);
+  const service = new SprintDraftService(store, async () => jira, predictions({}), () => new Date('2026-10-26T10:00:00Z'), undefined, storyboard);
   const view = await service.load(26, 'Alvin');
   const flag = (key: string) => view.tickets.find((ticket) => ticket.key === key)!.storyboard;
   assert.deepEqual(flag('QRD-1312'), { version: 8, frames: ['F7.3'], held: true, checked: null });
@@ -291,7 +292,7 @@ test('test cases are checked, kept across a load, posted once per new set as QON
   const again = await service.publish('QRD Sprint 26');
   assert.equal(again.filter((result) => result.kind === 'tc').length, 0, 'an unchanged set is not posted again');
 
-  store.draft.tickets.find((item: any) => item.key === 'QRD-1489').tcAt = new Date('2026-11-01T00:00:00Z');
+  store.draft.tickets.find((item: any) => item.key === 'QRD-1489').tcAt = new Date('2026-10-20T00:00:00Z');
   store.draft.tickets.find((item: any) => item.key === 'QRD-1489').epic = 'QRD-1233';
   store.draft.tickets.find((item: any) => item.key === 'QRD-1489').frames = JSON.stringify(['F7.3']);
   await service.applyStoryboard({ epic: 'QRD-1233', version: 2, previous: 1, path: 'p', page: '1', frames: [], changed: ['F7.3'] });
@@ -309,4 +310,15 @@ test('the test case comment starts with the QONFLO-TC v1 line and holds the JSON
   assert.deepEqual(marker, { type: 'paragraph', content: [{ type: 'text', text: 'QONFLO-TC v1' }] });
   assert.equal(code.type, 'codeBlock');
   assert.deepEqual(JSON.parse(code.content[0].text), { version: 1, tcs: [{ id: 'TC-1', ac: 1, title: 't', steps: ['s'], expected: 'e' }] });
+});
+
+test('an active sprint loaded after its start lays open tickets from today, with day 1 still the sprint start', async () => {
+  const store = new MemoryStore();
+  const jira = new FakeJira([issue('QRD-1', { sp: 2 }), issue('QRD-2', { sp: 2, links: [{ key: 'QRD-1', relation: 'blockedBy' }] })]);
+  jira.previousSprintEnd = async () => '2026-10-26T12:06:00.000Z';
+  jira.listSprints = async () => [{ ...SPRINT, state: 'active', startDate: '2026-10-28T02:06:29.812Z', endDate: '2026-11-11T14:00:00.000Z' }];
+  const service = new SprintDraftService(store, async () => jira, predictions({}), () => new Date('2026-11-04T03:00:00Z'));
+  const view = await service.load(26, 'Alvin');
+  assert.deepEqual([view.startDate, view.sprintDays, view.today], ['2026-10-26T16:00:00.000Z', 12, 7]);
+  assert.deepEqual(view.tickets.map((ticket) => [ticket.key, ticket.start, ticket.end]), [['QRD-1', 6, 7], ['QRD-2', 7, 8]]);
 });

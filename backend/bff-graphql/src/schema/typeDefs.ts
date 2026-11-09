@@ -665,6 +665,8 @@ export const typeDefs = gql`
     canPublish: Boolean!
     """Tickets already past merge (UAT CHECK and later): out of the schedule and the AC check."""
     landed: Int!
+    "Today's working day on the plan's axis, 1-based; null before day 1."
+    today: Int
   }
 
   """What Publish would write to one ticket. refused says why the ticket is skipped."""
