@@ -570,6 +570,108 @@ export const typeDefs = gql`
     tickets: [SprintPlanTicket!]!
   }
 
+  """An active or future sprint of the board that Planning can load."""
+  type PlanningSprint {
+    id: Int!
+    name: String!
+    """active or future."""
+    state: String!
+    startDate: String
+    endDate: String
+  }
+
+  type SprintDraftDecision {
+    """move, wait or drop for an AC line; accept or fix for a QA prediction."""
+    action: String!
+    note: String
+    by: String
+    at: String!
+  }
+
+  """The QA bot's triage of a ticket's draft AC: LOLOS, ESCALATED or REVISION-RISK."""
+  type QaPrediction {
+    prediction: String!
+    reasons: [String!]!
+    fix: String
+  }
+
+  """A draft ticket on its developer's lane. Days count working days from the sprint start; end past sprintDays is backlog."""
+  type SprintDraftTicket {
+    key: String!
+    summary: String!
+    dev: String
+    """The assignee Jira held at load or last publish."""
+    jiraDev: String
+    sp: Float
+    wave: Int!
+    """True when the planner set the wave; false when it comes from the dependencies."""
+    waveSet: Boolean!
+    status: String!
+    ac: [String!]!
+    dependsOn: [String!]!
+    start: Float!
+    dur: Float!
+    end: Float!
+    inSprint: Boolean!
+    """Suggested parts in SP for a ticket of 5 SP or more."""
+    split: [Float!]
+    prediction: QaPrediction
+    qaDecision: SprintDraftDecision
+  }
+
+  """An AC line that names another ticket. kind is after-it (that ticket lands later), lands-first or outside-plan."""
+  type SprintDraftFinding {
+    id: ID!
+    key: String!
+    line: Int!
+    text: String!
+    refKey: String!
+    kind: String!
+    refEnd: Float
+    ownEnd: Float
+    decision: SprintDraftDecision
+  }
+
+  """A sprint being planned. Publish is held while blockers (finding or qa|KEY ids) remain."""
+  type SprintDraft {
+    sprint: String!
+    sprintId: Int!
+    """draft or published."""
+    status: String!
+    sprintDays: Int!
+    startDate: String
+    spPerDay: Float!
+    createdBy: String
+    loadedAt: String!
+    publishedAt: String
+    """Why there is no QA prediction, null when the QA bot answered."""
+    qaReason: String
+    devs: [String!]!
+    tickets: [SprintDraftTicket!]!
+    findings: [SprintDraftFinding!]!
+    blockers: [String!]!
+    canPublish: Boolean!
+    """Tickets already past merge (UAT CHECK and later): out of the schedule and the AC check."""
+    landed: Int!
+  }
+
+  """What Publish would write to one ticket. refused says why the ticket is skipped."""
+  type SprintDraftChange {
+    key: String!
+    assigneeFrom: String
+    assigneeTo: String
+    acRemoved: [String!]!
+    acAdded: [String!]!
+    refused: String
+  }
+
+  """The outcome of Publish for one ticket: updated, refused or failed."""
+  type SprintDraftPublishResult {
+    key: String!
+    status: String!
+    detail: String
+  }
+
   type RetroProblem {
     label: String!
     count: Int!
@@ -1581,6 +1683,12 @@ export const typeDefs = gql`
     """The retro of a sprint from the sprint dashboard's list; no id is the active sprint."""
     retro(sprintId: Int): Retro
     sprintPlan: SprintPlan
+    """The board's active and future sprints, read from Jira."""
+    planningSprints: [PlanningSprint!]!
+    """The stored draft of a sprint by name, null before it is loaded."""
+    sprintDraft(sprint: String!): SprintDraft
+    """The changes Publish would make, each ticket read from Jira again; writes nothing."""
+    previewSprintDraftPublish(sprint: String!): [SprintDraftChange!]!
     """The tools, agents and thinking notes behind one Thinking row, from two minutes before it to until."""
     runThinkingRaw(key: String!, at: String!, until: String): [ThinkingRawLine!]!
     """A folder under the home of the workspace; no path is the home itself."""
@@ -1595,6 +1703,15 @@ export const typeDefs = gql`
     retroBuild(sprintId: Int!): String!
     sprintPlanMap: String!
     sprintPlanEdgeAction(id: ID!, action: String!): SprintPlanEdge!
+    """Reads the sprint's tickets from Jira into its draft and runs the QA prediction."""
+    loadSprintDraft(sprintId: Int!): SprintDraft!
+    """Changes a draft ticket. wave 0 goes back to the wave its dependencies give; ac replaces every line."""
+    updateSprintDraftTicket(sprint: String!, key: String!, dev: String, wave: Int, sp: Float, ac: [String!]): SprintDraft!
+    """Records a decision on a finding or a qa|KEY prediction; action clear removes it."""
+    decideSprintDraft(sprint: String!, id: ID!, action: String!, note: String): SprintDraft!
+    refreshSprintDraftQa(sprint: String!): SprintDraft!
+    """Writes AC lines and assignees that differ from Jira. Refused while a blocker has no decision."""
+    publishSprintDraft(sprint: String!): [SprintDraftPublishResult!]!
     """accept, close, reopen or edit (with text). Accepting a line that goes to kit, memory or dock asks sous to apply it."""
     retroItemAction(id: ID!, action: String!, text: String): RetroItem!
     """A new folder under the home of the workspace. Secrets stay read only; file content goes through PUT /api/workspace/file."""

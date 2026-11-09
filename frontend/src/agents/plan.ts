@@ -1,7 +1,7 @@
 import { ago } from '../lib/discordThreads';
 
 export type AgentsTab = 'office' | 'sprint' | 'library';
-export type SprintSub = 'plan' | 'retro';
+export type SprintSub = 'planning' | 'plan' | 'retro';
 
 export interface PlanEdge {
   id: string;
@@ -30,7 +30,10 @@ export function agentsRoute(search: string): { tab: AgentsTab; sub: SprintSub } 
   const tab = params.get('tab');
   if (tab === 'library') return { tab: 'library', sub: 'plan' };
   if (tab === 'retro') return { tab: 'sprint', sub: 'retro' };
-  if (tab === 'sprint') return { tab: 'sprint', sub: params.get('sub') === 'retro' ? 'retro' : 'plan' };
+  if (tab === 'sprint') {
+    const sub = params.get('sub');
+    return { tab: 'sprint', sub: sub === 'retro' || sub === 'planning' ? sub : 'plan' };
+  }
   return { tab: 'office', sub: 'plan' };
 }
 

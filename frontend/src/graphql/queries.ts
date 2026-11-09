@@ -745,6 +745,64 @@ export const RETRO_ITEM_ACTION = gql`
   }
 `;
 
+export const SPRINT_DRAFT_FIELDS = `
+  sprint sprintId status sprintDays startDate spPerDay createdBy loadedAt publishedAt qaReason devs blockers canPublish landed
+  tickets {
+    key summary dev jiraDev sp wave waveSet status ac dependsOn start dur end inSprint split
+    prediction { prediction reasons fix }
+    qaDecision { action note by at }
+  }
+  findings { id key line text refKey kind refEnd ownEnd decision { action note by at } }
+`;
+
+export const GET_PLANNING_SPRINTS = gql`
+  query GetPlanningSprints {
+    planningSprints { id name state startDate endDate }
+  }
+`;
+
+export const GET_SPRINT_DRAFT = gql`
+  query GetSprintDraft($sprint: String!) {
+    sprintDraft(sprint: $sprint) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const PREVIEW_SPRINT_DRAFT_PUBLISH = gql`
+  query PreviewSprintDraftPublish($sprint: String!) {
+    previewSprintDraftPublish(sprint: $sprint) { key assigneeFrom assigneeTo acRemoved acAdded refused }
+  }
+`;
+
+export const LOAD_SPRINT_DRAFT = gql`
+  mutation LoadSprintDraft($sprintId: Int!) {
+    loadSprintDraft(sprintId: $sprintId) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const UPDATE_SPRINT_DRAFT_TICKET = gql`
+  mutation UpdateSprintDraftTicket($sprint: String!, $key: String!, $dev: String, $wave: Int, $sp: Float, $ac: [String!]) {
+    updateSprintDraftTicket(sprint: $sprint, key: $key, dev: $dev, wave: $wave, sp: $sp, ac: $ac) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const DECIDE_SPRINT_DRAFT = gql`
+  mutation DecideSprintDraft($sprint: String!, $id: ID!, $action: String!, $note: String) {
+    decideSprintDraft(sprint: $sprint, id: $id, action: $action, note: $note) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const REFRESH_SPRINT_DRAFT_QA = gql`
+  mutation RefreshSprintDraftQa($sprint: String!) {
+    refreshSprintDraftQa(sprint: $sprint) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const PUBLISH_SPRINT_DRAFT = gql`
+  mutation PublishSprintDraft($sprint: String!) {
+    publishSprintDraft(sprint: $sprint) { key status detail }
+  }
+`;
+
 export const GET_ORCHESTRATION = gql`
   query GetOrchestration($key: String!) {
     orchestration(key: $key) {

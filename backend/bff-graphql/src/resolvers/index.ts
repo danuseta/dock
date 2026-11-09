@@ -14,6 +14,7 @@ import { StorageService } from '../storage/service';
 import { activeSprint } from '../integrations/sprint-plan';
 import { lookupDependencies } from '../integrations/dependency-lookup';
 import { sprintPlanner } from '../integrations/sprint-plan-live';
+import { sprintDraftService } from '../integrations/sprint-draft-live';
 import { isSettledStatus, mergeAttention, planAttentionItems, withoutSettledTickets } from '../integrations/attention';
 import { discordGateway, discordReader } from '../integrations/discord-reader-live';
 import { isTeamChannel } from '../integrations/discord-team';
@@ -213,6 +214,14 @@ function sprintError(error: unknown): never {
   throw error;
 }
 
+/** Planning errors the page can show: a bad input as is, a Jira answer with its status. */
+function planningError(error: unknown): never {
+  if (error instanceof SprintInputError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+  const status = (error as any)?.response?.status;
+  if (status) throw new GraphQLError(`Jira responded ${status}`, { extensions: { code: 'BAD_GATEWAY' } });
+  throw error;
+}
+
 async function qaLocalState(ticketKey?: string | null) {
   if (!qaAvailable()) return { available: false, autoRun: false, trigger: null, run: null };
   const key = (ticketKey ?? '').trim().toUpperCase();
@@ -324,6 +333,9 @@ export const resolvers = {
     dockIssueDraftUrl: (_: unknown, draft: IssueDraft) => draftUrl(issuesRepo(), draft, issueEnvironment(draft.page)),
     retro: (_: unknown, { sprintId }: { sprintId?: number | null }) => retroView(sprintId),
     sprintPlan: () => sprintPlanView(),
+    planningSprints: () => sprintDraftService.sprints().catch(planningError),
+    sprintDraft: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.view(sprint).catch(planningError),
+    previewSprintDraftPublish: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.preview(sprint).catch(planningError),
     runThinking: async (_: unknown, { key }: { key: string }) => (await orchestratorService.thinking(key).catch(orchestratorInputError)) ?? [],
     runThinkingRaw: (_: unknown, { key, at, until }: { key: string; at: string; until?: string | null }) => orchestratorService.thinkingRaw(key, at, until).catch(orchestratorInputError),
     workspaceDir: async (_: unknown, { path }: { path?: string | null }) => {
@@ -615,6 +627,15 @@ export const resolvers = {
       const parent: any = await jiraAPI.getTicket(edge.dependsOnKey).catch(() => null);
       return { id: edge.id, ticketKey: edge.ticketKey, dependsOnKey: edge.dependsOnKey, dependsOnTitle: parent?.title ?? null, dependsOnAssignee: parent?.assignee ?? null, dependsOnStatus: parent?.status ?? null, source: edge.source, reason: edge.reason, state: edge.state };
     },
+    loadSprintDraft: (_: unknown, { sprintId }: { sprintId: number }) => sprintDraftService.load(sprintId, reporterName()).catch(planningError),
+    updateSprintDraftTicket: (_: unknown, { sprint, key, ...change }: { sprint: string; key: string; dev?: string | null; wave?: number | null; sp?: number | null; ac?: string[] | null }) => (
+      sprintDraftService.updateTicket(sprint, key, change).catch(planningError)
+    ),
+    decideSprintDraft: (_: unknown, { sprint, id, action, note }: { sprint: string; id: string; action: string; note?: string | null }) => (
+      sprintDraftService.decide(sprint, id, action, note ?? null, reporterName()).catch(planningError)
+    ),
+    refreshSprintDraftQa: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.refreshQa(sprint).catch(planningError),
+    publishSprintDraft: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.publish(sprint).catch(planningError),
     retroItemAction: async (_: unknown, { id, action, text }: { id: string; action: string; text?: string | null }) => {
       const item = await storageService.getRetroItem(id);
       if (!item) throw new GraphQLError('No such retro line', { extensions: { code: 'BAD_USER_INPUT' } });
@@ -997,11 +1018,17 @@ export const protectedQueries = [
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'agentLooks', 'libraryAgents', 'libraryAgent',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
   'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro', 'sprintPlan',
+  'planningSprints', 'sprintDraft', 'previewSprintDraftPublish',
 ] as const;
 export const protectedMutations = [
   'retroBuild',
   'sprintPlanMap',
   'sprintPlanEdgeAction',
+  'loadSprintDraft',
+  'updateSprintDraftTicket',
+  'decideSprintDraft',
+  'refreshSprintDraftQa',
+  'publishSprintDraft',
   'retroItemAction',
   'workspaceMkdir',
   'workspaceRename',
