@@ -6,13 +6,15 @@ import { acFindings, findingId, isDoneStatus, normalizeAcLine } from './ac-scope
 import type { PlanningIssue } from './jira-sprint';
 import { SprintInputError } from './sprint-dashboard';
 import { acValueLines, rewriteAcValue, type DraftJira, type DraftStore, type DraftView } from './sprint-draft';
+import { MOVE_MARKER, MOVE_PENDING_LABEL, moveAnswer, moveId, type AcMoveJira } from './ac-move';
 
 export const DRIFT_ACTIONS = ['move', 'not-tested', 'wait', 'needs-po', 'clear'] as const;
-export const MOVE_PENDING_LABEL = 'ac-move-pending';
+export { MOVE_PENDING_LABEL };
 export type DriftAction = typeof DRIFT_ACTIONS[number];
-export type DriftState = 'held' | 'moved' | 'move-pending' | 'not-tested' | 'wait' | 'needs-po';
+export type DriftState = 'held' | 'moved' | 'move-pending' | 'move-accepted' | 'not-tested' | 'wait' | 'needs-po';
 
-export interface DriftDecision { action: Exclude<DriftAction, 'clear'>; state: DriftState; note: string | null; by: string | null; at: string }
+/** moveId names the QONFLO-AC-MOVE request a move to a teammate's ticket is waiting on. */
+export interface DriftDecision { action: Exclude<DriftAction, 'clear'>; state: DriftState; note: string | null; by: string | null; at: string; moveId?: string }
 export interface DriftRow {
   id: string; key: string; line: number; text: string; refKey: string; refStatus: string | null; refDev: string | null;
   refEnd: number | null; ownEnd: number | null; reason: 'after-it' | 'slipped' | 'outside-plan'; state: DriftState; decision: DriftDecision | null;
@@ -22,7 +24,7 @@ export interface DriftStoryboard { key: string; version: number; frames: string[
 export interface PlanDrift { sprint: string; publishedAt: string | null; today: number | null; rows: DriftRow[]; storyboard: DriftStoryboard[] }
 
 /** What drift needs from Jira beyond Planning: who DOCK is, comments and labels. */
-export interface DriftJira extends Pick<DraftJira, 'statusesOf' | 'issueNow' | 'setAc'> {
+export interface DriftJira extends Pick<DraftJira, 'statusesOf' | 'issueNow' | 'setAc'>, Pick<AcMoveJira, 'comments' | 'markedComment'> {
   myself(): Promise<string | null>;
   comment(key: string, lines: string[]): Promise<void>;
   addLabel(key: string, label: string): Promise<void>;
@@ -94,6 +96,7 @@ export class AcDriftService {
       for (const line of published.jiraAc.get(ticket.key) ?? []) for (const ref of line.match(/\bQRD-\d+\b/gi) || []) keys.add(ref.toUpperCase());
     }
     const statuses = keys.size ? await (await this.jira()).statusesOf([...keys]) : new Map<string, string>();
+    if (await this.settleMoves(sprint, published)) return this.drift(sprint, ownerKeys);
     const today = sprintDay(published.view.startDate, this.now());
     return {
       sprint, publishedAt: published.view.publishedAt, today,
@@ -118,10 +121,11 @@ export class AcDriftService {
     }
     const row = current.rows.find((item) => item.id === id);
     if (!row) throw new SprintInputError('That AC line is not held any more');
-    if (row.decision && row.decision.action !== 'wait') throw new SprintInputError('That line already has a call; undo it first');
+    if (row.decision && row.decision.action !== 'wait' && row.decision.state !== 'held') throw new SprintInputError('That line already has a call; undo it first');
     const text = note?.trim().slice(0, 2000) || null;
     const jira = await this.jira();
     let state: DriftState = action === 'wait' ? 'wait' : action === 'needs-po' ? 'needs-po' : 'not-tested';
+    let requestId: string | undefined;
     if (action === 'needs-po') {
       await jira.comment(row.key, [`Needs PO: AC ${row.line} needs ${row.refKey}, which has not landed (${row.refStatus ?? 'unknown status'}).`, `"${row.text}"`, ...(text ? [text] : []), `Planner: ${published.view.createdBy ?? 'unknown'}. Flagged from DOCK by ${by ?? 'the owner'}.`]);
     } else if (action === 'not-tested') {
@@ -150,18 +154,59 @@ export class AcDriftService {
         await jira.comment(row.refKey, [trail, `"${row.text}"`, ...(text ? [text] : [])]);
         state = 'moved';
       } else {
+        requestId = moveId(row.key, row.refKey, row.text);
         await jira.addLabel(row.refKey, MOVE_PENDING_LABEL);
-        const ask = `${row.key} asks to move its AC ${row.line} here: it needs ${row.refKey}, which lands after ${row.key}. ${target.assignee ?? 'The assignee'} accepts it into this AC, declines it, or flags it Needs PO; until then the line stays on ${row.key}. Label ${MOVE_PENDING_LABEL}. Sent from DOCK by ${by ?? 'the owner'}.`;
-        await jira.comment(row.refKey, [ask, `"${row.text}"`, ...(text ? [text] : [])]);
-        await jira.comment(row.key, [`AC ${row.line} offered to ${row.refKey} (${target.assignee ?? 'unassigned'}); it stays here until accepted.`, `"${row.text}"`]);
+        // The receiving DOCK reads this comment: the marker line, then the line as JSON.
+        await jira.markedComment(row.refKey, MOVE_MARKER, JSON.stringify({ id: requestId, from: row.key, to: row.refKey, line: row.line, text: row.text, by, ...(text ? { note: text } : {}) }, null, 2));
+        await jira.comment(row.key, [`AC ${row.line} offered to ${row.refKey} (${target.assignee ?? 'unassigned'}) under label ${MOVE_PENDING_LABEL}; it stays here until accepted.`, `"${row.text}"`]);
         state = 'move-pending';
       }
     }
     // A line marked not tested here reads differently now, so its call is kept under the marked line.
     const kept = state === 'not-tested' ? findingId(row.key, row.refKey, `${row.text} (not tested here: needs ${row.refKey})`) : id;
-    decisions[kept] = { action: action as DriftDecision['action'], state, note: text, by, at: this.now().toISOString() };
+    decisions[kept] = { action: action as DriftDecision['action'], state, note: text, by, at: this.now().toISOString(), ...(requestId ? { moveId: requestId } : {}) };
     await this.store.updateSprintDraftDrift(sprint, JSON.stringify(decisions));
     return (await this.drift(sprint, ownerKeys))!;
+  }
+
+  /**
+   * Reads the teammate's answer to each pending move. Accepted: the line leaves the owner's ticket, after reading its AC
+   * again (changed AC leaves it for the owner to remove by hand). Declined: the line is Held again with the reason.
+   * True when a call changed.
+   */
+  private async settleMoves(sprint: string, published: { decisions: Record<string, DriftDecision>; jiraAc: Map<string, string[]> }): Promise<boolean> {
+    const pending = Object.entries(published.decisions).filter(([, decision]) => decision.state === 'move-pending' && decision.moveId);
+    if (!pending.length) return false;
+    const jira = await this.jira();
+    const decisions = { ...published.decisions };
+    let changed = false;
+    for (const [id, decision] of pending) {
+      const [, from, to, ...rest] = id.split('|');
+      const text = rest.join('|');
+      const answer = await moveAnswer(jira, to, decision.moveId!);
+      if (!answer) continue;
+      changed = true;
+      const at = this.now().toISOString();
+      if (!answer.accepted) {
+        decisions[id] = { ...decision, state: 'held', note: `${to} declined${answer.by ? ` (${answer.by})` : ''}: ${answer.reason ?? 'no reason given'}`, at };
+        continue;
+      }
+      try {
+        const own = await this.ownTicket(jira, from, published.jiraAc.get(from) ?? []);
+        const line = acValueLines(own.acRaw).find((item) => normalizeAcLine(item) === text);
+        if (line) {
+          await jira.setAc(from, rewriteAcValue(own.acRaw, [line], []));
+          await this.saveAc(sprint, from, published.jiraAc.get(from) ?? [], [line], []);
+          published.jiraAc.set(from, (published.jiraAc.get(from) ?? []).filter((item) => normalizeAcLine(item) !== text));
+          await jira.comment(from, [`${to} accepted this AC line${answer.by ? ` (${answer.by})` : ''}; it is removed here.`, `"${line}"`]);
+        }
+        decisions[id] = { ...decision, state: 'moved', note: `Accepted by ${to}${answer.by ? ` (${answer.by})` : ''}`, at };
+      } catch (error) {
+        decisions[id] = { ...decision, state: 'move-accepted', note: `Accepted by ${to}; remove the line from ${from} by hand: ${error instanceof Error ? error.message : String(error)}`, at };
+      }
+    }
+    if (changed) await this.store.updateSprintDraftDrift(sprint, JSON.stringify(decisions));
+    return changed;
   }
 
   /** The owner's ticket as Jira holds it now: refused unless it is assigned to DOCK's Jira user and its AC is the published one. */

@@ -80,6 +80,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
     const mutationFields = Object.keys(schema.getMutationType()?.getFields() || {}).sort();
 
     assert.deepStrictEqual(queryFields, [
+      'acIncoming',
       'agentLooks',
       'authStatus',
       'autoReviews',
@@ -156,6 +157,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'workspaceFile',
     ]);
     assert.deepStrictEqual(mutationFields, [
+      'acInAction',
       'addDiscordChannel',
       'addElevenLabsKey',
       'addMonitor',

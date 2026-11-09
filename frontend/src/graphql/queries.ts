@@ -811,6 +811,18 @@ export const SPRINT_DRIFT_FIELDS = `
   storyboard { key version frames held checked }
 `;
 
+export const GET_AC_INCOMING = gql`
+  query GetAcIncoming {
+    acIncoming { id from to line text by at }
+  }
+`;
+
+export const AC_IN_ACTION = gql`
+  mutation AcInAction($to: String!, $id: ID!, $action: String!, $reason: String) {
+    acInAction(to: $to, id: $id, action: $action, reason: $reason) { id from to line text by at }
+  }
+`;
+
 export const GET_SPRINT_DRIFT = gql`
   query GetSprintDrift {
     sprintDrift { ${SPRINT_DRIFT_FIELDS} }

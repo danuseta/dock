@@ -3,6 +3,7 @@ import { JiraSprintClient, createJiraHttp } from './jira-sprint';
 import { SprintInputError, sprintDashboardService } from './sprint-dashboard';
 import { SprintDraftService, TC_MARKER, type ContractTarget, type DraftJira } from './sprint-draft';
 import { AcDriftService, type DriftJira } from './ac-drift';
+import { AcInService, MOVE_PENDING_LABEL, type AcMoveJira } from './ac-move';
 import { confluenceFrom, type ConfluenceClient } from './confluence';
 import { StoryboardReader } from './storyboard';
 import { defaultBlackboardRoot } from './blackboard';
@@ -71,7 +72,25 @@ async function driftJira(): Promise<DriftJira> {
     myself: () => client.myself(),
     comment: (key, lines) => client.addComment(key, lines),
     addLabel: (key, label) => client.addLabel(key, label),
+    comments: (key) => client.comments(key),
+    markedComment: (key, marker, json) => client.addMarkedComment(key, marker, json),
   };
 }
+
+/** The receiving side of an AC move, on the same Jira credentials. */
+async function moveJira(): Promise<AcMoveJira> {
+  const { client } = await jiraClient();
+  return {
+    myself: () => client.myself(),
+    issueNow: (key) => client.planningIssueNow(key),
+    setAc: (key, value) => client.setAcField(key, value),
+    pendingMoveKeys: () => client.myLabelledKeys(MOVE_PENDING_LABEL),
+    comments: (key) => client.comments(key),
+    markedComment: (key, marker, json) => client.addMarkedComment(key, marker, json),
+    removeLabel: (key, label) => client.removeLabel(key, label),
+  };
+}
+
+export const acInService = new AcInService(moveJira);
 
 export const acDriftService = new AcDriftService(storage, (sprint) => sprintDraftService.view(sprint), driftJira);

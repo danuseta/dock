@@ -260,11 +260,39 @@ export class JiraSprintClient {
     });
   }
 
-  /** The QA bot's test case comment: the marker line, then the JSON in a code block. */
-  async addTcComment(key: string, marker: string, json: string): Promise<void> {
+  /** A comment another tool reads back: the marker line, then the JSON in a code block (QONFLO-TC, QONFLO-AC-MOVE). */
+  async addMarkedComment(key: string, marker: string, json: string): Promise<void> {
     await this.http.post(`/rest/api/3/issue/${encodeURIComponent(key)}/comment`, {
       body: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: marker }] }, { type: 'codeBlock', attrs: { language: 'json' }, content: [{ type: 'text', text: json }] }] },
     });
+  }
+
+  /** The QA bot's test case comment. */
+  addTcComment(key: string, marker: string, json: string): Promise<void> {
+    return this.addMarkedComment(key, marker, json);
+  }
+
+  /** The ticket's comments, oldest first, as Jira returned their bodies. */
+  async comments(key: string): Promise<Array<{ created: string; body: unknown }>> {
+    const comments: Array<{ created: string; body: unknown }> = [];
+    for (let startAt = 0; startAt < 1000; ) {
+      const page = await this.http.get(`/rest/api/3/issue/${encodeURIComponent(key)}/comment`, { startAt, maxResults: PAGE_SIZE, orderBy: 'created' });
+      const values = page?.comments || [];
+      comments.push(...values.map((comment: any) => ({ created: String(comment.created ?? ''), body: comment.body ?? null })));
+      if (!values.length || startAt + values.length >= (page.total ?? 0)) return comments;
+      startAt += values.length;
+    }
+    return comments;
+  }
+
+  async removeLabel(key: string, label: string): Promise<void> {
+    if (!this.http.put) throw new Error('This Jira connection cannot write');
+    await this.http.put(`/rest/api/3/issue/${encodeURIComponent(key)}`, { update: { labels: [{ remove: label }] } });
+  }
+
+  /** The keys of the token user's tickets that carry `label`. */
+  async myLabelledKeys(label: string): Promise<string[]> {
+    return (await this.searchPlanning(`labels = "${label.replace(/["\\]/g, '')}" AND assignee = currentUser()`)).map((issue) => issue.key);
   }
 
   async addLabel(key: string, label: string): Promise<void> {

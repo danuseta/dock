@@ -706,6 +706,17 @@ export const typeDefs = gql`
     decision: SprintDriftDecision
   }
 
+  "An AC line a teammate offers to one of the owner's tickets (label ac-move-pending, comment QONFLO-AC-MOVE v1)."
+  type AcIn {
+    id: ID!
+    from: String!
+    to: String!
+    line: Int!
+    text: String!
+    by: String
+    at: String!
+  }
+
   type SprintDriftStoryboard {
     key: String!
     version: Int!
@@ -1838,6 +1849,8 @@ export const typeDefs = gql`
     previewSprintDraftPublish(sprint: String!): [SprintDraftChange!]!
     "The owner's held AC lines in the active sprint's published plan; null when it was not published from Planning."
     sprintDrift: SprintDrift
+    "AC lines teammates offer to the owner's tickets, waiting for accept or decline."
+    acIncoming: [AcIn!]!
     """The tools, agents and thinking notes behind one Thinking row, from two minutes before it to until."""
     runThinkingRaw(key: String!, at: String!, until: String): [ThinkingRawLine!]!
     """A folder under the home of the workspace; no path is the home itself."""
@@ -1869,6 +1882,8 @@ export const typeDefs = gql`
     publishSprintDraft(sprint: String!): [SprintDraftPublishResult!]!
     "move, not-tested, wait, needs-po or clear on a held AC line of the owner's ticket."
     sprintDriftAction(id: ID!, action: String!, note: String): SprintDrift!
+    "accept (adds the line to the AC of to) or decline (with a reason) an AC line a teammate offers."
+    acInAction(to: String!, id: ID!, action: String!, reason: String): [AcIn!]!
     """accept, close, reopen or edit (with text). Accepting a line that goes to kit, memory or dock asks sous to apply it."""
     retroItemAction(id: ID!, action: String!, text: String): RetroItem!
     """A new folder under the home of the workspace. Secrets stay read only; file content goes through PUT /api/workspace/file."""

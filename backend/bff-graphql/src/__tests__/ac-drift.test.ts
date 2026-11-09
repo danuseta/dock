@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AcDriftService, sprintDay, type DriftJira } from '../integrations/ac-drift';
+import { MOVE_ACCEPTED, MOVE_DECLINED, parseMarkedComment, type JiraComment } from '../integrations/ac-move';
+
+const markedBody = (marker: string, json: string) => ({ type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: marker }] }, { type: 'codeBlock', content: [{ type: 'text', text: json }] }] });
 import type { PlanningIssue } from '../integrations/jira-sprint';
 import type { DraftView } from '../integrations/sprint-draft';
 
@@ -34,6 +37,7 @@ function setup() {
     updateSprintDraftDrift: async (_sprint: string, drift: string) => { row.drift = drift; },
   };
   const writes: Array<[string, string, unknown]> = [];
+  const comments = new Map<string, JiraComment[]>();
   const issues = new Map<string, PlanningIssue>([
     ['QRD-1511', issue('QRD-1511', 'Danu', jiraAc['QRD-1511'])],
     ['QRD-1520', issue('QRD-1520', 'Danu', jiraAc['QRD-1520'])],
@@ -47,10 +51,15 @@ function setup() {
     myself: async () => 'Danu',
     comment: async (key, lines) => { writes.push(['comment', key, lines.join('\n')]); },
     addLabel: async (key, label) => { writes.push(['label', key, label]); },
+    comments: async (key) => comments.get(key) ?? [],
+    markedComment: async (key, marker, json) => {
+      writes.push(['marked', key, `${marker}\n${json}`]);
+      comments.set(key, [...(comments.get(key) ?? []), { created: '2026-11-09T09:00:00.000Z', body: markedBody(marker, json) }]);
+    },
   };
   // Day 6 of the sprint: QRD-1489 was planned to land on day 3.
   const service = new AcDriftService(store, async () => VIEW, async () => jira, () => new Date('2026-11-09T09:00:00Z'));
-  return { service, writes, row, issues, owner: ['QRD-1511', 'QRD-1520', 'QRD-1530'] };
+  return { service, writes, row, issues, comments, owner: ['QRD-1511', 'QRD-1520', 'QRD-1530'] };
 }
 
 test('the sprint day counts working days from the start', () => {
@@ -68,13 +77,43 @@ test('held rows: a slipped ticket and one landing after it, not lines of a ticke
   ]);
 });
 
-test('move to a teammate: label and a comment on both tickets, the line stays', async () => {
-  const { service, writes, owner } = setup();
+test('move to a teammate: label, a QONFLO-AC-MOVE v1 request on the target and a note on the source; the line stays', async () => {
+  const { service, writes, owner, comments } = setup();
   const drift = (await service.drift('QRD Sprint 27', owner))!;
   const after = await service.act('QRD Sprint 27', owner, drift.rows[0].id, 'move', null, 'Danu');
-  assert.deepEqual(writes.map(([kind, key]) => [kind, key]), [['label', 'QRD-1489'], ['comment', 'QRD-1489'], ['comment', 'QRD-1511']]);
+  assert.deepEqual(writes.map(([kind, key]) => [kind, key]), [['label', 'QRD-1489'], ['marked', 'QRD-1489'], ['comment', 'QRD-1511']]);
   assert.equal(writes[0][2], 'ac-move-pending');
+  const request = parseMarkedComment(comments.get('QRD-1489')![0].body)!;
+  assert.equal(request.marker, 'QONFLO-AC-MOVE v1');
+  assert.deepEqual([request.data.from, request.data.to, request.data.line, request.data.text], ['QRD-1511', 'QRD-1489', 2, 'An Edit client sees the cursor (QRD-1489)']);
   assert.equal(after.rows[0].state, 'move-pending');
+  assert.equal(after.rows[0].decision!.moveId, request.data.id);
+});
+
+test('an accepted move takes the line off the source ticket after reading it again; a declined one is Held again', async () => {
+  const accepted = setup();
+  let drift = (await accepted.service.drift('QRD Sprint 27', accepted.owner))!;
+  await accepted.service.act('QRD Sprint 27', accepted.owner, drift.rows[0].id, 'move', null, 'Danu');
+  const id = String(parseMarkedComment(accepted.comments.get('QRD-1489')![0].body)!.data.id);
+  accepted.writes.length = 0;
+  accepted.comments.get('QRD-1489')!.push({ created: 'x', body: markedBody(MOVE_ACCEPTED, JSON.stringify({ id, by: 'Aken' })) });
+  drift = (await accepted.service.drift('QRD Sprint 27', accepted.owner))!;
+  assert.deepEqual(accepted.writes.map(([kind, key]) => [kind, key]), [['ac', 'QRD-1511'], ['comment', 'QRD-1511']]);
+  assert.equal(accepted.writes[0][2], '- Cursor shows\n- Owner sees QRD-1520 badge');
+  assert.deepEqual(drift.rows.map((row) => row.refKey), ['QRD-1520'], 'the moved line is gone');
+  assert.deepEqual(JSON.parse(accepted.row.tickets.find((item: any) => item.key === 'QRD-1511').jiraAc), ['Cursor shows', 'Owner sees QRD-1520 badge']);
+  await accepted.service.drift('QRD Sprint 27', accepted.owner);
+  assert.equal(accepted.writes.length, 2, 'an answer is acted on once');
+
+  const declined = setup();
+  drift = (await declined.service.drift('QRD Sprint 27', declined.owner))!;
+  await declined.service.act('QRD Sprint 27', declined.owner, drift.rows[0].id, 'move', null, 'Danu');
+  const declinedId = String(parseMarkedComment(declined.comments.get('QRD-1489')![0].body)!.data.id);
+  declined.comments.get('QRD-1489')!.push({ created: 'x', body: markedBody(MOVE_DECLINED, JSON.stringify({ id: declinedId, by: 'Aken', reason: 'Not this sprint' })) });
+  drift = (await declined.service.drift('QRD Sprint 27', declined.owner))!;
+  assert.equal(drift.rows[0].state, 'held');
+  assert.match(drift.rows[0].decision!.note!, /declined \(Aken\): Not this sprint/);
+  await declined.service.act('QRD Sprint 27', declined.owner, drift.rows[0].id, 'wait', null, 'Danu');
 });
 
 test('move to an own ticket writes both AC fields and comments on both', async () => {

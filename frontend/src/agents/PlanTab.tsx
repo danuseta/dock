@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { ArrowRightLeft, Check, Clock, EyeOff, Flag, RotateCcw, Undo2, X } from 'lucide-react';
-import { Button } from '../components/ui';
-import { GET_SPRINT_DRIFT, GET_SPRINT_PLAN, SPRINT_DRIFT_ACTION, SPRINT_PLAN_EDGE_ACTION, SPRINT_PLAN_MAP } from '../graphql/queries';
+import { Button, Input } from '../components/ui';
+import { AC_IN_ACTION, GET_AC_INCOMING, GET_SPRINT_DRIFT, GET_SPRINT_PLAN, SPRINT_DRIFT_ACTION, SPRINT_PLAN_EDGE_ACTION, SPRINT_PLAN_MAP } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import {
   driftReason, driftStateLabel, edgeStateText, groupsText, hasMap, isMapping, mappedText, sortDrift, sourceLabel,
-  type DriftRow, type PlanEdge, type SprintDrift, type SprintPlan,
+  type AcIn, type DriftRow, type PlanEdge, type SprintDrift, type SprintPlan,
 } from './plan';
 
 const head = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
@@ -63,6 +63,54 @@ const DriftLine: React.FC<{ row: DriftRow; busy: boolean; onAction: (id: string,
         ) : <Button size="sm" variant="ghost" onClick={() => onAction(row.id, 'clear')} disabled={busy} title="Forget the call here; what was written to Jira stays"><Undo2 size={13} aria-hidden="true" />Undo</Button>}
       </div>
     </li>
+  );
+};
+
+const AcInLine: React.FC<{ row: AcIn; busy: boolean; onAction: (row: AcIn, action: 'accept' | 'decline', reason?: string) => void }> = ({ row, busy, onAction }) => {
+  const [declining, setDeclining] = useState(false);
+  const [reason, setReason] = useState('');
+  return (
+    <li className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 border-b border-border border-l-2 border-l-accent py-2.5 pl-3 last:border-b-0 max-[760px]:grid-cols-[minmax(0,1fr)]">
+      <div className="min-w-0">
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.8rem] text-secondary-foreground">
+          <span className="font-mono font-semibold text-foreground">{row.to}</span>
+          <span className={cn(chip, 'border-accent text-accent')}>AC in</span>
+          <span>moved from <span className="font-mono font-semibold text-foreground">{row.from}</span> AC {row.line}{row.by ? ` · ${row.by}` : ''}</span>
+        </p>
+        <p className="mt-1 text-pretty text-[0.78rem] text-foreground">{row.text}</p>
+        {declining && (
+          <form className="mt-2 flex gap-2 max-[760px]:flex-col" onSubmit={(event) => { event.preventDefault(); onAction(row, 'decline', reason); setDeclining(false); }}>
+            <Input aria-label={`Why ${row.to} declines the line`} className="h-9" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Why it does not belong here" autoFocus />
+            <Button size="sm" type="submit" disabled={busy || !reason.trim()}>Send</Button>
+          </form>
+        )}
+      </div>
+      <div className="flex flex-wrap items-start justify-end gap-1.5 max-[760px]:justify-start">
+        <Button size="sm" variant="ghost" onClick={() => setDeclining(!declining)} disabled={busy}><X size={13} aria-hidden="true" />Decline</Button>
+        <Button size="sm" variant="primary" onClick={() => onAction(row, 'accept')} disabled={busy}><Check size={13} aria-hidden="true" />Accept into AC</Button>
+      </div>
+    </li>
+  );
+};
+
+/** AC lines teammates move to the owner's tickets: accept writes the line into the AC, decline sends it back with a reason. */
+const AcInSection: React.FC = () => {
+  const [notice, setNotice] = useState<string | null>(null);
+  const { data, refetch } = useQuery<{ acIncoming: AcIn[] }>(GET_AC_INCOMING, { fetchPolicy: 'cache-and-network', pollInterval: 60000 });
+  const [act, acting] = useMutation(AC_IN_ACTION);
+  const rows = data?.acIncoming ?? [];
+  if (!rows.length && !notice) return null;
+  const onAction = (row: AcIn, action: 'accept' | 'decline', reason?: string) => {
+    setNotice(null);
+    act({ variables: { to: row.to, id: row.id, action, reason: reason ?? null } }).then(() => refetch()).catch((failure: unknown) => setNotice(failure instanceof Error ? failure.message : 'The answer failed'));
+  };
+  return (
+    <section aria-label="AC in" className="min-w-0">
+      <h3 className={head}>AC in · from teammates</h3>
+      {notice && <p className="mt-2 text-sm text-status-conflict" role="alert">{notice}</p>}
+      <p className="mt-2 text-pretty text-[0.8rem] text-muted-foreground">Accept writes the line into your ticket's AC and tells the sender's DOCK, which removes it from theirs. Decline sends it back to them as Held, with your reason.</p>
+      <ul className="mt-2 rounded-md border border-border bg-surface-0">{rows.map((row) => <AcInLine key={`${row.to}|${row.id}`} row={row} busy={acting.loading} onAction={onAction} />)}</ul>
+    </section>
   );
 };
 
@@ -178,6 +226,7 @@ export const PlanTab: React.FC = () => {
           )}
         </section>
       )}
+      <AcInSection />
       <DriftSection />
     </div>
   );

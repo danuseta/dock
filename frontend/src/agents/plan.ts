@@ -59,7 +59,9 @@ export interface DriftRow {
 export interface DriftStoryboard { key: string; version: number; frames: string[]; held: boolean; checked: boolean }
 export interface SprintDrift { sprint: string; publishedAt: string | null; today: number | null; rows: DriftRow[]; storyboard: DriftStoryboard[] }
 
-const DRIFT_STATE: Record<string, string> = { held: 'Held', moved: 'Moved', 'move-pending': 'Move pending', 'not-tested': 'Not tested here', wait: 'Wait', 'needs-po': 'Needs PO' };
+export interface AcIn { id: string; from: string; to: string; line: number; text: string; by: string | null; at: string }
+
+const DRIFT_STATE: Record<string, string> = { held: 'Held', moved: 'Moved', 'move-pending': 'Move pending', 'move-accepted': 'Accepted, remove by hand', 'not-tested': 'Not tested here', wait: 'Wait', 'needs-po': 'Needs PO' };
 export const driftStateLabel = (state: string) => DRIFT_STATE[state] ?? state;
 
 /** Why the line is held, in the words of the plan. */
