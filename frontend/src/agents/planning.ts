@@ -20,7 +20,7 @@ export interface DraftFinding {
 }
 export interface SprintDraft {
   sprint: string; sprintId: number; status: string; sprintDays: number; startDate: string | null; spPerDay: number; createdBy: string | null;
-  loadedAt: string; publishedAt: string | null; qaReason: string | null; devs: string[]; blockers: string[]; canPublish: boolean; landed: number;
+  loadedAt: string; publishedAt: string | null; qaReason: string | null; devs: string[]; blockers: string[]; canPublish: boolean; landed: number; today: number | null;
   tickets: DraftTicket[]; findings: DraftFinding[]; storyboards: StoryboardState[]; questions: DraftQuestion[];
 }
 export interface DraftQuestion { id: string; text: string; key: string | null; askedAt: string; answered: boolean; answeredBy: string | null; answeredAt: string | null }
@@ -38,7 +38,11 @@ export interface PublishResult { key: string; kind: string; status: string; deta
 
 export type PlanningPanel = 'team' | 'scope' | 'ac' | 'qa' | 'tc' | 'storyboard';
 export const UNASSIGNED = 'Unassigned';
-const LANE_COLORS = ['--color-accent', '--color-status-merged', '--color-status-discord', '--color-status-warn', '--color-status-open', '--color-status-draft', '--color-status-conflict'];
+const DEV_COLOR_COUNT = 8;
+const UNASSIGNED_COLOR = 'var(--color-muted-foreground)';
+/** DOCK's calendar is +08:00, as on the sprint dashboard. */
+const OFFSET_MS = 8 * 3_600_000;
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 const sum = (values: Array<number | null>) => values.reduce<number>((total, value) => total + (value ?? 0), 0);
@@ -49,30 +53,117 @@ export const dayOf = (end: number) => `D${Math.max(1, Math.ceil(end))}`;
 /** The days the schedule spans: the sprint, or longer when backlog runs past it. */
 export const spanOf = (draft: Pick<SprintDraft, 'sprintDays' | 'tickets'>) => Math.max(draft.sprintDays, Math.ceil(Math.max(0, ...draft.tickets.map((ticket) => ticket.end))));
 
-/** Short dates of the working days from the sprint start: "27 Oct". Empty when the sprint has no start. */
+/** Dates of the working days from day 1 on the +08:00 calendar: "Tue 27 Oct". Empty when the sprint has no start. */
 export function workingDayLabels(startDate: string | null, count: number): string[] {
-  const start = startDate ? new Date(startDate) : null;
-  if (!start || Number.isNaN(start.getTime())) return [];
+  const time = startDate ? Date.parse(startDate) : NaN;
+  if (Number.isNaN(time)) return [];
   const labels: string[] = [];
-  const day = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
+  const day = new Date(time + OFFSET_MS);
+  day.setUTCHours(0, 0, 0, 0);
   while (labels.length < count) {
     const weekday = day.getUTCDay();
-    if (weekday !== 0 && weekday !== 6) labels.push(`${day.getUTCDate()} ${MONTHS[day.getUTCMonth()]}`);
+    if (weekday !== 0 && weekday !== 6) labels.push(`${WEEKDAYS[weekday]} ${day.getUTCDate()} ${MONTHS[day.getUTCMonth()]}`);
     day.setUTCDate(day.getUTCDate() + 1);
   }
   return labels;
 }
 
-export interface Lane { dev: string; color: string; sp: number; tickets: DraftTicket[]; backlog: number }
+const nameHash = (name: string) => [...name.toLowerCase()].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 7);
+
+/**
+ * A colour per developer from the --color-dev-N tokens: each name keeps its own slot, and when two names of the team
+ * want the same slot the later one in name order takes the next free one, so the colour stays put while the team does.
+ */
+export function devColors(names: string[]): Map<string, string> {
+  const colors = new Map<string, string>();
+  const taken = new Set<number>();
+  for (const name of [...new Set(names)].filter((name) => name !== UNASSIGNED).sort((a, b) => a.localeCompare(b))) {
+    let slot = nameHash(name) % DEV_COLOR_COUNT;
+    for (let tries = 0; taken.has(slot) && tries < DEV_COLOR_COUNT; tries++) slot = (slot + 1) % DEV_COLOR_COUNT;
+    taken.add(slot);
+    colors.set(name, `var(--color-dev-${slot + 1})`);
+  }
+  return colors;
+}
+
+/** A colour's soft fill for a card. */
+export const softColor = (color: string) => `color-mix(in oklch, ${color} 16%, transparent)`;
+
+export interface Lane { dev: string; color: string; sp: number; tickets: DraftTicket[]; backlog: number; inSprintSp: number; end: number }
 
 /** One lane per developer, in the draft's order, and an Unassigned lane last when a ticket has no developer. */
 export function lanes(draft: Pick<SprintDraft, 'devs' | 'tickets'>): Lane[] {
   const names = [...draft.devs, ...(draft.tickets.some((ticket) => !ticket.dev) ? [UNASSIGNED] : [])];
-  return names.map((dev, index) => {
-    const tickets = draft.tickets.filter((ticket) => (ticket.dev ?? UNASSIGNED) === dev).sort((a, b) => a.start - b.start);
-    return { dev, color: `var(${LANE_COLORS[index % LANE_COLORS.length]})`, sp: sum(tickets.map((ticket) => ticket.sp)), tickets, backlog: tickets.filter((ticket) => !ticket.inSprint).length };
+  const colors = devColors(draft.devs);
+  return names.map((dev) => {
+    const tickets = draft.tickets.filter((ticket) => (ticket.dev ?? UNASSIGNED) === dev).sort((a, b) => a.start - b.start || a.key.localeCompare(b.key, undefined, { numeric: true }));
+    return {
+      dev, color: colors.get(dev) ?? UNASSIGNED_COLOR, sp: sum(tickets.map((ticket) => ticket.sp)), tickets, backlog: tickets.filter((ticket) => !ticket.inSprint).length,
+      inSprintSp: sum(tickets.filter((ticket) => ticket.inSprint).map((ticket) => ticket.sp)), end: Math.max(0, ...tickets.map((ticket) => ticket.end)),
+    };
   });
 }
+
+/** Each ticket's place in its developer's order of work, 1-based: #3 is that person's third card. */
+export function ranks(tickets: DraftTicket[]): Map<string, number> {
+  const rank = new Map<string, number>();
+  const next = new Map<string, number>();
+  for (const ticket of [...tickets].sort((a, b) => a.start - b.start || a.key.localeCompare(b.key, undefined, { numeric: true }))) {
+    const lane = ticket.dev ?? UNASSIGNED;
+    const value = (next.get(lane) ?? 0) + 1;
+    next.set(lane, value);
+    rank.set(ticket.key, value);
+  }
+  return rank;
+}
+
+/** The plan's tickets waiting on each ticket. */
+export function waitersOf(tickets: DraftTicket[]): Map<string, DraftTicket[]> {
+  const waiters = new Map<string, DraftTicket[]>();
+  for (const ticket of tickets) for (const dep of ticket.dependsOn) waiters.set(dep, [...(waiters.get(dep) ?? []), ticket]);
+  return waiters;
+}
+
+/** The unanswered questions of each ticket, from the planning chat. */
+export function openQuestionsOf(questions: DraftQuestion[]): Map<string, DraftQuestion[]> {
+  const open = new Map<string, DraftQuestion[]>();
+  for (const question of questions) if (question.key && !question.answered) open.set(question.key, [...(open.get(question.key) ?? []), question]);
+  return open;
+}
+
+export interface HandOff { from: string; fromDev: string; to: string; toDev: string; lands: number; float: number }
+
+/**
+ * A dependency finished by one developer that unblocks a ticket of another. Float is how many days the finishing
+ * ticket can slip before the waiting one starts late: the waiting ticket's start minus the dependency's end.
+ */
+export function handOffs(tickets: DraftTicket[]): HandOff[] {
+  const byKey = new Map(tickets.map((ticket) => [ticket.key, ticket]));
+  const rows: HandOff[] = [];
+  for (const ticket of tickets) {
+    for (const dep of ticket.dependsOn) {
+      const from = byKey.get(dep);
+      if (!from || !from.dev || !ticket.dev || from.dev === ticket.dev) continue;
+      rows.push({ from: from.key, fromDev: from.dev, to: ticket.key, toDev: ticket.dev, lands: from.end, float: Math.max(0, Math.round((ticket.start - from.end) * 1000) / 1000) });
+    }
+  }
+  return rows.sort((a, b) => a.lands - b.lands || a.from.localeCompare(b.from, undefined, { numeric: true }) || a.to.localeCompare(b.to, undefined, { numeric: true }));
+}
+
+/** The numbers the team map opens with; developers, target and spread leave the Unassigned lane out. */
+export function teamStats(draft: Pick<SprintDraft, 'devs' | 'tickets'>) {
+  const named = lanes({ devs: draft.devs, tickets: draft.tickets.filter((ticket) => ticket.dev) });
+  const sp = sum(draft.tickets.map((ticket) => ticket.sp));
+  const inSprint = draft.tickets.filter((ticket) => ticket.inSprint);
+  const loads = named.map((lane) => lane.sp);
+  return {
+    cards: draft.tickets.length, sp, devs: named.length, target: named.length ? Math.round((sp / named.length) * 10) / 10 : 0,
+    landCards: inSprint.length, landSp: sum(inSprint.map((ticket) => ticket.sp)), spread: loads.length ? Math.max(...loads) - Math.min(...loads) : 0,
+  };
+}
+
+/** The 1-based day a ticket ending at `end` lands on: ending at 2.5 lands on day 3, at 3 on day 3. */
+export const landingDay = (end: number) => Math.max(1, Math.ceil(end - 1e-9));
 
 /** Where a bar sits on a lane, in percent of the span. */
 export const barPlace = (ticket: Pick<DraftTicket, 'start' | 'dur'>, span: number) => ({
@@ -80,15 +171,15 @@ export const barPlace = (ticket: Pick<DraftTicket, 'start' | 'dur'>, span: numbe
   width: `${(Math.max(ticket.dur, 0.25) / span) * 100}%`,
 });
 
-export interface WaveRow { wave: number; count: number; sp: number; closes: number; late: boolean }
+export interface WaveRow { wave: number; count: number; sp: number; closes: number; late: boolean; tickets: DraftTicket[] }
 
-/** Each wave with the day its last ticket lands; late when that is after the sprint. */
+/** Each wave with its tickets and the day its last ticket lands; late when that is after the sprint. */
 export function waveRows(draft: Pick<SprintDraft, 'sprintDays' | 'tickets'>): WaveRow[] {
   const waves = [...new Set(draft.tickets.map((ticket) => ticket.wave))].sort((a, b) => a - b);
   return waves.map((wave) => {
     const tickets = draft.tickets.filter((ticket) => ticket.wave === wave);
     const closes = Math.max(0, ...tickets.map((ticket) => ticket.end));
-    return { wave, count: tickets.length, sp: sum(tickets.map((ticket) => ticket.sp)), closes, late: closes > draft.sprintDays };
+    return { wave, count: tickets.length, sp: sum(tickets.map((ticket) => ticket.sp)), closes, late: closes > draft.sprintDays, tickets };
   });
 }
 

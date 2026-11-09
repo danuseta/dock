@@ -5,7 +5,7 @@
 import { acFindings, isDoneStatus, normalizeAcLine, splitAc, type AcFinding } from './ac-scope';
 import type { PlanningIssue, PlanningSprint } from './jira-sprint';
 import { predictQa, type QaInputTicket, type QaPrediction, type QaRun } from './qa-predict';
-import { DEFAULT_SP_PER_DAY, DEFAULT_SPRINT_DAYS, scheduleSprint, workingDays, type ScheduledTicket } from './scope-cut';
+import { DEFAULT_SP_PER_DAY, DEFAULT_SPRINT_DAYS, planStart, scheduleSprint, workingDayOf, workingDays, type ScheduledTicket } from './scope-cut';
 import { SprintInputError } from './sprint-dashboard';
 import { writeContract, type ContractClient } from './sprint-contract';
 import { StoryboardMissing, framesIn, type StoryboardResult } from './storyboard';
@@ -25,6 +25,8 @@ export type Decisions = Record<string, Decision>;
 
 export interface DraftJira {
   listSprints(): Promise<PlanningSprint[]>;
+  /** The end date of the sprint closed before this one on the board; null when there is none. */
+  previousSprintEnd?(sprint: PlanningSprint): Promise<string | null>;
   sprintIssues(sprintId: number): Promise<PlanningIssue[]>;
   statusesOf(keys: string[]): Promise<Map<string, string>>;
   issueNow(key: string): Promise<PlanningIssue | null>;
@@ -90,6 +92,8 @@ export interface DraftView {
   devs: string[]; tickets: DraftTicketView[]; findings: DraftFindingView[]; blockers: string[]; canPublish: boolean;
   /** Tickets of the sprint already past merge: left out of the schedule and the AC check. */
   landed: number;
+  /** Today's working day on the plan's axis, 1-based; null before day 1. Open tickets are not laid before it. */
+  today: number | null;
   storyboards: StoryboardState[];
   questions: DraftQuestion[];
 }
@@ -332,6 +336,7 @@ export class SprintDraftService {
     const refKeys = [...outside].filter((key) => !keys.has(key));
     const refStatuses = refKeys.length ? Object.fromEntries(await jira.statusesOf(refKeys)) : {};
     const previous = await this.store.getSprintDraft(sprint.name);
+    const start = planStart(sprint.startDate, jira.previousSprintEnd ? await jira.previousSprintEnd(sprint).catch(() => null) : null);
     // Test cases are DOCK's own: they survive a load from Jira.
     for (const ticket of tickets) {
       const before = previous?.tickets.find((item) => item.key === ticket.key);
@@ -339,8 +344,8 @@ export class SprintDraftService {
     }
     await this.store.replaceSprintDraft({
       sprint: sprint.name, sprintId: sprint.id,
-      sprintDays: workingDays(sprint.startDate, sprint.endDate) ?? previous?.sprintDays ?? DEFAULT_SPRINT_DAYS,
-      startDate: sprint.startDate ? new Date(sprint.startDate) : null, createdBy: previous?.createdBy ?? by, refStatuses: JSON.stringify(refStatuses),
+      sprintDays: workingDays(start, sprint.endDate) ?? previous?.sprintDays ?? DEFAULT_SPRINT_DAYS,
+      startDate: start ? new Date(start) : null, createdBy: previous?.createdBy ?? by, refStatuses: JSON.stringify(refStatuses),
     }, tickets);
     await this.refreshQa(sprint.name);
     return this.checkStoryboards(sprint.name).catch(async () => (await this.view(sprint.name))!);
@@ -360,9 +365,12 @@ export class SprintDraftService {
       tcs: parse<DraftTc[]>(ticket.tcs, []),
     }));
     const tickets = all.filter((ticket) => !isDoneStatus(ticket.status));
+    // Once the sprint has started, a draft lays open tickets from today's working day, never in the past. A published
+    // plan keeps its days, so AC drift can still tell a ticket that slipped past its planned day.
+    const today = workingDayOf(row.startDate?.toISOString() ?? null, this.now());
     const schedule = new Map(scheduleSprint(
       tickets.map((ticket) => ({ key: ticket.key, dev: ticket.dev, sp: ticket.sp, wave: ticket.wave, dependsOn: ticket.dependsOn })),
-      { sprintDays: row.sprintDays, spPerDay },
+      { sprintDays: row.sprintDays, spPerDay, from: today && row.status !== 'published' ? today - 1 : 0 },
     ).map((item) => [item.key, item]));
     const ends = new Map([...schedule.values()].map((item) => [item.key, item.end]));
     const status = new Map(all.map((ticket) => [ticket.key, ticket.status]));
@@ -386,7 +394,7 @@ export class SprintDraftService {
     return {
       sprint: row.sprint, sprintId: row.sprintId, status: row.status, sprintDays: row.sprintDays, startDate: row.startDate?.toISOString() ?? null,
       spPerDay, createdBy: row.createdBy, loadedAt: row.loadedAt.toISOString(), publishedAt: row.publishedAt?.toISOString() ?? null, qaReason: row.qaReason,
-      devs, landed: all.length - tickets.length, storyboards, questions: parse<DraftQuestion[]>(row.questions, []),
+      devs, today, landed: all.length - tickets.length, storyboards, questions: parse<DraftQuestion[]>(row.questions, []),
       tickets: tickets.map((ticket) => {
         const placed = schedule.get(ticket.key)!;
         return {

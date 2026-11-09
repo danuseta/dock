@@ -28,6 +28,11 @@ async function planningJira(): Promise<DraftJira> {
   if (!boardId) throw new SprintInputError('No Scrum board found in Jira for the configured projects');
   return {
     listSprints: () => client.listPlanningSprints(boardId),
+    previousSprintEnd: async (sprint) => {
+      if (!sprint.startDate) return null;
+      const closed = (await client.listSprints(boardId)).filter((item) => item.state === 'closed' && item.startDate < sprint.startDate!);
+      return closed.sort((a, b) => b.startDate.localeCompare(a.startDate))[0]?.endDate ?? null;
+    },
     sprintIssues: (sprintId) => client.fetchPlanningIssues(sprintId),
     statusesOf: (keys) => client.statusesOf(keys),
     issueNow: (key) => client.planningIssueNow(key),

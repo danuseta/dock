@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { computeWaves, scheduleSprint, splitParts, workingDays, type ScopeTicket } from '../integrations/scope-cut';
+import { computeWaves, planStart, scheduleSprint, splitParts, workingDayOf, workingDays, type ScopeTicket } from '../integrations/scope-cut';
 
 interface PlanRow { key: string; dev: string; sp: number; wave: number; dep: string[]; st: number; dur: number }
 const sprint26 = JSON.parse(readFileSync(resolve(__dirname, 'fixtures/sprint26-plan.json'), 'utf8')) as { sprintDays: number; tasks: PlanRow[] };
@@ -70,4 +70,36 @@ test('working days count Monday to Friday', () => {
   assert.equal(workingDays('2026-10-27T01:00:00.000Z', '2026-11-09T10:00:00.000Z'), 10);
   assert.equal(workingDays(null, '2026-11-09'), null);
   assert.equal(workingDays('2026-11-10', '2026-11-09'), null);
+});
+
+test('days are +08:00 calendar days: an evening start in UTC is the next day here', () => {
+  assert.equal(workingDays('2026-10-27T17:00:00.000Z', '2026-10-28T10:00:00.000Z'), 1);
+  assert.equal(workingDays('2026-10-26T16:00:00.000Z', '2026-11-11T14:00:00.000Z'), 12);
+});
+
+test('day 1 of Sprint 26 is Tue 27 Oct although Start sprint was pressed on Wed 28 Oct', () => {
+  // Jira: Sprint 25 ended 26 Oct 20:06 +08:00, Sprint 26 was started 28 Oct 10:06 +08:00.
+  assert.equal(planStart('2026-10-28T02:06:29.812Z', '2026-10-26T12:06:00.000Z'), '2026-10-26T16:00:00.000Z');
+  assert.equal(planStart('2026-10-28T02:06:29.812Z', null), '2026-10-27T16:00:00.000Z');
+  assert.equal(planStart('2026-10-28T02:06:29.812Z', '2026-10-01T12:00:00.000Z'), '2026-10-27T16:00:00.000Z', 'an old previous sprint does not move day 1');
+  assert.equal(planStart('2026-10-31T02:00:00.000Z'), '2026-11-01T16:00:00.000Z', 'a Saturday start counts from Monday');
+  assert.equal(planStart(null, '2026-10-26T12:06:00.000Z'), null);
+});
+
+test('today on the plan: 1-based working day from day 1, a weekend rolls to Monday unless told not to', () => {
+  const start = '2026-10-26T16:00:00.000Z';
+  assert.equal(workingDayOf(start, new Date('2026-10-27T01:00:00Z')), 1);
+  assert.equal(workingDayOf(start, new Date('2026-11-09T03:00:00Z')), 10);
+  assert.equal(workingDayOf(start, new Date('2026-11-07T03:00:00Z')), 10);
+  assert.equal(workingDayOf(start, new Date('2026-11-07T03:00:00Z'), false), 9);
+  assert.equal(workingDayOf(start, new Date('2026-10-20T00:00:00Z')), null);
+});
+
+test('a schedule laid from a later day never starts a ticket before it', () => {
+  const rows = scheduleSprint([
+    { key: 'A', dev: 'Danu', sp: 2, dependsOn: [] },
+    { key: 'B', dev: 'Danu', sp: 2, dependsOn: [] },
+    { key: 'C', dev: 'Aken', sp: 2, dependsOn: ['A'] },
+  ], { sprintDays: 10, from: 4 });
+  assert.deepEqual(rows.map((row) => [row.key, row.start, row.end]), [['A', 4, 5], ['B', 5, 6], ['C', 5, 6]]);
 });
