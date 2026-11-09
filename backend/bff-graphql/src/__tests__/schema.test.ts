@@ -103,6 +103,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'dashboard',
       'demoStorage',
       'demoVideos',
+      'deployGate',
       'devServerLog',
       'devServers',
       'discordThreads',
