@@ -34,7 +34,7 @@ const TeamPanel: React.FC<{ draft: SprintDraft }> = ({ draft }) => {
   const rows = lanes(draft);
   const waves = waveRows(draft);
   return (
-    <div className="grid gap-5">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5">
       <section aria-label="Load per developer">
         <h3 className={head}>Team map · load per developer</h3>
         <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2.5">
@@ -169,7 +169,7 @@ const ScopePanel: React.FC<{ draft: SprintDraft; busy: boolean; onChange: (key: 
     </ul>
   );
   return (
-    <div className="grid gap-5">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5">
       <p className="text-[0.84rem] text-secondary-foreground">
         <b className="text-foreground">{summary.inSprint}</b> tickets ({summary.inSprintSp} SP) fit {draft.sprintDays} days; <b className="text-foreground">{summary.backlog}</b> ({summary.backlogSp} SP) go to the backlog.
       </p>
@@ -236,7 +236,7 @@ const QaPanel: React.FC<{ draft: SprintDraft; busy: boolean; onDecide: (id: stri
   const [note, setNote] = useState('');
   const rows = [...draft.tickets].sort((a, b) => Number(b.prediction?.prediction === 'ESCALATED') - Number(a.prediction?.prediction === 'ESCALATED') || a.key.localeCompare(b.key, undefined, { numeric: true }));
   return (
-    <section aria-label="QA check" className="grid gap-3">
+    <section aria-label="QA check" className="grid grid-cols-[minmax(0,1fr)] gap-3">
       <div className="flex flex-wrap items-center gap-3">
         <p className="min-w-0 flex-1 text-pretty text-[0.8rem] text-muted-foreground">The QA bot's triage rules run on the draft AC before publish, so a ticket that would escalate is fixed now instead of after QA in UAT.</p>
         <Button size="sm" onClick={onRefresh} disabled={busy}><RefreshCw size={13} aria-hidden="true" />Check again</Button>
@@ -390,7 +390,7 @@ export const PlanningTab: React.FC = () => {
   const late = draft?.findings.filter((finding) => finding.kind === 'after-it').length ?? 0;
 
   return (
-    <div className="grid gap-5">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5">
       <div className="flex flex-wrap items-center gap-3">
         <Select aria-label="Sprint to plan" className="w-[260px] max-[760px]:w-full" value={String(chosen.id)} onValueChange={(value) => setSprintId(Number(value))} options={options.map((sprint) => ({ value: String(sprint.id), label: `${sprint.name}${sprint.state === 'active' ? ' (active)' : ''}` }))} />
         <Button onClick={onLoad} disabled={busy}><Download size={14} aria-hidden="true" />{loading.loading ? 'Loading...' : draft ? 'Load again from Jira' : 'Load from Jira'}</Button>
