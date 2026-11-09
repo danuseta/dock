@@ -3,7 +3,7 @@ import test from 'node:test';
 import { agentsRoute } from '../agents/plan';
 import {
   UNASSIGNED, barPlace, changeCount, dayOf, decisionLabel, findingKindLabel, lanes, parseWave, predictionTone, publishHint, scopeSummary, sortFindings,
-  spanOf, waveRows, workingDayLabels, type DraftFinding, type DraftTicket,
+  spanOf, storyboardDecisionId, storyboardLine, waveRows, workingDayLabels, type DraftFinding, type DraftTicket,
 } from '../agents/planning';
 
 const ticket = (over: Partial<DraftTicket>): DraftTicket => ({
@@ -66,4 +66,12 @@ test('QA tone, publish hint, change count and wave input', () => {
     { key: 'B', assigneeFrom: null, assigneeTo: null, acRemoved: ['x'], acAdded: [], refused: 'AC changed' },
   ]), 1);
   assert.deepEqual(['2', '0', ' 3 ', '1.5', '', '-1', '51'].map(parseWave), [2, 0, 3, null, null, null, null]);
+});
+
+test('a storyboard line names its version and changed frames, or why there is none', () => {
+  const board = { epic: 'QRD-1233', version: 8, previous: 7, path: null, page: '11', frames: 62, changed: ['F7.3'], changedAt: null, checkedAt: '2026-11-09T00:00:00.000Z', error: null };
+  assert.equal(storyboardLine(board), 'v8 · 62 frames · 1 frame changed since v7: F7.3');
+  assert.equal(storyboardLine({ ...board, previous: null, changed: [] }), 'v8 · 62 frames · first version saved');
+  assert.equal(storyboardLine({ ...board, error: 'No Confluence page titled "Storyboard" for QRD-1233.' }), 'No Confluence page titled "Storyboard" for QRD-1233.');
+  assert.equal(storyboardDecisionId('QRD-1312', 8), 'sb|QRD-1312|v8');
 });

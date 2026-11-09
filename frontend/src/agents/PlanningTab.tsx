@@ -1,15 +1,15 @@
 import React, { useEffect, useId, useState } from 'react';
 import { useLazyQuery, useMutation, useQuery } from '@apollo/client';
-import { ArrowRightLeft, Check, Clock, Download, EyeOff, Minus, Plus, RefreshCw, Scissors, Send, ShieldAlert, ShieldCheck, Undo2 } from 'lucide-react';
+import { ArrowRightLeft, Check, Clock, Download, EyeOff, FileSearch, Minus, Plus, RefreshCw, Scissors, Send, ShieldAlert, ShieldCheck, Undo2 } from 'lucide-react';
 import { Button, Card, Dialog, Input, Select } from '../components/ui';
 import {
-  DECIDE_SPRINT_DRAFT, GET_PLANNING_SPRINTS, GET_SPRINT_DRAFT, LOAD_SPRINT_DRAFT, PREVIEW_SPRINT_DRAFT_PUBLISH, PUBLISH_SPRINT_DRAFT,
+  CHECK_SPRINT_STORYBOARDS, DECIDE_SPRINT_DRAFT, GET_PLANNING_SPRINTS, GET_SPRINT_DRAFT, LOAD_SPRINT_DRAFT, PREVIEW_SPRINT_DRAFT_PUBLISH, PUBLISH_SPRINT_DRAFT,
   REFRESH_SPRINT_DRAFT_QA, UPDATE_SPRINT_DRAFT_TICKET,
 } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import {
   UNASSIGNED, barPlace, changeCount, dayOf, decisionLabel, findingKindLabel, lanes, parseWave, predictionTone, publishHint, scopeSummary, sortFindings,
-  spanOf, waveRows, workingDayLabels,
+  spanOf, storyboardDecisionId, storyboardLine, uncheckedStoryboard, waveRows, workingDayLabels,
   type DraftChange, type DraftFinding, type DraftTicket, type PlanningPanel, type PlanningSprint, type PublishResult, type SprintDraft,
 } from './planning';
 
@@ -19,13 +19,67 @@ const NO_DEV = '__none';
 const TONE: Record<string, string> = {
   ok: 'border-status-merged text-status-merged', conflict: 'border-status-conflict text-status-conflict', warn: 'border-status-warn text-status-warn', none: 'border-border text-muted-foreground',
 };
-const PANELS: Array<[PlanningPanel, string]> = [['team', 'Team map'], ['scope', 'Scope'], ['ac', 'AC check'], ['qa', 'QA check']];
+const PANELS: Array<[PlanningPanel, string]> = [['team', 'Team map'], ['scope', 'Scope'], ['ac', 'AC check'], ['qa', 'QA check'], ['storyboard', 'Storyboard']];
 
 const errorText = (failure: unknown, fallback: string) => (failure instanceof Error ? failure.message : fallback);
 
 const QaChip: React.FC<{ ticket: DraftTicket; qaReason: string | null }> = ({ ticket, qaReason }) => {
   if (!ticket.prediction) return <span className={cn(chip, TONE.none)} title={qaReason ?? undefined}>{qaReason ? 'No QA' : 'QA pending'}</span>;
   return <span className={cn(chip, TONE[predictionTone(ticket.prediction.prediction)])} title={ticket.prediction.reasons.join('\n') || undefined}>{ticket.prediction.prediction}</span>;
+};
+
+/** "AC needs a check" on a ticket naming a storyboard frame that changed. */
+const StoryboardChip: React.FC<{ ticket: DraftTicket }> = ({ ticket }) => {
+  const flag = ticket.storyboard;
+  if (!flag) return null;
+  const tone = flag.checked ? TONE.none : flag.held ? TONE.conflict : TONE.warn;
+  return <span className={cn(chip, tone)} title={`Storyboard v${flag.version} changed ${flag.frames.join(', ')}`}>{flag.checked ? 'AC checked' : flag.held ? 'Held · AC needs a check' : 'AC needs a check'} · {flag.frames.join(' ')}</span>;
+};
+
+const StoryboardPanel: React.FC<{ draft: SprintDraft; busy: boolean; onCheck: () => void; onDecide: (id: string, action: string, note?: string) => void }> = ({ draft, busy, onCheck, onDecide }) => {
+  const flagged = draft.tickets.filter((ticket) => ticket.storyboard);
+  const epics = [...new Set(draft.tickets.map((ticket) => ticket.epic).filter(Boolean))];
+  return (
+    <section aria-label="Storyboard" className="grid grid-cols-[minmax(0,1fr)] gap-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="min-w-0 flex-1 text-pretty text-[0.8rem] text-muted-foreground">Each epic's Confluence page "Storyboard" holds one HTML attachment per version. DOCK saves every version under the blackboard and compares the newest two frame by frame; a ticket whose AC or description names a changed frame needs its AC checked.</p>
+        <Button size="sm" onClick={onCheck} disabled={busy}><FileSearch size={13} aria-hidden="true" />Check storyboard</Button>
+      </div>
+      {draft.storyboards.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{epics.length ? 'No storyboard read yet. Check storyboard reads it from Confluence.' : 'No ticket of this sprint has an epic, so there is no storyboard to read.'}</p>
+      ) : (
+        <ul className="overflow-hidden rounded-md border border-border bg-surface-0">
+          {draft.storyboards.map((board) => (
+            <li key={board.epic} className="border-b border-border px-3 py-2.5 last:border-b-0">
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.8rem]">
+                <span className="font-mono font-semibold">{board.epic}</span>
+                <span className={cn(chip, board.error ? TONE.warn : board.changed.length ? TONE.conflict : TONE.ok)}>{board.error ? 'No storyboard' : `v${board.version}`}</span>
+              </p>
+              <p className={cn('mt-1 text-pretty text-[0.76rem]', board.error ? 'text-status-warn' : 'text-muted-foreground')}>{storyboardLine(board)}</p>
+              {board.path && <p className="mt-0.5 break-all font-mono text-[0.64rem] text-muted-foreground">{board.path}</p>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {flagged.length > 0 && (
+        <ul className="overflow-hidden rounded-md border border-border bg-surface-0">
+          {flagged.map((ticket) => (
+            <li key={ticket.key} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 border-b border-border px-3 py-2.5 last:border-b-0 max-[760px]:grid-cols-[minmax(0,1fr)]">
+              <div className="min-w-0">
+                <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.8rem]"><span className="font-mono font-semibold">{ticket.key}</span><StoryboardChip ticket={ticket} /><span className="text-muted-foreground">{ticket.status}</span></p>
+                <p className="mt-0.5 truncate text-[0.78rem] text-secondary-foreground">{ticket.summary}</p>
+              </div>
+              <div className="flex flex-wrap items-start justify-end gap-1.5 max-[760px]:justify-start">
+                {ticket.storyboard!.checked
+                  ? <Button size="sm" variant="ghost" onClick={() => onDecide(storyboardDecisionId(ticket.key, ticket.storyboard!.version), 'clear')} disabled={busy}><Undo2 size={13} aria-hidden="true" />Undo</Button>
+                  : <Button size="sm" variant="primary" onClick={() => onDecide(storyboardDecisionId(ticket.key, ticket.storyboard!.version), 'checked')} disabled={busy}><Check size={13} aria-hidden="true" />AC checked</Button>}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
 };
 
 const TeamPanel: React.FC<{ draft: SprintDraft }> = ({ draft }) => {
@@ -134,6 +188,7 @@ const TicketRow: React.FC<{ draft: SprintDraft; ticket: DraftTicket; busy: boole
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="font-mono text-[0.8rem] font-semibold">{ticket.key}</span>
           <QaChip ticket={ticket} qaReason={draft.qaReason} />
+          <StoryboardChip ticket={ticket} />
           {ticket.split && <span className={cn(chip, TONE.warn)} title="Suggested parts in SP"><Scissors size={10} className="mr-1 inline" aria-hidden="true" />Split {ticket.split.join(' + ')}</span>}
           {ticket.dev !== ticket.jiraDev && ticket.dev && <span className={cn(chip, 'border-accent text-accent')}>was {ticket.jiraDev ?? UNASSIGNED}</span>}
         </p>
@@ -351,10 +406,11 @@ export const PlanningTab: React.FC = () => {
   const [updateTicket, updating] = useMutation(UPDATE_SPRINT_DRAFT_TICKET);
   const [decide, deciding] = useMutation(DECIDE_SPRINT_DRAFT);
   const [refreshQa, refreshing] = useMutation(REFRESH_SPRINT_DRAFT_QA);
+  const [checkStoryboards, checking] = useMutation(CHECK_SPRINT_STORYBOARDS);
   const [publish, publishing] = useMutation(PUBLISH_SPRINT_DRAFT);
   const [preview, previewing] = useLazyQuery<{ previewSprintDraftPublish: DraftChange[] }>(PREVIEW_SPRINT_DRAFT_PUBLISH, { fetchPolicy: 'network-only' });
   const draft = draftQuery.data?.sprintDraft ?? null;
-  const busy = loading.loading || updating.loading || deciding.loading || refreshing.loading || publishing.loading;
+  const busy = loading.loading || updating.loading || deciding.loading || refreshing.loading || publishing.loading || checking.loading;
 
   const run = (work: Promise<unknown>, fallback: string) => {
     setNotice(null);
@@ -364,6 +420,7 @@ export const PlanningTab: React.FC = () => {
   const onChange = (key: string, change: { dev?: string | null; wave?: number; sp?: number }) => draft && run(updateTicket({ variables: { sprint: draft.sprint, key, ...change } }), 'The ticket could not be changed');
   const onDecide = (id: string, action: string, note?: string) => draft && run(decide({ variables: { sprint: draft.sprint, id, action, note: note ?? null } }), 'The decision could not be saved');
   const onRefreshQa = () => draft && run(refreshQa({ variables: { sprint: draft.sprint } }), 'The QA check failed');
+  const onCheckStoryboards = () => draft && run(checkStoryboards({ variables: { sprint: draft.sprint } }), 'The storyboard could not be read');
   const onPublish = async () => {
     if (!draft) return;
     setResults(null);
@@ -388,6 +445,7 @@ export const PlanningTab: React.FC = () => {
   if (!chosen) return <p className="text-sm text-muted-foreground">No active or future sprint on the board. Create the sprint in Jira, then come back.</p>;
   const escalated = draft?.tickets.filter((ticket) => ticket.prediction?.prediction === 'ESCALATED').length ?? 0;
   const late = draft?.findings.filter((finding) => finding.kind === 'after-it').length ?? 0;
+  const storyboardChecks = draft ? uncheckedStoryboard(draft).length : 0;
 
   return (
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5">
@@ -411,7 +469,7 @@ export const PlanningTab: React.FC = () => {
       ) : (
         <>
           <p className="text-[0.8rem] text-muted-foreground">
-            {draft.tickets.length} open tickets{draft.landed > 0 && ` (${draft.landed} already past merge)`} · {draft.sprintDays} working days · {draft.devs.length} developers · {late} AC {late === 1 ? 'line' : 'lines'} after it · {escalated} ESCALATED · {publishHint(draft)}
+            {draft.tickets.length} open tickets{draft.landed > 0 && ` (${draft.landed} already past merge)`} · {draft.sprintDays} working days · {draft.devs.length} developers · {late} AC {late === 1 ? 'line' : 'lines'} after it · {escalated} ESCALATED{storyboardChecks > 0 && ` · ${storyboardChecks} AC to check after a storyboard change`} · {publishHint(draft)}
           </p>
           <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Planning panel">
             {PANELS.map(([id, label]) => (
@@ -431,6 +489,7 @@ export const PlanningTab: React.FC = () => {
           {panel === 'scope' && <ScopePanel draft={draft} busy={busy} onChange={onChange} />}
           {panel === 'ac' && <AcPanel draft={draft} busy={busy} onDecide={onDecide} />}
           {panel === 'qa' && <QaPanel draft={draft} busy={busy} onDecide={onDecide} onRefresh={onRefreshQa} />}
+          {panel === 'storyboard' && <StoryboardPanel draft={draft} busy={busy} onCheck={onCheckStoryboards} onDecide={onDecide} />}
         </>
       )}
       <PublishDialog

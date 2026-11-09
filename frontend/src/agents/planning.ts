@@ -3,10 +3,15 @@
 export interface PlanningSprint { id: number; name: string; state: string; startDate: string | null; endDate: string | null }
 export interface DraftDecision { action: string; note: string | null; by: string | null; at: string }
 export interface QaPrediction { prediction: string; reasons: string[]; fix: string | null }
+export interface StoryboardFlag { version: number; frames: string[]; held: boolean; checked: DraftDecision | null }
 export interface DraftTicket {
   key: string; summary: string; dev: string | null; jiraDev: string | null; sp: number | null; wave: number; waveSet: boolean; status: string;
   ac: string[]; dependsOn: string[]; start: number; dur: number; end: number; inSprint: boolean; split: number[] | null;
-  prediction: QaPrediction | null; qaDecision: DraftDecision | null;
+  prediction: QaPrediction | null; qaDecision: DraftDecision | null; epic: string | null; frames: string[]; storyboard: StoryboardFlag | null;
+}
+export interface StoryboardState {
+  epic: string; version: number | null; previous: number | null; path: string | null; page: string | null; frames: number; changed: string[];
+  changedAt: string | null; checkedAt: string; error: string | null;
 }
 export interface DraftFinding {
   id: string; key: string; line: number; text: string; refKey: string; kind: string; refEnd: number | null; ownEnd: number | null; decision: DraftDecision | null;
@@ -14,12 +19,12 @@ export interface DraftFinding {
 export interface SprintDraft {
   sprint: string; sprintId: number; status: string; sprintDays: number; startDate: string | null; spPerDay: number; createdBy: string | null;
   loadedAt: string; publishedAt: string | null; qaReason: string | null; devs: string[]; blockers: string[]; canPublish: boolean; landed: number;
-  tickets: DraftTicket[]; findings: DraftFinding[];
+  tickets: DraftTicket[]; findings: DraftFinding[]; storyboards: StoryboardState[];
 }
 export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; refused: string | null }
 export interface PublishResult { key: string; kind: string; status: string; detail: string | null }
 
-export type PlanningPanel = 'team' | 'scope' | 'ac' | 'qa';
+export type PlanningPanel = 'team' | 'scope' | 'ac' | 'qa' | 'storyboard';
 export const UNASSIGNED = 'Unassigned';
 const LANE_COLORS = ['--color-accent', '--color-status-merged', '--color-status-discord', '--color-status-warn', '--color-status-open', '--color-status-draft', '--color-status-conflict'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -115,3 +120,17 @@ export function parseWave(text: string): number | null {
   const value = Number(text.trim());
   return text.trim() !== '' && Number.isInteger(value) && value >= 0 && value <= 50 ? value : null;
 }
+
+/** The id a storyboard check is recorded under, as the BFF builds it. */
+export const storyboardDecisionId = (key: string, version: number) => `sb|${key}|v${version}`;
+
+/** One line on a storyboard: its version and what changed, or why there is none. */
+export function storyboardLine(board: StoryboardState): string {
+  if (board.error) return board.error;
+  if (board.version === null) return 'Not read yet';
+  const changed = board.previous === null ? 'first version saved' : board.changed.length ? `${board.changed.length} ${board.changed.length === 1 ? 'frame' : 'frames'} changed since v${board.previous}: ${board.changed.join(', ')}` : `no frame changed since v${board.previous}`;
+  return `v${board.version} · ${board.frames} frames · ${changed}`;
+}
+
+/** Tickets whose AC needs a check after a storyboard change and nobody marked it checked. */
+export const uncheckedStoryboard = (draft: Pick<SprintDraft, 'tickets'>) => draft.tickets.filter((ticket) => ticket.storyboard && !ticket.storyboard.checked);

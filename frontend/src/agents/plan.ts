@@ -56,7 +56,8 @@ export interface DriftRow {
   id: string; key: string; line: number; text: string; refKey: string; refStatus: string | null; refDev: string | null;
   refEnd: number | null; ownEnd: number | null; reason: string; state: string; decision: DriftDecision | null;
 }
-export interface SprintDrift { sprint: string; publishedAt: string | null; today: number | null; rows: DriftRow[] }
+export interface DriftStoryboard { key: string; version: number; frames: string[]; held: boolean; checked: boolean }
+export interface SprintDrift { sprint: string; publishedAt: string | null; today: number | null; rows: DriftRow[]; storyboard: DriftStoryboard[] }
 
 const DRIFT_STATE: Record<string, string> = { held: 'Held', moved: 'Moved', 'move-pending': 'Move pending', 'not-tested': 'Not tested here', wait: 'Wait', 'needs-po': 'Needs PO' };
 export const driftStateLabel = (state: string) => DRIFT_STATE[state] ?? state;

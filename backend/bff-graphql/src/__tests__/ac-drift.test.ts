@@ -108,7 +108,7 @@ test('wait writes nothing; needs PO comments on the own ticket only', async () =
   await service.act('QRD Sprint 27', owner, drift.rows[0].id, 'wait', null, 'Danu');
   assert.deepEqual(writes, []);
   const after = await service.act('QRD Sprint 27', owner, drift.rows[1].id, 'needs-po', null, 'Danu');
-  assert.deepEqual(writes.map(([kind, key]) => [kind, key]), [['comment', 'QRD-1511']]);
+  assert.deepEqual((writes as Array<[string, string, unknown]>).map(([kind, key]) => [kind, key]), [['comment', 'QRD-1511']]);
   assert.match(String(writes[0][2]), /Needs PO.*Planner: Alvin/s);
   assert.deepEqual(after.rows.map((item) => item.state), ['wait', 'needs-po']);
 });

@@ -4,6 +4,7 @@ import { JiraSprintClient, type PlanningIssue, type PlanningSprint } from '../in
 import type { QaInputTicket, QaRun } from '../integrations/qa-predict';
 import { SprintDraftService, acValueLines, diffLines, finalAc, rewriteAcValue, type DraftJira, type DraftStore } from '../integrations/sprint-draft';
 import type { SprintDraftInput, SprintDraftTicketInput } from '../storage/service';
+import { StoryboardMissing } from '../integrations/storyboard';
 
 const adf = (...blocks: any[]) => ({ type: 'doc', version: 1, content: blocks });
 const para = (...content: any[]) => ({ type: 'paragraph', content });
@@ -18,7 +19,7 @@ class MemoryStore implements DraftStore {
   async replaceSprintDraft(draft: SprintDraftInput, tickets: SprintDraftTicketInput[]) {
     this.draft = {
       ...draft, status: 'draft', decisions: this.draft?.decisions ?? '{}', qaReason: null, loadedAt: new Date('2026-11-09T00:00:00Z'), publishedAt: null,
-      tickets: tickets.map((ticket, position) => ({ ...ticket, ac: JSON.stringify(ticket.ac), jiraAc: JSON.stringify(ticket.jiraAc), dependsOn: JSON.stringify(ticket.dependsOn), prediction: null, position })),
+      tickets: tickets.map((ticket, position) => ({ ...ticket, ac: JSON.stringify(ticket.ac), jiraAc: JSON.stringify(ticket.jiraAc), dependsOn: JSON.stringify(ticket.dependsOn), frames: JSON.stringify(ticket.frames ?? []), prediction: null, position })),
     };
   }
   async updateSprintDraftTicket(_sprint: string, key: string, data: any) {
@@ -26,6 +27,7 @@ class MemoryStore implements DraftStore {
     for (const [field, value] of Object.entries(data)) ticket[field] = field === 'ac' || field === 'jiraAc' ? JSON.stringify(value) : value;
   }
   async updateSprintDraft(_sprint: string, data: any) { Object.assign(this.draft, data); }
+  async sprintDraftsWithEpic(epic: string) { return this.draft?.tickets.some((ticket: any) => ticket.epic === epic) ? [this.draft.sprint] : []; }
   async saveSprintDraftPredictions(_sprint: string, predictions: Map<string, string> | null, qaReason: string | null) {
     this.draft.qaReason = qaReason;
     for (const ticket of this.draft.tickets) ticket.prediction = predictions?.get(ticket.key) ?? null;
@@ -95,7 +97,7 @@ test('the Jira client lists open sprints, leaves Epics out and resolves an assig
   ]);
   assert.deepEqual(calls[0][2], { state: 'active,future', startAt: 0, maxResults: 50 });
   assert.deepEqual(await client.fetchPlanningIssues(26), [
-    { key: 'QRD-1', summary: 'One', type: 'Story', status: 'To Do', assignee: null, sp: 3, acRaw: 'x', links: [{ key: 'QRD-2', relation: 'blockedBy' }] },
+    { key: 'QRD-1', summary: 'One', type: 'Story', status: 'To Do', assignee: null, sp: 3, acRaw: 'x', links: [{ key: 'QRD-2', relation: 'blockedBy' }], epic: null, descriptionRaw: null },
   ]);
   assert.deepEqual(await client.assignableAccounts('QRD-1', 'danu'), ['acc-1']);
   await client.setAcField('QRD-1', 'y');
@@ -228,4 +230,29 @@ test('tickets already past merge stay out of the schedule and the AC check, and 
   assert.equal(view.tickets[0].start, 0);
   assert.deepEqual(view.findings.map((finding) => [finding.refKey, finding.kind]), [['QRD-1', 'lands-first'], ['QRD-2', 'lands-first']]);
   assert.equal(view.canPublish, true);
+});
+
+test('a frame changed in the newest storyboard flags the tickets naming it, Held until work starts; a missing storyboard says so', async () => {
+  const store = new MemoryStore();
+  const jira = new FakeJira([
+    issue('QRD-1312', { epic: 'QRD-1233', acRaw: '- Stop serving dialog (F7.3)' }),
+    issue('QRD-1307', { epic: 'QRD-1233', status: 'In Progress', descriptionRaw: adf(para(text('Builds F7.3 and F7.4'))) }),
+    issue('QRD-1400', { epic: 'QRD-1233', acRaw: '- Share (F10.1)' }),
+    issue('QRD-1500', { epic: 'QRD-1300' }),
+  ]);
+  const storyboard = async (epic: string) => {
+    if (epic === 'QRD-1300') throw new StoryboardMissing('No Confluence page titled "Storyboard" for QRD-1300.');
+    return { epic, version: 8, previous: 7, path: '/b/QRD-1233/materials/storyboard/v8.html', page: '11', frames: [{ id: 'F7.3', text: '' }], changed: ['F7.3'] };
+  };
+  const service = new SprintDraftService(store, async () => jira, predictions({}), () => new Date('2026-11-09T10:00:00Z'), undefined, storyboard);
+  const view = await service.load(26, 'Alvin');
+  const flag = (key: string) => view.tickets.find((ticket) => ticket.key === key)!.storyboard;
+  assert.deepEqual(flag('QRD-1312'), { version: 8, frames: ['F7.3'], held: true, checked: null });
+  assert.deepEqual(flag('QRD-1307')?.held, false);
+  assert.equal(flag('QRD-1400'), null);
+  assert.deepEqual(view.storyboards.map((board) => [board.epic, board.version, board.error]), [['QRD-1233', 8, null], ['QRD-1300', null, 'No Confluence page titled "Storyboard" for QRD-1300.']]);
+  const checked = await service.decide('QRD Sprint 26', 'sb|QRD-1312|v8', 'checked', null, 'Alvin');
+  assert.equal(checked.tickets.find((ticket) => ticket.key === 'QRD-1312')!.storyboard!.checked!.by, 'Alvin');
+  assert.deepEqual(await service.applyStoryboard({ epic: 'QRD-1233', version: 9, previous: 8, path: 'p', page: '11', frames: [], changed: ['F10.1'] }), ['QRD Sprint 26']);
+  assert.deepEqual((await service.view('QRD Sprint 26'))!.tickets.filter((ticket) => ticket.storyboard).map((ticket) => ticket.key), ['QRD-1400']);
 });

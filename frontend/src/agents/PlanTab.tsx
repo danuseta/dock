@@ -78,8 +78,20 @@ const DriftSection: React.FC = () => {
     act({ variables: { id, action } }).then(() => refetch()).catch((failure: unknown) => setNotice(failure instanceof Error ? failure.message : 'The change failed'));
   };
   const held = drift.rows.filter((row) => row.state === 'held').length;
+  const storyboard = drift.storyboard.filter((item) => !item.checked);
   return (
     <section aria-label="AC drift" className="min-w-0">
+      {storyboard.length > 0 && (
+        <ul className="mb-4 rounded-md border border-border bg-surface-0">
+          {storyboard.map((item) => (
+            <li key={item.key} className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border border-l-2 border-l-status-warn px-3 py-2 text-[0.8rem] last:border-b-0">
+              <span className="font-mono font-semibold">{item.key}</span>
+              <span className={cn(chip, item.held ? 'border-status-conflict text-status-conflict' : 'border-status-warn text-status-warn')}>{item.held ? 'Held · AC needs a check' : 'AC needs a check'}</span>
+              <span className="text-muted-foreground">storyboard v{item.version} changed {item.frames.join(', ')}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       <h3 className={head}>AC drift · your tickets {drift.today ? <span className="font-medium normal-case tracking-normal">· sprint day {drift.today}</span> : null}</h3>
       {notice && <p className="mt-2 text-sm text-status-conflict" role="alert">{notice}</p>}
       {drift.rows.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">Every AC line of your tickets has what it needs landed or planned before it.</p> : (

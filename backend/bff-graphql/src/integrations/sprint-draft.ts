@@ -8,6 +8,7 @@ import { predictQa, type QaInputTicket, type QaPrediction, type QaRun } from './
 import { DEFAULT_SP_PER_DAY, DEFAULT_SPRINT_DAYS, scheduleSprint, workingDays, type ScheduledTicket } from './scope-cut';
 import { SprintInputError } from './sprint-dashboard';
 import { writeContract, type ContractClient } from './sprint-contract';
+import { StoryboardMissing, framesIn, type StoryboardResult } from './storyboard';
 import type { SprintDraftInput, SprintDraftTicketInput } from '../storage/service';
 
 export const SP_PER_DAY_KEY = 'planningSpPerDay';
@@ -32,10 +33,10 @@ export interface DraftJira {
 
 interface DraftRow {
   sprint: string; sprintId: number; status: string; sprintDays: number; startDate: Date | null; decisions: string; qaReason: string | null;
-  refStatuses: string; createdBy: string | null; loadedAt: Date; publishedAt: Date | null;
+  refStatuses: string; createdBy: string | null; loadedAt: Date; publishedAt: Date | null; storyboards?: string;
   tickets: Array<{
     key: string; summary: string; dev: string | null; sp: number | null; wave: number | null; ac: string; jiraAc: string; jiraDev: string | null;
-    dependsOn: string; status: string; prediction: string | null; position: number;
+    dependsOn: string; status: string; prediction: string | null; position: number; epic?: string | null; frames?: string;
   }>;
 }
 
@@ -44,13 +45,23 @@ export interface DraftStore {
   getSprintDraft(sprint: string): Promise<DraftRow | null>;
   replaceSprintDraft(draft: SprintDraftInput, tickets: SprintDraftTicketInput[]): Promise<unknown>;
   updateSprintDraftTicket(sprint: string, key: string, data: { dev?: string | null; sp?: number | null; wave?: number | null; ac?: string[]; jiraAc?: string[]; jiraDev?: string | null }): Promise<unknown>;
-  updateSprintDraft(sprint: string, data: { decisions?: string; qaReason?: string | null; status?: string; publishedAt?: Date | null }): Promise<unknown>;
+  updateSprintDraft(sprint: string, data: { decisions?: string; qaReason?: string | null; status?: string; publishedAt?: Date | null; storyboards?: string }): Promise<unknown>;
   saveSprintDraftPredictions(sprint: string, predictions: Map<string, string> | null, qaReason: string | null): Promise<unknown>;
+  sprintDraftsWithEpic(epic: string): Promise<string[]>;
 }
+
+/** The newest storyboard version of an epic as the draft last saw it; error says why there is none. */
+export interface StoryboardState {
+  epic: string; version: number | null; previous: number | null; path: string | null; page: string | null; frames: number; changed: string[];
+  changedAt: string | null; checkedAt: string; error: string | null;
+}
+/** A ticket naming a frame that changed in the newest storyboard version: its AC needs a check, Held when work has not started. */
+export interface StoryboardFlag { version: number; frames: string[]; held: boolean; checked: Decision | null }
 
 export interface DraftTicketView extends Omit<ScheduledTicket, 'dev' | 'wave'> {
   summary: string; dev: string | null; jiraDev: string | null; sp: number | null; wave: number; waveSet: boolean; status: string;
   ac: string[]; dependsOn: string[]; prediction: QaPrediction | null; qaDecision: Decision | null;
+  epic: string | null; frames: string[]; storyboard: StoryboardFlag | null;
 }
 export interface DraftFindingView extends AcFinding { decision: Decision | null }
 export interface DraftView {
@@ -59,6 +70,7 @@ export interface DraftView {
   devs: string[]; tickets: DraftTicketView[]; findings: DraftFindingView[]; blockers: string[]; canPublish: boolean;
   /** Tickets of the sprint already past merge: left out of the schedule and the AC check. */
   landed: number;
+  storyboards: StoryboardState[];
 }
 export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; refused: string | null }
 /** One line of a publish: a ticket's AC and assignee, or the Confluence contract page. */
@@ -70,6 +82,14 @@ const parse = <T>(raw: string | null | undefined, fallback: T): T => {
 };
 const sameLines = (a: string[], b: string[]) => a.length === b.length && a.every((line, index) => line === b[index]);
 const qaId = (key: string) => `qa|${key}`;
+const storyboardId = (key: string, version: number) => `sb|${key}|v${version}`;
+const isInProgress = (status: string) => /in ?progress/i.test(status);
+
+/** Every text line of a Jira rich-text or plain field. */
+function fieldLines(raw: unknown): string[] {
+  if (typeof raw === 'string') return raw.split(/\r?\n/);
+  return isAdf(raw) ? adfLines(raw) : [];
+}
 
 async function mapLimit<T, R>(items: T[], limit: number, worker: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
@@ -224,6 +244,7 @@ export class SprintDraftService {
     private readonly predict: (tickets: QaInputTicket[]) => Promise<QaRun> = (tickets) => predictQa(tickets),
     private readonly now: () => Date = () => new Date(),
     private readonly contract: () => Promise<ContractTarget> = async () => ({ client: null, parentId: null }),
+    private readonly storyboard: ((epic: string) => Promise<StoryboardResult>) | null = null,
   ) {}
 
   async sprints(): Promise<PlanningSprint[]> {
@@ -254,6 +275,7 @@ export class SprintDraftService {
         key: issue.key, summary: issue.summary, dev: issue.assignee, sp: issue.sp, wave: null, status: issue.status,
         ac, jiraAc: ac, jiraDev: issue.assignee,
         dependsOn: [...new Set(issue.links.filter((link) => link.relation === 'blockedBy').map((link) => link.key))],
+        epic: issue.epic ?? null, frames: framesIn([...ac, ...fieldLines(issue.descriptionRaw)]),
       };
     });
     const outside = new Set<string>();
@@ -269,7 +291,8 @@ export class SprintDraftService {
       sprintDays: workingDays(sprint.startDate, sprint.endDate) ?? previous?.sprintDays ?? DEFAULT_SPRINT_DAYS,
       startDate: sprint.startDate ? new Date(sprint.startDate) : null, createdBy: previous?.createdBy ?? by, refStatuses: JSON.stringify(refStatuses),
     }, tickets);
-    return this.refreshQa(sprint.name);
+    await this.refreshQa(sprint.name);
+    return this.checkStoryboards(sprint.name).catch(async () => (await this.view(sprint.name))!);
   }
 
   async view(sprint: string): Promise<DraftView | null> {
@@ -282,7 +305,7 @@ export class SprintDraftService {
     const refStatuses = parse<Record<string, string>>(row.refStatuses, {});
     const all = row.tickets.map((ticket) => ({
       ...ticket, ac: parse<string[]>(ticket.ac, []), jiraAc: parse<string[]>(ticket.jiraAc, []), dependsOn: parse<string[]>(ticket.dependsOn, []),
-      prediction: parse<QaPrediction | null>(ticket.prediction, null),
+      prediction: parse<QaPrediction | null>(ticket.prediction, null), epic: ticket.epic ?? null, frames: parse<string[]>(ticket.frames, []),
     }));
     const tickets = all.filter((ticket) => !isDoneStatus(ticket.status));
     const schedule = new Map(scheduleSprint(
@@ -294,17 +317,27 @@ export class SprintDraftService {
     const findings = acFindings(tickets, ends, (key) => status.get(key) ?? refStatuses[key] ?? null)
       .map((finding) => ({ ...finding, decision: decisions[finding.id] ?? null }));
     const blockers = publishBlockers(findings, tickets, decisions);
+    const storyboards = Object.values(parse<Record<string, StoryboardState>>(row.storyboards, {})).sort((a, b) => a.epic.localeCompare(b.epic));
+    const boardOf = new Map(storyboards.map((board) => [board.epic, board]));
+    const flagOf = (ticket: { key: string; epic: string | null; frames: string[]; ac: string[]; status: string }): StoryboardFlag | null => {
+      const board = ticket.epic ? boardOf.get(ticket.epic) : undefined;
+      if (!board?.version || !board.changed.length) return null;
+      const named = new Set([...ticket.frames, ...framesIn(ticket.ac)]);
+      const frames = board.changed.filter((id) => named.has(id));
+      return frames.length ? { version: board.version, frames, held: !isInProgress(ticket.status), checked: decisions[storyboardId(ticket.key, board.version)] ?? null } : null;
+    };
     const devs = [...new Set(tickets.map((ticket) => ticket.dev).filter((dev): dev is string => !!dev))].sort((a, b) => a.localeCompare(b));
     return {
       sprint: row.sprint, sprintId: row.sprintId, status: row.status, sprintDays: row.sprintDays, startDate: row.startDate?.toISOString() ?? null,
       spPerDay, createdBy: row.createdBy, loadedAt: row.loadedAt.toISOString(), publishedAt: row.publishedAt?.toISOString() ?? null, qaReason: row.qaReason,
-      devs, landed: all.length - tickets.length,
+      devs, landed: all.length - tickets.length, storyboards,
       tickets: tickets.map((ticket) => {
         const placed = schedule.get(ticket.key)!;
         return {
           key: ticket.key, summary: ticket.summary, dev: ticket.dev, jiraDev: ticket.jiraDev, sp: ticket.sp, wave: placed.wave, waveSet: ticket.wave !== null,
           status: ticket.status, ac: ticket.ac, dependsOn: ticket.dependsOn, start: placed.start, dur: placed.dur, end: placed.end,
           inSprint: placed.inSprint, split: placed.split, prediction: ticket.prediction, qaDecision: decisions[qaId(ticket.key)] ?? null,
+          epic: ticket.epic, frames: ticket.frames, storyboard: flagOf(ticket),
         };
       }).sort((a, b) => a.start - b.start || a.key.localeCompare(b.key, undefined, { numeric: true })),
       findings,
@@ -365,6 +398,9 @@ export class SprintDraftService {
         if (!finding) throw new SprintInputError('No such AC line in the draft');
         if (!AC_ACTIONS.includes(action)) throw new SprintInputError('An AC line is moved, kept to wait, or dropped');
         if (action === 'move' && !view.tickets.some((ticket) => ticket.key === finding.refKey)) throw new SprintInputError(`${finding.refKey} is not in this sprint; keep the line or drop it`);
+      } else if (id.startsWith('sb|')) {
+        if (!view.tickets.some((ticket) => ticket.storyboard && storyboardId(ticket.key, ticket.storyboard.version) === id)) throw new SprintInputError('No storyboard change on that ticket');
+        if (action !== 'checked') throw new SprintInputError('A storyboard change is marked checked');
       } else if (id.startsWith('qa|')) {
         if (!view.tickets.some((ticket) => qaId(ticket.key) === id && ticket.prediction)) throw new SprintInputError('No QA prediction for that ticket');
         if (!QA_ACTIONS.includes(action)) throw new SprintInputError('A QA prediction is accepted as a risk or fixed');
@@ -376,6 +412,45 @@ export class SprintDraftService {
     }
     await this.store.updateSprintDraft(sprint, { decisions: JSON.stringify(decisions) });
     return (await this.view(sprint))!;
+  }
+
+  /** Reads the newest storyboard of every epic of the draft; an epic without one says why, and nothing else stops. */
+  async checkStoryboards(sprint: string): Promise<DraftView> {
+    const row = await this.row(sprint);
+    if (!this.storyboard) return (await this.view(sprint))!;
+    const epics = [...new Set(row.tickets.map((ticket) => ticket.epic).filter((epic): epic is string => !!epic))].sort();
+    const boards = parse<Record<string, StoryboardState>>(row.storyboards, {});
+    for (const epic of epics) {
+      try {
+        boards[epic] = this.boardState(await this.storyboard(epic), boards[epic]);
+      } catch (error) {
+        const message = error instanceof StoryboardMissing ? error.message : `Confluence: ${error instanceof Error ? error.message : String(error)}`;
+        boards[epic] = { ...(boards[epic] ?? { epic, version: null, previous: null, path: null, page: null, frames: 0, changed: [], changedAt: null }), checkedAt: this.now().toISOString(), error: message };
+      }
+    }
+    await this.store.updateSprintDraft(sprint, { storyboards: JSON.stringify(boards) });
+    return (await this.view(sprint))!;
+  }
+
+  /** A storyboard read outside Planning (the agent's route): every draft holding a ticket of the epic takes it. */
+  async applyStoryboard(result: StoryboardResult): Promise<string[]> {
+    const sprints = await this.store.sprintDraftsWithEpic(result.epic);
+    for (const sprint of sprints) {
+      const row = await this.store.getSprintDraft(sprint);
+      if (!row) continue;
+      const boards = parse<Record<string, StoryboardState>>(row.storyboards, {});
+      boards[result.epic] = this.boardState(result, boards[result.epic]);
+      await this.store.updateSprintDraft(sprint, { storyboards: JSON.stringify(boards) });
+    }
+    return sprints;
+  }
+
+  private boardState(result: StoryboardResult, before: StoryboardState | undefined): StoryboardState {
+    const at = this.now().toISOString();
+    return {
+      epic: result.epic, version: result.version, previous: result.previous, path: result.path, page: result.page, frames: result.frames.length, changed: result.changed,
+      changedAt: before?.version === result.version ? before.changedAt ?? at : at, checkedAt: at, error: null,
+    };
   }
 
   /** The changes Publish would write, each ticket read from Jira again; nothing is written. */

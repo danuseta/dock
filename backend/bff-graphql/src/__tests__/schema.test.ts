@@ -167,6 +167,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'changeMasterPin',
       'checkConflicts',
       'checkMonitors',
+      'checkSprintStoryboards',
       'clearDemoStorage',
       'clearTicketDependency',
       'clearTicketWorkOrder',

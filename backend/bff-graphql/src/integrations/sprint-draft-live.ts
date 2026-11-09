@@ -3,7 +3,9 @@ import { JiraSprintClient, createJiraHttp } from './jira-sprint';
 import { SprintInputError, sprintDashboardService } from './sprint-dashboard';
 import { SprintDraftService, type ContractTarget, type DraftJira } from './sprint-draft';
 import { AcDriftService, type DriftJira } from './ac-drift';
-import { confluenceFrom } from './confluence';
+import { confluenceFrom, type ConfluenceClient } from './confluence';
+import { StoryboardReader } from './storyboard';
+import { defaultBlackboardRoot } from './blackboard';
 import { CONTRACT_PARENT_KEY } from './sprint-contract';
 
 const storage = new StorageService();
@@ -34,16 +36,29 @@ async function planningJira(): Promise<DraftJira> {
   };
 }
 
-/** Confluence on the Jira site, and the page the contract goes under; no credentials leave the client null. */
-async function planningContract(): Promise<ContractTarget> {
+/** Confluence on the Jira site; no credentials leave it null. */
+async function confluence(): Promise<{ client: ConfluenceClient | null; value: (key: string) => string }> {
   const settings = await storage.getSettings();
   const value = (key: string) => settings.find((setting) => setting.key === key)?.value?.trim() || '';
   const credentials = { domain: value('jiraUrl'), email: value('jiraEmail'), apiToken: value('jiraApiToken') };
   const ready = credentials.domain && credentials.email && credentials.apiToken;
-  return { client: ready ? confluenceFrom(credentials) : null, parentId: value(CONTRACT_PARENT_KEY) || null };
+  return { client: ready ? confluenceFrom(credentials) : null, value };
 }
 
-export const sprintDraftService = new SprintDraftService(storage, planningJira, undefined, undefined, planningContract);
+/** The page the sprint contract goes under. */
+async function planningContract(): Promise<ContractTarget> {
+  const { client, value } = await confluence();
+  return { client, parentId: value(CONTRACT_PARENT_KEY) || null };
+}
+
+/** The storyboards, read from Confluence on the Jira site and saved under the blackboard sous reads. */
+export const storyboardReader = new StoryboardReader(async () => {
+  const { client } = await confluence();
+  if (!client) throw new SprintInputError('Jira credentials are not configured in Settings');
+  return client;
+}, defaultBlackboardRoot);
+
+export const sprintDraftService = new SprintDraftService(storage, planningJira, undefined, undefined, planningContract, (epic) => storyboardReader.sync(epic));
 
 /** The owner's side of a published plan, on the same Jira credentials. */
 async function driftJira(): Promise<DriftJira> {

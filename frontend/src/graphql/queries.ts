@@ -752,8 +752,11 @@ export const SPRINT_DRAFT_FIELDS = `
     key summary dev jiraDev sp wave waveSet status ac dependsOn start dur end inSprint split
     prediction { prediction reasons fix }
     qaDecision { action note by at }
+    epic frames
+    storyboard { version frames held checked { action note by at } }
   }
   findings { id key line text refKey kind refEnd ownEnd decision { action note by at } }
+  storyboards { epic version previous path page frames changed changedAt checkedAt error }
 `;
 
 export const GET_PLANNING_SPRINTS = gql`
@@ -801,6 +804,7 @@ export const REFRESH_SPRINT_DRAFT_QA = gql`
 export const SPRINT_DRIFT_FIELDS = `
   sprint publishedAt today
   rows { id key line text refKey refStatus refDev refEnd ownEnd reason state decision { action state note by at } }
+  storyboard { key version frames held checked }
 `;
 
 export const GET_SPRINT_DRIFT = gql`
@@ -812,6 +816,12 @@ export const GET_SPRINT_DRIFT = gql`
 export const SPRINT_DRIFT_ACTION = gql`
   mutation SprintDriftAction($id: ID!, $action: String!, $note: String) {
     sprintDriftAction(id: $id, action: $action, note: $note) { ${SPRINT_DRIFT_FIELDS} }
+  }
+`;
+
+export const CHECK_SPRINT_STORYBOARDS = gql`
+  mutation CheckSprintStoryboards($sprint: String!) {
+    checkSprintStoryboards(sprint: $sprint) { ${SPRINT_DRAFT_FIELDS} }
   }
 `;
 

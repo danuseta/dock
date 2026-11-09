@@ -17,7 +17,9 @@ export interface DriftRow {
   id: string; key: string; line: number; text: string; refKey: string; refStatus: string | null; refDev: string | null;
   refEnd: number | null; ownEnd: number | null; reason: 'after-it' | 'slipped' | 'outside-plan'; state: DriftState; decision: DriftDecision | null;
 }
-export interface PlanDrift { sprint: string; publishedAt: string | null; today: number | null; rows: DriftRow[] }
+/** An owner ticket naming a storyboard frame that changed since publish. */
+export interface DriftStoryboard { key: string; version: number; frames: string[]; held: boolean; checked: boolean }
+export interface PlanDrift { sprint: string; publishedAt: string | null; today: number | null; rows: DriftRow[]; storyboard: DriftStoryboard[] }
 
 /** What drift needs from Jira beyond Planning: who DOCK is, comments and labels. */
 export interface DriftJira extends Pick<DraftJira, 'statusesOf' | 'issueNow' | 'setAc'> {
@@ -96,6 +98,9 @@ export class AcDriftService {
     return {
       sprint, publishedAt: published.view.publishedAt, today,
       rows: driftRows(published.view, published.jiraAc, owner, statuses, published.decisions, today),
+      storyboard: published.view.tickets.filter((ticket) => owner.has(ticket.key) && ticket.storyboard).map((ticket) => ({
+        key: ticket.key, version: ticket.storyboard!.version, frames: ticket.storyboard!.frames, held: ticket.storyboard!.held && !isDoneStatus(statuses.get(ticket.key)), checked: !!ticket.storyboard!.checked,
+      })),
     };
   }
 

@@ -13,7 +13,7 @@ export interface PlanEdgeInput { ticketKey: string; dependsOnKey: string; reason
 export interface SprintDraftInput { sprint: string; sprintId: number; sprintDays: number; startDate: Date | null; createdBy: string | null; refStatuses: string }
 export interface SprintDraftTicketInput {
   key: string; summary: string; dev: string | null; sp: number | null; wave: number | null; status: string;
-  ac: string[]; jiraAc: string[]; jiraDev: string | null; dependsOn: string[];
+  ac: string[]; jiraAc: string[]; jiraDev: string | null; dependsOn: string[]; epic?: string | null; frames?: string[];
 }
 export interface SprintPlanData { status?: string; mappingKeys?: string[]; sessionId?: string | null; mappedKeys?: string[]; groups?: string[][]; error?: string | null; startedAt?: Date | null; mappedAt?: Date | null }
 
@@ -444,6 +444,7 @@ export class StorageService {
     const rows = tickets.map((ticket, position) => ({
       draftSprint: sprint, key: ticket.key, summary: ticket.summary, dev: ticket.dev, sp: ticket.sp, wave: ticket.wave, status: ticket.status,
       ac: JSON.stringify(ticket.ac), jiraAc: JSON.stringify(ticket.jiraAc), jiraDev: ticket.jiraDev, dependsOn: JSON.stringify(ticket.dependsOn), position,
+      epic: ticket.epic ?? null, frames: JSON.stringify(ticket.frames ?? []),
     }));
     await this.db.$transaction([
       this.db.sprintDraft.upsert({ where: { sprint }, update: reset, create: { sprint, ...reset } }),
@@ -460,7 +461,12 @@ export class StorageService {
     });
   }
 
-  updateSprintDraft(sprint: string, data: { decisions?: string; qaReason?: string | null; status?: string; publishedAt?: Date | null }) {
+  /** The drafts holding a ticket of the epic, so a new storyboard version flags them all. */
+  async sprintDraftsWithEpic(epic: string): Promise<string[]> {
+    return (await this.db.sprintDraftTicket.findMany({ where: { epic }, select: { draftSprint: true }, distinct: ['draftSprint'] })).map((row) => row.draftSprint);
+  }
+
+  updateSprintDraft(sprint: string, data: { decisions?: string; qaReason?: string | null; status?: string; publishedAt?: Date | null; storyboards?: string }) {
     return this.db.sprintDraft.update({ where: { sprint }, data });
   }
 

@@ -465,6 +465,7 @@ model SprintDraft {
   qaReason    String? /// why there is no QA prediction, null when predict.mjs answered
   refStatuses String    @default("{}") /// {key: Jira status} of tickets the AC or links name outside the sprint
   drift       String    @default("{}") /// {findingId: {action, state, note, by, at}}: the owners' calls on held AC lines after publish
+  storyboards String    @default("{}") /// {epic: {version, previous, path, page, frames, changed, changedAt, checkedAt, error}}
   createdBy   String?
   loadedAt    DateTime  @default(now())
   publishedAt DateTime?
@@ -485,6 +486,8 @@ model SprintDraftTicket {
   dependsOn   String  @default("[]")
   status      String
   prediction  String? /// {prediction, reasons, fix}
+  epic        String?
+  frames      String  @default("[]") /// storyboard frames (F<n>.<m>) the AC or the description names
   position    Int     @default(0)
 
   @@id([draftSprint, key])

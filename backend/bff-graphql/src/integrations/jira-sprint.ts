@@ -36,11 +36,15 @@ export interface PlanningIssue {
   sp: number | null;
   acRaw: unknown;
   links: TicketLink[];
+  /** The parent epic's key. */
+  epic?: string | null;
+  /** The description as Jira returned it (ADF or text). */
+  descriptionRaw?: unknown;
 }
 
 export const AC_FIELD = 'customfield_10332';
 const SP_FIELDS = ['story_points', 'customfield_10016', 'customfield_10028', 'customfield_10034'];
-const PLANNING_FIELDS = ['summary', 'issuetype', 'status', 'assignee', 'issuelinks', AC_FIELD, ...SP_FIELDS];
+const PLANNING_FIELDS = ['summary', 'issuetype', 'status', 'assignee', 'issuelinks', 'parent', 'description', AC_FIELD, ...SP_FIELDS];
 
 const TRACKED_FIELDS = new Set(['status', 'labels', 'Sprint', 'Story point estimate', 'assignee']);
 const ISSUE_FIELDS = [
@@ -133,6 +137,8 @@ export function planningIssue(issue: any): PlanningIssue {
     sp: storyPoints(fields),
     acRaw: fields[AC_FIELD] ?? null,
     links: blockLinks(fields.issuelinks),
+    epic: typeof fields.parent?.key === 'string' ? fields.parent.key : null,
+    descriptionRaw: fields.description ?? null,
   };
 }
 

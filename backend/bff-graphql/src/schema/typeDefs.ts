@@ -619,6 +619,9 @@ export const typeDefs = gql`
     split: [Float!]
     prediction: QaPrediction
     qaDecision: SprintDraftDecision
+    epic: String
+    frames: [String!]!
+    storyboard: SprintDraftStoryboardFlag
   }
 
   """An AC line that names another ticket. kind is after-it (that ticket lands later), lands-first or outside-plan."""
@@ -651,6 +654,7 @@ export const typeDefs = gql`
     devs: [String!]!
     tickets: [SprintDraftTicket!]!
     findings: [SprintDraftFinding!]!
+    storyboards: [SprintStoryboard!]!
     blockers: [String!]!
     canPublish: Boolean!
     """Tickets already past merge (UAT CHECK and later): out of the schedule and the AC check."""
@@ -696,12 +700,45 @@ export const typeDefs = gql`
     decision: SprintDriftDecision
   }
 
+  type SprintDriftStoryboard {
+    key: String!
+    version: Int!
+    frames: [String!]!
+    held: Boolean!
+    checked: Boolean!
+  }
+
   type SprintDrift {
     sprint: String!
     publishedAt: String
     "The working day of the sprint today, 1-based."
     today: Int
     rows: [SprintDriftRow!]!
+    "The owner's tickets naming a storyboard frame that changed in the newest version: their AC needs a check."
+    storyboard: [SprintDriftStoryboard!]!
+  }
+
+  "A ticket naming a frame (F<n>.<m>) that changed in the newest storyboard version."
+  type SprintDraftStoryboardFlag {
+    version: Int!
+    frames: [String!]!
+    "Work has not started, so the ticket waits for the check."
+    held: Boolean!
+    checked: SprintDraftDecision
+  }
+
+  type SprintStoryboard {
+    epic: String!
+    version: Int
+    previous: Int
+    path: String
+    page: String
+    frames: Int!
+    changed: [String!]!
+    changedAt: String
+    checkedAt: String!
+    "Why there is no storyboard, such as no page or no HTML attachment."
+    error: String
   }
 
   type SprintDraftPublishResult {
@@ -1754,6 +1791,8 @@ export const typeDefs = gql`
     """Records a decision on a finding or a qa|KEY prediction; action clear removes it."""
     decideSprintDraft(sprint: String!, id: ID!, action: String!, note: String): SprintDraft!
     refreshSprintDraftQa(sprint: String!): SprintDraft!
+    "Reads the newest storyboard of each epic of the draft from Confluence and saves it under the blackboard."
+    checkSprintStoryboards(sprint: String!): SprintDraft!
     """Writes AC lines and assignees that differ from Jira. Refused while a blocker has no decision."""
     publishSprintDraft(sprint: String!): [SprintDraftPublishResult!]!
     "move, not-tested, wait, needs-po or clear on a held AC line of the owner's ticket."
