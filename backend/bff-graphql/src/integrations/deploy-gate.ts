@@ -28,6 +28,8 @@ export interface DeployGateDeps {
   workflow(fullName: string): Promise<string | null>;
   runs(owner: string, repo: string, workflow: string, branch: string): Promise<WorkflowRun[]>;
   contains(owner: string, repo: string, base: string, head: string): Promise<boolean>;
+  /** The branch the deploy workflows run on; default develop. */
+  branch?: string;
 }
 
 const RUNNING = new Set(['queued', 'in_progress', 'waiting', 'requested', 'pending']);
@@ -38,6 +40,8 @@ async function repoDeploy(p: GatePull, deps: DeployGateDeps): Promise<RepoDeploy
   if (p.status === 'closed') return { ...base, state: 'not-merged', detail: 'closed without merge; it does not count' };
   const pull = await deps.pull(p.owner, p.repo, p.number);
   if (!pull.merged || !pull.mergeSha) return { ...base, state: 'not-merged', detail: 'not merged yet' };
+  const deployBranch = deps.branch ?? 'develop';
+  if (pull.base !== deployBranch) return { ...base, state: 'not-merged', mergeSha: pull.mergeSha, detail: `merged into ${pull.base}; it reaches UAT through that branch's own pull request` };
   const merged = { ...base, mergeSha: pull.mergeSha };
   const workflow = await deps.workflow(fullName);
   if (!workflow) return { ...merged, detail: `no deploy workflow set for ${fullName} (Settings deployWorkflows)` };
@@ -67,7 +71,7 @@ export async function deployGate(key: string, deps: DeployGateDeps): Promise<Dep
     repo: `${p.owner}/${p.repo}`, pull: p.number, state: 'unknown' as const, mergeSha: null, runUrl: null, finishedAt: null,
     detail: `GitHub refused: ${error instanceof Error ? error.message : 'unknown error'}`,
   }))));
-  const counted = repos.filter((r) => !(r.state === 'not-merged' && r.detail.startsWith('closed')));
+  const counted = repos.filter((r) => !(r.state === 'not-merged' && (r.detail.startsWith('closed') || r.detail.startsWith('merged into'))));
   const ready = counted.length > 0 && counted.every((r) => r.state === 'deployed');
   const summary = ready
     ? `deployed: ${counted.map((r) => `${r.repo}#${r.pull}`).join(', ')}`

@@ -6,11 +6,11 @@ const BE = { owner: 'qonekid', repo: 'ms-admin-worker-backend' };
 const FE = { owner: 'qonekid', repo: 'ms-client-dashboard-frontend' };
 const run = (headSha: string, status: string, conclusion: string | null, createdAt: string, updatedAt = createdAt): WorkflowRun => ({ headSha, status, conclusion, createdAt, updatedAt, url: `https://github.com/run/${headSha}` });
 
-function deps(options: { pulls: GatePull[]; merged: Record<number, { sha: string | null; at: string | null }>; runs: Record<string, WorkflowRun[]>; contains?: Record<string, string[]>; workflows?: Record<string, string> }): DeployGateDeps {
+function deps(options: { pulls: GatePull[]; merged: Record<number, { sha: string | null; at: string | null }>; runs: Record<string, WorkflowRun[]>; contains?: Record<string, string[]>; workflows?: Record<string, string>; bases?: Record<number, string> }): DeployGateDeps {
   const workflows = options.workflows ?? { 'qonekid/ms-admin-worker-backend': 'deploy.uat.yml', 'qonekid/ms-client-dashboard-frontend': 'deploy-dev.yml' };
   return {
     pulls: async () => options.pulls,
-    pull: async (_o, _r, number) => ({ merged: Boolean(options.merged[number]?.sha), mergeSha: options.merged[number]?.sha ?? null, mergedAt: options.merged[number]?.at ?? null, base: 'develop' }),
+    pull: async (_o, _r, number) => ({ merged: Boolean(options.merged[number]?.sha), mergeSha: options.merged[number]?.sha ?? null, mergedAt: options.merged[number]?.at ?? null, base: options.bases?.[number] ?? 'develop' }),
     workflow: async (fullName) => workflows[fullName] ?? null,
     runs: async (_o, repo) => options.runs[repo] ?? [],
     contains: async (_o, _r, base, head) => base === head || (options.contains?.[base] ?? []).includes(head),
@@ -85,4 +85,15 @@ test('deployWorkflows setting: repo names are case-insensitive, junk is ignored'
   assert.deepEqual(parseDeployWorkflows('{"Qonekid/MS-Admin-Worker-Backend":"deploy.uat.yml","bad":"x","o/r":""}'), { 'qonekid/ms-admin-worker-backend': 'deploy.uat.yml' });
   assert.deepEqual(parseDeployWorkflows('not json'), {});
   assert.deepEqual(parseDeployWorkflows(null), {});
+});
+
+test('a pull request merged into another ticket branch does not hold the gate (FE #1157 into feat/QRD-1296 on QRD-1292)', async () => {
+  const gate = await deployGate('QRD-1292', deps({
+    pulls: [{ ...FE, number: 1115, status: 'merged' }, { ...FE, number: 1157, status: 'merged' }],
+    merged: { 1115: { sha: 'fe1115', at: '2026-11-04T14:28:07Z' }, 1157: { sha: 'stack', at: '2026-11-06T02:00:00Z' } },
+    bases: { 1157: 'feat/QRD-1296-share-skill-view-use' },
+    runs: { 'ms-client-dashboard-frontend': [run('fe1115', 'completed', 'success', '2026-11-04T14:28:10Z')] },
+  }));
+  assert.equal(gate.ready, true);
+  assert.match(gate.repos[1].detail, /merged into feat\/QRD-1296/);
 });
