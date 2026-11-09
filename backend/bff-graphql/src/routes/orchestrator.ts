@@ -15,6 +15,7 @@ import { decisionGate, stillWorking, type DecisionGate } from '../integrations/d
 import { parseRetroDraft } from '../integrations/retro';
 import type { SprintPlanner } from '../integrations/sprint-plan';
 import { sprintPlanner } from '../integrations/sprint-plan-live';
+import { deployGateFor } from '../integrations/deploy-gate-live';
 import { doctorReports, type DoctorReports } from '../integrations/doctor';
 import { DiscordReaderError, type DiscordReader } from '../integrations/discord-reader';
 import { discordReader } from '../integrations/discord-reader-live';
@@ -118,6 +119,11 @@ export function createOrchestratorIngestRouter(
     return { sprint: draft.sprint, items: await retroStore.replaceRetroDraft(draft.sprint, draft.items) };
   }));
   router.post('/plan', small, handle((body) => planner.ingest(body)));
+  router.post('/deploy-gate', small, handle(async (body) => {
+    const key = String((body as { key?: unknown } | null)?.key ?? '').trim().toUpperCase();
+    if (!/^[A-Z][A-Z0-9]+-\d+$/.test(key)) throw new OrchestratorInputError('key must be a ticket key such as QRD-1292');
+    return deployGateFor(key);
+  }));
   router.post('/ledger/list', small, handle((_body, _signal, machine) => service.ledgerList(machine)));
   router.post('/ledger/get', small, handle((body, _signal, machine) => service.ledgerGet(body, machine)));
   router.post('/event', small, handle(async (body, _signal, machine) => {

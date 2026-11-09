@@ -95,6 +95,8 @@ test('the QA prompt names the ticket, the command and what it must not touch', (
   assert.match(prompt, /QRD-1286 setelah PR https:/);
   assert.match(prompt, /qonflo-qa-local QRD-1286/);
   assert.match(prompt, /Dilarang: menulis ke ~\/qa, UAT, Jira/);
+  assert.match(prompt, /deploy-gate\.cjs QRD-1286/);
+  assert.match(prompt, /UAT CHECK setelah QA lokal lolos DAN deploy-gate menjawab ready/);
 });
 
 function world(options: { available?: boolean; enabled?: boolean; machine?: string; last?: QaTrigger | null; failOpen?: boolean } = {}) {

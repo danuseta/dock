@@ -38,6 +38,7 @@ import { claudeUsage } from '../integrations/claude-usage';
 import { claudeAccounts, claudeAccountsState, cycleAvailable } from '../integrations/claude-accounts-live';
 import { latestQaRun, qaAuto, qaAvailable, qaEnabled, qaTrigger, QA_SETTING } from '../integrations/qa-local-live';
 import { isTicketKey, runPullRequests } from '../integrations/qa-local';
+import { deployGateFor } from '../integrations/deploy-gate-live';
 import { agentLooks } from '../integrations/agent-looks';
 import { agentBridge } from '../integrations/agents-live';
 import type { AnswerInput } from '../integrations/chat-interactions';
@@ -414,6 +415,10 @@ export const resolvers = {
     autoReviews: async () => listedAutoReviews(await storageAPI.getAutoReviews()),
     claudeAccounts: () => claudeAccountsState(),
     qaLocal: (_: unknown, { ticketKey }: { ticketKey?: string | null }) => qaLocalState(ticketKey),
+    deployGate: (_: unknown, { ticketKey }: { ticketKey: string }) => {
+      if (!isTicketKey(ticketKey)) throw new GraphQLError('ticketKey must be a ticket key such as QRD-1292', { extensions: { code: 'BAD_USER_INPUT' } });
+      return deployGateFor(ticketKey);
+    },
     needsAttention: async () => {
       const [agentItems, pullRequestItems] = await Promise.all([
         Promise.all([
@@ -986,7 +991,7 @@ export const resolvers = {
 };
 
 export const protectedQueries = [
-  'dashboard', 'ticketPullRequests', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'claudeAccounts', 'qaLocal', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
+  'dashboard', 'ticketPullRequests', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'claudeAccounts', 'qaLocal', 'deployGate', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatSessionStates', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'agentLooks', 'libraryAgents', 'libraryAgent',

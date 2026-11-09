@@ -1434,6 +1434,26 @@ export const typeDefs = gql`
     error: String
   }
 
+  "One merged pull request of a ticket and whether its repo's deploy workflow has shipped it."
+  type RepoDeploy {
+    repo: String!
+    pull: Int!
+    "deployed, deploying, failed, not-merged or unknown."
+    state: String!
+    mergeSha: String
+    runUrl: String
+    finishedAt: String
+    detail: String!
+  }
+
+  "Whether a ticket's merged code is deployed, so it may move to UAT CHECK."
+  type DeployGate {
+    key: String!
+    ready: Boolean!
+    repos: [RepoDeploy!]!
+    summary: String!
+  }
+
   "Local QA with qonflo-qa-local; available only on a workspace DOCK where it is installed."
   type QaLocal {
     available: Boolean!
@@ -1502,6 +1522,8 @@ export const typeDefs = gql`
     claudeAccounts: ClaudeAccounts!
     "The local QA state, and the newest run and QA session of a ticket when one is given."
     qaLocal(ticketKey: String): QaLocal!
+    "Whether the ticket's merged pull requests are deployed (Settings deployWorkflows names each repo's deploy workflow)."
+    deployGate(ticketKey: String!): DeployGate!
     """Pull requests and Jira labels of up to 10 tickets by key; extra keys are ignored."""
     ticketPullRequests(keys: [String!]!): [TicketPullRequests!]!
     settings: Settings

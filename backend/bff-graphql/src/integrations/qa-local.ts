@@ -160,6 +160,7 @@ export const qaPrompt = (key: string, prs: string[]) => [
   `2. Jalankan: qonflo-qa-local ${key} (worktree wt-<nomor>-be dan -fe dipilih otomatis; pakai --be dan --fe kalau ada lebih dari satu).`,
   '3. Setelah run, hapus data tes buatan spec dari MongoDB lokal (hanya dokumen yang dibuat run ini).',
   '4. Laporkan per TC: id, AC, PASS/FAIL/BLOCKED, path video, path summary.md, dan prediksi verdict beserta aturan judge.md yang dipakai.',
+  `5. Jalankan: node ~/.claude/kit/deploy-gate.cjs ${key} dan laporkan hasilnya. Tiket baru boleh dipindah ke UAT CHECK setelah QA lokal lolos DAN deploy-gate menjawab ready (semua PR yang merge sudah ter-deploy ke UAT).`,
   'Dilarang: menulis ke ~/qa, UAT, Jira (label, transisi, komentar), Confluence, Drive, apt, sudo, docker, dan commit ke repo aplikasi. Jangan sentuh port 3000, 3001, 5173, 5174, 5000, 3100, 13337, 13339, 8099, 27017, 6379, 1055.',
 ].join('\n');
 

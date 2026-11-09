@@ -1237,6 +1237,12 @@ export const GET_QA_LOCAL = gql`
   }
 `;
 
+export const GET_DEPLOY_GATE = gql`
+  query GetDeployGate($ticketKey: String!) {
+    deployGate(ticketKey: $ticketKey) { key ready summary repos { repo pull state mergeSha runUrl finishedAt detail } }
+  }
+`;
+
 export const GET_CLAUDE_ACCOUNTS = gql`
   query GetClaudeAccounts {
     claudeAccounts { ${CLAUDE_ACCOUNTS_FIELDS} }
