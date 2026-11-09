@@ -464,6 +464,10 @@ export class StorageService {
     return this.db.sprintDraft.update({ where: { sprint }, data });
   }
 
+  updateSprintDraftDrift(sprint: string, drift: string) {
+    return this.db.sprintDraft.update({ where: { sprint }, data: { drift } });
+  }
+
   /** The predictions of one run: a ticket the script did not answer for loses its old one. */
   async saveSprintDraftPredictions(sprint: string, predictions: Map<string, string> | null, qaReason: string | null) {
     await this.db.$transaction([

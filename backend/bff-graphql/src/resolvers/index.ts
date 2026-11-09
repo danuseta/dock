@@ -14,7 +14,7 @@ import { StorageService } from '../storage/service';
 import { activeSprint } from '../integrations/sprint-plan';
 import { lookupDependencies } from '../integrations/dependency-lookup';
 import { sprintPlanner } from '../integrations/sprint-plan-live';
-import { sprintDraftService } from '../integrations/sprint-draft-live';
+import { acDriftService, sprintDraftService } from '../integrations/sprint-draft-live';
 import { isSettledStatus, mergeAttention, planAttentionItems, withoutSettledTickets } from '../integrations/attention';
 import { discordGateway, discordReader } from '../integrations/discord-reader-live';
 import { isTeamChannel } from '../integrations/discord-team';
@@ -336,6 +336,10 @@ export const resolvers = {
     planningSprints: () => sprintDraftService.sprints().catch(planningError),
     sprintDraft: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.view(sprint).catch(planningError),
     previewSprintDraftPublish: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.preview(sprint).catch(planningError),
+    sprintDrift: async () => {
+      const active = activeSprint(await jiraAPI.getTickets());
+      return active ? acDriftService.drift(active.sprint, active.tickets.map((ticket) => ticket.key)).catch(planningError) : null;
+    },
     runThinking: async (_: unknown, { key }: { key: string }) => (await orchestratorService.thinking(key).catch(orchestratorInputError)) ?? [],
     runThinkingRaw: (_: unknown, { key, at, until }: { key: string; at: string; until?: string | null }) => orchestratorService.thinkingRaw(key, at, until).catch(orchestratorInputError),
     workspaceDir: async (_: unknown, { path }: { path?: string | null }) => {
@@ -636,6 +640,11 @@ export const resolvers = {
     ),
     refreshSprintDraftQa: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.refreshQa(sprint).catch(planningError),
     publishSprintDraft: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.publish(sprint, reporterName()).catch(planningError),
+    sprintDriftAction: async (_: unknown, { id, action, note }: { id: string; action: string; note?: string | null }) => {
+      const active = activeSprint(await jiraAPI.getTickets());
+      if (!active) throw new GraphQLError('No active sprint has a ticket of yours', { extensions: { code: 'BAD_USER_INPUT' } });
+      return acDriftService.act(active.sprint, active.tickets.map((ticket) => ticket.key), id, action, note ?? null, reporterName()).catch(planningError);
+    },
     retroItemAction: async (_: unknown, { id, action, text }: { id: string; action: string; text?: string | null }) => {
       const item = await storageService.getRetroItem(id);
       if (!item) throw new GraphQLError('No such retro line', { extensions: { code: 'BAD_USER_INPUT' } });
@@ -1018,7 +1027,7 @@ export const protectedQueries = [
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'agentLooks', 'libraryAgents', 'libraryAgent',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
   'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro', 'sprintPlan',
-  'planningSprints', 'sprintDraft', 'previewSprintDraftPublish',
+  'planningSprints', 'sprintDraft', 'previewSprintDraftPublish', 'sprintDrift',
 ] as const;
 export const protectedMutations = [
   'retroBuild',
@@ -1029,6 +1038,7 @@ export const protectedMutations = [
   'decideSprintDraft',
   'refreshSprintDraftQa',
   'publishSprintDraft',
+  'sprintDriftAction',
   'retroItemAction',
   'workspaceMkdir',
   'workspaceRename',

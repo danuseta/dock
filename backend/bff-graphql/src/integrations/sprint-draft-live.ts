@@ -2,18 +2,23 @@ import { StorageService } from '../storage/service';
 import { JiraSprintClient, createJiraHttp } from './jira-sprint';
 import { SprintInputError, sprintDashboardService } from './sprint-dashboard';
 import { SprintDraftService, type ContractTarget, type DraftJira } from './sprint-draft';
+import { AcDriftService, type DriftJira } from './ac-drift';
 import { confluenceFrom } from './confluence';
 import { CONTRACT_PARENT_KEY } from './sprint-contract';
 
 const storage = new StorageService();
 
-/** Jira for Planning: the credentials in Settings and the board the sprint dashboard uses. */
-async function planningJira(): Promise<DraftJira> {
+async function jiraClient(): Promise<{ client: JiraSprintClient; value: (key: string) => string }> {
   const settings = await storage.getSettings();
   const value = (key: string) => settings.find((setting) => setting.key === key)?.value || '';
   const credentials = { domain: value('jiraUrl'), email: value('jiraEmail'), apiToken: value('jiraApiToken') };
   if (!credentials.domain || !credentials.email || !credentials.apiToken) throw new SprintInputError('Jira credentials are not configured in Settings');
-  const client = new JiraSprintClient(createJiraHttp(credentials));
+  return { client: new JiraSprintClient(createJiraHttp(credentials)), value };
+}
+
+/** Jira for Planning: the credentials in Settings and the board the sprint dashboard uses. */
+async function planningJira(): Promise<DraftJira> {
+  const { client, value } = await jiraClient();
   const projects = value('jiraProjectKeys').split(',').map((key) => key.trim()).filter(Boolean);
   let boardId = await sprintDashboardService.boardId();
   if (!boardId) boardId = (await client.findBoardId(projects)) || '';
@@ -39,3 +44,18 @@ async function planningContract(): Promise<ContractTarget> {
 }
 
 export const sprintDraftService = new SprintDraftService(storage, planningJira, undefined, undefined, planningContract);
+
+/** The owner's side of a published plan, on the same Jira credentials. */
+async function driftJira(): Promise<DriftJira> {
+  const { client } = await jiraClient();
+  return {
+    statusesOf: (keys) => client.statusesOf(keys),
+    issueNow: (key) => client.planningIssueNow(key),
+    setAc: (key, value) => client.setAcField(key, value),
+    myself: () => client.myself(),
+    comment: (key, lines) => client.addComment(key, lines),
+    addLabel: (key, label) => client.addLabel(key, label),
+  };
+}
+
+export const acDriftService = new AcDriftService(storage, (sprint) => sprintDraftService.view(sprint), driftJira);

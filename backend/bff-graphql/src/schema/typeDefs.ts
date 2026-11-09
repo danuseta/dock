@@ -668,6 +668,42 @@ export const typeDefs = gql`
   }
 
   """The outcome of Publish for one ticket: updated, refused or failed."""
+  type SprintDriftDecision {
+    "move, not-tested, wait or needs-po"
+    action: String!
+    "moved, move-pending, not-tested, wait or needs-po"
+    state: String!
+    note: String
+    by: String
+    at: String!
+  }
+
+  "An AC line of one of the owner's tickets, in the published plan, that needs a ticket which has not landed."
+  type SprintDriftRow {
+    id: ID!
+    key: String!
+    line: Int!
+    text: String!
+    refKey: String!
+    refStatus: String
+    refDev: String
+    refEnd: Float
+    ownEnd: Float
+    "after-it, slipped (the ticket it needs is past its planned day) or outside-plan"
+    reason: String!
+    "held until the owner makes a call"
+    state: String!
+    decision: SprintDriftDecision
+  }
+
+  type SprintDrift {
+    sprint: String!
+    publishedAt: String
+    "The working day of the sprint today, 1-based."
+    today: Int
+    rows: [SprintDriftRow!]!
+  }
+
   type SprintDraftPublishResult {
     key: String!
     "ticket, or contract for the Confluence page"
@@ -1695,6 +1731,8 @@ export const typeDefs = gql`
     sprintDraft(sprint: String!): SprintDraft
     """The changes Publish would make, each ticket read from Jira again; writes nothing."""
     previewSprintDraftPublish(sprint: String!): [SprintDraftChange!]!
+    "The owner's held AC lines in the active sprint's published plan; null when it was not published from Planning."
+    sprintDrift: SprintDrift
     """The tools, agents and thinking notes behind one Thinking row, from two minutes before it to until."""
     runThinkingRaw(key: String!, at: String!, until: String): [ThinkingRawLine!]!
     """A folder under the home of the workspace; no path is the home itself."""
@@ -1718,6 +1756,8 @@ export const typeDefs = gql`
     refreshSprintDraftQa(sprint: String!): SprintDraft!
     """Writes AC lines and assignees that differ from Jira. Refused while a blocker has no decision."""
     publishSprintDraft(sprint: String!): [SprintDraftPublishResult!]!
+    "move, not-tested, wait, needs-po or clear on a held AC line of the owner's ticket."
+    sprintDriftAction(id: ID!, action: String!, note: String): SprintDrift!
     """accept, close, reopen or edit (with text). Accepting a line that goes to kit, memory or dock asks sous to apply it."""
     retroItemAction(id: ID!, action: String!, text: String): RetroItem!
     """A new folder under the home of the workspace. Secrets stay read only; file content goes through PUT /api/workspace/file."""

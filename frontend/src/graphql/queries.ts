@@ -798,6 +798,23 @@ export const REFRESH_SPRINT_DRAFT_QA = gql`
   }
 `;
 
+export const SPRINT_DRIFT_FIELDS = `
+  sprint publishedAt today
+  rows { id key line text refKey refStatus refDev refEnd ownEnd reason state decision { action state note by at } }
+`;
+
+export const GET_SPRINT_DRIFT = gql`
+  query GetSprintDrift {
+    sprintDrift { ${SPRINT_DRIFT_FIELDS} }
+  }
+`;
+
+export const SPRINT_DRIFT_ACTION = gql`
+  mutation SprintDriftAction($id: ID!, $action: String!, $note: String) {
+    sprintDriftAction(id: $id, action: $action, note: $note) { ${SPRINT_DRIFT_FIELDS} }
+  }
+`;
+
 export const PUBLISH_SPRINT_DRAFT = gql`
   mutation PublishSprintDraft($sprint: String!) {
     publishSprintDraft(sprint: $sprint) { key kind status detail }

@@ -241,6 +241,24 @@ export class JiraSprintClient {
     await this.http.put(`/rest/api/3/issue/${encodeURIComponent(key)}`, { fields: { [AC_FIELD]: value } });
   }
 
+  /** The display name of the Jira user DOCK's token belongs to. */
+  async myself(): Promise<string | null> {
+    const me = await this.http.get('/rest/api/3/myself');
+    return typeof me?.displayName === 'string' ? me.displayName : null;
+  }
+
+  /** A comment of plain paragraphs, one per line. */
+  async addComment(key: string, lines: string[]): Promise<void> {
+    await this.http.post(`/rest/api/3/issue/${encodeURIComponent(key)}/comment`, {
+      body: { type: 'doc', version: 1, content: lines.filter(Boolean).map((line) => ({ type: 'paragraph', content: [{ type: 'text', text: line }] })) },
+    });
+  }
+
+  async addLabel(key: string, label: string): Promise<void> {
+    if (!this.http.put) throw new Error('This Jira connection cannot write');
+    await this.http.put(`/rest/api/3/issue/${encodeURIComponent(key)}`, { update: { labels: [{ add: label }] } });
+  }
+
   async setAssignee(key: string, accountId: string): Promise<void> {
     if (!this.http.put) throw new Error('This Jira connection cannot write');
     await this.http.put(`/rest/api/3/issue/${encodeURIComponent(key)}/assignee`, { accountId });

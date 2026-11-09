@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { agentsRoute, edgeStateText, groupsText, hasMap, isMapping, mappedText, pendingEdges, sourceLabel, type SprintPlan } from '../agents/plan';
+import { agentsRoute, driftReason, driftStateLabel, edgeStateText, groupsText, hasMap, isMapping, mappedText, pendingEdges, sortDrift, sourceLabel, type SprintPlan } from '../agents/plan';
 import { RETRO_NUMBERS } from '../agents/retro';
 import { signalOf } from '../lib/attention';
 
@@ -64,4 +64,14 @@ test('the Agents page shows Sprint with Plan and Retro, Home opens the plan, and
   const tab = source('../agents/PlanTab.tsx');
   assert.match(tab, /edge\.dependsOnStatus &&/);
   for (const text of ['Map again', 'Accept', 'Reject', 'Map now', 'Safe in parallel']) assert.ok(tab.includes(text), text);
+});
+
+test('AC drift rows name why a line is held and put held ones first', () => {
+  const row = { id: 'a', key: 'QRD-1511', line: 4, text: 'Edit client', refKey: 'QRD-1489', refStatus: 'To Do', refDev: 'Aken', refEnd: 3, ownEnd: 7, reason: 'slipped', state: 'held', decision: null };
+  assert.equal(driftReason(row), 'QRD-1489 was planned to land D3, before QRD-1511, and has not. It is To Do.');
+  assert.equal(driftReason({ ...row, reason: 'after-it', refEnd: 9 }), 'QRD-1489 lands D9, after QRD-1511 (D7). It is To Do.');
+  assert.equal(driftStateLabel('move-pending'), 'Move pending');
+  assert.deepEqual(sortDrift([{ ...row, id: 'b', state: 'wait' }, row]).map((item) => item.id), ['a', 'b']);
+  const tab = source('../agents/PlanTab.tsx');
+  for (const text of ['Not tested here', 'Needs PO', 'Move to', 'ac-move-pending']) assert.ok(tab.includes(text), text);
 });

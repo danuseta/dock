@@ -1,10 +1,13 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { Check, RotateCcw, X } from 'lucide-react';
+import { ArrowRightLeft, Check, Clock, EyeOff, Flag, RotateCcw, Undo2, X } from 'lucide-react';
 import { Button } from '../components/ui';
-import { GET_SPRINT_PLAN, SPRINT_PLAN_EDGE_ACTION, SPRINT_PLAN_MAP } from '../graphql/queries';
+import { GET_SPRINT_DRIFT, GET_SPRINT_PLAN, SPRINT_DRIFT_ACTION, SPRINT_PLAN_EDGE_ACTION, SPRINT_PLAN_MAP } from '../graphql/queries';
 import { cn } from '../lib/cn';
-import { edgeStateText, groupsText, hasMap, isMapping, mappedText, sourceLabel, type PlanEdge, type SprintPlan } from './plan';
+import {
+  driftReason, driftStateLabel, edgeStateText, groupsText, hasMap, isMapping, mappedText, sortDrift, sourceLabel,
+  type DriftRow, type PlanEdge, type SprintDrift, type SprintPlan,
+} from './plan';
 
 const head = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
 const chip = 'rounded-xs border px-1.5 font-mono text-[0.6rem] font-bold uppercase tracking-[0.08em]';
@@ -33,6 +36,61 @@ const EdgeRow: React.FC<{ edge: PlanEdge; busy: boolean; onAction: (id: string, 
     </div>
   </li>
 );
+
+const DriftLine: React.FC<{ row: DriftRow; busy: boolean; onAction: (id: string, action: string) => void }> = ({ row, busy, onAction }) => {
+  const held = row.state === 'held';
+  return (
+    <li className={cn('grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 border-b border-border py-2.5 pl-3 last:border-b-0 max-[760px]:grid-cols-[minmax(0,1fr)]', held ? 'border-l-2 border-l-status-warn' : 'opacity-80')}>
+      <div className="min-w-0">
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.8rem] text-secondary-foreground">
+          <span className="font-mono font-semibold text-foreground">{row.key}</span>
+          <span className={cn(chip, 'border-status-warn text-status-warn')}>AC {row.line}</span>
+          <span>needs <span className="font-mono font-semibold text-foreground">{row.refKey}</span>{row.refDev ? ` · ${row.refDev}` : ''}</span>
+          <span className={cn(chip, held ? 'border-status-conflict text-status-conflict' : 'border-border text-secondary-foreground')}>{driftStateLabel(row.state)}</span>
+        </p>
+        <p className="mt-1 text-pretty text-[0.78rem] text-foreground">{row.text}</p>
+        <p className="mt-1 text-pretty text-[0.74rem] text-muted-foreground">{driftReason(row)}{row.decision?.by ? ` · ${driftStateLabel(row.decision.state)} by ${row.decision.by}` : ''}</p>
+      </div>
+      <div className="flex flex-wrap items-start justify-end gap-1.5 max-[760px]:justify-start">
+        {held || row.state === 'wait' ? (
+          <>
+            {held && <Button size="sm" variant="ghost" onClick={() => onAction(row.id, 'wait')} disabled={busy}><Clock size={13} aria-hidden="true" />Wait</Button>}
+            {row.state === 'wait' && <Button size="sm" variant="ghost" onClick={() => onAction(row.id, 'clear')} disabled={busy}><Undo2 size={13} aria-hidden="true" />Undo</Button>}
+            <Button size="sm" variant="ghost" onClick={() => onAction(row.id, 'needs-po')} disabled={busy}><Flag size={13} aria-hidden="true" />Needs PO</Button>
+            <Button size="sm" onClick={() => onAction(row.id, 'not-tested')} disabled={busy}><EyeOff size={13} aria-hidden="true" />Not tested here</Button>
+            <Button size="sm" variant="primary" onClick={() => onAction(row.id, 'move')} disabled={busy}><ArrowRightLeft size={13} aria-hidden="true" />Move to {row.refKey}{row.refDev ? ` (${row.refDev})` : ''}</Button>
+          </>
+        ) : <Button size="sm" variant="ghost" onClick={() => onAction(row.id, 'clear')} disabled={busy} title="Forget the call here; what was written to Jira stays"><Undo2 size={13} aria-hidden="true" />Undo</Button>}
+      </div>
+    </li>
+  );
+};
+
+/** The owner's AC lines of the published plan that need a ticket which has not landed. */
+const DriftSection: React.FC = () => {
+  const [notice, setNotice] = useState<string | null>(null);
+  const { data, refetch } = useQuery<{ sprintDrift: SprintDrift | null }>(GET_SPRINT_DRIFT, { fetchPolicy: 'cache-and-network', pollInterval: 60000 });
+  const [act, acting] = useMutation(SPRINT_DRIFT_ACTION);
+  const drift = data?.sprintDrift ?? null;
+  if (!drift) return null;
+  const onAction = (id: string, action: string) => {
+    setNotice(null);
+    act({ variables: { id, action } }).then(() => refetch()).catch((failure: unknown) => setNotice(failure instanceof Error ? failure.message : 'The change failed'));
+  };
+  const held = drift.rows.filter((row) => row.state === 'held').length;
+  return (
+    <section aria-label="AC drift" className="min-w-0">
+      <h3 className={head}>AC drift · your tickets {drift.today ? <span className="font-medium normal-case tracking-normal">· sprint day {drift.today}</span> : null}</h3>
+      {notice && <p className="mt-2 text-sm text-status-conflict" role="alert">{notice}</p>}
+      {drift.rows.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">Every AC line of your tickets has what it needs landed or planned before it.</p> : (
+        <>
+          <p className="mt-2 text-pretty text-[0.8rem] text-muted-foreground">{held} held. Move and Not tested here write to Jira only on your own tickets, after reading the AC again; a line for a teammate's ticket waits for them under the label ac-move-pending.</p>
+          <ul className="mt-2 rounded-md border border-border bg-surface-0">{sortDrift(drift.rows).map((row) => <DriftLine key={row.id} row={row} busy={acting.loading} onAction={onAction} />)}</ul>
+        </>
+      )}
+    </section>
+  );
+};
 
 /** The sprint's dependency map: the owner's tickets in work order, what each waits for, and the lead's proposals awaiting Accept or Reject. */
 export const PlanTab: React.FC = () => {
@@ -63,7 +121,7 @@ export const PlanTab: React.FC = () => {
   const parallel = groupsText(plan.groups);
 
   return (
-    <div className="grid gap-5">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5">
       <div className="flex flex-wrap items-center gap-3">
         <span className="font-display text-base font-bold">{plan.sprint}</span>
         <span className="text-sm text-muted-foreground">{mappedText(plan.mappedAt, new Date())}</span>
@@ -108,6 +166,7 @@ export const PlanTab: React.FC = () => {
           )}
         </section>
       )}
+      <DriftSection />
     </div>
   );
 };
