@@ -1,7 +1,7 @@
 import { StorageService } from '../storage/service';
 import { JiraSprintClient, createJiraHttp } from './jira-sprint';
 import { SprintInputError, sprintDashboardService } from './sprint-dashboard';
-import { SprintDraftService, type ContractTarget, type DraftJira } from './sprint-draft';
+import { SprintDraftService, TC_MARKER, type ContractTarget, type DraftJira } from './sprint-draft';
 import { AcDriftService, type DriftJira } from './ac-drift';
 import { confluenceFrom, type ConfluenceClient } from './confluence';
 import { StoryboardReader } from './storyboard';
@@ -33,6 +33,7 @@ async function planningJira(): Promise<DraftJira> {
     assignableAccounts: (key, name) => client.assignableAccounts(key, name),
     setAc: (key, value) => client.setAcField(key, value),
     setAssignee: (key, accountId) => client.setAssignee(key, accountId),
+    postTcs: (key, body) => client.addTcComment(key, TC_MARKER, JSON.stringify(body, null, 2)),
   };
 }
 

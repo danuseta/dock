@@ -640,6 +640,7 @@ export const resolvers = {
     ),
     refreshSprintDraftQa: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.refreshQa(sprint).catch(planningError),
     checkSprintStoryboards: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.checkStoryboards(sprint).catch(planningError),
+    setSprintDraftTcs: (_: unknown, { sprint, key, tcs }: { sprint: string; key: string; tcs: unknown[] }) => sprintDraftService.setTcs(sprint, key, tcs).catch(planningError),
     answerSprintDraftQuestion: (_: unknown, { sprint, id, answered }: { sprint: string; id: string; answered: boolean }) => (
       sprintDraftService.answer(sprint, id, answered, reporterName()).catch(planningError)
     ),
@@ -1043,6 +1044,7 @@ export const protectedMutations = [
   'refreshSprintDraftQa',
   'checkSprintStoryboards',
   'answerSprintDraftQuestion',
+  'setSprintDraftTcs',
   'publishSprintDraft',
   'sprintDriftAction',
   'retroItemAction',

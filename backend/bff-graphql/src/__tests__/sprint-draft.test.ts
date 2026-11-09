@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JiraSprintClient, type PlanningIssue, type PlanningSprint } from '../integrations/jira-sprint';
 import type { QaInputTicket, QaRun } from '../integrations/qa-predict';
-import { SprintDraftService, acValueLines, diffLines, finalAc, rewriteAcValue, type DraftJira, type DraftStore } from '../integrations/sprint-draft';
+import { SprintDraftService, TC_MARKER, acValueLines, diffLines, finalAc, rewriteAcValue, type DraftJira, type DraftStore } from '../integrations/sprint-draft';
 import type { SprintDraftInput, SprintDraftTicketInput } from '../storage/service';
 import { StoryboardMissing } from '../integrations/storyboard';
 
@@ -53,6 +53,7 @@ class FakeJira implements DraftJira {
   async assignableAccounts(_key: string, name: string) { return this.users[name] ?? []; }
   async setAc(key: string, value: unknown) { this.writes.push(['ac', key, value]); }
   async setAssignee(key: string, accountId: string) { this.writes.push(['assignee', key, accountId]); }
+  async postTcs(key: string, body: unknown) { this.writes.push(['tc', key, body]); }
 }
 
 const predictions = (verdicts: Record<string, string>) => async (tickets: QaInputTicket[]): Promise<QaRun> => ({
@@ -268,4 +269,44 @@ test('the planning chat asks open questions once each and the planner marks them
   const answered = await service.answer('QRD Sprint 26', view.questions[0].id, true, 'Alvin');
   assert.deepEqual([answered.questions[0].answered, answered.questions[0].answeredBy], [true, 'Alvin']);
   assert.equal((await service.answer('QRD Sprint 26', view.questions[0].id, false, 'Alvin')).questions[0].answered, false);
+});
+
+test('test cases are checked, kept across a load, posted once per new set as QONFLO-TC v1, and go stale after a storyboard change', async () => {
+  const { service, jira, store } = setup();
+  const view = await service.load(26, 'Alvin');
+  await service.decide('QRD Sprint 26', view.findings[0].id, 'wait', null, 'Alvin');
+  const tcs = [{ id: 'tc-1', ac: 1, title: 'Edit client sees the cursor', steps: ['Open as owner', 'Open as client'], expected: 'Both cursors show' }];
+  await assert.rejects(service.setTcs('QRD Sprint 26', 'QRD-1489', [{ ...tcs[0], ac: 9 }]), /ac must be the number of one of the 2 AC lines/);
+  await assert.rejects(service.setTcs('QRD Sprint 26', 'QRD-1489', [{ ...tcs[0], id: 'one' }]), /id must look like TC-1/);
+  let next = await service.setTcs('QRD Sprint 26', 'QRD-1489', tcs);
+  const ticket = () => next.tickets.find((item) => item.key === 'QRD-1489')!;
+  assert.deepEqual(ticket().tcs, [{ ...tcs[0], id: 'TC-1' }]);
+  assert.equal(ticket().tcPending, true);
+  next = await service.load(26, 'Alvin');
+  assert.equal(ticket().tcs.length, 1, 'a load from Jira keeps the test cases');
+
+  const first = await service.publish('QRD Sprint 26');
+  assert.deepEqual(first.filter((result) => result.kind === 'tc').map((result) => [result.key, result.status]), [['QRD-1489', 'updated']]);
+  assert.deepEqual(jira.writes.filter(([kind]) => kind === 'tc'), [['tc', 'QRD-1489', { version: 1, tcs: [{ ...tcs[0], id: 'TC-1' }] }]]);
+  const again = await service.publish('QRD Sprint 26');
+  assert.equal(again.filter((result) => result.kind === 'tc').length, 0, 'an unchanged set is not posted again');
+
+  store.draft.tickets.find((item: any) => item.key === 'QRD-1489').tcAt = new Date('2026-11-01T00:00:00Z');
+  store.draft.tickets.find((item: any) => item.key === 'QRD-1489').epic = 'QRD-1233';
+  store.draft.tickets.find((item: any) => item.key === 'QRD-1489').frames = JSON.stringify(['F7.3']);
+  await service.applyStoryboard({ epic: 'QRD-1233', version: 2, previous: 1, path: 'p', page: '1', frames: [], changed: ['F7.3'] });
+  next = (await service.view('QRD Sprint 26'))!;
+  assert.equal(ticket().tcStale, true);
+});
+
+test('the test case comment starts with the QONFLO-TC v1 line and holds the JSON in a code block', async () => {
+  const posts: Array<[string, any]> = [];
+  const client = new JiraSprintClient({ get: async () => ({}), post: async (url: string, body: unknown) => { posts.push([url, body]); return {}; } });
+  const json = JSON.stringify({ version: 1, tcs: [{ id: 'TC-1', ac: 1, title: 't', steps: ['s'], expected: 'e' }] }, null, 2);
+  await client.addTcComment('QRD-1489', TC_MARKER, json);
+  assert.equal(posts[0][0], '/rest/api/3/issue/QRD-1489/comment');
+  const [marker, code] = posts[0][1].body.content;
+  assert.deepEqual(marker, { type: 'paragraph', content: [{ type: 'text', text: 'QONFLO-TC v1' }] });
+  assert.equal(code.type, 'codeBlock');
+  assert.deepEqual(JSON.parse(code.content[0].text), { version: 1, tcs: [{ id: 'TC-1', ac: 1, title: 't', steps: ['s'], expected: 'e' }] });
 });

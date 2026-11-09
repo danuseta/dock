@@ -489,6 +489,9 @@ model SprintDraftTicket {
   prediction  String? /// {prediction, reasons, fix}
   epic        String?
   frames      String  @default("[]") /// storyboard frames (F<n>.<m>) the AC or the description names
+  tcs         String  @default("[]") /// [{id, ac, title, steps, expected}]: the draft test cases
+  tcAt        DateTime? /// when the test cases were last written
+  tcPosted    String? /// the test cases of the last QONFLO-TC v1 comment posted on the ticket
   position    Int     @default(0)
 
   @@id([draftSprint, key])

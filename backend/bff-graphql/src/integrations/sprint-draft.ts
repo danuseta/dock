@@ -31,7 +31,16 @@ export interface DraftJira {
   assignableAccounts(key: string, name: string): Promise<string[]>;
   setAc(key: string, value: unknown): Promise<void>;
   setAssignee(key: string, accountId: string): Promise<void>;
+  /** One comment holding the test cases as `QONFLO-TC v1` and a JSON code block. */
+  postTcs(key: string, body: TcComment): Promise<void>;
 }
+
+/** A draft test case: the AC line it checks (1-based), the steps and what is expected. */
+export interface DraftTc { id: string; ac: number; title: string; steps: string[]; expected: string }
+export interface TcComment { version: 1; tcs: DraftTc[] }
+export const TC_MARKER = 'QONFLO-TC v1';
+const MAX_TCS = 100;
+const MAX_STEPS = 40;
 
 interface DraftRow {
   sprint: string; sprintId: number; status: string; sprintDays: number; startDate: Date | null; decisions: string; qaReason: string | null;
@@ -39,6 +48,7 @@ interface DraftRow {
   tickets: Array<{
     key: string; summary: string; dev: string | null; sp: number | null; wave: number | null; ac: string; jiraAc: string; jiraDev: string | null;
     dependsOn: string; status: string; prediction: string | null; position: number; epic?: string | null; frames?: string;
+    tcs?: string; tcAt?: Date | null; tcPosted?: string | null;
   }>;
 }
 
@@ -46,7 +56,7 @@ export interface DraftStore {
   getSettings(): Promise<Array<{ key: string; value: string }>>;
   getSprintDraft(sprint: string): Promise<DraftRow | null>;
   replaceSprintDraft(draft: SprintDraftInput, tickets: SprintDraftTicketInput[]): Promise<unknown>;
-  updateSprintDraftTicket(sprint: string, key: string, data: { dev?: string | null; sp?: number | null; wave?: number | null; ac?: string[]; jiraAc?: string[]; jiraDev?: string | null }): Promise<unknown>;
+  updateSprintDraftTicket(sprint: string, key: string, data: { dev?: string | null; sp?: number | null; wave?: number | null; ac?: string[]; jiraAc?: string[]; jiraDev?: string | null; tcs?: string; tcAt?: Date; tcPosted?: string | null }): Promise<unknown>;
   updateSprintDraft(sprint: string, data: { decisions?: string; qaReason?: string | null; status?: string; publishedAt?: Date | null; storyboards?: string; questions?: string }): Promise<unknown>;
   saveSprintDraftPredictions(sprint: string, predictions: Map<string, string> | null, qaReason: string | null): Promise<unknown>;
   sprintDraftsWithEpic(epic: string): Promise<string[]>;
@@ -67,6 +77,11 @@ export interface DraftTicketView extends Omit<ScheduledTicket, 'dev' | 'wave'> {
   summary: string; dev: string | null; jiraDev: string | null; sp: number | null; wave: number; waveSet: boolean; status: string;
   ac: string[]; dependsOn: string[]; prediction: QaPrediction | null; qaDecision: Decision | null;
   epic: string | null; frames: string[]; storyboard: StoryboardFlag | null;
+  tcs: DraftTc[];
+  /** The storyboard changed a frame of this ticket after its test cases were written. */
+  tcStale: boolean;
+  /** The test cases differ from the last QONFLO-TC comment, so Publish posts them. */
+  tcPending: boolean;
 }
 export interface DraftFindingView extends AcFinding { decision: Decision | null }
 export interface DraftView {
@@ -80,7 +95,7 @@ export interface DraftView {
 }
 export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; refused: string | null }
 /** One line of a publish: a ticket's AC and assignee, or the Confluence contract page. */
-export interface PublishResult { key: string; kind: 'ticket' | 'contract'; status: 'updated' | 'refused' | 'failed' | 'skipped'; detail: string | null }
+export interface PublishResult { key: string; kind: 'ticket' | 'tc' | 'contract'; status: 'updated' | 'refused' | 'failed' | 'skipped'; detail: string | null }
 export interface ContractTarget { client: ContractClient | null; parentId: string | null }
 
 const parse = <T>(raw: string | null | undefined, fallback: T): T => {
@@ -90,6 +105,31 @@ const sameLines = (a: string[], b: string[]) => a.length === b.length && a.every
 const qaId = (key: string) => `qa|${key}`;
 const storyboardId = (key: string, version: number) => `sb|${key}|v${version}`;
 const isInProgress = (status: string) => /in ?progress/i.test(status);
+
+const clip = (value: unknown, max: number) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
+
+/** The test cases as the route or the panel sends them; anything malformed is refused whole. */
+export function parseTcs(input: unknown, acCount: number): DraftTc[] {
+  if (!Array.isArray(input)) throw new SprintInputError('tcs must be an array');
+  if (input.length > MAX_TCS) throw new SprintInputError(`A ticket holds at most ${MAX_TCS} test cases`);
+  const ids = new Set<string>();
+  return input.map((raw, index) => {
+    const item = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const id = clip(item.id, 20).toUpperCase();
+    if (!/^TC-\d{1,4}$/.test(id)) throw new SprintInputError(`Test case ${index + 1}: id must look like TC-1`);
+    if (ids.has(id)) throw new SprintInputError(`${id} appears twice`);
+    ids.add(id);
+    const ac = Number(item.ac);
+    if (!Number.isInteger(ac) || ac < 1 || (acCount > 0 && ac > acCount)) throw new SprintInputError(`${id}: ac must be the number of one of the ${acCount} AC lines`);
+    const title = clip(item.title, 300);
+    if (!title) throw new SprintInputError(`${id}: title is required`);
+    if (!Array.isArray(item.steps) || item.steps.length > MAX_STEPS) throw new SprintInputError(`${id}: steps must be a list of at most ${MAX_STEPS}`);
+    const steps = item.steps.map((step) => clip(step, 1000)).filter(Boolean);
+    const expected = clip(item.expected, 2000);
+    if (!expected) throw new SprintInputError(`${id}: expected is required`);
+    return { id, ac, title, steps, expected };
+  });
+}
 
 /** Every text line of a Jira rich-text or plain field. */
 function fieldLines(raw: unknown): string[] {
@@ -292,6 +332,11 @@ export class SprintDraftService {
     const refKeys = [...outside].filter((key) => !keys.has(key));
     const refStatuses = refKeys.length ? Object.fromEntries(await jira.statusesOf(refKeys)) : {};
     const previous = await this.store.getSprintDraft(sprint.name);
+    // Test cases are DOCK's own: they survive a load from Jira.
+    for (const ticket of tickets) {
+      const before = previous?.tickets.find((item) => item.key === ticket.key);
+      if (before) Object.assign(ticket, { tcs: before.tcs ?? '[]', tcAt: before.tcAt ?? null, tcPosted: before.tcPosted ?? null });
+    }
     await this.store.replaceSprintDraft({
       sprint: sprint.name, sprintId: sprint.id,
       sprintDays: workingDays(sprint.startDate, sprint.endDate) ?? previous?.sprintDays ?? DEFAULT_SPRINT_DAYS,
@@ -312,6 +357,7 @@ export class SprintDraftService {
     const all = row.tickets.map((ticket) => ({
       ...ticket, ac: parse<string[]>(ticket.ac, []), jiraAc: parse<string[]>(ticket.jiraAc, []), dependsOn: parse<string[]>(ticket.dependsOn, []),
       prediction: parse<QaPrediction | null>(ticket.prediction, null), epic: ticket.epic ?? null, frames: parse<string[]>(ticket.frames, []),
+      tcs: parse<DraftTc[]>(ticket.tcs, []),
     }));
     const tickets = all.filter((ticket) => !isDoneStatus(ticket.status));
     const schedule = new Map(scheduleSprint(
@@ -332,6 +378,10 @@ export class SprintDraftService {
       const frames = board.changed.filter((id) => named.has(id));
       return frames.length ? { version: board.version, frames, held: !isInProgress(ticket.status), checked: decisions[storyboardId(ticket.key, board.version)] ?? null } : null;
     };
+    const tcStale = (ticket: { key: string; epic: string | null; frames: string[]; ac: string[]; status: string; tcs: DraftTc[]; tcAt?: Date | null }) => {
+      const changedAt = ticket.epic ? boardOf.get(ticket.epic)?.changedAt : null;
+      return ticket.tcs.length > 0 && !!flagOf(ticket) && !!changedAt && (!ticket.tcAt || ticket.tcAt.toISOString() < changedAt);
+    };
     const devs = [...new Set(tickets.map((ticket) => ticket.dev).filter((dev): dev is string => !!dev))].sort((a, b) => a.localeCompare(b));
     return {
       sprint: row.sprint, sprintId: row.sprintId, status: row.status, sprintDays: row.sprintDays, startDate: row.startDate?.toISOString() ?? null,
@@ -344,6 +394,7 @@ export class SprintDraftService {
           status: ticket.status, ac: ticket.ac, dependsOn: ticket.dependsOn, start: placed.start, dur: placed.dur, end: placed.end,
           inSprint: placed.inSprint, split: placed.split, prediction: ticket.prediction, qaDecision: decisions[qaId(ticket.key)] ?? null,
           epic: ticket.epic, frames: ticket.frames, storyboard: flagOf(ticket),
+          tcs: ticket.tcs, tcStale: tcStale(ticket), tcPending: ticket.tcs.length > 0 && JSON.stringify(ticket.tcs) !== (ticket.tcPosted ?? ''),
         };
       }).sort((a, b) => a.start - b.start || a.key.localeCompare(b.key, undefined, { numeric: true })),
       findings,
@@ -417,6 +468,16 @@ export class SprintDraftService {
       decisions[id] = { action, note: text, by, at: this.now().toISOString() };
     }
     await this.store.updateSprintDraft(sprint, { decisions: JSON.stringify(decisions) });
+    return (await this.view(sprint))!;
+  }
+
+  /** Replaces a ticket's test cases, from the planning agent or the panel. */
+  async setTcs(sprint: string, key: string, input: unknown): Promise<DraftView> {
+    const row = await this.row(sprint);
+    const ticket = row.tickets.find((item) => item.key === key);
+    if (!ticket) throw new SprintInputError(`${key} is not in the ${sprint} draft`);
+    const tcs = parseTcs(input, parse<string[]>(ticket.ac, []).length);
+    await this.store.updateSprintDraftTicket(sprint, key, { tcs: JSON.stringify(tcs), tcAt: this.now() });
     return (await this.view(sprint))!;
   }
 
@@ -553,6 +614,18 @@ export class SprintDraftService {
       }
     }
     const tickets = results.filter((result) => result.kind === 'ticket');
+    // A newer set of test cases is a new comment; the QA bot reads the latest one.
+    for (const ticket of (await this.view(sprint))!.tickets.filter((item) => item.tcPending)) {
+      try {
+        await jira.postTcs(ticket.key, { version: 1, tcs: ticket.tcs });
+        await this.store.updateSprintDraftTicket(sprint, ticket.key, { tcPosted: JSON.stringify(ticket.tcs) });
+        results.push({ key: ticket.key, kind: 'tc', status: 'updated', detail: `${ticket.tcs.length} test ${ticket.tcs.length === 1 ? 'case' : 'cases'} posted` });
+      } catch (error: any) {
+        const status = error?.response?.status;
+        const message = error instanceof Error ? error.message : String(error);
+        results.push({ key: ticket.key, kind: 'tc', status: 'failed', detail: status ? `Jira responded ${status}: ${message}` : message });
+      }
+    }
     const target = await this.contract().catch((): ContractTarget => ({ client: null, parentId: null }));
     const contract = await writeContract(target.client, target.parentId, (await this.view(sprint))!, by, this.now());
     results.push({ key: 'Confluence', kind: 'contract', status: contract.status, detail: contract.detail });

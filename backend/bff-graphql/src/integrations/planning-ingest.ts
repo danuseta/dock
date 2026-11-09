@@ -6,11 +6,11 @@ import { SprintInputError } from './sprint-dashboard';
 import type { DraftView, SprintDraftService } from './sprint-draft';
 import { StoryboardMissing, type StoryboardReader } from './storyboard';
 
-export const PLANNING_ROUTES = ['sprint-draft/get', 'sprint-draft/update', 'sprint-draft/question', 'storyboard'] as const;
+export const PLANNING_ROUTES = ['sprint-draft/get', 'sprint-draft/update', 'sprint-draft/tc', 'sprint-draft/question', 'storyboard'] as const;
 export type PlanningRoute = typeof PLANNING_ROUTES[number];
 
 export interface PlanningIngestDeps {
-  drafts: Pick<SprintDraftService, 'view' | 'updateTicket' | 'ask' | 'applyStoryboard'>;
+  drafts: Pick<SprintDraftService, 'view' | 'updateTicket' | 'ask' | 'applyStoryboard' | 'setTcs'>;
   storyboards: Pick<StoryboardReader, 'sync'>;
 }
 
@@ -52,6 +52,7 @@ export async function planningIngest(deps: PlanningIngestDeps, route: PlanningRo
     if (route === 'sprint-draft/get') return await draftOf(deps.drafts, sprint);
     if (route === 'sprint-draft/question') return await deps.drafts.ask(sprint, textField(body, 'text')!, textField(body, 'key', false));
     const key = textField(body, 'key')!.toUpperCase();
+    if (route === 'sprint-draft/tc') return await deps.drafts.setTcs(sprint, key, body.tcs);
     const change: { dev?: string | null; wave?: number | null; sp?: number | null; ac?: string[] } = {};
     if (body.dev !== undefined) change.dev = body.dev === null ? null : textField(body, 'dev', false);
     const wave = numberField(body, 'wave');

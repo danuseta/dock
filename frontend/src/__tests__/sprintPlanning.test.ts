@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { agentsRoute } from '../agents/plan';
 import {
   UNASSIGNED, barPlace, changeCount, dayOf, decisionLabel, findingKindLabel, lanes, parseWave, predictionTone, publishHint, scopeSummary, sortFindings,
-  planningChatTitle, questionsLine, spanOf, storyboardDecisionId, storyboardLine, waveRows, workingDayLabels, type DraftFinding, type DraftTicket,
+  planningChatTitle, questionsLine, spanOf, storyboardDecisionId, storyboardLine, tcsToText, textToTcs, waveRows, workingDayLabels, type DraftFinding, type DraftTicket,
 } from '../agents/planning';
 
 const ticket = (over: Partial<DraftTicket>): DraftTicket => ({
@@ -91,4 +91,16 @@ test('Planning opens a Planning-<sprint> chat beside the panel, which polls the 
   assert.match(chat, /h-\[620px\]/);
   assert.match(chat, /xl:sticky/);
   assert.match(chat, /<ChatThread /);
+});
+
+test('test cases read back from the text the planner edits', () => {
+  const tcs = [
+    { id: 'TC-1', ac: 2, title: 'Client sees the cursor', steps: ['Open as owner', 'Open as client'], expected: 'Both cursors show' },
+    { id: 'TC-2', ac: 3, title: 'No steps', steps: [], expected: 'Shown' },
+  ];
+  const text = tcsToText(tcs);
+  assert.equal(text.split('\n')[0], 'TC-1 · AC 2 · Client sees the cursor');
+  assert.deepEqual(textToTcs(text), { tcs, error: null });
+  assert.match(textToTcs('TC-1 AC 1 Title\nExpected: x').error ?? '', /first line reads/);
+  assert.match(textToTcs('tc-3 | AC 1 | Title\n- step').error ?? '', /TC-3: add an "Expected: \.\.\." line/);
 });

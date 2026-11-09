@@ -622,6 +622,11 @@ export const typeDefs = gql`
     epic: String
     frames: [String!]!
     storyboard: SprintDraftStoryboardFlag
+    tcs: [SprintDraftTc!]!
+    "A frame of the ticket changed in the storyboard after the test cases were written."
+    tcStale: Boolean!
+    "Publish posts the test cases: they differ from the last comment."
+    tcPending: Boolean!
   }
 
   """An AC line that names another ticket. kind is after-it (that ticket lands later), lands-first or outside-plan."""
@@ -728,6 +733,24 @@ export const typeDefs = gql`
     checked: SprintDraftDecision
   }
 
+  "A draft test case; Publish posts a ticket's set as a QONFLO-TC v1 comment the QA bot reads."
+  type SprintDraftTc {
+    id: String!
+    "The AC line it checks, 1-based."
+    ac: Int!
+    title: String!
+    steps: [String!]!
+    expected: String!
+  }
+
+  input SprintDraftTcInput {
+    id: String!
+    ac: Int!
+    title: String!
+    steps: [String!]!
+    expected: String!
+  }
+
   "A question the planning chat raised; the planner marks it answered."
   type SprintDraftQuestion {
     id: ID!
@@ -755,7 +778,7 @@ export const typeDefs = gql`
 
   type SprintDraftPublishResult {
     key: String!
-    "ticket, or contract for the Confluence page"
+    "ticket, tc for a QONFLO-TC comment, or contract for the Confluence page"
     kind: String!
     "updated, refused, failed or skipped"
     status: String!
@@ -1807,6 +1830,8 @@ export const typeDefs = gql`
     checkSprintStoryboards(sprint: String!): SprintDraft!
     "Marks an open question of the planning chat answered, or open again."
     answerSprintDraftQuestion(sprint: String!, id: ID!, answered: Boolean!): SprintDraft!
+    "Replaces a ticket's draft test cases."
+    setSprintDraftTcs(sprint: String!, key: String!, tcs: [SprintDraftTcInput!]!): SprintDraft!
     """Writes AC lines and assignees that differ from Jira. Refused while a blocker has no decision."""
     publishSprintDraft(sprint: String!): [SprintDraftPublishResult!]!
     "move, not-tested, wait, needs-po or clear on a held AC line of the owner's ticket."

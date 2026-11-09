@@ -754,6 +754,7 @@ export const SPRINT_DRAFT_FIELDS = `
     qaDecision { action note by at }
     epic frames
     storyboard { version frames held checked { action note by at } }
+    tcs { id ac title steps expected } tcStale tcPending
   }
   findings { id key line text refKey kind refEnd ownEnd decision { action note by at } }
   storyboards { epic version previous path page frames changed changedAt checkedAt error }
@@ -817,6 +818,12 @@ export const GET_SPRINT_DRIFT = gql`
 export const SPRINT_DRIFT_ACTION = gql`
   mutation SprintDriftAction($id: ID!, $action: String!, $note: String) {
     sprintDriftAction(id: $id, action: $action, note: $note) { ${SPRINT_DRIFT_FIELDS} }
+  }
+`;
+
+export const SET_SPRINT_DRAFT_TCS = gql`
+  mutation SetSprintDraftTcs($sprint: String!, $key: String!, $tcs: [SprintDraftTcInput!]!) {
+    setSprintDraftTcs(sprint: $sprint, key: $key, tcs: $tcs) { ${SPRINT_DRAFT_FIELDS} }
   }
 `;
 

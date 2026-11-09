@@ -14,6 +14,8 @@ export interface SprintDraftInput { sprint: string; sprintId: number; sprintDays
 export interface SprintDraftTicketInput {
   key: string; summary: string; dev: string | null; sp: number | null; wave: number | null; status: string;
   ac: string[]; jiraAc: string[]; jiraDev: string | null; dependsOn: string[]; epic?: string | null; frames?: string[];
+  /** Kept from the previous load: the test cases and what was last posted. */
+  tcs?: string; tcAt?: Date | null; tcPosted?: string | null;
 }
 export interface SprintPlanData { status?: string; mappingKeys?: string[]; sessionId?: string | null; mappedKeys?: string[]; groups?: string[][]; error?: string | null; startedAt?: Date | null; mappedAt?: Date | null }
 
@@ -444,7 +446,7 @@ export class StorageService {
     const rows = tickets.map((ticket, position) => ({
       draftSprint: sprint, key: ticket.key, summary: ticket.summary, dev: ticket.dev, sp: ticket.sp, wave: ticket.wave, status: ticket.status,
       ac: JSON.stringify(ticket.ac), jiraAc: JSON.stringify(ticket.jiraAc), jiraDev: ticket.jiraDev, dependsOn: JSON.stringify(ticket.dependsOn), position,
-      epic: ticket.epic ?? null, frames: JSON.stringify(ticket.frames ?? []),
+      epic: ticket.epic ?? null, frames: JSON.stringify(ticket.frames ?? []), tcs: ticket.tcs ?? '[]', tcAt: ticket.tcAt ?? null, tcPosted: ticket.tcPosted ?? null,
     }));
     await this.db.$transaction([
       this.db.sprintDraft.upsert({ where: { sprint }, update: reset, create: { sprint, ...reset } }),
@@ -453,7 +455,7 @@ export class StorageService {
     ]);
   }
 
-  updateSprintDraftTicket(sprint: string, key: string, data: { dev?: string | null; sp?: number | null; wave?: number | null; ac?: string[]; jiraAc?: string[]; jiraDev?: string | null; prediction?: string | null }) {
+  updateSprintDraftTicket(sprint: string, key: string, data: { dev?: string | null; sp?: number | null; wave?: number | null; ac?: string[]; jiraAc?: string[]; jiraDev?: string | null; prediction?: string | null; tcs?: string; tcAt?: Date; tcPosted?: string | null }) {
     const { ac, jiraAc, ...rest } = data;
     return this.db.sprintDraftTicket.update({
       where: { draftSprint_key: { draftSprint: sprint, key } },

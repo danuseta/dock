@@ -260,6 +260,13 @@ export class JiraSprintClient {
     });
   }
 
+  /** The QA bot's test case comment: the marker line, then the JSON in a code block. */
+  async addTcComment(key: string, marker: string, json: string): Promise<void> {
+    await this.http.post(`/rest/api/3/issue/${encodeURIComponent(key)}/comment`, {
+      body: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: marker }] }, { type: 'codeBlock', attrs: { language: 'json' }, content: [{ type: 'text', text: json }] }] },
+    });
+  }
+
   async addLabel(key: string, label: string): Promise<void> {
     if (!this.http.put) throw new Error('This Jira connection cannot write');
     await this.http.put(`/rest/api/3/issue/${encodeURIComponent(key)}`, { update: { labels: [{ add: label }] } });

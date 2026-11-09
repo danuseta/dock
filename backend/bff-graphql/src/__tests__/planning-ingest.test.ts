@@ -21,6 +21,7 @@ function fakes() {
         return view;
       },
       ask: async (sprint, text, key) => { calls.push(['ask', sprint, text, key]); return view; },
+      setTcs: async (sprint, key, tcs) => { calls.push(['tc', sprint, key, tcs]); return view; },
       applyStoryboard: async (result) => { calls.push(['apply', result.epic, result.version]); return ['QRD Sprint 27']; },
     },
     storyboards: {

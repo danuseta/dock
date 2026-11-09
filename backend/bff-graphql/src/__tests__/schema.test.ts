@@ -216,6 +216,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'setClaudeRotation',
       'setMasterPin',
       'setQaAutoRun',
+      'setSprintDraftTcs',
       'setTicketDependency',
       'setTicketManual',
       'setTicketWorkOrder',
