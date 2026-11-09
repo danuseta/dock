@@ -411,7 +411,7 @@ export const PlanningTab: React.FC = () => {
       ) : (
         <>
           <p className="text-[0.8rem] text-muted-foreground">
-            {draft.tickets.length} tickets · {draft.sprintDays} working days · {draft.devs.length} developers · {late} AC {late === 1 ? 'line' : 'lines'} after it · {escalated} ESCALATED · {publishHint(draft)}
+            {draft.tickets.length} open tickets{draft.landed > 0 && ` (${draft.landed} already past merge)`} · {draft.sprintDays} working days · {draft.devs.length} developers · {late} AC {late === 1 ? 'line' : 'lines'} after it · {escalated} ESCALATED · {publishHint(draft)}
           </p>
           <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Planning panel">
             {PANELS.map(([id, label]) => (

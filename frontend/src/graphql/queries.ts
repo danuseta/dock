@@ -746,7 +746,7 @@ export const RETRO_ITEM_ACTION = gql`
 `;
 
 export const SPRINT_DRAFT_FIELDS = `
-  sprint sprintId status sprintDays startDate spPerDay createdBy loadedAt publishedAt qaReason devs blockers canPublish
+  sprint sprintId status sprintDays startDate spPerDay createdBy loadedAt publishedAt qaReason devs blockers canPublish landed
   tickets {
     key summary dev jiraDev sp wave waveSet status ac dependsOn start dur end inSprint split
     prediction { prediction reasons fix }

@@ -37,3 +37,8 @@ test('the finding id survives the line moving and the done statuses are the agre
   assert.equal(findingId('QRD-1', 'QRD-2', '- needs  QRD-2'), 'ac|QRD-1|QRD-2|needs QRD-2');
   assert.deepEqual(['UAT CHECK', 'uat merged', 'Ready for Production', 'Done', 'PR Review'].map(isDoneStatus), [true, true, true, true, false]);
 });
+
+test('Jira status names past merge count as done however they are spelled (QRD Sprint 26)', () => {
+  for (const name of ['Done / MERGED', 'ReadyForProduction', 'Ready for Production', 'UAT CHECK', 'UAT MERGED', 'Done']) assert.equal(isDoneStatus(name), true, name);
+  for (const name of ['To Do', 'In Progress', 'PR Review', 'UAT BUG / Improvement']) assert.equal(isDoneStatus(name), false, name);
+});
