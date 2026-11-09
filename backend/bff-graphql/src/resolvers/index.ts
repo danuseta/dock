@@ -9,7 +9,7 @@ import { upstreamMonitorService } from '../integrations/upstream-monitor';
 import { dockerRuntimeService } from '../integrations/docker-runtime';
 import { OrchestratorInputError, attentionItems, normalizeTicketKey, orchestratorService, type Orchestration } from '../integrations/orchestrator';
 import { CHAT_MACHINE, chatService } from '../integrations/chat';
-import { retroApplyPrompt, retroNumbers, retroProblems, retroTickets } from '../integrations/retro';
+import { MANUAL_DESTS, qaEscalations, retroApplyPrompt, retroNumbers, retroProblems, retroTickets, triageSuggestions } from '../integrations/retro';
 import { StorageService } from '../storage/service';
 import { activeSprint } from '../integrations/sprint-plan';
 import { lookupDependencies } from '../integrations/dependency-lookup';
@@ -178,6 +178,7 @@ async function retroView(sprintId?: number | null) {
   const sprint = sprintId != null ? sprints.find((item) => item.id === sprintId) : sprints.find((item) => item.state === 'active') ?? sprints[sprints.length - 1];
   if (!sprint) return null;
   const previous = sprints[sprints.indexOf(sprint) - 1] ?? null;
+  const escalations = await sprintEscalations(sprint);
   const [{ runs, numbers }, before, items] = await Promise.all([sprintLoad(sprint), previous ? sprintLoad(previous).then((load) => load.numbers) : Promise.resolve(null), storageService.getRetroItems(sprint.name)]);
   return {
     sprint: sprint.name,
@@ -188,7 +189,21 @@ async function retroView(sprintId?: number | null) {
     problems: retroProblems(runs),
     tickets: retroTickets(runs),
     items: items.map(retroItemView),
+    escalations,
   };
+}
+
+/** QA escalations of the whole team by cause, from the sprint dashboard's tickets; the ones Planning did not predict become proposed triage rules. */
+async function sprintEscalations(sprint: { id: number; name: string }) {
+  let issues: Array<{ key: string; summary?: string; labels?: string[]; events?: Array<{ field: string; to: string | null }> }> = [];
+  try { issues = JSON.parse(await sprintDashboardService.issueEvents(sprint.id)); } catch { issues = []; }
+  const draft = await storageService.getSprintDraft(sprint.name);
+  const predictions = draft ? new Map(draft.tickets.map((ticket) => {
+    try { return [ticket.key, ticket.prediction ? String(JSON.parse(ticket.prediction).prediction ?? '') || null : null] as const; } catch { return [ticket.key, null] as const; }
+  })) : null;
+  const escalations = qaEscalations(Array.isArray(issues) ? issues : [], predictions);
+  for (const item of triageSuggestions(escalations)) await storageService.upsertRetroSuggestion(sprint.name, item);
+  return escalations;
 }
 
 /** A new session on the workspace that runs one sous prompt, for the retro draft and for an accepted line. */
@@ -661,7 +676,7 @@ export const resolvers = {
       if (action === 'close' || action === 'reopen') return retroItemView(await storageService.updateRetroItem(id, { status: action === 'close' ? 'closed' : 'open' }));
       if (action !== 'accept') throw new GraphQLError('action must be accept, close, reopen or edit', { extensions: { code: 'BAD_USER_INPUT' } });
       const view = retroItemView(item);
-      const sessionId = item.dest === 'note' ? null : await runSousPrompt(`Retro-apply-${item.sprint}`, retroApplyPrompt(view));
+      const sessionId = MANUAL_DESTS.includes(item.dest) ? null : await runSousPrompt(`Retro-apply-${item.sprint}`, retroApplyPrompt(view));
       return retroItemView(await storageService.updateRetroItem(id, { status: 'accepted', sessionId }));
     },
     workspaceMkdir: async (_: unknown, { path }: { path: string }) => {

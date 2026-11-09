@@ -502,6 +502,14 @@ export class StorageService {
     return items.length;
   }
 
+  /** A line DOCK proposes itself: added once by its text, its evidence refreshed while it is still open. */
+  async upsertRetroSuggestion(sprint: string, item: { kind: string; text: string; evidence: string[]; dest: string }) {
+    const existing = await this.db.retroItem.findFirst({ where: { sprint, dest: item.dest, text: item.text } });
+    if (!existing) return this.db.retroItem.create({ data: { sprint, kind: item.kind, text: item.text, evidence: JSON.stringify(item.evidence), dest: item.dest } });
+    if (existing.status !== 'open' || existing.evidence === JSON.stringify(item.evidence)) return existing;
+    return this.db.retroItem.update({ where: { id: existing.id }, data: { evidence: JSON.stringify(item.evidence) } });
+  }
+
   updateRetroItem(id: string, data: { status?: string; text?: string; sessionId?: string | null }) {
     return this.db.retroItem.update({ where: { id }, data });
   }

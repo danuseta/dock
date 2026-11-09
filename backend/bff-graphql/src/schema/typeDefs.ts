@@ -814,6 +814,31 @@ export const typeDefs = gql`
     updatedAt: String!
   }
 
+  type RetroEscalationCause {
+    "dependency, access, data, environment or unspecified"
+    cause: String!
+    label: String!
+    count: Int!
+    tickets: [String!]!
+  }
+
+  type RetroUnpredicted {
+    key: String!
+    summary: String!
+    causes: [String!]!
+    "What Planning predicted; null when it said nothing."
+    prediction: String
+  }
+
+  "QA escalations of the whole team in the sprint, by cause, from the QA labels on the sprint dashboard's tickets."
+  type RetroEscalations {
+    tickets: Int!
+    causes: [RetroEscalationCause!]!
+    unpredicted: [RetroUnpredicted!]!
+    "Whether the sprint was planned in DOCK Planning, so its predictions can be compared."
+    planned: Boolean!
+  }
+
   type Retro {
     sprint: String!
     sprintId: Int!
@@ -823,6 +848,7 @@ export const typeDefs = gql`
     problems: [RetroProblem!]!
     tickets: [RetroTicket!]!
     items: [RetroItem!]!
+    escalations: RetroEscalations!
   }
 
   type ThinkingRawLine {

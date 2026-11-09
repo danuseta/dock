@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { agentsRoute, driftReason, driftStateLabel, edgeStateText, groupsText, hasMap, isMapping, mappedText, pendingEdges, sortDrift, sourceLabel, type SprintPlan } from '../agents/plan';
-import { RETRO_NUMBERS } from '../agents/retro';
+import { RETRO_NUMBERS, causeShare } from '../agents/retro';
 import { signalOf } from '../lib/attention';
 
 const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
@@ -74,4 +74,11 @@ test('AC drift rows name why a line is held and put held ones first', () => {
   assert.deepEqual(sortDrift([{ ...row, id: 'b', state: 'wait' }, row]).map((item) => item.id), ['a', 'b']);
   const tab = source('../agents/PlanTab.tsx');
   for (const text of ['Not tested here', 'Needs PO', 'Move to', 'ac-move-pending']) assert.ok(tab.includes(text), text);
+});
+
+test('the retro shows QA escalations by cause team-wide and labels the QA bot triage rules', () => {
+  assert.equal(causeShare(2, [{ count: 4 }, { count: 2 }]), 50);
+  assert.equal(causeShare(0, []), 0);
+  const tab = source('../agents/RetroTab.tsx');
+  for (const text of ['QA escalations by cause', 'team-wide', "'qa-agent': 'QA bot triage rule", 'Planning did not predict']) assert.ok(tab.includes(text), text);
 });

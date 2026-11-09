@@ -701,6 +701,7 @@ export const GET_RETRO = gql`
       previousNumbers { tickets medianHours fixRounds replans ownerIssues medianOwnerWaitHours reviews requestChanges blockedWaits mergeConflicts stackedRebases }
       problems { label count tickets }
       tickets { key title kind hours rounds issues ownerWaitHours result }
+      escalations { tickets planned causes { cause label count tickets } unpredicted { key summary causes prediction } }
       items { id kind text evidence dest status sessionId updatedAt }
     }
   }
