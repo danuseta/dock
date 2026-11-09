@@ -36,11 +36,15 @@ export interface PlanningIssue {
   sp: number | null;
   acRaw: unknown;
   links: TicketLink[];
+  /** The parent epic's key. */
+  epic?: string | null;
+  /** The description as Jira returned it (ADF or text). */
+  descriptionRaw?: unknown;
 }
 
 export const AC_FIELD = 'customfield_10332';
 const SP_FIELDS = ['story_points', 'customfield_10016', 'customfield_10028', 'customfield_10034'];
-const PLANNING_FIELDS = ['summary', 'issuetype', 'status', 'assignee', 'issuelinks', AC_FIELD, ...SP_FIELDS];
+const PLANNING_FIELDS = ['summary', 'issuetype', 'status', 'assignee', 'issuelinks', 'parent', 'description', AC_FIELD, ...SP_FIELDS];
 
 const TRACKED_FIELDS = new Set(['status', 'labels', 'Sprint', 'Story point estimate', 'assignee']);
 const ISSUE_FIELDS = [
@@ -133,6 +137,8 @@ export function planningIssue(issue: any): PlanningIssue {
     sp: storyPoints(fields),
     acRaw: fields[AC_FIELD] ?? null,
     links: blockLinks(fields.issuelinks),
+    epic: typeof fields.parent?.key === 'string' ? fields.parent.key : null,
+    descriptionRaw: fields.description ?? null,
   };
 }
 
@@ -239,6 +245,59 @@ export class JiraSprintClient {
   async setAcField(key: string, value: unknown): Promise<void> {
     if (!this.http.put) throw new Error('This Jira connection cannot write');
     await this.http.put(`/rest/api/3/issue/${encodeURIComponent(key)}`, { fields: { [AC_FIELD]: value } });
+  }
+
+  /** The display name of the Jira user DOCK's token belongs to. */
+  async myself(): Promise<string | null> {
+    const me = await this.http.get('/rest/api/3/myself');
+    return typeof me?.displayName === 'string' ? me.displayName : null;
+  }
+
+  /** A comment of plain paragraphs, one per line. */
+  async addComment(key: string, lines: string[]): Promise<void> {
+    await this.http.post(`/rest/api/3/issue/${encodeURIComponent(key)}/comment`, {
+      body: { type: 'doc', version: 1, content: lines.filter(Boolean).map((line) => ({ type: 'paragraph', content: [{ type: 'text', text: line }] })) },
+    });
+  }
+
+  /** A comment another tool reads back: the marker line, then the JSON in a code block (QONFLO-TC, QONFLO-AC-MOVE). */
+  async addMarkedComment(key: string, marker: string, json: string): Promise<void> {
+    await this.http.post(`/rest/api/3/issue/${encodeURIComponent(key)}/comment`, {
+      body: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: marker }] }, { type: 'codeBlock', attrs: { language: 'json' }, content: [{ type: 'text', text: json }] }] },
+    });
+  }
+
+  /** The QA bot's test case comment. */
+  addTcComment(key: string, marker: string, json: string): Promise<void> {
+    return this.addMarkedComment(key, marker, json);
+  }
+
+  /** The ticket's comments, oldest first, as Jira returned their bodies. */
+  async comments(key: string): Promise<Array<{ created: string; body: unknown }>> {
+    const comments: Array<{ created: string; body: unknown }> = [];
+    for (let startAt = 0; startAt < 1000; ) {
+      const page = await this.http.get(`/rest/api/3/issue/${encodeURIComponent(key)}/comment`, { startAt, maxResults: PAGE_SIZE, orderBy: 'created' });
+      const values = page?.comments || [];
+      comments.push(...values.map((comment: any) => ({ created: String(comment.created ?? ''), body: comment.body ?? null })));
+      if (!values.length || startAt + values.length >= (page.total ?? 0)) return comments;
+      startAt += values.length;
+    }
+    return comments;
+  }
+
+  async removeLabel(key: string, label: string): Promise<void> {
+    if (!this.http.put) throw new Error('This Jira connection cannot write');
+    await this.http.put(`/rest/api/3/issue/${encodeURIComponent(key)}`, { update: { labels: [{ remove: label }] } });
+  }
+
+  /** The keys of the token user's tickets that carry `label`. */
+  async myLabelledKeys(label: string): Promise<string[]> {
+    return (await this.searchPlanning(`labels = "${label.replace(/["\\]/g, '')}" AND assignee = currentUser()`)).map((issue) => issue.key);
+  }
+
+  async addLabel(key: string, label: string): Promise<void> {
+    if (!this.http.put) throw new Error('This Jira connection cannot write');
+    await this.http.put(`/rest/api/3/issue/${encodeURIComponent(key)}`, { update: { labels: [{ add: label }] } });
   }
 
   async setAssignee(key: string, accountId: string): Promise<void> {

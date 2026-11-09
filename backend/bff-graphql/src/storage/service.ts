@@ -13,7 +13,9 @@ export interface PlanEdgeInput { ticketKey: string; dependsOnKey: string; reason
 export interface SprintDraftInput { sprint: string; sprintId: number; sprintDays: number; startDate: Date | null; createdBy: string | null; refStatuses: string }
 export interface SprintDraftTicketInput {
   key: string; summary: string; dev: string | null; sp: number | null; wave: number | null; status: string;
-  ac: string[]; jiraAc: string[]; jiraDev: string | null; dependsOn: string[];
+  ac: string[]; jiraAc: string[]; jiraDev: string | null; dependsOn: string[]; epic?: string | null; frames?: string[];
+  /** Kept from the previous load: the test cases and what was last posted. */
+  tcs?: string; tcAt?: Date | null; tcPosted?: string | null;
 }
 export interface SprintPlanData { status?: string; mappingKeys?: string[]; sessionId?: string | null; mappedKeys?: string[]; groups?: string[][]; error?: string | null; startedAt?: Date | null; mappedAt?: Date | null }
 
@@ -444,6 +446,7 @@ export class StorageService {
     const rows = tickets.map((ticket, position) => ({
       draftSprint: sprint, key: ticket.key, summary: ticket.summary, dev: ticket.dev, sp: ticket.sp, wave: ticket.wave, status: ticket.status,
       ac: JSON.stringify(ticket.ac), jiraAc: JSON.stringify(ticket.jiraAc), jiraDev: ticket.jiraDev, dependsOn: JSON.stringify(ticket.dependsOn), position,
+      epic: ticket.epic ?? null, frames: JSON.stringify(ticket.frames ?? []), tcs: ticket.tcs ?? '[]', tcAt: ticket.tcAt ?? null, tcPosted: ticket.tcPosted ?? null,
     }));
     await this.db.$transaction([
       this.db.sprintDraft.upsert({ where: { sprint }, update: reset, create: { sprint, ...reset } }),
@@ -452,7 +455,7 @@ export class StorageService {
     ]);
   }
 
-  updateSprintDraftTicket(sprint: string, key: string, data: { dev?: string | null; sp?: number | null; wave?: number | null; ac?: string[]; jiraAc?: string[]; jiraDev?: string | null; prediction?: string | null }) {
+  updateSprintDraftTicket(sprint: string, key: string, data: { dev?: string | null; sp?: number | null; wave?: number | null; ac?: string[]; jiraAc?: string[]; jiraDev?: string | null; prediction?: string | null; tcs?: string; tcAt?: Date; tcPosted?: string | null }) {
     const { ac, jiraAc, ...rest } = data;
     return this.db.sprintDraftTicket.update({
       where: { draftSprint_key: { draftSprint: sprint, key } },
@@ -460,8 +463,17 @@ export class StorageService {
     });
   }
 
-  updateSprintDraft(sprint: string, data: { decisions?: string; qaReason?: string | null; status?: string; publishedAt?: Date | null }) {
+  /** The drafts holding a ticket of the epic, so a new storyboard version flags them all. */
+  async sprintDraftsWithEpic(epic: string): Promise<string[]> {
+    return (await this.db.sprintDraftTicket.findMany({ where: { epic }, select: { draftSprint: true }, distinct: ['draftSprint'] })).map((row) => row.draftSprint);
+  }
+
+  updateSprintDraft(sprint: string, data: { decisions?: string; qaReason?: string | null; status?: string; publishedAt?: Date | null; storyboards?: string; questions?: string }) {
     return this.db.sprintDraft.update({ where: { sprint }, data });
+  }
+
+  updateSprintDraftDrift(sprint: string, drift: string) {
+    return this.db.sprintDraft.update({ where: { sprint }, data: { drift } });
   }
 
   /** The predictions of one run: a ticket the script did not answer for loses its old one. */
@@ -488,6 +500,14 @@ export class StorageService {
       ...items.map((item) => this.db.retroItem.create({ data: { sprint, kind: item.kind, text: item.text, evidence: JSON.stringify(item.evidence), dest: item.dest } })),
     ]);
     return items.length;
+  }
+
+  /** A line DOCK proposes itself: added once by its text, its evidence refreshed while it is still open. */
+  async upsertRetroSuggestion(sprint: string, item: { kind: string; text: string; evidence: string[]; dest: string }) {
+    const existing = await this.db.retroItem.findFirst({ where: { sprint, dest: item.dest, text: item.text } });
+    if (!existing) return this.db.retroItem.create({ data: { sprint, kind: item.kind, text: item.text, evidence: JSON.stringify(item.evidence), dest: item.dest } });
+    if (existing.status !== 'open' || existing.evidence === JSON.stringify(item.evidence)) return existing;
+    return this.db.retroItem.update({ where: { id: existing.id }, data: { evidence: JSON.stringify(item.evidence) } });
   }
 
   updateRetroItem(id: string, data: { status?: string; text?: string; sessionId?: string | null }) {

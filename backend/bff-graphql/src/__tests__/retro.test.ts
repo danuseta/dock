@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { median, parseRetroDraft, retroApplyPrompt, retroNumbers, retroProblems, retroTickets } from '../integrations/retro';
+import { labelCauses, median, parseRetroDraft, qaEscalations, retroApplyPrompt, retroNumbers, retroProblems, retroTickets, triageSuggestions } from '../integrations/retro';
 import { OrchestratorInputError } from '../integrations/orchestrator';
 
 const run = (key: string, overrides: Record<string, unknown> = {}) => ({
@@ -43,4 +43,28 @@ test('a draft keeps only lines with a known kind and evidence; an unknown destin
   ] });
   assert.throws(() => parseRetroDraft({ items: [] }), OrchestratorInputError);
   assert.strictEqual(retroApplyPrompt({ id: 'abc', text: 'T', dest: 'kit', evidence: ['QRD-1'] }), 'Pakai skill sous: retro apply abc\nDest: kit\nText: T\nEvidence: QRD-1');
+});
+
+test('QA escalations count the team by cause from labels, and the ones Planning missed become triage rules for the QA bot', () => {
+  const issues = [
+    { key: 'QRD-1286', summary: 'Two accounts', labels: ['QA-MANUAL'], events: [] },
+    { key: 'QRD-1511', summary: 'Edit client', labels: [], events: [{ field: 'labels', to: 'QA-BLOCKED-DEPENDENCY QA-ESCALATED' }] },
+    { key: 'QRD-1498', summary: 'Published tool', labels: ['qa-blocked-data'], events: [] },
+    { key: 'QRD-1500', summary: 'Mixed', labels: ['QA-ESCALATED'], events: [] },
+    { key: 'QRD-1600', summary: 'Clean', labels: ['QA-PASSED'], events: [] },
+  ];
+  const predictions = new Map<string, string | null>([['QRD-1286', 'ESCALATED'], ['QRD-1511', 'LOLOS'], ['QRD-1498', null]]);
+  const escalations = qaEscalations(issues, predictions);
+  assert.strictEqual(escalations.tickets, 4);
+  assert.deepStrictEqual(escalations.causes.map((row) => [row.cause, row.count]), [['dependency', 1], ['access', 1], ['data', 1], ['unspecified', 1]]);
+  assert.deepStrictEqual(escalations.unpredicted.map((item) => [item.key, item.causes, item.prediction]), [
+    ['QRD-1498', ['data'], null], ['QRD-1500', ['unspecified'], null], ['QRD-1511', ['dependency'], 'LOLOS'],
+  ]);
+  const rules = triageSuggestions(escalations);
+  assert.deepStrictEqual(rules.map((rule) => [rule.dest, rule.kind]), [['qa-agent', 'try'], ['qa-agent', 'try'], ['qa-agent', 'try']]);
+  assert.match(rules[0].text, /blockedReason dependency/);
+  assert.deepStrictEqual(rules[0].evidence, ['QRD-1511 escalated (dependency); Planning predicted LOLOS']);
+  assert.deepStrictEqual(qaEscalations(issues, null).unpredicted, [], 'no Planning draft, nothing to compare');
+  assert.deepStrictEqual(labelCauses('QA-BLOCKED-ENV'), ['environment']);
+  assert.deepStrictEqual(parseRetroDraft({ sprint: 'S', items: [{ kind: 'try', text: 'x', evidence: ['e'], dest: 'qa-agent' }] }).items[0].dest, 'qa-agent');
 });

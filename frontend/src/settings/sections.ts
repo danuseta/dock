@@ -27,6 +27,7 @@ export interface SavedSettings {
   jiraUrl?: string | null;
   jiraEmail?: string | null;
   jiraProjectKeys?: string | null;
+  planningConfluenceParent?: string | null;
   githubRepos?: string | null;
   googleClientId?: string | null;
   googleCalendarId?: string | null;
@@ -106,7 +107,7 @@ export function savedValues(settings: SavedSettings): Record<DraftSectionId, Sec
       ownerReplySession: settings.ownerReplySession === 'last' ? 'last' : 'new',
     },
     notifications: prefsToValues(parseNotificationPrefs(settings.notificationPrefs)),
-    jira: { jiraUrl: settings.jiraUrl || '', jiraEmail: settings.jiraEmail || '', jiraApiToken: '', jiraProjectKeys: settings.jiraProjectKeys || '' },
+    jira: { jiraUrl: settings.jiraUrl || '', jiraEmail: settings.jiraEmail || '', jiraApiToken: '', jiraProjectKeys: settings.jiraProjectKeys || '', planningConfluenceParent: settings.planningConfluenceParent || '' },
     github: { githubToken: '', githubRepos: settings.githubRepos || '' },
     discord: {
       discordWebhookUrl: '',

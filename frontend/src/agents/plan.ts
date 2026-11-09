@@ -50,3 +50,27 @@ export const edgeStateText = (state: string) => (state === 'accepted' ? 'Accepte
 export const hasMap = (plan: SprintPlan | null) => !!plan && plan.mappedAt !== null;
 
 export const groupsText = (groups: string[][]) => groups.filter((group) => group.length > 1).map((group) => group.join(' · '));
+
+export interface DriftDecision { action: string; state: string; note: string | null; by: string | null; at: string }
+export interface DriftRow {
+  id: string; key: string; line: number; text: string; refKey: string; refStatus: string | null; refDev: string | null;
+  refEnd: number | null; ownEnd: number | null; reason: string; state: string; decision: DriftDecision | null;
+}
+export interface DriftStoryboard { key: string; version: number; frames: string[]; held: boolean; checked: boolean }
+export interface SprintDrift { sprint: string; publishedAt: string | null; today: number | null; rows: DriftRow[]; storyboard: DriftStoryboard[] }
+
+export interface AcIn { id: string; from: string; to: string; line: number; text: string; by: string | null; at: string }
+
+const DRIFT_STATE: Record<string, string> = { held: 'Held', moved: 'Moved', 'move-pending': 'Move pending', 'move-accepted': 'Accepted, remove by hand', 'not-tested': 'Not tested here', wait: 'Wait', 'needs-po': 'Needs PO' };
+export const driftStateLabel = (state: string) => DRIFT_STATE[state] ?? state;
+
+/** Why the line is held, in the words of the plan. */
+export function driftReason(row: Pick<DriftRow, 'reason' | 'refKey' | 'refEnd' | 'ownEnd' | 'refStatus' | 'key'>): string {
+  const status = row.refStatus ? ` It is ${row.refStatus}.` : '';
+  if (row.reason === 'slipped') return `${row.refKey} was planned to land D${Math.ceil(row.refEnd ?? 0)}, before ${row.key}, and has not.${status}`;
+  if (row.reason === 'after-it') return `${row.refKey} lands D${Math.ceil(row.refEnd ?? 0)}, after ${row.key} (D${Math.ceil(row.ownEnd ?? 0)}).${status}`;
+  return `${row.refKey} is outside this sprint's plan and has not landed.${status}`;
+}
+
+/** Held rows first, then the ones already decided. */
+export const sortDrift = (rows: DriftRow[]) => [...rows].sort((a, b) => Number(a.state !== 'held') - Number(b.state !== 'held'));

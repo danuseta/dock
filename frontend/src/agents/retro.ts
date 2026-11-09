@@ -21,6 +21,7 @@ export interface Retro {
   problems: Array<{ label: string; count: number; tickets: string[] }>;
   tickets: Array<{ key: string; title: string; kind: string; hours: number | null; rounds: number; issues: number; ownerWaitHours: number | null; result: string }>;
   items: RetroItem[];
+  escalations: RetroEscalations;
 }
 
 /** The numbers shown, with their unit and which way is better. */
@@ -47,3 +48,12 @@ export function numberDelta(now: RetroNumbers, before: RetroNumbers | null, fiel
   if (diff === 0) return { text: 'same as before', good: false };
   return { text: `${diff > 0 ? '+' : ''}${diff} vs before`, good: better !== null && (better === 'up' ? diff > 0 : diff < 0) };
 }
+
+export interface RetroEscalations {
+  tickets: number; planned: boolean;
+  causes: Array<{ cause: string; label: string; count: number; tickets: string[] }>;
+  unpredicted: Array<{ key: string; summary: string; causes: string[]; prediction: string | null }>;
+}
+
+/** The bar width of a cause against the largest one, in percent. */
+export const causeShare = (count: number, causes: Array<{ count: number }>) => Math.round((count / Math.max(1, ...causes.map((item) => item.count))) * 100);
