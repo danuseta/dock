@@ -124,6 +124,19 @@ export class GitHubClient {
     return response.data?.commit?.committer?.date ?? null;
   }
 
+  /** Runs of one workflow file on one branch, newest first (30 at most). */
+  async getWorkflowRuns(owner: string, repo: string, workflow: string, branch: string): Promise<any[]> {
+    const response = await this.client.get(`/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs`, { params: { branch, per_page: 30 } });
+    return Array.isArray(response.data?.workflow_runs) ? response.data.workflow_runs : [];
+  }
+
+  /** Whether commit `head` contains commit `base`: GitHub's compare says identical or ahead. */
+  async commitContains(owner: string, repo: string, base: string, head: string): Promise<boolean> {
+    if (base === head) return true;
+    const response = await this.client.get(`/repos/${owner}/${repo}/compare/${base}...${head}`);
+    return response.data?.status === 'identical' || response.data?.status === 'ahead';
+  }
+
   /** A file at a commit as plain text. */
   async getRawFile(owner: string, repo: string, filePath: string, ref: string): Promise<string> {
     const response = await this.client.get(`/repos/${owner}/${repo}/contents/${filePath.split('/').map(encodeURIComponent).join('/')}`, {

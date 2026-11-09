@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { CheckCircle2, Circle, FlaskConical, Loader2, MinusCircle, PlayCircle, XCircle } from 'lucide-react';
+import { CheckCircle2, Circle, FlaskConical, Loader2, MinusCircle, PlayCircle, Rocket, XCircle } from 'lucide-react';
 import { RUN_QA, SET_QA_AUTO_RUN } from '../graphql/mutations';
-import { GET_QA_LOCAL } from '../graphql/queries';
+import { GET_DEPLOY_GATE, GET_QA_LOCAL } from '../graphql/queries';
 import { Badge, Button, Checkbox } from '../components/ui';
 import { cn } from '../lib/cn';
 import { qaBusy, qaLine, qaPhase, qaVideoUrl, shortTc, verdictVariant, type QaLocal } from './qa';
@@ -18,6 +18,35 @@ const TcIcon: React.FC<{ state: string }> = ({ state }) => {
   if (state === 'running') return <Loader2 {...common} className="flex-none animate-spin text-accent" />;
   if (state === 'blocked' || state === 'skipped') return <MinusCircle {...common} className="flex-none text-status-warn" />;
   return <Circle {...common} className="flex-none text-muted-foreground" />;
+};
+
+const GATE_POLL_MS = 60000;
+
+interface DeployGate { ready: boolean; summary: string; repos: Array<{ repo: string; pull: number; state: string; runUrl: string | null; detail: string }> }
+
+/** Whether the ticket's merged code is on UAT yet: the ticket moves to UAT CHECK only after local QA passed and this says deployed. */
+const DeployGateLine: React.FC<{ ticketKey: string }> = ({ ticketKey }) => {
+  const { data, error } = useQuery<{ deployGate: DeployGate }>(GET_DEPLOY_GATE, { variables: { ticketKey }, pollInterval: GATE_POLL_MS, fetchPolicy: 'cache-and-network' });
+  const gate = data?.deployGate;
+  if (error) return <p className="font-mono text-[0.7rem] text-muted-foreground">UAT deploy: {error.message}</p>;
+  if (!gate) return null;
+  return (
+    <div className="flex flex-col gap-0.5" aria-label="UAT deploy">
+      <p className={cn('flex items-center gap-1.5 font-mono text-[0.72rem]', gate.ready ? 'text-status-merged' : 'text-status-warn')}>
+        <Rocket size={12} aria-hidden="true" className="flex-none" />
+        {gate.ready ? 'Deployed to UAT: may move to UAT CHECK' : 'Waiting deploy: not ready for UAT CHECK'}
+      </p>
+      <ul className="flex flex-col gap-0.5 font-mono text-[0.68rem] text-muted-foreground">
+        {gate.repos.map((r) => (
+          <li key={`${r.repo}#${r.pull}`} className="flex min-w-0 items-center gap-1.5" title={r.detail}>
+            <span className="min-w-0 truncate">{r.repo.split('/').pop()}#{r.pull}</span>
+            <span className={cn('flex-none', r.state === 'deployed' ? 'text-status-merged' : r.state === 'failed' ? 'text-status-conflict' : 'text-status-warn')}>{r.state}</span>
+            {r.runUrl && <a href={r.runUrl} target="_blank" rel="noreferrer" className="flex-none text-accent hover:text-foreground">run</a>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 };
 
 /** Local QA of the session's ticket: where the run is, each test case with its video, and the predicted verdict. Hidden where qonflo-qa-local is not installed. */
@@ -85,6 +114,7 @@ export const QaPanel: React.FC<{ ticketKey: string }> = ({ ticketKey }) => {
           </ul>
         </>
       )}
+      {run?.verdict && <DeployGateLine ticketKey={ticketKey} />}
       {error && <p className="text-xs text-status-conflict">{error}</p>}
       <div className="flex items-center justify-between gap-2">
         <label className="flex items-center gap-2 text-xs text-secondary-foreground">
