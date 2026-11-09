@@ -757,6 +757,7 @@ export const SPRINT_DRAFT_FIELDS = `
   }
   findings { id key line text refKey kind refEnd ownEnd decision { action note by at } }
   storyboards { epic version previous path page frames changed changedAt checkedAt error }
+  questions { id text key askedAt answered answeredBy answeredAt }
 `;
 
 export const GET_PLANNING_SPRINTS = gql`
@@ -816,6 +817,12 @@ export const GET_SPRINT_DRIFT = gql`
 export const SPRINT_DRIFT_ACTION = gql`
   mutation SprintDriftAction($id: ID!, $action: String!, $note: String) {
     sprintDriftAction(id: $id, action: $action, note: $note) { ${SPRINT_DRIFT_FIELDS} }
+  }
+`;
+
+export const ANSWER_SPRINT_DRAFT_QUESTION = gql`
+  mutation AnswerSprintDraftQuestion($sprint: String!, $id: ID!, $answered: Boolean!) {
+    answerSprintDraftQuestion(sprint: $sprint, id: $id, answered: $answered) { ${SPRINT_DRAFT_FIELDS} }
   }
 `;
 

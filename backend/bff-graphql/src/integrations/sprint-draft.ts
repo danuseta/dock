@@ -16,6 +16,8 @@ const AC_ACTIONS = ['move', 'wait', 'drop'];
 const QA_ACTIONS = ['accept', 'fix'];
 const MAX_AC_LINES = 200;
 const MAX_LINE = 2000;
+const MAX_QUESTIONS = 200;
+const TICKET_KEY = /^[A-Z][A-Z0-9_]*-\d+$/;
 const READ_CONCURRENCY = 4;
 
 export interface Decision { action: string; note: string | null; by: string | null; at: string }
@@ -33,7 +35,7 @@ export interface DraftJira {
 
 interface DraftRow {
   sprint: string; sprintId: number; status: string; sprintDays: number; startDate: Date | null; decisions: string; qaReason: string | null;
-  refStatuses: string; createdBy: string | null; loadedAt: Date; publishedAt: Date | null; storyboards?: string;
+  refStatuses: string; createdBy: string | null; loadedAt: Date; publishedAt: Date | null; storyboards?: string; questions?: string;
   tickets: Array<{
     key: string; summary: string; dev: string | null; sp: number | null; wave: number | null; ac: string; jiraAc: string; jiraDev: string | null;
     dependsOn: string; status: string; prediction: string | null; position: number; epic?: string | null; frames?: string;
@@ -45,7 +47,7 @@ export interface DraftStore {
   getSprintDraft(sprint: string): Promise<DraftRow | null>;
   replaceSprintDraft(draft: SprintDraftInput, tickets: SprintDraftTicketInput[]): Promise<unknown>;
   updateSprintDraftTicket(sprint: string, key: string, data: { dev?: string | null; sp?: number | null; wave?: number | null; ac?: string[]; jiraAc?: string[]; jiraDev?: string | null }): Promise<unknown>;
-  updateSprintDraft(sprint: string, data: { decisions?: string; qaReason?: string | null; status?: string; publishedAt?: Date | null; storyboards?: string }): Promise<unknown>;
+  updateSprintDraft(sprint: string, data: { decisions?: string; qaReason?: string | null; status?: string; publishedAt?: Date | null; storyboards?: string; questions?: string }): Promise<unknown>;
   saveSprintDraftPredictions(sprint: string, predictions: Map<string, string> | null, qaReason: string | null): Promise<unknown>;
   sprintDraftsWithEpic(epic: string): Promise<string[]>;
 }
@@ -55,6 +57,9 @@ export interface StoryboardState {
   epic: string; version: number | null; previous: number | null; path: string | null; page: string | null; frames: number; changed: string[];
   changedAt: string | null; checkedAt: string; error: string | null;
 }
+/** A question the planning chat could not settle from the storyboard; the planner marks it answered. */
+export interface DraftQuestion { id: string; text: string; key: string | null; askedAt: string; answered: boolean; answeredBy: string | null; answeredAt: string | null }
+
 /** A ticket naming a frame that changed in the newest storyboard version: its AC needs a check, Held when work has not started. */
 export interface StoryboardFlag { version: number; frames: string[]; held: boolean; checked: Decision | null }
 
@@ -71,6 +76,7 @@ export interface DraftView {
   /** Tickets of the sprint already past merge: left out of the schedule and the AC check. */
   landed: number;
   storyboards: StoryboardState[];
+  questions: DraftQuestion[];
 }
 export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; refused: string | null }
 /** One line of a publish: a ticket's AC and assignee, or the Confluence contract page. */
@@ -330,7 +336,7 @@ export class SprintDraftService {
     return {
       sprint: row.sprint, sprintId: row.sprintId, status: row.status, sprintDays: row.sprintDays, startDate: row.startDate?.toISOString() ?? null,
       spPerDay, createdBy: row.createdBy, loadedAt: row.loadedAt.toISOString(), publishedAt: row.publishedAt?.toISOString() ?? null, qaReason: row.qaReason,
-      devs, landed: all.length - tickets.length, storyboards,
+      devs, landed: all.length - tickets.length, storyboards, questions: parse<DraftQuestion[]>(row.questions, []),
       tickets: tickets.map((ticket) => {
         const placed = schedule.get(ticket.key)!;
         return {
@@ -411,6 +417,34 @@ export class SprintDraftService {
       decisions[id] = { action, note: text, by, at: this.now().toISOString() };
     }
     await this.store.updateSprintDraft(sprint, { decisions: JSON.stringify(decisions) });
+    return (await this.view(sprint))!;
+  }
+
+  /** Adds an open question to the draft; the same open text is asked once. */
+  async ask(sprint: string, text: string, key: string | null): Promise<DraftView> {
+    const row = await this.row(sprint);
+    const question = text.trim().slice(0, MAX_LINE);
+    if (!question) throw new SprintInputError('text is required');
+    const ticket = key?.trim().toUpperCase() || null;
+    if (ticket && !TICKET_KEY.test(ticket)) throw new SprintInputError('key must be a ticket key such as QRD-1312');
+    const questions = parse<DraftQuestion[]>(row.questions, []);
+    if (!questions.some((item) => !item.answered && item.text === question && item.key === ticket)) {
+      if (questions.length >= MAX_QUESTIONS) throw new SprintInputError(`A draft holds at most ${MAX_QUESTIONS} questions`);
+      const at = this.now().toISOString();
+      questions.push({ id: `q${questions.length + 1}-${Date.parse(at).toString(36)}`, text: question, key: ticket, askedAt: at, answered: false, answeredBy: null, answeredAt: null });
+      await this.store.updateSprintDraft(sprint, { questions: JSON.stringify(questions) });
+    }
+    return (await this.view(sprint))!;
+  }
+
+  /** Marks a question answered, or open again. */
+  async answer(sprint: string, id: string, answered: boolean, by: string | null): Promise<DraftView> {
+    const row = await this.row(sprint);
+    const questions = parse<DraftQuestion[]>(row.questions, []);
+    const question = questions.find((item) => item.id === id);
+    if (!question) throw new SprintInputError('No such question in the draft');
+    Object.assign(question, answered ? { answered: true, answeredBy: by, answeredAt: this.now().toISOString() } : { answered: false, answeredBy: null, answeredAt: null });
+    await this.store.updateSprintDraft(sprint, { questions: JSON.stringify(questions) });
     return (await this.view(sprint))!;
   }
 

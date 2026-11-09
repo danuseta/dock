@@ -256,3 +256,16 @@ test('a frame changed in the newest storyboard flags the tickets naming it, Held
   assert.deepEqual(await service.applyStoryboard({ epic: 'QRD-1233', version: 9, previous: 8, path: 'p', page: '11', frames: [], changed: ['F10.1'] }), ['QRD Sprint 26']);
   assert.deepEqual((await service.view('QRD Sprint 26'))!.tickets.filter((ticket) => ticket.storyboard).map((ticket) => ticket.key), ['QRD-1400']);
 });
+
+test('the planning chat asks open questions once each and the planner marks them answered', async () => {
+  const { service } = setup();
+  await service.load(26, 'Alvin');
+  await service.ask('QRD Sprint 26', 'Tooltip names both open versions or the last?', 'qrd-1511');
+  const view = await service.ask('QRD Sprint 26', 'Tooltip names both open versions or the last?', 'QRD-1511');
+  assert.equal(view.questions.length, 1);
+  assert.equal(view.questions[0].key, 'QRD-1511');
+  await assert.rejects(service.ask('QRD Sprint 26', '  ', null), /text is required/);
+  const answered = await service.answer('QRD Sprint 26', view.questions[0].id, true, 'Alvin');
+  assert.deepEqual([answered.questions[0].answered, answered.questions[0].answeredBy], [true, 'Alvin']);
+  assert.equal((await service.answer('QRD Sprint 26', view.questions[0].id, false, 'Alvin')).questions[0].answered, false);
+});

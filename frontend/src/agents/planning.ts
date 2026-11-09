@@ -19,7 +19,17 @@ export interface DraftFinding {
 export interface SprintDraft {
   sprint: string; sprintId: number; status: string; sprintDays: number; startDate: string | null; spPerDay: number; createdBy: string | null;
   loadedAt: string; publishedAt: string | null; qaReason: string | null; devs: string[]; blockers: string[]; canPublish: boolean; landed: number;
-  tickets: DraftTicket[]; findings: DraftFinding[]; storyboards: StoryboardState[];
+  tickets: DraftTicket[]; findings: DraftFinding[]; storyboards: StoryboardState[]; questions: DraftQuestion[];
+}
+export interface DraftQuestion { id: string; text: string; key: string | null; askedAt: string; answered: boolean; answeredBy: string | null; answeredAt: string | null }
+
+/** The chat session Planning opens for a sprint; the planning agent and the kit find it by this title. */
+export const planningChatTitle = (sprint: string) => `Planning-${sprint}`;
+
+/** "3/9 answered", or null when the chat raised none. */
+export function questionsLine(questions: DraftQuestion[]): string | null {
+  if (!questions.length) return null;
+  return `${questions.filter((question) => question.answered).length}/${questions.length} answered`;
 }
 export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; refused: string | null }
 export interface PublishResult { key: string; kind: string; status: string; detail: string | null }

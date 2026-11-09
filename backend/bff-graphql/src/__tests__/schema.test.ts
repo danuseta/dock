@@ -161,6 +161,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'addMonitor',
       'addQuickLink',
       'answerChatInteraction',
+      'answerSprintDraftQuestion',
       'answerTicket',
       'approveReview',
       'backfillSprintDashboards',

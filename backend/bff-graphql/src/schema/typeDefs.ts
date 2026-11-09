@@ -655,6 +655,7 @@ export const typeDefs = gql`
     tickets: [SprintDraftTicket!]!
     findings: [SprintDraftFinding!]!
     storyboards: [SprintStoryboard!]!
+    questions: [SprintDraftQuestion!]!
     blockers: [String!]!
     canPublish: Boolean!
     """Tickets already past merge (UAT CHECK and later): out of the schedule and the AC check."""
@@ -725,6 +726,17 @@ export const typeDefs = gql`
     "Work has not started, so the ticket waits for the check."
     held: Boolean!
     checked: SprintDraftDecision
+  }
+
+  "A question the planning chat raised; the planner marks it answered."
+  type SprintDraftQuestion {
+    id: ID!
+    text: String!
+    key: String
+    askedAt: String!
+    answered: Boolean!
+    answeredBy: String
+    answeredAt: String
   }
 
   type SprintStoryboard {
@@ -1793,6 +1805,8 @@ export const typeDefs = gql`
     refreshSprintDraftQa(sprint: String!): SprintDraft!
     "Reads the newest storyboard of each epic of the draft from Confluence and saves it under the blackboard."
     checkSprintStoryboards(sprint: String!): SprintDraft!
+    "Marks an open question of the planning chat answered, or open again."
+    answerSprintDraftQuestion(sprint: String!, id: ID!, answered: Boolean!): SprintDraft!
     """Writes AC lines and assignees that differ from Jira. Refused while a blocker has no decision."""
     publishSprintDraft(sprint: String!): [SprintDraftPublishResult!]!
     "move, not-tested, wait, needs-po or clear on a held AC line of the owner's ticket."

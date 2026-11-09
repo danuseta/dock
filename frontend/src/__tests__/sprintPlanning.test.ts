@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { agentsRoute } from '../agents/plan';
 import {
   UNASSIGNED, barPlace, changeCount, dayOf, decisionLabel, findingKindLabel, lanes, parseWave, predictionTone, publishHint, scopeSummary, sortFindings,
-  spanOf, storyboardDecisionId, storyboardLine, waveRows, workingDayLabels, type DraftFinding, type DraftTicket,
+  planningChatTitle, questionsLine, spanOf, storyboardDecisionId, storyboardLine, waveRows, workingDayLabels, type DraftFinding, type DraftTicket,
 } from '../agents/planning';
 
 const ticket = (over: Partial<DraftTicket>): DraftTicket => ({
@@ -74,4 +76,19 @@ test('a storyboard line names its version and changed frames, or why there is no
   assert.equal(storyboardLine({ ...board, previous: null, changed: [] }), 'v8 · 62 frames · first version saved');
   assert.equal(storyboardLine({ ...board, error: 'No Confluence page titled "Storyboard" for QRD-1233.' }), 'No Confluence page titled "Storyboard" for QRD-1233.');
   assert.equal(storyboardDecisionId('QRD-1312', 8), 'sb|QRD-1312|v8');
+});
+
+test('Planning opens a Planning-<sprint> chat beside the panel, which polls the draft, and lists the open questions', () => {
+  assert.equal(planningChatTitle('QRD Sprint 27'), 'Planning-QRD Sprint 27');
+  assert.equal(questionsLine([]), null);
+  const question = { id: 'q1', text: 'Both tabs?', key: null, askedAt: 'a', answered: true, answeredBy: 'Alvin', answeredAt: 'b' };
+  assert.equal(questionsLine([question, { ...question, id: 'q2', answered: false }]), '1/2 answered');
+  const tab = readFileSync(fileURLToPath(new URL('../agents/PlanningTab.tsx', import.meta.url)), 'utf8');
+  assert.match(tab, /<PlanningChat sprint=\{chosen\.name\} \/>/);
+  assert.match(tab, /pollInterval: 10000/);
+  assert.match(tab, /xl:grid-cols-\[420px_minmax\(0,1fr\)\]/);
+  const chat = readFileSync(fileURLToPath(new URL('../agents/PlanningChat.tsx', import.meta.url)), 'utf8');
+  assert.match(chat, /h-\[620px\]/);
+  assert.match(chat, /xl:sticky/);
+  assert.match(chat, /<ChatThread /);
 });

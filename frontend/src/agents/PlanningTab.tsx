@@ -2,14 +2,15 @@ import React, { useEffect, useId, useState } from 'react';
 import { useLazyQuery, useMutation, useQuery } from '@apollo/client';
 import { ArrowRightLeft, Check, Clock, Download, EyeOff, FileSearch, Minus, Plus, RefreshCw, Scissors, Send, ShieldAlert, ShieldCheck, Undo2 } from 'lucide-react';
 import { Button, Card, Dialog, Input, Select } from '../components/ui';
+import { PlanningChat } from './PlanningChat';
 import {
-  CHECK_SPRINT_STORYBOARDS, DECIDE_SPRINT_DRAFT, GET_PLANNING_SPRINTS, GET_SPRINT_DRAFT, LOAD_SPRINT_DRAFT, PREVIEW_SPRINT_DRAFT_PUBLISH, PUBLISH_SPRINT_DRAFT,
+  ANSWER_SPRINT_DRAFT_QUESTION, CHECK_SPRINT_STORYBOARDS, DECIDE_SPRINT_DRAFT, GET_PLANNING_SPRINTS, GET_SPRINT_DRAFT, LOAD_SPRINT_DRAFT, PREVIEW_SPRINT_DRAFT_PUBLISH, PUBLISH_SPRINT_DRAFT,
   REFRESH_SPRINT_DRAFT_QA, UPDATE_SPRINT_DRAFT_TICKET,
 } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import {
   UNASSIGNED, barPlace, changeCount, dayOf, decisionLabel, findingKindLabel, lanes, parseWave, predictionTone, publishHint, scopeSummary, sortFindings,
-  spanOf, storyboardDecisionId, storyboardLine, uncheckedStoryboard, waveRows, workingDayLabels,
+  questionsLine, spanOf, storyboardDecisionId, storyboardLine, uncheckedStoryboard, waveRows, workingDayLabels,
   type DraftChange, type DraftFinding, type DraftTicket, type PlanningPanel, type PlanningSprint, type PublishResult, type SprintDraft,
 } from './planning';
 
@@ -78,6 +79,34 @@ const StoryboardPanel: React.FC<{ draft: SprintDraft; busy: boolean; onCheck: ()
           ))}
         </ul>
       )}
+    </section>
+  );
+};
+
+/** What the planning chat could not settle; the planner marks each answered once it is. */
+const Questions: React.FC<{ draft: SprintDraft; busy: boolean; onAnswer: (id: string, answered: boolean) => void }> = ({ draft, busy, onAnswer }) => {
+  const line = questionsLine(draft.questions);
+  if (!line) return null;
+  const ordered = [...draft.questions].sort((a, b) => Number(a.answered) - Number(b.answered));
+  return (
+    <section aria-label="Open questions" className="min-w-0">
+      <h3 className={head}>Open questions · {line}</h3>
+      <ul className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
+        {ordered.map((question) => (
+          <li key={question.id} className={cn('grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 border-b border-border px-3 py-2 last:border-b-0 max-[760px]:grid-cols-[minmax(0,1fr)]', question.answered && 'opacity-70')}>
+            <p className="min-w-0 text-pretty text-[0.8rem] text-secondary-foreground">
+              {question.key && <span className="mr-2 font-mono font-semibold text-foreground">{question.key}</span>}
+              {question.text}
+              {question.answered && question.answeredBy && <span className="ml-2 font-mono text-[0.64rem] text-muted-foreground">answered · {question.answeredBy}</span>}
+            </p>
+            <div className="flex justify-end max-[760px]:justify-start">
+              {question.answered
+                ? <Button size="sm" variant="ghost" onClick={() => onAnswer(question.id, false)} disabled={busy}><Undo2 size={13} aria-hidden="true" />Reopen</Button>
+                : <Button size="sm" onClick={() => onAnswer(question.id, true)} disabled={busy}><Check size={13} aria-hidden="true" />Answered</Button>}
+            </div>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 };
@@ -401,16 +430,18 @@ export const PlanningTab: React.FC = () => {
   const sprints = useQuery<{ planningSprints: PlanningSprint[] }>(GET_PLANNING_SPRINTS, { fetchPolicy: 'cache-and-network' });
   const options = sprints.data?.planningSprints ?? [];
   const chosen = options.find((sprint) => sprint.id === sprintId) ?? options.find((sprint) => sprint.state === 'future') ?? options[0] ?? null;
-  const draftQuery = useQuery<{ sprintDraft: SprintDraft | null }>(GET_SPRINT_DRAFT, { variables: { sprint: chosen?.name ?? '' }, skip: !chosen, fetchPolicy: 'cache-and-network' });
+  // The planning chat changes the draft through DOCK's ingest routes, so the panel polls it like Plan does.
+  const draftQuery = useQuery<{ sprintDraft: SprintDraft | null }>(GET_SPRINT_DRAFT, { variables: { sprint: chosen?.name ?? '' }, skip: !chosen, fetchPolicy: 'cache-and-network', pollInterval: 10000 });
   const [loadDraft, loading] = useMutation(LOAD_SPRINT_DRAFT);
   const [updateTicket, updating] = useMutation(UPDATE_SPRINT_DRAFT_TICKET);
   const [decide, deciding] = useMutation(DECIDE_SPRINT_DRAFT);
   const [refreshQa, refreshing] = useMutation(REFRESH_SPRINT_DRAFT_QA);
   const [checkStoryboards, checking] = useMutation(CHECK_SPRINT_STORYBOARDS);
+  const [answerQuestion, answering] = useMutation(ANSWER_SPRINT_DRAFT_QUESTION);
   const [publish, publishing] = useMutation(PUBLISH_SPRINT_DRAFT);
   const [preview, previewing] = useLazyQuery<{ previewSprintDraftPublish: DraftChange[] }>(PREVIEW_SPRINT_DRAFT_PUBLISH, { fetchPolicy: 'network-only' });
   const draft = draftQuery.data?.sprintDraft ?? null;
-  const busy = loading.loading || updating.loading || deciding.loading || refreshing.loading || publishing.loading || checking.loading;
+  const busy = loading.loading || updating.loading || deciding.loading || refreshing.loading || publishing.loading || checking.loading || answering.loading;
 
   const run = (work: Promise<unknown>, fallback: string) => {
     setNotice(null);
@@ -421,6 +452,7 @@ export const PlanningTab: React.FC = () => {
   const onDecide = (id: string, action: string, note?: string) => draft && run(decide({ variables: { sprint: draft.sprint, id, action, note: note ?? null } }), 'The decision could not be saved');
   const onRefreshQa = () => draft && run(refreshQa({ variables: { sprint: draft.sprint } }), 'The QA check failed');
   const onCheckStoryboards = () => draft && run(checkStoryboards({ variables: { sprint: draft.sprint } }), 'The storyboard could not be read');
+  const onAnswer = (id: string, answered: boolean) => draft && run(answerQuestion({ variables: { sprint: draft.sprint, id, answered } }), 'The question could not be saved');
   const onPublish = async () => {
     if (!draft) return;
     setResults(null);
@@ -448,7 +480,9 @@ export const PlanningTab: React.FC = () => {
   const storyboardChecks = draft ? uncheckedStoryboard(draft).length : 0;
 
   return (
-    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
+    <PlanningChat sprint={chosen.name} />
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-5">
       <div className="flex flex-wrap items-center gap-3">
         <Select aria-label="Sprint to plan" className="w-[260px] max-[760px]:w-full" value={String(chosen.id)} onValueChange={(value) => setSprintId(Number(value))} options={options.map((sprint) => ({ value: String(sprint.id), label: `${sprint.name}${sprint.state === 'active' ? ' (active)' : ''}` }))} />
         <Button onClick={onLoad} disabled={busy}><Download size={14} aria-hidden="true" />{loading.loading ? 'Loading...' : draft ? 'Load again from Jira' : 'Load from Jira'}</Button>
@@ -471,6 +505,7 @@ export const PlanningTab: React.FC = () => {
           <p className="text-[0.8rem] text-muted-foreground">
             {draft.tickets.length} open tickets{draft.landed > 0 && ` (${draft.landed} already past merge)`} · {draft.sprintDays} working days · {draft.devs.length} developers · {late} AC {late === 1 ? 'line' : 'lines'} after it · {escalated} ESCALATED{storyboardChecks > 0 && ` · ${storyboardChecks} AC to check after a storyboard change`} · {publishHint(draft)}
           </p>
+          <Questions draft={draft} busy={busy} onAnswer={onAnswer} />
           <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Planning panel">
             {PANELS.map(([id, label]) => (
               <button
@@ -503,6 +538,7 @@ export const PlanningTab: React.FC = () => {
         onConfirm={() => void onConfirm()}
         onClose={() => setPublishOpen(false)}
       />
+    </div>
     </div>
   );
 };

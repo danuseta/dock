@@ -466,7 +466,7 @@ export class StorageService {
     return (await this.db.sprintDraftTicket.findMany({ where: { epic }, select: { draftSprint: true }, distinct: ['draftSprint'] })).map((row) => row.draftSprint);
   }
 
-  updateSprintDraft(sprint: string, data: { decisions?: string; qaReason?: string | null; status?: string; publishedAt?: Date | null; storyboards?: string }) {
+  updateSprintDraft(sprint: string, data: { decisions?: string; qaReason?: string | null; status?: string; publishedAt?: Date | null; storyboards?: string; questions?: string }) {
     return this.db.sprintDraft.update({ where: { sprint }, data });
   }
 

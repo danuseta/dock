@@ -16,6 +16,8 @@ import { parseRetroDraft } from '../integrations/retro';
 import type { SprintPlanner } from '../integrations/sprint-plan';
 import { sprintPlanner } from '../integrations/sprint-plan-live';
 import { deployGateFor } from '../integrations/deploy-gate-live';
+import { PLANNING_ROUTES, planningIngest, type PlanningIngestDeps } from '../integrations/planning-ingest';
+import { sprintDraftService, storyboardReader } from '../integrations/sprint-draft-live';
 import { doctorReports, type DoctorReports } from '../integrations/doctor';
 import { DiscordReaderError, type DiscordReader } from '../integrations/discord-reader';
 import { discordReader } from '../integrations/discord-reader-live';
@@ -74,6 +76,8 @@ export function createOrchestratorIngestRouter(
   retroStore: Pick<StorageService, 'replaceRetroDraft'> = new StorageService(),
   // The sprint plan draft the plan session posts.
   planner: Pick<SprintPlanner, 'ingest'> = sprintPlanner,
+  // The planning chat's agent reading and changing the sprint draft Planning shows.
+  planning: PlanningIngestDeps = { drafts: sprintDraftService, storyboards: storyboardReader },
 ): Router {
   const router = Router();
 
@@ -124,6 +128,7 @@ export function createOrchestratorIngestRouter(
     if (!/^[A-Z][A-Z0-9]+-\d+$/.test(key)) throw new OrchestratorInputError('key must be a ticket key such as QRD-1292');
     return deployGateFor(key);
   }));
+  for (const route of PLANNING_ROUTES) router.post(`/${route}`, small, handle((body) => planningIngest(planning, route, body)));
   router.post('/ledger/list', small, handle((_body, _signal, machine) => service.ledgerList(machine)));
   router.post('/ledger/get', small, handle((body, _signal, machine) => service.ledgerGet(body, machine)));
   router.post('/event', small, handle(async (body, _signal, machine) => {

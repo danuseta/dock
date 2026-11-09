@@ -640,6 +640,9 @@ export const resolvers = {
     ),
     refreshSprintDraftQa: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.refreshQa(sprint).catch(planningError),
     checkSprintStoryboards: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.checkStoryboards(sprint).catch(planningError),
+    answerSprintDraftQuestion: (_: unknown, { sprint, id, answered }: { sprint: string; id: string; answered: boolean }) => (
+      sprintDraftService.answer(sprint, id, answered, reporterName()).catch(planningError)
+    ),
     publishSprintDraft: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.publish(sprint, reporterName()).catch(planningError),
     sprintDriftAction: async (_: unknown, { id, action, note }: { id: string; action: string; note?: string | null }) => {
       const active = activeSprint(await jiraAPI.getTickets());
@@ -1039,6 +1042,7 @@ export const protectedMutations = [
   'decideSprintDraft',
   'refreshSprintDraftQa',
   'checkSprintStoryboards',
+  'answerSprintDraftQuestion',
   'publishSprintDraft',
   'sprintDriftAction',
   'retroItemAction',
