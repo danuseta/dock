@@ -12,7 +12,21 @@ export function mergeState(pulls: Array<{ status: string; merged: boolean }>): M
 
 export interface MergeRead { merge: TicketMerge; pulls: string[] }
 
-interface ListedPull { owner: string; repo: string; number?: number | string; pullNumber?: number | string; status?: string }
+interface ListedPull { owner: string; repo: string; number?: number | string; pullNumber?: number | string; status?: string; title?: string; headBranch?: string }
+
+/**
+ * Whether a pull request is the ticket's own work: its branch names the key, or its title does before the first colon
+ * ("feat(QRD-1292): ...", "QRD-1306 fix: ..."). A docs sync ("docs: sync for #1115 (QRD-1292)") or a PR that only
+ * mentions the key elsewhere is not, so it never holds a merged ticket open.
+ */
+export function ownPull(key: string, pull: { title?: string; headBranch?: string }): boolean {
+  const normalized = key.trim().toUpperCase();
+  if (!/^[A-Z][A-Z0-9_]*-\d+$/.test(normalized)) return false;
+  const exact = new RegExp(`(^|[^A-Z0-9_])${normalized}(?![A-Z0-9_])`, 'i');
+  const lead = String(pull.title ?? '').split(':')[0];
+  return exact.test(String(pull.headBranch ?? '')) || exact.test(lead);
+}
+
 interface PullDetail { state?: string | null; merged_at?: string | null }
 
 /** The parts of GitHubAPI the reader needs. */
@@ -46,9 +60,9 @@ export async function readMergeStates(keys: string[], github: MergeGitHub): Prom
     if (!gh) return null;
     const lists = await mapLimit(keys, MERGE_CONCURRENCY, async (key) => {
       const cached = await github.cachedPullRequestsForTicket(key);
-      if (cached && cached.length) return { key, pulls: cached, complete: true };
+      if (cached && cached.length) return { key, pulls: cached.filter((pull) => ownPull(key, pull)), complete: true };
       const fresh = await github.freshPullRequestsForTicket(key);
-      return { key, pulls: fresh.prs || [], complete: fresh.complete };
+      return { key, pulls: (fresh.prs || []).filter((pull) => ownPull(key, pull)), complete: fresh.complete };
     });
     const pulls = lists.flatMap((list) => list.pulls.map((pull) => ({ key: list.key, owner: pull.owner, repo: pull.repo, number: Number(pull.number || pull.pullNumber), status: String(pull.status || 'open') })));
     const details = await mapLimit(pulls, MERGE_CONCURRENCY, async (pull) => {
