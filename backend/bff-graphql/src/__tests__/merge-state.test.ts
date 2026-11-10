@@ -31,7 +31,7 @@ function fakeGitHub(pulls: Record<string, Array<{ number: number; status: string
   return { github, calls, peak: () => peak };
 }
 
-test('the live reader reads merged_at, counts a merge into a feature branch and keeps at most 6 requests in flight', async () => {
+test('the live reader reads merged_at, counts a merge into a feature branch, names the state of each pull request and keeps at most 6 requests in flight', async () => {
   const pulls: Record<string, Array<{ number: number; status: string }>> = {
     'QRD-1': [{ number: 1, status: 'open' }],
     'QRD-2': [{ number: 2, status: 'open' }, { number: 3, status: 'closed' }],
@@ -47,8 +47,8 @@ test('the live reader reads merged_at, counts a merge into a feature branch and 
   }
   const { github, peak } = fakeGitHub(pulls, details);
   const states = (await readMergeStates([...Object.keys(pulls), 'QRD-99'], github))!;
-  assert.deepEqual(states.get('QRD-1'), { merge: 'merged', pulls: ['qonekid/web#1'] });
-  assert.deepEqual(states.get('QRD-2'), { merge: 'open', pulls: ['qonekid/web#2', 'qonekid/web#3'] });
+  assert.deepEqual(states.get('QRD-1'), { merge: 'merged', pulls: ['qonekid/web#1 · merged'] });
+  assert.deepEqual(states.get('QRD-2'), { merge: 'open', pulls: ['qonekid/web#2 · open', 'qonekid/web#3 · closed'] });
   assert.deepEqual(states.get('QRD-99'), { merge: 'none', pulls: [] });
   assert.equal(states.get('QRD-29')!.merge, 'merged');
   assert.ok(peak() <= 6 && peak() > 1, `peak ${peak()}`);
@@ -75,5 +75,5 @@ test('only the pull requests a ticket owns count: a docs sync or a PR that only 
       { number: 1360, status: 'open', title: 'feat(QRD-1295): move pinned agents', headBranch: 'feat/QRD-1295-pinned' },
     ],
   }, {});
-  assert.deepEqual((await readMergeStates(['QRD-1292'], github))!.get('QRD-1292'), { merge: 'merged', pulls: ['qonekid/web#1115'] });
+  assert.deepEqual((await readMergeStates(['QRD-1292'], github))!.get('QRD-1292'), { merge: 'merged', pulls: ['qonekid/web#1115 · merged'] });
 });

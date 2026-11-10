@@ -13,7 +13,7 @@ import { createOrchestratorIngestRouter } from '../routes/orchestrator';
 
 function fakes() {
   const calls: unknown[][] = [];
-  const view = { sprint: 'QRD Sprint 27', tickets: [], questions: [] } as unknown as DraftView;
+  const view = { sprint: 'QRD Sprint 27', tickets: [{ key: 'QRD-1312', merged: false }, { key: 'QRD-1300', merged: true }], questions: [] } as unknown as DraftView;
   const deps: PlanningIngestDeps = {
     drafts: {
       view: async (sprint) => (sprint === 'QRD Sprint 27' ? view : null),
@@ -38,7 +38,7 @@ function fakes() {
 
 test('the planning routes read and change the draft and turn the planner errors into 400s', async () => {
   const { deps, calls, view } = fakes();
-  assert.equal(await planningIngest(deps, 'sprint-draft/get', { sprint: 'QRD Sprint 27' }), view);
+  assert.deepEqual(await planningIngest(deps, 'sprint-draft/get', { sprint: 'QRD Sprint 27' }), { ...view, tickets: [view.tickets[0]] }, 'the agent plans only the cards still to build');
   await assert.rejects(planningIngest(deps, 'sprint-draft/get', { sprint: 'QRD Sprint 9' }), /No draft for QRD Sprint 9/);
   await planningIngest(deps, 'sprint-draft/update', { sprint: 'QRD Sprint 27', key: 'qrd-1312', dev: 'Aken', wave: 2, sp: 3, ac: ['One', 'Two'] });
   assert.deepEqual(calls.at(-1), ['update', 'QRD Sprint 27', 'QRD-1312', { dev: 'Aken', wave: 2, sp: 3, ac: ['One', 'Two'] }]);

@@ -4,7 +4,7 @@ import { AcInService, MOVE_MARKER, moveId, parseMarkedComment, readMoves, type A
 import type { PlanningIssue } from '../integrations/jira-sprint';
 
 const body = (marker: string, data: unknown) => ({ type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: marker }] }, { type: 'codeBlock', attrs: { language: 'json' }, content: [{ type: 'text', text: JSON.stringify(data) }] }] });
-const issue = (key: string, assignee: string, ac: string[]): PlanningIssue => ({ key, summary: key, type: 'Story', status: 'To Do', assignee, sp: 2, acRaw: ac.map((line) => `- ${line}`).join('\n'), links: [] });
+const issue = (key: string, assignee: string, ac: string[]): PlanningIssue => ({ key, summary: key, type: 'Story', status: 'To Do', assignee, sp: 2, acRaw: ac.map((line) => `- ${line}`).join('\n'), links: [], labels: [] });
 
 function setup() {
   const first = { id: moveId('QRD-1511', 'QRD-1489', 'Edit client sees the cursor'), from: 'QRD-1511', to: 'QRD-1489', line: 4, text: 'Edit client sees the cursor', by: 'Danu' };

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { computeWaves, endDay, planStart, remainingSp, scheduleSprint, splitParts, suggestMoves, workingDayOf, workingDays, type ScopeTicket } from '../integrations/scope-cut';
+import { computeWaves, endDay, planLayout, planStart, rankOf, remainingSp, scheduleSprint, splitParts, suggestMoves, workingDayOf, workingDays, type ScopeTicket } from '../integrations/scope-cut';
 
 interface PlanRow { key: string; dev: string; sp: number; wave: number; dep: string[]; st: number; dur: number }
 const sprint26 = JSON.parse(readFileSync(resolve(__dirname, 'fixtures/sprint26-plan.json'), 'utf8')) as { sprintDays: number; tasks: PlanRow[] };
@@ -162,4 +162,30 @@ test('a To Do card with an open pull request, or a lane already ending with the 
     { key: 'QRD-1', dev: 'Ana', status: 'To Do', sp: 4, dependsOn: [], merge: 'none' },
     { key: 'QRD-2', dev: 'Budi', status: 'In Progress', sp: 4, dependsOn: [], merge: 'none' },
   ], options), []);
+});
+
+test('a card plan rank is the number of its #N label', () => {
+  assert.equal(rankOf(['V2-Playbook', '#7']), 7);
+  assert.equal(rankOf([' #12 ', '#3']), 12);
+  assert.equal(rankOf(['#', '#x', 'rank#2', '7']), null);
+  assert.equal(rankOf([]), null);
+});
+
+test('the plan lays every card of a developer by rank, back to back from day 1 at its full SP', () => {
+  const plan = planLayout([
+    { key: 'QRD-30', dev: 'Ana', sp: 3, rank: 2 },
+    { key: 'QRD-10', dev: 'Ana', sp: 2, rank: null },
+    { key: 'QRD-9', dev: 'Ana', sp: 1, rank: null },
+    { key: 'QRD-20', dev: 'Ana', sp: 4, rank: 1 },
+    { key: 'QRD-40', dev: 'Budi', sp: 5, rank: 1 },
+    { key: 'QRD-50', dev: null, sp: null, rank: null },
+  ], { spPerDay: 2 });
+  assert.deepEqual(plan, [
+    { key: 'QRD-20', planStart: 0, planDur: 2 },
+    { key: 'QRD-40', planStart: 0, planDur: 2.5 },
+    { key: 'QRD-30', planStart: 2, planDur: 1.5 },
+    { key: 'QRD-9', planStart: 3.5, planDur: 0.5 },
+    { key: 'QRD-10', planStart: 4, planDur: 1 },
+    { key: 'QRD-50', planStart: 0, planDur: 0 },
+  ]);
 });

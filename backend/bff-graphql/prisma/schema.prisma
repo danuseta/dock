@@ -482,6 +482,7 @@ model SprintDraftTicket {
   dev         String?
   sp          Float?
   wave        Int?
+  planRank    Int? /// the number of the ticket's #N label in Jira: its place in the owner's plan
   ac          String  @default("[]") /// AC lines as planned
   jiraAc      String  @default("[]") /// AC lines as Jira held them at load or last publish
   jiraDev     String?

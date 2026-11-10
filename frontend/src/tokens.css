@@ -35,16 +35,6 @@
   --color-status-open: oklch(0.75 0.10 140);
   --color-status-open-bg: oklch(0.75 0.10 140 / 0.10);
 
-  /* Developer lanes on the Planning team map: one per person, apart from the status colours */
-  --color-dev-1: #E28C50;
-  --color-dev-2: #43C1AC;
-  --color-dev-3: #849DF5;
-  --color-dev-4: #CC81D6;
-  --color-dev-5: #A6C766;
-  --color-dev-6: #E3B84A;
-  --color-dev-7: #5EC3E8;
-  --color-dev-8: #E88AB0;
-
   /* Typography */
   --font-display: 'Outfit', system-ui, -apple-system, sans-serif;
   --font-body: 'Inter', system-ui, -apple-system, sans-serif;
@@ -62,6 +52,20 @@
   --shadow-conflict: 0 0 20px rgb(200 60 60 / 0.15);
 }
 
+/* Developer lanes and the warn label, read through inline var(): outside @theme, which drops variables no utility uses */
+:root {
+  --color-dev-1: #E28C50;
+  --color-dev-2: #43C1AC;
+  --color-dev-3: #849DF5;
+  --color-dev-4: #CC81D6;
+  --color-dev-5: #A6C766;
+  --color-dev-6: #E3B84A;
+  --color-dev-7: #5EC3E8;
+  --color-dev-8: #E88AB0;
+  --color-status-warn-ink: oklch(0.86 0.13 85);
+  --color-status-warn-pill: oklch(0.80 0.14 85 / 0.18);
+}
+
 /* Light pages: the same eight lanes, darker so they read on a light surface */
 :root[data-theme='light'] {
   --color-dev-1: #A9501B;
@@ -72,4 +76,6 @@
   --color-dev-6: #8C6A00;
   --color-dev-7: #11698F;
   --color-dev-8: #A3366A;
+  --color-status-warn-ink: oklch(0.45 0.11 70);
+  --color-status-warn-pill: oklch(0.80 0.14 85 / 0.28);
 }

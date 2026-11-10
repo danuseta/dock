@@ -19,7 +19,7 @@ const VIEW = {
   findings: [],
 } as unknown as DraftView;
 
-const issue = (key: string, assignee: string, ac: string[]): PlanningIssue => ({ key, summary: key, type: 'Story', status: 'In Progress', assignee, sp: 2, acRaw: ac.map((line) => `- ${line}`).join('\n'), links: [] });
+const issue = (key: string, assignee: string, ac: string[]): PlanningIssue => ({ key, summary: key, type: 'Story', status: 'In Progress', assignee, sp: 2, acRaw: ac.map((line) => `- ${line}`).join('\n'), links: [], labels: [] });
 
 function setup() {
   const jiraAc: Record<string, string[]> = {

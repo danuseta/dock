@@ -10,6 +10,7 @@ export function mergeState(pulls: Array<{ status: string; merged: boolean }>): M
   return pulls.some((pull) => pull.merged) ? 'merged' : 'none';
 }
 
+/** pulls reads `owner/repo#n · merged|open|closed` for each of the ticket's own pull requests. */
 export interface MergeRead { merge: TicketMerge; pulls: string[] }
 
 interface ListedPull { owner: string; repo: string; number?: number | string; pullNumber?: number | string; status?: string; title?: string; headBranch?: string }
@@ -75,7 +76,7 @@ export async function readMergeStates(keys: string[], github: MergeGitHub): Prom
       const own = pulls.map((pull, index) => ({ pull, detail: details[index] })).filter(({ pull }) => pull.key === list.key);
       result.set(list.key, {
         merge: list.complete ? mergeState(own.map(({ detail }) => detail)) : 'unknown',
-        pulls: own.map(({ pull }) => `${pull.owner}/${pull.repo}#${pull.number}`),
+        pulls: own.map(({ pull, detail }) => `${pull.owner}/${pull.repo}#${pull.number} · ${detail.merged ? 'merged' : detail.status === 'open' ? 'open' : 'closed'}`),
       });
     }
     return result;
