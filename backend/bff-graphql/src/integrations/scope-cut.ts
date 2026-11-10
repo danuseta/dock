@@ -148,6 +148,94 @@ export function scheduleSprint(tickets: ScopeTicket[], options: { sprintDays?: n
   return order.map((ticket) => placed.get(ticket.key)!);
 }
 
+/** A card's place in its owner's plan: the number of its first `#N` Jira label ("#7" is 7); null without one. */
+export function rankOf(labels: string[]): number | null {
+  for (const label of labels) {
+    const match = /^#(\d{1,4})$/.exec(label.trim());
+    if (match) return Number(match[1]);
+  }
+  return null;
+}
+
+export interface PlanTicket { key: string; dev: string | null; sp: number | null; rank: number | null }
+export interface PlannedTicket { key: string; planStart: number; planDur: number }
+
+/**
+ * Where each card sits in the plan as written: per developer by rank (no rank last, then key), back to back from day 1,
+ * each lasting its full SP. Merged cards keep their place, so the plan reads the same all sprint.
+ */
+export function planLayout(tickets: PlanTicket[], options: { spPerDay?: number } = {}): PlannedTicket[] {
+  const spPerDay = options.spPerDay && options.spPerDay > 0 ? options.spPerDay : DEFAULT_SP_PER_DAY;
+  const free = new Map<string, number>();
+  const order = [...tickets].sort((a, b) => (a.rank ?? Number.MAX_SAFE_INTEGER) - (b.rank ?? Number.MAX_SAFE_INTEGER) || a.key.localeCompare(b.key, undefined, { numeric: true }));
+  return order.map((ticket) => {
+    const lane = ticket.dev || UNASSIGNED;
+    const planStart = free.get(lane) ?? 0;
+    const planDur = round((ticket.sp && ticket.sp > 0 ? ticket.sp : 0) / spPerDay);
+    free.set(lane, round(planStart + planDur));
+    return { key: ticket.key, planStart, planDur };
+  });
+}
+
+/** The working day, 1-based, on which work ending at `end` days from the start finishes; never before the day after `from`. */
+export const endDay = (end: number, from = 0) => Math.max(Math.ceil(round(end)), from + 1);
+
+export interface MoveTicket extends ScopeTicket { status: string; merge: string }
+export interface MoveSuggestion { keys: string[]; from: string; to: string; sp: number; forecastBefore: number; forecastAfter: number; improves: boolean }
+const MAX_MOVES = 5;
+
+/**
+ * Cards to hand from the lane ending last to the lane free earliest: only To Do cards with no pull request, each with
+ * the To Do cards of its Blocks chain on that lane. A move is kept only when the sprint forecast gets earlier; up to five.
+ */
+export function suggestMoves(tickets: MoveTicket[], options: { developers: string[]; sprintDays?: number; spPerDay?: number; from?: number }): MoveSuggestion[] {
+  const from = options.from && options.from > 0 ? options.from : 0;
+  const plan = tickets.map((ticket) => ({ ...ticket }));
+  const lanes = (current: MoveTicket[]) => {
+    const ends = new Map(options.developers.map((dev) => [dev, from]));
+    for (const item of scheduleSprint(current, options)) if (item.dev) ends.set(item.dev, Math.max(ends.get(item.dev) ?? from, item.end));
+    return ends;
+  };
+  const forecast = (ends: Map<string, number>) => endDay(Math.max(from, ...ends.values()), from);
+  const movable = (ticket: MoveTicket) => letters(ticket.status) === 'todo' && ticket.merge !== 'open' && ticket.merge !== 'merged';
+  const suggestions: MoveSuggestion[] = [];
+  while (suggestions.length < MAX_MOVES) {
+    const ends = lanes(plan);
+    const before = forecast(ends);
+    const order = [...ends.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    const last = order[0]?.[0];
+    const target = [...order].reverse().find(([dev]) => dev !== last)?.[0];
+    if (!last || !target) break;
+    const pool = new Map(plan.filter((ticket) => ticket.dev === last && movable(ticket)).map((ticket) => [ticket.key, ticket]));
+    const groups: string[][] = [];
+    const grouped = new Set<string>();
+    for (const key of pool.keys()) {
+      if (grouped.has(key)) continue;
+      const group: string[] = [];
+      const stack = [key];
+      while (stack.length) {
+        const next = stack.pop()!;
+        if (grouped.has(next) || !pool.has(next)) continue;
+        grouped.add(next);
+        group.push(next);
+        stack.push(...pool.get(next)!.dependsOn, ...[...pool.values()].filter((other) => other.dependsOn.includes(next)).map((other) => other.key));
+      }
+      groups.push(group.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })));
+    }
+    const tried = groups.map((keys) => {
+      const moved = plan.map((ticket) => (keys.includes(ticket.key) ? { ...ticket, dev: target } : ticket));
+      const sp = round(keys.reduce((sum, key) => sum + (pool.get(key)!.sp ?? 0), 0));
+      return { keys, sp, after: forecast(lanes(moved)) };
+    }).filter((option) => option.after < before)
+      .sort((a, b) => a.after - b.after || a.sp - b.sp || a.keys[0].localeCompare(b.keys[0], undefined, { numeric: true }));
+    const best = tried[0];
+    if (!best) break;
+    for (const ticket of plan) if (best.keys.includes(ticket.key)) ticket.dev = target;
+    suggestions.push({ keys: best.keys, from: last, to: target, sp: best.sp, forecastBefore: before, forecastAfter: best.after, improves: true });
+  }
+  return suggestions;
+}
+
 /** DOCK's calendar is +08:00, as on the sprint dashboard: a day starts at 00:00 +08:00. */
 export const CALENDAR_OFFSET_HOURS = 8;
 const DAY_MS = 86_400_000;

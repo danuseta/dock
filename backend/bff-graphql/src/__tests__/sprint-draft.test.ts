@@ -37,7 +37,7 @@ class MemoryStore implements DraftStore {
 const SPRINT: PlanningSprint = { id: 26, name: 'QRD Sprint 26', state: 'future', startDate: '2026-10-27T01:00:00.000Z', endDate: '2026-11-09T10:00:00.000Z' };
 
 function issue(key: string, over: Partial<PlanningIssue> = {}): PlanningIssue {
-  return { key, summary: `Ticket ${key}`, type: 'Story', status: 'To Do', assignee: 'Danu', sp: 2, acRaw: null, links: [], ...over };
+  return { key, summary: `Ticket ${key}`, type: 'Story', status: 'To Do', assignee: 'Danu', sp: 2, acRaw: null, links: [], labels: [], ...over };
 }
 
 class FakeJira implements DraftJira {
@@ -99,7 +99,7 @@ test('the Jira client lists open sprints, leaves Epics out and resolves an assig
   ]);
   assert.deepEqual(calls[0][2], { state: 'active,future', startAt: 0, maxResults: 50 });
   assert.deepEqual(await client.fetchPlanningIssues(26), [
-    { key: 'QRD-1', summary: 'One', type: 'Story', status: 'To Do', assignee: null, sp: 3, acRaw: 'x', links: [{ key: 'QRD-2', relation: 'blockedBy' }], epic: null, descriptionRaw: null },
+    { key: 'QRD-1', summary: 'One', type: 'Story', status: 'To Do', assignee: null, sp: 3, acRaw: 'x', links: [{ key: 'QRD-2', relation: 'blockedBy' }], epic: null, descriptionRaw: null, labels: [] },
   ]);
   assert.deepEqual(await client.assignableAccounts('QRD-1', 'danu'), ['acc-1']);
   await client.setAcField('QRD-1', 'y');
@@ -227,7 +227,7 @@ test('tickets already past merge stay out of the schedule and the AC check, and 
   ]);
   const service = new SprintDraftService(store, async () => jira, predictions({}), () => new Date('2026-10-26T10:00:00Z'));
   const view = await service.load(26, 'Danu');
-  assert.deepEqual(view.tickets.map((ticket) => ticket.key), ['QRD-3']);
+  assert.deepEqual(view.tickets.filter((ticket) => !ticket.merged).map((ticket) => ticket.key), ['QRD-3']);
   assert.equal(view.landed, 2);
   assert.equal(view.tickets[0].start, 0);
   assert.deepEqual(view.findings.map((finding) => [finding.refKey, finding.kind]), [['QRD-1', 'lands-first'], ['QRD-2', 'lands-first']]);
@@ -257,6 +257,11 @@ test('a frame changed in the newest storyboard flags the tickets naming it, Held
   assert.equal(checked.tickets.find((ticket) => ticket.key === 'QRD-1312')!.storyboard!.checked!.by, 'Alvin');
   assert.deepEqual(await service.applyStoryboard({ epic: 'QRD-1233', version: 9, previous: 8, path: 'p', page: '11', frames: [], changed: ['F10.1'] }), ['QRD Sprint 26']);
   assert.deepEqual((await service.view('QRD Sprint 26'))!.tickets.filter((ticket) => ticket.storyboard).map((ticket) => ticket.key), ['QRD-1400']);
+  const scenarios = [{ n: 1, title: 'Serve outward', groups: [{ title: 'Stop', flows: [{ id: 'F7.3', title: 'Stop serving', tickets: ['QRD-1307'], info: [], frames: [{ index: 0, title: 'Dialog', step: null, changed: true }], changed: true }] }] }];
+  await service.applyStoryboard({ epic: 'QRD-1233', version: 10, previous: 9, path: 'p', page: null, frames: [], changed: ['F7.3', 'F10.1'], scenarios, tickets: { 'F7.3': ['QRD-1307'], 'F10.1': [] } });
+  const byFlow = (await service.view('QRD Sprint 26'))!;
+  assert.deepEqual(byFlow.tickets.filter((ticket) => ticket.storyboard).map((ticket) => [ticket.key, ticket.storyboard!.frames]), [['QRD-1307', ['F7.3']], ['QRD-1400', ['F10.1']]], "a flow's own tickets win over the AC text; a flow without tickets falls back to it");
+  assert.deepEqual(byFlow.storyboards.find((board) => board.epic === 'QRD-1233')!.scenarios, scenarios);
 });
 
 test('the planning chat asks open questions once each and the planner marks them answered', async () => {
@@ -340,4 +345,101 @@ test('mid-sprint the lanes count the work left by status; a future sprint keeps 
   const planning = new SprintDraftService(futureStore, async () => future, predictions({}), () => new Date('2026-10-20T03:00:00Z'));
   const plan = await planning.load(26, 'Danu');
   assert.deepEqual(plan.tickets.map((ticket) => [ticket.key, ticket.left, ticket.dur]).sort(), [['QRD-1', null, 2], ['QRD-2', null, 2], ['QRD-3', null, 2]]);
+});
+
+test('merge state from GitHub decides what is scheduled, is read on load only, and every assignee is listed', async () => {
+  const store = new MemoryStore();
+  const jira = new FakeJira([
+    issue('QRD-1', { status: 'In Progress', sp: 3 }),
+    issue('QRD-2', { status: 'UAT MERGED', sp: 2 }),
+    issue('QRD-3', { assignee: 'Aken', sp: 4 }),
+    issue('QRD-4', { assignee: 'M Danu Seta W', status: 'PR Review', sp: 5 }),
+    issue('QRD-5', { assignee: 'Yusril', status: 'Done / MERGED', sp: 1 }),
+  ]);
+  let reads = 0;
+  const merges = async (keys: string[]) => {
+    reads++;
+    assert.deepEqual(keys, ['QRD-1', 'QRD-2', 'QRD-3', 'QRD-4', 'QRD-5']);
+    return new Map([
+      ['QRD-1', { merge: 'merged' as const, pulls: ['qonekid/web#1'] }],
+      ['QRD-2', { merge: 'open' as const, pulls: ['qonekid/web#2'] }],
+      ['QRD-3', { merge: 'none' as const, pulls: [] }],
+      ['QRD-4', { merge: 'merged' as const, pulls: ['qonekid/api#4'] }],
+      ['QRD-5', { merge: 'none' as const, pulls: [] }],
+    ]);
+  };
+  const service = new SprintDraftService(store, async () => jira, predictions({}), () => new Date('2026-10-26T10:00:00Z'), undefined, null, merges);
+  const view = await service.load(26, 'Danu');
+  assert.equal(view.mergeSource, 'github');
+  assert.deepEqual(view.tickets.filter((ticket) => !ticket.merged).map((ticket) => [ticket.key, ticket.merge, ticket.pulls, ticket.jiraAhead]), [
+    ['QRD-2', 'open', ['qonekid/web#2'], true],
+    ['QRD-3', 'none', [], false],
+  ]);
+  assert.equal(view.landed, 3, 'a Jira-done ticket without any pull request stays off the schedule');
+  assert.deepEqual(view.developers, [
+    { name: 'Aken', merged: 0, open: 1, sp: 4, leftSp: 4, end: 2 },
+    { name: 'Danu', merged: 1, open: 1, sp: 5, leftSp: 2, end: 1 },
+    { name: 'M Danu Seta W', merged: 1, open: 0, sp: 5, leftSp: 0, end: null },
+    { name: 'Yusril', merged: 1, open: 0, sp: 1, leftSp: 0, end: null },
+  ]);
+  await service.view('QRD Sprint 26');
+  await service.updateTicket('QRD Sprint 26', 'QRD-3', { sp: 2 });
+  assert.equal(reads, 1, 'polling and edits never read GitHub');
+});
+
+test('when GitHub cannot be read the Jira status decides, and the draft says the merge state came from Jira', async () => {
+  const store = new MemoryStore();
+  const jira = new FakeJira([issue('QRD-1', { status: 'UAT MERGED' }), issue('QRD-2', { status: 'In Progress' })]);
+  const service = new SprintDraftService(store, async () => jira, predictions({}), () => new Date('2026-10-26T10:00:00Z'), undefined, null, async () => { throw new Error('GitHub responded 502'); });
+  const view = await service.load(26, 'Danu');
+  assert.equal(view.mergeSource, 'jira');
+  assert.deepEqual(view.tickets.filter((ticket) => !ticket.merged).map((ticket) => [ticket.key, ticket.merge, ticket.jiraAhead]), [['QRD-2', 'unknown', false]]);
+  assert.deepEqual(view.developers, [{ name: 'Danu', merged: 1, open: 1, sp: 4, leftSp: 2, end: 1 }]);
+  const none = await new SprintDraftService(new MemoryStore(), async () => jira, predictions({}), () => new Date('2026-10-26T10:00:00Z'), undefined, null, async () => null).load(26, 'Danu');
+  assert.equal(none.mergeSource, 'jira');
+});
+
+test('moving cards changes only the draft developer, and the free lane appears in the suggestions', async () => {
+  const store = new MemoryStore();
+  const jira = new FakeJira([
+    issue('QRD-1', { sp: 4 }), issue('QRD-2', { sp: 4, links: [{ key: 'QRD-1', relation: 'blockedBy' }] }), issue('QRD-3', { sp: 2 }),
+    issue('QRD-9', { assignee: 'Aken', status: 'Done' }),
+  ]);
+  const service = new SprintDraftService(store, async () => jira, predictions({}), () => new Date('2026-10-26T10:00:00Z'));
+  const view = await service.load(26, 'Danu');
+  assert.deepEqual(view.moves.map((move) => [move.keys, move.from, move.to, move.forecastBefore, move.forecastAfter]), [[['QRD-3'], 'Danu', 'Aken', 5, 4]]);
+  await assert.rejects(service.moveCards('QRD Sprint 26', ['QRD-404'], 'Aken'), /QRD-404 is not in the QRD Sprint 26 draft/);
+  await assert.rejects(service.moveCards('QRD Sprint 26', ['QRD-3'], ' '), /to is required/);
+  const moved = await service.moveCards('QRD Sprint 26', view.moves[0].keys, 'Aken');
+  assert.equal(moved.tickets.find((ticket) => ticket.key === 'QRD-3')!.dev, 'Aken');
+  assert.equal(moved.tickets.find((ticket) => ticket.key === 'QRD-3')!.jiraDev, 'Danu');
+  assert.deepEqual(moved.moves, []);
+  assert.deepEqual(jira.writes, []);
+});
+
+test('the plan reads each card rank from its #N label and lays merged and open cards alike, leaving forecast, moves and landed as they were', async () => {
+  const open = () => [
+    issue('QRD-1', { sp: 4, labels: ['#2'] }), issue('QRD-2', { sp: 4, labels: ['#3', 'V2'], links: [{ key: 'QRD-1', relation: 'blockedBy' }] }), issue('QRD-3', { sp: 2 }),
+    issue('QRD-8', { assignee: 'Aken', sp: 2, labels: ['#1'] }),
+  ];
+  const merged = [issue('QRD-5', { sp: 2, status: 'Done / MERGED', labels: ['#1'] }), issue('QRD-6', { assignee: 'Aken', sp: 6, status: 'UAT MERGED', labels: ['#2'] })];
+  const loadWith = async (issues: PlanningIssue[]) => {
+    let seen: QaInputTicket[] = [];
+    const predict = async (tickets: QaInputTicket[]) => { seen = tickets; return predictions({})(tickets); };
+    const service = new SprintDraftService(new MemoryStore(), async () => new FakeJira(issues), predict, () => new Date('2026-10-26T10:00:00Z'));
+    return { view: await service.load(26, 'Danu'), seen: () => seen };
+  };
+  const { view, seen } = await loadWith([...open(), ...merged]);
+  const { view: alone } = await loadWith(open());
+  assert.deepEqual(view.tickets.map((ticket) => [ticket.key, ticket.merged, ticket.rank, ticket.planStart, ticket.planDur]), [
+    ['QRD-1', false, 2, 1, 2], ['QRD-8', false, 1, 0, 1], ['QRD-3', false, null, 5, 1], ['QRD-2', false, 3, 3, 2],
+    ['QRD-5', true, 1, 0, 1], ['QRD-6', true, 2, 1, 3],
+  ]);
+  const schedule = (tickets: typeof view.tickets) => tickets.filter((ticket) => !ticket.merged).map((ticket) => [ticket.key, ticket.start, ticket.end, ticket.wave]);
+  assert.deepEqual(schedule(view.tickets), schedule(alone.tickets));
+  assert.deepEqual(view.moves, alone.moves);
+  assert.deepEqual(view.findings, alone.findings);
+  assert.deepEqual([view.landed, alone.landed], [2, 0]);
+  assert.deepEqual(view.developers.map((developer) => [developer.name, developer.merged, developer.open, developer.leftSp, developer.end]), [['Aken', 1, 1, 2, 1], ['Danu', 1, 3, 10, 5]]);
+  assert.deepEqual(seen().map((ticket) => ticket.key).sort(), ['QRD-1', 'QRD-2', 'QRD-3', 'QRD-8'], 'the QA bot sees only the open cards');
 });

@@ -5,10 +5,12 @@
 import { acFindings, isDoneStatus, normalizeAcLine, splitAc, type AcFinding } from './ac-scope';
 import type { PlanningIssue, PlanningSprint } from './jira-sprint';
 import { predictQa, type QaInputTicket, type QaPrediction, type QaRun } from './qa-predict';
-import { DEFAULT_SP_PER_DAY, DEFAULT_SPRINT_DAYS, planStart, remainingSp, scheduleSprint, workingDayOf, workingDays, type ScheduledTicket } from './scope-cut';
+import { DEFAULT_SP_PER_DAY, DEFAULT_SPRINT_DAYS, endDay, planLayout, planStart, rankOf, remainingSp, scheduleSprint, suggestMoves, workingDayOf, workingDays, type MoveSuggestion, type ScheduledTicket } from './scope-cut';
+import type { MergeRead, TicketMerge } from './merge-state';
 import { SprintInputError } from './sprint-dashboard';
 import { writeContract, type ContractClient } from './sprint-contract';
 import { StoryboardMissing, framesIn, type StoryboardResult } from './storyboard';
+import type { StoryboardScenario } from './storyboard-flows';
 import type { SprintDraftInput, SprintDraftTicketInput } from '../storage/service';
 
 export const SP_PER_DAY_KEY = 'planningSpPerDay';
@@ -46,9 +48,9 @@ const MAX_STEPS = 40;
 
 interface DraftRow {
   sprint: string; sprintId: number; status: string; sprintDays: number; startDate: Date | null; decisions: string; qaReason: string | null;
-  refStatuses: string; createdBy: string | null; loadedAt: Date; publishedAt: Date | null; storyboards?: string; questions?: string;
+  refStatuses: string; createdBy: string | null; loadedAt: Date; publishedAt: Date | null; storyboards?: string; questions?: string; merges?: string;
   tickets: Array<{
-    key: string; summary: string; dev: string | null; sp: number | null; wave: number | null; ac: string; jiraAc: string; jiraDev: string | null;
+    key: string; summary: string; dev: string | null; sp: number | null; wave: number | null; planRank?: number | null; ac: string; jiraAc: string; jiraDev: string | null;
     dependsOn: string; status: string; prediction: string | null; position: number; epic?: string | null; frames?: string;
     tcs?: string; tcAt?: Date | null; tcPosted?: string | null;
   }>;
@@ -68,6 +70,9 @@ export interface DraftStore {
 export interface StoryboardState {
   epic: string; version: number | null; previous: number | null; path: string | null; page: string | null; frames: number; changed: string[];
   changedAt: string | null; checkedAt: string; error: string | null;
+  scenarios?: StoryboardScenario[];
+  /** The tickets each changed flow lists; a changed flow without tickets falls back to the flow ids a ticket names. */
+  tickets?: Record<string, string[]>;
 }
 /** A question the planning chat could not settle from the storyboard; the planner marks it answered. */
 export interface DraftQuestion { id: string; text: string; key: string | null; askedAt: string; answered: boolean; answeredBy: string | null; answeredAt: string | null }
@@ -86,18 +91,37 @@ export interface DraftTicketView extends Omit<ScheduledTicket, 'dev' | 'wave'> {
   tcStale: boolean;
   /** The test cases differ from the last QONFLO-TC comment, so Publish posts them. */
   tcPending: boolean;
+  merge: TicketMerge; pulls: string[];
+  /** Jira already says past merge while a pull request is still open. */
+  jiraAhead: boolean;
+  /** Past merge: kept on the plan only; the schedule, AC check, QA and publish use the other tickets. */
+  merged: boolean;
+  /** The number of the ticket's #N label in Jira; null without one. */
+  rank: number | null;
+  /** Where the plan put the ticket: by rank on its owner's lane, back to back from day 1, at its full SP. */
+  planStart: number; planDur: number;
 }
+
+/** The tickets still to build: the draft's tickets without the merged ones. */
+export const openTickets = <T extends { merged: boolean }>(view: { tickets: T[] }): T[] => view.tickets.filter((ticket) => !ticket.merged);
+/** Every assignee of the sprint, those whose cards all merged included. end is the working day their lane ends. */
+export interface DraftDeveloper { name: string; merged: number; open: number; sp: number; leftSp: number; end: number | null }
+/** The merge state read from GitHub on the last load; source jira when GitHub could not be read. */
+export interface DraftMerges { source: 'github' | 'jira'; tickets: Record<string, MergeRead> }
 export interface DraftFindingView extends AcFinding { decision: Decision | null }
 export interface DraftView {
   sprint: string; sprintId: number; status: string; sprintDays: number; startDate: string | null; spPerDay: number;
   createdBy: string | null; loadedAt: string; publishedAt: string | null; qaReason: string | null;
   devs: string[]; tickets: DraftTicketView[]; findings: DraftFindingView[]; blockers: string[]; canPublish: boolean;
-  /** Tickets of the sprint already past merge: left out of the schedule and the AC check. */
+  /** Tickets of the sprint already past merge: in tickets as merged, left out of the schedule and the AC check. */
   landed: number;
   /** Today's working day on the plan's axis, 1-based; null before day 1. Open tickets are not laid before it. */
   today: number | null;
   storyboards: StoryboardState[];
   questions: DraftQuestion[];
+  developers: DraftDeveloper[];
+  mergeSource: 'github' | 'jira';
+  moves: MoveSuggestion[];
 }
 export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; refused: string | null }
 /** One line of a publish: a ticket's AC and assignee, or the Confluence contract page. */
@@ -297,6 +321,7 @@ export class SprintDraftService {
     private readonly now: () => Date = () => new Date(),
     private readonly contract: () => Promise<ContractTarget> = async () => ({ client: null, parentId: null }),
     private readonly storyboard: ((epic: string) => Promise<StoryboardResult>) | null = null,
+    private readonly mergeStates: ((keys: string[]) => Promise<Map<string, MergeRead> | null>) | null = null,
   ) {}
 
   async sprints(): Promise<PlanningSprint[]> {
@@ -321,10 +346,12 @@ export class SprintDraftService {
     if (!sprint) throw new SprintInputError('That sprint is not an active or future sprint of the board');
     const issues = await jira.sprintIssues(sprint.id);
     const keys = new Set(issues.map((issue) => issue.key));
+    const read = this.mergeStates ? await this.mergeStates([...keys]).catch(() => null) : null;
+    const merges: DraftMerges = read ? { source: 'github', tickets: Object.fromEntries(read) } : { source: 'jira', tickets: {} };
     const tickets: SprintDraftTicketInput[] = issues.map((issue) => {
       const ac = acValueLines(issue.acRaw);
       return {
-        key: issue.key, summary: issue.summary, dev: issue.assignee, sp: issue.sp, wave: null, status: issue.status,
+        key: issue.key, summary: issue.summary, dev: issue.assignee, sp: issue.sp, wave: null, planRank: rankOf(issue.labels ?? []), status: issue.status,
         ac, jiraAc: ac, jiraDev: issue.assignee,
         dependsOn: [...new Set(issue.links.filter((link) => link.relation === 'blockedBy').map((link) => link.key))],
         epic: issue.epic ?? null, frames: framesIn([...ac, ...fieldLines(issue.descriptionRaw)]),
@@ -347,7 +374,7 @@ export class SprintDraftService {
     await this.store.replaceSprintDraft({
       sprint: sprint.name, sprintId: sprint.id,
       sprintDays: workingDays(start, sprint.endDate) ?? previous?.sprintDays ?? DEFAULT_SPRINT_DAYS,
-      startDate: start ? new Date(start) : null, createdBy: previous?.createdBy ?? by, refStatuses: JSON.stringify(refStatuses),
+      startDate: start ? new Date(start) : null, createdBy: previous?.createdBy ?? by, refStatuses: JSON.stringify(refStatuses), merges: JSON.stringify(merges),
     }, tickets);
     await this.refreshQa(sprint.name);
     return this.checkStoryboards(sprint.name).catch(async () => (await this.view(sprint.name))!);
@@ -366,17 +393,26 @@ export class SprintDraftService {
       prediction: parse<QaPrediction | null>(ticket.prediction, null), epic: ticket.epic ?? null, frames: parse<string[]>(ticket.frames, []),
       tcs: parse<DraftTc[]>(ticket.tcs, []),
     }));
-    const tickets = all.filter((ticket) => !isDoneStatus(ticket.status));
+    const merges = parse<Partial<DraftMerges>>(row.merges, {});
+    const mergeSource = merges.source === 'github' ? 'github' : 'jira';
+    const mergeOf = (key: string): MergeRead | null => (mergeSource === 'github' ? merges.tickets?.[key] ?? null : null);
+    // GitHub decides when the ticket has pull requests; a ticket without any (an infra or RND task) is past merge when Jira says so.
+    const pastMerge = (ticket: { key: string; status: string }) => {
+      const merge = mergeOf(ticket.key)?.merge;
+      if (merge === 'merged') return true;
+      if (merge === 'open') return false;
+      return isDoneStatus(ticket.status);
+    };
+    const tickets = all.filter((ticket) => !pastMerge(ticket));
     // Once the sprint has started, a draft lays open tickets from today's working day, never in the past. A published
     // plan keeps its days, so AC drift can still tell a ticket that slipped past its planned day.
     const today = workingDayOf(row.startDate?.toISOString() ?? null, this.now());
     // The same draft counts only the work left on each ticket by its status; before day 1 every ticket keeps its full SP.
     const underWay = !!today && row.status !== 'published';
     const left = new Map(tickets.map((ticket) => [ticket.key, underWay ? remainingSp(ticket.sp, ticket.status, spPerDay) : null]));
-    const schedule = new Map(scheduleSprint(
-      tickets.map((ticket) => ({ key: ticket.key, dev: ticket.dev, sp: ticket.sp, left: left.get(ticket.key), wave: ticket.wave, dependsOn: ticket.dependsOn })),
-      { sprintDays: row.sprintDays, spPerDay, from: underWay && today ? today - 1 : 0 },
-    ).map((item) => [item.key, item]));
+    const from = underWay && today ? today - 1 : 0;
+    const laneInput = tickets.map((ticket) => ({ key: ticket.key, dev: ticket.dev, sp: ticket.sp, left: left.get(ticket.key), wave: ticket.wave, dependsOn: ticket.dependsOn }));
+    const schedule = new Map(scheduleSprint(laneInput, { sprintDays: row.sprintDays, spPerDay, from }).map((item) => [item.key, item]));
     const ends = new Map([...schedule.values()].map((item) => [item.key, item.end]));
     const status = new Map(all.map((ticket) => [ticket.key, ticket.status]));
     const findings = acFindings(tickets, ends, (key) => status.get(key) ?? refStatuses[key] ?? null)
@@ -388,7 +424,7 @@ export class SprintDraftService {
       const board = ticket.epic ? boardOf.get(ticket.epic) : undefined;
       if (!board?.version || !board.changed.length) return null;
       const named = new Set([...ticket.frames, ...framesIn(ticket.ac)]);
-      const frames = board.changed.filter((id) => named.has(id));
+      const frames = board.changed.filter((id) => (board.tickets?.[id]?.length ? board.tickets[id].includes(ticket.key) : named.has(id)));
       return frames.length ? { version: board.version, frames, held: !isInProgress(ticket.status), checked: decisions[storyboardId(ticket.key, board.version)] ?? null } : null;
     };
     const tcStale = (ticket: { key: string; epic: string | null; frames: string[]; ac: string[]; status: string; tcs: DraftTc[]; tcAt?: Date | null }) => {
@@ -396,20 +432,45 @@ export class SprintDraftService {
       return ticket.tcs.length > 0 && !!flagOf(ticket) && !!changedAt && (!ticket.tcAt || ticket.tcAt.toISOString() < changedAt);
     };
     const devs = [...new Set(tickets.map((ticket) => ticket.dev).filter((dev): dev is string => !!dev))].sort((a, b) => a.localeCompare(b));
+    const sum = (values: number[]) => Math.round(values.reduce((total, value) => total + value, 0) * 1000) / 1000;
+    const developers = [...new Set(all.map((ticket) => ticket.dev).filter((dev): dev is string => !!dev))].sort((a, b) => a.localeCompare(b)).map((name) => {
+      const mine = all.filter((ticket) => ticket.dev === name);
+      const open = tickets.filter((ticket) => ticket.dev === name);
+      const ends = open.map((ticket) => schedule.get(ticket.key)!.end);
+      return {
+        name, merged: mine.length - open.length, open: open.length, sp: sum(mine.map((ticket) => ticket.sp ?? 0)),
+        leftSp: sum(open.map((ticket) => left.get(ticket.key) ?? ticket.sp ?? 0)),
+        end: ends.length ? endDay(Math.max(...ends), from) : null,
+      };
+    });
+    const plan = new Map(planLayout(all.map((ticket) => ({ key: ticket.key, dev: ticket.dev, sp: ticket.sp, rank: ticket.planRank ?? null })), { spPerDay }).map((item) => [item.key, item]));
+    const view = (ticket: (typeof all)[number], placed: Omit<ScheduledTicket, 'key' | 'dev'>, merged: boolean): DraftTicketView => ({
+      key: ticket.key, summary: ticket.summary, dev: ticket.dev, jiraDev: ticket.jiraDev, sp: ticket.sp, left: left.get(ticket.key) ?? null, wave: placed.wave, waveSet: ticket.wave !== null,
+      status: ticket.status, ac: ticket.ac, dependsOn: ticket.dependsOn, start: placed.start, dur: placed.dur, end: placed.end,
+      inSprint: placed.inSprint, split: placed.split, prediction: ticket.prediction, qaDecision: decisions[qaId(ticket.key)] ?? null,
+      epic: ticket.epic, frames: ticket.frames, storyboard: flagOf(ticket),
+      tcs: ticket.tcs, tcStale: tcStale(ticket), tcPending: ticket.tcs.length > 0 && JSON.stringify(ticket.tcs) !== (ticket.tcPosted ?? ''),
+      merge: mergeOf(ticket.key)?.merge ?? 'unknown', pulls: mergeOf(ticket.key)?.pulls ?? [],
+      jiraAhead: isDoneStatus(ticket.status) && mergeOf(ticket.key)?.merge === 'open',
+      merged, rank: ticket.planRank ?? null, planStart: plan.get(ticket.key)!.planStart, planDur: plan.get(ticket.key)!.planDur,
+    });
+    const openKeys = new Set(tickets.map((ticket) => ticket.key));
+    const merged = all.filter((ticket) => !openKeys.has(ticket.key)).map((ticket) => {
+      const { planStart: start, planDur: dur } = plan.get(ticket.key)!;
+      return view(ticket, { wave: ticket.wave ?? 1, start, dur, end: start + dur, inSprint: start + dur <= row.sprintDays, split: null }, true);
+    });
+    const moves = row.status === 'published' ? [] : suggestMoves(
+      laneInput.map((ticket, index) => ({ ...ticket, status: tickets[index].status, merge: mergeOf(ticket.key)?.merge ?? 'unknown' })),
+      { developers: developers.map((developer) => developer.name), sprintDays: row.sprintDays, spPerDay, from },
+    );
     return {
       sprint: row.sprint, sprintId: row.sprintId, status: row.status, sprintDays: row.sprintDays, startDate: row.startDate?.toISOString() ?? null,
       spPerDay, createdBy: row.createdBy, loadedAt: row.loadedAt.toISOString(), publishedAt: row.publishedAt?.toISOString() ?? null, qaReason: row.qaReason,
-      devs, today, landed: all.length - tickets.length, storyboards, questions: parse<DraftQuestion[]>(row.questions, []),
-      tickets: tickets.map((ticket) => {
-        const placed = schedule.get(ticket.key)!;
-        return {
-          key: ticket.key, summary: ticket.summary, dev: ticket.dev, jiraDev: ticket.jiraDev, sp: ticket.sp, left: left.get(ticket.key) ?? null, wave: placed.wave, waveSet: ticket.wave !== null,
-          status: ticket.status, ac: ticket.ac, dependsOn: ticket.dependsOn, start: placed.start, dur: placed.dur, end: placed.end,
-          inSprint: placed.inSprint, split: placed.split, prediction: ticket.prediction, qaDecision: decisions[qaId(ticket.key)] ?? null,
-          epic: ticket.epic, frames: ticket.frames, storyboard: flagOf(ticket),
-          tcs: ticket.tcs, tcStale: tcStale(ticket), tcPending: ticket.tcs.length > 0 && JSON.stringify(ticket.tcs) !== (ticket.tcPosted ?? ''),
-        };
-      }).sort((a, b) => a.start - b.start || a.key.localeCompare(b.key, undefined, { numeric: true })),
+      devs, today, landed: all.length - tickets.length, storyboards, questions: parse<DraftQuestion[]>(row.questions, []), developers, mergeSource, moves,
+      tickets: [
+        ...tickets.map((ticket) => view(ticket, schedule.get(ticket.key)!, false)).sort((a, b) => a.start - b.start || a.key.localeCompare(b.key, undefined, { numeric: true })),
+        ...merged.sort((a, b) => a.planStart - b.planStart || a.key.localeCompare(b.key, undefined, { numeric: true })),
+      ],
       findings,
       blockers,
       canPublish: blockers.length === 0 && tickets.length > 0,
@@ -419,8 +480,9 @@ export class SprintDraftService {
   /** Runs predict.mjs on the draft as it stands and stores what it answered. */
   async refreshQa(sprint: string): Promise<DraftView> {
     const view = (await this.view(sprint))!;
-    const ends = new Map(view.tickets.map((ticket) => [ticket.key, ticket.end]));
-    const input: QaInputTicket[] = view.tickets.map((ticket) => ({
+    const open = openTickets(view);
+    const ends = new Map(open.map((ticket) => [ticket.key, ticket.end]));
+    const input: QaInputTicket[] = open.map((ticket) => ({
       key: ticket.key, summary: ticket.summary, ac: ticket.ac, endDay: ticket.end,
       waitsOn: [...new Set([...ticket.dependsOn, ...view.findings.filter((finding) => finding.key === ticket.key).map((finding) => finding.refKey)])]
         .map((key) => ({ key, endDay: ends.get(key) ?? null })),
@@ -454,6 +516,19 @@ export class SprintDraftService {
     return (await this.view(sprint))!;
   }
 
+  /** Hands cards to another developer in the draft only; Publish writes the assignee to Jira. */
+  async moveCards(sprint: string, keys: string[], to: string): Promise<DraftView> {
+    const row = await this.row(sprint);
+    if (row.status === 'published') throw new SprintInputError('This draft is published; load it from Jira again to change it');
+    const dev = to.trim().slice(0, 120);
+    if (!dev) throw new SprintInputError('to is required');
+    if (!keys.length) throw new SprintInputError('keys is required');
+    const missing = keys.find((key) => !row.tickets.some((ticket) => ticket.key === key));
+    if (missing) throw new SprintInputError(`${missing} is not in the ${sprint} draft`);
+    for (const key of new Set(keys)) await this.store.updateSprintDraftTicket(sprint, key, { dev });
+    return (await this.view(sprint))!;
+  }
+
   /** Records, changes or clears (action "clear") the planner's call on an AC finding or an ESCALATED prediction. */
   async decide(sprint: string, id: string, action: string, note: string | null, by: string | null): Promise<DraftView> {
     const row = await this.row(sprint);
@@ -467,12 +542,12 @@ export class SprintDraftService {
         const finding = view.findings.find((item) => item.id === id);
         if (!finding) throw new SprintInputError('No such AC line in the draft');
         if (!AC_ACTIONS.includes(action)) throw new SprintInputError('An AC line is moved, kept to wait, or dropped');
-        if (action === 'move' && !view.tickets.some((ticket) => ticket.key === finding.refKey)) throw new SprintInputError(`${finding.refKey} is not in this sprint; keep the line or drop it`);
+        if (action === 'move' && !openTickets(view).some((ticket) => ticket.key === finding.refKey)) throw new SprintInputError(`${finding.refKey} is not in this sprint; keep the line or drop it`);
       } else if (id.startsWith('sb|')) {
-        if (!view.tickets.some((ticket) => ticket.storyboard && storyboardId(ticket.key, ticket.storyboard.version) === id)) throw new SprintInputError('No storyboard change on that ticket');
+        if (!openTickets(view).some((ticket) => ticket.storyboard && storyboardId(ticket.key, ticket.storyboard.version) === id)) throw new SprintInputError('No storyboard change on that ticket');
         if (action !== 'checked') throw new SprintInputError('A storyboard change is marked checked');
       } else if (id.startsWith('qa|')) {
-        if (!view.tickets.some((ticket) => qaId(ticket.key) === id && ticket.prediction)) throw new SprintInputError('No QA prediction for that ticket');
+        if (!openTickets(view).some((ticket) => qaId(ticket.key) === id && ticket.prediction)) throw new SprintInputError('No QA prediction for that ticket');
         if (!QA_ACTIONS.includes(action)) throw new SprintInputError('A QA prediction is accepted as a risk or fixed');
         if (action === 'fix' && !text) throw new SprintInputError('Say what was fixed');
       } else {
@@ -558,6 +633,7 @@ export class SprintDraftService {
     return {
       epic: result.epic, version: result.version, previous: result.previous, path: result.path, page: result.page, frames: result.frames.length, changed: result.changed,
       changedAt: before?.version === result.version ? before.changedAt ?? at : at, checkedAt: at, error: null,
+      scenarios: result.scenarios ?? [], tickets: result.tickets ?? {},
     };
   }
 
@@ -628,7 +704,7 @@ export class SprintDraftService {
     }
     const tickets = results.filter((result) => result.kind === 'ticket');
     // A newer set of test cases is a new comment; the QA bot reads the latest one.
-    for (const ticket of (await this.view(sprint))!.tickets.filter((item) => item.tcPending)) {
+    for (const ticket of openTickets((await this.view(sprint))!).filter((item) => item.tcPending)) {
       try {
         await jira.postTcs(ticket.key, { version: 1, tcs: ticket.tcs });
         await this.store.updateSprintDraftTicket(sprint, ticket.key, { tcPosted: JSON.stringify(ticket.tcs) });
@@ -640,7 +716,8 @@ export class SprintDraftService {
       }
     }
     const target = await this.contract().catch((): ContractTarget => ({ client: null, parentId: null }));
-    const contract = await writeContract(target.client, target.parentId, (await this.view(sprint))!, by, this.now());
+    const published = (await this.view(sprint))!;
+    const contract = await writeContract(target.client, target.parentId, { ...published, tickets: openTickets(published) }, by, this.now());
     results.push({ key: 'Confluence', kind: 'contract', status: contract.status, detail: contract.detail });
     if (tickets.every((result) => result.status === 'updated')) await this.store.updateSprintDraft(sprint, { status: 'published', publishedAt: this.now() });
     return results;

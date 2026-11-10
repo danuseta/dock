@@ -13,11 +13,25 @@ export interface DraftTicket {
   ac: string[]; dependsOn: string[]; start: number; dur: number; end: number; inSprint: boolean; split: number[] | null;
   prediction: QaPrediction | null; qaDecision: DraftDecision | null; epic: string | null; frames: string[]; storyboard: StoryboardFlag | null;
   tcs: DraftTc[]; tcStale: boolean; tcPending: boolean;
+  /** GitHub merge state of the pull requests: merged, open, none or unknown; pulls read "owner/repo#n · open". */
+  merge: string; pulls: string[]; jiraAhead: boolean;
+  /** Past merge: drawn on the plan only, left out of everything else. */
+  merged: boolean;
+  /** The ticket's #N label in Jira, its place in the owner's plan. */
+  rank: number | null;
+  /** Where the plan puts the ticket: by rank on its owner's lane, back to back from day 1, at its full SP. */
+  planStart: number; planDur: number;
 }
+export interface SprintDeveloper { name: string; merged: number; open: number; sp: number; leftSp: number; end: number | null }
+export interface SprintMove { keys: string[]; from: string; to: string; sp: number; forecastBefore: number; forecastAfter: number; improves: boolean }
 export interface StoryboardState {
   epic: string; version: number | null; previous: number | null; path: string | null; page: string | null; frames: number; changed: string[];
   changedAt: string | null; checkedAt: string; error: string | null;
+  scenarios?: StoryboardScenario[]; htmlUrl?: string | null; previousHtmlUrl?: string | null;
 }
+export interface StoryboardFrame { index: number; title: string; step: string | null; changed: boolean }
+export interface StoryboardFlow { id: string; title: string; tickets: string[]; info: string[]; frames: StoryboardFrame[]; changed: boolean }
+export interface StoryboardScenario { n: number; title: string; groups: Array<{ title: string; flows: StoryboardFlow[] }> }
 export interface DraftFinding {
   id: string; key: string; line: number; text: string; refKey: string; kind: string; refEnd: number | null; ownEnd: number | null; decision: DraftDecision | null;
 }
@@ -25,6 +39,7 @@ export interface SprintDraft {
   sprint: string; sprintId: number; status: string; sprintDays: number; startDate: string | null; spPerDay: number; createdBy: string | null;
   loadedAt: string; publishedAt: string | null; qaReason: string | null; devs: string[]; blockers: string[]; canPublish: boolean; landed: number; today: number | null;
   tickets: DraftTicket[]; findings: DraftFinding[]; storyboards: StoryboardState[]; questions: DraftQuestion[];
+  developers: SprintDeveloper[]; mergeSource: string; moves: SprintMove[];
 }
 export interface DraftQuestion { id: string; text: string; key: string | null; askedAt: string; answered: boolean; answeredBy: string | null; answeredAt: string | null }
 
@@ -285,4 +300,81 @@ export function textToTcs(text: string): { tcs: DraftTc[]; error: string | null 
     tcs.push({ id: match[1].toUpperCase(), ac: Number(match[2]), title: match[3].trim(), steps, expected });
   }
   return { tcs, error: null };
+}
+
+/** Cards still to be built: everything GitHub (or Jira, when GitHub is down) has not merged. */
+export const scheduled = (tickets: DraftTicket[]) => tickets.filter((ticket) => !ticket.merged);
+
+const planEnd = (ticket: Pick<DraftTicket, 'planStart' | 'planDur'>) => ticket.planStart + ticket.planDur;
+
+export interface ScheduleWindow { first: number; last: number }
+
+/** The days the schedule draws: from day 1 to the forecast, the end of the plan or the sprint's last day, whichever is latest. */
+export function scheduleWindow(draft: Pick<SprintDraft, 'sprintDays' | 'tickets'>): ScheduleWindow {
+  const forecast = landingDay(Math.max(0, ...scheduled(draft.tickets).map((ticket) => ticket.end)));
+  const plan = landingDay(Math.max(0, ...draft.tickets.map(planEnd)));
+  return { first: 1, last: Math.max(forecast, plan, draft.sprintDays) };
+}
+
+export interface LaneBar {
+  ticket: DraftTicket; kind: 'progress' | 'todo' | 'done';
+  /** Not merged and its place in the plan ended before today. */
+  late: boolean;
+  third: string; ahead: string | null; moved: boolean; left: string; width: string;
+}
+
+/** A developer's cards, merged ones included, at their place in the plan. */
+export function laneOf(draft: Pick<SprintDraft, 'sprintDays' | 'tickets' | 'today'>, devName: string): LaneBar[] {
+  const { last } = scheduleWindow(draft);
+  return draft.tickets
+    .filter((ticket) => (ticket.dev ?? UNASSIGNED) === devName)
+    .sort((a, b) => a.planStart - b.planStart || a.key.localeCompare(b.key, undefined, { numeric: true }))
+    .map((ticket) => {
+      const place = barPlace({ start: ticket.planStart, dur: ticket.planDur }, last);
+      const todo = !ticket.merged && ticket.merge === 'none' && /^to do$/i.test(ticket.status);
+      const late = !ticket.merged && !!draft.today && planEnd(ticket) <= draft.today - 1 + 1e-9;
+      const third = ticket.merged ? `merged · ${ticket.status}` : late ? `late · ${ticket.status}` : todo ? 'To Do · no PR yet' : ticket.pulls[0] ?? ticket.status;
+      return {
+        ticket, kind: ticket.merged ? 'done' : todo ? 'todo' : 'progress', late, third,
+        ahead: !ticket.merged && ticket.jiraAhead ? `Jira says ${ticket.status}, PR open` : null, moved: !!ticket.dev && ticket.dev !== ticket.jiraDev, left: place.left, width: place.width,
+      };
+    });
+}
+
+/** "3 merged · 4 open" on a schedule lane. */
+export const laneCount = (bars: LaneBar[]) => `${bars.filter((bar) => bar.ticket.merged).length} merged · ${bars.filter((bar) => !bar.ticket.merged).length} open`;
+
+/** The days a card holds in the plan: "D9 Fri 6 Nov → D10 Mon 9 Nov". */
+export function planRange(ticket: Pick<DraftTicket, 'planStart' | 'planDur'>, labels: string[]): string {
+  const first = Math.floor(ticket.planStart + 1e-9) + 1;
+  const last = Math.max(first, landingDay(planEnd(ticket)));
+  const day = (value: number) => `D${value}${labels[value - 1] ? ` ${labels[value - 1]}` : ''}`;
+  return `${day(first)} → ${day(last)}`;
+}
+
+/** The GitHub line of a card's hover: what its pull requests say, and whether it needs a look. */
+export function githubLine(ticket: Pick<DraftTicket, 'merged' | 'merge' | 'jiraAhead'>, mergeSource: string): { text: string; tone: 'ok' | 'warn' | 'none' } {
+  if (ticket.merged) return { text: ticket.merge === 'merged' ? '✓ merged' : '✓ done in Jira', tone: 'ok' };
+  if (ticket.jiraAhead) return { text: 'PR still open', tone: 'warn' };
+  if (ticket.merge === 'open') return { text: 'PR open', tone: 'none' };
+  if (ticket.merge === 'none') return { text: 'no PR yet', tone: 'none' };
+  return { text: mergeSource === 'jira' ? 'not read: GitHub unavailable' : 'unknown', tone: 'none' };
+}
+
+/** "17 cards merged on GitHub · 0 open" on a developer's tile; the source changes when GitHub could not be read. */
+export function developerLine(developer: Pick<SprintDeveloper, 'merged' | 'open'>, mergeSource: string): string {
+  const where = mergeSource === 'jira' ? 'done in Jira' : 'merged on GitHub';
+  return `${developer.merged} ${developer.merged === 1 ? 'card' : 'cards'} ${where} · ${developer.open} open`;
+}
+
+/** "free from D13" for a developer with nothing open. */
+export const freeFrom = (today: number | null) => `free from D${Math.max(1, today ?? 1)}`;
+
+/** "QRD-1278, QRD-1290 4 SP · Shovian → Danu". */
+export const moveLine = (move: Pick<SprintMove, 'keys' | 'sp' | 'from' | 'to'>) => `${move.keys.join(', ')} ${move.sp} SP · ${move.from} → ${move.to}`;
+
+/** "forecast D17 → D13" with the dates when the sprint has a start: "forecast D17 (Tue 17 Nov) → D13 (Fri 13 Nov)". */
+export function moveForecast(move: Pick<SprintMove, 'forecastBefore' | 'forecastAfter'>, labels: string[]): string {
+  const day = (value: number) => `D${value}${labels[value - 1] ? ` (${labels[value - 1]})` : ''}`;
+  return `forecast ${day(move.forecastBefore)} → ${day(move.forecastAfter)}`;
 }

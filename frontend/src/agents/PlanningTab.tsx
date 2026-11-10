@@ -1,17 +1,19 @@
-import React, { useEffect, useId, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useLazyQuery, useMutation, useQuery } from '@apollo/client';
-import { ArrowRightLeft, Check, Clock, Download, EyeOff, FileSearch, Minus, Plus, RefreshCw, Scissors, Send, ShieldAlert, ShieldCheck, Undo2, X } from 'lucide-react';
+import { AlertTriangle, ArrowRightLeft, Check, Clock, Download, EyeOff, Minus, Plus, RefreshCw, Scissors, Send, ShieldAlert, ShieldCheck, Undo2, X } from 'lucide-react';
 import { Button, Card, Dialog, Input, Select, Textarea } from '../components/ui';
 import { PlanningChat } from './PlanningChat';
+import { StoryboardBoard } from './StoryboardBoard';
 import {
-  ANSWER_SPRINT_DRAFT_QUESTION, CHECK_SPRINT_STORYBOARDS, DECIDE_SPRINT_DRAFT, SET_SPRINT_DRAFT_TCS, GET_PLANNING_SPRINTS, GET_SPRINT_DRAFT, LOAD_SPRINT_DRAFT, PREVIEW_SPRINT_DRAFT_PUBLISH, PUBLISH_SPRINT_DRAFT,
+  ANSWER_SPRINT_DRAFT_QUESTION, CHECK_SPRINT_STORYBOARDS, DECIDE_SPRINT_DRAFT, MOVE_SPRINT_DRAFT_CARDS, SET_SPRINT_DRAFT_TCS, GET_PLANNING_SPRINTS, GET_SPRINT_DRAFT, LOAD_SPRINT_DRAFT, PREVIEW_SPRINT_DRAFT_PUBLISH, PUBLISH_SPRINT_DRAFT,
   REFRESH_SPRINT_DRAFT_QA, UPDATE_SPRINT_DRAFT_TICKET,
 } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import {
-  UNASSIGNED, barPlace, changeCount, dayOf, decisionLabel, findingKindLabel, forecastOf, handOffs, lateDays, lateText, shortDate, underWay, landingDay, lanes, openQuestionsOf, parseWave, ranks, softColor, teamStats, waitersOf, predictionTone, publishHint, scopeSummary, sortFindings,
-  questionsLine, spanOf, storyboardDecisionId, storyboardLine, tcsToText, textToTcs, uncheckedStoryboard, waveRows, workingDayLabels,
-  type DraftChange, type DraftFinding, type DraftTc, type DraftTicket, type PlanningPanel, type PlanningSprint, type PublishResult, type SprintDraft,
+  UNASSIGNED, devColors, changeCount, dayOf, decisionLabel, findingKindLabel, forecastOf, handOffs, lateDays, lateText, shortDate, underWay, landingDay, lanes, openQuestionsOf, parseWave, ranks, teamStats, waitersOf, predictionTone, publishHint, scopeSummary, sortFindings,
+  developerLine, freeFrom, githubLine, laneCount, laneOf, moveForecast, moveLine, planRange, questionsLine, scheduleWindow, scheduled, spanOf, tcsToText, textToTcs, uncheckedStoryboard, waveRows, workingDayLabels,
+  type DraftChange, type DraftFinding, type DraftTc, type DraftTicket, type LaneBar, type PlanningPanel, type PlanningSprint, type PublishResult, type SprintDraft,
 } from './planning';
 
 const head = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
@@ -35,52 +37,6 @@ const StoryboardChip: React.FC<{ ticket: DraftTicket }> = ({ ticket }) => {
   if (!flag) return null;
   const tone = flag.checked ? TONE.none : flag.held ? TONE.conflict : TONE.warn;
   return <span className={cn(chip, tone)} title={`Storyboard v${flag.version} changed ${flag.frames.join(', ')}`}>{flag.checked ? 'AC checked' : flag.held ? 'Held · AC needs a check' : 'AC needs a check'} · {flag.frames.join(' ')}</span>;
-};
-
-const StoryboardPanel: React.FC<{ draft: SprintDraft; busy: boolean; onCheck: () => void; onDecide: (id: string, action: string, note?: string) => void }> = ({ draft, busy, onCheck, onDecide }) => {
-  const flagged = draft.tickets.filter((ticket) => ticket.storyboard);
-  const epics = [...new Set(draft.tickets.map((ticket) => ticket.epic).filter(Boolean))];
-  return (
-    <section aria-label="Storyboard" className="grid grid-cols-[minmax(0,1fr)] gap-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <p className="min-w-0 flex-1 text-pretty text-[0.8rem] text-muted-foreground">Each epic's Confluence page "Storyboard" holds one HTML attachment per version. DOCK saves every version under the blackboard and compares the newest two frame by frame; a ticket whose AC or description names a changed frame needs its AC checked.</p>
-        <Button size="sm" onClick={onCheck} disabled={busy}><FileSearch size={13} aria-hidden="true" />Check storyboard</Button>
-      </div>
-      {draft.storyboards.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{epics.length ? 'No storyboard read yet. Check storyboard reads it from Confluence.' : 'No ticket of this sprint has an epic, so there is no storyboard to read.'}</p>
-      ) : (
-        <ul className="overflow-hidden rounded-md border border-border bg-surface-0">
-          {draft.storyboards.map((board) => (
-            <li key={board.epic} className="border-b border-border px-3 py-2.5 last:border-b-0">
-              <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.8rem]">
-                <span className="font-mono font-semibold">{board.epic}</span>
-                <span className={cn(chip, board.error ? TONE.warn : board.changed.length ? TONE.conflict : TONE.ok)}>{board.error ? 'No storyboard' : `v${board.version}`}</span>
-              </p>
-              <p className={cn('mt-1 text-pretty text-[0.76rem]', board.error ? 'text-status-warn' : 'text-muted-foreground')}>{storyboardLine(board)}</p>
-              {board.path && <p className="mt-0.5 break-all font-mono text-[0.64rem] text-muted-foreground">{board.path}</p>}
-            </li>
-          ))}
-        </ul>
-      )}
-      {flagged.length > 0 && (
-        <ul className="overflow-hidden rounded-md border border-border bg-surface-0">
-          {flagged.map((ticket) => (
-            <li key={ticket.key} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 border-b border-border px-3 py-2.5 last:border-b-0 max-[760px]:grid-cols-[minmax(0,1fr)]">
-              <div className="min-w-0">
-                <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.8rem]"><span className="font-mono font-semibold">{ticket.key}</span><StoryboardChip ticket={ticket} /><span className="text-muted-foreground">{ticket.status}</span></p>
-                <p className="mt-0.5 truncate text-[0.78rem] text-secondary-foreground">{ticket.summary}</p>
-              </div>
-              <div className="flex flex-wrap items-start justify-end gap-1.5 max-[760px]:justify-start">
-                {ticket.storyboard!.checked
-                  ? <Button size="sm" variant="ghost" onClick={() => onDecide(storyboardDecisionId(ticket.key, ticket.storyboard!.version), 'clear')} disabled={busy}><Undo2 size={13} aria-hidden="true" />Undo</Button>
-                  : <Button size="sm" variant="primary" onClick={() => onDecide(storyboardDecisionId(ticket.key, ticket.storyboard!.version), 'checked')} disabled={busy}><Check size={13} aria-hidden="true" />AC checked</Button>}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
 };
 
 /** What the planning chat could not settle; the planner marks each answered once it is. */
@@ -165,28 +121,84 @@ const fmt = (value: number) => String(Math.round(value * 10) / 10);
 const plainSummary = (summary: string) => summary.replace(/^(\[[^\]]+\]\s*)+/, '');
 const HATCH = 'repeating-linear-gradient(135deg, transparent 0 5px, var(--color-border) 5px 6px)';
 
+/** The floating card a schedule bar shows on hover, focus or tap: fixed to the viewport, above the bar when there is no room below. */
+const PlanHover: React.FC<{ id: string; anchor: HTMLElement; bar: LaneBar; color: string; labels: string[]; spPerDay: number; mergeSource: string }> = ({ id, anchor, bar, color, labels, spPerDay, mergeSource }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const card = ref.current;
+    if (!card) return;
+    const rect = anchor.getBoundingClientRect();
+    const below = rect.bottom + 8 + card.offsetHeight < window.innerHeight;
+    card.style.left = `${Math.max(8, Math.min(window.innerWidth - card.offsetWidth - 8, rect.left))}px`;
+    card.style.top = `${below ? rect.bottom + 6 : Math.max(8, rect.top - card.offsetHeight - 6)}px`;
+    card.style.visibility = 'visible';
+  });
+  const { ticket } = bar;
+  const github = githubLine(ticket, mergeSource);
+  const row = 'font-mono text-[0.66rem] text-muted-foreground';
+  return createPortal(
+    <div ref={ref} id={id} role="tooltip" className="pointer-events-none fixed z-50 w-[300px] max-w-[calc(100vw-16px)] rounded-md border border-border bg-surface-0 px-3 py-2.5 text-[0.75rem] shadow-card" style={{ left: 0, top: 0, visibility: 'hidden' }}>
+      <p className="flex items-center gap-1.5 font-mono text-[0.8rem] font-bold">
+        <span className="inline-block h-2.5 w-2.5 rounded-[3px]" style={{ background: color }} aria-hidden="true" />{ticket.key}
+        {ticket.rank !== null && <span className="font-medium text-muted-foreground">#{ticket.rank}</span>}
+      </p>
+      <p className="mb-2 mt-0.5 text-pretty leading-snug text-foreground">{ticket.summary}</p>
+      <dl className="grid grid-cols-[72px_minmax(0,1fr)] gap-x-2 gap-y-0.5">
+        <dt className={row}>owner</dt><dd className="text-secondary-foreground">{ticket.dev ?? UNASSIGNED}</dd>
+        <dt className={row}>SP</dt><dd className="text-secondary-foreground">{ticket.sp ?? '?'} SP · {fmt(ticket.planDur)} {ticket.planDur === 1 ? 'day' : 'days'}{ticket.sp === null ? ` (1 SP = ${fmt(1 / spPerDay)} day)` : ''}</dd>
+        <dt className={row}>plan</dt><dd className="text-secondary-foreground">{planRange(ticket, labels)}</dd>
+        <dt className={row}>Jira</dt><dd className="text-secondary-foreground">{ticket.status}</dd>
+        <dt className={row}>GitHub</dt>
+        <dd className={github.tone === 'ok' ? 'text-status-merged' : github.tone === 'warn' ? 'text-[var(--color-status-warn-ink)]' : 'text-secondary-foreground'}>{github.text}</dd>
+        <dt className={row}>PR</dt><dd className="break-words text-secondary-foreground">{ticket.pulls.length ? ticket.pulls.map((pull) => <span key={pull} className="block">{pull}</span>) : 'none found'}</dd>
+        {bar.late && <><dt className={row}>late</dt><dd className="text-status-conflict">plan ended before today, not merged</dd></>}
+      </dl>
+    </div>,
+    document.body,
+  );
+};
+
 /** The team map: load per developer, wave progress, the day-by-day board, each person's order of work and the hand-offs. */
-const TeamPanel: React.FC<{ draft: SprintDraft }> = ({ draft }) => {
+const TeamPanel: React.FC<{ draft: SprintDraft; plan: DraftTicket[]; busy: boolean; onMove: (keys: string[], to: string) => void }> = ({ draft, plan, busy, onMove }) => {
   const [picked, setPicked] = useState<string | null>(null);
-  const span = spanOf(draft);
-  const labels = workingDayLabels(draft.startDate, span);
-  const rows = lanes(draft);
-  const colorOf = new Map(rows.map((lane) => [lane.dev, lane.color]));
+  const [hover, setHover] = useState<{ key: string; anchor: HTMLElement } | null>(null);
+  const hoverId = useId();
+  useEffect(() => {
+    if (!hover) return undefined;
+    const hide = () => setHover(null);
+    const outside = (event: MouseEvent) => { if (!(event.target instanceof Element && event.target.closest('[data-plan-bar]'))) hide(); };
+    window.addEventListener('scroll', hide, true);
+    document.addEventListener('click', outside);
+    return () => { window.removeEventListener('scroll', hide, true); document.removeEventListener('click', outside); };
+  }, [hover]);
+  // Merged cards are done: only the cards still to build are scheduled; the schedule draws the whole plan.
+  const board = { ...draft, tickets: scheduled(draft.tickets) };
+  const planned = { ...draft, tickets: plan };
+  const span = spanOf(board);
+  const win = scheduleWindow(planned);
+  const days = win.last;
+  const labels = workingDayLabels(draft.startDate, Math.max(span, win.last));
+  const rows = lanes(board);
+  // Every developer of the sprint gets a tile and a schedule row, also one whose cards are all merged.
+  const developers = draft.developers.length ? draft.developers : rows.filter((lane) => lane.dev !== UNASSIGNED).map((lane) => ({ name: lane.dev, merged: 0, open: lane.tickets.length, sp: lane.sp, leftSp: lane.left, end: lane.end }));
+  const laneNames = [...new Set([...developers.map((developer) => developer.name), ...rows.map((lane) => lane.dev), ...(plan.some((ticket) => !ticket.dev) ? [UNASSIGNED] : [])])];
+  const colorOf = devColors(laneNames);
   const color = (dev: string | null) => colorOf.get(dev ?? UNASSIGNED) ?? 'var(--color-muted-foreground)';
-  const waves = waveRows(draft);
-  const rank = ranks(draft.tickets);
-  const waiters = waitersOf(draft.tickets);
+  const waves = waveRows(board);
+  const rank = ranks(board.tickets);
+  const waiters = waitersOf(board.tickets);
   const questions = openQuestionsOf(draft.questions);
-  const stats = teamStats(draft);
-  const hand = handOffs(draft.tickets);
-  const byKey = new Map(draft.tickets.map((ticket) => [ticket.key, ticket]));
+  const stats = teamStats(board);
+  const hand = handOffs(board.tickets);
+  const byKey = new Map(board.tickets.map((ticket) => [ticket.key, ticket]));
   const pct = (days: number) => `${(days / span) * 100}%`;
+  const winPct = (day: number) => `${(day / days) * 100}%`;
   const dateOf = (day: number) => labels[day - 1] ?? null;
   const lands = (end: number) => { const day = landingDay(end); return `day ${day}${dateOf(day) ? ` · ${dateOf(day)}` : ''}`; };
   const starts = (start: number) => { const day = Math.floor(start + 1e-9) + 1; return `day ${day}${dateOf(day) ? ` · ${dateOf(day)}` : ''}`; };
   const after = (ticket: DraftTicket) => ticket.end > draft.sprintDays + 1e-9;
   const today = draft.today && draft.today <= span ? draft.today : null;
-  const forecast = forecastOf(draft);
+  const forecast = forecastOf(board);
   const live = underWay(draft);
   const dayDate = (day: number) => dateOf(day) ?? `day ${day}`;
   const shortDay = (day: number) => { const label = dateOf(day); return label ? shortDate(label) : `day ${day}`; };
@@ -194,9 +206,13 @@ const TeamPanel: React.FC<{ draft: SprintDraft }> = ({ draft }) => {
   const lateTone = forecast.late > 0 ? 'text-status-conflict' : 'text-status-merged';
   // A line at the very end of the span stays inside its clipped row.
   const lineAt = (days: number) => `min(${pct(days)}, calc(100% - 2px))`;
+  const winLineAt = (day: number) => `clamp(0px, ${winPct(day)}, calc(100% - 2px))`;
   const dueLabel = `Sprint ends · ${dayDate(forecast.due)}`;
   const forecastLabel = `Forecast · ${dayDate(forecast.day)}`;
-  const selected = picked ? byKey.get(picked) ?? null : null;
+  const planByKey = new Map(plan.map((ticket) => [ticket.key, ticket]));
+  const selected = picked ? planByKey.get(picked) ?? null : null;
+  const planToday = draft.today && draft.today <= days ? draft.today : null;
+  const hoverBar = hover ? laneOf(planned, planByKey.get(hover.key)?.dev ?? UNASSIGNED).find((bar) => bar.ticket.key === hover.key) ?? null : null;
   const waitsOn = selected ? selected.dependsOn.filter((key) => byKey.has(key)) : [];
   const waiting = selected ? (waiters.get(selected.key) ?? []).map((ticket) => ticket.key) : [];
   const zeroFloat = hand.filter((row) => row.float <= 0).length;
@@ -226,27 +242,55 @@ const TeamPanel: React.FC<{ draft: SprintDraft }> = ({ draft }) => {
           <span><b className="text-secondary-foreground">{asked}</b> {asked === 1 ? 'card' : 'cards'} with open questions</span>
         </p>
         <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(min(170px,100%),1fr))] gap-2.5">
-          {rows.map((lane) => {
-            const laneDay = landingDay(lane.end);
+          {developers.map((developer) => {
+            const lane = rows.find((item) => item.dev === developer.name);
+            const tint = color(developer.name);
+            const laneDay = landingDay(lane?.end ?? 0);
             const laneLate = lateDays(draft.sprintDays, laneDay);
             return (
-            <div key={lane.dev} className="min-w-0 rounded-md border border-border border-t-[3px] bg-surface-0 px-3 py-2.5" style={{ borderTopColor: lane.color }}>
-              <b className="block truncate font-display text-[0.9rem]" style={{ color: lane.color }}>{lane.dev}</b>
-              <p className="mt-1.5 font-mono text-[1.2rem] font-semibold tabular-nums">{lane.sp}<span className="text-[0.7rem] font-normal text-muted-foreground"> SP · {lane.tickets.length} {lane.tickets.length === 1 ? 'card' : 'cards'}</span></p>
-              {live && <p className="font-mono text-[0.68rem] text-muted-foreground">left <b className="text-secondary-foreground">{fmt(lane.left)}</b> of {fmt(lane.sp)} SP</p>}
-              <span className="relative mt-2 block h-1.5 overflow-hidden rounded-sm bg-surface-2" aria-hidden="true">
-                <span className="absolute inset-y-0 left-0" style={{ width: pct(lane.end), background: lane.color }} />
-                <span className="absolute -inset-y-0.5 w-0.5 bg-foreground" style={{ left: pct(draft.sprintDays) }} />
-              </span>
-              <p className="mt-2 text-[0.72rem] text-muted-foreground">Ends <b className="text-secondary-foreground">{lands(lane.end)}</b>. In sprint: <b className="text-secondary-foreground">{lane.inSprintSp} SP</b>.</p>
-              <p className="mt-1 font-mono text-[0.66rem] text-muted-foreground">
-                Due {shortDay(draft.sprintDays)} · forecast {shortDay(laneDay)}{laneLate > 0 && <b className="text-status-conflict"> · {lateText(laneLate)}</b>}
-              </p>
+            <div key={developer.name} className="min-w-0 rounded-md border border-border border-t-[3px] bg-surface-0 px-3 py-2.5" style={{ borderTopColor: tint }}>
+              <b className="block truncate font-display text-[0.9rem]" style={{ color: tint }}>{developer.name}</b>
+              <p className="mt-1.5 font-mono text-[1.2rem] font-semibold tabular-nums">{lane?.sp ?? 0}<span className="text-[0.7rem] font-normal text-muted-foreground"> SP · {lane?.tickets.length ?? 0} {lane?.tickets.length === 1 ? 'card' : 'cards'}</span></p>
+              <p className="font-mono text-[0.68rem] text-muted-foreground">{developerLine(developer, draft.mergeSource)}</p>
+              {lane && live && <p className="font-mono text-[0.68rem] text-muted-foreground">left <b className="text-secondary-foreground">{fmt(lane.left)}</b> of {fmt(lane.sp)} SP</p>}
+              {lane ? (
+                <>
+                  <span className="relative mt-2 block h-1.5 overflow-hidden rounded-sm bg-surface-2" aria-hidden="true">
+                    <span className="absolute inset-y-0 left-0" style={{ width: pct(lane.end), background: tint }} />
+                    <span className="absolute -inset-y-0.5 w-0.5 bg-foreground" style={{ left: pct(draft.sprintDays) }} />
+                  </span>
+                  <p className="mt-2 text-[0.72rem] text-muted-foreground">Ends <b className="text-secondary-foreground">{lands(lane.end)}</b>. In sprint: <b className="text-secondary-foreground">{lane.inSprintSp} SP</b>.</p>
+                  <p className="mt-1 font-mono text-[0.66rem] text-muted-foreground">
+                    Due {shortDay(draft.sprintDays)} · forecast {shortDay(laneDay)}{laneLate > 0 && <b className="text-status-conflict"> · {lateText(laneLate)}</b>}
+                  </p>
+                </>
+              ) : (
+                <p className="mt-2 text-[0.72rem] text-muted-foreground"><b className="text-secondary-foreground">{freeFrom(draft.today)}</b>{dateOf(Math.max(1, draft.today ?? 1)) ? ` · ${dateOf(Math.max(1, draft.today ?? 1))}` : ''}</p>
+              )}
             </div>
             );
           })}
         </div>
       </section>
+
+      {draft.moves.length > 0 && (
+        <section aria-label="Suggested moves" className="min-w-0">
+          <h3 className={head}>Suggested moves</h3>
+          <p className="mt-2 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Only To Do cards, with the cards that wait on them. A move changes this draft; Jira gets the new assignee when you Publish.</p>
+          <ul className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
+            {draft.moves.map((move) => (
+              <li key={move.keys.join('|')} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-border px-3 py-2.5 last:border-b-0 max-[760px]:grid-cols-[minmax(0,1fr)]">
+                <div className="min-w-0">
+                  <p className="text-pretty font-mono text-[0.78rem] font-semibold">{moveLine(move)}</p>
+                  <p className="mt-0.5 text-pretty text-[0.76rem] text-muted-foreground">{move.to} frees up first, so the sprint finishes earlier.</p>
+                  <p className="mt-0.5 font-mono text-[0.7rem] text-status-merged">{moveForecast(move, labels)}</p>
+                </div>
+                <Button size="sm" variant="primary" onClick={() => onMove(move.keys, move.to)} disabled={busy}><ArrowRightLeft size={13} aria-hidden="true" />Move to {move.to}</Button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section aria-label="Wave progress" className="min-w-0">
         <h3 className={head}>Wave progress</h3>
@@ -277,70 +321,102 @@ const TeamPanel: React.FC<{ draft: SprintDraft }> = ({ draft }) => {
 
       <section aria-label="Schedule" className="min-w-0">
         <h3 className={head}>Schedule · every developer</h3>
-        <p className="mt-2 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">One row per developer from day 1. The tag is the owner's rank and the card's wave: <b className="text-foreground">#3·W2</b> is that person's third card, from wave 2. The hatched days are after the sprint. Click a card to see what it waits on and what waits on it.</p>
+        <p className="mt-2 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">One row per developer, from day 1 to the forecast. Every card of the sprint sits where the plan put it: in its owner's <b className="text-foreground">#N</b> label order, back to back, as long as its SP. Merged cards are drawn faded with a ✓; a card not merged whose place has passed is <b className="text-status-conflict">late</b>. The forecast counts only the work left on the open cards, from today. The hatched days are after the sprint. Hover or tap a card for its details; click it to see what it waits on and what waits on it.</p>
+        {draft.mergeSource === 'jira' && <p className="mt-2 font-mono text-[0.7rem] text-muted-foreground" role="status">Merge state from Jira status: GitHub unavailable</p>}
         <div className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
           <div className="overflow-x-auto">
-            <div style={{ minWidth: `${112 + span * 58}px` }}>
+            <div style={{ minWidth: `${112 + days * 58}px` }}>
               <div className="flex border-b border-border bg-surface-1 pl-[112px]">
-                {Array.from({ length: span }, (_, index) => (
-                  <div key={index} className={cn('min-w-0 flex-1 overflow-hidden whitespace-nowrap border-l border-border px-1.5 py-1.5 font-mono text-[0.58rem] text-muted-foreground', today === index + 1 && 'text-accent')} style={index >= draft.sprintDays ? { backgroundImage: HATCH } : undefined}>
-                    <b className={cn('block', today === index + 1 ? 'text-accent' : 'text-secondary-foreground')}>D{index + 1}{today === index + 1 ? ' · today' : ''}</b>{labels[index] ?? ''}
-                  </div>
-                ))}
+                {Array.from({ length: days }, (_, index) => {
+                  const day = index + 1;
+                  return (
+                    <div key={day} className={cn('min-w-0 flex-1 overflow-hidden whitespace-nowrap border-l border-border px-1.5 py-1.5 font-mono text-[0.58rem] text-muted-foreground', planToday === day && 'text-status-discord')} style={day > draft.sprintDays ? { backgroundImage: HATCH } : undefined}>
+                      <b className={cn('block', planToday === day ? 'text-status-discord' : 'text-secondary-foreground')}>D{day}{planToday === day ? ' · today' : ''}</b>{labels[day - 1] ?? ''}
+                    </div>
+                  );
+                })}
               </div>
               <div className="flex border-b border-border">
                 <div className="w-[112px] flex-none border-r border-border bg-surface-1" />
                 <div className="relative h-9 flex-1">
-                  <span className="absolute inset-y-0 z-[2] w-0.5 bg-foreground/75" style={{ left: lineAt(draft.sprintDays) }} aria-hidden="true" />
-                  <span className="absolute inset-y-0 z-[2] border-l-2 border-dashed" style={{ left: lineAt(forecast.end), borderColor: forecastColor }} aria-hidden="true" />
+                  <span className="absolute inset-y-0 z-[2] w-0.5 bg-foreground/75" style={{ left: winLineAt(draft.sprintDays) }} aria-hidden="true" />
+                  <span className="absolute inset-y-0 z-[2] border-l-2 border-dashed" style={{ left: winLineAt(forecast.end), borderColor: forecastColor }} aria-hidden="true" />
+                  {planToday && <span className="absolute inset-y-0 z-[2] w-0.5 bg-status-discord" style={{ left: winLineAt(planToday - 1) }} aria-hidden="true" />}
                   {([[draft.sprintDays, dueLabel, 'var(--color-foreground)', 3], [forecast.end, forecastLabel, forecastColor, 19]] as const).map(([at, text, tone, top]) => (
-                    <span key={text} className="absolute whitespace-nowrap font-mono text-[0.6rem] font-semibold" style={{ top, left: pct(at), color: tone, transform: at / span > 0.5 ? 'translateX(calc(-100% - 5px))' : 'translateX(5px)' }}>{text}</span>
+                    <span key={text} className="absolute whitespace-nowrap font-mono text-[0.6rem] font-semibold" style={{ top, left: winLineAt(at), color: tone, transform: at / days > 0.5 ? 'translateX(calc(-100% - 5px))' : 'translateX(5px)' }}>{text}</span>
                   ))}
                 </div>
               </div>
-              {rows.map((lane) => (
-                <div key={lane.dev} className="flex min-h-[58px] border-b border-border last:border-b-0">
+              {laneNames.map((name) => {
+                const bars = laneOf(planned, name);
+                const tint = color(name);
+                return (
+                <div key={name} className="flex min-h-[74px] border-b border-border last:border-b-0">
                   <div className="w-[112px] flex-none border-r border-border bg-surface-1 px-3 py-2.5">
-                    <b className="block truncate font-display text-[0.84rem]" style={{ color: lane.color }}>{lane.dev}</b>
-                    <span className="font-mono text-[0.6rem] text-muted-foreground">{lane.sp} SP</span>
+                    <b className="block truncate font-display text-[0.84rem]" style={{ color: tint }}>{name}</b>
+                    <span className="font-mono text-[0.6rem] text-muted-foreground">{bars.length ? laneCount(bars) : 'no card'}</span>
                   </div>
                   <div className="relative flex-1">
-                    {Array.from({ length: span }, (_, index) => <span key={index} className="absolute inset-y-0 w-px bg-border/60" style={{ left: pct(index) }} aria-hidden="true" />)}
-                    <span className="absolute inset-y-0 z-[2] w-0.5 bg-foreground/75" style={{ left: lineAt(draft.sprintDays) }} aria-hidden="true" />
-                    <span className="absolute inset-y-0 z-[2] border-l-2 border-dashed" style={{ left: lineAt(forecast.end), borderColor: forecastColor }} aria-hidden="true" />
-                    {today && <span className="absolute inset-y-0 z-[2] w-0.5 bg-accent" style={{ left: pct(today - 1) }} aria-hidden="true" />}
-                    {lane.tickets.map((ticket) => {
-                      const place = barPlace(ticket, span);
+                    {Array.from({ length: days }, (_, index) => <span key={index} className="absolute inset-y-0 w-px bg-border/60" style={{ left: `${(index / days) * 100}%` }} aria-hidden="true" />)}
+                    <span className="absolute inset-y-0 z-[2] w-0.5 bg-foreground/75" style={{ left: winLineAt(draft.sprintDays) }} aria-hidden="true" />
+                    <span className="absolute inset-y-0 z-[2] border-l-2 border-dashed" style={{ left: winLineAt(forecast.end), borderColor: forecastColor }} aria-hidden="true" />
+                    {planToday && <span className="absolute inset-y-0 z-[2] w-0.5 bg-status-discord" style={{ left: winLineAt(planToday - 1) }} aria-hidden="true" />}
+                    {bars.map((bar) => {
+                      const ticket = bar.ticket;
                       const asks = questions.get(ticket.key)?.length ?? 0;
                       const isPicked = picked === ticket.key;
                       const related = !selected || isPicked || waitsOn.includes(ticket.key) || waiting.includes(ticket.key);
+                      const done = bar.kind === 'done';
+                      const show = (event: React.SyntheticEvent<HTMLButtonElement>) => setHover({ key: ticket.key, anchor: event.currentTarget });
+                      const hide = () => setHover((current) => (current?.key === ticket.key ? null : current));
                       return (
                         <button
                           key={ticket.key}
                           type="button"
+                          data-plan-bar=""
                           aria-pressed={isPicked}
-                          onClick={() => setPicked(isPicked ? null : ticket.key)}
+                          aria-describedby={hover?.key === ticket.key ? hoverId : undefined}
+                          onClick={(event) => { show(event); setPicked(isPicked ? null : ticket.key); }}
+                          onMouseEnter={show}
+                          onMouseLeave={hide}
+                          onFocus={show}
+                          onBlur={hide}
+                          onKeyDown={(event) => { if (event.key === 'Escape') setHover(null); }}
                           className={cn(
-                            'absolute top-[9px] z-[3] h-10 overflow-hidden rounded-[7px] border px-1.5 py-1 text-left transition-[opacity,transform] hover:-translate-y-px',
+                            'absolute top-[7px] z-[3] h-[60px] overflow-hidden rounded-[7px] border border-l-4 py-1 pl-1.5 pr-[7px] text-left transition-[opacity,transform] hover:-translate-y-px',
+                            bar.kind === 'todo' && 'border-dashed',
+                            bar.moved && 'outline outline-1 outline-dashed outline-offset-1 outline-status-discord',
                             !related && 'opacity-25',
                             isPicked && 'outline outline-2 outline-offset-1 outline-foreground',
                           )}
                           style={{
-                            left: `calc(${place.left} + 2px)`, width: `calc(${place.width} - 4px)`, borderColor: lane.color, background: softColor(lane.color),
-                            boxShadow: [asks ? 'inset 3px 0 0 var(--color-status-conflict)' : '', selected && waitsOn.includes(ticket.key) ? 'inset 0 0 0 2px var(--color-status-conflict)' : ''].filter(Boolean).join(', ') || undefined,
+                            left: `calc(${bar.left} + 2px)`, width: `calc(${bar.width} - 4px)`,
+                            borderColor: bar.late ? 'var(--color-status-conflict)' : `color-mix(in oklch, ${tint} ${done ? 35 : 70}%, transparent)`,
+                            borderLeftColor: done ? `color-mix(in oklch, ${tint} 55%, transparent)` : tint,
+                            borderLeftStyle: 'solid',
+                            background: bar.kind === 'todo' ? 'var(--color-surface-0)' : `color-mix(in oklch, ${tint} ${done ? 5 : 10}%, var(--color-surface-0))`,
+                            boxShadow: [
+                              bar.late ? 'inset 0 0 0 1px color-mix(in oklch, var(--color-status-conflict) 40%, transparent)' : '',
+                              asks ? 'inset 3px 0 0 var(--color-status-conflict)' : '',
+                              selected && waitsOn.includes(ticket.key) ? 'inset 0 0 0 2px var(--color-status-conflict)' : '',
+                            ].filter(Boolean).join(', ') || undefined,
                           }}
-                          title={`${ticket.key} · ${ticket.summary}`}
                         >
-                          <span className="flex justify-between gap-1 whitespace-nowrap font-mono text-[10px] font-semibold" style={{ color: lane.color }}>
-                            <span>{ticket.key.replace(/^[A-Z]+-/, '')}</span><span className="opacity-75">#{rank.get(ticket.key)}·W{ticket.wave}</span>
+                          <span className={cn('flex justify-between gap-1 whitespace-nowrap font-mono text-[11px]', done ? 'font-semibold text-secondary-foreground' : 'font-bold text-foreground')}>
+                            <span>{done && <span className="text-status-merged">✓ </span>}{ticket.key.replace(/^[A-Z]+-/, '')}</span>
+                            {ticket.rank !== null && <span className="font-medium text-muted-foreground">#{ticket.rank}</span>}
                           </span>
-                          <span className="line-clamp-2 block text-[10px] leading-tight text-secondary-foreground">{plainSummary(ticket.summary)}</span>
+                          <span className="block truncate text-[11px] leading-tight text-secondary-foreground">{plainSummary(ticket.summary)}</span>
+                          {bar.ahead
+                            ? <span className="mt-px inline-flex max-w-full items-center gap-[3px] rounded-xs bg-[var(--color-status-warn-pill)] px-[5px] font-mono text-[10px] font-semibold text-[var(--color-status-warn-ink)]"><AlertTriangle size={11} className="flex-none" aria-hidden="true" /><span className="truncate">{bar.ahead}</span></span>
+                            : <span className={cn('mt-px block truncate font-mono text-[10px] font-semibold', bar.late ? 'text-status-conflict' : 'text-muted-foreground')}>{bar.third}</span>}
                         </button>
                       );
                     })}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
           <div className="min-h-[72px] border-t border-border bg-surface-1 px-4 py-3" aria-live="polite">
@@ -350,12 +426,14 @@ const TeamPanel: React.FC<{ draft: SprintDraft }> = ({ draft }) => {
               <div className="grid gap-2">
                 <div className="flex items-start gap-2">
                   <p className="min-w-0 flex-1 font-mono text-[0.68rem] text-muted-foreground">
-                    <b className="text-[0.74rem]" style={{ color: color(selected.dev) }}>{selected.key}</b> · {selected.dev ?? UNASSIGNED} · {selected.sp ?? '?'} SP · wave {selected.wave} · #{rank.get(selected.key)}
+                    <b className="text-[0.74rem]" style={{ color: color(selected.dev) }}>{selected.key}</b> · {selected.dev ?? UNASSIGNED} · {selected.sp ?? '?'} SP · wave {selected.wave}{selected.rank !== null && ` · #${selected.rank}`}
                   </p>
                   <Button size="sm" variant="ghost" onClick={() => setPicked(null)} aria-label="Close the card details"><X size={13} aria-hidden="true" /></Button>
                 </div>
                 <h4 className="text-balance font-display text-[0.95rem] font-semibold">{selected.summary}</h4>
-                <p className="text-pretty text-[0.8rem] text-secondary-foreground">Starts {starts(selected.start)}, lands {lands(selected.end)}.{after(selected) && <b className="text-foreground"> Runs past the sprint.</b>}</p>
+                {selected.merged
+                  ? <p className="text-pretty text-[0.8rem] text-secondary-foreground">Merged. The plan had it at {planRange(selected, labels)}.</p>
+                  : <p className="text-pretty text-[0.8rem] text-secondary-foreground">Starts {starts(selected.start)}, lands {lands(selected.end)}.{after(selected) && <b className="text-foreground"> Runs past the sprint.</b>}</p>}
                 <div className="flex flex-wrap gap-x-5 gap-y-2 text-[0.72rem] text-muted-foreground">
                   <div className="flex flex-wrap items-center gap-1.5"><b className="font-mono text-[0.6rem] uppercase tracking-[0.07em]">Waits on</b>{waitsOn.length ? waitsOn.map((key) => keyChip(key, true)) : <span>nothing in the plan</span>}</div>
                   <div className="flex flex-wrap items-center gap-1.5"><b className="font-mono text-[0.6rem] uppercase tracking-[0.07em]">Waiting on it</b>{waiting.length ? waiting.map((key) => keyChip(key)) : <span>nothing in the plan</span>}</div>
@@ -370,12 +448,19 @@ const TeamPanel: React.FC<{ draft: SprintDraft }> = ({ draft }) => {
             )}
           </div>
         </div>
+        {hoverBar && hover && <PlanHover id={hoverId} anchor={hover.anchor} bar={hoverBar} color={color(hoverBar.ticket.dev)} labels={labels} spPerDay={draft.spPerDay} mergeSource={draft.mergeSource} />}
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[0.7rem] text-muted-foreground">
           <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] border border-status-conflict bg-status-conflict-bg shadow-[inset_3px_0_0_var(--color-status-conflict)]" aria-hidden="true" />red left edge = open question</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-l-4 border-dashed border-secondary-foreground" style={{ borderLeftStyle: 'solid' }} aria-hidden="true" />To Do, no PR yet</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-l-4 border-secondary-foreground bg-surface-2" aria-hidden="true" />in progress, PR open</span>
+          <span className="inline-flex items-center gap-1.5"><span className="inline-flex items-center gap-[3px] rounded-xs bg-[var(--color-status-warn-pill)] px-1 font-mono text-[0.6rem] font-semibold text-[var(--color-status-warn-ink)]"><AlertTriangle size={10} aria-hidden="true" />Jira says</span>Jira past merge, PR still open</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-l-4 border-border" aria-hidden="true" />✓ merged</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-l-4 border-status-conflict" style={{ borderLeftColor: 'var(--color-secondary-foreground)' }} aria-hidden="true" />late: not merged, its plan days have passed</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] outline outline-1 outline-dashed outline-status-discord" aria-hidden="true" />moved in this draft</span>
           <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-0.5 bg-foreground" aria-hidden="true" />{dueLabel}</span>
           <span className="inline-flex items-center gap-1.5"><span className="h-2.5 border-l-2 border-dashed" style={{ borderColor: forecastColor }} aria-hidden="true" />{forecastLabel}</span>
-          {today && <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-0.5 bg-accent" aria-hidden="true" />today</span>}
-          <span className="inline-flex items-center gap-1.5"><span className="rounded-xs border border-secondary-foreground px-1 font-mono text-[0.6rem] font-semibold text-secondary-foreground">#1·W1</span>owner's first card, wave 1</span>
+          {planToday && <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-0.5 bg-status-discord" aria-hidden="true" />today</span>}
+          <span className="inline-flex items-center gap-1.5"><span className="rounded-xs border border-secondary-foreground px-1 font-mono text-[0.6rem] font-semibold text-secondary-foreground">#1</span>the card's #N label in Jira: first in its owner's plan</span>
           <span>1 SP = {fmt(1 / draft.spPerDay)} day</span>
         </div>
       </section>
@@ -697,10 +782,13 @@ export const PlanningTab: React.FC = () => {
   const [checkStoryboards, checking] = useMutation(CHECK_SPRINT_STORYBOARDS);
   const [answerQuestion, answering] = useMutation(ANSWER_SPRINT_DRAFT_QUESTION);
   const [saveTcs, savingTcs] = useMutation(SET_SPRINT_DRAFT_TCS);
+  const [moveCards, moving] = useMutation(MOVE_SPRINT_DRAFT_CARDS);
   const [publish, publishing] = useMutation(PUBLISH_SPRINT_DRAFT);
   const [preview, previewing] = useLazyQuery<{ previewSprintDraftPublish: DraftChange[] }>(PREVIEW_SPRINT_DRAFT_PUBLISH, { fetchPolicy: 'network-only' });
-  const draft = draftQuery.data?.sprintDraft ?? null;
-  const busy = loading.loading || updating.loading || deciding.loading || refreshing.loading || publishing.loading || checking.loading || answering.loading || savingTcs.loading;
+  const full = draftQuery.data?.sprintDraft ?? null;
+  // Merged cards are on the plan only: every panel works on the cards still to build, the schedule draws them all.
+  const draft = full && { ...full, tickets: scheduled(full.tickets) };
+  const busy = loading.loading || updating.loading || deciding.loading || refreshing.loading || publishing.loading || checking.loading || answering.loading || savingTcs.loading || moving.loading;
 
   const run = (work: Promise<unknown>, fallback: string) => {
     setNotice(null);
@@ -723,6 +811,7 @@ export const PlanningTab: React.FC = () => {
       return false;
     }
   };
+  const onMove = (keys: string[], to: string) => draft && run(moveCards({ variables: { sprint: draft.sprint, keys, to } }), 'The cards could not be moved');
   const onAnswer = (id: string, answered: boolean) => draft && run(answerQuestion({ variables: { sprint: draft.sprint, id, answered } }), 'The question could not be saved');
   const onPublish = async () => {
     if (!draft) return;
@@ -751,12 +840,11 @@ export const PlanningTab: React.FC = () => {
   const storyboardChecks = draft ? uncheckedStoryboard(draft).length : 0;
 
   return (
-    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
-    <PlanningChat sprint={chosen.name} />
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-5">
       <div className="flex flex-wrap items-center gap-3">
         <Select aria-label="Sprint to plan" className="w-[260px] max-[760px]:w-full" value={String(chosen.id)} onValueChange={(value) => setSprintId(Number(value))} options={options.map((sprint) => ({ value: String(sprint.id), label: `${sprint.name}${sprint.state === 'active' ? ' (active)' : ''}` }))} />
         <Button onClick={onLoad} disabled={busy}><Download size={14} aria-hidden="true" />{loading.loading ? 'Loading...' : draft ? 'Load again from Jira' : 'Load from Jira'}</Button>
+        <PlanningChat sprint={chosen.name} />
         {draft && <span className={cn(chip, draft.status === 'published' ? TONE.ok : 'border-accent text-accent')}>{draft.status === 'published' ? 'Published' : 'Draft'}</span>}
         {draft && (
           <Button className="ml-auto max-[760px]:ml-0 max-[760px]:w-full" variant="primary" onClick={() => void onPublish()} disabled={busy || !draft.canPublish} title={publishHint(draft)}>
@@ -791,12 +879,12 @@ export const PlanningTab: React.FC = () => {
               </button>
             ))}
           </div>
-          {panel === 'team' && <TeamPanel draft={draft} />}
+          {panel === 'team' && <TeamPanel draft={draft} plan={full?.tickets ?? []} busy={busy} onMove={onMove} />}
           {panel === 'scope' && <ScopePanel draft={draft} busy={busy} onChange={onChange} />}
           {panel === 'ac' && <AcPanel draft={draft} busy={busy} onDecide={onDecide} />}
           {panel === 'qa' && <QaPanel draft={draft} busy={busy} onDecide={onDecide} onRefresh={onRefreshQa} />}
           {panel === 'tc' && <TcPanel draft={draft} busy={busy} onSave={onSaveTcs} />}
-          {panel === 'storyboard' && <StoryboardPanel draft={draft} busy={busy} onCheck={onCheckStoryboards} onDecide={onDecide} />}
+          {panel === 'storyboard' && <StoryboardBoard draft={draft} busy={busy} onCheck={onCheckStoryboards} onDecide={onDecide} />}
         </>
       )}
       <PublishDialog
@@ -810,7 +898,6 @@ export const PlanningTab: React.FC = () => {
         onConfirm={() => void onConfirm()}
         onClose={() => setPublishOpen(false)}
       />
-    </div>
     </div>
   );
 };

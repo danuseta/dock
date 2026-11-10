@@ -75,11 +75,11 @@ export class GitHubAPI {
   }
 
   /** The cached pull requests of a ticket, without any GitHub call; null on a cache miss. */
-  async cachedPullRequestsForTicket(ticketKey: string): Promise<Array<{ url: string; status: string; owner: string; repo: string; number: number }> | null> {
+  async cachedPullRequestsForTicket(ticketKey: string): Promise<Array<{ url: string; status: string; owner: string; repo: string; number: number; title: string; headBranch: string }> | null> {
     const auth = await this.getAuth();
     if (!auth.hasToken || !auth.repos) return null;
     const items = await this.githubService.cachedPRs(auth.headers.Authorization.replace('Bearer ', ''), auth.repos.split(',').map((repo: string) => repo.trim()).filter(Boolean), ticketKey);
-    return items && items.map((pr: any) => ({ url: pr.url || pr.html_url || '', status: pr.status || 'open', owner: pr.owner, repo: pr.repo, number: pr.number || pr.pullNumber }));
+    return items && items.map((pr: any) => ({ url: pr.url || pr.html_url || '', status: pr.status || 'open', owner: pr.owner, repo: pr.repo, number: pr.number || pr.pullNumber, title: pr.title || '', headBranch: pr.headBranch || pr.head?.ref || '' }));
   }
 
   /** A fresh search; `complete` is false when a pull request was dropped because it could not be enriched. */

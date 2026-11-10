@@ -5,7 +5,7 @@
 import { acFindings, findingId, isDoneStatus, normalizeAcLine } from './ac-scope';
 import type { PlanningIssue } from './jira-sprint';
 import { SprintInputError } from './sprint-dashboard';
-import { acValueLines, rewriteAcValue, type DraftJira, type DraftStore, type DraftView } from './sprint-draft';
+import { acValueLines, openTickets, rewriteAcValue, type DraftJira, type DraftStore, type DraftView } from './sprint-draft';
 import { workingDayOf } from './scope-cut';
 import { MOVE_MARKER, MOVE_PENDING_LABEL, moveAnswer, moveId, type AcMoveJira } from './ac-move';
 
@@ -75,7 +75,7 @@ export class AcDriftService {
     const [row, view] = await Promise.all([this.store.getSprintDraft(sprint), this.view(sprint)]);
     if (!row || !view || row.status !== 'published') return null;
     const jiraAc = new Map(row.tickets.map((ticket) => [ticket.key, parse<string[]>(ticket.jiraAc, [])]));
-    return { row, view, jiraAc, decisions: parse<Record<string, DriftDecision>>((row as { drift?: string }).drift, {}) };
+    return { row, view: { ...view, tickets: openTickets(view) }, jiraAc, decisions: parse<Record<string, DriftDecision>>((row as { drift?: string }).drift, {}) };
   }
 
   /** Null when the sprint was not published from Planning. */

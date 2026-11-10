@@ -14,7 +14,8 @@ import { StorageService } from '../storage/service';
 import { activeSprint } from '../integrations/sprint-plan';
 import { lookupDependencies } from '../integrations/dependency-lookup';
 import { sprintPlanner } from '../integrations/sprint-plan-live';
-import { acDriftService, acInService, sprintDraftService } from '../integrations/sprint-draft-live';
+import { acDriftService, acInService, sprintDraftService, storyboardReader } from '../integrations/sprint-draft-live';
+import { StoryboardMissing, StoryboardRefused } from '../integrations/storyboard';
 import { planningChatPrompt, planningChatTitle } from '../integrations/planning-ingest';
 import { isSettledStatus, mergeAttention, planAttentionItems, withoutSettledTickets } from '../integrations/attention';
 import { discordGateway, discordReader } from '../integrations/discord-reader-live';
@@ -237,6 +238,23 @@ function planningError(error: unknown): never {
   if (status) throw new GraphQLError(`Jira responded ${status}`, { extensions: { code: 'BAD_GATEWAY' } });
   throw error;
 }
+
+/** Saves an uploaded storyboard version, hands it to every draft holding the epic, and returns this sprint's draft. */
+async function uploadStoryboard(sprint: string, epic: string, html: string) {
+  try {
+    const before = await sprintDraftService.view(sprint);
+    if (!before) throw new SprintInputError(`No draft for ${sprint}; load it from Jira first`);
+    const key = epic.trim().toUpperCase();
+    if (!before.tickets.some((ticket) => ticket.epic === key) && !before.storyboards.some((board) => board.epic === key)) throw new SprintInputError(`No ticket of ${sprint} belongs to ${key}`);
+    await sprintDraftService.applyStoryboard(await storyboardReader.upload(key, html));
+    return (await sprintDraftService.view(sprint))!;
+  } catch (error) {
+    if (error instanceof StoryboardRefused || error instanceof StoryboardMissing) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+    return planningError(error);
+  }
+}
+
+const storyboardUrl = (epic: string, version: number | null) => (version ? `/api/storyboard/${encodeURIComponent(epic)}/v${version}.html` : null);
 
 async function qaLocalState(ticketKey?: string | null) {
   if (!qaAvailable()) return { available: false, autoRun: false, trigger: null, run: null };
@@ -657,7 +675,9 @@ export const resolvers = {
     ),
     refreshSprintDraftQa: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.refreshQa(sprint).catch(planningError),
     checkSprintStoryboards: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.checkStoryboards(sprint).catch(planningError),
+    uploadSprintStoryboard: (_: unknown, { sprint, epic, html }: { sprint: string; epic: string; html: string }) => uploadStoryboard(sprint, epic, html),
     setSprintDraftTcs: (_: unknown, { sprint, key, tcs }: { sprint: string; key: string; tcs: unknown[] }) => sprintDraftService.setTcs(sprint, key, tcs).catch(planningError),
+    moveSprintDraftCards: (_: unknown, { sprint, keys, to }: { sprint: string; keys: string[]; to: string }) => sprintDraftService.moveCards(sprint, keys, to).catch(planningError),
     answerSprintDraftQuestion: (_: unknown, { sprint, id, answered }: { sprint: string; id: string; answered: boolean }) => (
       sprintDraftService.answer(sprint, id, answered, reporterName()).catch(planningError)
     ),
@@ -1047,6 +1067,11 @@ export const resolvers = {
   DiscordChannel: {
     team: (channel: { team?: boolean }) => Boolean(channel.team),
   },
+  SprintStoryboard: {
+    scenarios: (board: { scenarios?: unknown[] }) => board.scenarios ?? [],
+    htmlUrl: (board: { epic: string; version: number | null; error: string | null }) => storyboardUrl(board.epic, board.version),
+    previousHtmlUrl: (board: { epic: string; previous: number | null }) => storyboardUrl(board.epic, board.previous),
+  },
   ChatMessage: {
     attachments: (message: { attachments?: unknown[] }) => message.attachments ?? [],
   },
@@ -1070,8 +1095,10 @@ export const protectedMutations = [
   'decideSprintDraft',
   'refreshSprintDraftQa',
   'checkSprintStoryboards',
+  'uploadSprintStoryboard',
   'answerSprintDraftQuestion',
   'setSprintDraftTcs',
+  'moveSprintDraftCards',
   'publishSprintDraft',
   'sprintDriftAction',
   'acInAction',

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { computeWaves, planStart, remainingSp, scheduleSprint, splitParts, workingDayOf, workingDays, type ScopeTicket } from '../integrations/scope-cut';
+import { computeWaves, endDay, planLayout, planStart, rankOf, remainingSp, scheduleSprint, splitParts, suggestMoves, workingDayOf, workingDays, type ScopeTicket } from '../integrations/scope-cut';
 
 interface PlanRow { key: string; dev: string; sp: number; wave: number; dep: string[]; st: number; dur: number }
 const sprint26 = JSON.parse(readFileSync(resolve(__dirname, 'fixtures/sprint26-plan.json'), 'utf8')) as { sprintDays: number; tasks: PlanRow[] };
@@ -123,4 +123,69 @@ test('a ticket with work left takes only those days on its lane', () => {
     { key: 'B', dev: 'Danu', sp: 4, left: null, dependsOn: ['A'] },
   ], { sprintDays: 10, spPerDay: 2 });
   assert.deepEqual(rows.map((row) => [row.key, row.start, row.end]), [['A', 0, 0.5], ['B', 0.5, 2.5]]);
+});
+
+test('Sprint 26 on day 11: the To Do chain QRD-1278 and QRD-1290 moves from Shovian to the free lane and the forecast gets earlier', () => {
+  const rows: Array<[string, string, string, number, string[]?]> = [
+    ['QRD-1509', 'Shovian', 'In Progress', 5], ['QRD-1304', 'Shovian', 'PR Review', 1], ['QRD-1293', 'Shovian', 'PR Review', 1],
+    ['QRD-1290', 'Shovian', 'To Do', 2, ['QRD-1278']], ['QRD-1278', 'Shovian', 'To Do', 3], ['QRD-1273', 'Shovian', 'To Do', 2],
+    ['QRD-1490', 'Aken', 'In Progress', 8], ['QRD-1484', 'Aken', 'PR Review', 3], ['QRD-1303', 'Aken', 'UAT BUG / Improvement', 3], ['QRD-1350', 'Aken', 'To Do', 2],
+    ['QRD-1427', 'Alvin', 'In Progress', 4], ['QRD-1424', 'Alvin', 'PR Review', 2], ['QRD-1308', 'Alvin', 'In Progress', 3], ['QRD-1306', 'Alvin', 'UAT BUG / Improvement', 3], ['QRD-1287', 'Alvin', 'In Progress', 2],
+    ['QRD-1310', 'Dwi Indra', 'PR Review', 2], ['QRD-1309', 'Dwi Indra', 'UAT BUG / Improvement', 3],
+    ['QRD-1515', 'Yusril', 'In Progress', 3], ['QRD-1501', 'Yusril', 'PR Review', 3], ['QRD-1496', 'Yusril', 'PR Review', 3],
+  ];
+  const tickets = rows.map(([key, dev, status, sp, dependsOn = []]) => ({ key, dev, status, sp, left: remainingSp(sp, status, 2), dependsOn, merge: status === 'To Do' ? 'none' : 'open' }));
+  const developers = ['Aken', 'Alvin', 'Dwi Indra', 'M Danu Seta W', 'Shovian', 'Yusril'];
+  const options = { developers, sprintDays: 12, spPerDay: 2, from: 10 };
+  const forecast = (plan: typeof tickets) => endDay(Math.max(...scheduleSprint(plan, options).map((row) => row.end)), 10);
+  const moves = suggestMoves(tickets, options);
+  assert.ok(moves.length >= 1);
+  const [first] = moves;
+  assert.deepEqual([first.keys, first.from, first.to, first.improves], [['QRD-1278', 'QRD-1290'], 'Shovian', 'M Danu Seta W', true]);
+  assert.equal(first.sp, 5);
+  assert.equal(first.forecastBefore, forecast(tickets));
+  assert.ok(first.forecastAfter < first.forecastBefore);
+  const moved = tickets.map((ticket) => (first.keys.includes(ticket.key) ? { ...ticket, dev: first.to } : ticket));
+  assert.equal(first.forecastAfter, forecast(moved));
+  const open = new Set(rows.filter(([, , status]) => status !== 'To Do').map(([key]) => key));
+  for (const move of moves) {
+    assert.ok(move.keys.every((key) => !open.has(key)), `${move.keys} holds a card already under way`);
+    assert.ok(move.forecastAfter < move.forecastBefore);
+  }
+  assert.ok(!moves.some((move) => move.keys.includes('QRD-1273')), 'QRD-1273 alone does not bring the forecast earlier');
+});
+
+test('a To Do card with an open pull request, or a lane already ending with the others, is never suggested', () => {
+  const options = { developers: ['Ana', 'Budi'], spPerDay: 2 };
+  assert.deepEqual(suggestMoves([{ key: 'QRD-1', dev: 'Ana', status: 'To Do', sp: 8, dependsOn: [], merge: 'open' }], options), []);
+  assert.deepEqual(suggestMoves([
+    { key: 'QRD-1', dev: 'Ana', status: 'To Do', sp: 4, dependsOn: [], merge: 'none' },
+    { key: 'QRD-2', dev: 'Budi', status: 'In Progress', sp: 4, dependsOn: [], merge: 'none' },
+  ], options), []);
+});
+
+test('a card plan rank is the number of its #N label', () => {
+  assert.equal(rankOf(['V2-Playbook', '#7']), 7);
+  assert.equal(rankOf([' #12 ', '#3']), 12);
+  assert.equal(rankOf(['#', '#x', 'rank#2', '7']), null);
+  assert.equal(rankOf([]), null);
+});
+
+test('the plan lays every card of a developer by rank, back to back from day 1 at its full SP', () => {
+  const plan = planLayout([
+    { key: 'QRD-30', dev: 'Ana', sp: 3, rank: 2 },
+    { key: 'QRD-10', dev: 'Ana', sp: 2, rank: null },
+    { key: 'QRD-9', dev: 'Ana', sp: 1, rank: null },
+    { key: 'QRD-20', dev: 'Ana', sp: 4, rank: 1 },
+    { key: 'QRD-40', dev: 'Budi', sp: 5, rank: 1 },
+    { key: 'QRD-50', dev: null, sp: null, rank: null },
+  ], { spPerDay: 2 });
+  assert.deepEqual(plan, [
+    { key: 'QRD-20', planStart: 0, planDur: 2 },
+    { key: 'QRD-40', planStart: 0, planDur: 2.5 },
+    { key: 'QRD-30', planStart: 2, planDur: 1.5 },
+    { key: 'QRD-9', planStart: 3.5, planDur: 0.5 },
+    { key: 'QRD-10', planStart: 4, planDur: 1 },
+    { key: 'QRD-50', planStart: 0, planDur: 0 },
+  ]);
 });

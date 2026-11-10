@@ -757,10 +757,17 @@ export const SPRINT_DRAFT_FIELDS = `
     epic frames
     storyboard { version frames held checked { action note by at } }
     tcs { id ac title steps expected } tcStale tcPending
+    merge pulls jiraAhead merged rank planStart planDur
   }
   findings { id key line text refKey kind refEnd ownEnd decision { action note by at } }
-  storyboards { epic version previous path page frames changed changedAt checkedAt error }
+  storyboards {
+    epic version previous path page frames changed changedAt checkedAt error htmlUrl previousHtmlUrl
+    scenarios { n title groups { title flows { id title tickets info changed frames { index title step changed } } } }
+  }
   questions { id text key askedAt answered answeredBy answeredAt }
+  developers { name merged open sp leftSp end }
+  mergeSource
+  moves { keys from to sp forecastBefore forecastAfter improves }
 `;
 
 export const GET_PLANNING_SPRINTS = gql`
@@ -790,6 +797,12 @@ export const LOAD_SPRINT_DRAFT = gql`
 export const UPDATE_SPRINT_DRAFT_TICKET = gql`
   mutation UpdateSprintDraftTicket($sprint: String!, $key: String!, $dev: String, $wave: Int, $sp: Float, $ac: [String!]) {
     updateSprintDraftTicket(sprint: $sprint, key: $key, dev: $dev, wave: $wave, sp: $sp, ac: $ac) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const MOVE_SPRINT_DRAFT_CARDS = gql`
+  mutation MoveSprintDraftCards($sprint: String!, $keys: [String!]!, $to: String!) {
+    moveSprintDraftCards(sprint: $sprint, keys: $keys, to: $to) { ${SPRINT_DRAFT_FIELDS} }
   }
 `;
 
@@ -856,6 +869,12 @@ export const ANSWER_SPRINT_DRAFT_QUESTION = gql`
 export const CHECK_SPRINT_STORYBOARDS = gql`
   mutation CheckSprintStoryboards($sprint: String!) {
     checkSprintStoryboards(sprint: $sprint) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const UPLOAD_SPRINT_STORYBOARD = gql`
+  mutation UploadSprintStoryboard($sprint: String!, $epic: String!, $html: String!) {
+    uploadSprintStoryboard(sprint: $sprint, epic: $epic, html: $html) { ${SPRINT_DRAFT_FIELDS} }
   }
 `;
 
