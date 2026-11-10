@@ -6,6 +6,8 @@ export interface ScopeTicket {
   key: string;
   dev: string | null;
   sp: number | null;
+  /** SP still to do, which sets the ticket's days on the lane; the full SP when left out. */
+  left?: number | null;
   /** 1 for a ticket with no dependency in the plan; null computes it from the dependencies. */
   wave?: number | null;
   /** Keys of the plan's tickets this one waits for; keys outside the plan are ignored. */
@@ -74,6 +76,28 @@ function downstreamCounts(tickets: ScopeTicket[]): Map<string, number> {
   return counts;
 }
 
+/** Half a working day: what a ticket in review or in a UAT bug round still needs. */
+const REVIEW_DAYS_LEFT = 0.5;
+const letters = (status: string | null | undefined) => String(status ?? '').toLowerCase().replace(/[^a-z]/g, '');
+
+/**
+ * SP still to do on an open ticket of a sprint already under way, by its Jira status compared letters only: PR Review
+ * and UAT BUG / Improvement need half a day, In Progress half its SP, To Do and anything else all of it. Null without SP.
+ */
+export function remainingSp(sp: number | null, status: string | null | undefined, spPerDay = DEFAULT_SP_PER_DAY): number | null {
+  if (sp === null || !Number.isFinite(sp)) return null;
+  const full = Math.max(0, sp);
+  switch (letters(status)) {
+    case 'prreview':
+    case 'uatbugimprovement':
+      return round(Math.min(full, REVIEW_DAYS_LEFT * (spPerDay > 0 ? spPerDay : DEFAULT_SP_PER_DAY)));
+    case 'inprogress':
+      return round(full / 2);
+    default:
+      return full;
+  }
+}
+
 export function splitParts(sp: number | null): number[] | null {
   if (sp === null || sp < SPLIT_FROM_SP) return null;
   const parts: number[] = [];
@@ -114,7 +138,8 @@ export function scheduleSprint(tickets: ScopeTicket[], options: { sprintDays?: n
     queues.get(lane)!.shift();
     const depsEnd = Math.max(0, ...ticket.dependsOn.map((dep) => ends.get(dep) ?? 0));
     const start = round(Math.max(free.get(lane) ?? from, depsEnd, from));
-    const dur = round((ticket.sp && ticket.sp > 0 ? ticket.sp : 0) / spPerDay);
+    const work = ticket.left ?? ticket.sp;
+    const dur = round((work && work > 0 ? work : 0) / spPerDay);
     const end = round(start + dur);
     ends.set(ticket.key, end);
     free.set(lane, end);

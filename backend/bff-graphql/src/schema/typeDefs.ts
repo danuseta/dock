@@ -605,6 +605,8 @@ export const typeDefs = gql`
     """The assignee Jira held at load or last publish."""
     jiraDev: String
     sp: Float
+    "SP still to do by status once the sprint is under way; null before day 1 or on a published plan."
+    left: Float
     wave: Int!
     """True when the planner set the wave; false when it comes from the dependencies."""
     waveSet: Boolean!

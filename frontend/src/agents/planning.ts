@@ -6,7 +6,10 @@ export interface QaPrediction { prediction: string; reasons: string[]; fix: stri
 export interface StoryboardFlag { version: number; frames: string[]; held: boolean; checked: DraftDecision | null }
 export interface DraftTc { id: string; ac: number; title: string; steps: string[]; expected: string }
 export interface DraftTicket {
-  key: string; summary: string; dev: string | null; jiraDev: string | null; sp: number | null; wave: number; waveSet: boolean; status: string;
+  key: string; summary: string; dev: string | null; jiraDev: string | null; sp: number | null;
+  /** SP still to do by status once the sprint is under way; null before day 1 or on a published plan. */
+  left?: number | null;
+  wave: number; waveSet: boolean; status: string;
   ac: string[]; dependsOn: string[]; start: number; dur: number; end: number; inSprint: boolean; split: number[] | null;
   prediction: QaPrediction | null; qaDecision: DraftDecision | null; epic: string | null; frames: string[]; storyboard: StoryboardFlag | null;
   tcs: DraftTc[]; tcStale: boolean; tcPending: boolean;
@@ -89,7 +92,7 @@ export function devColors(names: string[]): Map<string, string> {
 /** A colour's soft fill for a card. */
 export const softColor = (color: string) => `color-mix(in oklch, ${color} 16%, transparent)`;
 
-export interface Lane { dev: string; color: string; sp: number; tickets: DraftTicket[]; backlog: number; inSprintSp: number; end: number }
+export interface Lane { dev: string; color: string; sp: number; left: number; tickets: DraftTicket[]; backlog: number; inSprintSp: number; end: number }
 
 /** One lane per developer, in the draft's order, and an Unassigned lane last when a ticket has no developer. */
 export function lanes(draft: Pick<SprintDraft, 'devs' | 'tickets'>): Lane[] {
@@ -98,7 +101,7 @@ export function lanes(draft: Pick<SprintDraft, 'devs' | 'tickets'>): Lane[] {
   return names.map((dev) => {
     const tickets = draft.tickets.filter((ticket) => (ticket.dev ?? UNASSIGNED) === dev).sort((a, b) => a.start - b.start || a.key.localeCompare(b.key, undefined, { numeric: true }));
     return {
-      dev, color: colors.get(dev) ?? UNASSIGNED_COLOR, sp: sum(tickets.map((ticket) => ticket.sp)), tickets, backlog: tickets.filter((ticket) => !ticket.inSprint).length,
+      dev, color: colors.get(dev) ?? UNASSIGNED_COLOR, sp: sum(tickets.map((ticket) => ticket.sp)), left: sum(tickets.map((ticket) => ticket.left ?? ticket.sp)), tickets, backlog: tickets.filter((ticket) => !ticket.inSprint).length,
       inSprintSp: sum(tickets.filter((ticket) => ticket.inSprint).map((ticket) => ticket.sp)), end: Math.max(0, ...tickets.map((ticket) => ticket.end)),
     };
   });
@@ -164,6 +167,31 @@ export function teamStats(draft: Pick<SprintDraft, 'devs' | 'tickets'>) {
 
 /** The 1-based day a ticket ending at `end` lands on: ending at 2.5 lands on day 3, at 3 on day 3. */
 export const landingDay = (end: number) => Math.max(1, Math.ceil(end - 1e-9));
+
+/** True when the BFF counted the work left by status: an active sprint after day 1. */
+export const underWay = (draft: Pick<SprintDraft, 'tickets'>) => draft.tickets.some((ticket) => ticket.left !== null && ticket.left !== undefined);
+
+/** Working days the forecast lands after the due day: positive is late, negative early, 0 on time. */
+export const lateDays = (dueDay: number, forecastDay: number) => forecastDay - dueDay;
+
+/** "3 working days late", "on time" or "2 days early". */
+export function lateText(late: number): string {
+  if (late === 0) return 'on time';
+  const n = Math.abs(late);
+  return late > 0 ? `${n} working ${n === 1 ? 'day' : 'days'} late` : `${n} ${n === 1 ? 'day' : 'days'} early`;
+}
+
+export interface Forecast { due: number; day: number; end: number; late: number }
+
+/** The sprint's due day, the day the last lane lands and how late that is, in working days of the plan. */
+export function forecastOf(draft: Pick<SprintDraft, 'sprintDays' | 'tickets'>): Forecast {
+  const end = Math.max(0, ...draft.tickets.map((ticket) => ticket.end));
+  const day = landingDay(end);
+  return { due: draft.sprintDays, day, end, late: lateDays(draft.sprintDays, day) };
+}
+
+/** "Wed 11 Nov" as "11 Nov". */
+export const shortDate = (label: string) => label.replace(/^[A-Z][a-z]{2} /, '');
 
 /** Where a bar sits on a lane, in percent of the span. */
 export const barPlace = (ticket: Pick<DraftTicket, 'start' | 'dur'>, span: number) => ({

@@ -322,3 +322,22 @@ test('an active sprint loaded after its start lays open tickets from today, with
   assert.deepEqual([view.startDate, view.sprintDays, view.today], ['2026-10-26T16:00:00.000Z', 12, 7]);
   assert.deepEqual(view.tickets.map((ticket) => [ticket.key, ticket.start, ticket.end]), [['QRD-1', 6, 7], ['QRD-2', 7, 8]]);
 });
+
+test('mid-sprint the lanes count the work left by status; a future sprint keeps the full SP', async () => {
+  const issues = () => [
+    issue('QRD-1', { sp: 4, status: 'PR Review' }), issue('QRD-2', { sp: 4, status: 'In Progress' }), issue('QRD-3', { sp: 4, status: 'To Do' }),
+  ];
+  const store = new MemoryStore();
+  const jira = new FakeJira(issues());
+  jira.listSprints = async () => [{ ...SPRINT, state: 'active', startDate: '2026-10-27T01:00:00.000Z', endDate: '2026-11-11T14:00:00.000Z' }];
+  const service = new SprintDraftService(store, async () => jira, predictions({}), () => new Date('2026-11-04T03:00:00Z'));
+  const view = await service.load(26, 'Danu');
+  const byKey = new Map(view.tickets.map((ticket) => [ticket.key, ticket]));
+  assert.deepEqual(['QRD-1', 'QRD-2', 'QRD-3'].map((key) => [byKey.get(key)!.sp, byKey.get(key)!.left, byKey.get(key)!.dur]), [[4, 1, 0.5], [4, 2, 1], [4, 4, 2]]);
+
+  const futureStore = new MemoryStore();
+  const future = new FakeJira(issues());
+  const planning = new SprintDraftService(futureStore, async () => future, predictions({}), () => new Date('2026-10-20T03:00:00Z'));
+  const plan = await planning.load(26, 'Danu');
+  assert.deepEqual(plan.tickets.map((ticket) => [ticket.key, ticket.left, ticket.dur]).sort(), [['QRD-1', null, 2], ['QRD-2', null, 2], ['QRD-3', null, 2]]);
+});

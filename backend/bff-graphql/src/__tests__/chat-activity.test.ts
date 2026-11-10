@@ -488,7 +488,7 @@ test('deleting a session or trimming its messages takes the activity of those tu
 test('the ingest route shares the token rules, answers 404 and 400 as delta does and refuses a large body', async (t) => {
   const { storage, ChatService, OrchestratorService, PinRateLimiter, createOrchestratorIngestRouter, session, rows } = await world();
   const orchestrator = new OrchestratorService(storage, os.tmpdir());
-  const chat = new ChatService(storage);
+  const chat = new ChatService(storage, () => new Date(NOW));
   const laptopToken = (await orchestrator.createToken('activity-laptop', 'laptop')).token;
   const workspaceToken = (await orchestrator.createToken('activity-workspace', 'workspace')).token;
   const app = express();
