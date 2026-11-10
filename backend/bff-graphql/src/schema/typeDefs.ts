@@ -631,10 +631,17 @@ export const typeDefs = gql`
     tcPending: Boolean!
     "GitHub merge state of the ticket's pull requests: merged | open | none | unknown"
     merge: String!
-    "Pull requests found for the ticket, as owner/repo#number"
+    "Pull requests found for the ticket, as owner/repo#number · merged|open|closed"
     pulls: [String!]!
     "Jira already says past merge while a pull request is still open"
     jiraAhead: Boolean!
+    "Past merge: drawn on the plan only; the schedule, AC check, QA and publish use the other tickets"
+    merged: Boolean!
+    "The number of the ticket's #N label in Jira, its place in the owner's plan; null without one"
+    rank: Int
+    "Where the plan puts the ticket: by rank on its owner's lane, back to back from day 1, at its full SP"
+    planStart: Float!
+    planDur: Float!
   }
 
   "An assignee of the sprint, also when every card of theirs is merged. end is the working day their lane ends; null when nothing is open."

@@ -40,11 +40,12 @@ export interface PlanningIssue {
   epic?: string | null;
   /** The description as Jira returned it (ADF or text). */
   descriptionRaw?: unknown;
+  labels: string[];
 }
 
 export const AC_FIELD = 'customfield_10332';
 const SP_FIELDS = ['story_points', 'customfield_10016', 'customfield_10028', 'customfield_10034'];
-const PLANNING_FIELDS = ['summary', 'issuetype', 'status', 'assignee', 'issuelinks', 'parent', 'description', AC_FIELD, ...SP_FIELDS];
+const PLANNING_FIELDS = ['summary', 'issuetype', 'status', 'assignee', 'issuelinks', 'parent', 'description', 'labels', AC_FIELD, ...SP_FIELDS];
 
 const TRACKED_FIELDS = new Set(['status', 'labels', 'Sprint', 'Story point estimate', 'assignee']);
 const ISSUE_FIELDS = [
@@ -139,6 +140,7 @@ export function planningIssue(issue: any): PlanningIssue {
     links: blockLinks(fields.issuelinks),
     epic: typeof fields.parent?.key === 'string' ? fields.parent.key : null,
     descriptionRaw: fields.description ?? null,
+    labels: Array.isArray(fields.labels) ? fields.labels.filter((label: unknown): label is string => typeof label === 'string') : [],
   };
 }
 

@@ -12,7 +12,7 @@ const KEPT_EVENT_KINDS = ['STAGE', 'WAITING', 'DEP_WAIT', 'CONFLICT'];
 export interface PlanEdgeInput { ticketKey: string; dependsOnKey: string; reason?: string | null }
 export interface SprintDraftInput { sprint: string; sprintId: number; sprintDays: number; startDate: Date | null; createdBy: string | null; refStatuses: string; merges?: string }
 export interface SprintDraftTicketInput {
-  key: string; summary: string; dev: string | null; sp: number | null; wave: number | null; status: string;
+  key: string; summary: string; dev: string | null; sp: number | null; wave: number | null; status: string; planRank?: number | null;
   ac: string[]; jiraAc: string[]; jiraDev: string | null; dependsOn: string[]; epic?: string | null; frames?: string[];
   /** Kept from the previous load: the test cases and what was last posted. */
   tcs?: string; tcAt?: Date | null; tcPosted?: string | null;
@@ -444,7 +444,7 @@ export class StorageService {
     const { sprint, ...fields } = draft;
     const reset = { ...fields, status: 'draft', publishedAt: null, loadedAt: new Date() };
     const rows = tickets.map((ticket, position) => ({
-      draftSprint: sprint, key: ticket.key, summary: ticket.summary, dev: ticket.dev, sp: ticket.sp, wave: ticket.wave, status: ticket.status,
+      draftSprint: sprint, key: ticket.key, summary: ticket.summary, dev: ticket.dev, sp: ticket.sp, wave: ticket.wave, planRank: ticket.planRank ?? null, status: ticket.status,
       ac: JSON.stringify(ticket.ac), jiraAc: JSON.stringify(ticket.jiraAc), jiraDev: ticket.jiraDev, dependsOn: JSON.stringify(ticket.dependsOn), position,
       epic: ticket.epic ?? null, frames: JSON.stringify(ticket.frames ?? []), tcs: ticket.tcs ?? '[]', tcAt: ticket.tcAt ?? null, tcPosted: ticket.tcPosted ?? null,
     }));

@@ -3,7 +3,7 @@
 // are fixed; the kit is written against them.
 import { OrchestratorInputError } from './orchestrator';
 import { SprintInputError } from './sprint-dashboard';
-import type { DraftView, SprintDraftService } from './sprint-draft';
+import { openTickets, type DraftView, type SprintDraftService } from './sprint-draft';
 import { StoryboardMissing, type StoryboardReader } from './storyboard';
 
 export const PLANNING_ROUTES = ['sprint-draft/get', 'sprint-draft/update', 'sprint-draft/tc', 'sprint-draft/question', 'storyboard'] as const;
@@ -34,10 +34,13 @@ function numberField(body: Record<string, unknown>, name: string): number | null
   return value;
 }
 
+/** The agent plans the cards still to build, as before merged cards joined the draft. */
+const open = (view: DraftView): DraftView => ({ ...view, tickets: openTickets(view) });
+
 async function draftOf(drafts: PlanningIngestDeps['drafts'], sprint: string): Promise<DraftView> {
   const view = await drafts.view(sprint);
   if (!view) throw new OrchestratorInputError(`No draft for ${sprint}; load it in Agents › Sprint › Planning first`);
-  return view;
+  return open(view);
 }
 
 export async function planningIngest(deps: PlanningIngestDeps, route: PlanningRoute, input: unknown): Promise<unknown> {
@@ -50,9 +53,9 @@ export async function planningIngest(deps: PlanningIngestDeps, route: PlanningRo
     }
     const sprint = textField(body, 'sprint')!;
     if (route === 'sprint-draft/get') return await draftOf(deps.drafts, sprint);
-    if (route === 'sprint-draft/question') return await deps.drafts.ask(sprint, textField(body, 'text')!, textField(body, 'key', false));
+    if (route === 'sprint-draft/question') return open(await deps.drafts.ask(sprint, textField(body, 'text')!, textField(body, 'key', false)));
     const key = textField(body, 'key')!.toUpperCase();
-    if (route === 'sprint-draft/tc') return await deps.drafts.setTcs(sprint, key, body.tcs);
+    if (route === 'sprint-draft/tc') return open(await deps.drafts.setTcs(sprint, key, body.tcs));
     const change: { dev?: string | null; wave?: number | null; sp?: number | null; ac?: string[] } = {};
     if (body.dev !== undefined) change.dev = body.dev === null ? null : textField(body, 'dev', false);
     const wave = numberField(body, 'wave');
@@ -63,7 +66,7 @@ export async function planningIngest(deps: PlanningIngestDeps, route: PlanningRo
       if (!Array.isArray(body.ac) || body.ac.some((line) => typeof line !== 'string')) throw new OrchestratorInputError('ac must be an array of strings');
       change.ac = body.ac as string[];
     }
-    return await deps.drafts.updateTicket(sprint, key, change);
+    return open(await deps.drafts.updateTicket(sprint, key, change));
   } catch (error) {
     if (error instanceof SprintInputError || error instanceof StoryboardMissing) throw new OrchestratorInputError(error.message);
     throw error;

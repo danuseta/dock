@@ -757,7 +757,7 @@ export const SPRINT_DRAFT_FIELDS = `
     epic frames
     storyboard { version frames held checked { action note by at } }
     tcs { id ac title steps expected } tcStale tcPending
-    merge pulls jiraAhead
+    merge pulls jiraAhead merged rank planStart planDur
   }
   findings { id key line text refKey kind refEnd ownEnd decision { action note by at } }
   storyboards {

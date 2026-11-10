@@ -5,12 +5,12 @@ import { fileURLToPath } from 'node:url';
 import { agentsRoute } from '../agents/plan';
 import {
   UNASSIGNED, barPlace, changeCount, dayOf, decisionLabel, findingKindLabel, lanes, parseWave, predictionTone, publishHint, scopeSummary, sortFindings,
-  forecastOf, lateDays, lateText, shortDate, underWay, planningChatTitle, questionsLine, spanOf, devColors, handOffs, landingDay, openQuestionsOf, ranks, teamStats, waitersOf, storyboardDecisionId, storyboardLine, tcsToText, textToTcs, waveRows, workingDayLabels, scheduleWindow, laneOf, developerLine, freeFrom, moveLine, moveForecast, type DraftFinding, type DraftTicket,
+  forecastOf, lateDays, lateText, shortDate, underWay, planningChatTitle, questionsLine, spanOf, devColors, handOffs, landingDay, openQuestionsOf, ranks, teamStats, waitersOf, storyboardDecisionId, storyboardLine, tcsToText, textToTcs, waveRows, workingDayLabels, scheduleWindow, laneOf, laneCount, planRange, githubLine, scheduled, developerLine, freeFrom, moveLine, moveForecast, type DraftFinding, type DraftTicket,
 } from '../agents/planning';
 
 const ticket = (over: Partial<DraftTicket>): DraftTicket => ({
   key: 'QRD-1', summary: 'One', dev: 'Danu', jiraDev: 'Danu', sp: 3, wave: 1, waveSet: false, status: 'To Do', ac: [], dependsOn: [],
-  start: 0, dur: 1.5, end: 1.5, inSprint: true, split: null, prediction: null, qaDecision: null, merge: 'open', pulls: [], jiraAhead: false, ...over,
+  start: 0, dur: 1.5, end: 1.5, inSprint: true, split: null, prediction: null, qaDecision: null, merge: 'open', pulls: [], jiraAhead: false, merged: false, rank: null, planStart: 0, planDur: 1.5, ...over,
 });
 const finding = (over: Partial<DraftFinding>): DraftFinding => ({ id: 'x', key: 'QRD-1', line: 1, text: 't', refKey: 'QRD-2', kind: 'lands-first', refEnd: 1, ownEnd: 2, decision: null, ...over });
 
@@ -188,32 +188,54 @@ test('lanes sum the work left next to the full SP; a draft without left is not u
   assert.equal(lanes({ devs: ['Danu'], tickets: [ticket({ sp: 3 })] })[0].left, 3);
 });
 
-test('schedule window starts today in an active sprint, at D1 before it, and reaches the later of forecast and sprint end', () => {
-  const tickets = [ticket({ end: 12 }), ticket({ key: 'QRD-2', merge: 'merged', end: 30 })];
-  assert.deepEqual(scheduleWindow({ sprintDays: 10, today: 6, tickets }), { first: 6, last: 12 });
-  assert.deepEqual(scheduleWindow({ sprintDays: 10, today: 1, tickets }), { first: 1, last: 12 });
-  assert.deepEqual(scheduleWindow({ sprintDays: 10, today: null, tickets: [ticket({ end: 3 })] }), { first: 1, last: 10 });
-  assert.deepEqual(scheduleWindow({ sprintDays: 10, today: 14, tickets: [ticket({ end: 3 })] }), { first: 14, last: 14 });
+test('schedule window runs from day 1 to the latest of forecast, plan end and sprint end', () => {
+  const tickets = [ticket({ end: 12 }), ticket({ key: 'QRD-2', merged: true, merge: 'merged', end: 30, planStart: 2, planDur: 1 })];
+  assert.deepEqual(scheduleWindow({ sprintDays: 10, tickets }), { first: 1, last: 12 }, 'a merged card leaves the forecast alone');
+  assert.deepEqual(scheduleWindow({ sprintDays: 10, tickets: [ticket({ end: 3, planStart: 12, planDur: 2.5 })] }), { first: 1, last: 15 });
+  assert.deepEqual(scheduleWindow({ sprintDays: 10, tickets: [ticket({ end: 3 })] }), { first: 1, last: 10 });
+  assert.deepEqual(scheduled([ticket({}), ticket({ key: 'QRD-2', merged: true })]).map((item) => item.key), ['QRD-1']);
 });
 
-test('laneOf draws scheduled cards only, styles To Do apart and flags jiraAhead and moved cards', () => {
+test('laneOf draws every card at its plan place: merged faded, late past today, To Do apart, jiraAhead and moved flagged', () => {
   const draft = {
     sprintDays: 10, today: 6, tickets: [
-      ticket({ key: 'QRD-1', merge: 'open', status: 'In Progress', pulls: ['qonflo/app#12'], start: 4, end: 8 }),
-      ticket({ key: 'QRD-2', merge: 'none', status: 'To Do', start: 8, end: 10 }),
-      ticket({ key: 'QRD-3', merge: 'merged', status: 'Done', start: 0, end: 2 }),
-      ticket({ key: 'QRD-4', merge: 'open', status: 'UAT MERGED', jiraAhead: true, pulls: ['qonflo/app#13'], start: 5, end: 6 }),
-      ticket({ key: 'QRD-5', dev: 'Aken', jiraDev: 'Danu', merge: 'none', status: 'To Do', start: 6, end: 7 }),
+      ticket({ key: 'QRD-1', merge: 'open', status: 'In Progress', pulls: ['qonflo/app#12 · open'], planStart: 6, planDur: 2 }),
+      ticket({ key: 'QRD-2', merge: 'none', status: 'To Do', planStart: 8, planDur: 2 }),
+      ticket({ key: 'QRD-3', merged: true, merge: 'merged', status: 'UAT CHECK', planStart: 0, planDur: 2 }),
+      ticket({ key: 'QRD-4', merge: 'open', status: 'UAT MERGED', jiraAhead: true, pulls: ['qonflo/app#13 · open'], planStart: 2, planDur: 1 }),
+      ticket({ key: 'QRD-6', merge: 'open', status: 'PR Review', planStart: 3, planDur: 2 }),
+      ticket({ key: 'QRD-7', merge: 'open', status: 'PR Review', planStart: 4.5, planDur: 1 }),
+      ticket({ key: 'QRD-5', dev: 'Aken', jiraDev: 'Danu', merge: 'none', status: 'To Do', planStart: 0, planDur: 1 }),
     ],
   };
   const bars = laneOf(draft, 'Danu');
-  assert.deepEqual(bars.map((bar) => [bar.ticket.key, bar.kind, bar.second, bar.ahead, bar.moved]), [
-    ['QRD-1', 'progress', 'qonflo/app#12', null, false], ['QRD-4', 'progress', 'qonflo/app#13', 'Jira says UAT MERGED, PR open', false], ['QRD-2', 'todo', 'To Do · no PR yet', null, false],
+  assert.deepEqual(bars.map((bar) => [bar.ticket.key, bar.kind, bar.late, bar.third, bar.ahead]), [
+    ['QRD-3', 'done', false, 'merged · UAT CHECK', null],
+    ['QRD-4', 'progress', true, 'late · UAT MERGED', 'Jira says UAT MERGED, PR open'],
+    ['QRD-6', 'progress', true, 'late · PR Review', null],
+    ['QRD-7', 'progress', false, 'PR Review', null],
+    ['QRD-1', 'progress', false, 'qonflo/app#12 · open', null],
+    ['QRD-2', 'todo', false, 'To Do · no PR yet', null],
   ]);
-  assert.deepEqual([bars[0].left, bars[0].width], ['0%', '60%']);
-  assert.deepEqual([bars[2].left, bars[2].width], ['60%', '40%']);
+  assert.deepEqual([bars[0].left, bars[0].width], ['0%', '20%']);
+  assert.deepEqual([bars[5].left, bars[5].width], ['80%', '20%']);
+  assert.equal(laneCount(bars), '1 merged · 5 open');
   assert.equal(laneOf(draft, 'Aken')[0].moved, true);
+  assert.equal(laneOf({ ...draft, today: null }, 'Danu').some((bar) => bar.late), false, 'nothing is late before day 1');
   assert.deepEqual(laneOf(draft, 'Nobody'), []);
+});
+
+test('the hover reads the plan days on the calendar and what GitHub says', () => {
+  const labels = ['Thu 5 Nov', 'Fri 6 Nov', 'Mon 9 Nov'];
+  assert.equal(planRange({ planStart: 1, planDur: 1.5 }, labels), 'D2 Fri 6 Nov → D3 Mon 9 Nov');
+  assert.equal(planRange({ planStart: 0, planDur: 0 }, labels), 'D1 Thu 5 Nov → D1 Thu 5 Nov');
+  assert.equal(planRange({ planStart: 3, planDur: 1 }, labels), 'D4 → D4');
+  assert.deepEqual(githubLine({ merged: true, merge: 'merged', jiraAhead: false }, 'github'), { text: '✓ merged', tone: 'ok' });
+  assert.deepEqual(githubLine({ merged: true, merge: 'none', jiraAhead: false }, 'github'), { text: '✓ done in Jira', tone: 'ok' });
+  assert.deepEqual(githubLine({ merged: false, merge: 'open', jiraAhead: true }, 'github'), { text: 'PR still open', tone: 'warn' });
+  assert.deepEqual(githubLine({ merged: false, merge: 'open', jiraAhead: false }, 'github'), { text: 'PR open', tone: 'none' });
+  assert.deepEqual(githubLine({ merged: false, merge: 'none', jiraAhead: false }, 'github'), { text: 'no PR yet', tone: 'none' });
+  assert.deepEqual(githubLine({ merged: false, merge: 'unknown', jiraAhead: false }, 'jira'), { text: 'not read: GitHub unavailable', tone: 'none' });
 });
 
 test('developer tile and move texts', () => {

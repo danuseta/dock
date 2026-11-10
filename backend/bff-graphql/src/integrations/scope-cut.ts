@@ -148,6 +148,35 @@ export function scheduleSprint(tickets: ScopeTicket[], options: { sprintDays?: n
   return order.map((ticket) => placed.get(ticket.key)!);
 }
 
+/** A card's place in its owner's plan: the number of its first `#N` Jira label ("#7" is 7); null without one. */
+export function rankOf(labels: string[]): number | null {
+  for (const label of labels) {
+    const match = /^#(\d{1,4})$/.exec(label.trim());
+    if (match) return Number(match[1]);
+  }
+  return null;
+}
+
+export interface PlanTicket { key: string; dev: string | null; sp: number | null; rank: number | null }
+export interface PlannedTicket { key: string; planStart: number; planDur: number }
+
+/**
+ * Where each card sits in the plan as written: per developer by rank (no rank last, then key), back to back from day 1,
+ * each lasting its full SP. Merged cards keep their place, so the plan reads the same all sprint.
+ */
+export function planLayout(tickets: PlanTicket[], options: { spPerDay?: number } = {}): PlannedTicket[] {
+  const spPerDay = options.spPerDay && options.spPerDay > 0 ? options.spPerDay : DEFAULT_SP_PER_DAY;
+  const free = new Map<string, number>();
+  const order = [...tickets].sort((a, b) => (a.rank ?? Number.MAX_SAFE_INTEGER) - (b.rank ?? Number.MAX_SAFE_INTEGER) || a.key.localeCompare(b.key, undefined, { numeric: true }));
+  return order.map((ticket) => {
+    const lane = ticket.dev || UNASSIGNED;
+    const planStart = free.get(lane) ?? 0;
+    const planDur = round((ticket.sp && ticket.sp > 0 ? ticket.sp : 0) / spPerDay);
+    free.set(lane, round(planStart + planDur));
+    return { key: ticket.key, planStart, planDur };
+  });
+}
+
 /** The working day, 1-based, on which work ending at `end` days from the start finishes; never before the day after `from`. */
 export const endDay = (end: number, from = 0) => Math.max(Math.ceil(round(end)), from + 1);
 
