@@ -8,8 +8,11 @@ import { confluenceFrom, type ConfluenceClient } from './confluence';
 import { StoryboardReader } from './storyboard';
 import { defaultBlackboardRoot } from './blackboard';
 import { CONTRACT_PARENT_KEY } from './sprint-contract';
+import { GitHubAPI } from '../datasources/GitHubAPI';
+import { readMergeStates } from './merge-state';
 
 const storage = new StorageService();
+const github = new GitHubAPI();
 
 async function jiraClient(): Promise<{ client: JiraSprintClient; value: (key: string) => string }> {
   const settings = await storage.getSettings();
@@ -65,7 +68,7 @@ export const storyboardReader = new StoryboardReader(async () => {
   return client;
 }, defaultBlackboardRoot);
 
-export const sprintDraftService = new SprintDraftService(storage, planningJira, undefined, undefined, planningContract, (epic) => storyboardReader.sync(epic));
+export const sprintDraftService = new SprintDraftService(storage, planningJira, undefined, undefined, planningContract, (epic) => storyboardReader.sync(epic), (keys) => readMergeStates(keys, github));
 
 /** The owner's side of a published plan, on the same Jira credentials. */
 async function driftJira(): Promise<DriftJira> {

@@ -467,6 +467,7 @@ model SprintDraft {
   drift       String    @default("{}") /// {findingId: {action, state, note, by, at}}: the owners' calls on held AC lines after publish
   storyboards String    @default("{}") /// {epic: {version, previous, path, page, frames, changed, changedAt, checkedAt, error}}
   questions   String    @default("[]") /// [{id, text, key, askedAt, answered, answeredBy, answeredAt}]: open questions the planning chat raised
+  merges      String    @default("{}") /// {source: github|jira, tickets: {key: {merge, pulls}}}: GitHub merge state read on the last load
   createdBy   String?
   loadedAt    DateTime  @default(now())
   publishedAt DateTime?

@@ -629,6 +629,33 @@ export const typeDefs = gql`
     tcStale: Boolean!
     "Publish posts the test cases: they differ from the last comment."
     tcPending: Boolean!
+    "GitHub merge state of the ticket's pull requests: merged | open | none | unknown"
+    merge: String!
+    "Pull requests found for the ticket, as owner/repo#number"
+    pulls: [String!]!
+    "Jira already says past merge while a pull request is still open"
+    jiraAhead: Boolean!
+  }
+
+  "An assignee of the sprint, also when every card of theirs is merged. end is the working day their lane ends; null when nothing is open."
+  type SprintDeveloper {
+    name: String!
+    merged: Int!
+    open: Int!
+    sp: Float!
+    leftSp: Float!
+    end: Int
+  }
+
+  "Cards to hand from the lane ending last to the lane free earliest, moved together along their Blocks chain."
+  type SprintMoveSuggestion {
+    keys: [String!]!
+    from: String!
+    to: String!
+    sp: Float!
+    forecastBefore: Int!
+    forecastAfter: Int!
+    improves: Boolean!
   }
 
   """An AC line that names another ticket. kind is after-it (that ticket lands later), lands-first or outside-plan."""
@@ -669,6 +696,10 @@ export const typeDefs = gql`
     landed: Int!
     "Today's working day on the plan's axis, 1-based; null before day 1."
     today: Int
+    developers: [SprintDeveloper!]!
+    "github when merge state came from GitHub, jira when GitHub could not be read"
+    mergeSource: String!
+    moves: [SprintMoveSuggestion!]!
   }
 
   """What Publish would write to one ticket. refused says why the ticket is skipped."""
@@ -789,6 +820,38 @@ export const typeDefs = gql`
     checkedAt: String!
     "Why there is no storyboard, such as no page or no HTML attachment."
     error: String
+    scenarios: [StoryboardScenario!]!
+    "DOCK route serving this saved version's HTML; append #<flowId> to open a flow"
+    htmlUrl: String
+    "Same for the previous version, for the side-by-side compare"
+    previousHtmlUrl: String
+  }
+
+  type StoryboardFrame {
+    index: Int!
+    title: String!
+    step: String
+    changed: Boolean!
+  }
+
+  type StoryboardFlow {
+    id: String!
+    title: String!
+    tickets: [String!]!
+    info: [String!]!
+    frames: [StoryboardFrame!]!
+    changed: Boolean!
+  }
+
+  type StoryboardGroup {
+    title: String!
+    flows: [StoryboardFlow!]!
+  }
+
+  type StoryboardScenario {
+    n: Int!
+    title: String!
+    groups: [StoryboardGroup!]!
   }
 
   type SprintDraftPublishResult {
@@ -1878,10 +1941,14 @@ export const typeDefs = gql`
     refreshSprintDraftQa(sprint: String!): SprintDraft!
     "Reads the newest storyboard of each epic of the draft from Confluence and saves it under the blackboard."
     checkSprintStoryboards(sprint: String!): SprintDraft!
+    "Save an uploaded storyboard HTML as the newest version for the epic (used until the Confluence page exists)."
+    uploadSprintStoryboard(sprint: String!, epic: String!, html: String!): SprintDraft!
     "Marks an open question of the planning chat answered, or open again."
     answerSprintDraftQuestion(sprint: String!, id: ID!, answered: Boolean!): SprintDraft!
     "Replaces a ticket's draft test cases."
     setSprintDraftTcs(sprint: String!, key: String!, tcs: [SprintDraftTcInput!]!): SprintDraft!
+    "Assign cards to another developer in the draft only; Jira changes on Publish."
+    moveSprintDraftCards(sprint: String!, keys: [String!]!, to: String!): SprintDraft!
     """Writes AC lines and assignees that differ from Jira. Refused while a blocker has no decision."""
     publishSprintDraft(sprint: String!): [SprintDraftPublishResult!]!
     "move, not-tested, wait, needs-po or clear on a held AC line of the owner's ticket."
