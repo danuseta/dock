@@ -5,12 +5,12 @@ import { fileURLToPath } from 'node:url';
 import { agentsRoute } from '../agents/plan';
 import {
   UNASSIGNED, barPlace, changeCount, dayOf, decisionLabel, findingKindLabel, lanes, parseWave, predictionTone, publishHint, scopeSummary, sortFindings,
-  forecastOf, lateDays, lateText, shortDate, underWay, planningChatTitle, questionsLine, spanOf, devColors, handOffs, landingDay, openQuestionsOf, ranks, teamStats, waitersOf, storyboardDecisionId, storyboardLine, tcsToText, textToTcs, waveRows, workingDayLabels, type DraftFinding, type DraftTicket,
+  forecastOf, lateDays, lateText, shortDate, underWay, planningChatTitle, questionsLine, spanOf, devColors, handOffs, landingDay, openQuestionsOf, ranks, teamStats, waitersOf, storyboardDecisionId, storyboardLine, tcsToText, textToTcs, waveRows, workingDayLabels, scheduleWindow, laneOf, developerLine, freeFrom, moveLine, moveForecast, type DraftFinding, type DraftTicket,
 } from '../agents/planning';
 
 const ticket = (over: Partial<DraftTicket>): DraftTicket => ({
   key: 'QRD-1', summary: 'One', dev: 'Danu', jiraDev: 'Danu', sp: 3, wave: 1, waveSet: false, status: 'To Do', ac: [], dependsOn: [],
-  start: 0, dur: 1.5, end: 1.5, inSprint: true, split: null, prediction: null, qaDecision: null, ...over,
+  start: 0, dur: 1.5, end: 1.5, inSprint: true, split: null, prediction: null, qaDecision: null, merge: 'open', pulls: [], jiraAhead: false, ...over,
 });
 const finding = (over: Partial<DraftFinding>): DraftFinding => ({ id: 'x', key: 'QRD-1', line: 1, text: 't', refKey: 'QRD-2', kind: 'lands-first', refEnd: 1, ownEnd: 2, decision: null, ...over });
 
@@ -80,7 +80,7 @@ test('a storyboard line names its version and changed frames, or why there is no
   assert.equal(storyboardDecisionId('QRD-1312', 8), 'sb|QRD-1312|v8');
 });
 
-test('Planning opens a Planning-<sprint> chat beside the panel, which polls the draft, and lists the open questions', () => {
+test('Planning opens a Planning-<sprint> chat in the floating ChatDock, which polls the draft, and lists the open questions', () => {
   assert.equal(planningChatTitle('QRD Sprint 27'), 'Planning-QRD Sprint 27');
   assert.equal(questionsLine([]), null);
   const question = { id: 'q1', text: 'Both tabs?', key: null, askedAt: 'a', answered: true, answeredBy: 'Alvin', answeredAt: 'b' };
@@ -88,11 +88,11 @@ test('Planning opens a Planning-<sprint> chat beside the panel, which polls the 
   const tab = readFileSync(fileURLToPath(new URL('../agents/PlanningTab.tsx', import.meta.url)), 'utf8');
   assert.match(tab, /<PlanningChat sprint=\{chosen\.name\} \/>/);
   assert.match(tab, /pollInterval: 10000/);
-  assert.match(tab, /xl:grid-cols-\[420px_minmax\(0,1fr\)\]/);
+  assert.doesNotMatch(tab, /xl:grid-cols-\[420px/);
   const chat = readFileSync(fileURLToPath(new URL('../agents/PlanningChat.tsx', import.meta.url)), 'utf8');
-  assert.match(chat, /h-\[620px\]/);
-  assert.match(chat, /xl:sticky/);
-  assert.match(chat, /<ChatThread /);
+  assert.doesNotMatch(chat, /ChatThread/);
+  assert.ok(chat.includes('chatStore.openSession('));
+  assert.ok(chat.includes('Open planning chat'));
   assert.match(chat, /OPEN_PLANNING_CHAT/);
   assert.ok(chat.includes('create({ variables: { sprint } })'));
 });
@@ -186,4 +186,42 @@ test('lanes sum the work left next to the full SP; a draft without left is not u
   assert.equal(underWay({ tickets }), true);
   assert.equal(underWay({ tickets: [ticket({ left: null })] }), false);
   assert.equal(lanes({ devs: ['Danu'], tickets: [ticket({ sp: 3 })] })[0].left, 3);
+});
+
+test('schedule window starts today in an active sprint, at D1 before it, and reaches the later of forecast and sprint end', () => {
+  const tickets = [ticket({ end: 12 }), ticket({ key: 'QRD-2', merge: 'merged', end: 30 })];
+  assert.deepEqual(scheduleWindow({ sprintDays: 10, today: 6, tickets }), { first: 6, last: 12 });
+  assert.deepEqual(scheduleWindow({ sprintDays: 10, today: 1, tickets }), { first: 1, last: 12 });
+  assert.deepEqual(scheduleWindow({ sprintDays: 10, today: null, tickets: [ticket({ end: 3 })] }), { first: 1, last: 10 });
+  assert.deepEqual(scheduleWindow({ sprintDays: 10, today: 14, tickets: [ticket({ end: 3 })] }), { first: 14, last: 14 });
+});
+
+test('laneOf draws scheduled cards only, styles To Do apart and flags jiraAhead and moved cards', () => {
+  const draft = {
+    sprintDays: 10, today: 6, tickets: [
+      ticket({ key: 'QRD-1', merge: 'open', status: 'In Progress', pulls: ['qonflo/app#12'], start: 4, end: 8 }),
+      ticket({ key: 'QRD-2', merge: 'none', status: 'To Do', start: 8, end: 10 }),
+      ticket({ key: 'QRD-3', merge: 'merged', status: 'Done', start: 0, end: 2 }),
+      ticket({ key: 'QRD-4', merge: 'open', status: 'UAT MERGED', jiraAhead: true, pulls: ['qonflo/app#13'], start: 5, end: 6 }),
+      ticket({ key: 'QRD-5', dev: 'Aken', jiraDev: 'Danu', merge: 'none', status: 'To Do', start: 6, end: 7 }),
+    ],
+  };
+  const bars = laneOf(draft, 'Danu');
+  assert.deepEqual(bars.map((bar) => [bar.ticket.key, bar.kind, bar.second, bar.ahead, bar.moved]), [
+    ['QRD-1', 'progress', 'qonflo/app#12', null, false], ['QRD-4', 'progress', 'qonflo/app#13', 'Jira says UAT MERGED, PR open', false], ['QRD-2', 'todo', 'To Do · no PR yet', null, false],
+  ]);
+  assert.deepEqual([bars[0].left, bars[0].width], ['0%', '60%']);
+  assert.deepEqual([bars[2].left, bars[2].width], ['60%', '40%']);
+  assert.equal(laneOf(draft, 'Aken')[0].moved, true);
+  assert.deepEqual(laneOf(draft, 'Nobody'), []);
+});
+
+test('developer tile and move texts', () => {
+  assert.equal(developerLine({ merged: 17, open: 0 }, 'github'), '17 cards merged on GitHub · 0 open');
+  assert.equal(developerLine({ merged: 1, open: 2 }, 'jira'), '1 card done in Jira · 2 open');
+  assert.equal(freeFrom(13), 'free from D13');
+  assert.equal(freeFrom(null), 'free from D1');
+  assert.equal(moveLine({ keys: ['QRD-1278', 'QRD-1290'], sp: 4, from: 'Shovian', to: 'Danu' }), 'QRD-1278, QRD-1290 4 SP · Shovian → Danu');
+  assert.equal(moveForecast({ forecastBefore: 3, forecastAfter: 2 }, ['Mon 9 Nov', 'Tue 10 Nov', 'Wed 11 Nov']), 'forecast D3 (Wed 11 Nov) → D2 (Tue 10 Nov)');
+  assert.equal(moveForecast({ forecastBefore: 17, forecastAfter: 13 }, []), 'forecast D17 → D13');
 });

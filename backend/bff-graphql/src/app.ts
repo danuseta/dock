@@ -21,6 +21,7 @@ import { createChatAttachmentRouter } from './routes/chat-attachments';
 import { createBlackboardRouter } from './routes/blackboard';
 import { createDiscordFilesRouter } from './routes/discord-files';
 import { createDemoVideoRouter } from './routes/demo-videos';
+import { createStoryboardRouter } from './routes/storyboard';
 import { createOrchestratorApiRouter, createOrchestratorIngestRouter } from './routes/orchestrator';
 import { dockMode } from './mode';
 import { buildOf } from './integrations/dock-issues';
@@ -75,6 +76,9 @@ export async function createApp(options: CreateAppOptions = {}): Promise<JidisAp
   if (mode === 'workspace') app.use('/api/agent-looks', createAgentLookRouter());
   if (mode === 'workspace') app.use('/api/workspace', createWorkspaceFilesRouter());
   if (mode === 'workspace') app.use('/api/qa-local', createQaLocalRouter());
+  if (mode === 'workspace') app.use('/api/storyboard', createStoryboardRouter());
+  // An uploaded storyboard HTML (up to 8 MB) travels as a GraphQL argument.
+  app.use('/graphql', express.json({ limit: '10mb' }));
   app.use(express.json());
 
   app.use('/auth/google', createGoogleCalendarRouter());

@@ -10,7 +10,7 @@ const RUN_WITHOUT_LEDGER = {
 const KEPT_EVENT_KINDS = ['STAGE', 'WAITING', 'DEP_WAIT', 'CONFLICT'];
 
 export interface PlanEdgeInput { ticketKey: string; dependsOnKey: string; reason?: string | null }
-export interface SprintDraftInput { sprint: string; sprintId: number; sprintDays: number; startDate: Date | null; createdBy: string | null; refStatuses: string }
+export interface SprintDraftInput { sprint: string; sprintId: number; sprintDays: number; startDate: Date | null; createdBy: string | null; refStatuses: string; merges?: string }
 export interface SprintDraftTicketInput {
   key: string; summary: string; dev: string | null; sp: number | null; wave: number | null; status: string;
   ac: string[]; jiraAc: string[]; jiraDev: string | null; dependsOn: string[]; epic?: string | null; frames?: string[];

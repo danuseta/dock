@@ -1,71 +1,49 @@
 // The epic's storyboard, kept on Confluence as a page titled "Storyboard" with one HTML attachment per version (the
-// claude.ai artifact saved as HTML). DOCK saves every version under the blackboard, where sous already reads
-// materials, and compares the newest with the one before it frame by frame (F<n>.<m>), so a frame that changed mid
-// sprint flags the tickets that name it.
+// claude.ai artifact saved as HTML), or uploaded in Planning until that page exists. DOCK saves every version under
+// the blackboard, where sous already reads materials, and compares the newest with the one before it flow by flow,
+// so a flow that changed mid sprint flags the tickets it lists.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { cqlText, type ConfluenceAttachment, type ConfluenceClient, type ConfluencePage } from './confluence';
+import { compareStoryboards, flowsOf, parseStoryboard, type StoryboardScenario } from './storyboard-flows';
 
 export interface StoryboardFrame { id: string; text: string }
-export interface StoryboardResult { epic: string; version: number; path: string; page: string; frames: StoryboardFrame[]; changed: string[]; previous: number | null }
+export interface StoryboardResult {
+  epic: string; version: number; path: string; page: string | null;
+  /** One entry per frame of the newest version, id "<flow>/<n>". */
+  frames: StoryboardFrame[];
+  /** Flow ids changed since the previous version. */
+  changed: string[];
+  previous: number | null;
+  scenarios?: StoryboardScenario[];
+  /** The tickets each changed flow lists. */
+  tickets?: Record<string, string[]>;
+}
 
 export class StoryboardMissing extends Error {}
+/** An upload DOCK will not save; the message says why. */
+export class StoryboardRefused extends Error {}
 
 export type StoryboardClient = Pick<ConfluenceClient, 'search' | 'children' | 'attachments' | 'download'>;
 
-const EPIC = /^[A-Z][A-Z0-9_]*-\d+$/;
-const FRAME = /\bF(\d{1,3})\.(\d{1,3})\b/g;
-const MAX_FRAME_TEXT = 8000;
+export const STORYBOARD_EPIC = /^[A-Z][A-Z0-9_]*-\d+$/;
+export const STORYBOARD_FILE = /^v(\d{1,13})\.html$/;
+export const MAX_STORYBOARD_BYTES = 8 * 1024 * 1024;
+const FRAME = /\bF(\d{1,3})\.(\d{1,3})([a-z]?)(?![A-Za-z0-9])/g;
+const MAX_FRAME_TEXT = 2000;
 const MAX_DOWNLOADS = 20;
 
-const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', middot: '·', mdash: '—', ndash: '–', hellip: '…', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“' };
-
-/** The readable text of a saved artifact: markup and styles dropped, the script source (where an artifact keeps its screens) kept with its string escapes undone. */
-export function storyboardText(html: string): string {
-  return html
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(parseInt(code, 16)))
-    .replace(/&([a-z]+);/gi, (match, name) => ENTITIES[name.toLowerCase()] ?? match)
-    .replace(/\\u([0-9a-fA-F]{4})/g, (_, code) => String.fromCharCode(parseInt(code, 16)))
-    .replace(/\\[nrt]/g, ' ')
-    .replace(/\\(["'`\\])/g, '$1')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-const frameId = (major: string, minor: string) => `F${Number(major)}.${Number(minor)}`;
+const frameId = (major: string, minor: string, letter: string) => `F${Number(major)}.${Number(minor)}${letter}`;
 const byFrame = (a: string, b: string) => {
-  const [a1, a2] = a.slice(1).split('.').map(Number);
-  const [b1, b2] = b.slice(1).split('.').map(Number);
-  return a1 - b1 || a2 - b2;
+  const [a1, a2] = a.slice(1).split('.').map((part) => parseInt(part, 10));
+  const [b1, b2] = b.slice(1).split('.').map((part) => parseInt(part, 10));
+  return a1 - b1 || a2 - b2 || a.localeCompare(b);
 };
 
-/** Every frame id and the text that follows each mention of it up to the next frame id, in frame order. */
-export function extractFrames(html: string): StoryboardFrame[] {
-  const text = storyboardText(html);
-  const marks = [...text.matchAll(FRAME)].map((match) => ({ id: frameId(match[1], match[2]), at: match.index ?? 0 }));
-  const parts = new Map<string, string[]>();
-  marks.forEach((mark, index) => {
-    const piece = text.slice(mark.at, marks[index + 1]?.at ?? text.length).trim();
-    parts.set(mark.id, [...(parts.get(mark.id) ?? []), piece]);
-  });
-  return [...parts.entries()].map(([id, pieces]) => ({ id, text: pieces.join(' ').slice(0, MAX_FRAME_TEXT) })).sort((a, b) => byFrame(a.id, b.id));
-}
-
-/** Frames added, removed or reworded between two versions. */
-export function changedFrames(before: StoryboardFrame[], after: StoryboardFrame[]): string[] {
-  const old = new Map(before.map((frame) => [frame.id, frame.text]));
-  const now = new Map(after.map((frame) => [frame.id, frame.text]));
-  return [...new Set([...old.keys(), ...now.keys()])].filter((id) => old.get(id) !== now.get(id)).sort(byFrame);
-}
-
-/** The frame ids a text names, such as an AC line or a ticket description. */
+/** The flow ids a text names, such as an AC line or a ticket description: F1.4, F1.1b. */
 export function framesIn(lines: string[]): string[] {
   const ids = new Set<string>();
-  for (const line of lines) for (const match of line.matchAll(FRAME)) ids.add(frameId(match[1], match[2]));
+  for (const line of lines) for (const match of line.matchAll(FRAME)) ids.add(frameId(match[1], match[2], match[3]));
   return [...ids].sort(byFrame);
 }
 
@@ -78,11 +56,26 @@ export function versionsOf(attachments: ConfluenceAttachment[]): Array<{ version
   return newest ? [{ version: newest.version, attachment: newest }] : [];
 }
 
+const epicKey = (epic: string) => {
+  const key = epic.trim().toUpperCase();
+  if (!STORYBOARD_EPIC.test(key)) throw new StoryboardMissing('epic must be a ticket key such as QRD-1233');
+  return key;
+};
+
 export class StoryboardReader {
-  constructor(private readonly client: () => Promise<StoryboardClient>, private readonly root: () => string) {}
+  constructor(
+    private readonly client: () => Promise<StoryboardClient>,
+    private readonly root: () => string,
+    private readonly now: () => Date = () => new Date(),
+  ) {}
 
   dir(epic: string): string {
     return path.join(this.root(), epic, 'materials', 'storyboard');
+  }
+
+  /** The saved file of one version, or null when the epic or the file name is not one DOCK writes. */
+  file(epic: string, name: string): string | null {
+    return STORYBOARD_EPIC.test(epic) && STORYBOARD_FILE.test(name) ? path.join(this.dir(epic), name) : null;
   }
 
   /** The "Storyboard" page: a child of the epic's contract page, else the newest page the CQL search finds for the epic. */
@@ -97,33 +90,64 @@ export class StoryboardReader {
 
   private async saved(epic: string): Promise<number[]> {
     try {
-      return (await fs.readdir(this.dir(epic))).map((name) => Number(/^v(\d+)\.html$/.exec(name)?.[1])).filter((version) => version > 0).sort((a, b) => a - b);
+      return (await fs.readdir(this.dir(epic))).map((name) => Number(STORYBOARD_FILE.exec(name)?.[1])).filter((version) => version > 0).sort((a, b) => a - b);
     } catch {
       return [];
     }
   }
 
-  /** Saves the versions not on disk yet and compares the newest with the version before it. */
+  /** Saves the Confluence versions not on disk yet and compares the newest saved version with the one before it. Uploaded versions stand in when Confluence has none. */
   async sync(epic: string): Promise<StoryboardResult> {
-    const key = epic.trim().toUpperCase();
-    if (!EPIC.test(key)) throw new StoryboardMissing('epic must be a ticket key such as QRD-1233');
-    const client = await this.client();
-    const page = await this.findPage(client, key);
-    if (!page) throw new StoryboardMissing(`No Confluence page titled "Storyboard" for ${key}. Add one under the epic's contract page and attach the storyboard as HTML (v1.html, v2.html, ...).`);
-    const versions = versionsOf(await client.attachments(page.id));
-    if (!versions.length) throw new StoryboardMissing(`The Storyboard page of ${key} has no HTML attachment. Attach the storyboard saved as HTML (v1.html, v2.html, ...).`);
-    const dir = this.dir(key);
-    await fs.mkdir(dir, { recursive: true });
-    const onDisk = new Set(await this.saved(key));
-    for (const { version, attachment } of versions.filter((item) => !onDisk.has(item.version)).slice(-MAX_DOWNLOADS)) {
-      await fs.writeFile(path.join(dir, `v${version}.html`), await client.download(attachment.download), 'utf8');
+    const key = epicKey(epic);
+    let page: string | null = null;
+    let missing: string;
+    try {
+      const client = await this.client();
+      const found = await this.findPage(client, key);
+      missing = `No Confluence page titled "Storyboard" for ${key}. Add one under the epic's contract page and attach the storyboard as HTML (v1.html, v2.html, ...), or upload the storyboard HTML in Planning.`;
+      if (found) {
+        page = found.id;
+        const versions = versionsOf(await client.attachments(found.id));
+        missing = `The Storyboard page of ${key} has no HTML attachment. Attach the storyboard saved as HTML (v1.html, v2.html, ...), or upload it in Planning.`;
+        const dir = this.dir(key);
+        if (versions.length) await fs.mkdir(dir, { recursive: true });
+        const onDisk = new Set(await this.saved(key));
+        for (const { version, attachment } of versions.filter((item) => !onDisk.has(item.version)).slice(-MAX_DOWNLOADS)) {
+          await fs.writeFile(path.join(dir, `v${version}.html`), await client.download(attachment.download), 'utf8');
+        }
+      }
+    } catch (error) {
+      if (!(await this.saved(key)).length) throw error;
+      missing = '';
     }
+    if (!(await this.saved(key)).length) throw new StoryboardMissing(missing);
+    return this.compare(key, page);
+  }
+
+  /** Saves an uploaded storyboard as the newest version of the epic, named by the upload time in seconds. */
+  async upload(epic: string, html: string): Promise<StoryboardResult> {
+    const key = epicKey(epic);
+    if (Buffer.byteLength(html, 'utf8') > MAX_STORYBOARD_BYTES) throw new StoryboardRefused(`The storyboard is larger than ${MAX_STORYBOARD_BYTES / 1024 / 1024} MB`);
+    if (!html.includes('SCENARIOS')) throw new StoryboardRefused('This file is not a storyboard: it has no SCENARIOS list. Save the storyboard artifact as HTML and upload that file.');
+    if (!parseStoryboard(html).length) throw new StoryboardRefused('The SCENARIOS list of this file could not be read. Upload the storyboard artifact saved as HTML.');
+    const saved = await this.saved(key);
+    const version = Math.max(Math.floor(this.now().getTime() / 1000), (saved[saved.length - 1] ?? 0) + 1);
+    await fs.mkdir(this.dir(key), { recursive: true });
+    await fs.writeFile(path.join(this.dir(key), `v${version}.html`), html, 'utf8');
+    return this.compare(key, null);
+  }
+
+  private async compare(key: string, page: string | null): Promise<StoryboardResult> {
     const saved = await this.saved(key);
     const latest = saved[saved.length - 1];
     const previous = saved.length > 1 ? saved[saved.length - 2] : null;
-    const file = path.join(dir, `v${latest}.html`);
-    const frames = extractFrames(await fs.readFile(file, 'utf8'));
-    const changed = previous === null ? [] : changedFrames(extractFrames(await fs.readFile(path.join(dir, `v${previous}.html`), 'utf8')), frames);
-    return { epic: key, version: latest, path: file, page: page.id, frames, changed, previous };
+    const read = async (version: number) => parseStoryboard(await fs.readFile(path.join(this.dir(key), `v${version}.html`), 'utf8'));
+    const after = await read(latest);
+    const { scenarios, changed, tickets } = compareStoryboards(previous === null ? null : await read(previous), after);
+    const frames = flowsOf(after).flatMap((flow) => flow.frames.map((frame, index) => ({
+      id: `${flow.id}/${index + 1}`,
+      text: [frame.title, frame.step, ...frame.notes].filter(Boolean).join(' · ').slice(0, MAX_FRAME_TEXT),
+    })));
+    return { epic: key, version: latest, path: path.join(this.dir(key), `v${latest}.html`), page, frames, changed, previous, scenarios, tickets };
   }
 }
