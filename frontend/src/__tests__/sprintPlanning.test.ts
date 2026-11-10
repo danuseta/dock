@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { agentsRoute } from '../agents/plan';
 import {
   UNASSIGNED, barPlace, changeCount, dayOf, decisionLabel, findingKindLabel, lanes, parseWave, predictionTone, publishHint, scopeSummary, sortFindings,
-  planningChatTitle, questionsLine, spanOf, devColors, handOffs, landingDay, openQuestionsOf, ranks, teamStats, waitersOf, storyboardDecisionId, storyboardLine, tcsToText, textToTcs, waveRows, workingDayLabels, type DraftFinding, type DraftTicket,
+  forecastOf, lateDays, lateText, shortDate, underWay, planningChatTitle, questionsLine, spanOf, devColors, handOffs, landingDay, openQuestionsOf, ranks, teamStats, waitersOf, storyboardDecisionId, storyboardLine, tcsToText, textToTcs, waveRows, workingDayLabels, type DraftFinding, type DraftTicket,
 } from '../agents/planning';
 
 const ticket = (over: Partial<DraftTicket>): DraftTicket => ({
@@ -156,4 +156,34 @@ test('hand-offs cross developers only, sort by landing, and float is the slack b
 test('team stats: cards, SP, developers, target each, what lands in the sprint and the spread between lanes', () => {
   const tickets = [ticket({ sp: 3 }), ticket({ key: 'QRD-2', dev: 'Aken', sp: 8, inSprint: false }), ticket({ key: 'QRD-3', dev: 'Aken', sp: 2 }), ticket({ key: 'QRD-4', dev: null, sp: 1 })];
   assert.deepEqual(teamStats({ devs: ['Aken', 'Danu'], tickets }), { cards: 4, sp: 14, devs: 2, target: 7, landCards: 3, landSp: 6, spread: 7 });
+});
+
+test('late days: the forecast day minus the due day, in working days of the plan', () => {
+  assert.equal(lateDays(12, 18), 6);
+  assert.equal(lateDays(12, 12), 0);
+  assert.equal(lateDays(12, 10), -2);
+  assert.equal(lateText(6), '6 working days late');
+  assert.equal(lateText(1), '1 working day late');
+  assert.equal(lateText(0), 'on time');
+  assert.equal(lateText(-2), '2 days early');
+  assert.equal(lateText(-1), '1 day early');
+});
+
+test('Sprint 26 mid-sprint: due Wed 11 Nov on day 12, the last lane lands Thu 19 Nov on day 18', () => {
+  const draft = { sprintDays: 12, tickets: [ticket({ key: 'QRD-1', start: 10, end: 13.5 }), ticket({ key: 'QRD-2', dev: 'Aken', start: 12, end: 17.5 })] };
+  assert.deepEqual(forecastOf(draft), { due: 12, day: 18, end: 17.5, late: 6 });
+  const labels = workingDayLabels('2026-10-26T16:00:00.000Z', 18);
+  assert.deepEqual([labels[11], labels[17]], ['Wed 11 Nov', 'Thu 19 Nov']);
+  assert.equal(shortDate(labels[11]), '11 Nov');
+  assert.equal(forecastOf({ sprintDays: 12, tickets: [ticket({ end: 9 })] }).late, -3);
+  assert.equal(forecastOf({ sprintDays: 12, tickets: [] }).day, 1);
+});
+
+test('lanes sum the work left next to the full SP; a draft without left is not under way', () => {
+  const tickets = [ticket({ key: 'QRD-1', sp: 8, left: 1 }), ticket({ key: 'QRD-2', sp: 5, left: 2.5 }), ticket({ key: 'QRD-3', sp: 3, left: 3 })];
+  const [lane] = lanes({ devs: ['Danu'], tickets });
+  assert.deepEqual([lane.left, lane.sp], [6.5, 16]);
+  assert.equal(underWay({ tickets }), true);
+  assert.equal(underWay({ tickets: [ticket({ left: null })] }), false);
+  assert.equal(lanes({ devs: ['Danu'], tickets: [ticket({ sp: 3 })] })[0].left, 3);
 });

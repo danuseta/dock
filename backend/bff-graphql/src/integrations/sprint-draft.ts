@@ -5,7 +5,7 @@
 import { acFindings, isDoneStatus, normalizeAcLine, splitAc, type AcFinding } from './ac-scope';
 import type { PlanningIssue, PlanningSprint } from './jira-sprint';
 import { predictQa, type QaInputTicket, type QaPrediction, type QaRun } from './qa-predict';
-import { DEFAULT_SP_PER_DAY, DEFAULT_SPRINT_DAYS, planStart, scheduleSprint, workingDayOf, workingDays, type ScheduledTicket } from './scope-cut';
+import { DEFAULT_SP_PER_DAY, DEFAULT_SPRINT_DAYS, planStart, remainingSp, scheduleSprint, workingDayOf, workingDays, type ScheduledTicket } from './scope-cut';
 import { SprintInputError } from './sprint-dashboard';
 import { writeContract, type ContractClient } from './sprint-contract';
 import { StoryboardMissing, framesIn, type StoryboardResult } from './storyboard';
@@ -77,6 +77,8 @@ export interface StoryboardFlag { version: number; frames: string[]; held: boole
 
 export interface DraftTicketView extends Omit<ScheduledTicket, 'dev' | 'wave'> {
   summary: string; dev: string | null; jiraDev: string | null; sp: number | null; wave: number; waveSet: boolean; status: string;
+  /** SP still to do by the ticket's status once the sprint is under way; null before day 1 or on a published plan. */
+  left: number | null;
   ac: string[]; dependsOn: string[]; prediction: QaPrediction | null; qaDecision: Decision | null;
   epic: string | null; frames: string[]; storyboard: StoryboardFlag | null;
   tcs: DraftTc[];
@@ -368,9 +370,12 @@ export class SprintDraftService {
     // Once the sprint has started, a draft lays open tickets from today's working day, never in the past. A published
     // plan keeps its days, so AC drift can still tell a ticket that slipped past its planned day.
     const today = workingDayOf(row.startDate?.toISOString() ?? null, this.now());
+    // The same draft counts only the work left on each ticket by its status; before day 1 every ticket keeps its full SP.
+    const underWay = !!today && row.status !== 'published';
+    const left = new Map(tickets.map((ticket) => [ticket.key, underWay ? remainingSp(ticket.sp, ticket.status, spPerDay) : null]));
     const schedule = new Map(scheduleSprint(
-      tickets.map((ticket) => ({ key: ticket.key, dev: ticket.dev, sp: ticket.sp, wave: ticket.wave, dependsOn: ticket.dependsOn })),
-      { sprintDays: row.sprintDays, spPerDay, from: today && row.status !== 'published' ? today - 1 : 0 },
+      tickets.map((ticket) => ({ key: ticket.key, dev: ticket.dev, sp: ticket.sp, left: left.get(ticket.key), wave: ticket.wave, dependsOn: ticket.dependsOn })),
+      { sprintDays: row.sprintDays, spPerDay, from: underWay && today ? today - 1 : 0 },
     ).map((item) => [item.key, item]));
     const ends = new Map([...schedule.values()].map((item) => [item.key, item.end]));
     const status = new Map(all.map((ticket) => [ticket.key, ticket.status]));
@@ -398,7 +403,7 @@ export class SprintDraftService {
       tickets: tickets.map((ticket) => {
         const placed = schedule.get(ticket.key)!;
         return {
-          key: ticket.key, summary: ticket.summary, dev: ticket.dev, jiraDev: ticket.jiraDev, sp: ticket.sp, wave: placed.wave, waveSet: ticket.wave !== null,
+          key: ticket.key, summary: ticket.summary, dev: ticket.dev, jiraDev: ticket.jiraDev, sp: ticket.sp, left: left.get(ticket.key) ?? null, wave: placed.wave, waveSet: ticket.wave !== null,
           status: ticket.status, ac: ticket.ac, dependsOn: ticket.dependsOn, start: placed.start, dur: placed.dur, end: placed.end,
           inSprint: placed.inSprint, split: placed.split, prediction: ticket.prediction, qaDecision: decisions[qaId(ticket.key)] ?? null,
           epic: ticket.epic, frames: ticket.frames, storyboard: flagOf(ticket),

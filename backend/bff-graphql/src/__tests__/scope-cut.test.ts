@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { computeWaves, planStart, scheduleSprint, splitParts, workingDayOf, workingDays, type ScopeTicket } from '../integrations/scope-cut';
+import { computeWaves, planStart, remainingSp, scheduleSprint, splitParts, workingDayOf, workingDays, type ScopeTicket } from '../integrations/scope-cut';
 
 interface PlanRow { key: string; dev: string; sp: number; wave: number; dep: string[]; st: number; dur: number }
 const sprint26 = JSON.parse(readFileSync(resolve(__dirname, 'fixtures/sprint26-plan.json'), 'utf8')) as { sprintDays: number; tasks: PlanRow[] };
@@ -102,4 +102,25 @@ test('a schedule laid from a later day never starts a ticket before it', () => {
     { key: 'C', dev: 'Aken', sp: 2, dependsOn: ['A'] },
   ], { sprintDays: 10, from: 4 });
   assert.deepEqual(rows.map((row) => [row.key, row.start, row.end]), [['A', 4, 5], ['B', 5, 6], ['C', 5, 6]]);
+});
+
+test('work left by status, letters only: review and UAT bug half a day, In Progress half, To Do all', () => {
+  assert.equal(remainingSp(8, 'PR Review', 2), 1);
+  assert.equal(remainingSp(8, 'pr-review', 2), 1);
+  assert.equal(remainingSp(8, 'UAT BUG / Improvement', 2), 1);
+  assert.equal(remainingSp(3, 'UAT BUG / Improvement', 4), 2);
+  assert.equal(remainingSp(0.5, 'PR Review', 2), 0.5, 'never more than the ticket holds');
+  assert.equal(remainingSp(5, 'In Progress', 2), 2.5);
+  assert.equal(remainingSp(5, 'IN-PROGRESS', 2), 2.5);
+  assert.equal(remainingSp(5, 'To Do', 2), 5);
+  assert.equal(remainingSp(5, 'Something new', 2), 5);
+  assert.equal(remainingSp(null, 'In Progress', 2), null);
+});
+
+test('a ticket with work left takes only those days on its lane', () => {
+  const rows = scheduleSprint([
+    { key: 'A', dev: 'Danu', sp: 4, left: 1, dependsOn: [] },
+    { key: 'B', dev: 'Danu', sp: 4, left: null, dependsOn: ['A'] },
+  ], { sprintDays: 10, spPerDay: 2 });
+  assert.deepEqual(rows.map((row) => [row.key, row.start, row.end]), [['A', 0, 0.5], ['B', 0.5, 2.5]]);
 });
