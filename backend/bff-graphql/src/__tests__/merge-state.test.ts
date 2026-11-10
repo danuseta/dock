@@ -65,13 +65,15 @@ test('only the pull requests a ticket owns count: a docs sync or a PR that only 
   assert.equal(ownPull('QRD-1292', { title: 'feat(QRD-1292): version history', headBranch: 'feat/version-history' }), true);
   assert.equal(ownPull('QRD-1306', { title: 'QRD-1306 fix: show token figures', headBranch: 'fix/tokens' }), true);
   assert.equal(ownPull('QRD-1292', { title: 'anything', headBranch: 'feat/QRD-1292-history' }), true);
-  assert.equal(ownPull('QRD-1292', { title: 'docs: sync for #1115 (QRD-1292)', headBranch: 'docs/sync-1115' }), false);
+  assert.equal(ownPull('QRD-1292', { title: 'docs: sync for #1115 (QRD-1292)', headBranch: 'docs/auto-update/QRD-1292-pr-1115' }), false);
+  assert.equal(ownPull('QRD-1228', { title: 'anything else', headBranch: 'docs/auto-update/QRD-1228-pr-1040' }), false);
+  assert.equal(ownPull('QRD-1449', { title: 'docs: sync for #1038 (QRD-1449)', headBranch: 'feat/QRD-1449-docs' }), false);
   assert.equal(ownPull('QRD-1292', { title: 'feat(QRD-1295): move pinned agents', headBranch: 'feat/QRD-1295-pinned' }), false);
   assert.equal(ownPull('QRD-129', { title: 'feat(QRD-1292): x', headBranch: '' }), false);
   const { github } = fakeGitHub({
     'QRD-1292': [
       { number: 1115, status: 'merged', title: 'feat(QRD-1292): version history', headBranch: 'feat/QRD-1292-history' },
-      { number: 1152, status: 'open', title: 'docs: sync for #1115 (QRD-1292)', headBranch: 'docs/sync-1115' },
+      { number: 1152, status: 'open', title: 'docs: sync for #1115 (QRD-1292)', headBranch: 'docs/auto-update/QRD-1292-pr-1115' },
       { number: 1360, status: 'open', title: 'feat(QRD-1295): move pinned agents', headBranch: 'feat/QRD-1295-pinned' },
     ],
   }, {});

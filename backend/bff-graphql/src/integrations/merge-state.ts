@@ -17,12 +17,14 @@ interface ListedPull { owner: string; repo: string; number?: number | string; pu
 
 /**
  * Whether a pull request is the ticket's own work: its branch names the key, or its title does before the first colon
- * ("feat(QRD-1292): ...", "QRD-1306 fix: ..."). A docs sync ("docs: sync for #1115 (QRD-1292)") or a PR that only
- * mentions the key elsewhere is not, so it never holds a merged ticket open.
+ * ("feat(QRD-1292): ...", "QRD-1306 fix: ..."). The docs sync a bot opens after a merge ("docs: sync for #1115
+ * (QRD-1292)" on docs/auto-update/QRD-1292-pr-1115) names the key in its branch too, so it is left out by name; so is
+ * a PR that only mentions the key elsewhere. Neither holds a merged ticket open.
  */
 export function ownPull(key: string, pull: { title?: string; headBranch?: string }): boolean {
   const normalized = key.trim().toUpperCase();
   if (!/^[A-Z][A-Z0-9_]*-\d+$/.test(normalized)) return false;
+  if (/^docs\/auto-update\//i.test(String(pull.headBranch ?? '')) || /^docs: sync for #\d+/i.test(String(pull.title ?? ''))) return false;
   const exact = new RegExp(`(^|[^A-Z0-9_])${normalized}(?![A-Z0-9_])`, 'i');
   const lead = String(pull.title ?? '').split(':')[0];
   return exact.test(String(pull.headBranch ?? '')) || exact.test(lead);
