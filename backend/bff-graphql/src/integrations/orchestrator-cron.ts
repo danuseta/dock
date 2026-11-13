@@ -4,6 +4,7 @@ import { stalledNotice, waitingNotice } from './push-notices';
 import { isSettledStatus } from './attention';
 import { REVIEW_STATUS } from './broadcast-review';
 import { ticketSessionTitle } from './session-titles';
+import { inPublishedPlan, publishWait, sprintRevision } from './plan-publish';
 
 export class CronInputError extends Error {}
 
@@ -39,6 +40,10 @@ export interface CronSettings {
   usageBrakePercent: number;
   weeklyBrakePercent: number;
   engine: CronEngine;
+  /** "Mulai kerja setelah plan dipublish": a To Do ticket waits until the sprint plan carrying it is published. */
+  waitForPublish: boolean;
+  /** "Plan per developer dibikin setelah publish": the Plan-<sprint> session waits for the published plan too. */
+  planAfterPublish: boolean;
 }
 
 export interface UsageWindow {
@@ -66,6 +71,8 @@ export const DEFAULT_CRON_SETTINGS: CronSettings = {
   usageBrakePercent: 70,
   weeklyBrakePercent: 90,
   engine: 'sous',
+  waitForPublish: false,
+  planAfterPublish: false,
 };
 
 const CONFIG_KEY = 'orchestratorCronConfig';
@@ -137,6 +144,8 @@ export function parseCronSettings(raw: string | null | undefined): CronSettings 
   const inProgressStatus = typeof merged.inProgressStatus === 'string' ? merged.inProgressStatus.trim() : '';
   if (!inProgressStatus) throw new CronInputError('inProgressStatus is required');
   if (!CRON_ENGINES.includes(merged.engine as CronEngine)) throw new CronInputError(`engine must be one of ${CRON_ENGINES.join(', ')}`);
+  if (typeof merged.waitForPublish !== 'boolean') throw new CronInputError('waitForPublish must be true or false');
+  if (typeof merged.planAfterPublish !== 'boolean') throw new CronInputError('planAfterPublish must be true or false');
   return {
     enabled: merged.enabled,
     machine,
@@ -157,6 +166,8 @@ export function parseCronSettings(raw: string | null | undefined): CronSettings 
     usageBrakePercent: integer(merged.usageBrakePercent, 'usageBrakePercent', 0, 100),
     weeklyBrakePercent: integer(merged.weeklyBrakePercent, 'weeklyBrakePercent', 0, 100),
     engine: merged.engine as CronEngine,
+    waitForPublish: merged.waitForPublish,
+    planAfterPublish: merged.planAfterPublish,
   };
 }
 
@@ -197,7 +208,8 @@ export function labelOrder(labels: string[] | undefined): number | null {
 export const orderOf = (ticket: CronTicket, dockOrder: Map<string, number>): number | null => dockOrder.get(ticket.key) ?? labelOrder(ticket.labels);
 
 /**
- * The tickets the cron may take: still To Do, in scope, without a run and without an open dependency.
+ * The tickets the cron may take: still To Do, in scope, without a run and without an open dependency, and with
+ * waitForPublish on, part of a published sprint plan (a plan-published-rN label).
  * Tickets with an order come first, lowest number first; the rest follow by ticket number.
  */
 export function candidates(tickets: CronTicket[], taken: Set<string>, blocked: Set<string>, settings: CronSettings, dockOrder: Map<string, number> = new Map(), manual: Set<string> = new Set()): CronTicket[] {
@@ -207,7 +219,22 @@ export function candidates(tickets: CronTicket[], taken: Set<string>, blocked: S
     .filter((ticket) => !taken.has(ticket.key) && !blocked.has(ticket.key) && !manual.has(ticket.key))
     .filter((ticket) => settings.sprint === 'any' || String(ticket.sprintState || '').toUpperCase() === 'ACTIVE')
     .filter((ticket) => settings.labels.length === 0 || (ticket.labels || []).some((label) => settings.labels.some((wanted) => sameText(wanted, label))))
+    .filter((ticket) => !settings.waitForPublish || inPublishedPlan(ticket.labels))
     .sort((a, b) => (rank(a) - rank(b)) || (ticketNumber(a.key) - ticketNumber(b.key)));
+}
+
+/**
+ * The To Do tickets the publish gate holds back, with why: the sprint plan is not published yet, or the ticket joined
+ * the sprint after the plan went out. Empty when waitForPublish is off.
+ */
+export function publishWaits(tickets: CronTicket[], taken: Set<string>, settings: CronSettings, manual: Set<string> = new Set()): DeferredTicket[] {
+  if (!settings.waitForPublish) return [];
+  const open = candidates(tickets, taken, new Set(), { ...settings, waitForPublish: false }, new Map(), manual);
+  return open.flatMap((ticket) => {
+    const sprint = tickets.filter((other) => other.sprintName === ticket.sprintName);
+    const reason = publishWait(ticket, sprintRevision(sprint));
+    return reason ? [{ key: ticket.key, reason }] : [];
+  });
 }
 
 /** Date, hour and ISO weekday (1 = Monday) in WIB. */
@@ -309,7 +336,7 @@ export const ownerReplyPrompt = (key: string, line: string) => [
 ].join('\n');
 
 export interface DeferredTicket { key: string; reason: string }
-export interface FillLog { at: string; day: string; skipped: string | null; started: string[]; parked: string[]; deferred: DeferredTicket[]; notMoved: string[]; failed: string[]; released: string[]; resumed?: string[] }
+export interface FillLog { at: string; day: string; skipped: string | null; started: string[]; parked: string[]; deferred: DeferredTicket[]; notMoved: string[]; failed: string[]; released: string[]; resumed?: string[]; dryRun?: boolean }
 export interface CronSlots { busy: number; waiting: number }
 export interface CronStatus { enabled: boolean; slots: CronSlots; parallel: number; startedToday: number; maxPerDay: number; lastFill: FillLog | null }
 
@@ -382,6 +409,11 @@ export interface CronDeps {
   stopTurn(sessionId: string): Promise<unknown>;
   hasPushDevices(): Promise<boolean>;
   push(message: PushMessage): Promise<unknown>;
+  /**
+   * Dry run (staging): a fill logs the tickets it would start or park and opens no session, saves no run and moves no
+   * ticket; the machine, its usage brake and stalled runs are not looked at.
+   */
+  dryRun?: boolean;
 }
 
 interface DayCount { started: string[]; parked: string[] }
@@ -438,6 +470,7 @@ export class OrchestratorCron {
     const settings = await this.settings();
     const { date } = wib(now);
     const log: FillLog = { at: now.toISOString(), day: date, skipped: null, started: [], parked: [], deferred: [], notMoved: [], failed: [], released: [] };
+    if (this.deps.dryRun) return this.dryFill(settings, now, ignoreWindow, log);
     log.released = await this.releaseDeadStarts(settings, now, date).catch((error) => {
       console.error('[Orchestrator cron] Release failed:', error instanceof Error ? error.message : 'unknown error');
       return [];
@@ -452,6 +485,15 @@ export class OrchestratorCron {
       await this.pick(settings, now, log, day);
       await this.deps.cacheSet(`day:${date}`, day);
     }
+    await this.deps.cacheSet('lastFill', log);
+    return log;
+  }
+
+  private async dryFill(settings: CronSettings, now: Date, ignoreWindow: boolean, log: FillLog): Promise<FillLog> {
+    log.dryRun = true;
+    log.skipped = ignoreWindow ? null : outsideWindow(now, settings);
+    if (!log.skipped) await this.pick(settings, now, log, await this.dayCount(log.day));
+    console.warn(`[Orchestrator cron] dry run: would start ${log.started.join(', ') || 'nothing'}; would park ${log.parked.join(', ') || 'nothing'}${log.skipped ? `; skipped: ${log.skipped}` : ''}${log.deferred.length ? `; deferred ${log.deferred.map((item) => `${item.key} (${item.reason})`).join(', ')}` : ''}`);
     await this.deps.cacheSet('lastFill', log);
     return log;
   }
@@ -479,6 +521,7 @@ export class OrchestratorCron {
     ]);
     let free = Math.max(0, settings.parallel - slots.busy - slots.waiting);
     const defer = (key: string, reason: string) => { if (log.deferred.length < MAX_DEFERRED_LOGGED) log.deferred.push({ key, reason }); };
+    for (const wait of publishWaits(tickets, new Set(taken), settings, manual)) defer(wait.key, wait.reason);
     for (const ticket of candidates(tickets, new Set(taken), new Set(), settings, dockOrder, manual)) {
       if (held.has(ticket.key) || blocked.has(ticket.key)) {
         await this.deps.recordWait(ticket.key, held.has(ticket.key) ? 'pending' : waitsOn.get(ticket.key) ?? '').catch(() => undefined);
@@ -487,7 +530,7 @@ export class OrchestratorCron {
       try {
         if (!ticketHasAcceptanceCriteria(ticket)) {
           if (day.parked.length >= settings.maxPerDay) { defer(ticket.key, `daily cap reached: ${settings.maxPerDay} parked today`); continue; }
-          await this.saveRun(ticket, settings.machine, now, PARKED_TEXT);
+          if (!this.deps.dryRun) await this.saveRun(ticket, settings.machine, now, PARKED_TEXT);
           day.parked.push(ticket.key);
           log.parked.push(ticket.key);
         } else if (day.started.length >= settings.maxPerDay) {
@@ -498,6 +541,7 @@ export class OrchestratorCron {
           free -= 1;
           day.started.push(ticket.key);
           log.started.push(ticket.key);
+          if (this.deps.dryRun) continue;
           if (!(await this.start(ticket, settings, now, this.startPromptOf(settings, ticket.key, stacked.get(ticket.key))))) log.notMoved.push(ticket.key);
         }
       } catch (error) {
@@ -796,7 +840,8 @@ ${run.stalledDetail ?? ''}`, stalledNotice);
     } catch (error) {
       console.error('[Orchestrator cron] Ping failed:', error instanceof Error ? error.message : 'unknown error');
     }
-    await this.deps.planWatch(await this.deps.tickets()).catch((error) => console.error('[Orchestrator cron] Plan watch failed:', error instanceof Error ? error.message : 'unknown error'));
+    const trigger = await this.deps.planWatch(await this.deps.tickets()).catch((error) => console.error('[Orchestrator cron] Plan watch failed:', error instanceof Error ? error.message : 'unknown error'));
+    if (this.deps.dryRun && isRecord(trigger) && Array.isArray(trigger.keys)) console.warn(`[Orchestrator cron] dry run: would start the Plan-${String(trigger.sprint)} session (${String(trigger.kind)}) for ${trigger.keys.join(', ')}`);
     if ((await this.settings()).enabled) await this.runFill();
   }
 }

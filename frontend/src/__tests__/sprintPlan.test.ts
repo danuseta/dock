@@ -20,13 +20,10 @@ const plan = (over: Partial<SprintPlan> = {}): SprintPlan => ({
   ...over,
 });
 
-test('agentsRoute opens Sprint > Retro for the old tab=retro link and Plan by default', () => {
-  assert.deepEqual(agentsRoute('?tab=retro'), { tab: 'sprint', sub: 'retro' });
-  assert.deepEqual(agentsRoute('?tab=sprint'), { tab: 'sprint', sub: 'plan' });
-  assert.deepEqual(agentsRoute('?tab=sprint&sub=plan'), { tab: 'sprint', sub: 'plan' });
-  assert.deepEqual(agentsRoute('?tab=sprint&sub=retro'), { tab: 'sprint', sub: 'retro' });
-  assert.deepEqual(agentsRoute('?tab=library'), { tab: 'library', sub: 'plan' });
-  assert.deepEqual(agentsRoute(''), { tab: 'office', sub: 'plan' });
+test('agentsRoute keeps Office and Library; Sprint moved to Planning', () => {
+  assert.equal(agentsRoute('?tab=library'), 'library');
+  assert.equal(agentsRoute('?tab=sprint'), 'office');
+  assert.equal(agentsRoute(''), 'office');
 });
 
 test('plan helpers label the source, the state and the map', () => {
@@ -53,13 +50,13 @@ test('the retro lists the three dependency numbers and Home ranks PLAN_DEPENDENC
   assert.deepEqual(signalOf('PLAN_DEPENDENCY'), { rank: 6, group: 'answer', label: 'DEPENDENCY' });
 });
 
-test('the Agents page shows Sprint with Plan and Retro, Home opens the plan, and the phone ping is wired', () => {
+test('Planning shows Draft, Plan and Retro, Agents keeps Office and Library, Home opens the plan, and the phone ping is wired', () => {
   const page = source('../pages/AgentsPage.tsx');
-  assert.match(page, /\['sprint', 'Sprint', CalendarRange\]/);
-  assert.match(page, /<PlanTab \/> : <RetroTab \/>/);
-  assert.doesNotMatch(page, /current="retro"/);
-  assert.match(source('../agents/PhoneTabs.tsx'), /\['sprint', 'Sprint', undefined\]/);
-  assert.match(source('../components/HomeAttention.tsx'), /\/agents\?tab=sprint&sub=plan/);
+  assert.match(page, /\['office', 'Office', Building2\], \['library', 'Library', Library\]\]/);
+  assert.doesNotMatch(page, /PlanningTab|<PlanTab|<RetroTab/);
+  assert.match(source('../pages/PlanningPage.tsx'), /<PlanningTab initialPanel=\{route\.panel \?\? undefined\} \/> : tab === 'plan' \? <PlanTab \/> : <RetroTab \/>/);
+  assert.doesNotMatch(source('../agents/PhoneTabs.tsx'), /'sprint'/);
+  assert.match(source('../components/HomeAttention.tsx'), /\/planning\?tab=plan/);
   assert.match(source('../lib/notificationEvents.ts'), /PLAN_DEPENDENCY: \{ prefix: 'plan', title: 'waits for your call' \}/);
   const tab = source('../agents/PlanTab.tsx');
   assert.match(tab, /edge\.dependsOnStatus &&/);
@@ -73,7 +70,7 @@ test('AC drift rows name why a line is held and put held ones first', () => {
   assert.equal(driftStateLabel('move-pending'), 'Move pending');
   assert.deepEqual(sortDrift([{ ...row, id: 'b', state: 'wait' }, row]).map((item) => item.id), ['a', 'b']);
   const tab = source('../agents/PlanTab.tsx');
-  for (const text of ['Not tested here', 'Needs PO', 'Move to', 'ac-move-pending']) assert.ok(tab.includes(text), text);
+  for (const text of ['Pindah ke Reference', 'Needs PO', 'Move to', 'ac-move-pending']) assert.ok(tab.includes(text), text);
 });
 
 test('the retro shows QA escalations by cause team-wide and labels the QA bot triage rules', () => {

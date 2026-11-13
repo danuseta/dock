@@ -1,11 +1,11 @@
 // AC drift in Agents > Sprint > Plan: once a sprint is published, an AC line of one of the owner's tickets that needs a
 // ticket which has not landed (it lands after this one, or it slipped past its planned day) is Held. The owner then moves
-// the line to the ticket that builds it, marks it not tested here, keeps it waiting, or flags it for the PO. AC is only
+// the line to the ticket that builds it, moves it to the Reference field (not tested here), keeps it waiting, or flags it for the PO. AC is only
 // written on tickets assigned to the owner, and only when Jira still holds the AC the plan published.
-import { acFindings, findingId, isDoneStatus, normalizeAcLine } from './ac-scope';
+import { acFindings, isDoneStatus, normalizeAcLine } from './ac-scope';
 import type { PlanningIssue } from './jira-sprint';
 import { SprintInputError } from './sprint-dashboard';
-import { acValueLines, openTickets, rewriteAcValue, type DraftJira, type DraftStore, type DraftView } from './sprint-draft';
+import { acValueLines, openTickets, referenceLine, rewriteAcValue, type DraftJira, type DraftStore, type DraftView } from './sprint-draft';
 import { workingDayOf } from './scope-cut';
 import { MOVE_MARKER, MOVE_PENDING_LABEL, moveAnswer, moveId, type AcMoveJira } from './ac-move';
 
@@ -26,6 +26,8 @@ export interface PlanDrift { sprint: string; publishedAt: string | null; today: 
 
 /** What drift needs from Jira beyond Planning: who DOCK is, comments and labels. */
 export interface DriftJira extends Pick<DraftJira, 'statusesOf' | 'issueNow' | 'setAc'>, Pick<AcMoveJira, 'comments' | 'markedComment'> {
+  /** The Reference field, in the format Jira returned it. */
+  setReference(key: string, value: unknown): Promise<void>;
   myself(): Promise<string | null>;
   comment(key: string, lines: string[]): Promise<void>;
   addLabel(key: string, label: string): Promise<void>;
@@ -122,11 +124,11 @@ export class AcDriftService {
     if (action === 'needs-po') {
       await jira.comment(row.key, [`Needs PO: AC ${row.line} needs ${row.refKey}, which has not landed (${row.refStatus ?? 'unknown status'}).`, `"${row.text}"`, ...(text ? [text] : []), `Planner: ${published.view.createdBy ?? 'unknown'}. Flagged from DOCK by ${by ?? 'the owner'}.`]);
     } else if (action === 'not-tested') {
+      // Not tested here: the line leaves AC for the Reference field, with the ticket it names. No Jira comment.
       const own = await this.ownTicket(jira, row.key, published.jiraAc.get(row.key) ?? []);
-      const marked = `${row.text} (not tested here: needs ${row.refKey})`;
-      await jira.setAc(row.key, rewriteAcValue(own.acRaw, [row.text], [marked]));
-      await this.saveAc(sprint, row.key, published.jiraAc.get(row.key) ?? [], [row.text], [marked]);
-      await jira.comment(row.key, [`AC ${row.line} marked not tested here: it needs ${row.refKey}, which has not landed (${row.refStatus ?? 'unknown status'}).`, `"${row.text}"`, ...(text ? [text] : []), `Changed from DOCK by ${by ?? 'the owner'}; contract rule: changes without the PO.`]);
+      await jira.setReference(row.key, rewriteAcValue(own.referenceRaw ?? null, [], [referenceLine(row.refKey, row.text)]));
+      await jira.setAc(row.key, rewriteAcValue(own.acRaw, [row.text], []));
+      await this.saveAc(sprint, row.key, published.jiraAc.get(row.key) ?? [], [row.text], []);
     } else if (action === 'move') {
       const own = await this.ownTicket(jira, row.key, published.jiraAc.get(row.key) ?? []);
       const me = await jira.myself();
@@ -155,9 +157,7 @@ export class AcDriftService {
         state = 'move-pending';
       }
     }
-    // A line marked not tested here reads differently now, so its call is kept under the marked line.
-    const kept = state === 'not-tested' ? findingId(row.key, row.refKey, `${row.text} (not tested here: needs ${row.refKey})`) : id;
-    decisions[kept] = { action: action as DriftDecision['action'], state, note: text, by, at: this.now().toISOString(), ...(requestId ? { moveId: requestId } : {}) };
+    decisions[id] = { action: action as DriftDecision['action'], state, note: text, by, at: this.now().toISOString(), ...(requestId ? { moveId: requestId } : {}) };
     await this.store.updateSprintDraftDrift(sprint, JSON.stringify(decisions));
     return (await this.drift(sprint, ownerKeys))!;
   }

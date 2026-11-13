@@ -28,6 +28,9 @@ import type { SendPayload } from './composer/composerLogic';
 import { InteractionCards } from './interactions/InteractionCards';
 import { isPhone } from '../lib/phone';
 import { offlineLine } from './phonePanel';
+import { PlanningQuestionCards } from '../agents/PlanningQuestions';
+import { usePlanningQuestions, type QuestionTarget } from '../agents/usePlanningQuestions';
+import { planningSprintOf } from '../agents/planning';
 import { useInteractionLog } from './interactions/useInteractionLog';
 import { chatStore } from './store';
 
@@ -127,6 +130,13 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
   const readOnly = session?.source === 'cli';
   const control = useTurnOptions(sessionId, machine, composerFeatures(capabilities), sessionTurnOptions(session));
   const { status: liveStatus } = useChatStatus(machine);
+  // A Planning-<sprint> chat shows the draft's open questions as cards; the composer can answer the one picked.
+  const planning = usePlanningQuestions(planningSprintOf(session?.title));
+  const [answering, setAnswering] = useState<QuestionTarget | null>(null);
+  const answerQuestion = (id: string, text: string) => {
+    setSendError('');
+    planning.answer(id, text).catch((error: unknown) => setSendError(messageOf(error, 'The answer could not be saved')));
+  };
   const ownStatus = liveStatus?.sessions.find((item) => item.sessionId === sessionId);
   const dot = dotState({ bridgeUp: machineUp, waiting: interactions.cards.length > 0 || Boolean(session?.waiting), busy });
 
@@ -251,6 +261,18 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
   }, [messages, sessionId]);
 
   const send = async (payload: SendPayload) => {
+    if (answering) {
+      const target = answering;
+      try {
+        await planning.answer(target.id, payload.text);
+        setAnswering(null);
+      } catch (error) {
+        setSendError(messageOf(error, 'The answer could not be saved'));
+        throw error;
+      }
+      // The agent hears the answer too when its machine is up; the draft already holds it either way.
+      if (!machineUp) return;
+    }
     const pending: ChatMessage = optimisticMessage(sessionId, payload, -Date.now(), new Date().toISOString());
     setSendError('');
     stickRef.current = true;
@@ -311,6 +333,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
           />
         ))}
         <TranscriptList items={activity.items} store={activity.store} threadId={threadId} onOpenThread={onOpenThread ? (eventId) => onOpenThread(eventId) : undefined} />
+        <PlanningQuestionCards questions={planning.questions} canAnswer={planning.canAnswer} busy={planning.answering} target={answering} planner={planning.planner} onAnswer={answerQuestion} onTarget={setAnswering} />
       </div>
 
       {!missing && (compact && onOpenThread ? <WorkerStrip events={allEvents} onOpen={onOpenThread} /> : <WorkerTray events={allEvents} activeId={threadId} onSelect={onOpenThread} />)}
@@ -322,6 +345,12 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
         {status === 'running' && (!renderHeader || worker || isPhone()) && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] max-[760px]:text-xs text-status-merged" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">Running{interactions.cards.length > 0 ? ' · waiting for your answer' : worker ? ` · ${worker}` : session?.statusDetail ? ` · ${session.statusDetail}` : ''}</span></p>}
         {status === 'error' && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The last turn failed{session?.statusDetail ? `: ${session.statusDetail}` : '.'}</p>}
         {sendError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">Not sent: {sendError}</p>}
+        {answering && (
+          <p className="flex items-center gap-2 font-mono text-[0.66rem] text-muted-foreground" role="status">
+            Balas ke pertanyaan {answering.number}{answering.key ? ` · ${answering.key}` : ''}
+            <button type="button" className="text-accent hover:underline" onClick={() => setAnswering(null)}>batal</button>
+          </p>
+        )}
         {loadError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">{loadError}</p>}
         {sessionError && !data && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The session could not be loaded: {sessionError.message}</p>}
         {blocker && !readOnly && machineUp === false && compact && (
@@ -356,8 +385,8 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
             sessionId={sessionId}
             machine={machine}
             capabilities={capabilities}
-            blocker={blocker}
-            busy={busy}
+            blocker={answering ? null : blocker}
+            busy={answering ? false : busy}
             stopping={stopping}
             control={control}
             onSend={send}

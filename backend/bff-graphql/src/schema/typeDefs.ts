@@ -10,6 +10,13 @@ export const typeDefs = gql`
     userStory: String
     problemDefinition: String
     figmaUrl: String
+    """The Jira Reference field: what the ticket only mentions about other tickets."""
+    reference: String
+    """The Jira Open to confirm field; empty when nothing is left to confirm."""
+    openToConfirm: String
+    developerContext: String
+    """Tickets this one is blocked by (Blocks links)."""
+    blockedBy: [String!]!
     status: String!
     assignee: String
     url: String!
@@ -197,6 +204,8 @@ export const typeDefs = gql`
     notificationPrefs: String!
     """Confluence page id the sprint contract page of Planning goes under; null skips the page."""
     planningConfluenceParent: String
+    """The planner (Jira display name or account id): only that DOCK edits and publishes the draft; null lets every DOCK plan."""
+    planningPlanner: String
   }
 
   type DiscordAttachment {
@@ -583,7 +592,7 @@ export const typeDefs = gql`
   }
 
   type SprintDraftDecision {
-    """move, wait or drop for an AC line; accept or fix for a QA prediction."""
+    """dependency, reference or move for an AC line (older wait reads as dependency, drop as reference); accept or fix for a QA prediction; approve for test cases."""
     action: String!
     note: String
     by: String
@@ -625,6 +634,10 @@ export const typeDefs = gql`
     frames: [String!]!
     storyboard: SprintDraftStoryboardFlag
     tcs: [SprintDraftTc!]!
+    "QA approved the test cases as they are now (decision tc|KEY approve)."
+    tcApproved: Boolean!
+    "The hash of the AC lines; a ticket summary is written for one hash."
+    acHash: String!
     "A frame of the ticket changed in the storyboard after the test cases were written."
     tcStale: Boolean!
     "Publish posts the test cases: they differ from the last comment."
@@ -676,9 +689,11 @@ export const typeDefs = gql`
     refEnd: Float
     ownEnd: Float
     decision: SprintDraftDecision
+    """The ticket already has an "is blocked by" link to refKey: the line is a dependency."""
+    linked: Boolean!
   }
 
-  """A sprint being planned. Publish is held while blockers (finding or qa|KEY ids) remain."""
+  """A sprint being planned. blockers (finding or qa|KEY ids) are shown before publish; they never hold it."""
   type SprintDraft {
     sprint: String!
     sprintId: Int!
@@ -707,6 +722,8 @@ export const typeDefs = gql`
     "github when merge state came from GitHub, jira when GitHub could not be read"
     mergeSource: String!
     moves: [SprintMoveSuggestion!]!
+    "The planner's written scope cut, decision scope|cut; null while none is written."
+    scopeCut: SprintDraftDecision
   }
 
   """What Publish would write to one ticket. refused says why the ticket is skipped."""
@@ -716,7 +733,59 @@ export const typeDefs = gql`
     assigneeTo: String
     acRemoved: [String!]!
     acAdded: [String!]!
+    """Lines Publish appends to the Reference field."""
+    referenceAdded: [String!]!
+    """Tickets Publish links as blocking this one."""
+    blockedBy: [String!]!
     refused: String
+  }
+
+  """The planning agent's summary of a ticket, in Indonesian. Never written to Jira."""
+  type TicketSummary {
+    key: String!
+    acHash: String!
+    made: String!
+    checked: String!
+    notHere: String!
+    waitsOn: [String!]!
+    before: String!
+    after: String!
+    line: String!
+    testData: String
+    ui: Boolean!
+    """One Indonesian line per AC line."""
+    acId: [String!]!
+    titleId: String
+    writtenAt: String!
+    """Written for the AC the sprint draft holds now."""
+    current: Boolean!
+    """When the AC field last changed in Jira; only on ticketSummary."""
+    acChangedAt: String
+  }
+
+  type TicketRefDecision {
+    refKey: String!
+    """dependency, reference or move."""
+    action: String!
+  }
+
+  type TicketReadinessTicket {
+    key: String!
+    """The newest sprint draft holding the ticket."""
+    sprint: String
+    summary: TicketSummary
+    tcApproved: Boolean!
+    decisions: [TicketRefDecision!]!
+  }
+
+  type TicketStatus {
+    key: String!
+    status: String!
+  }
+
+  type TicketReadinessFacts {
+    tickets: [TicketReadinessTicket!]!
+    statuses: [TicketStatus!]!
   }
 
   """The outcome of Publish for one ticket: updated, refused or failed."""
@@ -804,7 +873,7 @@ export const typeDefs = gql`
     expected: String!
   }
 
-  "A question the planning chat raised; the planner marks it answered."
+  "A question the planning chat raised; the planner answers it in the chat."
   type SprintDraftQuestion {
     id: ID!
     text: String!
@@ -813,6 +882,45 @@ export const typeDefs = gql`
     answered: Boolean!
     answeredBy: String
     answeredAt: String
+    "The planner's answer: a draft decision, a Jira comment on the ticket and a contract decision on publish."
+    answer: String
+    "Quick replies the planning agent offered."
+    options: [String!]!
+  }
+
+  "One of this developer's To Do tickets of the published plan, in work order."
+  type SprintPlanOrderItem {
+    key: String!
+    summary: String!
+    status: String!
+    sp: Float
+    order: Int
+  }
+
+  "A sprint plan as every DOCK reads it from Jira's plan-published-rN labels."
+  type SprintPlanSignal {
+    sprint: String!
+    sprintId: Int!
+    sprintState: String!
+    activeSince: String
+    "draft, published or running"
+    stage: String!
+    revision: Int
+    publishedBy: String
+    publishedAt: String
+    planner: String
+    me: String
+    isPlanner: Boolean!
+    draftLoadedAt: String
+    draftStatus: String
+    "Sprint tickets without a plan label: they joined after the last publish."
+    joined: [String!]!
+    "Plan tickets whose AC changed in Jira after the revision went out."
+    acChanged: [String!]!
+    waitForPublish: Boolean!
+    planAfterPublish: Boolean!
+    myOrder: [SprintPlanOrderItem!]!
+    myOutside: [String!]!
   }
 
   type SprintStoryboard {
@@ -1572,6 +1680,7 @@ export const typeDefs = gql`
     ownerReplySession: String
     notificationPrefs: String
     planningConfluenceParent: String
+    planningPlanner: String
   }
 
   input QuickLinkInput {
@@ -1843,6 +1952,10 @@ export const typeDefs = gql`
     ownerName: String!
     dashboard: [TicketGroup!]!
     ticketDetail(key: String!): Ticket
+    """The planning agent's summary of the ticket; null when none was written."""
+    ticketSummary(key: String!): TicketSummary
+    """What the readiness of each ticket needs beyond Jira (summary, test case approval, AC decisions), and the Jira status of refs."""
+    ticketReadiness(keys: [String!]!, refs: [String!]): TicketReadinessFacts!
     ticketRelationGroup(ticketKey: String!): TicketRelationGroup!
     needsAttention: [NeedsAttentionItem!]!
     discordThreads: DiscordThreads!
@@ -1919,6 +2032,9 @@ export const typeDefs = gql`
     planningSprints: [PlanningSprint!]!
     """The stored draft of a sprint by name, null before it is loaded."""
     sprintDraft(sprint: String!): SprintDraft
+    sprintPlanSignal(sprint: String!): SprintPlanSignal
+    "The Planning flow as JSON (stages, owner, approve); null when none is saved and every stage runs."
+    planningFlow: String
     """The changes Publish would make, each ticket read from Jira again; writes nothing."""
     previewSprintDraftPublish(sprint: String!): [SprintDraftChange!]!
     "The owner's held AC lines in the active sprint's published plan; null when it was not published from Planning."
@@ -1943,7 +2059,7 @@ export const typeDefs = gql`
     loadSprintDraft(sprintId: Int!): SprintDraft!
     """Changes a draft ticket. wave 0 goes back to the wave its dependencies give; ac replaces every line."""
     updateSprintDraftTicket(sprint: String!, key: String!, dev: String, wave: Int, sp: Float, ac: [String!]): SprintDraft!
-    """Records a decision on a finding or a qa|KEY prediction; action clear removes it."""
+    """Records a decision on a finding, a qa|KEY prediction or the scope|cut note; action clear removes it."""
     decideSprintDraft(sprint: String!, id: ID!, action: String!, note: String): SprintDraft!
     refreshSprintDraftQa(sprint: String!): SprintDraft!
     "Reads the newest storyboard of each epic of the draft from Confluence and saves it under the blackboard."
@@ -1951,7 +2067,7 @@ export const typeDefs = gql`
     "Save an uploaded storyboard HTML as the newest version for the epic (used until the Confluence page exists)."
     uploadSprintStoryboard(sprint: String!, epic: String!, html: String!): SprintDraft!
     "Marks an open question of the planning chat answered, or open again."
-    answerSprintDraftQuestion(sprint: String!, id: ID!, answered: Boolean!): SprintDraft!
+    answerSprintDraftQuestion(sprint: String!, id: ID!, answered: Boolean!, text: String): SprintDraft!
     "Replaces a ticket's draft test cases."
     setSprintDraftTcs(sprint: String!, key: String!, tcs: [SprintDraftTcInput!]!): SprintDraft!
     "Assign cards to another developer in the draft only; Jira changes on Publish."
@@ -2050,6 +2166,8 @@ export const typeDefs = gql`
     backfillSprintDashboards(count: Int!): SprintRefreshState!
     updateSprintDashboardSettings(boardId: String!, config: String!): Boolean!
     updateOrchestratorCronSettings(config: String!): Boolean!
+    "Saves the Planning flow JSON after validation and returns it normalized; an empty string clears it."
+    setPlanningFlow(flow: String!): String
     runOrchestratorCronNow: String!
     confirmOrchestration(key: String!): Boolean!
     stopAllAgents: Int!

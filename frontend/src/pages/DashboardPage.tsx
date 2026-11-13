@@ -17,6 +17,8 @@ import { GET_DASHBOARD } from '../graphql/queries';
 import { REFRESH_DATA } from '../graphql/mutations';
 import { useTicketStore } from '../stores/useTicketStore';
 import { TicketCard } from '../components/TicketCard';
+import { useReadiness } from '../components/ticket/useReadiness';
+import { readinessOnBoard } from '../lib/ticketDetail';
 import { TicketMenu, type TicketMenuTarget } from '../components/ticket/TicketMenu';
 import { Toast } from '../components/Toast';
 import { useOpenForTicket } from '../chat/useOpenForTicket';
@@ -52,6 +54,9 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
   const [refreshData, { loading: refreshing }] = useMutation(REFRESH_DATA, {
     refetchQueries: [{ query: GET_DASHBOARD }]
   });
+  // One readiness query for every TODO card of the board.
+  const boardTickets: any[] = Array.isArray(data?.dashboard) ? data.dashboard.flatMap((group: any) => group.tickets || []) : [];
+  const { readiness } = useReadiness(boardTickets.filter((t: any) => getCanonicalColumnId(t.status) === 'TODO'));
 
   if (error && !data) return (
     <Page width="full">
@@ -110,7 +115,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
 
   const filterTabs = ['ALL', ...canonicalColumns.map(c => c.id)];
 
-  const getCanonicalColumnId = (ticketStatus: string): string => {
+  function getCanonicalColumnId(ticketStatus: string): string {
     const st = (ticketStatus || '').toUpperCase().trim();
     if (st === 'IN PROGRESS' || st === 'PR PREVIEW' || st === 'UAT MERGED' || st === 'UAT CHECK' || st === 'UAT/BUGG IMPROVEMENT' || st === 'READY FOR PRODUCTION' || st === 'DONE/MERGED') {
       return st;
@@ -124,7 +129,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
     if (st.includes('PROGRESS') || st === 'WORKING' || st === 'ACTIVE' || st.includes('DEVELOP') || st.includes('DOING') || st.includes('DEV')) return 'IN PROGRESS';
     // Fallback to TODO for any unknown, backlog, or new statuses so NO ticket ever vanishes from the Kanban board!
     return 'TODO';
-  };
+  }
 
   const matchesCanonicalStatus = (ticketStatus: string, filter: string) => {
     if (filter === 'ALL') return true;
@@ -269,6 +274,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
                         key={ticket.key} 
                         ticket={ticket} 
                         menuOpen={menu?.key === ticket.key}
+                        readiness={readinessOnBoard(column.id, readiness.get(ticket.key))}
                         onClick={() => onTicketClick(ticket.key)} 
                         onMenu={(x, y, sheet) => setMenu({ key: ticket.key, x, y, sheet })}
                       />

@@ -3,6 +3,7 @@ export interface FillLog {
   at: string;
   skipped: string | null;
   started: string[];
+  dryRun?: boolean;
   parked: string[];
   deferred: Array<{ key: string; reason: string }>;
   notMoved: string[];
@@ -26,7 +27,7 @@ export function fillSummary(fill: FillLog | null): string {
   const when = new Date(fill.at).toLocaleString();
   if (fill.skipped) return `${when}: nothing taken, ${fill.skipped}.`;
   const parts = [
-    `started ${fill.started.join(', ') || 'nothing'}`,
+    `${fill.dryRun ? 'dry run, would start' : 'started'} ${fill.started.join(', ') || 'nothing'}`,
     fill.parked.length ? `parked ${fill.parked.join(', ')}` : '',
     fill.notMoved.length ? `Jira did not move ${fill.notMoved.join(', ')}` : '',
     fill.failed.length ? `failed ${fill.failed.join(', ')}` : '',
@@ -63,6 +64,8 @@ export interface CronForm {
   inProgressStatus: string;
   usageBrakePercent: string;
   weeklyBrakePercent: string;
+  waitForPublish: boolean;
+  planAfterPublish: boolean;
 }
 
 const list = (text: string) => text.split(',').map((item) => item.trim()).filter(Boolean);
@@ -84,6 +87,8 @@ export function formFromConfig(configJson: string): CronForm {
     inProgressStatus: config.inProgressStatus,
     usageBrakePercent: String(config.usageBrakePercent),
     weeklyBrakePercent: String(config.weeklyBrakePercent ?? 90),
+    waitForPublish: config.waitForPublish === true,
+    planAfterPublish: config.planAfterPublish === true,
   };
 }
 
@@ -113,5 +118,7 @@ export function configFromForm(form: CronForm): string {
     usageBrakePercent: number(form.usageBrakePercent),
     weeklyBrakePercent: number(form.weeklyBrakePercent),
     engine: 'sous',
+    waitForPublish: form.waitForPublish,
+    planAfterPublish: form.planAfterPublish,
   });
 }

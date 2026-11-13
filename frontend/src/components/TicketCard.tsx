@@ -4,6 +4,8 @@ import { cn } from '../lib/cn';
 import { getPassLabels } from '../lib/ticketApprovals';
 import { displayAssignee } from '../lib/queryPolicy';
 import { MENU_WIDTH } from './ticket/TicketMenu';
+import { ReadinessChip } from './ticket/TicketReady';
+import type { TicketReadiness } from '../lib/ticketDetail';
 
 const LONG_PRESS_MS = 500;
 
@@ -20,12 +22,14 @@ interface TicketCardProps {
     pullRequests?: any[];
   };
   menuOpen: boolean;
+  /** "Siap dikerjain n/7": given only to cards in the TODO column. */
+  readiness?: TicketReadiness | null;
   onClick: () => void;
   /** Opens the ticket menu at a point, or as a bottom sheet after a long press. */
   onMenu: (x: number, y: number, sheet: boolean) => void;
 }
 
-export const TicketCard: React.FC<TicketCardProps> = ({ ticket, menuOpen, onClick, onMenu }) => {
+export const TicketCard: React.FC<TicketCardProps> = ({ ticket, menuOpen, readiness, onClick, onMenu }) => {
   const hasConflict = ticket.pullRequests?.some(pr => pr.status?.toUpperCase() === 'CONFLICT') ?? false;
   const passLabels = getPassLabels(ticket.labels);
   const assignee = displayAssignee(ticket.assignee);
@@ -95,6 +99,8 @@ export const TicketCard: React.FC<TicketCardProps> = ({ ticket, menuOpen, onClic
         </span>
 
         <span className="text-pretty text-[0.92rem] leading-[1.4] font-bold text-foreground">{ticket.title}</span>
+
+        {readiness && <ReadinessChip ready={readiness} />}
 
         {passLabels.length > 0 && (
           <span className="flex flex-wrap gap-1" aria-label="Approved by">

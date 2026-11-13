@@ -10,9 +10,14 @@ import { defaultBlackboardRoot } from './blackboard';
 import { CONTRACT_PARENT_KEY } from './sprint-contract';
 import { GitHubAPI } from '../datasources/GitHubAPI';
 import { readMergeStates } from './merge-state';
+import { PlanSignalService } from './plan-signal';
+import { parseCronSettings } from './orchestrator-cron';
+import { TicketSummaryService, acChangedFrom } from './ticket-summary';
 
 const storage = new StorageService();
 const github = new GitHubAPI();
+const PLAN_SIGNAL_CACHE = 'plan-signal';
+const CRON_CONFIG_KEY = 'orchestratorCronConfig';
 
 async function jiraClient(): Promise<{ client: JiraSprintClient; value: (key: string) => string }> {
   const settings = await storage.getSettings();
@@ -43,6 +48,11 @@ async function planningJira(): Promise<DraftJira> {
     setAc: (key, value) => client.setAcField(key, value),
     setAssignee: (key, accountId) => client.setAssignee(key, accountId),
     postTcs: (key, body) => client.addTcComment(key, TC_MARKER, JSON.stringify(body, null, 2)),
+    setReference: (key, value) => client.setReferenceField(key, value),
+    addBlockedBy: (key, blocker) => client.addBlockedBy(key, blocker),
+    addLabel: (key, label) => client.addLabel(key, label),
+    removeLabel: (key, label) => client.removeLabel(key, label),
+    comment: (key, lines) => client.addComment(key, lines),
   };
 }
 
@@ -68,7 +78,24 @@ export const storyboardReader = new StoryboardReader(async () => {
   return client;
 }, defaultBlackboardRoot);
 
-export const sprintDraftService = new SprintDraftService(storage, planningJira, undefined, undefined, planningContract, (epic) => storyboardReader.sync(epic), (keys) => readMergeStates(keys, github));
+/** The publish signal read back from Jira: every DOCK, the planner's or a developer's, sees the plan through it. */
+export const planSignalService = new PlanSignalService({
+  sprints: async () => (await planningJira()).listSprints(),
+  sprintIssues: async (sprintId) => (await planningJira()).sprintIssues(sprintId),
+  changelog: async (key) => (await jiraClient()).client.changelog(key),
+  myself: async () => (await jiraClient()).client.me(),
+  setting: async (key) => (await storage.getSettings()).find((setting) => setting.key === key)?.value ?? null,
+  cacheGet: (key) => storage.getCache(PLAN_SIGNAL_CACHE, key),
+  cacheSet: (key, value) => storage.upsertCache(PLAN_SIGNAL_CACHE, key, value, 0),
+  dockOrder: () => storage.getTicketOrders(),
+  cronSettings: async () => parseCronSettings((await storage.getSettings()).find((setting) => setting.key === CRON_CONFIG_KEY)?.value),
+  draftStatus: async (sprint) => {
+    const row = await storage.getSprintDraft(sprint);
+    return row ? { status: row.status, loadedAt: row.loadedAt.toISOString(), publishedAt: row.publishedAt?.toISOString() ?? null } : null;
+  },
+});
+
+export const sprintDraftService = new SprintDraftService(storage, planningJira, undefined, undefined, planningContract, (epic) => storyboardReader.sync(epic), (keys) => readMergeStates(keys, github), () => planSignalService.editRefusal());
 
 /** The owner's side of a published plan, on the same Jira credentials. */
 async function driftJira(): Promise<DriftJira> {
@@ -77,6 +104,7 @@ async function driftJira(): Promise<DriftJira> {
     statusesOf: (keys) => client.statusesOf(keys),
     issueNow: (key) => client.planningIssueNow(key),
     setAc: (key, value) => client.setAcField(key, value),
+    setReference: (key, value) => client.setReferenceField(key, value),
     myself: () => client.myself(),
     comment: (key, lines) => client.addComment(key, lines),
     addLabel: (key, label) => client.addLabel(key, label),
@@ -102,3 +130,12 @@ async function moveJira(): Promise<AcMoveJira> {
 export const acInService = new AcInService(moveJira);
 
 export const acDriftService = new AcDriftService(storage, (sprint) => sprintDraftService.view(sprint), driftJira);
+
+/** The planning agent's ticket summaries and the facts the ticket readiness reads, on the same storage and Jira. */
+export const ticketSummaryService = new TicketSummaryService({
+  store: storage,
+  view: (sprint) => sprintDraftService.view(sprint),
+  draftsWith: (keys) => storage.sprintDraftsWithKeys(keys),
+  statusesOf: async (keys) => (await jiraClient()).client.statusesOf(keys),
+  acChangedAt: async (key) => acChangedFrom(await (await jiraClient()).client.changelog(key)),
+});

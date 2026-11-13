@@ -204,6 +204,7 @@ export class StorageAPI {
       ownerReplySession: ownerReplySession(settings.ownerReplySession),
       notificationPrefs: JSON.stringify(parseNotificationPrefs(settings.notificationPrefs)),
       planningConfluenceParent: settings.planningConfluenceParent || null,
+      planningPlanner: settings.planningPlanner || null,
     };
   }
 
@@ -226,6 +227,7 @@ export class StorageAPI {
         if (input[key] != null && input[key] !== 'true' && input[key] !== 'false') throw new Error('Invalid auto review setting');
       }
       if (input.planningConfluenceParent != null && input.planningConfluenceParent !== '' && !/^\d{1,20}$/.test(String(input.planningConfluenceParent).trim())) throw new Error('Invalid Confluence page id');
+      if (input.planningPlanner != null && String(input.planningPlanner).length > 120) throw new Error('Invalid planner');
       if (input.discordUserId != null && input.discordUserId !== '' && !/^\d{5,25}$/.test(String(input.discordUserId).trim())) throw new Error('Invalid Discord user id');
       const saved = input.notificationPrefs == null ? input : { ...input, notificationPrefs: JSON.stringify(validateNotificationPrefs(String(input.notificationPrefs))) };
       await Promise.all(Object.entries(saved)

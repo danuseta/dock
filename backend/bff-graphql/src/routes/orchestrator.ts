@@ -17,7 +17,7 @@ import type { SprintPlanner } from '../integrations/sprint-plan';
 import { sprintPlanner } from '../integrations/sprint-plan-live';
 import { deployGateFor } from '../integrations/deploy-gate-live';
 import { PLANNING_ROUTES, planningIngest, type PlanningIngestDeps } from '../integrations/planning-ingest';
-import { sprintDraftService, storyboardReader } from '../integrations/sprint-draft-live';
+import { sprintDraftService, storyboardReader, ticketSummaryService } from '../integrations/sprint-draft-live';
 import { doctorReports, type DoctorReports } from '../integrations/doctor';
 import { DiscordReaderError, type DiscordReader } from '../integrations/discord-reader';
 import { discordReader } from '../integrations/discord-reader-live';
@@ -77,7 +77,7 @@ export function createOrchestratorIngestRouter(
   // The sprint plan draft the plan session posts.
   planner: Pick<SprintPlanner, 'ingest'> = sprintPlanner,
   // The planning chat's agent reading and changing the sprint draft Planning shows.
-  planning: PlanningIngestDeps = { drafts: sprintDraftService, storyboards: storyboardReader },
+  planning: PlanningIngestDeps = { drafts: sprintDraftService, storyboards: storyboardReader, summaries: ticketSummaryService },
 ): Router {
   const router = Router();
 

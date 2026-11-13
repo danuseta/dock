@@ -17,7 +17,9 @@ import {
   Send,
   X,
 } from 'lucide-react';
-import { GET_DASHBOARD, GET_ORCHESTRATION, GET_TICKET_DETAIL_CORE, GET_TICKET_DETAIL_ENRICHMENT } from '../graphql/queries';
+import { GET_DASHBOARD, GET_ORCHESTRATION, GET_TICKET_DETAIL_CORE, GET_TICKET_DETAIL_ENRICHMENT, GET_TICKET_SUMMARY } from '../graphql/queries';
+import { LinksMap, ReadinessCard, SummaryBlock } from '../components/ticket/TicketReady';
+import { useReadiness, type SummaryFacts } from '../components/ticket/useReadiness';
 import { stageLabel, type AgentRun } from '../agents/runs';
 import { machineOf } from '../chat/messages';
 import { useAnswerTicket } from '../chat/useAnswerTicket';
@@ -38,7 +40,7 @@ import { changesHref } from '../changes/href';
 import { cn } from '../lib/cn';
 import { monitorsOnly, useDockMode } from '../lib/dockMode';
 import { CACHED_QUERY_OPTIONS, DETAIL_QUERY_OPTIONS, displayAssignee } from '../lib/queryPolicy';
-import { NO_DESCRIPTION, RUN_STATE_LABEL, dependencyChoices, isLongDescription, jiraAcLines, needsYou, runState, type NeedItem } from '../lib/ticketDetail';
+import { NO_DESCRIPTION, RUN_STATE_LABEL, dependencyChoices, isLongDescription, jiraAcLines, needsYou, runState, ticketLinks, type NeedItem } from '../lib/ticketDetail';
 import { getPassLabels } from '../lib/ticketApprovals';
 import { blackboardFileHref, blackboardHref, folderOf, useBlackboardFiles } from '../lib/blackboard';
 import { nextWorkOrder } from '../lib/workOrder';
@@ -142,6 +144,9 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
   const monitoring = monitorsOnly(useDockMode());
   const blackboardFiles = useBlackboardFiles(ticketKey, !monitoring);
   const closeMenu = useCallback(() => setMenu(null), []);
+  const { data: summaryData } = useQuery<{ ticketSummary: SummaryFacts | null }>(GET_TICKET_SUMMARY, { ...CACHED_QUERY_OPTIONS, variables: { key: ticketKey }, skip: /^card-/i.test(ticketKey) });
+  const jiraTicket = coreTicketFromResponse ?? null;
+  const { readiness, facts: readinessFacts } = useReadiness(jiraTicket ? [jiraTicket] : [], !!jiraTicket);
 
   const renderBackButton = () => onBack ? (
     <button onClick={onBack} className="inline-flex min-h-6 max-[760px]:min-h-11 items-center gap-2 font-mono text-[0.82rem] font-semibold text-muted-foreground transition-colors duration-150 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
@@ -287,6 +292,9 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
   const description = ticket.description && ticket.description !== NO_DESCRIPTION ? ticket.description : null;
   const jiraAc = jiraAcLines(ticket.acceptanceCriteria);
   const blockedHere = monitoring ? 'This DOCK only monitors. Answer on the workspace DOCK.' : null;
+  const ready = readiness.get(ticket.key) ?? null;
+  const summary = summaryData?.ticketSummary?.key === ticket.key ? summaryData?.ticketSummary ?? null : null;
+  const links = ticketLinks({ key: ticket.key, acceptanceCriteria: ticket.acceptanceCriteria, blockedBy: ticket.blockedBy, reference: ticket.reference, decisions: readinessFacts?.tickets.find((item) => item.key === ticket.key)?.decisions ?? [] });
 
   const handleApprove = async () => {
     try {
@@ -384,6 +392,8 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
             <h1 className="mt-2 text-balance font-display text-[1.6rem] leading-snug font-bold">{ticket.title}</h1>
           </div>
 
+          {ready && <ReadinessCard ready={ready} startOpen={/^to ?do$/i.test(ticket.status ?? '')} onNavigate={onNavigate} />}
+
           <NeedsYouCard
             items={needs}
             onAction={handleNeed}
@@ -399,6 +409,9 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
               }
             }}
           />
+
+          {summary && <SummaryBlock summary={summary} jiraUrl={ticket.url} />}
+          {jiraTicket && <LinksMap ticketKey={ticket.key} links={links} onNavigate={onNavigate} />}
 
           <div className="grid grid-cols-2 items-start gap-8 max-[1280px]:grid-cols-1 max-[1280px]:gap-4">
             <div className="flex min-w-0 flex-col gap-4">

@@ -27,6 +27,10 @@ export const GET_DASHBOARD = gql`
         workOrder
         workOrderSource
         workManual
+        acceptanceCriteria
+        openToConfirm
+        figmaUrl
+        blockedBy
         orchestration {
           key
           machine
@@ -134,6 +138,10 @@ export const GET_TICKET_DETAIL_CORE = gql`
       userStory
       problemDefinition
       figmaUrl
+      reference
+      openToConfirm
+      developerContext
+      blockedBy
       status
       assignee
       url
@@ -293,6 +301,7 @@ export const GET_SETTINGS = gql`
       ownerReplySession
       notificationPrefs
       planningConfluenceParent
+      planningPlanner
     }
   }
 `;
@@ -756,18 +765,36 @@ export const SPRINT_DRAFT_FIELDS = `
     qaDecision { action note by at }
     epic frames
     storyboard { version frames held checked { action note by at } }
-    tcs { id ac title steps expected } tcStale tcPending
+    tcs { id ac title steps expected } tcStale tcPending tcApproved acHash
     merge pulls jiraAhead merged rank planStart planDur
   }
-  findings { id key line text refKey kind refEnd ownEnd decision { action note by at } }
+  findings { id key line text refKey kind refEnd ownEnd linked decision { action note by at } }
   storyboards {
     epic version previous path page frames changed changedAt checkedAt error htmlUrl previousHtmlUrl
     scenarios { n title groups { title flows { id title tickets info changed frames { index title step changed } } } }
   }
-  questions { id text key askedAt answered answeredBy answeredAt }
+  questions { id text key askedAt answered answeredBy answeredAt answer options }
   developers { name merged open sp leftSp end }
   mergeSource
   moves { keys from to sp forecastBefore forecastAfter improves }
+  scopeCut { action note by at }
+`;
+
+export const TICKET_SUMMARY_FIELDS = `key acHash made checked notHere waitsOn before after line testData ui acId titleId writtenAt current`;
+
+export const GET_TICKET_SUMMARY = gql`
+  query GetTicketSummary($key: String!) {
+    ticketSummary(key: $key) { ${TICKET_SUMMARY_FIELDS} acChangedAt }
+  }
+`;
+
+export const GET_TICKET_READINESS = gql`
+  query GetTicketReadiness($keys: [String!]!, $refs: [String!]) {
+    ticketReadiness(keys: $keys, refs: $refs) {
+      tickets { key sprint tcApproved decisions { refKey action } summary { ${TICKET_SUMMARY_FIELDS} } }
+      statuses { key status }
+    }
+  }
 `;
 
 export const GET_PLANNING_SPRINTS = gql`
@@ -782,9 +809,31 @@ export const GET_SPRINT_DRAFT = gql`
   }
 `;
 
+export const GET_SPRINT_PLAN_SIGNAL = gql`
+  query GetSprintPlanSignal($sprint: String!) {
+    sprintPlanSignal(sprint: $sprint) {
+      sprint sprintId sprintState activeSince stage revision publishedBy publishedAt planner me isPlanner draftLoadedAt draftStatus
+      joined acChanged waitForPublish planAfterPublish myOutside
+      myOrder { key summary status sp order }
+    }
+  }
+`;
+
+export const GET_PLANNING_FLOW = gql`
+  query GetPlanningFlow {
+    planningFlow
+  }
+`;
+
+export const SET_PLANNING_FLOW = gql`
+  mutation SetPlanningFlow($flow: String!) {
+    setPlanningFlow(flow: $flow)
+  }
+`;
+
 export const PREVIEW_SPRINT_DRAFT_PUBLISH = gql`
   query PreviewSprintDraftPublish($sprint: String!) {
-    previewSprintDraftPublish(sprint: $sprint) { key assigneeFrom assigneeTo acRemoved acAdded refused }
+    previewSprintDraftPublish(sprint: $sprint) { key assigneeFrom assigneeTo acRemoved acAdded referenceAdded blockedBy refused }
   }
 `;
 
@@ -861,8 +910,8 @@ export const SET_SPRINT_DRAFT_TCS = gql`
 `;
 
 export const ANSWER_SPRINT_DRAFT_QUESTION = gql`
-  mutation AnswerSprintDraftQuestion($sprint: String!, $id: ID!, $answered: Boolean!) {
-    answerSprintDraftQuestion(sprint: $sprint, id: $id, answered: $answered) { ${SPRINT_DRAFT_FIELDS} }
+  mutation AnswerSprintDraftQuestion($sprint: String!, $id: ID!, $answered: Boolean!, $text: String) {
+    answerSprintDraftQuestion(sprint: $sprint, id: $id, answered: $answered, text: $text) { ${SPRINT_DRAFT_FIELDS} }
   }
 `;
 

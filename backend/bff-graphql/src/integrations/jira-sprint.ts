@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { blockLinks, type JiraCredentials, type TicketLink } from './jira';
+import { atlassianBaseUrl, blockLinks, type JiraCredentials, type TicketLink } from './jira';
 import type { SprintEvent, SprintIssue } from './sprint-metrics';
 
 export interface JiraHttp {
@@ -41,11 +41,14 @@ export interface PlanningIssue {
   /** The description as Jira returned it (ADF or text). */
   descriptionRaw?: unknown;
   labels: string[];
+  /** The Reference field as Jira returned it (ADF or text). */
+  referenceRaw?: unknown;
 }
 
 export const AC_FIELD = 'customfield_10332';
+export const REFERENCE_FIELD = 'customfield_10333';
 const SP_FIELDS = ['story_points', 'customfield_10016', 'customfield_10028', 'customfield_10034'];
-const PLANNING_FIELDS = ['summary', 'issuetype', 'status', 'assignee', 'issuelinks', 'parent', 'description', 'labels', AC_FIELD, ...SP_FIELDS];
+const PLANNING_FIELDS = ['summary', 'issuetype', 'status', 'assignee', 'issuelinks', 'parent', 'description', 'labels', AC_FIELD, REFERENCE_FIELD, ...SP_FIELDS];
 
 const TRACKED_FIELDS = new Set(['status', 'labels', 'Sprint', 'Story point estimate', 'assignee']);
 const ISSUE_FIELDS = [
@@ -60,10 +63,6 @@ const REQUEST_TIMEOUT_MS = 30000;
 const DEFAULT_RETRY_AFTER_SECONDS = 5;
 
 const sleepMs = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-function cleanDomain(domain: string): string {
-  return domain.replace(/^https?:\/\//i, '').replace(/\/+$/, '').trim();
-}
 
 export async function retryOn429(send: () => Promise<any>, sleep: (ms: number) => Promise<void> = sleepMs): Promise<any> {
   for (let attempt = 0; ; attempt++) {
@@ -80,7 +79,7 @@ export async function retryOn429(send: () => Promise<any>, sleep: (ms: number) =
 export function createJiraHttp(credentials: JiraCredentials, sleep: (ms: number) => Promise<void> = sleepMs): JiraHttp {
   const auth = Buffer.from(`${credentials.email.trim()}:${credentials.apiToken.trim()}`).toString('base64');
   const client = axios.create({
-    baseURL: `https://${cleanDomain(credentials.domain)}`,
+    baseURL: atlassianBaseUrl(credentials.domain),
     headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
     timeout: REQUEST_TIMEOUT_MS,
   });
@@ -141,6 +140,7 @@ export function planningIssue(issue: any): PlanningIssue {
     epic: typeof fields.parent?.key === 'string' ? fields.parent.key : null,
     descriptionRaw: fields.description ?? null,
     labels: Array.isArray(fields.labels) ? fields.labels.filter((label: unknown): label is string => typeof label === 'string') : [],
+    referenceRaw: fields[REFERENCE_FIELD] ?? null,
   };
 }
 
@@ -247,6 +247,27 @@ export class JiraSprintClient {
   async setAcField(key: string, value: unknown): Promise<void> {
     if (!this.http.put) throw new Error('This Jira connection cannot write');
     await this.http.put(`/rest/api/3/issue/${encodeURIComponent(key)}`, { fields: { [AC_FIELD]: value } });
+  }
+
+  async setReferenceField(key: string, value: unknown): Promise<void> {
+    if (!this.http.put) throw new Error('This Jira connection cannot write');
+    await this.http.put(`/rest/api/3/issue/${encodeURIComponent(key)}`, { fields: { [REFERENCE_FIELD]: value } });
+  }
+
+  /** A Blocks link: `key` is blocked by `blocker`. On create Jira reads inwardIssue as the issue that blocks. */
+  async addBlockedBy(key: string, blocker: string): Promise<void> {
+    await this.http.post('/rest/api/3/issueLink', { type: { name: 'Blocks' }, inwardIssue: { key: blocker }, outwardIssue: { key } });
+  }
+
+  /** The account id and display name of the Jira user DOCK's token belongs to. */
+  async me(): Promise<{ accountId: string | null; displayName: string | null }> {
+    const me = await this.http.get('/rest/api/3/myself');
+    return { accountId: typeof me?.accountId === 'string' ? me.accountId : null, displayName: typeof me?.displayName === 'string' ? me.displayName : null };
+  }
+
+  /** The issue's whole changelog, oldest first. */
+  changelog(key: string): Promise<any[]> {
+    return this.fullChangelog(key);
   }
 
   /** The display name of the Jira user DOCK's token belongs to. */

@@ -17,6 +17,15 @@ function cleanDomain(domain: string): string {
   return domain.replace(/^https?:\/\//i, '').replace(/\/+$/, '').trim();
 }
 
+/**
+ * The site DOCK sends Jira and Confluence requests to: `https://<domain>`, or DOCK_ATLASSIAN_BASE_URL when it is set.
+ * Staging sets it to the local fake Atlassian server so a test DOCK never reaches the real site.
+ */
+export function atlassianBaseUrl(domain: string, env: NodeJS.ProcessEnv = process.env): string {
+  const override = env.DOCK_ATLASSIAN_BASE_URL?.trim().replace(/\/+$/, '');
+  return override || `https://${cleanDomain(domain)}`;
+}
+
 function cleanProjectKeys(projectKeys: string[] = []): string[] {
   return [...new Set(projectKeys
     .map((key) => key.trim().toUpperCase())
@@ -27,7 +36,7 @@ export class JiraClient {
   private getClient(credentials: JiraCredentials): AxiosInstance {
     const auth = Buffer.from(`${credentials.email.trim()}:${credentials.apiToken.trim()}`).toString('base64');
     return axios.create({
-      baseURL: `https://${cleanDomain(credentials.domain)}`,
+      baseURL: atlassianBaseUrl(credentials.domain),
       headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
       timeout: 10000,
     });
@@ -260,6 +269,9 @@ export class JiraService {
       // QRD keeps the ticket body in custom fields; the old User Story field still holds it on older tickets.
       userStory: fieldText(fields.customfield_10341) ?? fieldText(fields.customfield_10330),
       problemDefinition: fieldText(fields.customfield_10331),
+      reference: fieldText(fields.customfield_10333),
+      openToConfirm: fieldText(fields.customfield_10337),
+      developerContext: fieldText(fields.customfield_10340),
       figmaUrl: figmaLink && /^https?:\/\/\S+$/i.test(figmaLink) ? figmaLink : null,
       status: fields.status?.name || 'Unknown Status',
       assignee: fields.assignee?.displayName || fields.assignee?.emailAddress || 'Assignee unavailable',

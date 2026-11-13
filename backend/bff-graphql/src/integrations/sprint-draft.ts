@@ -2,7 +2,7 @@
 // developer, wave, SP and AC, the schedule and AC check computed from them, the QA bot's prediction, and the decisions
 // the planner made. Publish writes back only what differs from Jira, and refuses a ticket whose AC moved in Jira since
 // it was loaded, so a teammate's edit is never overwritten.
-import { acFindings, isDoneStatus, normalizeAcLine, splitAc, type AcFinding } from './ac-scope';
+import { acFindings, acHash, isDoneStatus, normalizeAcLine, splitAc, type AcFinding } from './ac-scope';
 import type { PlanningIssue, PlanningSprint } from './jira-sprint';
 import { predictQa, type QaInputTicket, type QaPrediction, type QaRun } from './qa-predict';
 import { DEFAULT_SP_PER_DAY, DEFAULT_SPRINT_DAYS, endDay, planLayout, planStart, rankOf, remainingSp, scheduleSprint, suggestMoves, workingDayOf, workingDays, type MoveSuggestion, type ScheduledTicket } from './scope-cut';
@@ -12,9 +12,17 @@ import { writeContract, type ContractClient } from './sprint-contract';
 import { StoryboardMissing, framesIn, type StoryboardResult } from './storyboard';
 import type { StoryboardScenario } from './storyboard-flows';
 import type { SprintDraftInput, SprintDraftTicketInput } from '../storage/service';
+import { planLabel, sprintRevision, stalePlanLabels } from './plan-publish';
 
 export const SP_PER_DAY_KEY = 'planningSpPerDay';
-const AC_ACTIONS = ['move', 'wait', 'drop'];
+/**
+ * A QRD key of another ticket in AC is a dependency: Publish adds the "is blocked by" link. A line that only informs moves
+ * to the Reference field. move hands the line to the ticket in the sprint that builds it.
+ */
+const AC_ACTIONS = ['dependency', 'reference', 'move'];
+/** Calls saved before the AC rule: wait reads as dependency, drop as reference. */
+const LEGACY_AC_ACTIONS: Record<string, string> = { wait: 'dependency', drop: 'reference' };
+export const acAction = (action: string) => LEGACY_AC_ACTIONS[action] ?? action;
 const QA_ACTIONS = ['accept', 'fix'];
 const MAX_AC_LINES = 200;
 const MAX_LINE = 2000;
@@ -37,6 +45,15 @@ export interface DraftJira {
   setAssignee(key: string, accountId: string): Promise<void>;
   /** One comment holding the test cases as `QONFLO-TC v1` and a JSON code block. */
   postTcs(key: string, body: TcComment): Promise<void>;
+  /** The Reference field, in the format Jira returned it. */
+  setReference?(key: string, value: unknown): Promise<void>;
+  /** A Blocks link: key is blocked by blocker. */
+  addBlockedBy?(key: string, blocker: string): Promise<void>;
+  /** The shared publish signal: Publish labels every ticket of the plan plan-published-r<N>. */
+  addLabel?(key: string, label: string): Promise<void>;
+  removeLabel?(key: string, label: string): Promise<void>;
+  /** A plain comment, one paragraph per line: an answered planning question on its ticket. */
+  comment?(key: string, lines: string[]): Promise<void>;
 }
 
 /** A draft test case: the AC line it checks (1-based), the steps and what is expected. */
@@ -74,8 +91,11 @@ export interface StoryboardState {
   /** The tickets each changed flow lists; a changed flow without tickets falls back to the flow ids a ticket names. */
   tickets?: Record<string, string[]>;
 }
-/** A question the planning chat could not settle from the storyboard; the planner marks it answered. */
-export interface DraftQuestion { id: string; text: string; key: string | null; askedAt: string; answered: boolean; answeredBy: string | null; answeredAt: string | null }
+/**
+ * A question the planning chat could not settle from the storyboard. The planner answers it in the chat: the answer is
+ * kept here, as a draft decision, as a comment on its ticket, and in the contract's decisions on publish.
+ */
+export interface DraftQuestion { id: string; text: string; key: string | null; askedAt: string; answered: boolean; answeredBy: string | null; answeredAt: string | null; answer?: string | null; options?: string[] }
 
 /** A ticket naming a frame that changed in the newest storyboard version: its AC needs a check, Held when work has not started. */
 export interface StoryboardFlag { version: number; frames: string[]; held: boolean; checked: Decision | null }
@@ -87,6 +107,10 @@ export interface DraftTicketView extends Omit<ScheduledTicket, 'dev' | 'wave'> {
   ac: string[]; dependsOn: string[]; prediction: QaPrediction | null; qaDecision: Decision | null;
   epic: string | null; frames: string[]; storyboard: StoryboardFlag | null;
   tcs: DraftTc[];
+  /** QA approved the test cases as they are now (decision tc|KEY); a later change of the set needs a new approval. */
+  tcApproved: boolean;
+  /** The hash of the AC lines; a ticket summary is written for one hash. */
+  acHash: string;
   /** The storyboard changed a frame of this ticket after its test cases were written. */
   tcStale: boolean;
   /** The test cases differ from the last QONFLO-TC comment, so Publish posts them. */
@@ -108,7 +132,8 @@ export const openTickets = <T extends { merged: boolean }>(view: { tickets: T[] 
 export interface DraftDeveloper { name: string; merged: number; open: number; sp: number; leftSp: number; end: number | null }
 /** The merge state read from GitHub on the last load; source jira when GitHub could not be read. */
 export interface DraftMerges { source: 'github' | 'jira'; tickets: Record<string, MergeRead> }
-export interface DraftFindingView extends AcFinding { decision: Decision | null }
+/** linked: the ticket already has an "is blocked by" link to the ticket the line names, so the line is a dependency. */
+export interface DraftFindingView extends AcFinding { decision: Decision | null; linked: boolean }
 export interface DraftView {
   sprint: string; sprintId: number; status: string; sprintDays: number; startDate: string | null; spPerDay: number;
   createdBy: string | null; loadedAt: string; publishedAt: string | null; qaReason: string | null;
@@ -122,10 +147,13 @@ export interface DraftView {
   developers: DraftDeveloper[];
   mergeSource: 'github' | 'jira';
   moves: MoveSuggestion[];
+  /** The planner's written scope cut (decision scope|cut): what leaves the sprint when the SP do not fit. */
+  scopeCut?: Decision | null;
 }
-export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; refused: string | null }
+/** referenceAdded: lines Publish appends to the Reference field; blockedBy: tickets Publish links as blocking this one. */
+export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; referenceAdded: string[]; blockedBy: string[]; refused: string | null }
 /** One line of a publish: a ticket's AC and assignee, or the Confluence contract page. */
-export interface PublishResult { key: string; kind: 'ticket' | 'tc' | 'contract'; status: 'updated' | 'refused' | 'failed' | 'skipped'; detail: string | null }
+export interface PublishResult { key: string; kind: 'ticket' | 'tc' | 'label' | 'contract'; status: 'updated' | 'refused' | 'failed' | 'skipped'; detail: string | null }
 export interface ContractTarget { client: ContractClient | null; parentId: string | null }
 
 const parse = <T>(raw: string | null | undefined, fallback: T): T => {
@@ -133,7 +161,13 @@ const parse = <T>(raw: string | null | undefined, fallback: T): T => {
 };
 const sameLines = (a: string[], b: string[]) => a.length === b.length && a.every((line, index) => line === b[index]);
 const qaId = (key: string) => `qa|${key}`;
+export const tcId = (key: string) => `tc|${key}`;
+/** Approved when QA approved the set after it was last written, and there is a set to approve. */
+const tcApproved = (ticket: { tcs: DraftTc[]; tcAt?: Date | null }, approval: Decision | undefined) => (
+  !!approval && approval.action === 'approve' && ticket.tcs.length > 0 && (!ticket.tcAt || ticket.tcAt.toISOString() <= approval.at)
+);
 const storyboardId = (key: string, version: number) => `sb|${key}|v${version}`;
+const SCOPE_CUT_ID = 'scope|cut';
 const isInProgress = (status: string) => /in ?progress/i.test(status);
 
 const clip = (value: unknown, max: number) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
@@ -286,27 +320,50 @@ export function rewriteAcValue(raw: unknown, removed: string[], added: string[])
 
 // ---- Decisions ----------------------------------------------------------------------------------------------------
 
-/** The AC of every ticket after the decisions: a moved line leaves its ticket for the one it needs, a dropped line goes. */
+/** The AC of every ticket after the decisions: a moved line leaves its ticket for the one it needs, a line for Reference goes. */
 export function finalAc(tickets: Array<{ key: string; ac: string[] }>, decisions: Decisions): Map<string, string[]> {
   const result = new Map(tickets.map((ticket) => [ticket.key, [...ticket.ac]]));
   for (const [id, decision] of Object.entries(decisions)) {
     const [kind, key, refKey, ...rest] = id.split('|');
-    if (kind !== 'ac' || (decision.action !== 'move' && decision.action !== 'drop')) continue;
+    const action = acAction(decision.action);
+    if (kind !== 'ac' || (action !== 'move' && action !== 'reference')) continue;
     const text = rest.join('|');
     const lines = result.get(key);
     const index = lines ? lines.findIndex((line) => normalizeAcLine(line) === text) : -1;
     if (!lines || index < 0) continue;
     const [line] = lines.splice(index, 1);
     const target = result.get(refKey);
-    if (decision.action === 'move' && target && !target.some((other) => normalizeAcLine(other) === text)) target.push(line);
+    if (action === 'move' && target && !target.some((other) => normalizeAcLine(other) === text)) target.push(line);
   }
   return result;
 }
 
-/** What still holds Publish: an after-it AC line or an ESCALATED prediction with no decision. */
-export function publishBlockers(findings: AcFinding[], tickets: Array<{ key: string; prediction: QaPrediction | null }>, decisions: Decisions): string[] {
+/** The line as the Reference field keeps it: the ticket it names first. */
+export const referenceLine = (refKey: string, text: string) => `${refKey}: ${normalizeAcLine(text)}`;
+
+/**
+ * What the decisions write beside the AC: each ticket's lines for the Reference field, and the tickets it gets an
+ * "is blocked by" link to. Only lines still in the ticket's AC count.
+ */
+export function acSideEffects(tickets: Array<{ key: string; ac: string[] }>, decisions: Decisions): Map<string, { reference: string[]; blockedBy: string[] }> {
+  const result = new Map(tickets.map((ticket) => [ticket.key, { reference: [] as string[], blockedBy: [] as string[] }]));
+  const acOf = new Map(tickets.map((ticket) => [ticket.key, ticket.ac.map(normalizeAcLine)]));
+  for (const [id, decision] of Object.entries(decisions)) {
+    const [kind, key, refKey, ...rest] = id.split('|');
+    const text = rest.join('|');
+    const effects = result.get(key);
+    if (kind !== 'ac' || !effects || !acOf.get(key)!.includes(text)) continue;
+    const action = acAction(decision.action);
+    if (action === 'reference' && !effects.reference.includes(referenceLine(refKey, text))) effects.reference.push(referenceLine(refKey, text));
+    if (action === 'dependency' && !effects.blockedBy.includes(refKey)) effects.blockedBy.push(refKey);
+  }
+  return result;
+}
+
+/** What still holds Publish: an after-it AC line with neither a Blocks link nor a decision, or an ESCALATED prediction with no decision. */
+export function publishBlockers(findings: Array<AcFinding & { linked?: boolean }>, tickets: Array<{ key: string; prediction: QaPrediction | null }>, decisions: Decisions): string[] {
   return [
-    ...findings.filter((finding) => finding.kind === 'after-it' && !decisions[finding.id]).map((finding) => finding.id),
+    ...findings.filter((finding) => finding.kind === 'after-it' && !finding.linked && !decisions[finding.id]).map((finding) => finding.id),
     ...tickets.filter((ticket) => ticket.prediction?.prediction === 'ESCALATED' && !decisions[qaId(ticket.key)]).map((ticket) => qaId(ticket.key)),
   ];
 }
@@ -322,7 +379,14 @@ export class SprintDraftService {
     private readonly contract: () => Promise<ContractTarget> = async () => ({ client: null, parentId: null }),
     private readonly storyboard: ((epic: string) => Promise<StoryboardResult>) | null = null,
     private readonly mergeStates: ((keys: string[]) => Promise<Map<string, MergeRead> | null>) | null = null,
+    /** Why this DOCK may not change the draft (it is not the planner's), or null when it may. */
+    private readonly editGuard: (() => Promise<string | null>) | null = null,
   ) {}
+
+  private async mayEdit(): Promise<void> {
+    const refused = this.editGuard ? await this.editGuard() : null;
+    if (refused) throw new SprintInputError(refused);
+  }
 
   async sprints(): Promise<PlanningSprint[]> {
     return (await this.jira()).listSprints();
@@ -415,8 +479,11 @@ export class SprintDraftService {
     const schedule = new Map(scheduleSprint(laneInput, { sprintDays: row.sprintDays, spPerDay, from }).map((item) => [item.key, item]));
     const ends = new Map([...schedule.values()].map((item) => [item.key, item.end]));
     const status = new Map(all.map((ticket) => [ticket.key, ticket.status]));
-    const findings = acFindings(tickets, ends, (key) => status.get(key) ?? refStatuses[key] ?? null)
-      .map((finding) => ({ ...finding, decision: decisions[finding.id] ?? null }));
+    const blockedBy = new Map(all.map((ticket) => [ticket.key, ticket.dependsOn]));
+    const findings = acFindings(tickets, ends, (key) => status.get(key) ?? refStatuses[key] ?? null).map((finding) => {
+      const decision = decisions[finding.id] ?? null;
+      return { ...finding, decision: decision && { ...decision, action: acAction(decision.action) }, linked: (blockedBy.get(finding.key) ?? []).includes(finding.refKey) };
+    });
     const blockers = publishBlockers(findings, tickets, decisions);
     const storyboards = Object.values(parse<Record<string, StoryboardState>>(row.storyboards, {})).sort((a, b) => a.epic.localeCompare(b.epic));
     const boardOf = new Map(storyboards.map((board) => [board.epic, board]));
@@ -449,7 +516,7 @@ export class SprintDraftService {
       status: ticket.status, ac: ticket.ac, dependsOn: ticket.dependsOn, start: placed.start, dur: placed.dur, end: placed.end,
       inSprint: placed.inSprint, split: placed.split, prediction: ticket.prediction, qaDecision: decisions[qaId(ticket.key)] ?? null,
       epic: ticket.epic, frames: ticket.frames, storyboard: flagOf(ticket),
-      tcs: ticket.tcs, tcStale: tcStale(ticket), tcPending: ticket.tcs.length > 0 && JSON.stringify(ticket.tcs) !== (ticket.tcPosted ?? ''),
+      tcs: ticket.tcs, tcApproved: tcApproved(ticket, decisions[tcId(ticket.key)]), acHash: acHash(ticket.ac), tcStale: tcStale(ticket), tcPending: ticket.tcs.length > 0 && JSON.stringify(ticket.tcs) !== (ticket.tcPosted ?? ''),
       merge: mergeOf(ticket.key)?.merge ?? 'unknown', pulls: mergeOf(ticket.key)?.pulls ?? [],
       jiraAhead: isDoneStatus(ticket.status) && mergeOf(ticket.key)?.merge === 'open',
       merged, rank: ticket.planRank ?? null, planStart: plan.get(ticket.key)!.planStart, planDur: plan.get(ticket.key)!.planDur,
@@ -473,7 +540,8 @@ export class SprintDraftService {
       ],
       findings,
       blockers,
-      canPublish: blockers.length === 0 && tickets.length > 0,
+      canPublish: tickets.length > 0,
+      scopeCut: decisions[SCOPE_CUT_ID] ?? null,
     };
   }
 
@@ -494,6 +562,7 @@ export class SprintDraftService {
   }
 
   async updateTicket(sprint: string, key: string, change: { dev?: string | null; wave?: number | null; sp?: number | null; ac?: string[] | null }): Promise<DraftView> {
+    await this.mayEdit();
     const row = await this.row(sprint);
     if (row.status === 'published') throw new SprintInputError('This draft is published; load it from Jira again to change it');
     if (!row.tickets.some((ticket) => ticket.key === key)) throw new SprintInputError(`${key} is not in the ${sprint} draft`);
@@ -518,6 +587,7 @@ export class SprintDraftService {
 
   /** Hands cards to another developer in the draft only; Publish writes the assignee to Jira. */
   async moveCards(sprint: string, keys: string[], to: string): Promise<DraftView> {
+    await this.mayEdit();
     const row = await this.row(sprint);
     if (row.status === 'published') throw new SprintInputError('This draft is published; load it from Jira again to change it');
     const dev = to.trim().slice(0, 120);
@@ -529,8 +599,9 @@ export class SprintDraftService {
     return (await this.view(sprint))!;
   }
 
-  /** Records, changes or clears (action "clear") the planner's call on an AC finding or an ESCALATED prediction. */
+  /** Records, changes or clears (action "clear") the planner's call on an AC finding, an ESCALATED prediction or the scope cut. */
   async decide(sprint: string, id: string, action: string, note: string | null, by: string | null): Promise<DraftView> {
+    await this.mayEdit();
     const row = await this.row(sprint);
     const view = this.compute(row, await this.spPerDay());
     const decisions = parse<Decisions>(row.decisions, {});
@@ -541,11 +612,20 @@ export class SprintDraftService {
       if (id.startsWith('ac|')) {
         const finding = view.findings.find((item) => item.id === id);
         if (!finding) throw new SprintInputError('No such AC line in the draft');
-        if (!AC_ACTIONS.includes(action)) throw new SprintInputError('An AC line is moved, kept to wait, or dropped');
-        if (action === 'move' && !openTickets(view).some((ticket) => ticket.key === finding.refKey)) throw new SprintInputError(`${finding.refKey} is not in this sprint; keep the line or drop it`);
+        action = acAction(action);
+        if (!AC_ACTIONS.includes(action)) throw new SprintInputError('An AC line naming another ticket is a dependency, moves to Reference, or moves to the ticket that builds it');
+        if (action === 'move' && !openTickets(view).some((ticket) => ticket.key === finding.refKey)) throw new SprintInputError(`${finding.refKey} is not in this sprint; make the line a dependency or move it to Reference`);
+      } else if (id.startsWith('tc|')) {
+        const ticket = openTickets(view).find((item) => tcId(item.key) === id);
+        if (!ticket) throw new SprintInputError('That ticket is not in the draft');
+        if (action !== 'approve') throw new SprintInputError('Test cases are approved with action approve');
+        if (!ticket.tcs.length) throw new SprintInputError(`${ticket.key} has no test cases to approve`);
       } else if (id.startsWith('sb|')) {
         if (!openTickets(view).some((ticket) => ticket.storyboard && storyboardId(ticket.key, ticket.storyboard.version) === id)) throw new SprintInputError('No storyboard change on that ticket');
         if (action !== 'checked') throw new SprintInputError('A storyboard change is marked checked');
+      } else if (id === SCOPE_CUT_ID) {
+        if (action !== 'cut') throw new SprintInputError('A scope cut is written with action cut');
+        if (!text) throw new SprintInputError('Write what leaves the sprint');
       } else if (id.startsWith('qa|')) {
         if (!openTickets(view).some((ticket) => qaId(ticket.key) === id && ticket.prediction)) throw new SprintInputError('No QA prediction for that ticket');
         if (!QA_ACTIONS.includes(action)) throw new SprintInputError('A QA prediction is accepted as a risk or fixed');
@@ -561,6 +641,7 @@ export class SprintDraftService {
 
   /** Replaces a ticket's test cases, from the planning agent or the panel. */
   async setTcs(sprint: string, key: string, input: unknown): Promise<DraftView> {
+    await this.mayEdit();
     const row = await this.row(sprint);
     const ticket = row.tickets.find((item) => item.key === key);
     if (!ticket) throw new SprintInputError(`${key} is not in the ${sprint} draft`);
@@ -569,8 +650,8 @@ export class SprintDraftService {
     return (await this.view(sprint))!;
   }
 
-  /** Adds an open question to the draft; the same open text is asked once. */
-  async ask(sprint: string, text: string, key: string | null): Promise<DraftView> {
+  /** Adds an open question to the draft; the same open text is asked once. `options` are the quick replies the chat offers. */
+  async ask(sprint: string, text: string, key: string | null, options: string[] = []): Promise<DraftView> {
     const row = await this.row(sprint);
     const question = text.trim().slice(0, MAX_LINE);
     if (!question) throw new SprintInputError('text is required');
@@ -580,20 +661,34 @@ export class SprintDraftService {
     if (!questions.some((item) => !item.answered && item.text === question && item.key === ticket)) {
       if (questions.length >= MAX_QUESTIONS) throw new SprintInputError(`A draft holds at most ${MAX_QUESTIONS} questions`);
       const at = this.now().toISOString();
-      questions.push({ id: `q${questions.length + 1}-${Date.parse(at).toString(36)}`, text: question, key: ticket, askedAt: at, answered: false, answeredBy: null, answeredAt: null });
+      const quick = [...new Set(options.map((option) => String(option).trim().slice(0, 200)).filter(Boolean))].slice(0, 4);
+      questions.push({ id: `q${questions.length + 1}-${Date.parse(at).toString(36)}`, text: question, key: ticket, askedAt: at, answered: false, answeredBy: null, answeredAt: null, answer: null, ...(quick.length ? { options: quick } : {}) });
       await this.store.updateSprintDraft(sprint, { questions: JSON.stringify(questions) });
     }
     return (await this.view(sprint))!;
   }
 
-  /** Marks a question answered, or open again. */
-  async answer(sprint: string, id: string, answered: boolean, by: string | null): Promise<DraftView> {
+  /**
+   * Marks a question answered, or open again. An answer with `text` (from the planning chat) is also kept as the draft
+   * decision q|<id> and posted as a comment on the question's ticket; publish writes it to the contract's decisions.
+   */
+  async answer(sprint: string, id: string, answered: boolean, by: string | null, text: string | null = null): Promise<DraftView> {
+    await this.mayEdit();
     const row = await this.row(sprint);
     const questions = parse<DraftQuestion[]>(row.questions, []);
     const question = questions.find((item) => item.id === id);
     if (!question) throw new SprintInputError('No such question in the draft');
-    Object.assign(question, answered ? { answered: true, answeredBy: by, answeredAt: this.now().toISOString() } : { answered: false, answeredBy: null, answeredAt: null });
-    await this.store.updateSprintDraft(sprint, { questions: JSON.stringify(questions) });
+    const reply = answered ? text?.trim().slice(0, MAX_LINE) || null : null;
+    const at = this.now().toISOString();
+    Object.assign(question, answered ? { answered: true, answeredBy: by, answeredAt: at, answer: reply } : { answered: false, answeredBy: null, answeredAt: null, answer: null });
+    const decisions = parse<Decisions>(row.decisions, {});
+    if (reply) decisions[`q|${id}`] = { action: 'answer', note: reply, by, at };
+    else delete decisions[`q|${id}`];
+    await this.store.updateSprintDraft(sprint, { questions: JSON.stringify(questions), decisions: JSON.stringify(decisions) });
+    if (reply && question.key) {
+      const jira = await this.jira();
+      if (jira.comment) await jira.comment(question.key, [`Planning ${sprint}: ${question.text}`, `Keputusan: ${reply}`, ...(by ? [`Dijawab oleh ${by} di DOCK Planning.`] : [])]);
+    }
     return (await this.view(sprint))!;
   }
 
@@ -647,7 +742,9 @@ export class SprintDraftService {
     const decisions = parse<Decisions>(row.decisions, {});
     const tickets = row.tickets.map((ticket) => ({ ...ticket, ac: parse<string[]>(ticket.ac, []), jiraAc: parse<string[]>(ticket.jiraAc, []) }));
     const finals = finalAc(tickets, decisions);
-    const touched = tickets.filter((ticket) => !sameLines(finals.get(ticket.key)!, ticket.jiraAc) || (!!ticket.dev && ticket.dev !== ticket.jiraDev));
+    const sides = acSideEffects(tickets, decisions);
+    const touched = tickets.filter((ticket) => !sameLines(finals.get(ticket.key)!, ticket.jiraAc) || (!!ticket.dev && ticket.dev !== ticket.jiraDev)
+      || sides.get(ticket.key)!.reference.length > 0 || sides.get(ticket.key)!.blockedBy.length > 0);
     const jira = touched.length ? await this.jira() : null;
     return mapLimit(touched, READ_CONCURRENCY, async (ticket) => {
       const final = finals.get(ticket.key)!;
@@ -656,21 +753,26 @@ export class SprintDraftService {
       const { removed, added } = diffLines(nowLines, final);
       const nowDev = now?.assignee ?? null;
       const assign = !!ticket.dev && ticket.dev !== nowDev;
+      const side = sides.get(ticket.key)!;
+      const referenceNow = now ? fieldLines(now.referenceRaw).map(normalizeAcLine) : [];
+      const referenceAdded = side.reference.filter((line) => !referenceNow.includes(line));
+      const linked = new Set((now?.links ?? []).filter((link) => link.relation === 'blockedBy').map((link) => link.key));
+      const blockedBy = side.blockedBy.filter((key) => !linked.has(key));
       let refused: string | null = null;
       if (!now) refused = 'The ticket is gone from Jira';
-      else if (!sameLines(nowLines, ticket.jiraAc) && (removed.length || added.length)) refused = 'The AC changed in Jira after it was loaded; load the sprint again';
+      else if (!sameLines(nowLines, ticket.jiraAc) && (removed.length || added.length || referenceAdded.length || blockedBy.length)) refused = 'The AC changed in Jira after it was loaded; load the sprint again';
       return {
-        change: { key: ticket.key, assigneeFrom: assign ? nowDev : null, assigneeTo: assign ? ticket.dev : null, acRemoved: removed, acAdded: added, refused },
+        change: { key: ticket.key, assigneeFrom: assign ? nowDev : null, assigneeTo: assign ? ticket.dev : null, acRemoved: removed, acAdded: added, referenceAdded, blockedBy, refused },
         final, dev: ticket.dev, now,
       };
-    }).then((rows) => rows.filter(({ change }) => change.refused || change.assigneeTo || change.acRemoved.length || change.acAdded.length));
+    }).then((rows) => rows.filter(({ change }) => change.refused || change.assigneeTo || change.acRemoved.length || change.acAdded.length || change.referenceAdded.length || change.blockedBy.length));
   }
 
-  /** Writes the previewed changes ticket by ticket, then the contract page. Held while a blocker has no decision. */
+  /** Writes the previewed changes ticket by ticket, then the contract page. An open blocker is shown in the dialog, never refused. */
   async publish(sprint: string, by: string | null = null): Promise<PublishResult[]> {
+    await this.mayEdit();
     const view = (await this.view(sprint));
     if (!view) throw new SprintInputError(`No draft for ${sprint}; load it from Jira first`);
-    if (!view.canPublish) throw new SprintInputError(`${view.blockers.length} AC line or QA prediction still needs a decision before publish`);
     const jira = await this.jira();
     const results: PublishResult[] = [];
     for (const { change, final, dev, now } of await this.plannedChanges(sprint)) {
@@ -686,10 +788,14 @@ export class SprintDraftService {
           accountId = accounts[0];
         }
         const update: { jiraAc?: string[]; jiraDev?: string | null } = {};
+        if (change.referenceAdded.length && !jira.setReference) throw new Error('This Jira connection cannot write the Reference field');
+        if (change.blockedBy.length && !jira.addBlockedBy) throw new Error('This Jira connection cannot add a Blocks link');
+        if (change.referenceAdded.length) await jira.setReference!(change.key, rewriteAcValue(now!.referenceRaw ?? null, [], change.referenceAdded));
         if (change.acRemoved.length || change.acAdded.length) {
           await jira.setAc(change.key, rewriteAcValue(now!.acRaw, change.acRemoved, change.acAdded));
           update.jiraAc = final;
         }
+        for (const blocker of change.blockedBy) await jira.addBlockedBy!(change.key, blocker);
         if (accountId) {
           await jira.setAssignee(change.key, accountId);
           update.jiraDev = dev;
@@ -715,11 +821,40 @@ export class SprintDraftService {
         results.push({ key: ticket.key, kind: 'tc', status: 'failed', detail: status ? `Jira responded ${status}: ${message}` : message });
       }
     }
+    // Every ticket of the draft carries the label, merged ones too: a ticket without it joined the sprint after publish.
+    const labelled = await this.publishLabels(jira, view.sprintId, (await this.view(sprint))!.tickets.map((ticket) => ticket.key), tickets.every((result) => result.status === 'updated'));
+    if (labelled) results.push(labelled);
     const target = await this.contract().catch((): ContractTarget => ({ client: null, parentId: null }));
     const published = (await this.view(sprint))!;
     const contract = await writeContract(target.client, target.parentId, { ...published, tickets: openTickets(published) }, by, this.now());
     results.push({ key: 'Confluence', kind: 'contract', status: contract.status, detail: contract.detail });
-    if (tickets.every((result) => result.status === 'updated')) await this.store.updateSprintDraft(sprint, { status: 'published', publishedAt: this.now() });
+    if (tickets.every((result) => result.status === 'updated') && labelled?.status !== 'failed') await this.store.updateSprintDraft(sprint, { status: 'published', publishedAt: this.now() });
     return results;
+  }
+
+  /**
+   * The publish signal every DOCK reads: plan-published-r<N> on each ticket of the plan, N one past the highest
+   * revision the sprint carries, and older plan labels taken off. Skipped while a ticket write failed, so a half-written
+   * plan never looks published to the developers.
+   */
+  private async publishLabels(jira: DraftJira, sprintId: number, keys: string[], ready: boolean): Promise<PublishResult | null> {
+    if (!jira.addLabel) return null;
+    if (!ready) return { key: 'Jira labels', kind: 'label', status: 'skipped', detail: 'A ticket was not written; the plan label waits for a publish that writes every ticket' };
+    if (!keys.length) return { key: 'Jira labels', kind: 'label', status: 'skipped', detail: 'No open ticket to label' };
+    const issues = await jira.sprintIssues(sprintId);
+    const revision = (sprintRevision(issues) ?? 0) + 1;
+    const label = planLabel(revision);
+    const labelsOf = new Map(issues.map((issue) => [issue.key, issue.labels ?? []]));
+    const failed: string[] = [];
+    await mapLimit(keys, READ_CONCURRENCY, async (key) => {
+      try {
+        await jira.addLabel!(key, label);
+        for (const stale of stalePlanLabels(labelsOf.get(key), revision)) await jira.removeLabel?.(key, stale);
+      } catch {
+        failed.push(key);
+      }
+    });
+    if (failed.length) return { key: 'Jira labels', kind: 'label', status: 'failed', detail: `${label} could not be set on ${failed.sort().join(', ')}` };
+    return { key: 'Jira labels', kind: 'label', status: 'updated', detail: `${label} on ${keys.length} ${keys.length === 1 ? 'ticket' : 'tickets'}` };
   }
 }

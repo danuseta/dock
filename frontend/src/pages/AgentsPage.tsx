@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowDown, ArrowUp, Building2, CalendarRange, ChevronLeft, ChevronRight, ClipboardList, Clock, ExternalLink, EyeOff, FileDiff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Square, Table2, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUp, Building2, CalendarRange, ChevronLeft, ChevronRight, ClipboardList, Clock, ExternalLink, EyeOff, FileDiff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Square, Table2, X } from 'lucide-react';
 import { GET_AUTO_REVIEWS, GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
 import { APPROVE_REVIEW, CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
@@ -9,10 +9,7 @@ import { DeskScene } from '../components/empty/scenes/DeskScene';
 import { RobotScene } from '../components/empty/scenes/RobotScene';
 import { Toast } from '../components/Toast';
 import { Badge, Button, Card, ConfirmDialog, Dialog, Page, PageHeader, PhoneCards } from '../components/ui';
-import { RetroTab } from '../agents/RetroTab';
-import { PlanTab } from '../agents/PlanTab';
-import { PlanningTab } from '../agents/PlanningTab';
-import { agentsRoute, type AgentsTab, type SprintSub } from '../agents/plan';
+import { agentsRoute, type AgentsTab } from '../agents/plan';
 import { PhoneFold } from '../agents/PhoneFold';
 import { PhoneTabs, type PhoneTab } from '../agents/PhoneTabs';
 import { isPhone } from '../lib/phone';
@@ -778,16 +775,13 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
 /** Office shows the runs; Library edits the agent files, on the DOCK that has chat and the kit bridge. */
 const AgentsPage: React.FC<AgentsPageProps> = (props) => {
   const library = hasPage(useDockMode(), '/sessions');
-  const [route, setRoute] = useState(() => (library ? agentsRoute(window.location.search) : { tab: 'office' as AgentsTab, sub: 'plan' as SprintSub }));
-  const { tab, sub } = route;
+  const [tab, setTab] = useState<AgentsTab>(() => (library ? agentsRoute(window.location.search) : 'office'));
   const [startArchive, setStartArchive] = useState(false);
-  const choose = (next: AgentsTab, nextSub: SprintSub = sub) => {
-    setRoute({ tab: next, sub: nextSub });
+  const choose = (next: AgentsTab) => {
+    setTab(next);
     const params = new URLSearchParams(window.location.search);
     if (next !== 'office') params.set('tab', next);
     else params.delete('tab');
-    if (next === 'sprint') params.set('sub', nextSub);
-    else params.delete('sub');
     const query = params.toString();
     window.history.replaceState(window.history.state, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
   };
@@ -799,7 +793,7 @@ const AgentsPage: React.FC<AgentsPageProps> = (props) => {
   };
   const tabs = library && (
     <div className="mb-4 flex border-b border-border max-[760px]:hidden" role="tablist" aria-label="Agents">
-      {([['office', 'Office', Building2], ['sprint', 'Sprint', CalendarRange], ['library', 'Library', Library]] as const).map(([id, label, Icon]) => (
+      {([['office', 'Office', Building2], ['library', 'Library', Library]] as const).map(([id, label, Icon]) => (
         <button
           key={id}
           type="button"
@@ -811,35 +805,12 @@ const AgentsPage: React.FC<AgentsPageProps> = (props) => {
           <Icon size={14} aria-hidden="true" />{label}
         </button>
       ))}
+      <button type="button" onClick={() => props.onNavigate('/planning')} className="-mb-px ml-2 flex h-10 items-center gap-1.5 px-3 font-display text-xs text-muted-foreground transition-colors duration-150 hover:text-foreground">
+        <CalendarRange size={13} aria-hidden="true" />Sprint pindah ke Planning<ArrowRight size={12} aria-hidden="true" />
+      </button>
     </div>
   );
   if (tab === 'office') return <OfficeTab {...props} tabs={tabs} library={library} startArchive={startArchive} onPickTab={pickPhoneTab} />;
-  if (tab === 'sprint') return (
-    <Page width="full" className="max-[760px]:pb-28">
-      <PageHeader>
-        <div>
-          <h1 className="text-balance font-display text-3xl font-black">Agents</h1>
-          <p className="mt-1 text-pretty text-secondary-foreground">The sprint's dependency map and work order, and the retro of the agents' work.</p>
-        </div>
-      </PageHeader>
-      {tabs}
-      <PhoneTabs current="sprint" library={library} onPick={pickPhoneTab} />
-      <div className="mb-4 flex flex-wrap gap-1.5" role="group" aria-label="Sprint view">
-        {([['planning', 'Planning'], ['plan', 'Plan'], ['retro', 'Retro']] as const).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            aria-pressed={sub === id}
-            onClick={() => choose('sprint', id)}
-            className={cn('h-7 rounded-xs border border-border bg-surface-1 px-3 font-display text-xs font-semibold text-secondary-foreground max-[760px]:h-11', sub === id && 'border-accent bg-accent text-black')}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      {sub === 'planning' ? <PlanningTab /> : sub === 'plan' ? <PlanTab /> : <RetroTab />}
-    </Page>
-  );
   return (
     <Page width="full" className="max-[760px]:pb-28">
       <PageHeader>

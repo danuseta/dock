@@ -30,9 +30,11 @@ import { LoadingSkeleton } from './components/LoadingSkeleton';
 import { Button, Page } from './components/ui';
 import { DockModeContext, hasPage, type DockMode } from './lib/dockMode';
 import { AgentLooksLoader } from './agents/library/AgentLooksLoader';
+import { planningRedirect } from './agents/plan';
 
 const AgentsPage = lazy(() => import('./pages/AgentsPage'));
 const ChangesPage = lazy(() => import('./pages/ChangesPage'));
+const PlanningPage = lazy(() => import('./pages/PlanningPage'));
 
 function App() {
   const client = useApolloClient();
@@ -56,12 +58,15 @@ function App() {
   const [setMasterPin] = useMutation(SET_MASTER_PIN);
 
   const getInitialRoute = () => {
+    // An old Agents link to Planning, a bookmark or a notification, opens the matching /planning tab.
+    const moved = planningRedirect(`${window.location.pathname}${window.location.search}`);
+    if (moved !== `${window.location.pathname}${window.location.search}`) window.history.replaceState(window.history.state, '', moved);
     const path = window.location.pathname;
     if (path.startsWith('/detail/') || path.startsWith('/ticket/')) {
       const key = decodeURIComponent(path.split('/').pop() || '');
       return { path: '/ticket', key: key || null };
     }
-    if (path === '/dashboard' || path === '/agents' || path === '/blackboard' || path === '/guide' || path === '/sessions' || path === '/calendar' || path === '/sprint' || path === '/monitoring' || path === '/docker' || path === '/demo-videos' || path === '/dev-servers' || path === '/machines' || path === '/decisions' || path === '/discord' || path === '/issues' || path === '/changes' || path === '/workspace' || path === '/settings') {
+    if (path === '/dashboard' || path === '/agents' || path === '/blackboard' || path === '/guide' || path === '/sessions' || path === '/calendar' || path === '/sprint' || path === '/monitoring' || path === '/docker' || path === '/demo-videos' || path === '/dev-servers' || path === '/machines' || path === '/decisions' || path === '/discord' || path === '/issues' || path === '/changes' || path === '/workspace' || path === '/settings' || path === '/planning') {
       return { path, key: null };
     }
     return { path: '/', key: null };
@@ -105,7 +110,8 @@ function App() {
     }
   };
 
-  const handleNavigate = (path: string) => {
+  const handleNavigate = (to: string) => {
+    const path = planningRedirect(to);
     window.history.pushState({}, '', path);
     // A link like /agents?run=KEY keeps its query in the URL for the page to read.
     setCurrentPath(path.split('?')[0]);
@@ -145,6 +151,7 @@ function App() {
       case '/changes': return <Suspense fallback={<Page width="full"><LoadingSkeleton /></Page>}><ChangesPage onNavigate={handleNavigate} onTicketClick={navigateToTicket} /></Suspense>;
       case '/workspace': return <WorkspacePage />;
       case '/settings': return <SettingsPage />;
+      case '/planning': return <Suspense fallback={<Page width="full"><LoadingSkeleton /></Page>}><PlanningPage /></Suspense>;
       case '/ticket': return selectedTicketKey ? <TicketDetailPage ticketKey={selectedTicketKey} onBack={() => handleNavigate('/dashboard')} onNavigate={handleNavigate} /> : <DashboardPage onTicketClick={navigateToTicket} />;
       default: return <HomePage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;
     }

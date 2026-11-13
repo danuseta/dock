@@ -6,6 +6,7 @@ import { ledgerPeer } from './ledger-peer';
 import { DEFAULT_MACHINE, orchestratorService } from './orchestrator';
 import { CRON_CACHE, OrchestratorCron } from './orchestrator-cron';
 import { activeSprint } from './sprint-plan';
+import { cronDryRun } from './plan-publish';
 import { sprintPlanner } from './sprint-plan-live';
 import { isTaskTitle } from './session-titles';
 import { eventPush, pushService } from './push';
@@ -85,6 +86,7 @@ export const orchestratorCron = new OrchestratorCron({
   stopTurn: (sessionId) => chatService.stopTurn(sessionId),
   hasPushDevices: async () => (await pushService.subscriptions()).length > 0,
   push: (message) => eventPush.send('needsYou', message),
+  dryRun: cronDryRun(),
 });
 
 chatService.onAsk = (ask) => { void eventPush.send('needsYou', askNotice(ask)).catch(() => undefined); };

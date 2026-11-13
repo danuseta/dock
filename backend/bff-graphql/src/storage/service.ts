@@ -468,6 +468,11 @@ export class StorageService {
     return (await this.db.sprintDraftTicket.findMany({ where: { epic }, select: { draftSprint: true }, distinct: ['draftSprint'] })).map((row) => row.draftSprint);
   }
 
+  /** The drafts holding any of the tickets, for the ticket summary and readiness. */
+  async sprintDraftsWithKeys(keys: string[]): Promise<string[]> {
+    return (await this.db.sprintDraftTicket.findMany({ where: { key: { in: keys } }, select: { draftSprint: true }, distinct: ['draftSprint'] })).map((row) => row.draftSprint);
+  }
+
   updateSprintDraft(sprint: string, data: { decisions?: string; qaReason?: string | null; status?: string; publishedAt?: Date | null; storyboards?: string; questions?: string }) {
     return this.db.sprintDraft.update({ where: { sprint }, data });
   }

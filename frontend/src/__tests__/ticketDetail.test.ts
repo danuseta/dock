@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { isLongDescription, jiraAcLines, needsYou, runState, splitChoices, stepIndex } from '../lib/ticketDetail';
+import { hasUi, inUat, isLongDescription, jiraAcLines, needsYou, readinessOnBoard, readinessRefs, runState, splitChoices, stepIndex, ticketLinks, ticketReadiness } from '../lib/ticketDetail';
 
 const run = { waiting: null, stalled: false, finished: false, stage: 'code', ac: [], reviewSignal: null };
 
@@ -63,4 +63,60 @@ test('the Jira Acceptance Criteria field reads as one criterion per line without
   ]);
   assert.deepStrictEqual(jiraAcLines(null), []);
   assert.deepStrictEqual(jiraAcLines('  \n '), []);
+});
+
+const base = {
+  key: 'QRD-1510', title: '[FE] Expose Playbook folders', url: 'https://jira/browse/QRD-1510',
+  acceptanceCriteria: '- Owner sees the rule\n- Allow is grey on the consent page (QRD-1307)\n- The MCP drawer greys its button (QRD-1312)',
+  blockedBy: ['QRD-1307'], openToConfirm: null, figmaUrl: 'https://figma.com/file/x',
+  summary: { current: true, testData: 'member tanpa rule', ui: true },
+  decisions: [{ refKey: 'QRD-1312', action: 'reference' }], tcApproved: true, statuses: { 'QRD-1307': 'UAT CHECK' },
+};
+
+test('Siap dikerjain is 7 of 7 when every ticket the AC names is decided, nothing is open, and summary, data, TC and design are there', () => {
+  const ready = ticketReadiness(base);
+  assert.deepStrictEqual([ready.done, ready.total, ready.missing], [7, 7, []]);
+  assert.deepStrictEqual(ready.items.map((item) => item.id), ['refs', 'open', 'summary', 'alone', 'data', 'tc', 'design']);
+});
+
+test('each missing readiness item says what is missing and links to where it gets fixed', () => {
+  const ready = ticketReadiness({
+    ...base, blockedBy: [], decisions: [], openToConfirm: 'Default rule off?', figmaUrl: null, tcApproved: false,
+    summary: { current: true, testData: null, ui: false }, statuses: { 'QRD-1307': 'In Progress' },
+  });
+  assert.deepStrictEqual(ready.missing.map((item) => [item.id, item.text, item.href]), [
+    ['refs', '2 rujukan tiket lain belum diputusin', '/planning?tab=draft&panel=ac'],
+    ['open', 'Open to confirm masih ada isinya', 'https://jira/browse/QRD-1510'],
+    ['alone', '2 tiket yang ditunggu AC belum di UAT', '#acceptance-criteria'],
+    ['data', 'Data uji belum disebut', 'https://jira/browse/QRD-1510'],
+    ['tc', 'Test case belum disetujui QA', '/planning?tab=draft&panel=tc'],
+    ['design', 'Tiket UI tanpa link desain', 'https://jira/browse/QRD-1510'],
+  ]);
+  assert.strictEqual(ready.missing[2].detail, 'QRD-1307 (In Progress), QRD-1312 (status belum kebaca)');
+  assert.strictEqual(ready.done, 1);
+});
+
+test('without a summary the summary item is missing and test data and UI say there is no summary yet; [FE] still means UI', () => {
+  const none = ticketReadiness({ ...base, title: 'Expose Playbook folders', summary: null });
+  assert.deepStrictEqual(none.missing.map((item) => [item.id, item.text]), [
+    ['summary', 'Belum ada ringkasan'], ['data', 'Data uji: belum ada ringkasan'], ['design', 'Desain: belum ada ringkasan'],
+  ]);
+  assert.strictEqual(ticketReadiness({ ...base, summary: null }).items.find((item) => item.id === 'design')!.ok, true, '[FE] with a Figma link');
+  assert.strictEqual(ticketReadiness({ ...base, summary: { ...base.summary, current: false } }).items[2].text, 'Ringkasan basi: AC berubah sesudah ringkasan ditulis');
+  assert.strictEqual(hasUi('[BE] API'), false);
+});
+
+test('the board shows the readiness chip only in the TODO column, and reads every ref once', () => {
+  const ready = ticketReadiness(base);
+  assert.strictEqual(readinessOnBoard('TODO', ready), ready);
+  assert.strictEqual(readinessOnBoard('IN PROGRESS', ready), null);
+  assert.deepStrictEqual(readinessRefs([base, { key: 'QRD-1307', acceptanceCriteria: '- Needs QRD-1510 and QRD-1500' }]), ['QRD-1307', 'QRD-1312', 'QRD-1500', 'QRD-1510']);
+  assert.strictEqual(inUat('UAT MERGED'), false);
+  assert.strictEqual(inUat('Done / MERGED'), true);
+});
+
+test('Nyambung ke: Blocks links, mentions moved to Reference and undecided mentions', () => {
+  const links = ticketLinks({ ...base, acceptanceCriteria: `${base.acceptanceCriteria}\n- Token rotates (QRD-1500)`, reference: '- QRD-1305: serve a folder over MCP' });
+  assert.deepStrictEqual(links.map((link) => [link.key, link.kind]), [['QRD-1307', 'blocks'], ['QRD-1312', 'reference'], ['QRD-1500', 'open'], ['QRD-1305', 'reference']]);
+  assert.strictEqual(ticketLinks({ key: 'QRD-1', acceptanceCriteria: '- x (QRD-2)', decisions: [{ refKey: 'QRD-2', action: 'dependency' }] })[0].kind, 'blocks');
 });

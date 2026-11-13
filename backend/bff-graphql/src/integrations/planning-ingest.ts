@@ -5,13 +5,16 @@ import { OrchestratorInputError } from './orchestrator';
 import { SprintInputError } from './sprint-dashboard';
 import { openTickets, type DraftView, type SprintDraftService } from './sprint-draft';
 import { StoryboardMissing, type StoryboardReader } from './storyboard';
+import type { TicketSummaryService } from './ticket-summary';
 
-export const PLANNING_ROUTES = ['sprint-draft/get', 'sprint-draft/update', 'sprint-draft/tc', 'sprint-draft/question', 'storyboard'] as const;
+export const PLANNING_ROUTES = ['sprint-draft/get', 'sprint-draft/update', 'sprint-draft/tc', 'sprint-draft/question', 'sprint-draft/summary', 'storyboard'] as const;
 export type PlanningRoute = typeof PLANNING_ROUTES[number];
 
 export interface PlanningIngestDeps {
   drafts: Pick<SprintDraftService, 'view' | 'updateTicket' | 'ask' | 'applyStoryboard' | 'setTcs'>;
   storyboards: Pick<StoryboardReader, 'sync'>;
+  /** The ticket summaries; get lists the acHash each stored summary was written for. */
+  summaries?: Pick<TicketSummaryService, 'write' | 'hashes'>;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -39,7 +42,7 @@ const open = (view: DraftView): DraftView => ({ ...view, tickets: openTickets(vi
 
 async function draftOf(drafts: PlanningIngestDeps['drafts'], sprint: string): Promise<DraftView> {
   const view = await drafts.view(sprint);
-  if (!view) throw new OrchestratorInputError(`No draft for ${sprint}; load it in Agents › Sprint › Planning first`);
+  if (!view) throw new OrchestratorInputError(`No draft for ${sprint}; load it in Planning › Draft first`);
   return open(view);
 }
 
@@ -52,8 +55,18 @@ export async function planningIngest(deps: PlanningIngestDeps, route: PlanningRo
       return { version: result.version, path: result.path, frames: result.frames, changed: result.changed };
     }
     const sprint = textField(body, 'sprint')!;
-    if (route === 'sprint-draft/get') return await draftOf(deps.drafts, sprint);
-    if (route === 'sprint-draft/question') return open(await deps.drafts.ask(sprint, textField(body, 'text')!, textField(body, 'key', false)));
+    if (route === 'sprint-draft/get') {
+      const view = await draftOf(deps.drafts, sprint);
+      return deps.summaries ? { ...view, summaries: await deps.summaries.hashes(view.tickets.map((ticket) => ticket.key)) } : view;
+    }
+    if (route === 'sprint-draft/summary') {
+      if (!deps.summaries) throw new OrchestratorInputError('Ticket summaries are not available on this DOCK');
+      return await deps.summaries.write(sprint, body);
+    }
+    if (route === 'sprint-draft/question') {
+      const options = Array.isArray(body.options) ? body.options.filter((option): option is string => typeof option === 'string') : [];
+      return open(await deps.drafts.ask(sprint, textField(body, 'text')!, textField(body, 'key', false), options));
+    }
     const key = textField(body, 'key')!.toUpperCase();
     if (route === 'sprint-draft/tc') return open(await deps.drafts.setTcs(sprint, key, body.tcs));
     const change: { dev?: string | null; wave?: number | null; sp?: number | null; ac?: string[] } = {};

@@ -1,4 +1,5 @@
-// The pure side of Agents > Sprint > Planning: shapes of the draft the BFF returns and what the panel derives from it.
+// The pure side of Planning > Draft: shapes of the draft the BFF returns and what the panel derives from it.
+import { skippedStages, type PlanningFlow } from './planningFlow';
 
 export interface PlanningSprint { id: number; name: string; state: string; startDate: string | null; endDate: string | null }
 export interface DraftDecision { action: string; note: string | null; by: string | null; at: string }
@@ -13,6 +14,9 @@ export interface DraftTicket {
   ac: string[]; dependsOn: string[]; start: number; dur: number; end: number; inSprint: boolean; split: number[] | null;
   prediction: QaPrediction | null; qaDecision: DraftDecision | null; epic: string | null; frames: string[]; storyboard: StoryboardFlag | null;
   tcs: DraftTc[]; tcStale: boolean; tcPending: boolean;
+  /** QA approved the test cases as they are now. */
+  tcApproved?: boolean;
+  acHash?: string;
   /** GitHub merge state of the pull requests: merged, open, none or unknown; pulls read "owner/repo#n · open". */
   merge: string; pulls: string[]; jiraAhead: boolean;
   /** Past merge: drawn on the plan only, left out of everything else. */
@@ -34,27 +38,95 @@ export interface StoryboardFlow { id: string; title: string; tickets: string[]; 
 export interface StoryboardScenario { n: number; title: string; groups: Array<{ title: string; flows: StoryboardFlow[] }> }
 export interface DraftFinding {
   id: string; key: string; line: number; text: string; refKey: string; kind: string; refEnd: number | null; ownEnd: number | null; decision: DraftDecision | null;
+  /** The ticket already has an "is blocked by" link to refKey. */
+  linked?: boolean;
 }
 export interface SprintDraft {
   sprint: string; sprintId: number; status: string; sprintDays: number; startDate: string | null; spPerDay: number; createdBy: string | null;
   loadedAt: string; publishedAt: string | null; qaReason: string | null; devs: string[]; blockers: string[]; canPublish: boolean; landed: number; today: number | null;
   tickets: DraftTicket[]; findings: DraftFinding[]; storyboards: StoryboardState[]; questions: DraftQuestion[];
   developers: SprintDeveloper[]; mergeSource: string; moves: SprintMove[];
+  /** The planner's written scope cut; null while none is written. */
+  scopeCut?: DraftDecision | null;
 }
-export interface DraftQuestion { id: string; text: string; key: string | null; askedAt: string; answered: boolean; answeredBy: string | null; answeredAt: string | null }
+export interface DraftQuestion { id: string; text: string; key: string | null; askedAt: string; answered: boolean; answeredBy: string | null; answeredAt: string | null; answer?: string | null; options?: string[] }
+
+/** A sprint plan as every DOCK reads it from Jira's plan-published-rN labels. */
+export interface PlanSignal {
+  sprint: string; sprintId: number; sprintState: string; activeSince: string | null; stage: 'draft' | 'published' | 'running'; revision: number | null;
+  publishedBy: string | null; publishedAt: string | null; planner: string | null; me: string | null; isPlanner: boolean;
+  draftLoadedAt: string | null; draftStatus: string | null; joined: string[]; acChanged: string[];
+  waitForPublish: boolean; planAfterPublish: boolean; myOutside: string[];
+  myOrder: Array<{ key: string; summary: string; status: string; sp: number | null; order: number | null }>;
+}
+
+export const PLAN_STEPS = ['Draft', 'Dipublish', 'Jalan'] as const;
+
+/** How far the sprint got: 0 Draft, 1 Dipublish, 2 Jalan (published and active in Jira with the cron gate on). */
+export function stepIndex(signal: Pick<PlanSignal, 'stage'> | null): number {
+  if (!signal || signal.stage === 'draft') return 0;
+  return signal.stage === 'running' ? 2 : 1;
+}
+
+/** "12 Nov 16:19" in the reader's time zone. */
+export const whenText = (iso: string | null): string => {
+  if (!iso) return '-';
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime()) ? '-' : `${at.getDate()} ${at.toLocaleString('en-GB', { month: 'short' })} ${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+};
+
+/** The status block's muted second line: where the draft and the sprint stand, or who published which revision. */
+export function planMetaLine(signal: PlanSignal | null, draft: { loadedAt: string } | null): string {
+  if (signal?.revision) {
+    const by = signal.publishedBy ?? signal.planner ?? 'planner';
+    return `${signal.isPlanner ? 'Dipublish' : `Dari ${by}`} · dipublish ${whenText(signal.publishedAt)} · r${signal.revision}${signal.activeSince ? ` · aktif di Jira sejak ${whenText(signal.activeSince)}` : ''}`;
+  }
+  const parts = [draft ? `Draft dimuat ${whenText(draft.loadedAt)}` : 'Draft belum dimuat'];
+  parts.push(signal?.activeSince ? `aktif di Jira sejak ${whenText(signal.activeSince)}` : 'belum aktif di Jira');
+  return parts.join(' · ');
+}
+
+export interface StatusItem { text: string; action?: 'chat' | 'republish' }
+
+/** The third line, only what needs attention: the cron gate, open chat questions and changes since publish. */
+export function planAttention(signal: PlanSignal | null, draft: Pick<SprintDraft, 'questions'> | null): StatusItem[] {
+  const items: StatusItem[] = [];
+  const planner = signal?.planner ?? 'planner';
+  if (signal && !signal.revision && signal.waitForPublish) items.push({ text: signal.isPlanner ? 'Cron nunggu publish' : `Cron nunggu ${planner} publish` });
+  const open = draft?.questions.filter((question) => !question.answered).length ?? 0;
+  if (open) items.push({ text: `${open} pertanyaan di chat`, action: 'chat' });
+  const changed = signal ? signal.joined.length + signal.acChanged.length : 0;
+  if (signal?.revision && changed) {
+    items.push(signal.isPlanner
+      ? { text: `Perlu publish ulang (r${signal.revision + 1}): ${changeText(signal)}`, action: 'republish' }
+      : { text: `Plan r${signal.revision} · ada perubahan nunggu planner (${changeText(signal)})` });
+  }
+  return items;
+}
+
+const SHOWN_CHANGES = 3;
+
+/** "QRD-9001 masuk sprint, QRD-1533 AC berubah", the first few and how many more. */
+export function changeText(signal: Pick<PlanSignal, 'joined' | 'acChanged'>): string {
+  const all = [...signal.joined.map((key) => `${key} masuk sprint`), ...signal.acChanged.map((key) => `${key} AC berubah`)];
+  return `${all.slice(0, SHOWN_CHANGES).join(', ')}${all.length > SHOWN_CHANGES ? ` +${all.length - SHOWN_CHANGES} lagi` : ''}`;
+}
 
 /** The chat session Planning opens for a sprint; the planning agent and the kit find it by this title. */
 export const planningChatTitle = (sprint: string) => `Planning-${sprint}`;
+
+/** The sprint a Planning chat belongs to, from its session title; null for any other chat. */
+export const planningSprintOf = (title: string | null | undefined): string | null => (title?.startsWith('Planning-') ? title.slice('Planning-'.length).trim() || null : null);
 
 /** "3/9 answered", or null when the chat raised none. */
 export function questionsLine(questions: DraftQuestion[]): string | null {
   if (!questions.length) return null;
   return `${questions.filter((question) => question.answered).length}/${questions.length} answered`;
 }
-export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; refused: string | null }
+export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; referenceAdded?: string[]; blockedBy?: string[]; refused: string | null }
 export interface PublishResult { key: string; kind: string; status: string; detail: string | null }
 
-export type PlanningPanel = 'team' | 'scope' | 'ac' | 'qa' | 'tc' | 'storyboard';
+export type PlanningPanel = 'mine' | 'team' | 'scope' | 'ac' | 'qa' | 'tc' | 'storyboard';
 export const UNASSIGNED = 'Unassigned';
 const DEV_COLOR_COUNT = 8;
 const UNASSIGNED_COLOR = 'var(--color-muted-foreground)';
@@ -238,8 +310,9 @@ export function decisionLabel(decision: DraftDecision | null, refKey?: string): 
   if (!decision) return null;
   switch (decision.action) {
     case 'move': return refKey ? `Moved to ${refKey}` : 'Moved';
-    case 'wait': return 'Kept, waits';
-    case 'drop': return 'Dropped';
+    case 'dependency': case 'wait': return 'Dependency · link Blocks dipasang waktu Publish';
+    case 'reference': case 'drop': return 'Pindah ke Reference';
+    case 'approve': return 'Disetujui QA';
     case 'accept': return 'Risk accepted';
     case 'fix': return decision.note ? `Fixed: ${decision.note}` : 'Fixed';
     default: return decision.action;
@@ -254,9 +327,66 @@ export const sortFindings = (findings: DraftFinding[]) => [...findings].sort((a,
 
 export function publishHint(draft: Pick<SprintDraft, 'canPublish' | 'blockers' | 'tickets'>): string {
   if (draft.tickets.length === 0) return 'No tickets in this sprint';
-  if (draft.canPublish) return 'Every AC line and QA prediction that needs a call has one';
+  if (!draft.blockers.length) return 'Every AC line and QA prediction that needs a call has one';
   const n = draft.blockers.length;
   return `${n} ${n === 1 ? 'item needs' : 'items need'} a decision before publish`;
+}
+
+export interface ReadyItem { id: 'scope' | 'ac' | 'qa' | 'storyboard'; ok: boolean; text: string; detail: string | null; panel: PlanningPanel; fix: string }
+export interface Readiness { items: ReadyItem[]; done: number; total: number; missing: ReadyItem[] }
+
+const SHOWN_KEYS = 3;
+const keysText = (keys: string[]) => `${keys.slice(0, SHOWN_KEYS).join(', ')}${keys.length > SHOWN_KEYS ? ` +${keys.length - SHOWN_KEYS} lagi` : ''}`;
+
+/**
+ * G1 "Siap publish": the SP fit the team's capacity or a scope cut is written, every AC line naming another ticket has a Blocks link or a decision,
+ * every ESCALATED prediction has one, and each storyboard version is recorded with the AC checked against it. Only
+ * information: Publish stays open. A stage the planning flow skips is not counted.
+ */
+export function publishReadiness(
+  draft: Pick<SprintDraft, 'tickets' | 'developers' | 'sprintDays' | 'spPerDay' | 'today' | 'findings' | 'storyboards' | 'scopeCut'>,
+  flow: PlanningFlow | null,
+): Readiness {
+  const skipped = skippedStages(flow);
+  const open = draft.tickets.filter((ticket) => !ticket.merged);
+  const sp = Math.round(sum(open.map((ticket) => ticket.left ?? ticket.sp)) * 10) / 10;
+  const days = Math.max(0, draft.sprintDays - (draft.today ? draft.today - 1 : 0));
+  const capacity = Math.round(draft.developers.length * days * draft.spPerDay * 10) / 10;
+  const fits = sp <= capacity;
+  const cut = draft.scopeCut?.note ?? null;
+  // The same undecided set the AC check lists: every line naming another ticket with no Blocks link and no call.
+  const late = draft.findings.filter(undecidedFinding);
+  const escalated = open.filter((ticket) => ticket.prediction?.prediction === 'ESCALATED' && !ticket.qaDecision);
+  const unread = draft.storyboards.filter((board) => board.version === null);
+  const unchecked = uncheckedStoryboard({ tickets: open });
+  const recorded = draft.storyboards.length > 0 && unread.length === 0;
+  const items: ReadyItem[] = [
+    {
+      id: 'scope', panel: 'scope', fix: 'Scope', ok: fits || !!cut,
+      text: fits ? `${sp} SP muat di kapasitas ${capacity} SP` : cut ? `Potong scope ditulis · ${sp} SP untuk kapasitas ${capacity} SP` : `${sp} SP untuk kapasitas ${capacity} SP`,
+      detail: fits ? null : cut ?? 'Belum ada keputusan potong scope',
+    },
+    {
+      id: 'ac', panel: 'ac', fix: 'AC check', ok: late.length === 0,
+      text: late.length ? `${late.length} rujukan tiket lain belum diputusin` : 'Rujukan tiket lain udah diputusin',
+      detail: late.length ? keysText([...new Set(late.map((finding) => finding.key))]) : null,
+    },
+    {
+      id: 'qa', panel: 'qa', fix: 'QA check', ok: escalated.length === 0,
+      text: escalated.length ? `${escalated.length} tiket diprediksi ESCALATED belum diputusin` : 'QA check udah diputusin semua',
+      detail: escalated.length ? keysText(escalated.map((ticket) => ticket.key)) : null,
+    },
+    {
+      id: 'storyboard', panel: 'storyboard', fix: 'Storyboard', ok: recorded && unchecked.length === 0,
+      text: !recorded ? 'Versi storyboard belum dicatat' : unchecked.length ? `${unchecked.length} AC belum dicek ke storyboard terbaru` : 'Versi storyboard dicatat, AC udah dicek',
+      detail: !recorded
+        ? (unread.length ? unread.map((board) => board.epic).join(', ') : 'Belum ada storyboard yang dibaca')
+        : unchecked.length ? keysText(unchecked.map((ticket) => ticket.key)) : draft.storyboards.map((board) => `${board.epic} v${board.version}`).join(', '),
+    },
+  ];
+  const counted = items.filter((item) => !skipped.has(item.id));
+  const missing = counted.filter((item) => !item.ok);
+  return { items: counted, done: counted.length - missing.length, total: counted.length, missing };
 }
 
 export const changeCount = (changes: DraftChange[]) => changes.filter((change) => !change.refused).length;
@@ -378,3 +508,46 @@ export function moveForecast(move: Pick<SprintMove, 'forecastBefore' | 'forecast
   const day = (value: number) => `D${value}${labels[value - 1] ? ` (${labels[value - 1]})` : ''}`;
   return `forecast ${day(move.forecastBefore)} → ${day(move.forecastAfter)}`;
 }
+
+/** An AC line that names another ticket and is not decided: no Blocks link and no call yet. */
+export const undecidedFinding = (finding: Pick<DraftFinding, 'decision' | 'linked'>) => !finding.decision && !finding.linked;
+
+/** The planning agent's summary of a ticket as Planning reads it: Indonesian title and AC lines. */
+export interface TicketSummaryLite { key: string; titleId: string | null; acId: string[]; current: boolean; testData: string | null }
+
+/** Tiket saya: the open tickets of the draft whose developer is the DOCK owner's Jira user, by name. */
+export function myTickets(draft: Pick<SprintDraft, 'tickets'>, me: string | null | undefined): DraftTicket[] {
+  const name = me?.trim().toLowerCase();
+  if (!name) return [];
+  return draft.tickets.filter((ticket) => !ticket.merged && ticket.dev?.trim().toLowerCase() === name)
+    .sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }));
+}
+
+export interface QaLine { n: number; text: string; textId: string | null; waitsOn: string[]; testedIn: string | null }
+export interface QaChecklist { here: QaLine[]; notHere: QaLine[] }
+
+/**
+ * The QA checklist built from a ticket's AC: a line decided for Reference, or moved to the ticket that builds it, is not
+ * tested here; every other line is, and a line naming another ticket waits for it (the dependency the QA bot holds on).
+ */
+export function qaChecklist(ticket: Pick<DraftTicket, 'key' | 'ac'>, findings: DraftFinding[], acId: string[] = []): QaChecklist {
+  const mine = findings.filter((finding) => finding.key === ticket.key);
+  const here: QaLine[] = [];
+  const notHere: QaLine[] = [];
+  ticket.ac.forEach((text, index) => {
+    const n = index + 1;
+    const line = mine.filter((finding) => finding.line === n);
+    const moved = line.find((finding) => ['reference', 'move', 'drop'].includes(finding.decision?.action ?? ''));
+    const row = { n, text, textId: acId[index] ?? null, waitsOn: [] as string[], testedIn: moved?.refKey ?? null };
+    if (moved) notHere.push(row);
+    else here.push({ ...row, waitsOn: [...new Set(line.map((finding) => finding.refKey))] });
+  });
+  return { here, notHere };
+}
+
+/** Draft test cases from the "dites di tiket ini" lines, for QA to edit and approve in Test cases. */
+export const checklistTcs = (list: QaChecklist): DraftTc[] => list.here.map((line, index) => ({
+  id: `TC-${index + 1}`, ac: line.n, title: line.text.slice(0, 300),
+  steps: line.waitsOn.length ? [`Tunggu ${line.waitsOn.join(', ')} sampai UAT CHECK`] : [],
+  expected: line.text,
+}));

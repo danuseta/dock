@@ -15,12 +15,14 @@ const WED_0905 = new Date('2026-10-14T02:05:00.000Z');
 test('settings: defaults when nothing is saved, saved fields win, v1 keys are ignored, wrong values are refused', () => {
   assert.deepStrictEqual(parseCronSettings(null), DEFAULT_CRON_SETTINGS);
   assert.strictEqual(DEFAULT_CRON_SETTINGS.weeklyBrakePercent, 90);
+  assert.deepStrictEqual([DEFAULT_CRON_SETTINGS.waitForPublish, DEFAULT_CRON_SETTINGS.planAfterPublish], [false, false], 'the publish gate starts off');
   assert.deepStrictEqual(
     [DEFAULT_CRON_SETTINGS.enabled, DEFAULT_CRON_SETTINGS.workStart, DEFAULT_CRON_SETTINGS.workEnd, DEFAULT_CRON_SETTINGS.workDays, DEFAULT_CRON_SETTINGS.maxPerDay, DEFAULT_CRON_SETTINGS.mode],
     [false, 9, 17, [1, 2, 3, 4, 5], 6, null],
   );
   const saved = parseCronSettings(JSON.stringify({ enabled: true, hoursWib: [9], perRound: 3, workDays: [5, 1, 1], parallel: 1, labels: [' be ', 'be'], epicBase: { 'QRD-1232': 'feat/V1-Playbook' } }));
   assert.deepStrictEqual([saved.enabled, saved.workDays, saved.parallel, saved.labels], [true, [1, 5], 1, ['be']]);
+  assert.deepStrictEqual([saved.waitForPublish, saved.planAfterPublish], [false, false], 'a config saved before the publish gate keeps it off');
   assert.ok(!('hoursWib' in saved) && !('perRound' in saved) && !('epicBase' in saved), 'keys from older configs are dropped');
   for (const bad of [
     '{', '[]', '{"parallel":0}', '{"workStart":17,"workEnd":9}', '{"workEnd":25}', '{"workDays":[]}', '{"workDays":[8]}', '{"maxPerDay":0}',

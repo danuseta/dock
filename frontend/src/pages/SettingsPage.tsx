@@ -26,6 +26,7 @@ import { JiraSection } from '../settings/sections/JiraSection';
 import { GitHubSection } from '../settings/sections/GitHubSection';
 import { DiscordSection } from '../settings/sections/DiscordSection';
 import { CalendarSection, type GoogleReturn } from '../settings/sections/CalendarSection';
+import { PlanningFlowSection } from '../settings/sections/PlanningFlowSection';
 
 const dotClass: Record<Exclude<SectionStatus, null>, string> = {
   ok: 'bg-status-merged', bad: 'bg-status-conflict', off: 'border border-muted-foreground', unsaved: 'bg-status-warn',
@@ -197,6 +198,7 @@ const SettingsPage: React.FC = () => {
           {active === 'tokens' && <IngestTokensSection />}
           {active === 'demo' && <div className="flex flex-col gap-5"><ElevenLabsKeysSection /><DemoStorageSection /></div>}
           {active === 'claude' && <ClaudeAccountSection />}
+          {active === 'planflow' && <PlanningFlowSection />}
         </main>
       </div>
 

@@ -14,8 +14,9 @@ import { StorageService } from '../storage/service';
 import { activeSprint } from '../integrations/sprint-plan';
 import { lookupDependencies } from '../integrations/dependency-lookup';
 import { sprintPlanner } from '../integrations/sprint-plan-live';
-import { acDriftService, acInService, sprintDraftService, storyboardReader } from '../integrations/sprint-draft-live';
+import { acDriftService, acInService, planSignalService, sprintDraftService, storyboardReader, ticketSummaryService } from '../integrations/sprint-draft-live';
 import { StoryboardMissing, StoryboardRefused } from '../integrations/storyboard';
+import { PLANNING_FLOW_KEY, PlanningFlowError, parsePlanningFlow, storedPlanningFlow } from '../integrations/planning-flow';
 import { planningChatPrompt, planningChatTitle } from '../integrations/planning-ingest';
 import { isSettledStatus, mergeAttention, planAttentionItems, withoutSettledTickets } from '../integrations/attention';
 import { discordGateway, discordReader } from '../integrations/discord-reader-live';
@@ -369,6 +370,8 @@ export const resolvers = {
     sprintPlan: () => sprintPlanView(),
     planningSprints: () => sprintDraftService.sprints().catch(planningError),
     sprintDraft: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.view(sprint).catch(planningError),
+    sprintPlanSignal: (_: unknown, { sprint }: { sprint: string }) => planSignalService.view(sprint).catch(planningError),
+    planningFlow: async () => storedPlanningFlow((await storageService.getSettingValues([PLANNING_FLOW_KEY]))[0]?.value),
     previewSprintDraftPublish: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.preview(sprint).catch(planningError),
     acIncoming: () => acInService.incoming().catch(planningError),
     sprintDrift: async () => {
@@ -455,6 +458,8 @@ export const resolvers = {
         throw error;
       }
     },
+    ticketSummary: (_: unknown, { key }: { key: string }) => ticketSummaryService.summary(key).catch(planningError),
+    ticketReadiness: (_: unknown, { keys, refs }: { keys: string[]; refs?: string[] | null }) => ticketSummaryService.readiness(keys, refs ?? []).catch(planningError),
     ticketRelationGroup: async (_: any, { ticketKey }: { ticketKey: string }) => {
       return storageAPI.getTicketRelationGroup(ticketKey);
     },
@@ -608,6 +613,7 @@ export const resolvers = {
   
   Ticket: {
     labels: (parent: any) => Array.isArray(parent.labels) ? parent.labels : [],
+    blockedBy: (parent: any) => (Array.isArray(parent.links) ? parent.links : []).filter((link: any) => link?.relation === 'blockedBy').map((link: any) => String(link.key)),
     workOrder: async (parent: any) => (await storageAPI.ticketOrders()).get(parent.key) ?? labelOrder(parent.labels),
     workOrderSource: async (parent: any) => ((await storageAPI.ticketOrders()).has(parent.key) ? 'dock' : labelOrder(parent.labels) === null ? null : 'label'),
     workManual: async (parent: any) => (await storageAPI.manualTickets()).has(parent.key),
@@ -678,10 +684,23 @@ export const resolvers = {
     uploadSprintStoryboard: (_: unknown, { sprint, epic, html }: { sprint: string; epic: string; html: string }) => uploadStoryboard(sprint, epic, html),
     setSprintDraftTcs: (_: unknown, { sprint, key, tcs }: { sprint: string; key: string; tcs: unknown[] }) => sprintDraftService.setTcs(sprint, key, tcs).catch(planningError),
     moveSprintDraftCards: (_: unknown, { sprint, keys, to }: { sprint: string; keys: string[]; to: string }) => sprintDraftService.moveCards(sprint, keys, to).catch(planningError),
-    answerSprintDraftQuestion: (_: unknown, { sprint, id, answered }: { sprint: string; id: string; answered: boolean }) => (
-      sprintDraftService.answer(sprint, id, answered, reporterName()).catch(planningError)
+    answerSprintDraftQuestion: (_: unknown, { sprint, id, answered, text }: { sprint: string; id: string; answered: boolean; text?: string | null }) => (
+      sprintDraftService.answer(sprint, id, answered, reporterName(), text ?? null).catch(planningError)
     ),
     publishSprintDraft: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.publish(sprint, reporterName()).catch(planningError),
+    setPlanningFlow: async (_: unknown, { flow }: { flow: string }) => {
+      if (!flow.trim()) {
+        await storageService.deleteSetting(PLANNING_FLOW_KEY);
+        return null;
+      }
+      let saved: string;
+      try { saved = JSON.stringify(parsePlanningFlow(flow)); } catch (error) {
+        if (error instanceof PlanningFlowError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+        throw error;
+      }
+      await storageService.upsertSetting(PLANNING_FLOW_KEY, saved);
+      return saved;
+    },
     openPlanningChat: async (_: unknown, { sprint }: { sprint: string }) => {
       const name = sprint.trim();
       if (!name) throw new GraphQLError('sprint is required', { extensions: { code: 'BAD_USER_INPUT' } });
@@ -1067,6 +1086,9 @@ export const resolvers = {
   DiscordChannel: {
     team: (channel: { team?: boolean }) => Boolean(channel.team),
   },
+  SprintDraftQuestion: {
+    options: (question: { options?: string[] }) => question.options ?? [],
+  },
   SprintStoryboard: {
     scenarios: (board: { scenarios?: unknown[] }) => board.scenarios ?? [],
     htmlUrl: (board: { epic: string; version: number | null; error: string | null }) => storyboardUrl(board.epic, board.version),
@@ -1084,7 +1106,7 @@ export const protectedQueries = [
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'agentLooks', 'libraryAgents', 'libraryAgent',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
   'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro', 'sprintPlan',
-  'planningSprints', 'sprintDraft', 'previewSprintDraftPublish', 'sprintDrift', 'acIncoming',
+  'planningSprints', 'sprintDraft', 'sprintPlanSignal', 'planningFlow', 'previewSprintDraftPublish', 'sprintDrift', 'acIncoming', 'ticketSummary', 'ticketReadiness',
 ] as const;
 export const protectedMutations = [
   'retroBuild',
@@ -1094,6 +1116,7 @@ export const protectedMutations = [
   'updateSprintDraftTicket',
   'decideSprintDraft',
   'refreshSprintDraftQa',
+  'setPlanningFlow',
   'checkSprintStoryboards',
   'uploadSprintStoryboard',
   'answerSprintDraftQuestion',
