@@ -42,10 +42,13 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
   const [menu, setMenu] = useState<TicketMenuTarget | null>(null);
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
-  const { openForTicket, error: sessionError } = useOpenForTicket();
+  const { openForTicket, error: sessionError, notice: sessionNotice } = useOpenForTicket();
   useEffect(() => {
     if (sessionError) setToast({ message: sessionError, type: 'error' });
   }, [sessionError]);
+  useEffect(() => {
+    if (sessionNotice) setToast({ message: sessionNotice, type: 'success' });
+  }, [sessionNotice]);
   
   const { data, loading, error } = useQuery(GET_DASHBOARD, { 
     ...CACHED_QUERY_OPTIONS,

@@ -15,6 +15,11 @@ export interface MergeRead { merge: TicketMerge; pulls: string[] }
 
 interface ListedPull { owner: string; repo: string; number?: number | string; pullNumber?: number | string; status?: string; title?: string; headBranch?: string }
 
+/** The docs sync a bot opens after a merge: branch docs/auto-update/..., title "docs: sync for #N ...". */
+export function isDocsSyncPull(pull: { title?: string; headBranch?: string }): boolean {
+  return /^docs\/auto-update\//i.test(String(pull.headBranch ?? '')) || /^docs: sync for #\d+/i.test(String(pull.title ?? ''));
+}
+
 /**
  * Whether a pull request is the ticket's own work: its branch names the key, or its title does before the first colon
  * ("feat(QRD-1292): ...", "QRD-1306 fix: ..."). The docs sync a bot opens after a merge ("docs: sync for #1115
@@ -24,7 +29,7 @@ interface ListedPull { owner: string; repo: string; number?: number | string; pu
 export function ownPull(key: string, pull: { title?: string; headBranch?: string }): boolean {
   const normalized = key.trim().toUpperCase();
   if (!/^[A-Z][A-Z0-9_]*-\d+$/.test(normalized)) return false;
-  if (/^docs\/auto-update\//i.test(String(pull.headBranch ?? '')) || /^docs: sync for #\d+/i.test(String(pull.title ?? ''))) return false;
+  if (isDocsSyncPull(pull)) return false;
   const exact = new RegExp(`(^|[^A-Z0-9_])${normalized}(?![A-Z0-9_])`, 'i');
   const lead = String(pull.title ?? '').split(':')[0];
   return exact.test(String(pull.headBranch ?? '')) || exact.test(lead);

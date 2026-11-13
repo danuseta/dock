@@ -28,7 +28,10 @@ import { discordGateway, discordReader } from '../integrations/discord-reader-li
 import { isTeamChannel } from '../integrations/discord-team';
 import { ChannelInputError, channelStore, isChannelKind, threadService, withJira } from '../integrations/discord-threads';
 import { DiscordReaderError, ROW_VERSION } from '../integrations/discord-reader';
-import { CronInputError, type OwnerAnswer, type OwnerChange } from '../integrations/orchestrator-cron';
+import { OpsRulesInputError, STATUS_AFTER_MERGE_KEY, WORKTREE_MERGED_KEY, parseStatusAfterMerge, parseWorktreeMerged, readStatusAfterMerge, readWorktreeMerged } from '../integrations/ops-rules';
+import { qaQueueService } from '../integrations/qa-queue-live';
+import { worktrees } from '../integrations/worktrees-live';
+import { CronInputError, manualRefusal, type OwnerAnswer, type OwnerChange } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
 import { autoReview, listedAutoReviews } from '../integrations/auto-review-live';
 import { labelOrder } from '../integrations/orchestrator-cron';
@@ -344,6 +347,27 @@ function cronError(error: unknown): never {
   throw error;
 }
 
+function requireWorktrees(): void {
+  if (dockMode() !== 'workspace') {
+    throw new GraphQLError('Worktrees are cleaned from the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });
+  }
+}
+
+/** Saves one Aturan rule after validation and returns it normalized; an empty value goes back to the defaults. */
+async function saveOpsRule<T>(key: string, value: string, parse: (raw: string | null) => T): Promise<string> {
+  if (!value.trim()) {
+    await storageService.deleteSetting(key);
+    return JSON.stringify(parse(null));
+  }
+  let saved: string;
+  try { saved = JSON.stringify(parse(value)); } catch (error) {
+    if (error instanceof OpsRulesInputError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+    throw error;
+  }
+  await storageService.upsertSetting(key, saved);
+  return saved;
+}
+
 async function hasMasterPin(): Promise<boolean> {
   return storageAPI.hasMasterPin();
 }
@@ -383,6 +407,16 @@ export const resolvers = {
     sousFlowPrompt: async (_: unknown, { profile, key }: { profile: string; key?: string | null }) => {
       const lines = flowLines(profileFor(await sousFlowSettings(), profile).profile);
       return { lines, prompt: sousStartPrompt(key?.trim().toUpperCase() || 'QRD-…', null, lines) };
+    },
+    opsRules: async () => {
+      const [statusAfterMerge, worktreeMerged] = await storageService.getSettingValues([STATUS_AFTER_MERGE_KEY, WORKTREE_MERGED_KEY]);
+      return { statusAfterMerge: JSON.stringify(readStatusAfterMerge(statusAfterMerge?.value)), worktreeMerged: JSON.stringify(readWorktreeMerged(worktreeMerged?.value)) };
+    },
+    qaQueue: () => qaQueueService.queue(),
+    qaQueuePosition: (_: unknown, { key }: { key: string }) => qaQueueService.position(key),
+    worktrees: () => {
+      requireWorktrees();
+      return worktrees.list();
     },
     previewSprintDraftPublish: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.preview(sprint).catch(planningError),
     acIncoming: () => acInService.incoming().catch(planningError),
@@ -726,6 +760,12 @@ export const resolvers = {
       await storageService.upsertSetting(SOUS_FLOW_KEY, saved);
       return saved;
     },
+    setStatusAfterMerge: (_: unknown, { value }: { value: string }) => saveOpsRule(STATUS_AFTER_MERGE_KEY, value, parseStatusAfterMerge),
+    setWorktreeMerged: (_: unknown, { value }: { value: string }) => saveOpsRule(WORKTREE_MERGED_KEY, value, parseWorktreeMerged),
+    cleanWorktrees: (_: unknown, { paths }: { paths: string[] }) => {
+      requireWorktrees();
+      return worktrees.clean(paths.slice(0, 50));
+    },
     setTicketSousFlow: async (_: unknown, { key, profile }: { key: string; profile?: string | null }) => {
       let ticket: string;
       try { ticket = normalizeTicketKey(key); } catch { throw new GraphQLError('A valid ticket key is required', { extensions: { code: 'BAD_USER_INPUT' } }); }
@@ -960,7 +1000,13 @@ export const resolvers = {
       if (!(await orchestratorService.machines()).includes(CHAT_MACHINE)) {
         throw new GraphQLError('Unknown machine', { extensions: { code: 'BAD_USER_INPUT' } });
       }
-      return chatService.createSession({ ...args, machine: CHAT_MACHINE }).catch(orchestratorInputError);
+      const check = args.ticketKey && !args.forkFrom
+        ? await Promise.resolve().then(() => orchestratorCron.manualCheck(normalizeTicketKey(args.ticketKey!))).catch(() => null)
+        : null;
+      const refused = check ? manualRefusal(check) : null;
+      if (refused) throw new GraphQLError(refused, { extensions: { code: 'BAD_USER_INPUT' } });
+      const session = await chatService.createSession({ ...args, machine: CHAT_MACHINE }).catch(orchestratorInputError);
+      return { ...session, waitsOn: check?.waitsOn ?? null };
     },
     sendChatMessage: async (
       _: unknown,
@@ -1153,7 +1199,7 @@ export const protectedQueries = [
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
   'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro', 'sprintPlan',
   'planningSprints', 'sprintDraft', 'sprintPlanSignal', 'planningFlow', 'previewSprintDraftPublish', 'sprintDrift', 'acIncoming', 'ticketSummary', 'ticketReadiness',
-  'checkpoints', 'sousFlow', 'ticketSousFlow', 'sousFlowPrompt',
+  'checkpoints', 'sousFlow', 'ticketSousFlow', 'sousFlowPrompt', 'opsRules', 'qaQueue', 'qaQueuePosition', 'worktrees',
 ] as const;
 export const protectedMutations = [
   'retroBuild',
@@ -1167,6 +1213,9 @@ export const protectedMutations = [
   'setSousFlow',
   'setTicketSousFlow',
   'writeQaGuide',
+  'setStatusAfterMerge',
+  'setWorktreeMerged',
+  'cleanWorktrees',
   'checkSprintStoryboards',
   'uploadSprintStoryboard',
   'answerSprintDraftQuestion',

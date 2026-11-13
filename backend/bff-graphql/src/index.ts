@@ -15,6 +15,7 @@ import { channelStore } from './integrations/discord-threads';
 import { autoReview } from './integrations/auto-review-live';
 import { reviewFindings } from './integrations/review-findings-live';
 import { uatMerged } from './integrations/uat-merged';
+import { worktrees } from './integrations/worktrees-live';
 import { autoBroadcast } from './integrations/broadcast';
 import { decisionGate, sweepReleases } from './integrations/decision-gate';
 import { claudeAccounts, cycleAvailable } from './integrations/claude-accounts-live';
@@ -34,6 +35,8 @@ const CLAUDE_PROBE_MS = 30 * 60 * 1000;
 const RELEASE_SWEEP_MS = 5 * 60 * 1000;
 /** How often the stored pr-review threads are looked at for new findings of a teammate's review. */
 const REVIEW_FINDINGS_MS = 60 * 1000;
+/** How often the worktree auto cleanup looks; it runs once a WIB day from 07:00, and only in auto mode. */
+const WORKTREE_AUTO_MS = 15 * 60 * 1000;
 
 export async function startServer(): Promise<void> {
   const journal = await useWriteAheadLog().catch((error) => `unchanged (${error instanceof Error ? error.message : 'unknown error'})`);
@@ -55,7 +58,8 @@ export async function startServer(): Promise<void> {
     const syncJira = () => jira.getTickets()
       .then(async (tickets) => {
         await orchestratorService.syncJira(dockMode(), tickets);
-        if (dockMode() === 'workspace') await uatMerged.tick(tickets).catch((error) => console.error('[UatMerged]', error));
+        // The laptop DOCK moves tickets only when Settings › Sous flow › Aturan says so; statusNow keeps it to one move.
+        await uatMerged.tick(tickets, dockMode()).catch((error) => console.error('[UatMerged]', error));
       })
       .catch((error) => console.warn('[Orchestrator] Jira sync failed:', error instanceof Error ? error.message : 'unknown error'));
     setInterval(syncJira, JIRA_SYNC_MS).unref();
@@ -88,6 +92,9 @@ export async function startServer(): Promise<void> {
       const releaseQuiet = () => sweepReleases({ list: () => orchestratorService.list(), gate: decisionGate, broadcast: (run) => autoBroadcast.afterLedger(run) })
         .catch((error) => console.warn('[DecisionGate] sweep failed:', error instanceof Error ? error.message : 'unknown error'));
       setInterval(releaseQuiet, RELEASE_SWEEP_MS).unref();
+      const cleanWorktrees = () => worktrees.autoTick()
+        .catch((error) => console.warn('[Worktrees] auto cleanup failed:', error instanceof Error ? error.message : 'unknown error'));
+      setInterval(cleanWorktrees, WORKTREE_AUTO_MS).unref();
     }
   });
 }

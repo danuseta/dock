@@ -66,6 +66,9 @@ export interface CronForm {
   weeklyBrakePercent: string;
   waitForPublish: boolean;
   planAfterPublish: boolean;
+  /** Kept as saved: the rules live in Settings › Sous flow › Aturan, the dialog only carries them through. */
+  blockedManual: string;
+  stackedAllowed: boolean;
 }
 
 const list = (text: string) => text.split(',').map((item) => item.trim()).filter(Boolean);
@@ -89,6 +92,8 @@ export function formFromConfig(configJson: string): CronForm {
     weeklyBrakePercent: String(config.weeklyBrakePercent ?? 90),
     waitForPublish: config.waitForPublish === true,
     planAfterPublish: config.planAfterPublish === true,
+    blockedManual: config.blockedManual ?? 'tell',
+    stackedAllowed: config.stackedAllowed !== false,
   };
 }
 
@@ -120,5 +125,7 @@ export function configFromForm(form: CronForm): string {
     engine: 'sous',
     waitForPublish: form.waitForPublish,
     planAfterPublish: form.planAfterPublish,
+    blockedManual: form.blockedManual,
+    stackedAllowed: form.stackedAllowed,
   });
 }

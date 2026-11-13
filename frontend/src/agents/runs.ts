@@ -157,13 +157,14 @@ export const STAGE_COLOR: Record<string, string> = {
   evidence: '#5cc0e0', commit: '#5cc0e0', pr: '#5cc0e0', done: '#62cf9f', blocked: '#d9695a',
 };
 
-export const stageLabel = (stage: string) => STAGE_LABEL[stage] ?? stage;
+/** A run the ledger sent without a stage reads as an empty label, never undefined. */
+export const stageLabel = (stage: string | null | undefined) => (stage ? STAGE_LABEL[stage] ?? stage : '');
 
 /** A review walks the same rail as a build but its stops mean different things. */
 const REVIEW_LABEL: Record<string, string> = {
   gate: 'Brief', plan: 'Plan', code: 'Review', test: 'Test', verify: 'Evidence', evidence: 'Evidence', commit: 'Verdict', pr: 'Verdict', done: 'Done', blocked: 'Blocked',
 };
-export const stageName = (stage: string, kind?: string) => (kind === 'review' ? REVIEW_LABEL[stage] : undefined) ?? stageLabel(stage);
+export const stageName = (stage: string | null | undefined, kind?: string) => (kind === 'review' ? REVIEW_LABEL[stage ?? ''] : undefined) ?? stageLabel(stage);
 
 /**
  * The lead hands each ticket to one sub-coordinator, which spawns the members.

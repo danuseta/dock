@@ -1377,6 +1377,89 @@ export const typeDefs = gql`
     prompt: String!
   }
 
+  "Settings › Sous flow › Aturan rules kept outside the cron config, each as JSON with its defaults filled in."
+  type OpsRules {
+    "{ enabled, next, ignoreDocsSync, laptop }: the Jira move after every pull request of a ticket merged."
+    statusAfterMerge: String!
+    "{ mode: notify | auto | off, days }: what DOCK does with worktrees whose ticket merged."
+    worktreeMerged: String!
+  }
+
+  type QaQueueRow {
+    position: Int!
+    key: String!
+    summary: String!
+    status: String!
+    assignee: String
+    "The QA bot's labels (QA-*)."
+    labels: [String!]!
+    "queue, dependency (QA-WAIT-DEPENDENCY) or escalated."
+    kind: String!
+    "The open is-blocked-by tickets of a QA-WAIT-DEPENDENCY row."
+    waitsOn: [String!]!
+    enteredAt: String
+    waitingMinutes: Int
+  }
+
+  type QaQueueMetrics {
+    total: Int!
+    queue: Int!
+    dependency: Int!
+    escalated: Int!
+    averageWaitMinutes: Int
+    oldestWaitMinutes: Int
+  }
+
+  type QaQueue {
+    at: String!
+    "DOCK's Jira user, for Punya saya."
+    me: String
+    rows: [QaQueueRow!]!
+    metrics: QaQueueMetrics!
+    error: String
+    "The search stopped at 500 issues."
+    capped: Boolean!
+    "Issues left unread when capped; -1 when Jira could not count them, null when not capped."
+    more: Int
+  }
+
+  type WorktreeRow {
+    repo: String!
+    path: String!
+    branch: String
+    ticketKey: String
+    "merged, open, none or unknown."
+    merge: String!
+    pulls: [String!]!
+    dirty: Boolean!
+    changes: [String!]!
+    session: Boolean!
+    devServer: Boolean!
+    mergedSince: String
+    "Why a cleanup is refused now; empty when it may go."
+    refusals: [String!]!
+  }
+
+  type WorktreeCleanResult {
+    path: String!
+    ok: Boolean!
+    output: String!
+    at: String
+    "owner or auto."
+    by: String
+    "True when wt.sh unlink took a node_modules junction away before the remove."
+    unlinked: Boolean
+  }
+
+  type WorktreeList {
+    root: String!
+    mode: String!
+    days: Int!
+    rows: [WorktreeRow!]!
+    history: [WorktreeCleanResult!]!
+    error: String
+  }
+
   type QaGuideResult {
     written: Boolean!
     """off when the switch is off, unchanged when the block already holds these lines."""
@@ -1473,6 +1556,8 @@ export const typeDefs = gql`
     settled: [ChatSettled!]!
     options: ChatTurnOptions
     reviewRound: ReviewRoundInfo
+    "The dependency a ticket session waits on, set by createChatSession when the blocked-by rule tells."
+    waitsOn: String
   }
 
   type ReviewRoundInfo {
@@ -2081,6 +2166,13 @@ export const typeDefs = gql`
     ticketSousFlow(key: String!): String
     "What a profile adds to the sous prompt; key names the ticket in the preview."
     sousFlowPrompt(profile: String!, key: String): SousFlowPrompt!
+    opsRules: OpsRules!
+    "The QA bot's queue from Jira: UAT CHECK plus QA-WAIT-DEPENDENCY tickets, oldest in UAT CHECK first. One Jira search a minute at most."
+    qaQueue: QaQueue!
+    "The ticket's place in the QA queue; null when it is not in it."
+    qaQueuePosition(key: String!): Int
+    "The linked worktrees of the repos under the kit's ROOT, with their cleanup checks. Workspace DOCK only."
+    worktrees: WorktreeList!
     """The changes Publish would make, each ticket read from Jira again; writes nothing."""
     previewSprintDraftPublish(sprint: String!): [SprintDraftChange!]!
     "The owner's held AC lines in the active sprint's published plan; null when it was not published from Planning."
@@ -2220,6 +2312,12 @@ export const typeDefs = gql`
     setTicketSousFlow(key: String!, profile: String): String
     "Writes the QA guide block in the ticket's Developer Context now, whatever the Sous flow switch says."
     writeQaGuide(key: String!): QaGuideResult!
+    "Saves the status-after-merge rule JSON after validation and returns it normalized; an empty string resets it."
+    setStatusAfterMerge(value: String!): String!
+    "Saves the worktree-merged rule JSON after validation and returns it normalized; an empty string resets it."
+    setWorktreeMerged(value: String!): String!
+    "Removes merged worktrees through the kit's wt.sh; each one with local changes, a live session, a dev server or no merge is REFUSED and left alone."
+    cleanWorktrees(paths: [String!]!): [WorktreeCleanResult!]!
     runOrchestratorCronNow: String!
     confirmOrchestration(key: String!): Boolean!
     stopAllAgents: Int!

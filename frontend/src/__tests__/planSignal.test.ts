@@ -42,5 +42,7 @@ test('the cron form keeps both publish gates, off by default', () => {
   assert.deepEqual([formFromConfig(JSON.stringify({ ...base, waitForPublish: true })).waitForPublish], [true]);
   const saved = JSON.parse(configFromForm({ ...form, waitForPublish: true }));
   assert.deepEqual([saved.waitForPublish, saved.planAfterPublish], [true, false]);
+  const rules = JSON.parse(configFromForm(formFromConfig(JSON.stringify({ ...base, blockedManual: 'stop', stackedAllowed: false }))));
+  assert.deepEqual([rules.blockedManual, rules.stackedAllowed], ['stop', false]);
   assert.match(fillSummary({ at: '2026-11-13T03:00:00Z', skipped: null, started: ['QRD-1'], dryRun: true, parked: [], deferred: [], notMoved: [], failed: [] }), /dry run, would start QRD-1/);
 });

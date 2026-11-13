@@ -234,6 +234,7 @@ export const CREATE_CHAT_SESSION = gql`
   mutation CreateChatSession($title: String, $ticketKey: String, $forkFrom: ID, $machine: String) {
     createChatSession(title: $title, ticketKey: $ticketKey, forkFrom: $forkFrom, machine: $machine) {
       ${CHAT_SESSION_FIELDS}
+      waitsOn
     }
   }
 `;

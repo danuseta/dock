@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { Plus, RefreshCw, Trash2, X } from 'lucide-react';
-import { GET_DISCORD_THREADS, GET_HOME_CORE, GET_HOME_SECONDARY, GET_HOME_TICKET_PRS, GET_OWNER_NAME, GET_OWNER_QUESTIONS } from '../graphql/queries';
+import { GitBranch, Plus, RefreshCw, Trash2, X } from 'lucide-react';
+import { GET_DISCORD_THREADS, GET_HOME_CORE, GET_HOME_SECONDARY, GET_HOME_TICKET_PRS, GET_OWNER_NAME, GET_OWNER_QUESTIONS, GET_WORKTREES } from '../graphql/queries';
 import { ADD_QUICK_LINK, REMOVE_QUICK_LINK } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { WebsiteIcon } from '../components/WebsiteIcon';
@@ -21,6 +21,7 @@ import { hasPage, useDockMode } from '../lib/dockMode';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { DEFAULT_SERVICE_HEALTH_REFRESH_SECONDS, normalizeServiceHealthRefreshSeconds } from '../lib/serviceHealthRefresh';
 import type { CalendarEvent } from '../lib/calendar';
+import { reminderText, type WorktreeList } from '../lib/worktrees';
 
 interface HomePageProps { onTicketClick: (key: string) => void; onNavigate: (path: string) => void; }
 
@@ -50,6 +51,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
   );
   const { data: ownerData } = useQuery(GET_OWNER_NAME, CACHED_QUERY_OPTIONS);
   const { data: questionsData } = useQuery(GET_OWNER_QUESTIONS, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
+  const { data: worktreeData } = useQuery<{ worktrees: WorktreeList }>(GET_WORKTREES, { ...CACHED_QUERY_OPTIONS, skip: !hasPage(mode, '/workspace') });
   const { data: discordData } = useQuery(GET_DISCORD_THREADS, { ...CACHED_QUERY_OPTIONS, pollInterval: 60000, skip: !hasPage(mode, '/discord') });
   const [addQuickLink, { loading: adding }] = useMutation(ADD_QUICK_LINK, { refetchQueries: [{ query: GET_HOME_CORE }] });
   const [removeQuickLink] = useMutation(REMOVE_QUICK_LINK, { refetchQueries: [{ query: GET_HOME_CORE }] });
@@ -116,6 +118,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
   ].join(' · ');
   const showSide = showCalendar || showMonitors;
   const quickLinks = coreData?.quickLinks || [];
+  const worktreeReminder = reminderText(worktreeData?.worktrees);
 
   return (
     <Page width="full">
@@ -135,6 +138,13 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
           </nav>
         </div>
       </header>
+
+      {worktreeReminder && (
+        <p className="mb-3.5 flex flex-wrap items-center gap-2 rounded-md border border-dashed border-border-glow px-4 py-2.5 text-[0.8rem] text-secondary-foreground" role="status">
+          <GitBranch size={14} aria-hidden="true" className="text-sky-200" />{worktreeReminder}
+          <Button variant="ghost" size="sm" className={cn(textActionClass, 'ml-auto')} onClick={() => onNavigate('/workspace?tab=worktrees')}>Buka Worktrees →</Button>
+        </p>
+      )}
 
       <HomeAttention rows={attention} titleOf={titleOf} panelClass={panelClass} headerClass={panelHeaderClass} titleClass={panelTitleClass} onTicketClick={onTicketClick} onNavigate={onNavigate} />
 

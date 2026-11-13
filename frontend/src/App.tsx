@@ -22,6 +22,7 @@ import HealthPage from './pages/HealthPage';
 import SessionsPage from './pages/SessionsPage';
 import SprintPage from './pages/SprintPage';
 import WorkspacePage from './pages/WorkspacePage';
+import QaQueuePage from './pages/QaQueuePage';
 import { PageBoundary } from './components/PageBoundary';
 import { PinLockModal } from './components/PinLockModal';
 import { SetPinScreen } from './components/SetPinScreen';
@@ -70,7 +71,7 @@ function App() {
       const key = decodeURIComponent(path.split('/').pop() || '');
       return { path: '/ticket', key: key || null };
     }
-    if (path === '/dashboard' || path === '/agents' || path === '/blackboard' || path === '/guide' || path === '/sessions' || path === '/calendar' || path === '/sprint' || path === '/monitoring' || path === '/docker' || path === '/demo-videos' || path === '/dev-servers' || path === '/machines' || path === '/decisions' || path === '/discord' || path === '/issues' || path === '/workspace' || path === '/settings' || path === '/planning') {
+    if (path === '/dashboard' || path === '/agents' || path === '/blackboard' || path === '/guide' || path === '/sessions' || path === '/calendar' || path === '/sprint' || path === '/monitoring' || path === '/docker' || path === '/demo-videos' || path === '/dev-servers' || path === '/machines' || path === '/decisions' || path === '/discord' || path === '/issues' || path === '/workspace' || path === '/settings' || path === '/planning' || path === '/qa-queue') {
       return { path, key: null };
     }
     return { path: '/', key: null };
@@ -154,6 +155,7 @@ function App() {
       case '/issues': return <DockIssuesPage onNavigate={handleNavigate} />;
       case '/changes': return <Suspense fallback={<Page width="full"><LoadingSkeleton /></Page>}><ChangesPage onNavigate={handleNavigate} onTicketClick={navigateToTicket} /></Suspense>;
       case '/workspace': return <WorkspacePage />;
+      case '/qa-queue': return <QaQueuePage onTicketClick={navigateToTicket} />;
       case '/settings': return <SettingsPage />;
       case '/planning': return <Suspense fallback={<Page width="full"><LoadingSkeleton /></Page>}><PlanningPage /></Suspense>;
       case '/ticket': return selectedTicketKey ? <TicketDetailPage ticketKey={selectedTicketKey} onBack={() => handleNavigate('/dashboard')} onNavigate={handleNavigate} /> : <DashboardPage onTicketClick={navigateToTicket} />;

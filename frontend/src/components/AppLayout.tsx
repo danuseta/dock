@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, BarChart3, BookOpen, Bot, Box, Bug, CalendarDays, CalendarRange, ClipboardList, ChevronLeft, ChevronRight, History, Home as HomeIcon, LayoutDashboard, ListChecks, MessagesSquare, MoreHorizontal, Settings as SettingsIcon, Clapperboard, FolderTree, Server, Stethoscope } from 'lucide-react';
+import { Activity, BarChart3, BookOpen, Bot, Box, Bug, CalendarDays, CalendarRange, ClipboardList, ChevronLeft, ChevronRight, FlaskConical, History, Home as HomeIcon, LayoutDashboard, ListChecks, MessagesSquare, MoreHorizontal, Settings as SettingsIcon, Clapperboard, FolderTree, Server, Stethoscope } from 'lucide-react';
 import { useQuery } from '@apollo/client';
 import { GET_DISCORD_THREADS, GET_NEEDS_ATTENTION, GET_OWNER_QUESTIONS } from '../graphql/queries';
 import { ticketAttention, ticketQuestions } from '../lib/attention';
@@ -81,6 +81,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
     { path: '/calendar', label: 'Calendar', icon: CalendarDays, badge: 0, group: 'Work' },
     { path: '/sprint', label: 'Sprint', icon: BarChart3, badge: 0, group: 'Team' },
     { path: '/planning', label: 'Planning', icon: CalendarRange, badge: 0, group: 'Team' },
+    { path: '/qa-queue', label: 'QA queue', icon: FlaskConical, badge: 0, group: 'Team' },
     { path: '/discord', label: 'Discord', icon: MessagesSquare, badge: discordCount, group: 'Team' },
     { path: '/monitoring', label: 'Monitoring', icon: Activity, badge: 0, group: 'System' },
     { path: '/docker', label: 'Docker Services', icon: Box, badge: 0, group: 'System' },

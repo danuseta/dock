@@ -133,7 +133,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
   const { data: autoData } = useQuery<{ autoReviews: AutoReviewRow[] }>(GET_AUTO_REVIEWS, { ...CACHED_QUERY_OPTIONS, pollInterval: POLL_MS, skip: !chat });
   const autoReviews = useMemo(() => autoData?.autoReviews ?? [], [autoData]);
   const autoByTicket = useMemo(() => latestByTicket(autoReviews), [autoReviews]);
-  const { openForTicket, opening: openingChat, error: chatError } = useOpenForTicket();
+  const { openForTicket, opening: openingChat, error: chatError, notice: chatNotice } = useOpenForTicket();
   const [view, setView] = useState<View>(() => (isPhone() ? 'table' : 'office'));
   const [flowView, setFlowView] = useState<FlowView>('live');
   const [selectedKey, setSelectedKey] = useState<string | null>(() => runKeyFromSearch(window.location.search));
@@ -532,6 +532,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
                 {!selected.sample && actions?.hide && <Button size="sm" variant="ghost" className="hidden h-7 px-2.5 max-[760px]:inline-flex" onClick={() => { setActionError(''); setDismissTarget(selected); }}><EyeOff size={14} aria-hidden="true" />Hide run</Button>}
               </div>
               {chatError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The chat could not be opened: {chatError}</p>}
+              {chatNotice && <p className="text-pretty text-xs break-words text-status-warn" role="status">{chatNotice}</p>}
               <h2 className="text-pretty font-display text-base leading-snug font-bold">{selected.title || 'Untitled'}</h2>
 
               {questionsOf(selected).length > 0 ? (

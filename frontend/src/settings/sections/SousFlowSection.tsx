@@ -9,6 +9,7 @@ import {
   type SousFlowSettings, type SousStageId, type StageAfter,
 } from '../../lib/sousFlow';
 import { SettingsCard } from '../SettingsParts';
+import { RulesCard } from './RulesCard';
 
 const errorText = (failure: unknown) => (failure instanceof Error ? failure.message : 'The sous flow could not be saved');
 const sectionLabel = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
@@ -180,6 +181,8 @@ export const SousFlowSection = () => {
         </div>
         {error && <p className="mt-3 text-sm text-status-conflict" role="alert">{error}</p>}
       </SettingsCard>
+
+      <div id="rules"><RulesCard /></div>
     </div>
   );
 };

@@ -44,7 +44,14 @@ export interface CronSettings {
   waitForPublish: boolean;
   /** "Plan per developer dibikin setelah publish": the Plan-<sprint> session waits for the published plan too. */
   planAfterPublish: boolean;
+  /** A session the owner opens by hand on a blocked ticket: `tell` opens it with a "nunggu QRD-x" line, `stop` refuses, `off` does not check. The cron always waits. */
+  blockedManual: BlockedManualMode;
+  /** A ticket may start stacked on a dependency's branch that is not merged yet (sous only). */
+  stackedAllowed: boolean;
 }
+
+export const BLOCKED_MANUAL_MODES = ['tell', 'stop', 'off'] as const;
+export type BlockedManualMode = typeof BLOCKED_MANUAL_MODES[number];
 
 export interface UsageWindow {
   usedPercentage: number;
@@ -73,6 +80,8 @@ export const DEFAULT_CRON_SETTINGS: CronSettings = {
   engine: 'sous',
   waitForPublish: false,
   planAfterPublish: false,
+  blockedManual: 'tell',
+  stackedAllowed: true,
 };
 
 const CONFIG_KEY = 'orchestratorCronConfig';
@@ -146,6 +155,8 @@ export function parseCronSettings(raw: string | null | undefined): CronSettings 
   if (!CRON_ENGINES.includes(merged.engine as CronEngine)) throw new CronInputError(`engine must be one of ${CRON_ENGINES.join(', ')}`);
   if (typeof merged.waitForPublish !== 'boolean') throw new CronInputError('waitForPublish must be true or false');
   if (typeof merged.planAfterPublish !== 'boolean') throw new CronInputError('planAfterPublish must be true or false');
+  if (!BLOCKED_MANUAL_MODES.includes(merged.blockedManual as BlockedManualMode)) throw new CronInputError(`blockedManual must be one of ${BLOCKED_MANUAL_MODES.join(', ')}`);
+  if (typeof merged.stackedAllowed !== 'boolean') throw new CronInputError('stackedAllowed must be true or false');
   return {
     enabled: merged.enabled,
     machine,
@@ -168,6 +179,8 @@ export function parseCronSettings(raw: string | null | undefined): CronSettings 
     engine: merged.engine as CronEngine,
     waitForPublish: merged.waitForPublish,
     planAfterPublish: merged.planAfterPublish,
+    blockedManual: merged.blockedManual as BlockedManualMode,
+    stackedAllowed: merged.stackedAllowed,
   };
 }
 
@@ -196,6 +209,41 @@ const ticketNumber = (key: string) => Number(key.split('-')[1]) || 0;
  */
 export function isStackable(status: string, run?: Pick<CronRun, 'prBe' | 'prFe' | 'review'> | null): boolean {
   return sameText(status, REVIEW_STATUS) || Boolean(run && (run.prBe || run.prFe) && run.review !== 'merged');
+}
+
+export interface DependencyState { blocked: Set<string>; stacked: Map<string, string>; waitsOn: Map<string, string> }
+export interface ManualCheck { mode: BlockedManualMode; waitsOn: string | null; stackedOn: string | null }
+
+/** Why a manual session on a blocked ticket is not opened, or null when it may open. */
+export function manualRefusal(check: ManualCheck): string | null {
+  return check.mode === 'stop' && check.waitsOn ? `Tiket ini nunggu ${check.waitsOn} dulu, jadi sesinya nggak dibuka. Ganti di Settings › Sous flow › Aturan kalau mau tetap mulai.` : null;
+}
+
+/**
+ * Tickets whose dependency is not settled yet are blocked, unless the dependency is stackable on engine sous and
+ * stackedAllowed is on: then the ticket runs stacked on its parent, and `stacked` names that parent. A ticket with more
+ * than one unsettled dependency is blocked, never stacked. `waitsOn` names the first dependency a blocked ticket waits for.
+ */
+export async function dependencyState(deps: Pick<CronDeps, 'dependencies' | 'ticket' | 'runs'>, settings: Pick<CronSettings, 'engine' | 'stackedAllowed'>): Promise<DependencyState> {
+  const blocked = new Set<string>();
+  const stacked = new Map<string, string>();
+  const waitsOn = new Map<string, string>();
+  const open = new Map<string, string[]>();
+  const stacking = settings.engine === 'sous' && settings.stackedAllowed !== false;
+  const dependencies = await deps.dependencies();
+  const runs = stacking && dependencies.length ? await deps.runs() : [];
+  for (const { ticketKey, dependsOnKey } of dependencies) {
+    const dependency = await deps.ticket(dependsOnKey).catch(() => null);
+    if (dependency && isSettledStatus(dependency.status)) continue;
+    open.set(ticketKey, [...new Set([...(open.get(ticketKey) ?? []), dependsOnKey])]);
+    if (dependency && stacking && isStackable(dependency.status, runs.find((run) => run.key === dependsOnKey))) stacked.set(ticketKey, dependsOnKey);
+    else blocked.add(ticketKey);
+  }
+  for (const [ticketKey, keys] of open) {
+    if (keys.length > 1) { stacked.delete(ticketKey); blocked.add(ticketKey); }
+    if (blocked.has(ticketKey)) waitsOn.set(ticketKey, keys[0]);
+  }
+  return { blocked, stacked, waitsOn };
 }
 
 /** The smallest Jira label of the form "#N", or null. */
@@ -621,30 +669,19 @@ export class OrchestratorCron {
     return options;
   }
 
+  private dependencyState(settings: CronSettings): Promise<DependencyState> {
+    return dependencyState(this.deps, settings);
+  }
+
   /**
-   * Tickets whose dependency is not settled yet are blocked, unless the dependency is stackable on engine sous:
-   * then the ticket runs stacked on its parent, and `stacked` names that parent. A ticket with more than one unsettled
-   * dependency is blocked, never stacked. `waitsOn` names the first dependency a blocked ticket waits for.
+   * The blocked-by check for a session the owner opens by hand on a ticket: what it waits on or stacks on, and what
+   * the blockedManual rule does with it. The cron's own rule is not changed by it: the cron always waits.
    */
-  private async dependencyState(settings: CronSettings): Promise<{ blocked: Set<string>; stacked: Map<string, string>; waitsOn: Map<string, string> }> {
-    const blocked = new Set<string>();
-    const stacked = new Map<string, string>();
-    const waitsOn = new Map<string, string>();
-    const open = new Map<string, string[]>();
-    const dependencies = await this.deps.dependencies();
-    const runs = settings.engine === 'sous' && dependencies.length ? await this.deps.runs() : [];
-    for (const { ticketKey, dependsOnKey } of dependencies) {
-      const dependency = await this.deps.ticket(dependsOnKey).catch(() => null);
-      if (dependency && isSettledStatus(dependency.status)) continue;
-      open.set(ticketKey, [...new Set([...(open.get(ticketKey) ?? []), dependsOnKey])]);
-      if (dependency && settings.engine === 'sous' && isStackable(dependency.status, runs.find((run) => run.key === dependsOnKey))) stacked.set(ticketKey, dependsOnKey);
-      else blocked.add(ticketKey);
-    }
-    for (const [ticketKey, keys] of open) {
-      if (keys.length > 1) { stacked.delete(ticketKey); blocked.add(ticketKey); }
-      if (blocked.has(ticketKey)) waitsOn.set(ticketKey, keys[0]);
-    }
-    return { blocked, stacked, waitsOn };
+  async manualCheck(key: string): Promise<ManualCheck> {
+    const settings = await this.settings();
+    if (settings.blockedManual === 'off') return { mode: 'off', waitsOn: null, stackedOn: null };
+    const state = await dependencyState({ ...this.deps, dependencies: async () => (await this.deps.dependencies()).filter((item) => item.ticketKey === key) }, settings);
+    return { mode: settings.blockedManual, waitsOn: state.waitsOn.get(key) ?? null, stackedOn: state.stacked.get(key) ?? null };
   }
 
   private saveRun(ticket: Pick<CronTicket, 'key' | 'title'>, machine: string, now: Date, waiting: string, engine?: CronEngine) {

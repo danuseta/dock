@@ -11,6 +11,7 @@ import {
   FileSignature,
   FileText,
   Figma,
+  FlaskConical,
   GitBranch,
   Link2,
   MessagesSquare,
@@ -21,7 +22,7 @@ import {
   Send,
   X,
 } from 'lucide-react';
-import { GET_DASHBOARD, GET_ORCHESTRATION, GET_TICKET_DETAIL_CORE, GET_TICKET_DETAIL_ENRICHMENT, GET_TICKET_SUMMARY } from '../graphql/queries';
+import { GET_DASHBOARD, GET_ORCHESTRATION, GET_QA_QUEUE_POSITION, GET_TICKET_DETAIL_CORE, GET_TICKET_DETAIL_ENRICHMENT, GET_TICKET_SUMMARY } from '../graphql/queries';
 import { LinksMap, ReadinessCard, SummaryBlock } from '../components/ticket/TicketReady';
 import { useReadiness, type SummaryFacts } from '../components/ticket/useReadiness';
 import { stageLabel, type AgentRun } from '../agents/runs';
@@ -146,7 +147,8 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
   const [jiraAcOpen, setJiraAcOpen] = useState(false);
   const { data: runData } = useQuery(GET_ORCHESTRATION, { ...CACHED_QUERY_OPTIONS, variables: { key: ticketKey }, pollInterval: 30000 });
   const run: AgentRun | null = runData?.orchestration?.key?.toUpperCase() === ticketKey.toUpperCase() ? runData.orchestration : null;
-  const { openForTicket, opening: openingSession, error: sessionError } = useOpenForTicket();
+  const { data: qaData } = useQuery<{ qaQueuePosition: number | null }>(GET_QA_QUEUE_POSITION, { ...CACHED_QUERY_OPTIONS, variables: { key: ticketKey }, pollInterval: 60000 });
+  const { openForTicket, opening: openingSession, error: sessionError, notice: sessionNotice } = useOpenForTicket();
   const { answer, sending: answering } = useAnswerTicket();
   const dockMode = useDockMode();
   const monitoring = monitorsOnly(dockMode);
@@ -377,6 +379,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
         </div>
       </div>
       {sessionError && <Card className="mb-4 border-status-conflict text-pretty text-sm text-status-conflict" role="alert">{sessionError}</Card>}
+      {sessionNotice && <Card className="mb-4 border-status-warn text-pretty text-sm text-status-warn" role="status">{sessionNotice}</Card>}
       {approval && (
         <Card className="mb-4" role="status">
           <h2 className="mb-1 font-display text-sm font-bold">Approval</h2>
@@ -400,6 +403,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
               {ticket.status && <PRBadge status={ticket.status} />}
               {ticket.sprintName && ticket.sprintName !== 'No Sprint' && <span className={cn(ticket.sprintState !== 'CLOSED' && 'text-status-merged')}>{ticket.sprintName}</span>}
               {run?.stackedOn && <StackedOnBadge stack={run.stackedOn} />}
+              {qaData?.qaQueuePosition && <button type="button" onClick={() => onNavigate('/qa-queue')} className="inline-flex items-center gap-1 rounded-xs bg-cyan-500/10 px-1.5 py-0.5 font-mono text-[0.68rem] font-bold text-cyan-300 hover:bg-cyan-500/20 max-[760px]:min-h-11"><FlaskConical size={11} aria-hidden="true" />Antrean QA: #{qaData.qaQueuePosition}</button>}
             </div>
             <h1 className="mt-2 text-balance font-display text-[1.6rem] leading-snug font-bold">{ticket.title}</h1>
           </div>

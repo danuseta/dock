@@ -28,6 +28,7 @@ import { DiscordSection } from '../settings/sections/DiscordSection';
 import { CalendarSection, type GoogleReturn } from '../settings/sections/CalendarSection';
 import { PlanningFlowSection } from '../settings/sections/PlanningFlowSection';
 import { SousFlowSection } from '../settings/sections/SousFlowSection';
+import { RulesCard } from '../settings/sections/RulesCard';
 
 const dotClass: Record<Exclude<SectionStatus, null>, string> = {
   ok: 'bg-status-merged', bad: 'bg-status-conflict', off: 'border border-muted-foreground', unsaved: 'bg-status-warn',
@@ -193,6 +194,7 @@ const SettingsPage: React.FC = () => {
           {active === 'notifications' && <NotificationsSection values={valuesOf('notifications')} set={setter('notifications')} />}
           {active === 'security' && <SecuritySection hasPin={Boolean(settings.hasMasterPin)} />}
           {active === 'jira' && <JiraSection values={valuesOf('jira')} set={setter('jira')} settings={settings} test={tests.jira} onTested={tested('jira')} />}
+          {active === 'jira' && mode === 'laptop' && <div className="mt-5"><RulesCard scope="merge" /></div>}
           {active === 'github' && <GitHubSection values={valuesOf('github')} set={setter('github')} settings={settings} test={tests.github} onTested={tested('github')} />}
           {active === 'discord' && <DiscordSection values={valuesOf('discord')} set={setter('discord')} settings={settings} test={tests.discord} onTested={tested('discord')} />}
           {active === 'calendar' && <CalendarSection values={valuesOf('calendar')} set={setter('calendar')} settings={settings} dirty={changesOf('calendar') > 0} googleReturn={googleReturn} />}

@@ -42,7 +42,7 @@ export const CronSettingsDialog = ({ open, onClose }: { open: boolean; onClose: 
   }, [open]);
 
   const set = <K extends keyof CronForm>(key: K, value: CronForm[K]) => form && setForm({ ...form, [key]: value });
-  const text = (key: Exclude<keyof CronForm, 'enabled' | 'workDays' | 'waitForPublish' | 'planAfterPublish'>) => ({ id: `cron-${key}`, value: form ? form[key] : '', onChange: (event: React.ChangeEvent<HTMLInputElement>) => set(key, event.target.value) });
+  const text = (key: Exclude<keyof CronForm, 'enabled' | 'workDays' | 'waitForPublish' | 'planAfterPublish' | 'stackedAllowed'>) => ({ id: `cron-${key}`, value: form ? form[key] : '', onChange: (event: React.ChangeEvent<HTMLInputElement>) => set(key, event.target.value) });
   const toggleDay = (day: number) => form && set('workDays', form.workDays.includes(day) ? form.workDays.filter((item) => item !== day) : [...form.workDays, day]);
 
   const act = async (work: () => Promise<string>, close = false) => {

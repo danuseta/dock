@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { UatMerged, type UatMergedDeps, type UatPullRequest } from '../integrations/uat-merged';
+import { DEFAULT_STATUS_AFTER_MERGE, OpsRulesInputError, parseStatusAfterMerge, readStatusAfterMerge, type StatusAfterMerge } from '../integrations/ops-rules';
 
 const pr = (n: number, status: string, repo = 'fe'): UatPullRequest => ({ url: `https://github.com/o/${repo}/pull/${n}`, status, owner: 'o', repo, number: n });
 
-function setup(options: { cached?: UatPullRequest[] | null; fresh?: UatPullRequest[]; complete?: boolean; live?: Record<number, 'open' | 'merged' | 'closed'>; status?: string; moves?: 'moved' | 'not-offered' | 'error'; clock?: { t: number } } = {}) {
+function setup(options: { cached?: UatPullRequest[] | null; fresh?: UatPullRequest[]; complete?: boolean; live?: Record<number, 'open' | 'merged' | 'closed'>; status?: string; moves?: 'moved' | 'not-offered' | 'error'; clock?: { t: number }; rules?: Partial<StatusAfterMerge>; statusNow?: () => string } = {}) {
   const calls: string[] = [];
   const events: string[] = [];
   let marker: string[] | null = null;
@@ -13,12 +14,14 @@ function setup(options: { cached?: UatPullRequest[] | null; fresh?: UatPullReque
     cachedPullRequests: async () => options.cached === undefined ? fresh : options.cached,
     pullStatus: async (_o, _r, n) => { calls.push(`pull:${n}`); return options.live?.[n] ?? 'open'; },
     freshPullRequests: async () => { calls.push('fresh'); return { prs: fresh, complete: options.complete ?? true }; },
-    statusNow: async () => { calls.push('status'); return options.status ?? 'PR Review'; },
+    statusNow: async () => { calls.push('status'); return options.statusNow?.() ?? options.status ?? 'PR Review'; },
     move: async (key, status) => { calls.push(`move:${key}:${status}`); return options.moves ?? 'moved'; },
     marker: async () => marker,
     setMarker: async (_k, urls) => { marker = urls; },
     event: async (_k, kind) => { events.push(kind); },
     now: () => options.clock?.t ?? Date.now(),
+    afterMove: async (key) => { calls.push(`after:${key}`); },
+    ...(options.rules ? { settings: async () => ({ ...DEFAULT_STATUS_AFTER_MERGE, ...options.rules }) } : {}),
   };
   return { step: new UatMerged(deps), calls, events, marker: () => marker };
 }
@@ -137,5 +140,62 @@ describe('UatMerged', () => {
     clock.t = 60 * 60 * 1000 + 1;
     await t.step.tick(review);
     assert.equal(t.calls.filter((call) => call.startsWith('move')).length, 4);
+  });
+});
+
+describe('UatMerged rules (Settings › Sous flow › Aturan)', () => {
+  const docsSync = (n: number, status: string): UatPullRequest => ({ ...pr(n, status, 'be'), title: `docs: sync for #${n - 1} (QRD-1)`, headBranch: `docs/auto-update/QRD-1-pr-${n - 1}` });
+
+  it('defaults keep the move on, to UAT MERGED, workspace only, with docs-sync ignored', () => {
+    assert.deepEqual(readStatusAfterMerge(null), { enabled: true, next: 'UAT MERGED', ignoreDocsSync: true, laptop: false });
+    assert.deepEqual(readStatusAfterMerge('{"next":""}'), DEFAULT_STATUS_AFTER_MERGE, 'a broken row falls back to the defaults');
+    assert.deepEqual(parseStatusAfterMerge('{"next":" UAT  CHECK ","laptop":true}'), { enabled: true, next: 'UAT CHECK', ignoreDocsSync: true, laptop: true });
+    assert.throws(() => parseStatusAfterMerge('{"enabled":"yes"}'), OpsRulesInputError);
+    assert.throws(() => parseStatusAfterMerge('[]'), OpsRulesInputError);
+  });
+
+  it('an open docs-sync pull request does not hold the move when ignored, and does when the rule is off', async () => {
+    const prs = [pr(1, 'merged'), docsSync(2, 'open')];
+    const ignored = setup({ cached: prs, fresh: prs, rules: {} });
+    assert.deepEqual(await ignored.step.tick(review), ['QRD-1']);
+    assert.ok(!ignored.calls.includes('pull:2'), 'GitHub is not asked about the docs sync');
+    assert.deepEqual(ignored.marker(), [pr(1, 'merged').url]);
+    const counted = setup({ cached: prs, fresh: prs, rules: { ignoreDocsSync: false } });
+    assert.deepEqual(await counted.step.tick(review), []);
+  });
+
+  it('a ticket with only a docs-sync pull request merged is not moved', async () => {
+    assert.deepEqual(await setup({ fresh: [docsSync(2, 'merged')], rules: {} }).step.tick(review), []);
+  });
+
+  it('moves to the status Settings name, then writes the QA guide once', async () => {
+    const t = setup({ fresh: [pr(1, 'merged')], rules: { next: 'UAT CHECK' } });
+    assert.deepEqual(await t.step.tick(review), ['QRD-1']);
+    assert.deepEqual(await t.step.tick(review), []);
+    assert.deepEqual(t.calls.filter((call) => call.startsWith('move') || call.startsWith('after')), ['move:QRD-1:UAT CHECK', 'after:QRD-1']);
+  });
+
+  it('switched off, nothing is read or moved', async () => {
+    const t = setup({ fresh: [pr(1, 'merged')], rules: { enabled: false } });
+    assert.deepEqual(await t.step.tick(review, 'workspace'), []);
+    assert.deepEqual(t.calls, []);
+  });
+
+  it('the laptop DOCK moves only with the laptop rule on', async () => {
+    const off = setup({ fresh: [pr(1, 'merged')], rules: {} });
+    assert.deepEqual(await off.step.tick(review, 'laptop'), []);
+    assert.deepEqual(off.calls, []);
+    const on = setup({ fresh: [pr(1, 'merged')], rules: { laptop: true } });
+    assert.deepEqual(await on.step.tick(review, 'laptop'), ['QRD-1']);
+  });
+
+  it('two DOCKs on: the second one finds the ticket moved and leaves it', async () => {
+    let status = 'PR Review';
+    const workspace = setup({ fresh: [pr(1, 'merged')], rules: { laptop: true }, statusNow: () => status });
+    const laptop = setup({ fresh: [pr(1, 'merged')], rules: { laptop: true }, statusNow: () => status });
+    assert.deepEqual(await workspace.step.tick(review, 'workspace'), ['QRD-1']);
+    status = 'UAT MERGED';
+    assert.deepEqual(await laptop.step.tick(review, 'laptop'), []);
+    assert.ok(!laptop.calls.some((call) => call.startsWith('move') || call.startsWith('after')));
   });
 });

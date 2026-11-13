@@ -1579,3 +1579,60 @@ export const WORKSPACE_DELETE = gql`
     workspaceDelete(path: $path)
   }
 `;
+
+export const GET_OPS_RULES = gql`
+  query GetOpsRules {
+    opsRules { statusAfterMerge worktreeMerged }
+  }
+`;
+
+export const SET_STATUS_AFTER_MERGE = gql`
+  mutation SetStatusAfterMerge($value: String!) {
+    setStatusAfterMerge(value: $value)
+  }
+`;
+
+export const SET_WORKTREE_MERGED = gql`
+  mutation SetWorktreeMerged($value: String!) {
+    setWorktreeMerged(value: $value)
+  }
+`;
+
+export const GET_QA_QUEUE = gql`
+  query GetQaQueue {
+    qaQueue {
+      at
+      me
+      error
+      capped
+      more
+      metrics { total queue dependency escalated averageWaitMinutes oldestWaitMinutes }
+      rows { position key summary status assignee labels kind waitsOn enteredAt waitingMinutes }
+    }
+  }
+`;
+
+export const GET_QA_QUEUE_POSITION = gql`
+  query GetQaQueuePosition($key: String!) {
+    qaQueuePosition(key: $key)
+  }
+`;
+
+export const GET_WORKTREES = gql`
+  query GetWorktrees {
+    worktrees {
+      root
+      mode
+      days
+      error
+      rows { repo path branch ticketKey merge pulls dirty changes session devServer mergedSince refusals }
+      history { path ok output at by }
+    }
+  }
+`;
+
+export const CLEAN_WORKTREES = gql`
+  mutation CleanWorktrees($paths: [String!]!) {
+    cleanWorktrees(paths: $paths) { path ok output at by }
+  }
+`;
