@@ -1017,8 +1017,8 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
             ))}
           </div>
           {/* A developer's DOCK reads the planner's draft: every control in the panels is disabled. */}
-          <fieldset disabled={!planner} className="contents">
           {shown === 'mine' && <MyTicketsPanel draft={draft} me={me} summaries={summaries} onOpenTicket={openTicket} />}
+          <fieldset disabled={!planner} className="contents">
           {shown === 'team' && <TeamPanel draft={draft} plan={full?.tickets ?? []} busy={busy} onMove={onMove} />}
           {shown === 'scope' && <ScopePanel draft={draft} busy={busy} onChange={onChange} onDecide={onDecide} />}
           {shown === 'ac' && <AcPanel draft={draft} busy={busy} onDecide={onDecide} />}

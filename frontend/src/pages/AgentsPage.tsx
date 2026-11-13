@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowDown, ArrowRight, ArrowUp, Building2, CalendarRange, ChevronLeft, ChevronRight, ClipboardList, Clock, ExternalLink, EyeOff, FileDiff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Square, Table2, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUp, Building2, CalendarRange, ChevronLeft, ChevronRight, ClipboardList, Clock, ExternalLink, EyeOff, FileDiff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Route, Square, Table2, X } from 'lucide-react';
 import { GET_AUTO_REVIEWS, GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
 import { APPROVE_REVIEW, CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
@@ -16,10 +16,11 @@ import { isPhone } from '../lib/phone';
 import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
 import { hasPage, monitorsOnly, useDockMode } from '../lib/dockMode';
-import { blackboardFileHref, blackboardHref, folderOf, sortFiles, useBlackboardFiles } from '../lib/blackboard';
+import { TRACE_ENTRY, blackboardFileHref, blackboardHref, folderOf, sortFiles, useBlackboardFiles } from '../lib/blackboard';
+import { coverageText, useAcTrace } from '../lib/acTrace';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { openIssues } from '../lib/sousReport';
-import { RUN_STATE_LABEL, isLongDescription, runState } from '../lib/ticketDetail';
+import { RUN_STATE_LABEL, isLongDescription, runState, slimDetail } from '../lib/ticketDetail';
 import { FILTER_KINDS, FLOW_RAIL, PARKED_TEXT, START_FAILED_TEXT, canLgtm, completeRun, formatAge, reviewFindings, hasTrouble, isArchived, kindLabel, matchesRunFilter, pageOf, runActions, runFilterFromSearch, runFilterSearch, runKeyFromSearch, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunFilter, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
 import { KindBadge } from '../agents/KindBadge';
 import { RunDecisions } from '../agents/RunDecisions';
@@ -190,6 +191,8 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
     : (detailData?.orchestration?.key === selected?.key ? detailData?.orchestration?.timeline || null : null);
   const actions = selected ? runActions(selected, monitorsOnly(mode)) : null;
   const blackboardFiles = useBlackboardFiles(selected?.key, hasPage(mode, '/blackboard'));
+  const slim = slimDetail(mode);
+  const trace = useAcTrace(selected?.sample ? null : selected?.key, slim);
   // Failing criteria first, so the fold never hides one.
   const acList = selected ? [...selected.ac].sort((first, second) => Number(second.state === 'FAIL') - Number(first.state === 'FAIL')) : [];
 
@@ -579,6 +582,26 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
                 </ol>
               </div>
 
+              {slim && (
+                <div className="flex flex-col gap-2.5">
+                  <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.82rem]">
+                    <span className={sectionLabel}>AC</span>
+                    <span className="font-mono tabular-nums">{selected.acPassed}/{selected.acTotal}</span>
+                    {selected.acFailed > 0 && <span className="font-mono text-status-conflict">{selected.acFailed} failed</span>}
+                    <span className="text-muted-foreground">·</span>
+                    <span className="inline-flex items-center gap-1 text-secondary-foreground"><Route size={12} aria-hidden="true" className="text-sky-200" />Tiket → kode <span className="font-mono tabular-nums text-foreground">{coverageText(trace)}</span></span>
+                  </p>
+                  {!selected.sample && (
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" onClick={() => onNavigate(blackboardFileHref(selected.key, TRACE_ENTRY))}><ClipboardList size={13} aria-hidden="true" />Buka Blackboard</Button>
+                      <Button size="sm" disabled={openingChat} onClick={() => void openForTicket(selected.key)}><MessagesSquare size={13} aria-hidden="true" />Buka Session</Button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!slim && (
+              <>
               <RunDecisions key={`decisions-${selected.key}`} run={selected} />
 
               <PhoneFold label={`Acceptance criteria · ${selected.acPassed}/${selected.acTotal}`}>
@@ -716,6 +739,8 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
                   </ol>
                 </PhoneFold>
               )}
+              </>
+              )}
 
               {!selected.sample && (
                 <div className="mt-auto flex flex-wrap gap-2 border-t border-border pt-3.5 max-[760px]:hidden">
@@ -729,6 +754,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
         </Card>
       </div>
 
+      {!slim && (
       <Card className="mt-4 p-0 max-[760px]:order-7">
         <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 border-b border-border bg-surface-0 px-5 py-2.5">
           <h2 className="font-display text-[0.95rem] font-bold">Session flow</h2>
@@ -748,6 +774,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
             ? <AgentFlowGraph run={selected} timeline={timeline} />
             : <p className="px-5 py-8 text-center text-pretty text-sm text-muted-foreground">{!selected ? 'Select a ticket to see its flow.' : sampling ? 'Select SAMPLE-2 to see a sample flow.' : 'Loading the flow...'}</p>}
       </Card>
+      )}
 
       <Dialog open={Boolean(dismissTarget)} onClose={() => !dismissing && setDismissTarget(null)} dismissible={!dismissing} labelledBy="hide-run-title" describedBy="hide-run-description">
         <Card className="w-[min(440px,calc(100vw-2rem))] shadow-card">

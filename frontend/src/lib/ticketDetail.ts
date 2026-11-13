@@ -1,4 +1,21 @@
 import type { AgentRun } from '../agents/runs';
+import { hasPage, type DockMode } from './dockMode';
+
+/**
+ * The slim ticket detail and run panel: on the workspace the brief, decisions, review, log and AC evidence live in
+ * Blackboard, so the detail links there. The laptop DOCK has no Blackboard and keeps every section.
+ */
+export const slimDetail = (mode: DockMode) => hasPage(mode, '/blackboard');
+
+/** The Intinya of a planning summary as hover text on a board card; parts it left empty are skipped. */
+export function intinyaTitle(summary: { made: string; checked: string; notHere: string; waitsOn: string[] }): string {
+  return [
+    summary.made && `Bikin apa: ${summary.made}`,
+    summary.checked && `Dicek di sini: ${summary.checked}`,
+    summary.notHere && `Bukan di sini: ${summary.notHere}`,
+    summary.waitsOn.length > 0 && `Nunggu tiket lain: ${summary.waitsOn.join(', ')}`,
+  ].filter(Boolean).join('\n');
+}
 
 /** The stops the ticket header walks; evidence and commit count as Verify, as on the flow graph. */
 export const TICKET_STEPS = [

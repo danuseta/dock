@@ -353,3 +353,10 @@ test('the Draft panel follows the URL on load and on Back / Forward', () => {
   assert.ok(source.includes('useState<PlanningPanel>(() => panelOf(window.location.search, initialPanel))'));
   assert.ok(source.includes("window.addEventListener('popstate', follow)"));
 });
+
+test("Tiket saya stays usable on a developer's read-only DOCK: it renders outside the disabled fieldset", () => {
+  const tab = readFileSync(fileURLToPath(new URL('../agents/PlanningTab.tsx', import.meta.url)), 'utf8');
+  const mine = tab.indexOf("shown === 'mine' && <MyTicketsPanel");
+  const fieldset = tab.indexOf('<fieldset disabled={!planner}');
+  assert.ok(mine > 0 && fieldset > 0 && mine < fieldset);
+});

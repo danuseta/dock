@@ -54,9 +54,10 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
   const [refreshData, { loading: refreshing }] = useMutation(REFRESH_DATA, {
     refetchQueries: [{ query: GET_DASHBOARD }]
   });
-  // One readiness query for every TODO card of the board.
+  // One readiness query for every card of the board: "Siap dikerjain" on the TODO cards, the summary line on all of them.
   const boardTickets: any[] = Array.isArray(data?.dashboard) ? data.dashboard.flatMap((group: any) => group.tickets || []) : [];
-  const { readiness } = useReadiness(boardTickets.filter((t: any) => getCanonicalColumnId(t.status) === 'TODO'));
+  const { readiness, facts: readinessFacts } = useReadiness(boardTickets);
+  const summaries = new Map((readinessFacts?.tickets ?? []).map((item) => [item.key, item.summary]));
 
   if (error && !data) return (
     <Page width="full">
@@ -275,6 +276,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
                         ticket={ticket} 
                         menuOpen={menu?.key === ticket.key}
                         readiness={readinessOnBoard(column.id, readiness.get(ticket.key))}
+                        summary={summaries.get(ticket.key) ?? null}
                         onClick={() => onTicketClick(ticket.key)} 
                         onMenu={(x, y, sheet) => setMenu({ key: ticket.key, x, y, sheet })}
                       />

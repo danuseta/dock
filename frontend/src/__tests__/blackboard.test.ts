@@ -33,7 +33,7 @@ test('the page is a workspace page in the Work group, and the ticket detail and 
   assert.equal(hasPage('workspace', '/blackboard'), true);
   assert.equal(hasPage('laptop', '/blackboard'), false, 'the blackboard lives on the workspace');
   assert.match(read('components/AppLayout.tsx'), /\{ path: '\/blackboard', label: 'Blackboard', icon: ClipboardList, badge: 0, group: 'Work' \}/);
-  assert.match(read('App.tsx'), /case '\/blackboard': return <BlackboardPage \/>;/);
+  assert.match(read('App.tsx'), /case '\/blackboard': return <BlackboardPage onNavigate=\{handleNavigate\} onTicketClick=\{navigateToTicket\} \/>;/);
   const detail = read('pages/TicketDetailPage.tsx');
   assert.match(detail, /useBlackboardFiles\(ticketKey, !monitoring\)/);
   assert.match(detail, /blackboardFiles && <Button[^>]*onClick=\{\(\) => onNavigate\(blackboardHref\(ticket\.key\)\)\}/);

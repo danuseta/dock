@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowRight, FileCode, FileDiff, Workflow } from 'lucide-react';
+import { ArrowRight, FileCode, FileDiff, Route, Workflow } from 'lucide-react';
 import type { AgentRun } from '../agents/runs';
 import { changesHref } from '../changes/href';
 import { LgtmButton } from '../agents/lgtm';
@@ -11,7 +11,9 @@ import { GET_CHAT_SESSION, GET_ORCHESTRATION } from '../graphql/queries';
 import { Toast } from '../components/Toast';
 import { Badge, Button, ConfirmDialog } from '../components/ui';
 import { cn } from '../lib/cn';
-import { monitorsOnly, useDockMode } from '../lib/dockMode';
+import { hasPage, monitorsOnly, useDockMode } from '../lib/dockMode';
+import { coverageText, useAcTrace } from '../lib/acTrace';
+import { TRACE_ENTRY, blackboardFileHref } from '../lib/blackboard';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 import { TICKET_STEPS, stepIndex } from '../lib/ticketDetail';
 import { CHAT_MACHINE_OPTIONS } from './composer/documents';
@@ -44,6 +46,9 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, cos
   const { data: machineData } = useQuery<{ chatMachineOptions: SessionMachineOptions | null }>(CHAT_MACHINE_OPTIONS, { variables: { machine: machineOf(session) } });
   const { data } = useQuery(GET_ORCHESTRATION, { ...CACHED_QUERY_OPTIONS, variables: { key: ticketKey }, skip: !ticketKey, pollInterval: 30000 });
   const mode = useDockMode();
+  const onBlackboard = hasPage(mode, '/blackboard') && Boolean(ticketKey);
+  // The short Tiket → kode line reads the board again on its poll; QRD-1534 checkpoints call refreshAcTrace.
+  const trace = useAcTrace(ticketKey, onBlackboard);
   const [approveReview, { loading: approving }] = useMutation(APPROVE_REVIEW, { refetchQueries: ['GetOrchestrations', 'GetOrchestration'] });
   const [lgtmTarget, setLgtmTarget] = useState<AgentRun | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -101,6 +106,11 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, cos
               {run.testsBe && <Badge title={`Tests BE: ${run.testsBe}`}>BE {run.testsBe.split(/[ ,]/)[0]}</Badge>}
             </div>
           </>
+        )}
+        {onBlackboard && trace && onNavigate && (
+          <button type="button" onClick={() => onNavigate(blackboardFileHref(ticketKey, TRACE_ENTRY))} className="flex items-center gap-1.5 border-0 bg-transparent p-0 text-left font-mono text-[0.72rem] text-secondary-foreground hover:text-foreground max-[900px]:min-h-11">
+            <Route size={12} aria-hidden="true" className="flex-none text-sky-200" />Tiket → kode <span className="text-foreground tabular-nums">{coverageText(trace)}</span><span className="ml-auto text-muted-foreground">buka</span>
+          </button>
         )}
         <div>
           <p className={cn(label, 'mb-1 flex items-center gap-2')}>

@@ -5,7 +5,7 @@ import { getPassLabels } from '../lib/ticketApprovals';
 import { displayAssignee } from '../lib/queryPolicy';
 import { MENU_WIDTH } from './ticket/TicketMenu';
 import { ReadinessChip } from './ticket/TicketReady';
-import type { TicketReadiness } from '../lib/ticketDetail';
+import { intinyaTitle, type TicketReadiness } from '../lib/ticketDetail';
 
 const LONG_PRESS_MS = 500;
 
@@ -24,12 +24,14 @@ interface TicketCardProps {
   menuOpen: boolean;
   /** "Siap dikerjain n/7": given only to cards in the TODO column. */
   readiness?: TicketReadiness | null;
+  /** The planning summary: its one Indonesian line under the title, the Intinya on hover. */
+  summary?: { line: string; made: string; checked: string; notHere: string; waitsOn: string[] } | null;
   onClick: () => void;
   /** Opens the ticket menu at a point, or as a bottom sheet after a long press. */
   onMenu: (x: number, y: number, sheet: boolean) => void;
 }
 
-export const TicketCard: React.FC<TicketCardProps> = ({ ticket, menuOpen, readiness, onClick, onMenu }) => {
+export const TicketCard: React.FC<TicketCardProps> = ({ ticket, menuOpen, readiness, summary, onClick, onMenu }) => {
   const hasConflict = ticket.pullRequests?.some(pr => pr.status?.toUpperCase() === 'CONFLICT') ?? false;
   const passLabels = getPassLabels(ticket.labels);
   const assignee = displayAssignee(ticket.assignee);
@@ -99,6 +101,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({ ticket, menuOpen, readin
         </span>
 
         <span className="text-pretty text-[0.92rem] leading-[1.4] font-bold text-foreground">{ticket.title}</span>
+        {summary?.line?.trim() && <span className="-mt-1 line-clamp-2 text-pretty text-[0.78rem] leading-snug text-sky-200" title={intinyaTitle(summary)}>{summary.line}</span>}
 
         {readiness && <ReadinessChip ready={readiness} />}
 
