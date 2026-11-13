@@ -3,6 +3,7 @@ import { JiraAPI } from '../datasources/JiraAPI';
 import { StorageService } from '../storage/service';
 import { REVIEW_STATUS } from './broadcast-review';
 import { orchestratorService } from './orchestrator';
+import { qaGuide } from './qa-guide-live';
 
 export const UAT_MERGED_STATUS = 'UAT MERGED';
 
@@ -17,6 +18,8 @@ export interface UatMergedDeps {
   marker(key: string): Promise<string[] | null>;
   setMarker(key: string, urls: string[]): Promise<unknown>;
   event(key: string, kind: string, detail: string): Promise<unknown>;
+  /** Runs once the ticket moved to UAT MERGED: the QA guide block in Developer Context. A failure never undoes the move. */
+  afterMove?(key: string): Promise<unknown>;
   now?(): number;
 }
 
@@ -102,6 +105,7 @@ export class UatMerged {
     this.failures.delete(key);
     await this.deps.setMarker(key, mergedUrls);
     await this.deps.event(key, 'JIRA', `${UAT_MERGED_STATUS}: every pull request merged (${mergedUrls.join(', ')})`).catch(() => undefined);
+    await this.deps.afterMove?.(key).catch((error) => console.error(`[UatMerged] ${key} after the move:`, error instanceof Error ? error.message : error));
     return true;
   }
 }
@@ -123,4 +127,5 @@ export const uatMerged = new UatMerged({
   },
   setMarker: (key, urls) => storage.upsertCache(UAT_MERGED_CACHE, key, { at: new Date().toISOString(), prs: urls }, 0),
   event: (key, kind, detail) => orchestratorService.recordEvent(key, kind, detail),
+  afterMove: (key) => qaGuide.afterUat(key),
 });

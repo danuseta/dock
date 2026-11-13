@@ -10,6 +10,7 @@ import { AgentCall } from './AgentThread';
 import { FoldedList, MessageShell, MessageTime, TranscriptRow } from './TranscriptParts';
 import type { LeadPart, TranscriptItem } from './transcript';
 import { useNow } from './useNow';
+import { placeCheckpoints, type Checkpoint } from '../checkpoints';
 
 const timeOf = (at: string) => new Date(at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 
@@ -63,16 +64,23 @@ interface ListProps {
   /** The thread open beside the conversation, if any. */
   threadId?: string | null;
   onOpenThread?: (eventId: string) => void;
+  /** The lead's checkpoints, each placed among the items by its time. */
+  checkpoints?: readonly Checkpoint[];
+  renderCheckpoint?: (checkpoint: Checkpoint) => React.ReactNode;
 }
 
+const itemTime = (item: TranscriptItem) => (item.kind === 'user' ? item.message.at : item.kind === 'lead' ? item.at : item.event.startedAt);
+
 /** The lead's conversation: your messages, the lead's messages with their steps, and one message per agent the lead called. */
-export const TranscriptList: React.FC<ListProps> = ({ items, store, threadId, onOpenThread }) => {
+export const TranscriptList: React.FC<ListProps> = ({ items, store, threadId, onOpenThread, checkpoints = [], renderCheckpoint }) => {
   const running = items.some((item) => (item.kind === 'call' && (item.event.status === 'running' || item.rows.some((row) => row.status === 'running')))
     || (item.kind === 'lead' && item.parts.some((part) => part.kind === 'event' && part.event.status === 'running')));
   const now = useNow(running);
   const renderPart = (part: LeadPart) => (part.kind === 'text'
     ? <LeadText key={`m${part.message.id}`} message={part.message} />
     : <TranscriptRow key={part.event.eventId} event={part.event} store={store} now={now} />);
+  const placed = renderCheckpoint && checkpoints.length > 0 ? placeCheckpoints(items.map(itemTime), checkpoints) : null;
+  const card = (checkpoint: Checkpoint) => <React.Fragment key={`cp-${checkpoint.id}`}>{renderCheckpoint!(checkpoint)}</React.Fragment>;
   return (
     <ol className="flex min-w-0 flex-col gap-6">
       {items.map((item) => {
@@ -86,7 +94,8 @@ export const TranscriptList: React.FC<ListProps> = ({ items, store, threadId, on
             <FoldedList parts={item.parts} isStep={(part) => part.kind === 'event'} render={renderPart} />
           </MessageShell>
         );
-      })}
+      }).flatMap((node, index) => [...(placed?.at.get(index) ?? []).map(card), node])}
+      {placed?.end.map(card)}
     </ol>
   );
 };

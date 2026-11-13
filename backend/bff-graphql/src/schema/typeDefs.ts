@@ -504,6 +504,10 @@ export const typeDefs = gql`
     question: String
     """Options the agent weighed and dropped, each with why."""
     rejected: [OrchestrationDecisionRejected!]!
+    """The decision in Indonesian for the owner, when the ledger has it; sous still reads text."""
+    textId: String
+    """Each alternative's label in Indonesian, in the order of alts; null where there is none."""
+    optionsId: [String]
   }
 
   type ThinkingOption {
@@ -1073,6 +1077,10 @@ export const typeDefs = gql`
     options: [String!]!
     """What choosing each option changes, in the order of options."""
     effects: [String]!
+    """The question in Indonesian for the owner, when the ledger has it; sous still reads text."""
+    textId: String
+    """Each option in Indonesian, in the order of options; null where there is none."""
+    optionsId: [String]
   }
 
   type OrchestrationStackRepo {
@@ -1348,6 +1356,34 @@ export const typeDefs = gql`
     reasons: [String!]!
   }
 
+  """The lead's report when one agent ends: the step, who, a short report, and on the final review two notes."""
+  type Checkpoint {
+    id: ID!
+    key: String!
+    step: String!
+    agentId: String
+    agent: String
+    text: String!
+    """AC lines that cannot be tested while the ticket is alone in UAT."""
+    untestable: [String!]!
+    """Test data the ticket still needs."""
+    missingData: [String!]!
+    at: String!
+  }
+
+  """The lines a Sous flow profile adds to the sous prompt, and the cron start prompt with them."""
+  type SousFlowPrompt {
+    lines: [String!]!
+    prompt: String!
+  }
+
+  type QaGuideResult {
+    written: Boolean!
+    """off when the switch is off, unchanged when the block already holds these lines."""
+    reason: String
+    lines: [String!]!
+  }
+
   type Orchestration {
     key: ID!
     kind: String!
@@ -1384,6 +1420,8 @@ export const typeDefs = gql`
     productionData: Boolean
     draft: Boolean
     issues: [OrchestrationIssue!]!
+    """The menu path to the change, written by sous at the video step for the QA guide."""
+    qaMenu: String
     """Every step of the owner's last review approval succeeded (Jira Pass label and GitHub approve)."""
     approved: Boolean!
     """The guessed decisions (GUESS, USULAN) the owner confirmed in DOCK."""
@@ -2035,6 +2073,14 @@ export const typeDefs = gql`
     sprintPlanSignal(sprint: String!): SprintPlanSignal
     "The Planning flow as JSON (stages, owner, approve); null when none is saved and every stage runs."
     planningFlow: String
+    "The ticket's checkpoints, oldest first."
+    checkpoints(key: String!): [Checkpoint!]!
+    "The Sous flow settings as JSON (profiles, mine, checkpoint, qaGuide, qaGuideField), defaults filled in."
+    sousFlow: String!
+    "The Sous flow profile the ticket was given; null when it follows the person's own profile."
+    ticketSousFlow(key: String!): String
+    "What a profile adds to the sous prompt; key names the ticket in the preview."
+    sousFlowPrompt(profile: String!, key: String): SousFlowPrompt!
     """The changes Publish would make, each ticket read from Jira again; writes nothing."""
     previewSprintDraftPublish(sprint: String!): [SprintDraftChange!]!
     "The owner's held AC lines in the active sprint's published plan; null when it was not published from Planning."
@@ -2168,6 +2214,12 @@ export const typeDefs = gql`
     updateOrchestratorCronSettings(config: String!): Boolean!
     "Saves the Planning flow JSON after validation and returns it normalized; an empty string clears it."
     setPlanningFlow(flow: String!): String
+    "Saves the Sous flow JSON after validation and returns it normalized; an empty string resets it."
+    setSousFlow(flow: String!): String!
+    "Gives the ticket a Sous flow profile; null makes it follow the person's own profile again."
+    setTicketSousFlow(key: String!, profile: String): String
+    "Writes the QA guide block in the ticket's Developer Context now, whatever the Sous flow switch says."
+    writeQaGuide(key: String!): QaGuideResult!
     runOrchestratorCronNow: String!
     confirmOrchestration(key: String!): Boolean!
     stopAllAgents: Int!

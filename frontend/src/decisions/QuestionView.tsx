@@ -4,7 +4,7 @@ import type { AgentRun } from '../agents/runs';
 import { reportAge } from '../lib/sousReport';
 import { cn } from '../lib/cn';
 import { Button, Textarea } from '../components/ui';
-import { OWN, OWN_EFFECT, type Draft, type Question } from './questions';
+import { OWN, OWN_EFFECT, OWN_ID, type Draft, type Question } from './questions';
 
 interface QuestionViewProps {
   run: AgentRun;
@@ -29,7 +29,7 @@ const LETTERS = 'ABCDEFGHIJ';
 export const QuestionView: React.FC<QuestionViewProps> = ({ run, question, number, total, draft, sentCount, readOnly, guessesLeft, onKeepAll, onChange, onPrevious, onNext }) => {
   const [textOpen, setTextOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const options = [...question.options, { key: OWN, label: question.kind === 'issue' ? 'Write my own answer' : 'Change it to what I write', effect: OWN_EFFECT[question.kind] }];
+  const options = [...question.options, { key: OWN, label: question.kind === 'issue' ? 'Write my own answer' : 'Change it to what I write', effect: OWN_EFFECT[question.kind], labelId: OWN_ID[question.kind] }];
   const sent = Boolean(draft?.sent);
   const pullRequests = (run.pullRequests ?? []).filter((pr) => pr.status === 'open' || pr.status === 'draft');
   return (
@@ -40,6 +40,7 @@ export const QuestionView: React.FC<QuestionViewProps> = ({ run, question, numbe
           {question.blocking && <span className="mr-2 inline-block size-2 rounded-full bg-amber-300 align-middle" title="Sous waits on this answer" aria-label="Sous waits on this answer" />}
           {question.text}
         </h2>
+        {question.textId && <p className="mt-1 text-pretty text-sm text-muted-foreground" lang="id">{question.textId}</p>}
         {question.text.length > 160 && <button type="button" className="hidden min-h-11 self-start border-0 bg-transparent p-0 text-xs font-semibold text-accent max-[760px]:block" aria-expanded={textOpen} onClick={() => setTextOpen((value) => !value)}>{textOpen ? 'Show less' : 'Show more'}</button>}
         <p className="mt-1 text-[0.8rem] text-muted-foreground">{question.kind === 'issue' ? 'Sous asked' : 'Sous guessed and went on'}{question.at ? ` · ${reportAge(question.at)}` : ''}</p>
 
@@ -57,7 +58,10 @@ export const QuestionView: React.FC<QuestionViewProps> = ({ run, question, numbe
                   onClick={() => onChange({ choice: option.key })}
                 >
                   <span className={cn('grid size-6 flex-none place-items-center rounded-full border font-mono text-[0.68rem]', picked ? 'border-foreground bg-foreground text-background' : 'border-border-glow text-muted-foreground')}>{option.key === OWN ? '–' : LETTERS[index]}</span>
-                  <span className="pt-0.5 text-[0.9rem] font-medium text-foreground">{option.label}</span>
+                  <span className="flex min-w-0 flex-col pt-0.5">
+                    <span className="text-[0.9rem] font-medium text-foreground">{option.label}</span>
+                    {option.labelId && <span className="text-pretty text-[0.78rem] text-muted-foreground" lang="id">{option.labelId}</span>}
+                  </span>
                 </button>
                 {picked && (
                   <div className="mt-1.5 pl-9">

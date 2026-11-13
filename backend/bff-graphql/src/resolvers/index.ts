@@ -17,6 +17,11 @@ import { sprintPlanner } from '../integrations/sprint-plan-live';
 import { acDriftService, acInService, planSignalService, sprintDraftService, storyboardReader, ticketSummaryService } from '../integrations/sprint-draft-live';
 import { StoryboardMissing, StoryboardRefused } from '../integrations/storyboard';
 import { PLANNING_FLOW_KEY, PlanningFlowError, parsePlanningFlow, storedPlanningFlow } from '../integrations/planning-flow';
+import { SOUS_FLOW_KEY, SousFlowError, flowLines, parseSousFlow, profileFor, storedSousFlow } from '../integrations/sous-flow';
+import { setTicketProfile, sousFlowSettings, ticketProfile } from '../integrations/sous-flow-live';
+import { sousStartPrompt } from '../integrations/orchestrator-cron';
+import { qaGuide } from '../integrations/qa-guide-live';
+import type { Checkpoint } from '../integrations/orchestrator';
 import { planningChatPrompt, planningChatTitle } from '../integrations/planning-ingest';
 import { isSettledStatus, mergeAttention, planAttentionItems, withoutSettledTickets } from '../integrations/attention';
 import { discordGateway, discordReader } from '../integrations/discord-reader-live';
@@ -372,6 +377,13 @@ export const resolvers = {
     sprintDraft: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.view(sprint).catch(planningError),
     sprintPlanSignal: (_: unknown, { sprint }: { sprint: string }) => planSignalService.view(sprint).catch(planningError),
     planningFlow: async () => storedPlanningFlow((await storageService.getSettingValues([PLANNING_FLOW_KEY]))[0]?.value),
+    checkpoints: (_: unknown, { key }: { key: string }) => orchestratorService.checkpoints(key),
+    sousFlow: async () => storedSousFlow((await storageService.getSettingValues([SOUS_FLOW_KEY]))[0]?.value),
+    ticketSousFlow: (_: unknown, { key }: { key: string }) => ticketProfile(key),
+    sousFlowPrompt: async (_: unknown, { profile, key }: { profile: string; key?: string | null }) => {
+      const lines = flowLines(profileFor(await sousFlowSettings(), profile).profile);
+      return { lines, prompt: sousStartPrompt(key?.trim().toUpperCase() || 'QRD-…', null, lines) };
+    },
     previewSprintDraftPublish: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.preview(sprint).catch(planningError),
     acIncoming: () => acInService.incoming().catch(planningError),
     sprintDrift: async () => {
@@ -700,6 +712,36 @@ export const resolvers = {
       }
       await storageService.upsertSetting(PLANNING_FLOW_KEY, saved);
       return saved;
+    },
+    setSousFlow: async (_: unknown, { flow }: { flow: string }) => {
+      if (!flow.trim()) {
+        await storageService.deleteSetting(SOUS_FLOW_KEY);
+        return storedSousFlow(null);
+      }
+      let saved: string;
+      try { saved = JSON.stringify(parseSousFlow(flow)); } catch (error) {
+        if (error instanceof SousFlowError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+        throw error;
+      }
+      await storageService.upsertSetting(SOUS_FLOW_KEY, saved);
+      return saved;
+    },
+    setTicketSousFlow: async (_: unknown, { key, profile }: { key: string; profile?: string | null }) => {
+      let ticket: string;
+      try { ticket = normalizeTicketKey(key); } catch { throw new GraphQLError('A valid ticket key is required', { extensions: { code: 'BAD_USER_INPUT' } }); }
+      const name = profile?.trim() || null;
+      if (name && !(await sousFlowSettings()).profiles[name]) throw new GraphQLError(`No Sous flow profile named ${name}`, { extensions: { code: 'BAD_USER_INPUT' } });
+      return setTicketProfile(ticket, name);
+    },
+    writeQaGuide: async (_: unknown, { key }: { key: string }) => {
+      let ticket: string;
+      try { ticket = normalizeTicketKey(key); } catch { throw new GraphQLError('A valid ticket key is required', { extensions: { code: 'BAD_USER_INPUT' } }); }
+      try {
+        return await qaGuide.write(ticket);
+      } catch (error) {
+        const status = (error as any)?.response?.status;
+        throw new GraphQLError(status ? `Jira responded ${status}` : error instanceof Error ? error.message : 'The QA guide could not be written', { extensions: { code: status ? 'BAD_GATEWAY' : 'BAD_USER_INPUT' } });
+      }
     },
     openPlanningChat: async (_: unknown, { sprint }: { sprint: string }) => {
       const name = sprint.trim();
@@ -1097,6 +1139,10 @@ export const resolvers = {
   ChatMessage: {
     attachments: (message: { attachments?: unknown[] }) => message.attachments ?? [],
   },
+  Checkpoint: {
+    untestable: (checkpoint: Checkpoint) => checkpoint.notes.untestable,
+    missingData: (checkpoint: Checkpoint) => checkpoint.notes.missingData,
+  },
 };
 
 export const protectedQueries = [
@@ -1107,6 +1153,7 @@ export const protectedQueries = [
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
   'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro', 'sprintPlan',
   'planningSprints', 'sprintDraft', 'sprintPlanSignal', 'planningFlow', 'previewSprintDraftPublish', 'sprintDrift', 'acIncoming', 'ticketSummary', 'ticketReadiness',
+  'checkpoints', 'sousFlow', 'ticketSousFlow', 'sousFlowPrompt',
 ] as const;
 export const protectedMutations = [
   'retroBuild',
@@ -1117,6 +1164,9 @@ export const protectedMutations = [
   'decideSprintDraft',
   'refreshSprintDraftQa',
   'setPlanningFlow',
+  'setSousFlow',
+  'setTicketSousFlow',
+  'writeQaGuide',
   'checkSprintStoryboards',
   'uploadSprintStoryboard',
   'answerSprintDraftQuestion',

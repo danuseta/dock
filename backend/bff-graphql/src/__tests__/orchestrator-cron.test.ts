@@ -104,6 +104,7 @@ interface Start {
   dockOrder?: Map<string, number>;
   manual?: Set<string>;
   now?: Date;
+  sousFlowLines?: (key: string) => Promise<string[]>;
 }
 
 type SessionState = 'queued' | 'running' | 'idle' | 'error';
@@ -190,6 +191,7 @@ function world(start: Start = {}) {
     stopTurn: async (sessionId) => { state.stopped.push(sessionId); },
     hasPushDevices: async () => start.pushDevices ?? false,
     push: async (message) => { state.pushes.push(message); },
+    ...(start.sousFlowLines ? { sousFlowLines: start.sousFlowLines } : {}),
   };
   const cron = new OrchestratorCron(deps);
   const byKey = (key: string) => state.sessions.filter((session) => session.ticketKey === key).at(-1)!;
@@ -594,6 +596,25 @@ test('the sous engine is the default; its start prompt runs the sous skill to a 
   await w.cron.runFill();
   assert.strictEqual(w.state.sent[0].text, prompt);
   assert.match(resumePrompt('QRD-7', 'sous'), /^Pakai skill sous\. Lanjutkan tiket QRD-7 dari blackboard dan ledger \(node \$K\/status\.cjs show QRD-7\)/);
+});
+
+test('QRD-1534: the default Sous flow leaves the cron start prompt byte for byte as before; a profile adds its lines at the end', async () => {
+  const before = world({ tickets: [ticket('QRD-7')], config: { engine: 'sous' } });
+  await before.cron.runFill();
+  const plain = world({ tickets: [ticket('QRD-7')], config: { engine: 'sous' }, sousFlowLines: async () => [] });
+  await plain.cron.runFill();
+  assert.strictEqual(plain.state.sent[0].text, before.state.sent[0].text);
+  assert.strictEqual(plain.state.sent[0].text, sousStartPrompt('QRD-7'));
+
+  const asked: string[] = [];
+  const flowed = world({ tickets: [ticket('QRD-7')], config: { engine: 'sous' }, sousFlowLines: async (key) => { asked.push(key); return ['Sous flow: stop after "plan".']; } });
+  await flowed.cron.runFill();
+  assert.deepStrictEqual(asked, ['QRD-7']);
+  assert.strictEqual(flowed.state.sent[0].text, `${sousStartPrompt('QRD-7')} Sous flow: stop after "plan".`);
+
+  const broken = world({ tickets: [ticket('QRD-7')], config: { engine: 'sous' }, sousFlowLines: async () => { throw new Error('settings unreadable'); } });
+  await broken.cron.runFill();
+  assert.strictEqual(broken.state.sent[0].text, sousStartPrompt('QRD-7'), 'a flow that cannot be read adds nothing');
 });
 
 test('a stalled sous run is resumed with the sous prompt even when the cron is switched back to the older flow', async () => {

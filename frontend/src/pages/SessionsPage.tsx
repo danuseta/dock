@@ -298,6 +298,7 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate
                 {threadId ? (
                   <AgentThreadPane
                     sessionId={selected.id}
+                    ticketKey={selected.ticketKey}
                     threadId={threadId}
                     onOpen={(id) => openThread(selected.id, id)}
                     onClose={() => openThread(selected.id, null)}

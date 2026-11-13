@@ -252,8 +252,8 @@ export const GET_OWNER_QUESTIONS = gql`
       key
       kind
       title
-      issues { n at type text level status resolvedBy resolvedAt options effects }
-      decisions { n at text status by issue cancelNote effect alts { label effect } replaces supersededBy }
+      issues { n at type text level status resolvedBy resolvedAt options effects textId optionsId }
+      decisions { n at text status by issue cancelNote effect alts { label effect } replaces supersededBy textId optionsId }
       confirmedDecisions
     }
   }
@@ -638,7 +638,7 @@ export const ORCHESTRATION_FIELDS = `
   finished
   note
   brief
-  decisions { n at text status by issue cancelNote effect alts { label effect } replaces supersededBy }
+  decisions { n at text status by issue cancelNote effect alts { label effect } replaces supersededBy textId optionsId }
   confirmedDecisions
   assumptions { n text falsifier state evidence }
   failures { at type what evidence attempt }
@@ -652,7 +652,7 @@ export const ORCHESTRATION_FIELDS = `
   stackedOn { key be { pr branch base retargetedAt } fe { pr branch base retargetedAt } }
   productionData
   draft
-  issues { n at type text level status resolvedBy resolvedAt options effects }
+  issues { n at type text level status resolvedBy resolvedAt options effects textId optionsId }
   blockers
   activity
   activityDetail
@@ -828,6 +828,48 @@ export const GET_PLANNING_FLOW = gql`
 export const SET_PLANNING_FLOW = gql`
   mutation SetPlanningFlow($flow: String!) {
     setPlanningFlow(flow: $flow)
+  }
+`;
+
+export const GET_SOUS_FLOW = gql`
+  query GetSousFlow {
+    sousFlow
+  }
+`;
+
+export const SET_SOUS_FLOW = gql`
+  mutation SetSousFlow($flow: String!) {
+    setSousFlow(flow: $flow)
+  }
+`;
+
+export const GET_TICKET_SOUS_FLOW = gql`
+  query GetTicketSousFlow($key: String!) {
+    ticketSousFlow(key: $key)
+  }
+`;
+
+export const SET_TICKET_SOUS_FLOW = gql`
+  mutation SetTicketSousFlow($key: String!, $profile: String) {
+    setTicketSousFlow(key: $key, profile: $profile)
+  }
+`;
+
+export const GET_SOUS_FLOW_PROMPT = gql`
+  query GetSousFlowPrompt($profile: String!, $key: String) {
+    sousFlowPrompt(profile: $profile, key: $key) { lines prompt }
+  }
+`;
+
+export const GET_CHECKPOINTS = gql`
+  query GetCheckpoints($key: String!) {
+    checkpoints(key: $key) { id key step agentId agent text untestable missingData at }
+  }
+`;
+
+export const WRITE_QA_GUIDE = gql`
+  mutation WriteQaGuide($key: String!) {
+    writeQaGuide(key: $key) { written reason lines }
   }
 `;
 

@@ -33,6 +33,11 @@ import { usePlanningQuestions, type QuestionTarget } from '../agents/usePlanning
 import { planningSprintOf } from '../agents/planning';
 import { useInteractionLog } from './interactions/useInteractionLog';
 import { chatStore } from './store';
+import { stepStage, type Checkpoint } from './checkpoints';
+import { useCheckpoints } from './useCheckpoints';
+import { CheckpointCard } from './CheckpointCard';
+import { useSessionFlow } from './composer/useSessionFlow';
+import { continueText, stageAfterStop } from '../lib/sousFlow';
 
 interface ChatThreadProps {
   sessionId: string;
@@ -137,6 +142,8 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     setSendError('');
     planning.answer(id, text).catch((error: unknown) => setSendError(messageOf(error, 'The answer could not be saved')));
   };
+  const checkpoints = useCheckpoints(session?.ticketKey);
+  const flow = useSessionFlow(sessionId, session?.ticketKey);
   const ownStatus = liveStatus?.sessions.find((item) => item.sessionId === sessionId);
   const dot = dotState({ bridgeUp: machineUp, waiting: interactions.cards.length > 0 || Boolean(session?.waiting), busy });
 
@@ -273,6 +280,12 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
       // The agent hears the answer too when its machine is up; the draft already holds it either way.
       if (!machineUp) return;
     }
+    try {
+      payload = { ...payload, text: await flow.decorate(payload.text) };
+    } catch (error) {
+      setSendError(messageOf(error, 'The session flow could not be read'));
+      throw error;
+    }
     const pending: ChatMessage = optimisticMessage(sessionId, payload, -Date.now(), new Date().toISOString());
     setSendError('');
     stickRef.current = true;
@@ -306,6 +319,16 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     }
   };
 
+  // After the flow stopped at a stage, the last checkpoint offers to go on from the next one, as a plain chat message.
+  const resume = stageAfterStop(flow.profile);
+  const resumeText = resume ? continueText(resume) : null;
+  const lastCheckpoint = checkpoints[checkpoints.length - 1];
+  const continueRef = useRef<(text: string) => void>(() => undefined);
+  useLayoutEffect(() => {
+    continueRef.current = (text) => { void send({ text, attachmentIds: [], attachments: [], options: null }).catch(() => undefined); };
+  });
+  const canContinue = (checkpoint: Checkpoint) => Boolean(resumeText) && !readOnly && !busy && checkpoint === lastCheckpoint && stepStage(checkpoint.step).stage === flow.profile.stop
+    && !messages.some((message) => message.role === 'user' && Date.parse(message.at) > Date.parse(checkpoint.at));
   const missing = data !== undefined && data.chatSession === null;
   const turnStartedAt = busy ? [...messages].reverse().find((message) => message.role === 'user')?.at ?? null : null;
   const blockerId = `chat-blocker-${sessionId}`;
@@ -332,7 +355,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
             ))}
           />
         ))}
-        <TranscriptList items={activity.items} store={activity.store} threadId={threadId} onOpenThread={onOpenThread ? (eventId) => onOpenThread(eventId) : undefined} />
+        <TranscriptList items={activity.items} store={activity.store} threadId={threadId} onOpenThread={onOpenThread ? (eventId) => onOpenThread(eventId) : undefined} checkpoints={checkpoints} renderCheckpoint={(checkpoint) => <CheckpointCard checkpoint={checkpoint} onContinue={resumeText && canContinue(checkpoint) ? { label: resumeText, run: () => continueRef.current(resumeText) } : null} />} />
         <PlanningQuestionCards questions={planning.questions} canAnswer={planning.canAnswer} busy={planning.answering} target={answering} planner={planning.planner} onAnswer={answerQuestion} onTarget={setAnswering} />
       </div>
 
@@ -393,6 +416,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
             onStop={() => void stop()}
             seed={seed}
             compact={compact ? { modelLabel: ownStatus?.model ?? '' } : null}
+            flow={answering ? null : flow}
           />
         )}
       </div>

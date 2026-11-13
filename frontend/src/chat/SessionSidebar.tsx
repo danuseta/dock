@@ -15,6 +15,8 @@ import { SLOW_POLL_MS, machineOf, machineOnline, relativeTime, sessionTitle, typ
 import { groupSessions, sidebarDot, type SessionFilter } from './sessionGroups';
 import { SessionMenu, type SessionMenuTarget } from './SessionMenu';
 import { StatusDot } from './StatusDot';
+import { checkpointForAgent, stepLabel } from './checkpoints';
+import { useCheckpoints } from './useCheckpoints';
 
 export type SidebarWorker = { id: string; parentId: string | null; turnId: number; name: string; label: string; status: string; startedAt: string; endedAt: string | null };
 
@@ -35,14 +37,16 @@ const clock = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour:
 
 interface SessionThreadsProps {
   sessionId: string;
+  ticketKey?: string | null;
   activeThreadId: string | null;
   onOpenThread: (sessionId: string, threadId: string | null) => void;
 }
 
 /** One line per agent the lead called, newest first; the open one lists the workers it called. */
-const SessionThreads: React.FC<SessionThreadsProps> = ({ sessionId, activeThreadId, onOpenThread }) => {
+const SessionThreads: React.FC<SessionThreadsProps> = ({ sessionId, ticketKey, activeThreadId, onOpenThread }) => {
   const { data } = useQuery<{ chatSessionWorkers: SidebarWorker[] }>(GET_CHAT_SESSION_WORKERS, { variables: { sessionId }, pollInterval: SLOW_POLL_MS });
   const workers = data?.chatSessionWorkers ?? [];
+  const checkpoints = useCheckpoints(ticketKey, SLOW_POLL_MS);
   const known = new Set(workers.map((worker) => worker.id));
   const threads = workers.filter((worker) => !worker.parentId || !known.has(worker.parentId)).reverse();
   const root = activeThreadId ? threadRoot(workers, activeThreadId) : null;
@@ -50,11 +54,15 @@ const SessionThreads: React.FC<SessionThreadsProps> = ({ sessionId, activeThread
   const line = (worker: SidebarWorker, nested: boolean) => {
     const ended = ENDED[worker.status];
     const workerCount = nested ? 0 : under(worker.id).length;
+    const report = nested ? null : checkpointForAgent(checkpoints, worker, workers);
     return (
       <li key={worker.id}>
         <button type="button" className={cn('flex w-full items-center gap-2 rounded-xs border border-transparent px-2 py-1.5 text-left hover:bg-surface-1 max-[900px]:min-h-11', nested && 'pl-5', activeThreadId === worker.id && 'border-border-glow bg-surface-1')} aria-current={activeThreadId === worker.id ? 'true' : undefined} title={worker.label} onClick={() => onOpenThread(sessionId, worker.id)}>
           <AgentAvatar name={worker.name} small />
-          <span className="min-w-0 flex-1 truncate text-[0.76rem]">{nested ? agentTask({ label: worker.label, name: worker.name }) : shortAgent(worker.name)}</span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate text-[0.76rem]">{nested ? agentTask({ label: worker.label, name: worker.name }) : shortAgent(worker.name)}</span>
+            {report && <span className="truncate text-[0.66rem] text-muted-foreground" title={`${stepLabel(report.step)}: ${report.text}`}>{stepLabel(report.step)} · {report.text}</span>}
+          </span>
           {!nested && <span className="flex-none font-mono text-[0.62rem] max-[760px]:text-xs text-muted-foreground tabular-nums">{clock(worker.startedAt)}{workerCount > 0 ? ` · ${workerCount}` : ''}</span>}
           {ended ? <Pill className={ended.className}>{ended.text}</Pill> : <StatusDot state="running" className="size-2" />}
         </button>
@@ -192,7 +200,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({ sessions, machin
                       </button>
                     )}
                   </div>
-                  {open && <div className={full}><SessionThreads sessionId={session.id} activeThreadId={active ? activeThreadId : null} onOpenThread={onOpenThread} /></div>}
+                  {open && <div className={full}><SessionThreads sessionId={session.id} ticketKey={session.ticketKey} activeThreadId={active ? activeThreadId : null} onOpenThread={onOpenThread} /></div>}
                 </div>
               );
             })}

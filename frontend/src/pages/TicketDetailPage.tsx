@@ -31,6 +31,7 @@ import { useOpenForTicket } from '../chat/useOpenForTicket';
 import { DependencyDialog } from '../components/ticket/DependencyDialog';
 import { NeedsYouCard } from '../components/ticket/NeedsYouCard';
 import { StackedOnBadge } from '../components/ticket/StackedOnBadge';
+import { TicketSousFlow } from '../components/ticket/TicketSousFlow';
 import { MENU_WIDTH, TicketMenu, type TicketMenuTarget } from '../components/ticket/TicketMenu';
 import { useTicketWork } from '../components/ticket/useTicketWork';
 import { APPROVE_REVIEW, SAVE_DEMO_LINK, SEND_TO_DISCORD, CHECK_CONFLICTS } from '../graphql/mutations';
@@ -431,6 +432,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
               {(description || (!ticket.userStory && !ticket.problemDefinition)) && <JiraField title="Description" text={description || NO_DESCRIPTION} />}
               {ticket.reference?.trim() && <JiraField title="Reference" field="customfield_10333" text={ticket.reference} />}
               {ticket.developerContext?.trim() && <JiraField title="Developer Context" field="customfield_10340" text={ticket.developerContext} />}
+              {!monitoring && <TicketSousFlow ticketKey={ticket.key} />}
             </div>
 
             <section id="acceptance-criteria" className="min-w-0 scroll-mt-6">

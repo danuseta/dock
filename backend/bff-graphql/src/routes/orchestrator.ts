@@ -25,6 +25,7 @@ import { dockMode } from '../mode';
 import { ELEVENLABS_ROUTES, elevenLabsKeys, elevenLabsRoute, type ElevenLabsKeys } from '../integrations/elevenlabs-keys';
 import { MAX_TRANSCRIPT_BYTES, OrchestratorInputError, OrchestratorService, orchestratorService, type Orchestration } from '../integrations/orchestrator';
 import { StorageService } from '../storage/service';
+import { checkpointsOn } from '../integrations/sous-flow-live';
 
 const broadcastFailed = (error: unknown) => console.error('[Broadcast] automatic broadcast failed:', error instanceof Error ? error.message : 'unknown error');
 const gateFailed = (error: unknown) => console.error('[Decision gate] failed:', error instanceof Error ? error.message : 'unknown error');
@@ -78,6 +79,8 @@ export function createOrchestratorIngestRouter(
   planner: Pick<SprintPlanner, 'ingest'> = sprintPlanner,
   // The planning chat's agent reading and changing the sprint draft Planning shows.
   planning: PlanningIngestDeps = { drafts: sprintDraftService, storyboards: storyboardReader, summaries: ticketSummaryService },
+  // The Sous flow "Kirim checkpoint" switch; off, a checkpoint is answered as not recorded so the lead carries on.
+  checkpointOn: () => Promise<boolean> = checkpointsOn,
 ): Router {
   const router = Router();
 
@@ -136,6 +139,19 @@ export function createOrchestratorIngestRouter(
     if (run && !run.ignored) settled(run);
     return run && { key: run.key, activity: run.activity, ...(run.ignored ? { ignored: true, owner: run.machine } : {}) };
   }));
+  router.post('/checkpoint', small, async (request: Request, response: Response) => {
+    try {
+      const result = await checkpointOn() ? await service.recordCheckpoint(request.body) : { recorded: false as const, reason: 'off' };
+      response.status(200).json({ ok: true, ...result, result });
+    } catch (error) {
+      if (error instanceof OrchestratorInputError) {
+        response.status(400).json({ error: error.message });
+        return;
+      }
+      console.error('[Orchestrator] checkpoint failed:', error instanceof Error ? error.message : 'unknown error');
+      response.status(500).json({ error: 'Ingest failed' });
+    }
+  });
   router.post('/events', small, handle(async (body, _signal, machine) => {
     const run = await service.ingestEventBatch(body, new Date(), machine);
     if (run && !run.ignored) settled(run);

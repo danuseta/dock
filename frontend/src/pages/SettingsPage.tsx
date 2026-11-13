@@ -27,6 +27,7 @@ import { GitHubSection } from '../settings/sections/GitHubSection';
 import { DiscordSection } from '../settings/sections/DiscordSection';
 import { CalendarSection, type GoogleReturn } from '../settings/sections/CalendarSection';
 import { PlanningFlowSection } from '../settings/sections/PlanningFlowSection';
+import { SousFlowSection } from '../settings/sections/SousFlowSection';
 
 const dotClass: Record<Exclude<SectionStatus, null>, string> = {
   ok: 'bg-status-merged', bad: 'bg-status-conflict', off: 'border border-muted-foreground', unsaved: 'bg-status-warn',
@@ -199,6 +200,7 @@ const SettingsPage: React.FC = () => {
           {active === 'demo' && <div className="flex flex-col gap-5"><ElevenLabsKeysSection /><DemoStorageSection /></div>}
           {active === 'claude' && <ClaudeAccountSection />}
           {active === 'planflow' && <PlanningFlowSection />}
+          {active === 'sousflow' && <SousFlowSection />}
         </main>
       </div>
 

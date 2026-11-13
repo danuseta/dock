@@ -308,8 +308,8 @@ const SOUS_CRON_LINE = 'Cron run: no GATE 1; work through to an opened pull requ
 /** The line a ticket gets when its dependency is stackable: its pull requests stack on the parent's open ones. */
 export const stackLine = (key: string, parent: string) => `Stack on ${parent}: base each repo on that ticket's open PR head branch (status.cjs set ${key} stackedOn=${parent}), open this PR against it, and say in the PR body that ${parent}'s PR merges first.`;
 
-/** The cron start on engine sous: no GATE 1, the run goes as far as an opened pull request. */
-export const sousStartPrompt = (key: string, stackOn: string | null = null) => [
+/** The cron start on engine sous: no GATE 1, the run goes as far as an opened pull request. `flow` is the ticket's Sous flow lines, none by default. */
+export const sousStartPrompt = (key: string, stackOn: string | null = null, flow: readonly string[] = []) => [
   `Pakai skill sous: kerjakan ${key}.`,
   SOUS_CRON_LINE,
   ...(stackOn ? [stackLine(key, stackOn)] : []),
@@ -317,16 +317,18 @@ export const sousStartPrompt = (key: string, stackOn: string | null = null) => [
   VAULT_LINE,
   LANES_LINE,
   LANGUAGE_LINE,
+  ...flow,
 ].join(' ');
 
 /** A parked ticket the owner confirmed, on engine sous: the AC are missing, so GATE 1 stays. */
-export const sousConfirmedPrompt = (key: string, stackOn: string | null = null) => [
+export const sousConfirmedPrompt = (key: string, stackOn: string | null = null, flow: readonly string[] = []) => [
   `Pakai skill sous: kerjakan ${key}.`,
   ...(stackOn ? [stackLine(key, stackOn)] : []),
   CONTRACT_LINE,
   VAULT_LINE,
   LANES_LINE,
   LANGUAGE_LINE,
+  ...flow,
 ].join(' ');
 
 /** The first message of the new session an owner action on a sous ticket opens; `line` is the answer or the cancel. */
@@ -389,6 +391,8 @@ export interface CronDeps {
   deadStarts(): Promise<string[]>;
   runs(): Promise<CronRun[]>;
   saveRun(ledger: Record<string, unknown>, machine: string): Promise<unknown>;
+  /** The Sous flow lines of the ticket's profile for the sous prompt; left out, the prompt has none. */
+  sousFlowLines?(key: string): Promise<string[]>;
   /** Sets the run's waiting text and keeps the rest of its ledger. */
   park(key: string, waiting: string): Promise<unknown>;
   /** The newest cron session of each ticket; `stopped` when the owner stopped its last turn, `otherActive` when another session of the ticket works or spoke after it. */
@@ -542,7 +546,7 @@ export class OrchestratorCron {
           day.started.push(ticket.key);
           log.started.push(ticket.key);
           if (this.deps.dryRun) continue;
-          if (!(await this.start(ticket, settings, now, this.startPromptOf(settings, ticket.key, stacked.get(ticket.key))))) log.notMoved.push(ticket.key);
+          if (!(await this.start(ticket, settings, now, await this.startPromptOf(settings, ticket.key, stacked.get(ticket.key))))) log.notMoved.push(ticket.key);
         }
       } catch (error) {
         console.error(`[Orchestrator cron] ${ticket.key} failed:`, error instanceof Error ? error.message : 'unknown error');
@@ -647,8 +651,13 @@ export class OrchestratorCron {
     return this.deps.saveRun({ key: ticket.key, kind: 'build', title: ticket.title, stage: 'gate', waiting, note: 'Started by the orchestrator cron', ...(engine === 'sous' ? { engine } : {}), createdAt: now.toISOString(), updatedAt: now.toISOString() }, machine);
   }
 
-  private startPromptOf(settings: CronSettings, key: string, stackOn: string | null = null) {
-    return settings.engine === 'sous' ? sousStartPrompt(key, stackOn) : startPrompt(key);
+  private async startPromptOf(settings: CronSettings, key: string, stackOn: string | null = null) {
+    return settings.engine === 'sous' ? sousStartPrompt(key, stackOn, await this.flowLines(key)) : startPrompt(key);
+  }
+
+  /** The ticket's Sous flow lines; none when no flow is wired or it cannot be read, so the prompt stays as before. */
+  private async flowLines(key: string): Promise<string[]> {
+    return this.deps.sousFlowLines ? this.deps.sousFlowLines(key).catch(() => []) : [];
   }
 
   /**
@@ -676,8 +685,8 @@ export class OrchestratorCron {
     if (!ticket) throw new CronInputError('The ticket was not found in Jira');
     const settings = { ...(await this.settings()), machine: run.machine };
     const stackOn = (await this.dependencyState(settings)).stacked.get(ticket.key) ?? null;
-    const confirmed = settings.engine === 'sous' ? sousConfirmedPrompt(ticket.key, stackOn) : confirmedPrompt(ticket.key);
-    await this.start(ticket, settings, this.deps.now(), run.waiting === PARKED_TEXT ? confirmed : this.startPromptOf(settings, ticket.key, stackOn));
+    const confirmed = settings.engine === 'sous' ? sousConfirmedPrompt(ticket.key, stackOn, await this.flowLines(ticket.key)) : confirmedPrompt(ticket.key);
+    await this.start(ticket, settings, this.deps.now(), run.waiting === PARKED_TEXT ? confirmed : await this.startPromptOf(settings, ticket.key, stackOn));
   }
 
   /** The run of a ticket the sous engine works, or null when the ticket runs the older flow. */

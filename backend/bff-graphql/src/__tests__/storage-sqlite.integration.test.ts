@@ -891,8 +891,10 @@ test('SQLite storage trims tool calls and activity flips but keeps spawns, stops
 
   await storage.addOrchestratorEvent('ZED-481', 'STAGE', 'plan', 2);
   await storage.addOrchestratorEvent('ZED-481', 'WAITING', 'GATE 1', 2);
+  await storage.addOrchestratorEvent('ZED-481', 'CHECKPOINT', '{"step":"plan","text":"Planned."}', 2);
   for (const kind of ['AGENT_ACTIVE', 'AGENT_IDLE', 'AGENT_ACTIVE', 'AGENT_IDLE']) await storage.addOrchestratorEvent('ZED-481', kind, null, 2);
   assert.deepStrictEqual((await storage.getOrchestratorEvents('ZED-481', undefined, ['STAGE', 'WAITING'])).map((event) => event.kind).sort(), ['STAGE', 'WAITING']);
+  assert.strictEqual((await storage.getOrchestratorEvents('ZED-481', undefined, ['CHECKPOINT'])).length, 1, 'a checkpoint outlives the activity flips');
   assert.strictEqual((await storage.getOrchestratorEvents('ZED-481')).filter((event) => event.kind.startsWith('AGENT_')).length, 2);
 });
 

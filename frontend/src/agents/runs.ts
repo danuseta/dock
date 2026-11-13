@@ -25,9 +25,11 @@ export interface AgentDecisionAlt { label: string; effect?: string | null }
 export interface AgentDecision {
   n?: number | null; at: string; text: string; status?: string | null; by?: string | null; issue?: number | null; cancelNote?: string | null;
   effect?: string | null; alts?: AgentDecisionAlt[]; replaces?: number | null; supersededBy?: number | null;
+  /** The decision and each alternative in Indonesian, for the owner only; sous still reads the English. */
+  textId?: string | null; optionsId?: Array<string | null> | null;
 }
 /** An issue raised during the run, I-n; level owner means it waits on the owner. */
-export interface AgentIssue { n: number; at: string; type: string; text: string; level: string; status: string; resolvedBy?: number | null; resolvedAt?: string | null; options: string[]; effects?: Array<string | null> }
+export interface AgentIssue { n: number; at: string; type: string; text: string; level: string; status: string; resolvedBy?: number | null; resolvedAt?: string | null; options: string[]; effects?: Array<string | null>; textId?: string | null; optionsId?: Array<string | null> | null }
 
 export interface AgentStackRepo { pr: string; branch?: string | null; base?: string | null; retargetedAt?: string | null }
 /** The parent ticket this run's pull requests are stacked on, per repo. */
