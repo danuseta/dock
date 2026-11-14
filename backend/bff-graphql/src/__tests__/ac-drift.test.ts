@@ -48,6 +48,7 @@ function setup() {
     statusesOf: async (keys) => new Map(keys.filter((key) => statuses.has(key)).map((key) => [key, statuses.get(key)!])),
     issueNow: async (key) => issues.get(key) ?? null,
     setAc: async (key, value) => { writes.push(['ac', key, value]); },
+    setReference: async (key, value) => { writes.push(['reference', key, value]); },
     myself: async () => 'Danu',
     comment: async (key, lines) => { writes.push(['comment', key, lines.join('\n')]); },
     addLabel: async (key, label) => { writes.push(['label', key, label]); },
@@ -127,8 +128,8 @@ test('move to an own ticket writes both AC fields and comments on both', async (
   assert.equal(after.rows.length, 1);
 });
 
-test('not tested here rewrites the line once; a changed AC or a ticket of someone else is refused', async () => {
-  const { service, writes, owner, issues } = setup();
+test('not tested here moves the line to Reference with its ticket and writes no comment; a changed AC or a ticket of someone else is refused', async () => {
+  const { service, writes, owner, issues, row } = setup();
   const drift = (await service.drift('QRD Sprint 27', owner))!;
   issues.set('QRD-1511', issue('QRD-1511', 'Danu', ['Someone edited this']));
   await assert.rejects(service.act('QRD Sprint 27', owner, drift.rows[0].id, 'not-tested', null, 'Danu'), /changed in Jira since publish/);
@@ -137,8 +138,11 @@ test('not tested here rewrites the line once; a changed AC or a ticket of someon
   assert.deepEqual(writes, []);
   issues.set('QRD-1511', issue('QRD-1511', 'Danu', ['Cursor shows', 'An Edit client sees the cursor (QRD-1489)', 'Owner sees QRD-1520 badge']));
   const after = await service.act('QRD Sprint 27', owner, drift.rows[0].id, 'not-tested', 'QA covers it on QRD-1489', 'Danu');
-  assert.match(String(writes[0][2]), /An Edit client sees the cursor \(QRD-1489\) \(not tested here: needs QRD-1489\)/);
-  assert.equal(after.rows.find((item) => item.refKey === 'QRD-1489')!.state, 'not-tested');
+  assert.deepEqual((writes as Array<[string, string, unknown]>).map(([kind, key]) => [kind, key]), [['reference', 'QRD-1511'], ['ac', 'QRD-1511']], 'no Jira comment');
+  assert.deepEqual(writes[0][2], { type: 'doc', version: 1, content: [{ type: 'bulletList', content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'QRD-1489: An Edit client sees the cursor (QRD-1489)' }] }] }] }] });
+  assert.equal(writes[1][2], '- Cursor shows\n- Owner sees QRD-1520 badge');
+  assert.deepEqual(JSON.parse(row.tickets.find((item: any) => item.key === 'QRD-1511').jiraAc), ['Cursor shows', 'Owner sees QRD-1520 badge']);
+  assert.equal(after.rows.some((item) => item.refKey === 'QRD-1489'), false, 'the line left AC, so nothing is held');
 });
 
 test('wait writes nothing; needs PO comments on the own ticket only', async () => {

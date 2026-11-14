@@ -14,6 +14,12 @@ export function threadIdFromSearch(search: string): string | null {
   return id !== null && THREAD_ID.test(id) ? id : null;
 }
 
+/** `?message=<id>`: the message the page scrolls to and highlights, for a Judge finding. */
+export function messageIdFromSearch(search: string): number | null {
+  const id = Number(new URLSearchParams(search).get('message'));
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
 export const sessionUrl = (id: string | null, thread: string | null = null): string => {
   if (id === null) return SESSIONS_PATH;
   return `${SESSIONS_PATH}?session=${encodeURIComponent(id)}${thread ? `&thread=${encodeURIComponent(thread)}` : ''}`;

@@ -6,9 +6,11 @@ export const RETRO_KINDS = ['keep', 'problem', 'try'] as const;
 export const RETRO_DESTS = ['kit', 'memory', 'dock', 'note', 'qa-agent'] as const;
 /** Lines that go to the QA bot's repo are its owner's to apply; DOCK never opens a session or a PR for them. */
 export const MANUAL_DESTS: readonly string[] = ['note', 'qa-agent'];
+export const RETRO_SOURCES = ['ledger', 'judge'] as const;
 export type RetroKind = typeof RETRO_KINDS[number];
 export type RetroDest = typeof RETRO_DESTS[number];
-export interface RetroDraftItem { kind: RetroKind; text: string; evidence: string[]; dest: RetroDest }
+export type RetroSource = typeof RETRO_SOURCES[number];
+export interface RetroDraftItem { kind: RetroKind; text: string; evidence: string[]; dest: RetroDest; source: RetroSource }
 export interface RetroNumbers {
   tickets: number;
   medianHours: number | null;
@@ -93,18 +95,26 @@ export function retroTickets(runs: RetroRun[]): RetroTicket[] {
   })).sort((a, b) => a.kind.localeCompare(b.kind) || a.key.localeCompare(b.key));
 }
 
-/** The draft the kit posts: `{ sprint, items: [{ kind, text, evidence, dest }] }`. A line without evidence is dropped. */
-export function parseRetroDraft(input: unknown): { sprint: string; items: RetroDraftItem[] } {
+const sourceOf = (value: unknown, fallback: RetroSource): RetroSource => ((RETRO_SOURCES as readonly string[]).includes(String(value)) ? value as RetroSource : fallback);
+
+/**
+ * The draft the kit posts: `{ sprint, items: [{ kind, text, evidence, dest, source? }] }`. A line without evidence is
+ * dropped. `source` is ledger unless the line (or the draft) says judge; `sources` are the ones whose open lines it replaces.
+ */
+export function parseRetroDraft(input: unknown): { sprint: string; items: RetroDraftItem[]; sources: RetroSource[] } {
   if (!isRecord(input)) throw new OrchestratorInputError('A retro draft must be an object');
   const sprint = typeof input.sprint === 'string' ? input.sprint.trim().slice(0, 120) : '';
   if (!sprint) throw new OrchestratorInputError('sprint is required');
+  const fallback = sourceOf(input.source, 'ledger');
   const items = (Array.isArray(input.items) ? input.items : []).filter(isRecord).map((item) => ({
     kind: String(item.kind ?? '').toLowerCase() as RetroKind,
     text: typeof item.text === 'string' ? item.text.trim().slice(0, 1000) : '',
     evidence: (Array.isArray(item.evidence) ? item.evidence : []).filter((line): line is string => typeof line === 'string' && line.trim() !== '').map((line) => line.trim().slice(0, 300)).slice(0, 10),
     dest: (RETRO_DESTS as readonly string[]).includes(String(item.dest)) ? item.dest as RetroDest : 'note',
+    source: sourceOf(item.source, fallback),
   })).filter((item) => (RETRO_KINDS as readonly string[]).includes(item.kind) && item.text && item.evidence.length > 0);
-  return { sprint, items: items.slice(0, MAX_ITEMS) };
+  const kept = items.slice(0, MAX_ITEMS);
+  return { sprint, items: kept, sources: kept.length ? [...new Set(kept.map((item) => item.source))] : [fallback] };
 }
 
 /** What DOCK asks sous to do when the owner accepts a line that has somewhere to go. */

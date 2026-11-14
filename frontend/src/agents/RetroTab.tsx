@@ -1,10 +1,14 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { Check, Pencil, RotateCcw, Sparkles, X } from 'lucide-react';
+import { Check, Gavel, Pencil, RotateCcw, Sparkles, X } from 'lucide-react';
 import { Button, Select, Textarea } from '../components/ui';
-import { GET_RETRO, GET_SPRINT_LIST, RETRO_BUILD, RETRO_ITEM_ACTION } from '../graphql/queries';
+import { GET_JUDGE_DAYS, GET_RETRO, GET_SPRINT_LIST, JUDGE_NOW, JUDGE_SPRINT, RETRO_BUILD, RETRO_ITEM_ACTION } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import { RETRO_NUMBERS, causeShare, numberDelta, type Retro, type RetroEscalations, type RetroItem } from './retro';
+import { JudgeDays } from './JudgeDays';
+import { SourceChips, SprintSheet } from './SprintSheet';
+import { JudgeDaySheet } from './JudgeDaySheet';
+import { JUDGE_ONLY_OPTION, judgeHref, judgeOnlySprint, judgeRoute, mergeRetroItems, readRetroView, retroSprintOptions, writeRetroView, type JudgeDays as JudgeDaysData, type MergedRetroItem, type RetroView } from './judge';
 
 const KIND_LABEL: Record<string, string> = { keep: 'Keep', problem: 'Problem', try: 'Try' };
 const DEST_LABEL: Record<string, string> = { kit: 'kit PR', memory: 'memory', dock: 'DOCK issue', note: 'note only', 'qa-agent': 'QA bot triage rule (PR by a developer)' };
@@ -12,14 +16,15 @@ const CAUSE_COLOR: Record<string, string> = {
   dependency: 'var(--color-status-warn)', access: 'var(--color-status-discord)', data: 'var(--color-secondary-foreground)', environment: 'var(--color-status-conflict)', unspecified: 'var(--color-muted-foreground)',
 };
 const head = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
+const VIEWS: Array<[RetroView, string]> = [['ledger', 'Ledger'], ['judge', 'Judge'], ['both', 'Both']];
 
-const Line: React.FC<{ item: RetroItem; onAction: (id: string, action: string, text?: string) => Promise<void>; busy: boolean }> = ({ item, onAction, busy }) => {
+const Line: React.FC<{ item: RetroItem; onAction: (id: string, action: string, text?: string) => Promise<void>; busy: boolean; sources?: string[] }> = ({ item, onAction, busy, sources }) => {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(item.text);
   const done = item.status !== 'open';
   return (
     <li className={cn('grid grid-cols-[72px_minmax(0,1fr)_auto] gap-x-3 gap-y-1 border-b border-border py-3 last:border-b-0 max-[760px]:grid-cols-[minmax(0,1fr)]', done && 'opacity-70')}>
-      <span className="pt-0.5 font-mono text-[0.66rem] font-bold uppercase tracking-[0.08em] text-secondary-foreground">{KIND_LABEL[item.kind] ?? item.kind}</span>
+      <span className="flex flex-col gap-1 pt-0.5 font-mono text-[0.66rem] font-bold uppercase tracking-[0.08em] text-secondary-foreground">{KIND_LABEL[item.kind] ?? item.kind}{sources && <SourceChips sources={sources} />}</span>
       <div className="min-w-0">
         {editing
           ? <Textarea aria-label="Edit the line" className="min-h-[72px] text-sm" value={text} onChange={(event) => setText(event.target.value)} />
@@ -77,16 +82,47 @@ const Escalations: React.FC<{ escalations: RetroEscalations }> = ({ escalations 
   </section>
 );
 
-/** A sprint's retro of the agents' work: numbers against the sprint before, what recurred, each ticket, and sous's Keep / Problem / Try. */
-export const RetroTab: React.FC = () => {
+/** A sprint's retro of the agents' work: the ledger numbers, what recurred, each ticket, sous's Keep / Problem / Try, and Judge's days. */
+export const RetroTab: React.FC<{ onNavigate?: (path: string) => void }> = ({ onNavigate }) => {
   const [sprintId, setSprintId] = useState<number | null>(null);
+  const [judgePick, setJudgePick] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const sprints = useQuery<{ sprintList: Array<{ id: number; name: string; state: string; startDate: string }> }>(GET_SPRINT_LIST, { fetchPolicy: 'cache-and-network' });
   const { data, loading, error, refetch } = useQuery<{ retro: Retro | null }>(GET_RETRO, { variables: { sprintId }, fetchPolicy: 'cache-and-network' });
   const [build, building] = useMutation(RETRO_BUILD);
   const [act, acting] = useMutation(RETRO_ITEM_ACTION);
   const retro = data?.retro ?? null;
-  const options = [...(sprints.data?.sprintList ?? [])].sort((a, b) => b.startDate.localeCompare(a.startDate)).map((sprint) => ({ value: String(sprint.id), label: `${sprint.name}${sprint.state === 'active' ? ' · active' : ''}` }));
+  const [view, setView] = useState<RetroView>(readRetroView);
+  const [route, setRoute] = useState(() => judgeRoute(window.location.search));
+  const judge = useQuery<{ judgeDays: JudgeDaysData | null }>(GET_JUDGE_DAYS, { variables: { sprint: judgePick ?? (sprintId === null ? null : retro?.sprint ?? null) }, skip: !retro, fetchPolicy: 'cache-and-network' });
+  const [judgeNow, judging] = useMutation(JUDGE_NOW, { refetchQueries: ['GetJudgeDays'] });
+  const [judgeSprint, summing] = useMutation(JUDGE_SPRINT, { refetchQueries: ['GetJudgeDays'] });
+  useEffect(() => {
+    const follow = () => setRoute(judgeRoute(window.location.search));
+    window.addEventListener('popstate', follow);
+    return () => window.removeEventListener('popstate', follow);
+  }, []);
+  const go = (target: { day?: string | null; sprintSheet?: boolean }) => {
+    window.history.pushState(window.history.state, '', judgeHref(window.location.search, target));
+    setRoute(judgeRoute(window.location.search));
+    window.scrollTo({ top: 0 });
+  };
+  const navigate = (path: string) => (onNavigate ? onNavigate(path) : window.location.assign(path));
+  const chooseView = (next: RetroView) => {
+    setView(next);
+    writeRetroView(next);
+  };
+  const sprintList = sprints.data?.sprintList ?? [];
+  const options = retroSprintOptions(sprintList, judge.data?.judgeDays?.activeSprint ?? null);
+  const pickSprint = (value: string) => {
+    if (value.startsWith(JUDGE_ONLY_OPTION)) {
+      setJudgePick(value.slice(JUDGE_ONLY_OPTION.length));
+      if (view === 'ledger') chooseView('judge');
+      return;
+    }
+    setJudgePick(null);
+    setSprintId(Number(value));
+  };
 
   const onAction = async (id: string, action: string, text?: string) => {
     setNotice(null);
@@ -96,6 +132,32 @@ export const RetroTab: React.FC = () => {
       if (action === 'accept') setNotice('Accepted. A line with somewhere to go opens a sous session that applies it; nothing is merged without you.');
     } catch (failure) {
       setNotice(failure instanceof Error ? failure.message : 'The change failed');
+    }
+  };
+  const onMerged = async (entry: MergedRetroItem, action: string, text?: string) => {
+    await onAction(entry.item.id, action, text);
+    // A line both sources found is applied once: its twin closes with it, or follows a close or a reopen.
+    const twin = action === 'accept' ? 'close' : action === 'edit' ? null : action;
+    for (const other of twin ? entry.others : []) await act({ variables: { id: other.id, action: twin } }).catch(() => undefined);
+    if (twin && entry.others.length) await refetch();
+  };
+  const onJudgeNow = async () => {
+    setNotice(null);
+    try {
+      const tick = (await judgeNow()).data?.judgeNow as { started: string | null; skipped: string | null } | undefined;
+      setNotice(tick?.started ? 'Judge started a session. Its findings show on the day once it posts them.' : `Judge did not start: ${tick?.skipped ?? 'nothing waiting'}.`);
+    } catch (failure) {
+      setNotice(failure instanceof Error ? failure.message : 'Judge could not start');
+    }
+  };
+  const onJudgeSprint = async () => {
+    if (!retro) return;
+    setNotice(null);
+    try {
+      await judgeSprint({ variables: { sprint: judge.data?.judgeDays?.sprint ?? retro.sprint } });
+      setNotice('The sprint summary waits for the Judge queue to empty (until 23:30), then runs. Its Problem and Try lines show on the Sprint sheet.');
+    } catch (failure) {
+      setNotice(failure instanceof Error ? failure.message : 'The sprint summary could not be asked for');
     }
   };
   const onBuild = async () => {
@@ -112,16 +174,61 @@ export const RetroTab: React.FC = () => {
   if (error && !data) return <p className="text-sm text-status-conflict" role="alert">{error.message}</p>;
   if (!data && loading) return <p className="text-sm text-muted-foreground" role="status">Loading the retro...</p>;
   if (!retro) return <p className="text-sm text-muted-foreground">No sprint yet. The sprint dashboard lists the sprints once Jira is set in Settings.</p>;
-  const open = retro.items.filter((item) => item.status === 'open').length;
+  const merged = mergeRetroItems(retro.items, view);
+  const open = merged.filter((entry) => entry.item.status === 'open').length;
+  const days = judge.data?.judgeDays ?? null;
+  const showJudge = view !== 'ledger';
+  const judgeOnly = judgeOnlySprint({ view, picked: judgePick, sprintChosen: sprintId !== null, daysSprint: days?.sprint ?? null, retroSprint: retro.sprint });
+  const listed = judgeOnly ? sprintList.find((sprint) => sprint.name === judgeOnly) : undefined;
+  const pickerValue = judgeOnly ? (listed ? String(listed.id) : `${JUDGE_ONLY_OPTION}${judgeOnly}`) : String(retro.sprintId);
+  const backToDays = () => go({});
+  const header = (
+    <div className="flex flex-wrap items-center gap-3">
+      <Select aria-label="Sprint" className="w-[280px] max-[760px]:w-full" value={pickerValue} onValueChange={pickSprint} options={options.length ? options : [{ value: String(retro.sprintId), label: retro.sprint }]} />
+      <span className="text-sm text-muted-foreground">{judgeOnly ? `no ledger retro for ${judgeOnly} yet` : retro.previous ? `compared with ${retro.previous}` : 'no earlier sprint to compare with'}</span>
+      <span className="inline-flex overflow-hidden whitespace-nowrap rounded-xs border border-border-glow font-mono text-[0.66rem]" role="group" aria-label="Retro source">
+        {VIEWS.map(([id, label]) => <button key={id} type="button" aria-pressed={view === id} onClick={() => chooseView(id)} className={cn('px-2.5 py-1 max-[760px]:min-h-11 max-[760px]:px-3.5', view === id ? 'bg-surface-hover font-bold text-foreground' : 'text-secondary-foreground hover:bg-surface-1')}>{label}</button>)}
+      </span>
+      <span className="ml-auto flex flex-wrap gap-2 max-[760px]:ml-0">
+        {showJudge && <Button onClick={() => void onJudgeSprint()} disabled={summing.loading}><Gavel size={14} aria-hidden="true" />Judge sprint</Button>}
+        {!judgeOnly && <Button onClick={() => void onBuild()} disabled={building.loading}><Sparkles size={14} aria-hidden="true" />{retro.items.length ? 'Draft again' : 'Build draft'}</Button>}
+      </span>
+    </div>
+  );
+  if (route.day) {
+    return (
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5">
+        {header}
+        <JudgeDaySheet key={route.day} day={route.day} onBack={backToDays} onDay={(day) => go({ day })} onConfirmed={() => { void judge.refetch(); backToDays(); }} onNavigate={navigate} />
+      </div>
+    );
+  }
+  if (route.sprintSheet && days) {
+    return (
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5">
+        {header}
+        {notice && <p className="text-sm text-secondary-foreground" role="status">{notice}</p>}
+        <SprintSheet
+          sprint={days.sprint}
+          previous={days.previous}
+          sheet={days.sheet}
+          busy={acting.loading}
+          onBack={backToDays}
+          onOpenDay={(day) => go({ day })}
+          patterns={judgeOnly ? [] : mergeRetroItems(retro.items, view === 'ledger' ? 'both' : view).filter((entry) => entry.item.status === 'open' && entry.item.kind !== 'keep')}
+          onAction={(entry, action) => void onMerged(entry, action)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5">
-      <div className="flex flex-wrap items-center gap-3">
-        <Select aria-label="Sprint" className="w-[280px] max-[760px]:w-full" value={String(retro.sprintId)} onValueChange={(value) => setSprintId(Number(value))} options={options.length ? options : [{ value: String(retro.sprintId), label: retro.sprint }]} />
-        <span className="text-sm text-muted-foreground">{retro.previous ? `compared with ${retro.previous}` : 'no earlier sprint to compare with'}</span>
-        <Button className="ml-auto max-[760px]:ml-0" onClick={() => void onBuild()} disabled={building.loading}><Sparkles size={14} aria-hidden="true" />{retro.items.length ? 'Draft again' : 'Build draft'}</Button>
-      </div>
+      {header}
       {notice && <p className="text-sm text-secondary-foreground" role="status">{notice}</p>}
+      {showJudge && days && <JudgeDays data={days} busy={judging.loading} onOpenDay={(day) => go({ day })} onOpenSprint={() => go({ sprintSheet: true })} onJudgeNow={() => void onJudgeNow()} />}
+      {showJudge && !days && judge.error && <p className="text-sm text-status-conflict" role="alert">{judge.error.message}</p>}
+      {view !== 'judge' && !judgeOnly && <>
 
       <dl className="grid grid-cols-4 border-y border-border max-[900px]:grid-cols-2">
         {RETRO_NUMBERS.map(([field, label, unit, better]) => {
@@ -178,11 +285,12 @@ export const RetroTab: React.FC = () => {
       <Escalations escalations={retro.escalations} />
 
       <section aria-label="Keep, Problem, Try">
-        <h3 className={head}>Keep · Problem · Try {retro.items.length > 0 && <span className="font-medium normal-case tracking-normal">· {open} waiting on you</span>}</h3>
-        {retro.items.length === 0
+        <h3 className={head}>Keep · Problem · Try {merged.length > 0 && <span className="font-medium normal-case tracking-normal">· {open} waiting on you</span>}</h3>
+        {merged.length === 0
           ? <p className="mt-2 text-sm text-muted-foreground">No draft yet. Build draft asks sous to write one from this sprint's runs; every line comes with its evidence.</p>
-          : <ol className="mt-1">{retro.items.map((item) => <Line key={item.id} item={item} onAction={onAction} busy={acting.loading} />)}</ol>}
+          : <ol className="mt-1">{merged.map((entry) => <Line key={entry.item.id} item={entry.item} sources={view === 'both' ? entry.sources : undefined} onAction={(_id, action, text) => onMerged(entry, action, text)} busy={acting.loading} />)}</ol>}
       </section>
+      </>}
     </div>
   );
 };

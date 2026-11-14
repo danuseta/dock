@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JiraSprintClient, type PlanningIssue, type PlanningSprint } from '../integrations/jira-sprint';
 import type { QaInputTicket, QaRun } from '../integrations/qa-predict';
-import { SprintDraftService, TC_MARKER, acValueLines, diffLines, finalAc, rewriteAcValue, type DraftJira, type DraftStore } from '../integrations/sprint-draft';
+import { SprintDraftService, TC_MARKER, acSideEffects, acValueLines, diffLines, finalAc, rewriteAcValue, type DraftJira, type DraftStore } from '../integrations/sprint-draft';
 import type { SprintDraftInput, SprintDraftTicketInput } from '../storage/service';
 import { StoryboardMissing } from '../integrations/storyboard';
 
@@ -55,6 +55,8 @@ class FakeJira implements DraftJira {
   async setAc(key: string, value: unknown) { this.writes.push(['ac', key, value]); }
   async setAssignee(key: string, accountId: string) { this.writes.push(['assignee', key, accountId]); }
   async postTcs(key: string, body: unknown) { this.writes.push(['tc', key, body]); }
+  async setReference(key: string, value: unknown) { this.writes.push(['reference', key, value]); }
+  async addBlockedBy(key: string, blocker: string) { this.writes.push(['link', key, blocker]); }
 }
 
 const predictions = (verdicts: Record<string, string>) => async (tickets: QaInputTicket[]): Promise<QaRun> => ({
@@ -99,12 +101,18 @@ test('the Jira client lists open sprints, leaves Epics out and resolves an assig
   ]);
   assert.deepEqual(calls[0][2], { state: 'active,future', startAt: 0, maxResults: 50 });
   assert.deepEqual(await client.fetchPlanningIssues(26), [
-    { key: 'QRD-1', summary: 'One', type: 'Story', status: 'To Do', assignee: null, sp: 3, acRaw: 'x', links: [{ key: 'QRD-2', relation: 'blockedBy' }], epic: null, descriptionRaw: null, labels: [] },
+    { key: 'QRD-1', summary: 'One', type: 'Story', status: 'To Do', assignee: null, sp: 3, acRaw: 'x', links: [{ key: 'QRD-2', relation: 'blockedBy' }], epic: null, descriptionRaw: null, labels: [], referenceRaw: null },
   ]);
   assert.deepEqual(await client.assignableAccounts('QRD-1', 'danu'), ['acc-1']);
   await client.setAcField('QRD-1', 'y');
   await client.setAssignee('QRD-1', 'acc-1');
   assert.deepEqual(calls.slice(-2), [['put', '/rest/api/3/issue/QRD-1', { fields: { customfield_10332: 'y' } }], ['put', '/rest/api/3/issue/QRD-1/assignee', { accountId: 'acc-1' }]]);
+  await client.setReferenceField('QRD-1', 'r');
+  await client.addBlockedBy('QRD-1', 'QRD-2');
+  assert.deepEqual(calls.slice(-2), [
+    ['put', '/rest/api/3/issue/QRD-1', { fields: { customfield_10333: 'r' } }],
+    ['post', '/rest/api/3/issueLink', { type: { name: 'Blocks' }, inwardIssue: { key: 'QRD-2' }, outwardIssue: { key: 'QRD-1' } }],
+  ]);
 });
 
 test('the AC field reads into lines from ADF and from text', () => {
@@ -126,13 +134,19 @@ test('a rewrite keeps Jira format: ADF keeps other nodes and marks, text keeps i
   assert.throws(() => rewriteAcValue('- one', ['missing'], []), /AC line not found in Jira: missing/);
 });
 
-test('decisions move a line to the ticket it needs or drop it', () => {
+test('decisions move a line to the ticket it needs or send it to Reference; older wait and drop read as dependency and reference', () => {
   const lines = finalAc([{ key: 'A', ac: ['x needs B', 'y needs B', 'z'] }, { key: 'B', ac: ['b1'] }], {
     'ac|A|B|x needs B': { action: 'move', note: null, by: null, at: '' },
     'ac|A|B|y needs B': { action: 'drop', note: null, by: null, at: '' },
     'ac|A|C|z': { action: 'wait', note: null, by: null, at: '' },
   });
   assert.deepEqual(Object.fromEntries(lines), { A: ['z'], B: ['b1', 'x needs B'] });
+  const sides = acSideEffects([{ key: 'A', ac: ['x needs B', 'y needs B', 'z needs C'] }], {
+    'ac|A|B|y needs B': { action: 'drop', note: null, by: null, at: '' },
+    'ac|A|C|z needs C': { action: 'wait', note: null, by: null, at: '' },
+    'ac|A|B|gone needs B': { action: 'reference', note: null, by: null, at: '' },
+  });
+  assert.deepEqual(sides.get('A'), { reference: ['B: y needs B'], blockedBy: ['C'] }, 'a line no longer in AC writes nothing');
 });
 
 test('a load schedules the sprint, finds the after-it line and gives the QA bot the plan', async () => {
@@ -148,21 +162,33 @@ test('a load schedules the sprint, finds the after-it line and gives the QA bot 
   ]);
   assert.equal(byKey['QRD-1511'].prediction?.prediction, 'ESCALATED');
   assert.deepEqual(view.blockers, ['ac|QRD-1511|QRD-1490|An Edit client sees the cursor (QRD-1490)', 'qa|QRD-1511']);
-  assert.equal(view.canPublish, false);
+  assert.equal(view.canPublish, true, 'blockers are shown, they do not hold publish');
   assert.deepEqual(seen().find((ticket) => ticket.key === 'QRD-1511')!.waitsOn, [{ key: 'QRD-1490', endDay: 6.5 }, { key: 'QRD-1363', endDay: null }]);
 });
 
-test('publish is held until every blocker has a decision, and a decision is checked', async () => {
-  const { service } = setup({ 'QRD-1511': 'ESCALATED' });
+test('a decision is checked and clears its blocker, and publish goes ahead with blockers still open', async () => {
+  const { service, store } = setup({ 'QRD-1511': 'ESCALATED' });
   const view = await service.load(26, 'Alvin');
-  await assert.rejects(service.publish('QRD Sprint 26'), /2 AC line or QA prediction still needs a decision/);
-  await assert.rejects(service.decide('QRD Sprint 26', view.blockers[0], 'ship', null, 'Alvin'), /moved, kept to wait, or dropped/);
+  await assert.rejects(service.decide('QRD Sprint 26', view.blockers[0], 'ship', null, 'Alvin'), /is a dependency, moves to Reference, or moves to the ticket that builds it/);
   await assert.rejects(service.decide('QRD Sprint 26', 'qa|QRD-1511', 'fix', ' ', 'Alvin'), /Say what was fixed/);
   await service.decide('QRD Sprint 26', view.blockers[0], 'move', null, 'Alvin');
   const decided = await service.decide('QRD Sprint 26', 'qa|QRD-1511', 'accept', null, 'Alvin');
-  assert.equal(decided.canPublish, true);
+  assert.deepEqual(decided.blockers, []);
   assert.equal(decided.findings[0].decision?.action, 'move');
-  assert.equal((await service.decide('QRD Sprint 26', 'qa|QRD-1511', 'clear', null, 'Alvin')).canPublish, false);
+  assert.deepEqual((await service.decide('QRD Sprint 26', 'qa|QRD-1511', 'clear', null, 'Alvin')).blockers, ['qa|QRD-1511']);
+  const results = await service.publish('QRD Sprint 26');
+  assert.ok(results.some((result) => result.kind === 'ticket' && result.status === 'updated'), 'an open QA blocker does not refuse publish');
+  assert.equal(store.draft.status, 'published');
+});
+
+test('a scope cut is written as the scope|cut decision and needs its text', async () => {
+  const { service } = setup();
+  assert.equal((await service.load(26, 'Alvin')).scopeCut, null);
+  await assert.rejects(service.decide('QRD Sprint 26', 'scope|cut', 'cut', '  ', 'Alvin'), /Write what leaves the sprint/);
+  await assert.rejects(service.decide('QRD Sprint 26', 'scope|cut', 'drop', 'QRD-1490', 'Alvin'), /action cut/);
+  const cut = await service.decide('QRD Sprint 26', 'scope|cut', 'cut', 'QRD-1490 moves to Sprint 27', 'Alvin');
+  assert.deepEqual([cut.scopeCut?.action, cut.scopeCut?.note, cut.scopeCut?.by], ['cut', 'QRD-1490 moves to Sprint 27', 'Alvin']);
+  assert.equal((await service.decide('QRD Sprint 26', 'scope|cut', 'clear', null, 'Alvin')).scopeCut, null);
 });
 
 test('preview lists only what differs from Jira, and publish writes it in Jira format', async () => {
@@ -173,9 +199,9 @@ test('preview lists only what differs from Jira, and publish writes it in Jira f
   await service.updateTicket('QRD Sprint 26', 'QRD-1511', { wave: 3, sp: 2 });
   const preview = await service.preview('QRD Sprint 26');
   assert.deepEqual(preview, [
-    { key: 'QRD-1489', assigneeFrom: 'Aken', assigneeTo: 'Danu', acRemoved: [], acAdded: [], refused: null },
-    { key: 'QRD-1511', assigneeFrom: null, assigneeTo: null, acRemoved: ['An Edit client sees the cursor (QRD-1490)'], acAdded: [], refused: null },
-    { key: 'QRD-1490', assigneeFrom: null, assigneeTo: null, acRemoved: [], acAdded: ['An Edit client sees the cursor (QRD-1490)'], refused: null },
+    { key: 'QRD-1489', assigneeFrom: 'Aken', assigneeTo: 'Danu', acRemoved: [], acAdded: [], referenceAdded: [], blockedBy: [], refused: null },
+    { key: 'QRD-1511', assigneeFrom: null, assigneeTo: null, acRemoved: ['An Edit client sees the cursor (QRD-1490)'], acAdded: [], referenceAdded: [], blockedBy: [], refused: null },
+    { key: 'QRD-1490', assigneeFrom: null, assigneeTo: null, acRemoved: [], acAdded: ['An Edit client sees the cursor (QRD-1490)'], referenceAdded: [], blockedBy: [], refused: null },
   ]);
   assert.deepEqual(jira.writes, [], 'preview writes nothing');
 
@@ -442,4 +468,64 @@ test('the plan reads each card rank from its #N label and lays merged and open c
   assert.deepEqual([view.landed, alone.landed], [2, 0]);
   assert.deepEqual(view.developers.map((developer) => [developer.name, developer.merged, developer.open, developer.leftSp, developer.end]), [['Aken', 1, 1, 2, 1], ['Danu', 1, 3, 10, 5]]);
   assert.deepEqual(seen().map((ticket) => ticket.key).sort(), ['QRD-1', 'QRD-2', 'QRD-3', 'QRD-8'], 'the QA bot sees only the open cards');
+});
+
+test('an AC line naming another ticket is a dependency (Blocks link) or moves to Reference; Publish writes them without a comment', async () => {
+  const { service, jira, store } = setup();
+  const view = await service.load(26, 'Alvin');
+  const [dependency, reference] = view.findings;
+  assert.deepEqual([dependency.refKey, dependency.linked, reference.refKey, reference.linked], ['QRD-1490', false, 'QRD-1363', false]);
+  await assert.rejects(service.decide('QRD Sprint 26', reference.id, 'move', null, 'Alvin'), /QRD-1363 is not in this sprint/);
+  await service.decide('QRD Sprint 26', dependency.id, 'dependency', null, 'Alvin');
+  const decided = await service.decide('QRD Sprint 26', reference.id, 'reference', null, 'Alvin');
+  assert.deepEqual(decided.findings.map((finding) => finding.decision?.action), ['dependency', 'reference']);
+  assert.equal(jira.writes.length, 0, 'nothing is written to Jira until Publish');
+
+  const preview = await service.preview('QRD Sprint 26');
+  assert.deepEqual(preview, [{
+    key: 'QRD-1511', assigneeFrom: null, assigneeTo: null, acRemoved: ['Works after QRD-1363'], acAdded: [],
+    referenceAdded: ['QRD-1363: Works after QRD-1363'], blockedBy: ['QRD-1490'], refused: null,
+  }]);
+  const results = await service.publish('QRD Sprint 26');
+  assert.deepEqual(results.filter((result) => result.kind === 'ticket').map((result) => [result.key, result.status]), [['QRD-1511', 'updated']]);
+  assert.deepEqual(jira.writes.map(([kind, key]) => [kind, key]), [['reference', 'QRD-1511'], ['ac', 'QRD-1511'], ['link', 'QRD-1511']]);
+  assert.deepEqual(jira.writes[0][2], adf(bullets('QRD-1363: Works after QRD-1363')));
+  assert.equal(jira.writes[2][2], 'QRD-1490');
+  assert.ok(!jira.writes.some(([kind]) => kind === 'comment'));
+  assert.deepEqual(JSON.parse(store.draft.tickets.find((ticket: any) => ticket.key === 'QRD-1511').jiraAc), ['Cursor shows', 'An Edit client sees the cursor (QRD-1490)']);
+});
+
+test('older wait and drop calls read as dependency and reference, a Blocks link already in Jira decides the line, and a changed AC refuses the write', async () => {
+  const { service, jira, store } = setup();
+  jira.issues = jira.issues.map((item) => (item.key === 'QRD-1511' ? { ...item, links: [{ key: 'QRD-1490', relation: 'blockedBy' as const }] } : item));
+  const view = await service.load(26, 'Alvin');
+  assert.deepEqual(view.findings.map((finding) => [finding.refKey, finding.linked]), [['QRD-1490', true], ['QRD-1363', false]]);
+  assert.deepEqual(view.blockers, [], 'a linked after-it line is a dependency already');
+  store.draft.decisions = JSON.stringify({
+    [view.findings[0].id]: { action: 'wait', note: null, by: 'Alvin', at: '2026-10-26T10:00:00.000Z' },
+    [view.findings[1].id]: { action: 'drop', note: null, by: 'Alvin', at: '2026-10-26T10:00:00.000Z' },
+  });
+  const legacy = (await service.view('QRD Sprint 26'))!;
+  assert.deepEqual(legacy.findings.map((finding) => finding.decision?.action), ['dependency', 'reference']);
+  const preview = await service.preview('QRD Sprint 26');
+  assert.deepEqual([preview[0].referenceAdded, preview[0].blockedBy], [['QRD-1363: Works after QRD-1363'], []], 'the link Jira already has is not added again');
+
+  jira.now.set('QRD-1511', { ...jira.issues.find((item) => item.key === 'QRD-1511')!, acRaw: '- Someone else edited this' });
+  const refused = await service.preview('QRD Sprint 26');
+  assert.equal(refused[0].refused, 'The AC changed in Jira after it was loaded; load the sprint again');
+  await service.publish('QRD Sprint 26');
+  assert.deepEqual(jira.writes, []);
+});
+
+test('QA approves a ticket test cases in the draft, and a changed set needs a new approval', async () => {
+  const { service, store } = setup();
+  await service.load(26, 'Alvin');
+  await assert.rejects(service.decide('QRD Sprint 26', 'tc|QRD-1489', 'approve', null, 'Rina'), /QRD-1489 has no test cases to approve/);
+  const tcs = [{ id: 'TC-1', ac: 1, title: 'Edit', steps: [], expected: 'Saved' }];
+  await service.setTcs('QRD Sprint 26', 'QRD-1489', tcs);
+  await assert.rejects(service.decide('QRD Sprint 26', 'tc|QRD-1489', 'ok', null, 'Rina'), /approved with action approve/);
+  const approved = await service.decide('QRD Sprint 26', 'tc|QRD-1489', 'approve', null, 'Rina');
+  assert.equal(approved.tickets.find((ticket) => ticket.key === 'QRD-1489')!.tcApproved, true);
+  store.draft.tickets.find((item: any) => item.key === 'QRD-1489').tcAt = new Date('2026-10-27T00:00:00Z');
+  assert.equal((await service.view('QRD Sprint 26'))!.tickets.find((ticket) => ticket.key === 'QRD-1489')!.tcApproved, false);
 });

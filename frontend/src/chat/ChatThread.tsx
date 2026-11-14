@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { useApolloClient, useQuery } from '@apollo/client';
 import { Loader2, Power, SendHorizontal } from 'lucide-react';
 import { SEND_CHAT_MESSAGE, STOP_CHAT_TURN } from '../graphql/mutations';
-import { GET_CHAT_MESSAGES, GET_CHAT_SESSION } from '../graphql/queries';
+import { GET_CHAT_MESSAGES, GET_CHAT_SESSION, GET_SESSION_JUDGE } from '../graphql/queries';
 import { Button } from '../components/ui';
 import { EmptyState } from '../components/EmptyState';
 import { TerminalScene } from '../components/empty/scenes/TerminalScene';
@@ -28,8 +28,17 @@ import type { SendPayload } from './composer/composerLogic';
 import { InteractionCards } from './interactions/InteractionCards';
 import { isPhone } from '../lib/phone';
 import { offlineLine } from './phonePanel';
+import { PlanningQuestionCards } from '../agents/PlanningQuestions';
+import { usePlanningQuestions, type QuestionTarget } from '../agents/usePlanningQuestions';
+import { planningSprintOf } from '../agents/planning';
 import { useInteractionLog } from './interactions/useInteractionLog';
 import { chatStore } from './store';
+import { stepStage, type Checkpoint } from './checkpoints';
+import { useCheckpoints } from './useCheckpoints';
+import { CheckpointCard } from './CheckpointCard';
+import { useSessionFlow } from './composer/useSessionFlow';
+import { flaggedMessages, type SessionJudge } from '../agents/judge';
+import { continueText, stageAfterStop } from '../lib/sousFlow';
 
 interface ChatThreadProps {
   sessionId: string;
@@ -49,6 +58,8 @@ interface ChatThreadProps {
   queuedBehind?: string[];
   /** The chat panel on a phone: the header comes from `renderHeader`, workers sit in one strip and the composer is compact. */
   compact?: boolean;
+  /** A message to scroll to and highlight, from `?message=`; older pages load until it is there. */
+  focusMessageId?: number | null;
 }
 
 export interface HeaderContext { control: TurnOptionsControl; dot: DotState; status: ChatSessionStatus | undefined; session: ChatSession; busy: boolean; turnStartedAt: string | null }
@@ -67,7 +78,7 @@ const PROMPT_EXAMPLES = [
 
 const messageOf = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
 
-export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, readOnlyAction, hideMachine, onActivity, renderHeader, threadId, onOpenThread, queuedBehind = [], compact }) => {
+export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, readOnlyAction, hideMachine, onActivity, renderHeader, threadId, onOpenThread, queuedBehind = [], compact, focusMessageId = null }) => {
   const client = useApolloClient();
   const [recalled] = useState(() => recallMessages(sessionId));
   const [messages, setMessages] = useState<ChatMessage[]>(() => recalled?.messages ?? []);
@@ -127,6 +138,15 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
   const readOnly = session?.source === 'cli';
   const control = useTurnOptions(sessionId, machine, composerFeatures(capabilities), sessionTurnOptions(session));
   const { status: liveStatus } = useChatStatus(machine);
+  // A Planning-<sprint> chat shows the draft's open questions as cards; the composer can answer the one picked.
+  const planning = usePlanningQuestions(planningSprintOf(session?.title));
+  const [answering, setAnswering] = useState<QuestionTarget | null>(null);
+  const answerQuestion = (id: string, text: string) => {
+    setSendError('');
+    planning.answer(id, text).catch((error: unknown) => setSendError(messageOf(error, 'The answer could not be saved')));
+  };
+  const checkpoints = useCheckpoints(session?.ticketKey);
+  const flow = useSessionFlow(sessionId, session?.ticketKey);
   const ownStatus = liveStatus?.sessions.find((item) => item.sessionId === sessionId);
   const dot = dotState({ bridgeUp: machineUp, waiting: interactions.cards.length > 0 || Boolean(session?.waiting), busy });
 
@@ -215,6 +235,22 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     }
   };
 
+  const { data: judgeData } = useQuery<{ chatSession: { id: string; judge: SessionJudge | null } | null }>(GET_SESSION_JUDGE, { variables: { id: sessionId }, fetchPolicy: 'cache-and-network' });
+  const flags = useMemo(() => flaggedMessages(judgeData?.chatSession?.judge?.findings), [judgeData]);
+  const focusedRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!focusMessageId || focusedRef.current === focusMessageId || !loaded) return;
+    const element = scrollRef.current?.querySelector(`[data-message-id="${focusMessageId}"]`);
+    if (element) {
+      focusedRef.current = focusMessageId;
+      stickRef.current = false;
+      element.scrollIntoView({ block: 'center' });
+      return;
+    }
+    const oldest = oldestId(messages);
+    if (hasOlder && !loadingOlder && oldest !== undefined && oldest > focusMessageId) void loadOlder();
+  });
+
   const handleScroll = () => {
     const element = scrollRef.current;
     if (!element) return;
@@ -251,6 +287,24 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
   }, [messages, sessionId]);
 
   const send = async (payload: SendPayload) => {
+    if (answering) {
+      const target = answering;
+      try {
+        await planning.answer(target.id, payload.text);
+        setAnswering(null);
+      } catch (error) {
+        setSendError(messageOf(error, 'The answer could not be saved'));
+        throw error;
+      }
+      // The agent hears the answer too when its machine is up; the draft already holds it either way.
+      if (!machineUp) return;
+    }
+    try {
+      payload = { ...payload, text: await flow.decorate(payload.text) };
+    } catch (error) {
+      setSendError(messageOf(error, 'The session flow could not be read'));
+      throw error;
+    }
     const pending: ChatMessage = optimisticMessage(sessionId, payload, -Date.now(), new Date().toISOString());
     setSendError('');
     stickRef.current = true;
@@ -284,6 +338,16 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     }
   };
 
+  // After the flow stopped at a stage, the last checkpoint offers to go on from the next one, as a plain chat message.
+  const resume = stageAfterStop(flow.profile);
+  const resumeText = resume ? continueText(resume) : null;
+  const lastCheckpoint = checkpoints[checkpoints.length - 1];
+  const continueRef = useRef<(text: string) => void>(() => undefined);
+  useLayoutEffect(() => {
+    continueRef.current = (text) => { void send({ text, attachmentIds: [], attachments: [], options: null }).catch(() => undefined); };
+  });
+  const canContinue = (checkpoint: Checkpoint) => Boolean(resumeText) && !readOnly && !busy && checkpoint === lastCheckpoint && stepStage(checkpoint.step).stage === flow.profile.stop
+    && !messages.some((message) => message.role === 'user' && Date.parse(message.at) > Date.parse(checkpoint.at));
   const missing = data !== undefined && data.chatSession === null;
   const turnStartedAt = busy ? [...messages].reverse().find((message) => message.role === 'user')?.at ?? null : null;
   const blockerId = `chat-blocker-${sessionId}`;
@@ -310,7 +374,8 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
             ))}
           />
         ))}
-        <TranscriptList items={activity.items} store={activity.store} threadId={threadId} onOpenThread={onOpenThread ? (eventId) => onOpenThread(eventId) : undefined} />
+        <TranscriptList items={activity.items} store={activity.store} flags={flags} focusId={focusMessageId} threadId={threadId} onOpenThread={onOpenThread ? (eventId) => onOpenThread(eventId) : undefined} checkpoints={checkpoints} renderCheckpoint={(checkpoint) => <CheckpointCard checkpoint={checkpoint} onContinue={resumeText && canContinue(checkpoint) ? { label: resumeText, run: () => continueRef.current(resumeText) } : null} />} />
+        <PlanningQuestionCards questions={planning.questions} canAnswer={planning.canAnswer} busy={planning.answering} target={answering} planner={planning.planner} onAnswer={answerQuestion} onTarget={setAnswering} />
       </div>
 
       {!missing && (compact && onOpenThread ? <WorkerStrip events={allEvents} onOpen={onOpenThread} /> : <WorkerTray events={allEvents} activeId={threadId} onSelect={onOpenThread} />)}
@@ -322,6 +387,12 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
         {status === 'running' && (!renderHeader || worker || isPhone()) && <p className="flex items-center gap-1.5 font-mono text-[0.68rem] max-[760px]:text-xs text-status-merged" role="status"><Loader2 size={12} className="animate-spin" aria-hidden="true" /><span className="min-w-0 break-words">Running{interactions.cards.length > 0 ? ' · waiting for your answer' : worker ? ` · ${worker}` : session?.statusDetail ? ` · ${session.statusDetail}` : ''}</span></p>}
         {status === 'error' && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The last turn failed{session?.statusDetail ? `: ${session.statusDetail}` : '.'}</p>}
         {sendError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">Not sent: {sendError}</p>}
+        {answering && (
+          <p className="flex items-center gap-2 font-mono text-[0.66rem] text-muted-foreground" role="status">
+            Balas ke pertanyaan {answering.number}{answering.key ? ` · ${answering.key}` : ''}
+            <button type="button" className="text-accent hover:underline" onClick={() => setAnswering(null)}>batal</button>
+          </p>
+        )}
         {loadError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">{loadError}</p>}
         {sessionError && !data && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The session could not be loaded: {sessionError.message}</p>}
         {blocker && !readOnly && machineUp === false && compact && (
@@ -356,14 +427,15 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
             sessionId={sessionId}
             machine={machine}
             capabilities={capabilities}
-            blocker={blocker}
-            busy={busy}
+            blocker={answering ? null : blocker}
+            busy={answering ? false : busy}
             stopping={stopping}
             control={control}
             onSend={send}
             onStop={() => void stop()}
             seed={seed}
             compact={compact ? { modelLabel: ownStatus?.model ?? '' } : null}
+            flow={answering ? null : flow}
           />
         )}
       </div>

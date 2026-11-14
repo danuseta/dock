@@ -4,6 +4,7 @@ import { stalledNotice, waitingNotice } from './push-notices';
 import { isSettledStatus } from './attention';
 import { REVIEW_STATUS } from './broadcast-review';
 import { ticketSessionTitle } from './session-titles';
+import { inPublishedPlan, publishWait, sprintRevision } from './plan-publish';
 
 export class CronInputError extends Error {}
 
@@ -39,7 +40,18 @@ export interface CronSettings {
   usageBrakePercent: number;
   weeklyBrakePercent: number;
   engine: CronEngine;
+  /** "Mulai kerja setelah plan dipublish": a To Do ticket waits until the sprint plan carrying it is published. */
+  waitForPublish: boolean;
+  /** "Plan per developer dibikin setelah publish": the Plan-<sprint> session waits for the published plan too. */
+  planAfterPublish: boolean;
+  /** A session the owner opens by hand on a blocked ticket: `tell` opens it with a "nunggu QRD-x" line, `stop` refuses, `off` does not check. The cron always waits. */
+  blockedManual: BlockedManualMode;
+  /** A ticket may start stacked on a dependency's branch that is not merged yet (sous only). */
+  stackedAllowed: boolean;
 }
+
+export const BLOCKED_MANUAL_MODES = ['tell', 'stop', 'off'] as const;
+export type BlockedManualMode = typeof BLOCKED_MANUAL_MODES[number];
 
 export interface UsageWindow {
   usedPercentage: number;
@@ -66,6 +78,10 @@ export const DEFAULT_CRON_SETTINGS: CronSettings = {
   usageBrakePercent: 70,
   weeklyBrakePercent: 90,
   engine: 'sous',
+  waitForPublish: false,
+  planAfterPublish: false,
+  blockedManual: 'tell',
+  stackedAllowed: true,
 };
 
 const CONFIG_KEY = 'orchestratorCronConfig';
@@ -137,6 +153,10 @@ export function parseCronSettings(raw: string | null | undefined): CronSettings 
   const inProgressStatus = typeof merged.inProgressStatus === 'string' ? merged.inProgressStatus.trim() : '';
   if (!inProgressStatus) throw new CronInputError('inProgressStatus is required');
   if (!CRON_ENGINES.includes(merged.engine as CronEngine)) throw new CronInputError(`engine must be one of ${CRON_ENGINES.join(', ')}`);
+  if (typeof merged.waitForPublish !== 'boolean') throw new CronInputError('waitForPublish must be true or false');
+  if (typeof merged.planAfterPublish !== 'boolean') throw new CronInputError('planAfterPublish must be true or false');
+  if (!BLOCKED_MANUAL_MODES.includes(merged.blockedManual as BlockedManualMode)) throw new CronInputError(`blockedManual must be one of ${BLOCKED_MANUAL_MODES.join(', ')}`);
+  if (typeof merged.stackedAllowed !== 'boolean') throw new CronInputError('stackedAllowed must be true or false');
   return {
     enabled: merged.enabled,
     machine,
@@ -157,6 +177,10 @@ export function parseCronSettings(raw: string | null | undefined): CronSettings 
     usageBrakePercent: integer(merged.usageBrakePercent, 'usageBrakePercent', 0, 100),
     weeklyBrakePercent: integer(merged.weeklyBrakePercent, 'weeklyBrakePercent', 0, 100),
     engine: merged.engine as CronEngine,
+    waitForPublish: merged.waitForPublish,
+    planAfterPublish: merged.planAfterPublish,
+    blockedManual: merged.blockedManual as BlockedManualMode,
+    stackedAllowed: merged.stackedAllowed,
   };
 }
 
@@ -187,6 +211,41 @@ export function isStackable(status: string, run?: Pick<CronRun, 'prBe' | 'prFe' 
   return sameText(status, REVIEW_STATUS) || Boolean(run && (run.prBe || run.prFe) && run.review !== 'merged');
 }
 
+export interface DependencyState { blocked: Set<string>; stacked: Map<string, string>; waitsOn: Map<string, string> }
+export interface ManualCheck { mode: BlockedManualMode; waitsOn: string | null; stackedOn: string | null }
+
+/** Why a manual session on a blocked ticket is not opened, or null when it may open. */
+export function manualRefusal(check: ManualCheck): string | null {
+  return check.mode === 'stop' && check.waitsOn ? `Tiket ini nunggu ${check.waitsOn} dulu, jadi sesinya nggak dibuka. Ganti di Settings › Sous flow › Aturan kalau mau tetap mulai.` : null;
+}
+
+/**
+ * Tickets whose dependency is not settled yet are blocked, unless the dependency is stackable on engine sous and
+ * stackedAllowed is on: then the ticket runs stacked on its parent, and `stacked` names that parent. A ticket with more
+ * than one unsettled dependency is blocked, never stacked. `waitsOn` names the first dependency a blocked ticket waits for.
+ */
+export async function dependencyState(deps: Pick<CronDeps, 'dependencies' | 'ticket' | 'runs'>, settings: Pick<CronSettings, 'engine' | 'stackedAllowed'>): Promise<DependencyState> {
+  const blocked = new Set<string>();
+  const stacked = new Map<string, string>();
+  const waitsOn = new Map<string, string>();
+  const open = new Map<string, string[]>();
+  const stacking = settings.engine === 'sous' && settings.stackedAllowed !== false;
+  const dependencies = await deps.dependencies();
+  const runs = stacking && dependencies.length ? await deps.runs() : [];
+  for (const { ticketKey, dependsOnKey } of dependencies) {
+    const dependency = await deps.ticket(dependsOnKey).catch(() => null);
+    if (dependency && isSettledStatus(dependency.status)) continue;
+    open.set(ticketKey, [...new Set([...(open.get(ticketKey) ?? []), dependsOnKey])]);
+    if (dependency && stacking && isStackable(dependency.status, runs.find((run) => run.key === dependsOnKey))) stacked.set(ticketKey, dependsOnKey);
+    else blocked.add(ticketKey);
+  }
+  for (const [ticketKey, keys] of open) {
+    if (keys.length > 1) { stacked.delete(ticketKey); blocked.add(ticketKey); }
+    if (blocked.has(ticketKey)) waitsOn.set(ticketKey, keys[0]);
+  }
+  return { blocked, stacked, waitsOn };
+}
+
 /** The smallest Jira label of the form "#N", or null. */
 export function labelOrder(labels: string[] | undefined): number | null {
   const numbers = (labels || []).map((label) => /^#(\d{1,4})$/.exec(label.trim())).filter(Boolean).map((match) => Number(match![1]));
@@ -197,7 +256,8 @@ export function labelOrder(labels: string[] | undefined): number | null {
 export const orderOf = (ticket: CronTicket, dockOrder: Map<string, number>): number | null => dockOrder.get(ticket.key) ?? labelOrder(ticket.labels);
 
 /**
- * The tickets the cron may take: still To Do, in scope, without a run and without an open dependency.
+ * The tickets the cron may take: still To Do, in scope, without a run and without an open dependency, and with
+ * waitForPublish on, part of a published sprint plan (a plan-published-rN label).
  * Tickets with an order come first, lowest number first; the rest follow by ticket number.
  */
 export function candidates(tickets: CronTicket[], taken: Set<string>, blocked: Set<string>, settings: CronSettings, dockOrder: Map<string, number> = new Map(), manual: Set<string> = new Set()): CronTicket[] {
@@ -207,7 +267,22 @@ export function candidates(tickets: CronTicket[], taken: Set<string>, blocked: S
     .filter((ticket) => !taken.has(ticket.key) && !blocked.has(ticket.key) && !manual.has(ticket.key))
     .filter((ticket) => settings.sprint === 'any' || String(ticket.sprintState || '').toUpperCase() === 'ACTIVE')
     .filter((ticket) => settings.labels.length === 0 || (ticket.labels || []).some((label) => settings.labels.some((wanted) => sameText(wanted, label))))
+    .filter((ticket) => !settings.waitForPublish || inPublishedPlan(ticket.labels))
     .sort((a, b) => (rank(a) - rank(b)) || (ticketNumber(a.key) - ticketNumber(b.key)));
+}
+
+/**
+ * The To Do tickets the publish gate holds back, with why: the sprint plan is not published yet, or the ticket joined
+ * the sprint after the plan went out. Empty when waitForPublish is off.
+ */
+export function publishWaits(tickets: CronTicket[], taken: Set<string>, settings: CronSettings, manual: Set<string> = new Set()): DeferredTicket[] {
+  if (!settings.waitForPublish) return [];
+  const open = candidates(tickets, taken, new Set(), { ...settings, waitForPublish: false }, new Map(), manual);
+  return open.flatMap((ticket) => {
+    const sprint = tickets.filter((other) => other.sprintName === ticket.sprintName);
+    const reason = publishWait(ticket, sprintRevision(sprint));
+    return reason ? [{ key: ticket.key, reason }] : [];
+  });
 }
 
 /** Date, hour and ISO weekday (1 = Monday) in WIB. */
@@ -281,8 +356,8 @@ const SOUS_CRON_LINE = 'Cron run: no GATE 1; work through to an opened pull requ
 /** The line a ticket gets when its dependency is stackable: its pull requests stack on the parent's open ones. */
 export const stackLine = (key: string, parent: string) => `Stack on ${parent}: base each repo on that ticket's open PR head branch (status.cjs set ${key} stackedOn=${parent}), open this PR against it, and say in the PR body that ${parent}'s PR merges first.`;
 
-/** The cron start on engine sous: no GATE 1, the run goes as far as an opened pull request. */
-export const sousStartPrompt = (key: string, stackOn: string | null = null) => [
+/** The cron start on engine sous: no GATE 1, the run goes as far as an opened pull request. `flow` is the ticket's Sous flow lines, none by default. */
+export const sousStartPrompt = (key: string, stackOn: string | null = null, flow: readonly string[] = []) => [
   `Pakai skill sous: kerjakan ${key}.`,
   SOUS_CRON_LINE,
   ...(stackOn ? [stackLine(key, stackOn)] : []),
@@ -290,16 +365,18 @@ export const sousStartPrompt = (key: string, stackOn: string | null = null) => [
   VAULT_LINE,
   LANES_LINE,
   LANGUAGE_LINE,
+  ...flow,
 ].join(' ');
 
 /** A parked ticket the owner confirmed, on engine sous: the AC are missing, so GATE 1 stays. */
-export const sousConfirmedPrompt = (key: string, stackOn: string | null = null) => [
+export const sousConfirmedPrompt = (key: string, stackOn: string | null = null, flow: readonly string[] = []) => [
   `Pakai skill sous: kerjakan ${key}.`,
   ...(stackOn ? [stackLine(key, stackOn)] : []),
   CONTRACT_LINE,
   VAULT_LINE,
   LANES_LINE,
   LANGUAGE_LINE,
+  ...flow,
 ].join(' ');
 
 /** The first message of the new session an owner action on a sous ticket opens; `line` is the answer or the cancel. */
@@ -309,7 +386,7 @@ export const ownerReplyPrompt = (key: string, line: string) => [
 ].join('\n');
 
 export interface DeferredTicket { key: string; reason: string }
-export interface FillLog { at: string; day: string; skipped: string | null; started: string[]; parked: string[]; deferred: DeferredTicket[]; notMoved: string[]; failed: string[]; released: string[]; resumed?: string[] }
+export interface FillLog { at: string; day: string; skipped: string | null; started: string[]; parked: string[]; deferred: DeferredTicket[]; notMoved: string[]; failed: string[]; released: string[]; resumed?: string[]; dryRun?: boolean }
 export interface CronSlots { busy: number; waiting: number }
 export interface CronStatus { enabled: boolean; slots: CronSlots; parallel: number; startedToday: number; maxPerDay: number; lastFill: FillLog | null }
 
@@ -362,11 +439,13 @@ export interface CronDeps {
   deadStarts(): Promise<string[]>;
   runs(): Promise<CronRun[]>;
   saveRun(ledger: Record<string, unknown>, machine: string): Promise<unknown>;
+  /** The Sous flow lines of the ticket's profile for the sous prompt; left out, the prompt has none. */
+  sousFlowLines?(key: string): Promise<string[]>;
   /** Sets the run's waiting text and keeps the rest of its ledger. */
   park(key: string, waiting: string): Promise<unknown>;
   /** The newest cron session of each ticket; `stopped` when the owner stopped its last turn, `otherActive` when another session of the ticket works or spoke after it. */
   cronSessions(keys: string[]): Promise<Map<string, { id: string; status: string; stopped: boolean; otherActive: boolean }>>;
-  openSession(input: { ticketKey: string; machine: string; title: string; origin: 'cron'; options: Record<string, string> }): Promise<{ id: string }>;
+  openSession(input: { ticketKey: string; machine: string; title: string; origin: 'cron'; options: Record<string, string>; account?: string }): Promise<{ id: string }>;
   /** The turn options the machine takes: none when it never reported what it offers; throws when it refuses them. */
   machineOptions(machine: string, options: Record<string, string>): Promise<Record<string, string>>;
   deleteSession(sessionId: string): Promise<unknown>;
@@ -382,6 +461,11 @@ export interface CronDeps {
   stopTurn(sessionId: string): Promise<unknown>;
   hasPushDevices(): Promise<boolean>;
   push(message: PushMessage): Promise<unknown>;
+  /**
+   * Dry run (staging): a fill logs the tickets it would start or park and opens no session, saves no run and moves no
+   * ticket; the machine, its usage brake and stalled runs are not looked at.
+   */
+  dryRun?: boolean;
 }
 
 interface DayCount { started: string[]; parked: string[] }
@@ -438,6 +522,7 @@ export class OrchestratorCron {
     const settings = await this.settings();
     const { date } = wib(now);
     const log: FillLog = { at: now.toISOString(), day: date, skipped: null, started: [], parked: [], deferred: [], notMoved: [], failed: [], released: [] };
+    if (this.deps.dryRun) return this.dryFill(settings, now, ignoreWindow, log);
     log.released = await this.releaseDeadStarts(settings, now, date).catch((error) => {
       console.error('[Orchestrator cron] Release failed:', error instanceof Error ? error.message : 'unknown error');
       return [];
@@ -452,6 +537,15 @@ export class OrchestratorCron {
       await this.pick(settings, now, log, day);
       await this.deps.cacheSet(`day:${date}`, day);
     }
+    await this.deps.cacheSet('lastFill', log);
+    return log;
+  }
+
+  private async dryFill(settings: CronSettings, now: Date, ignoreWindow: boolean, log: FillLog): Promise<FillLog> {
+    log.dryRun = true;
+    log.skipped = ignoreWindow ? null : outsideWindow(now, settings);
+    if (!log.skipped) await this.pick(settings, now, log, await this.dayCount(log.day));
+    console.warn(`[Orchestrator cron] dry run: would start ${log.started.join(', ') || 'nothing'}; would park ${log.parked.join(', ') || 'nothing'}${log.skipped ? `; skipped: ${log.skipped}` : ''}${log.deferred.length ? `; deferred ${log.deferred.map((item) => `${item.key} (${item.reason})`).join(', ')}` : ''}`);
     await this.deps.cacheSet('lastFill', log);
     return log;
   }
@@ -479,6 +573,7 @@ export class OrchestratorCron {
     ]);
     let free = Math.max(0, settings.parallel - slots.busy - slots.waiting);
     const defer = (key: string, reason: string) => { if (log.deferred.length < MAX_DEFERRED_LOGGED) log.deferred.push({ key, reason }); };
+    for (const wait of publishWaits(tickets, new Set(taken), settings, manual)) defer(wait.key, wait.reason);
     for (const ticket of candidates(tickets, new Set(taken), new Set(), settings, dockOrder, manual)) {
       if (held.has(ticket.key) || blocked.has(ticket.key)) {
         await this.deps.recordWait(ticket.key, held.has(ticket.key) ? 'pending' : waitsOn.get(ticket.key) ?? '').catch(() => undefined);
@@ -487,7 +582,7 @@ export class OrchestratorCron {
       try {
         if (!ticketHasAcceptanceCriteria(ticket)) {
           if (day.parked.length >= settings.maxPerDay) { defer(ticket.key, `daily cap reached: ${settings.maxPerDay} parked today`); continue; }
-          await this.saveRun(ticket, settings.machine, now, PARKED_TEXT);
+          if (!this.deps.dryRun) await this.saveRun(ticket, settings.machine, now, PARKED_TEXT);
           day.parked.push(ticket.key);
           log.parked.push(ticket.key);
         } else if (day.started.length >= settings.maxPerDay) {
@@ -498,7 +593,8 @@ export class OrchestratorCron {
           free -= 1;
           day.started.push(ticket.key);
           log.started.push(ticket.key);
-          if (!(await this.start(ticket, settings, now, this.startPromptOf(settings, ticket.key, stacked.get(ticket.key))))) log.notMoved.push(ticket.key);
+          if (this.deps.dryRun) continue;
+          if (!(await this.start(ticket, settings, now, await this.startPromptOf(settings, ticket.key, stacked.get(ticket.key))))) log.notMoved.push(ticket.key);
         }
       } catch (error) {
         console.error(`[Orchestrator cron] ${ticket.key} failed:`, error instanceof Error ? error.message : 'unknown error');
@@ -573,38 +669,32 @@ export class OrchestratorCron {
     return options;
   }
 
+  private dependencyState(settings: CronSettings): Promise<DependencyState> {
+    return dependencyState(this.deps, settings);
+  }
+
   /**
-   * Tickets whose dependency is not settled yet are blocked, unless the dependency is stackable on engine sous:
-   * then the ticket runs stacked on its parent, and `stacked` names that parent. A ticket with more than one unsettled
-   * dependency is blocked, never stacked. `waitsOn` names the first dependency a blocked ticket waits for.
+   * The blocked-by check for a session the owner opens by hand on a ticket: what it waits on or stacks on, and what
+   * the blockedManual rule does with it. The cron's own rule is not changed by it: the cron always waits.
    */
-  private async dependencyState(settings: CronSettings): Promise<{ blocked: Set<string>; stacked: Map<string, string>; waitsOn: Map<string, string> }> {
-    const blocked = new Set<string>();
-    const stacked = new Map<string, string>();
-    const waitsOn = new Map<string, string>();
-    const open = new Map<string, string[]>();
-    const dependencies = await this.deps.dependencies();
-    const runs = settings.engine === 'sous' && dependencies.length ? await this.deps.runs() : [];
-    for (const { ticketKey, dependsOnKey } of dependencies) {
-      const dependency = await this.deps.ticket(dependsOnKey).catch(() => null);
-      if (dependency && isSettledStatus(dependency.status)) continue;
-      open.set(ticketKey, [...new Set([...(open.get(ticketKey) ?? []), dependsOnKey])]);
-      if (dependency && settings.engine === 'sous' && isStackable(dependency.status, runs.find((run) => run.key === dependsOnKey))) stacked.set(ticketKey, dependsOnKey);
-      else blocked.add(ticketKey);
-    }
-    for (const [ticketKey, keys] of open) {
-      if (keys.length > 1) { stacked.delete(ticketKey); blocked.add(ticketKey); }
-      if (blocked.has(ticketKey)) waitsOn.set(ticketKey, keys[0]);
-    }
-    return { blocked, stacked, waitsOn };
+  async manualCheck(key: string): Promise<ManualCheck> {
+    const settings = await this.settings();
+    if (settings.blockedManual === 'off') return { mode: 'off', waitsOn: null, stackedOn: null };
+    const state = await dependencyState({ ...this.deps, dependencies: async () => (await this.deps.dependencies()).filter((item) => item.ticketKey === key) }, settings);
+    return { mode: settings.blockedManual, waitsOn: state.waitsOn.get(key) ?? null, stackedOn: state.stacked.get(key) ?? null };
   }
 
   private saveRun(ticket: Pick<CronTicket, 'key' | 'title'>, machine: string, now: Date, waiting: string, engine?: CronEngine) {
     return this.deps.saveRun({ key: ticket.key, kind: 'build', title: ticket.title, stage: 'gate', waiting, note: 'Started by the orchestrator cron', ...(engine === 'sous' ? { engine } : {}), createdAt: now.toISOString(), updatedAt: now.toISOString() }, machine);
   }
 
-  private startPromptOf(settings: CronSettings, key: string, stackOn: string | null = null) {
-    return settings.engine === 'sous' ? sousStartPrompt(key, stackOn) : startPrompt(key);
+  private async startPromptOf(settings: CronSettings, key: string, stackOn: string | null = null) {
+    return settings.engine === 'sous' ? sousStartPrompt(key, stackOn, await this.flowLines(key)) : startPrompt(key);
+  }
+
+  /** The ticket's Sous flow lines; none when no flow is wired or it cannot be read, so the prompt stays as before. */
+  private async flowLines(key: string): Promise<string[]> {
+    return this.deps.sousFlowLines ? this.deps.sousFlowLines(key).catch(() => []) : [];
   }
 
   /**
@@ -632,8 +722,8 @@ export class OrchestratorCron {
     if (!ticket) throw new CronInputError('The ticket was not found in Jira');
     const settings = { ...(await this.settings()), machine: run.machine };
     const stackOn = (await this.dependencyState(settings)).stacked.get(ticket.key) ?? null;
-    const confirmed = settings.engine === 'sous' ? sousConfirmedPrompt(ticket.key, stackOn) : confirmedPrompt(ticket.key);
-    await this.start(ticket, settings, this.deps.now(), run.waiting === PARKED_TEXT ? confirmed : this.startPromptOf(settings, ticket.key, stackOn));
+    const confirmed = settings.engine === 'sous' ? sousConfirmedPrompt(ticket.key, stackOn, await this.flowLines(ticket.key)) : confirmedPrompt(ticket.key);
+    await this.start(ticket, settings, this.deps.now(), run.waiting === PARKED_TEXT ? confirmed : await this.startPromptOf(settings, ticket.key, stackOn));
   }
 
   /** The run of a ticket the sous engine works, or null when the ticket runs the older flow. */
@@ -724,6 +814,28 @@ export class OrchestratorCron {
   }
 
   /**
+   * A `Judge-…` session on the cron's machine like openReview, with no ticket (an empty key), the Judge model and the Judge account
+   * (empty runs on the machine's active account). Removed again when its first message is refused.
+   */
+  async openJudge(title: string, prompt: string, account: string, model: string | null): Promise<string> {
+    const settings = await this.settings();
+    const base = this.turnOptions(settings);
+    if (model) {
+      delete base.effort;
+      base.model = model;
+    }
+    const options = await this.deps.machineOptions(settings.machine, base);
+    const session = await this.deps.openSession({ ticketKey: '', machine: settings.machine, title, origin: 'cron', options, ...(account ? { account } : {}) });
+    try {
+      await this.deps.send(session.id, prompt, options, { cronSlot: false });
+    } catch (error) {
+      await this.deps.deleteSession(session.id).catch(() => undefined);
+      throw error;
+    }
+    return session.id;
+  }
+
+  /**
    * A message for the ticket's last Task session, queued behind its running turn; without one, a new `Task-<key>` session
    * on the cron's machine, removed again when its first message is refused.
    */
@@ -796,7 +908,8 @@ ${run.stalledDetail ?? ''}`, stalledNotice);
     } catch (error) {
       console.error('[Orchestrator cron] Ping failed:', error instanceof Error ? error.message : 'unknown error');
     }
-    await this.deps.planWatch(await this.deps.tickets()).catch((error) => console.error('[Orchestrator cron] Plan watch failed:', error instanceof Error ? error.message : 'unknown error'));
+    const trigger = await this.deps.planWatch(await this.deps.tickets()).catch((error) => console.error('[Orchestrator cron] Plan watch failed:', error instanceof Error ? error.message : 'unknown error'));
+    if (this.deps.dryRun && isRecord(trigger) && Array.isArray(trigger.keys)) console.warn(`[Orchestrator cron] dry run: would start the Plan-${String(trigger.sprint)} session (${String(trigger.kind)}) for ${trigger.keys.join(', ')}`);
     if ((await this.settings()).enabled) await this.runFill();
   }
 }

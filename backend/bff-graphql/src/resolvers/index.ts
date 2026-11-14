@@ -14,15 +14,24 @@ import { StorageService } from '../storage/service';
 import { activeSprint } from '../integrations/sprint-plan';
 import { lookupDependencies } from '../integrations/dependency-lookup';
 import { sprintPlanner } from '../integrations/sprint-plan-live';
-import { acDriftService, acInService, sprintDraftService, storyboardReader } from '../integrations/sprint-draft-live';
+import { acDriftService, acInService, planSignalService, sprintDraftService, storyboardReader, ticketSummaryService } from '../integrations/sprint-draft-live';
 import { StoryboardMissing, StoryboardRefused } from '../integrations/storyboard';
+import { PLANNING_FLOW_KEY, PlanningFlowError, parsePlanningFlow, storedPlanningFlow } from '../integrations/planning-flow';
+import { SOUS_FLOW_KEY, SousFlowError, flowLines, parseSousFlow, profileFor, storedSousFlow } from '../integrations/sous-flow';
+import { setTicketProfile, sousFlowSettings, ticketProfile } from '../integrations/sous-flow-live';
+import { sousStartPrompt } from '../integrations/orchestrator-cron';
+import { qaGuide } from '../integrations/qa-guide-live';
+import type { Checkpoint } from '../integrations/orchestrator';
 import { planningChatPrompt, planningChatTitle } from '../integrations/planning-ingest';
 import { isSettledStatus, mergeAttention, planAttentionItems, withoutSettledTickets } from '../integrations/attention';
 import { discordGateway, discordReader } from '../integrations/discord-reader-live';
 import { isTeamChannel } from '../integrations/discord-team';
 import { ChannelInputError, channelStore, isChannelKind, threadService, withJira } from '../integrations/discord-threads';
 import { DiscordReaderError, ROW_VERSION } from '../integrations/discord-reader';
-import { CronInputError, type OwnerAnswer, type OwnerChange } from '../integrations/orchestrator-cron';
+import { OpsRulesInputError, STATUS_AFTER_MERGE_KEY, WORKTREE_MERGED_KEY, parseStatusAfterMerge, parseWorktreeMerged, readStatusAfterMerge, readWorktreeMerged } from '../integrations/ops-rules';
+import { qaQueueService } from '../integrations/qa-queue-live';
+import { worktrees } from '../integrations/worktrees-live';
+import { CronInputError, manualRefusal, type OwnerAnswer, type OwnerChange } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
 import { autoReview, listedAutoReviews } from '../integrations/auto-review-live';
 import { labelOrder } from '../integrations/orchestrator-cron';
@@ -50,6 +59,9 @@ import { dockMode, ownRuns } from '../mode';
 import { buildIssueBody, currentBuild, dockIssueError, draftUrl, issueEnvironment, issueTitle, issuesRepo, reporterName, type IssueDraft } from '../integrations/dock-issues';
 import { ChangesInputError } from '../integrations/pull-changes';
 import { pullChangesService } from '../integrations/pull-changes-live';
+import { judgeQueue } from '../integrations/judge-live';
+import { JudgeInputError } from '../integrations/judge-queue';
+import { JUDGE_SETTINGS_KEY, JudgeSettingsError, parseJudgeSettings, storedJudgeSettings } from '../integrations/judge';
 
 const jiraAPI = new JiraAPI();
 const githubAPI = new GitHubAPI();
@@ -217,6 +229,24 @@ async function runSousPrompt(title: string, text: string) {
   return session.id;
 }
 
+const judgeError = (error: unknown): never => {
+  if (error instanceof JudgeInputError || error instanceof JudgeSettingsError || error instanceof OrchestratorInputError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+  throw error;
+};
+
+type JudgeGrades = Awaited<ReturnType<typeof judgeQueue.grades>>;
+let judgeBatch: { ids: Set<string>; rows: Promise<JudgeGrades> } | null = null;
+
+/** The Judge row of a listed session; the sessions of one request are read in one query. */
+function sessionJudge(sessionId: string) {
+  if (!judgeBatch) {
+    const ids = new Set<string>();
+    judgeBatch = { ids, rows: new Promise<void>((resolve) => setImmediate(resolve)).then(() => { judgeBatch = null; return judgeQueue.grades([...ids]); }) };
+  }
+  judgeBatch.ids.add(sessionId);
+  return judgeBatch.rows.then((rows) => rows.get(sessionId) ?? null);
+}
+
 function orchestratorInputError(error: unknown): never {
   if (error instanceof OrchestratorInputError) {
     throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
@@ -338,6 +368,27 @@ function cronError(error: unknown): never {
   throw error;
 }
 
+function requireWorktrees(): void {
+  if (dockMode() !== 'workspace') {
+    throw new GraphQLError('Worktrees are cleaned from the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });
+  }
+}
+
+/** Saves one Aturan rule after validation and returns it normalized; an empty value goes back to the defaults. */
+async function saveOpsRule<T>(key: string, value: string, parse: (raw: string | null) => T): Promise<string> {
+  if (!value.trim()) {
+    await storageService.deleteSetting(key);
+    return JSON.stringify(parse(null));
+  }
+  let saved: string;
+  try { saved = JSON.stringify(parse(value)); } catch (error) {
+    if (error instanceof OpsRulesInputError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+    throw error;
+  }
+  await storageService.upsertSetting(key, saved);
+  return saved;
+}
+
 async function hasMasterPin(): Promise<boolean> {
   return storageAPI.hasMasterPin();
 }
@@ -369,6 +420,29 @@ export const resolvers = {
     sprintPlan: () => sprintPlanView(),
     planningSprints: () => sprintDraftService.sprints().catch(planningError),
     sprintDraft: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.view(sprint).catch(planningError),
+    sprintPlanSignal: (_: unknown, { sprint }: { sprint: string }) => planSignalService.view(sprint).catch(planningError),
+    planningFlow: async () => storedPlanningFlow((await storageService.getSettingValues([PLANNING_FLOW_KEY]))[0]?.value),
+    judgeDays: (_: unknown, { sprint }: { sprint?: string | null }) => judgeQueue.days(sprint).catch(judgeError),
+    judgeDay: (_: unknown, { day }: { day: string }) => judgeQueue.day(day).catch(judgeError),
+    judgeWaiting: () => (dockMode() === 'workspace' ? judgeQueue.waitingDays() : []),
+    judgeSettings: async () => JSON.stringify(storedJudgeSettings((await storageService.getSettingValues([JUDGE_SETTINGS_KEY]))[0]?.value)),
+    checkpoints: (_: unknown, { key }: { key: string }) => orchestratorService.checkpoints(key),
+    sousFlow: async () => storedSousFlow((await storageService.getSettingValues([SOUS_FLOW_KEY]))[0]?.value),
+    ticketSousFlow: (_: unknown, { key }: { key: string }) => ticketProfile(key),
+    sousFlowPrompt: async (_: unknown, { profile, key }: { profile: string; key?: string | null }) => {
+      const lines = flowLines(profileFor(await sousFlowSettings(), profile).profile);
+      return { lines, prompt: sousStartPrompt(key?.trim().toUpperCase() || 'QRD-…', null, lines) };
+    },
+    opsRules: async () => {
+      const [statusAfterMerge, worktreeMerged] = await storageService.getSettingValues([STATUS_AFTER_MERGE_KEY, WORKTREE_MERGED_KEY]);
+      return { statusAfterMerge: JSON.stringify(readStatusAfterMerge(statusAfterMerge?.value)), worktreeMerged: JSON.stringify(readWorktreeMerged(worktreeMerged?.value)) };
+    },
+    qaQueue: () => qaQueueService.queue(),
+    qaQueuePosition: (_: unknown, { key }: { key: string }) => qaQueueService.position(key),
+    worktrees: () => {
+      requireWorktrees();
+      return worktrees.list();
+    },
     previewSprintDraftPublish: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.preview(sprint).catch(planningError),
     acIncoming: () => acInService.incoming().catch(planningError),
     sprintDrift: async () => {
@@ -455,6 +529,8 @@ export const resolvers = {
         throw error;
       }
     },
+    ticketSummary: (_: unknown, { key }: { key: string }) => ticketSummaryService.summary(key).catch(planningError),
+    ticketReadiness: (_: unknown, { keys, refs }: { keys: string[]; refs?: string[] | null }) => ticketSummaryService.readiness(keys, refs ?? []).catch(planningError),
     ticketRelationGroup: async (_: any, { ticketKey }: { ticketKey: string }) => {
       return storageAPI.getTicketRelationGroup(ticketKey);
     },
@@ -608,6 +684,7 @@ export const resolvers = {
   
   Ticket: {
     labels: (parent: any) => Array.isArray(parent.labels) ? parent.labels : [],
+    blockedBy: (parent: any) => (Array.isArray(parent.links) ? parent.links : []).filter((link: any) => link?.relation === 'blockedBy').map((link: any) => String(link.key)),
     workOrder: async (parent: any) => (await storageAPI.ticketOrders()).get(parent.key) ?? labelOrder(parent.labels),
     workOrderSource: async (parent: any) => ((await storageAPI.ticketOrders()).has(parent.key) ? 'dock' : labelOrder(parent.labels) === null ? null : 'label'),
     workManual: async (parent: any) => (await storageAPI.manualTickets()).has(parent.key),
@@ -678,10 +755,71 @@ export const resolvers = {
     uploadSprintStoryboard: (_: unknown, { sprint, epic, html }: { sprint: string; epic: string; html: string }) => uploadStoryboard(sprint, epic, html),
     setSprintDraftTcs: (_: unknown, { sprint, key, tcs }: { sprint: string; key: string; tcs: unknown[] }) => sprintDraftService.setTcs(sprint, key, tcs).catch(planningError),
     moveSprintDraftCards: (_: unknown, { sprint, keys, to }: { sprint: string; keys: string[]; to: string }) => sprintDraftService.moveCards(sprint, keys, to).catch(planningError),
-    answerSprintDraftQuestion: (_: unknown, { sprint, id, answered }: { sprint: string; id: string; answered: boolean }) => (
-      sprintDraftService.answer(sprint, id, answered, reporterName()).catch(planningError)
+    answerSprintDraftQuestion: (_: unknown, { sprint, id, answered, text }: { sprint: string; id: string; answered: boolean; text?: string | null }) => (
+      sprintDraftService.answer(sprint, id, answered, reporterName(), text ?? null).catch(planningError)
     ),
     publishSprintDraft: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.publish(sprint, reporterName()).catch(planningError),
+    setJudgeCall: (_: unknown, { findingId, call, note }: { findingId: string; call: string; note?: string | null }) => { requireAgentControls(); return judgeQueue.setCall(findingId, call, note ?? null).catch(judgeError); },
+    confirmJudgeDay: (_: unknown, { day, note }: { day: string; note?: string | null }) => { requireAgentControls(); return judgeQueue.confirmDay(day, note ?? null).catch(judgeError); },
+    judgeNow: () => { requireAgentControls(); return judgeQueue.judgeNow().catch(judgeError); },
+    judgeSprint: (_: unknown, { sprint }: { sprint: string }) => { requireAgentControls(); return judgeQueue.requestSprint(sprint).catch(judgeError); },
+    judgeAgain: (_: unknown, { sessionId }: { sessionId: string }) => { requireAgentControls(); return judgeQueue.judgeAgain(sessionId).catch(judgeError); },
+    setJudgeSettings: async (_: unknown, { settings }: { settings: string }) => {
+      requireAgentControls();
+      let saved: string;
+      try { saved = JSON.stringify(parseJudgeSettings(settings)); } catch (error) { return judgeError(error); }
+      await storageService.upsertSetting(JUDGE_SETTINGS_KEY, saved, 'Settings › Judge');
+      return saved;
+    },
+    setPlanningFlow: async (_: unknown, { flow }: { flow: string }) => {
+      if (!flow.trim()) {
+        await storageService.deleteSetting(PLANNING_FLOW_KEY);
+        return null;
+      }
+      let saved: string;
+      try { saved = JSON.stringify(parsePlanningFlow(flow)); } catch (error) {
+        if (error instanceof PlanningFlowError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+        throw error;
+      }
+      await storageService.upsertSetting(PLANNING_FLOW_KEY, saved);
+      return saved;
+    },
+    setSousFlow: async (_: unknown, { flow }: { flow: string }) => {
+      if (!flow.trim()) {
+        await storageService.deleteSetting(SOUS_FLOW_KEY);
+        return storedSousFlow(null);
+      }
+      let saved: string;
+      try { saved = JSON.stringify(parseSousFlow(flow)); } catch (error) {
+        if (error instanceof SousFlowError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+        throw error;
+      }
+      await storageService.upsertSetting(SOUS_FLOW_KEY, saved);
+      return saved;
+    },
+    setStatusAfterMerge: (_: unknown, { value }: { value: string }) => saveOpsRule(STATUS_AFTER_MERGE_KEY, value, parseStatusAfterMerge),
+    setWorktreeMerged: (_: unknown, { value }: { value: string }) => saveOpsRule(WORKTREE_MERGED_KEY, value, parseWorktreeMerged),
+    cleanWorktrees: (_: unknown, { paths }: { paths: string[] }) => {
+      requireWorktrees();
+      return worktrees.clean(paths.slice(0, 50));
+    },
+    setTicketSousFlow: async (_: unknown, { key, profile }: { key: string; profile?: string | null }) => {
+      let ticket: string;
+      try { ticket = normalizeTicketKey(key); } catch { throw new GraphQLError('A valid ticket key is required', { extensions: { code: 'BAD_USER_INPUT' } }); }
+      const name = profile?.trim() || null;
+      if (name && !(await sousFlowSettings()).profiles[name]) throw new GraphQLError(`No Sous flow profile named ${name}`, { extensions: { code: 'BAD_USER_INPUT' } });
+      return setTicketProfile(ticket, name);
+    },
+    writeQaGuide: async (_: unknown, { key }: { key: string }) => {
+      let ticket: string;
+      try { ticket = normalizeTicketKey(key); } catch { throw new GraphQLError('A valid ticket key is required', { extensions: { code: 'BAD_USER_INPUT' } }); }
+      try {
+        return await qaGuide.write(ticket);
+      } catch (error) {
+        const status = (error as any)?.response?.status;
+        throw new GraphQLError(status ? `Jira responded ${status}` : error instanceof Error ? error.message : 'The QA guide could not be written', { extensions: { code: status ? 'BAD_GATEWAY' : 'BAD_USER_INPUT' } });
+      }
+    },
     openPlanningChat: async (_: unknown, { sprint }: { sprint: string }) => {
       const name = sprint.trim();
       if (!name) throw new GraphQLError('sprint is required', { extensions: { code: 'BAD_USER_INPUT' } });
@@ -899,7 +1037,13 @@ export const resolvers = {
       if (!(await orchestratorService.machines()).includes(CHAT_MACHINE)) {
         throw new GraphQLError('Unknown machine', { extensions: { code: 'BAD_USER_INPUT' } });
       }
-      return chatService.createSession({ ...args, machine: CHAT_MACHINE }).catch(orchestratorInputError);
+      const check = args.ticketKey && !args.forkFrom
+        ? await Promise.resolve().then(() => orchestratorCron.manualCheck(normalizeTicketKey(args.ticketKey!))).catch(() => null)
+        : null;
+      const refused = check ? manualRefusal(check) : null;
+      if (refused) throw new GraphQLError(refused, { extensions: { code: 'BAD_USER_INPUT' } });
+      const session = await chatService.createSession({ ...args, machine: CHAT_MACHINE }).catch(orchestratorInputError);
+      return { ...session, waitsOn: check?.waitsOn ?? null };
     },
     sendChatMessage: async (
       _: unknown,
@@ -1061,11 +1205,15 @@ export const resolvers = {
     },
   },
   ChatSession: {
+    judge: (session: { id: string }) => sessionJudge(session.id),
     pending: async (session: { id: string; status: string; machine: string }) => chatService.pending(session.id, session.status, session.machine),
     settled: async (session: { id: string; status: string; machine: string }) => chatService.settled(session.id, session.status, session.machine),
   },
   DiscordChannel: {
     team: (channel: { team?: boolean }) => Boolean(channel.team),
+  },
+  SprintDraftQuestion: {
+    options: (question: { options?: string[] }) => question.options ?? [],
   },
   SprintStoryboard: {
     scenarios: (board: { scenarios?: unknown[] }) => board.scenarios ?? [],
@@ -1074,6 +1222,13 @@ export const resolvers = {
   },
   ChatMessage: {
     attachments: (message: { attachments?: unknown[] }) => message.attachments ?? [],
+  },
+  SessionJudge: {
+    findings: (judge: { sessionId: string }) => judgeQueue.findings(judge.sessionId),
+  },
+  Checkpoint: {
+    untestable: (checkpoint: Checkpoint) => checkpoint.notes.untestable,
+    missingData: (checkpoint: Checkpoint) => checkpoint.notes.missingData,
   },
 };
 
@@ -1084,7 +1239,9 @@ export const protectedQueries = [
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'agentLooks', 'libraryAgents', 'libraryAgent',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
   'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro', 'sprintPlan',
-  'planningSprints', 'sprintDraft', 'previewSprintDraftPublish', 'sprintDrift', 'acIncoming',
+  'planningSprints', 'sprintDraft', 'sprintPlanSignal', 'planningFlow', 'previewSprintDraftPublish', 'sprintDrift', 'acIncoming', 'ticketSummary', 'ticketReadiness',
+  'checkpoints', 'sousFlow', 'ticketSousFlow', 'sousFlowPrompt', 'opsRules', 'qaQueue', 'qaQueuePosition', 'worktrees',
+  'judgeDays', 'judgeDay', 'judgeWaiting', 'judgeSettings',
 ] as const;
 export const protectedMutations = [
   'retroBuild',
@@ -1094,6 +1251,19 @@ export const protectedMutations = [
   'updateSprintDraftTicket',
   'decideSprintDraft',
   'refreshSprintDraftQa',
+  'setPlanningFlow',
+  'setJudgeCall',
+  'confirmJudgeDay',
+  'judgeNow',
+  'judgeSprint',
+  'judgeAgain',
+  'setJudgeSettings',
+  'setSousFlow',
+  'setTicketSousFlow',
+  'writeQaGuide',
+  'setStatusAfterMerge',
+  'setWorktreeMerged',
+  'cleanWorktrees',
   'checkSprintStoryboards',
   'uploadSprintStoryboard',
   'answerSprintDraftQuestion',

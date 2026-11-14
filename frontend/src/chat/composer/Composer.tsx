@@ -15,8 +15,9 @@ import { useCommands } from './useCommands';
 import { isPhone } from '../../lib/phone';
 import { ModelPopover } from '../ModelPopover';
 import type { SessionMachineOptions } from '../sessionOptions';
+import { FlowPicker } from './FlowPicker';
 
-const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilities, blocker, busy, stopping, control, onSend, onStop, seed, compact }) => {
+const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilities, blocker, busy, stopping, control, onSend, onStop, seed, compact, flow }) => {
   const features = composerFeatures(capabilities);
   const [draft, setDraft] = useState(() => readDraft(sessionId));
   const [sending, setSending] = useState(false);
@@ -174,6 +175,7 @@ const ComposerBody: React.FC<ComposerProps> = ({ sessionId, machine, capabilitie
               </button>
             </>
           )}
+          {flow && !compact && <FlowPicker flow={flow} disabled={sending} />}
           <span className="flex-1" />
           <button type="button" className={cn(iconButton, 'border-transparent text-secondary-foreground hover:bg-surface-hover hover:text-foreground', compact ? 'min-[901px]:hidden' : 'min-[761px]:hidden')} aria-pressed={full} aria-label={full ? 'Back to the small message box' : 'Write in full screen'} title={full ? 'Back to the small message box' : 'Write in full screen'} onClick={() => setFull((current) => !current)}>
             {full ? <Minimize2 size={15} aria-hidden="true" /> : <Maximize2 size={15} aria-hidden="true" />}

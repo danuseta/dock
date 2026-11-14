@@ -206,6 +206,8 @@ model ChatSession {
   options         String?
   /// "cron" for a session the orchestrator cron opened (it takes a cron slot), "manual" otherwise.
   origin          String    @default("manual")
+  /// The Claude account the bridge runs this session with; null runs it on the machine's active account.
+  account         String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -417,10 +419,63 @@ model RetroItem {
   dest      String   @default("note")
   status    String   @default("open")
   sessionId String?
+  /// ledger for a line drafted from the ticket ledgers, judge for one the Judge sprint summary posted.
+  source    String   @default("ledger")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([sprint])
+}
+
+/// A session Judge reads: queued when it goes quiet, judged one at a time in the quiet window.
+model JudgeSession {
+  sessionId            String    @id
+  /// The WIB date (YYYY-MM-DD) of the session's last judged message.
+  day                  String
+  status               String    @default("pending") /// pending | running | judged | failed
+  judgedUntilMessageId Int?
+  /// The last message id of the input the running Judge session reads.
+  runUntilMessageId    Int?
+  judgeChatId          String?
+  grade                String?
+  ownerWaitMinutes     Int       @default(0)
+  attempts             Int       @default(0)
+  startedAt            DateTime?
+  judgedAt             DateTime?
+  error                String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@index([status])
+  @@index([day])
+}
+
+/// One step Judge called a mistake (or not). ownerCall is the owner's answer on the day sheet; null keeps Judge's call.
+model JudgeFinding {
+  id         String   @id @default(uuid())
+  sessionId  String
+  day        String
+  messageId  Int?
+  threadUrl  String?
+  cause      String
+  text       String
+  quote      String   @default("")
+  shouldHave String   @default("")
+  judgeCall  String /// mistake | not
+  ownerCall  String? /// mistake | not
+  note       String?
+  createdAt  DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([day])
+  @@index([ownerCall, createdAt])
+}
+
+/// The owner's answer for one WIB day of findings.
+model JudgeDay {
+  day         String    @id
+  confirmedAt DateTime?
+  note        String?
 }
 
 /// One sprint's dependency map. sprint is the sprint name, like RetroItem.sprint.

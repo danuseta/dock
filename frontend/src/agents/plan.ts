@@ -1,7 +1,10 @@
 import { ago } from '../lib/discordThreads';
 
-export type AgentsTab = 'office' | 'sprint' | 'library';
-export type SprintSub = 'planning' | 'plan' | 'retro';
+export type AgentsTab = 'office' | 'library';
+export type PlanningPageTab = 'draft' | 'plan' | 'retro';
+const PLANNING_TABS: PlanningPageTab[] = ['draft', 'plan', 'retro'];
+const PLANNING_PANELS = ['mine', 'team', 'scope', 'ac', 'qa', 'tc', 'storyboard'] as const;
+export type PlanningPanelId = (typeof PLANNING_PANELS)[number];
 
 export interface PlanEdge {
   id: string;
@@ -25,16 +28,36 @@ export interface SprintPlan {
   tickets: PlanTicket[];
 }
 
-export function agentsRoute(search: string): { tab: AgentsTab; sub: SprintSub } {
+export const agentsRoute = (search: string): AgentsTab => (new URLSearchParams(search).get('tab') === 'library' ? 'library' : 'office');
+
+/** The tab and Draft panel of /planning: `?tab=draft|plan|retro` (Draft when missing) and `?panel=`. */
+export function planningRoute(search: string): { tab: PlanningPageTab; panel: PlanningPanelId | null } {
   const params = new URLSearchParams(search);
+  const tab = params.get('tab') as PlanningPageTab;
+  const panel = params.get('panel') as PlanningPanelId;
+  return { tab: PLANNING_TABS.includes(tab) ? tab : 'draft', panel: PLANNING_PANELS.includes(panel) ? panel : null };
+}
+
+/** The Draft panel the URL names, else the fallback: Planning follows ?panel= on load and on Back / Forward. */
+export const panelOf = <T extends string>(search: string, fallback: T): PlanningPanelId | T => planningRoute(search).panel ?? fallback;
+
+/**
+ * Planning moved out of Agents: an old link (/agents?tab=sprint&sub=planning|plan|retro, /agents?tab=sprint,
+ * /agents?tab=retro) opens the matching /planning tab and keeps its other parameters, such as panel. Any other path
+ * comes back unchanged.
+ */
+export function planningRedirect(href: string): string {
+  const [path, query = ''] = href.split('?');
+  if (path !== '/agents') return href;
+  const params = new URLSearchParams(query);
   const tab = params.get('tab');
-  if (tab === 'library') return { tab: 'library', sub: 'plan' };
-  if (tab === 'retro') return { tab: 'sprint', sub: 'retro' };
-  if (tab === 'sprint') {
-    const sub = params.get('sub');
-    return { tab: 'sprint', sub: sub === 'retro' || sub === 'planning' ? sub : 'plan' };
-  }
-  return { tab: 'office', sub: 'plan' };
+  if (tab !== 'sprint' && tab !== 'retro') return href;
+  const sub = params.get('sub');
+  const next = tab === 'retro' || sub === 'retro' ? 'retro' : sub === 'planning' ? 'draft' : 'plan';
+  params.delete('tab');
+  params.delete('sub');
+  const rest = params.toString();
+  return `/planning?tab=${next}${rest ? `&${rest}` : ''}`;
 }
 
 export const sourceLabel = (source: string) => (source === 'jira' ? 'Jira' : 'Inferred');

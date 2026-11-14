@@ -32,9 +32,14 @@ const SPRINT = /^Sprint-\d+$/i;
 const KEY_IN_NAME = /(?:^|[^A-Z0-9])([A-Z][A-Z0-9]+-\d+)(?![0-9])/;
 /** Rendered from the ledger by status.cjs; the page marks them so nobody edits them by hand. */
 const GENERATED = new Set(['NOW.md', 'status.md', 'decisions.md', 'issues.md']);
+/** Files at the blackboard root the page shows next to the tickets. */
+const ROOT_FILES = new Set(['kamus-pengucapan.md']);
+/** A board sous made while building a ticket; a board without any of these holds a PR review. */
+const TASK_MARK = /^(prompts\/|tasks\.md$|ac\.(txt|md)$|review-(FINAL|LOOP)|review\/)/i;
 
 export type BlackboardFileKind = 'text' | 'image' | 'video' | 'other';
-export interface BlackboardTicket { key: string; epic: string | null; updatedAt: string; files: number }
+export type BlackboardKind = 'task' | 'review';
+export interface BlackboardTicket { key: string; epic: string | null; updatedAt: string; files: number; sprint: string | null; kind: BlackboardKind }
 export interface BlackboardFile { path: string; size: number; updatedAt: string; kind: BlackboardFileKind; generated: boolean }
 export interface BlackboardOpened { file: string; size: number; mime: string; name: string; inline: boolean }
 
@@ -66,7 +71,9 @@ const inside = (root: string, target: string) => {
   return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
 };
 
-interface SprintTicket { epic: string; files: BlackboardFile[] }
+interface SprintTicket { epic: string; sprint: string; files: BlackboardFile[] }
+
+export const boardKind = (files: Array<{ path: string }>): BlackboardKind => (files.some((file) => TASK_MARK.test(file.path)) ? 'task' : 'review');
 
 export class Blackboard {
   constructor(private readonly root: string = defaultBlackboardRoot(), private readonly sprintRoot: string = defaultSprintBoardsRoot()) {}
@@ -91,8 +98,8 @@ export class Blackboard {
       const updatedAt = sprint.files.reduce((latest, file) => (file.updatedAt > latest ? file.updatedAt : latest), '');
       const ledger = found.get(key);
       found.set(key, ledger
-        ? { ...ledger, epic: ledger.epic ?? sprint.epic, files: ledger.files + sprint.files.length, updatedAt: updatedAt > ledger.updatedAt ? updatedAt : ledger.updatedAt }
-        : { key, epic: sprint.epic, files: sprint.files.length, updatedAt });
+        ? { ...ledger, epic: ledger.epic ?? sprint.epic, files: ledger.files + sprint.files.length, updatedAt: updatedAt > ledger.updatedAt ? updatedAt : ledger.updatedAt, sprint: sprint.sprint }
+        : { key, epic: sprint.epic, files: sprint.files.length, updatedAt, sprint: sprint.sprint, kind: boardKind(sprint.files) });
     }
     return [...found.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
@@ -125,6 +132,25 @@ export class Blackboard {
     return { file: real, size: stat.size, mime, name: path.basename(real), inline: true };
   }
 
+  /** A text file of the ticket as a string; null when it is missing, refused or unreadable. */
+  async text(key: string, relative: string): Promise<string | null> {
+    try {
+      const opened = await this.open(key, relative);
+      return opened.mime.startsWith('text/') || opened.mime.startsWith('application/json') ? await fs.readFile(opened.file, 'utf8') : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** A file at the blackboard root, such as the pronunciation list; null when it is not there. */
+  async rootFile(name: string): Promise<BlackboardOpened | null> {
+    if (!ROOT_FILES.has(name)) return null;
+    const full = path.join(this.root, name);
+    const stat = await fs.stat(full).catch(() => null);
+    if (!stat?.isFile() || stat.size > MAX_TEXT_BYTES) return null;
+    return { file: full, size: stat.size, mime: TEXT_TYPES.md, name, inline: true };
+  }
+
   private async dirOf(key: string): Promise<string | null> {
     const upper = String(key || '').trim().toUpperCase();
     if (!TICKET_KEY.test(upper)) return null;
@@ -153,7 +179,7 @@ export class Blackboard {
           const parts = file.path.split('/');
           const key = parts.slice(0, -1).find((part) => TICKET_KEY.test(part)) ?? KEY_IN_NAME.exec(parts[parts.length - 1])?.[1];
           if (!key) continue;
-          const ticket = found.get(key) ?? { epic: `${sprint.name} · ${epic.name}`, files: [] };
+          const ticket = found.get(key) ?? { epic: `${sprint.name} · ${epic.name}`, sprint: sprint.name, files: [] };
           ticket.files.push({ ...file, path: `${prefix}/${file.path}`, generated: false });
           found.set(key, ticket);
         }
@@ -165,7 +191,7 @@ export class Blackboard {
   private async summary(key: string, epic: string | null, dir: string): Promise<BlackboardTicket> {
     const files = await this.walk(dir);
     const updatedAt = files.reduce((latest, file) => (file.updatedAt > latest ? file.updatedAt : latest), '');
-    return { key, epic, updatedAt: updatedAt || (await fs.stat(dir)).mtime.toISOString(), files: files.length };
+    return { key, epic, updatedAt: updatedAt || (await fs.stat(dir)).mtime.toISOString(), files: files.length, sprint: null, kind: boardKind(files) };
   }
 
   private async walk(dir: string, ledger = true): Promise<BlackboardFile[]> {

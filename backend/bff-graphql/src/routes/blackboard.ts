@@ -3,11 +3,27 @@ import { pipeline } from 'node:stream/promises';
 import { Router, type Request, type Response } from 'express';
 import { sessionManager, shouldRequirePin } from '../auth/session';
 import { Blackboard, BlackboardRefusal, blackboard } from '../integrations/blackboard';
+import { loadAcTrace, type AcTraceLedger } from '../integrations/ac-trace';
+import { parseLedger } from '../integrations/orchestrator';
 import { StorageService } from '../storage/service';
 
 export interface BlackboardRouterOptions {
   board?: Blackboard;
   authorize?: (request: Request) => Promise<boolean>;
+  /** The ticket's ledger as status.cjs last pushed it; null when this DOCK has no run for it. */
+  ledger?: (key: string) => Promise<AcTraceLedger | null>;
+}
+
+/** The AC, pull requests and evidence of the run DOCK keeps for the ticket; null when there is none or it cannot be read. */
+async function storedLedger(key: string): Promise<AcTraceLedger | null> {
+  const row = await new StorageService().getOrchestratorRunWithLedger(key.trim().toUpperCase()).catch(() => null);
+  if (!row) return null;
+  try {
+    const ledger = parseLedger(JSON.parse(row.ledgerRaw || row.payload));
+    return { ac: ledger.ac, prBe: ledger.prBe, prFe: ledger.prFe };
+  } catch {
+    return null;
+  }
 }
 
 const refuse = (response: Response, status: number, message: string) => {
@@ -33,6 +49,13 @@ export function createBlackboardRouter(options: BlackboardRouterOptions = {}): R
     }
   });
 
+  router.get('/root/:file', async (request, response) => {
+    const opened = await board.rootFile(request.params.file);
+    if (!opened) return refuse(response, 404, 'No such file');
+    response.status(200).set({ 'content-type': opened.mime, 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' });
+    await pipeline(createReadStream(opened.file), response).catch(() => undefined);
+  });
+
   router.get('/tickets', async (_request, response) => {
     response.set('cache-control', 'no-store').json({ tickets: await board.tickets() });
   });
@@ -41,6 +64,13 @@ export function createBlackboardRouter(options: BlackboardRouterOptions = {}): R
     const files = await board.files(request.params.key);
     if (!files) return refuse(response, 404, 'No blackboard for this ticket');
     response.set('cache-control', 'no-store').json({ files });
+  });
+
+  router.get('/:key/ac-trace', async (request, response) => {
+    const ledger = await (options.ledger ?? storedLedger)(request.params.key).catch(() => null);
+    const trace = await loadAcTrace(board, request.params.key, ledger);
+    if (!trace) return refuse(response, 404, 'No blackboard for this ticket');
+    response.set('cache-control', 'no-store').json({ trace });
   });
 
   router.get('/:key/file', async (request, response) => {

@@ -1,16 +1,26 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@apollo/client';
-import { ArrowLeft, ClipboardList, Download, File, FileCheck2, Folder, Image as ImageIcon, Info, List, Lock, MapPin, HelpCircle, Scale, ScrollText, Video } from 'lucide-react';
+import { ArrowLeft, BookA, ChevronDown, ChevronRight, ClipboardList, Download, Eye, File, FileCheck2, FileSignature, Folder, FolderOpen, GitPullRequest, Image as ImageIcon, Info, List, Lock, MapPin, HelpCircle, Route, Scale, ScrollText, Video } from 'lucide-react';
 import { Button, Checkbox, Input, Page } from '../components/ui';
 import { Markdown } from '../chat/Markdown';
-import { GET_ORCHESTRATIONS, GET_RUN_THINKING } from '../graphql/queries';
+import { GET_DASHBOARD, GET_ORCHESTRATION, GET_ORCHESTRATIONS, GET_RUN_THINKING, GET_SPRINT_DRAFT, GET_TICKET_DETAIL_CORE, GET_TICKET_READINESS, GET_TICKET_SUMMARY } from '../graphql/queries';
+import { usePullPatches } from '../lib/usePullPatches';
+import { draftStoryboard } from '../lib/contractLinks';
+import type { SprintDraft } from '../agents/planning';
 import { ThinkingList } from '../agents/ThinkingList';
 import { filterRows, rowsMarkdown, type RowFilter, type ThinkingRow } from '../agents/thinking';
-import { stageLabel } from '../agents/runs';
+import { stageLabel, type AgentRun, type AgentTimeline } from '../agents/runs';
+import { repoName } from '../changes/href';
+import type { SummaryFacts } from '../components/ticket/useReadiness';
+import { coverageText, useAcTrace, withIndonesian, type AcRef } from '../lib/acTrace';
 import { cn } from '../lib/cn';
-import { LOG_ENTRY, fetchFiles, fetchText, fetchTickets, fileUrl, formatSize, groupFiles, withoutComments, type BlackboardFile, type BlackboardTicket } from '../lib/blackboard';
+import { CONTRACT_ENTRY, KAMUS_ENTRY, KAMUS_FILE, LOG_ENTRY, TRACE_ENTRY, boardTree, contractFiles, fetchFiles, fetchRootText, fetchText, fetchTickets, fileUrl, formatSize, groupFiles, isPullEntry, pullEntry, pullRepo, sprintGroups, withoutComments, type BlackboardFile, type BlackboardKind, type BlackboardTicket, type BoardFilter } from '../lib/blackboard';
+import { AcMap } from './blackboard/AcMap';
+import { CodeChanges } from './blackboard/CodeChanges';
+import { ContractView } from './blackboard/ContractView';
+import { ExecLog } from './blackboard/ExecLog';
 
-interface RunInfo { key: string; title: string | null; stage: string }
+interface RunInfo { key: string; title: string | null; stage: string; kind?: string | null }
 
 const FILE_ICON: Record<string, React.ElementType> = { 'NOW.md': MapPin, 'review.md': FileCheck2, 'decisions.md': Scale, 'issues.md': HelpCircle, 'status.md': List };
 const iconFor = (file: BlackboardFile) => FILE_ICON[file.path] ?? (file.kind === 'image' ? ImageIcon : file.kind === 'video' ? Video : File);
@@ -31,7 +41,7 @@ const when = (iso: string) => {
 
 const readQuery = () => {
   const params = new URLSearchParams(window.location.search);
-  return { key: params.get('key'), file: params.get('file') };
+  return { key: params.get('key'), file: params.get('file'), path: params.get('path') };
 };
 
 const writeQuery = (key: string | null, file: string | null) => {
@@ -131,21 +141,34 @@ const LogView: React.FC<{ ticket: string }> = ({ ticket }) => {
   );
 };
 
-/** The agents' per-ticket blackboard on this workspace, read-only: tickets, their files, and one file at a time. */
-const BlackboardPage: React.FC = () => {
+/** The agents' per-ticket blackboard on this workspace, read-only: tickets per sprint, one ticket's folders, and one entry at a time. */
+const BlackboardPage: React.FC<{ onNavigate?: (path: string) => void; onTicketClick?: (key: string) => void }> = ({ onNavigate, onTicketClick }) => {
   const [initial] = useState(readQuery);
   const [tickets, setTickets] = useState<BlackboardTicket[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [hideDone, setHideDone] = useState(false);
+  const [filter, setFilter] = useState<BoardFilter>('all');
+  const [closed, setClosed] = useState<Record<string, boolean>>({});
   const [picked, setPicked] = useState<string | null>(initial.key);
   const [files, setFiles] = useState<BlackboardFile[] | null>(null);
   const [selected, setSelected] = useState<string | null>(initial.file);
+  const [focus, setFocus] = useState<string | null>(initial.path);
+  const [kamus, setKamus] = useState<string | null | undefined>(undefined);
   const { data } = useQuery<{ orchestrations: RunInfo[] }>(GET_ORCHESTRATIONS, { fetchPolicy: 'cache-and-network' });
   const runs = useMemo(() => new Map((data?.orchestrations ?? []).map((run) => [run.key.toUpperCase(), run])), [data]);
+  const { data: board } = useQuery(GET_DASHBOARD, { fetchPolicy: 'cache-only', returnPartialData: true });
+  const jiraSprint = useMemo(() => new Map<string, string>((board?.dashboard ?? []).flatMap((group: { tickets?: Array<{ key: string; sprintName?: string | null }> }) => group.tickets ?? []).filter((ticket: { sprintName?: string | null }) => ticket.sprintName && ticket.sprintName !== 'No Sprint').map((ticket: { key: string; sprintName: string }) => [ticket.key.toUpperCase(), ticket.sprintName])), [board]);
+  const { data: detail } = useQuery<{ orchestration: AgentRun & { timeline?: AgentTimeline | null } | null }>(GET_ORCHESTRATION, { variables: { key: picked ?? '' }, skip: !picked, fetchPolicy: 'cache-and-network', pollInterval: 30000 });
+  const run = picked && detail?.orchestration?.key?.toUpperCase() === picked.toUpperCase() ? detail.orchestration : null;
+  const { data: summaryData } = useQuery<{ ticketSummary: SummaryFacts | null }>(GET_TICKET_SUMMARY, { variables: { key: picked ?? '' }, skip: !picked, fetchPolicy: 'cache-first' });
+  const summary = summaryData?.ticketSummary?.key === picked ? summaryData?.ticketSummary ?? null : null;
+  const rawTrace = useAcTrace(picked, Boolean(picked));
+  const trace = useMemo(() => (rawTrace ? withIndonesian(rawTrace, summary) : null), [rawTrace, summary]);
 
   useEffect(() => {
     fetchTickets().then(setTickets, (failure: Error) => setError(failure.message));
+    fetchRootText(KAMUS_FILE).then(setKamus);
   }, []);
 
   useEffect(() => {
@@ -158,89 +181,133 @@ const BlackboardPage: React.FC = () => {
 
   useEffect(() => { writeQuery(picked, selected); }, [picked, selected]);
 
+  const kindOf = (ticket: BlackboardTicket): BlackboardKind => {
+    const kind = runs.get(ticket.key)?.kind;
+    return kind === 'review' ? 'review' : kind ? 'task' : ticket.kind ?? 'task';
+  };
+  const sprintOf = (ticket: BlackboardTicket) => ticket.sprint ?? jiraSprint.get(ticket.key) ?? null;
   const shown = (tickets ?? []).filter((ticket) => {
     const run = runs.get(ticket.key);
     if (hideDone && run?.stage === 'done') return false;
     const needle = query.trim().toLowerCase();
     return !needle || ticket.key.toLowerCase().includes(needle) || (run?.title ?? '').toLowerCase().includes(needle);
   });
+  const sprints = sprintGroups(shown, filter, sprintOf, kindOf);
+  const tree = boardTree(files ?? []);
   const groups = groupFiles(files ?? []);
   const file = (files ?? []).find((entry) => entry.path === selected) ?? null;
   const folder = selected && !file ? groups.find((group) => group.folder === selected) ?? null : null;
-  const pickTicket = (key: string) => { setPicked(key); setSelected('NOW.md'); };
+  const pickTicket = (key: string) => { setPicked(key); setSelected('NOW.md'); setFocus(null); };
+  const pick = (entry: string) => { setSelected(entry); setFocus(null); };
+  const repos = [...new Set([...(run?.pullRequests ?? []).map((pr) => repoName(pr.repo)), ...(trace?.pulls ?? []).map((pull) => repoName(pull.url))])];
+  const patches = usePullPatches(picked, repos, selected === TRACE_ENTRY);
+  const onContract = Boolean(picked) && selected === CONTRACT_ENTRY;
+  const { data: jira } = useQuery(GET_TICKET_DETAIL_CORE, { variables: { key: picked ?? '' }, skip: !onContract, fetchPolicy: 'cache-first' });
+  const jiraTicket = jira?.ticketDetail?.key?.toUpperCase() === picked?.toUpperCase() ? jira?.ticketDetail : null;
+  const { data: readiness } = useQuery<{ ticketReadiness: { tickets: Array<{ key: string; sprint: string | null }> } }>(GET_TICKET_READINESS, { variables: { keys: [picked ?? ''], refs: [] }, skip: !onContract, fetchPolicy: 'cache-first' });
+  const draftSprint = readiness?.ticketReadiness?.tickets.find((item) => item.key === picked)?.sprint ?? null;
+  const { data: draftData } = useQuery<{ sprintDraft: SprintDraft | null }>(GET_SPRINT_DRAFT, { variables: { sprint: draftSprint ?? '' }, skip: !onContract || !draftSprint, fetchPolicy: 'cache-first' });
+  const storyboard = picked ? draftStoryboard(draftData?.sprintDraft, picked) : null;
+  const openRef = (ref: AcRef) => {
+    const pull = trace?.pulls.find((item) => item.side === ref.side) ?? (trace?.pulls.length === 1 ? trace.pulls[0] : null);
+    setSelected(pullEntry(pull ? repoName(pull.url) : repos[0] ?? null));
+    setFocus(ref.path);
+  };
+  const pickedTicket = (tickets ?? []).find((ticket) => ticket.key === picked) ?? null;
+  const pickedRun = picked ? runs.get(picked) : undefined;
+  const title = selected === LOG_ENTRY ? 'Log eksekusi' : selected === TRACE_ENTRY ? 'Tiket → kode' : selected === CONTRACT_ENTRY ? 'Kontrak' : selected === KAMUS_ENTRY ? KAMUS_FILE : isPullEntry(selected) ? `Perubahan kode${pullRepo(selected) ? ` · ${pullRepo(selected)}` : ''}` : selected ?? '';
+  const entry = (id: string, Icon: React.ElementType, label: React.ReactNode, meta: React.ReactNode, depth = 1) => (
+    <button key={id} type="button" onClick={() => pick(id)} aria-current={selected === id ? 'true' : undefined} style={{ paddingLeft: `${10 + depth * 14}px` }} className={cn('flex w-full items-center gap-2 border-0 bg-transparent py-1.5 pr-3.5 text-left text-[0.76rem] text-secondary-foreground hover:bg-surface-1 max-[760px]:min-h-11', selected === id && 'bg-surface-1 text-foreground')}>
+      <Icon size={14} aria-hidden="true" className="flex-none" /><span className="truncate">{label}</span><span className="ml-auto flex-none font-mono text-[0.6rem] text-muted-foreground">{meta}</span>
+    </button>
+  );
+  const dir = (name: string) => <p className="flex items-center gap-1.5 px-2.5 pt-2.5 pb-1 font-mono text-[0.66rem] font-bold text-foreground"><FolderOpen size={13} aria-hidden="true" className="text-sky-200" />{name}/</p>;
+  const folderEntry = (group: { folder: string; files: BlackboardFile[] }) => entry(group.folder, group.files.every((item) => item.kind === 'image') ? ImageIcon : Folder, group.folder, group.files.length);
 
   return (
     <Page width="full" className="max-[760px]:pb-28">
       <header className="mb-4 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-bold">Blackboard</h1>
-          <p className="mt-1 text-xs text-muted-foreground">The agents' working board per ticket: where it stands, decisions, review notes and evidence. Read-only.</p>
+          <p className="mt-1 text-xs text-muted-foreground">The agents' working board per ticket: contract, log, Tiket → kode, code changes, decisions, review notes and evidence. Read-only.</p>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-xs border border-border px-2 py-1 text-[0.68rem] text-muted-foreground"><Lock size={12} aria-hidden="true" />Read-only</span>
       </header>
       {error && <p className="mb-4 text-xs text-status-conflict" role="alert">{error}</p>}
 
-      <div className="grid min-h-[640px] grid-cols-[260px_240px_minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-background max-[1100px]:grid-cols-[240px_minmax(0,1fr)] max-[760px]:grid-cols-1">
-        <section className={cn('flex min-w-0 flex-col border-r border-border', picked && 'max-[760px]:hidden')} aria-label="Tickets">
-          <div className="flex flex-col gap-2 border-b border-border px-3 py-2.5">
-            <Input type="search" aria-label="Search tickets" className="h-8 text-xs max-[760px]:h-11" placeholder="Search key or title" value={query} onChange={(event) => setQuery(event.target.value)} />
-            <label className="flex items-center gap-2 text-[0.7rem] text-muted-foreground max-[760px]:min-h-11 max-[760px]:text-xs"><Checkbox checked={hideDone} onChange={(event) => setHideDone(event.target.checked)} />Hide done</label>
-          </div>
-          <div className="max-h-[calc(100dvh-16rem)] min-h-[320px] flex-1 overflow-y-auto max-[760px]:max-h-none">
-            {tickets === null && !error && <p className="px-4 py-6 text-sm text-muted-foreground" role="status">Loading tickets...</p>}
-            {tickets !== null && shown.length === 0 && <p className="px-4 py-6 text-sm text-muted-foreground">{tickets.length === 0 ? 'No ticket has a blackboard yet.' : 'No ticket matches.'}</p>}
-            {shown.map((ticket) => {
-              const run = runs.get(ticket.key);
-              return (
-                <button key={`${ticket.epic ?? ''}/${ticket.key}`} type="button" onClick={() => pickTicket(ticket.key)} aria-current={picked === ticket.key ? 'true' : undefined} className={cn('grid w-full grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-0.5 border-0 border-b border-border bg-transparent px-3.5 py-2.5 text-left hover:bg-surface-1', picked === ticket.key && 'bg-surface-1 shadow-[inset_2px_0_0_var(--color-accent)]', ticket.epic && 'pl-6')}>
-                  <span className="font-mono text-xs font-bold">{ticket.key}</span>
-                  {run ? <span className={cn('self-start rounded-xs px-1.5 py-px font-mono text-[0.6rem] font-bold max-[760px]:text-xs', STAGE_TONE[run.stage] ?? 'bg-surface-2 text-secondary-foreground')}>{stageLabel(run.stage)}</span> : <span />}
-                  <span className="col-span-2 truncate text-[0.72rem] text-secondary-foreground max-[760px]:line-clamp-2 max-[760px]:whitespace-normal">{run?.title ?? (ticket.epic ? `in ${ticket.epic}` : 'No run on this DOCK')}</span>
-                  <span className="col-span-2 font-mono text-[0.6rem] text-muted-foreground max-[760px]:text-xs">{ticket.files} files · {when(ticket.updatedAt)}</span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-
-        <section className={cn('flex min-w-0 flex-col border-r border-border max-[760px]:border-r-0', (!picked || selected) && 'max-[760px]:hidden', !picked && 'max-[1100px]:hidden')} aria-label="Files">
-          <div className="flex items-center justify-between border-b border-border px-3.5 py-2.5 font-mono text-[0.62rem] font-bold uppercase tracking-wide text-muted-foreground max-[760px]:text-xs">
-            <button type="button" onClick={() => setPicked(null)} className="hidden items-center gap-1 border-0 bg-transparent p-0 text-muted-foreground max-[760px]:flex max-[760px]:min-h-11"><ArrowLeft size={12} aria-hidden="true" />Tickets</button>
-            <span>{picked ?? 'Files'}</span><span>{files?.length ?? ''}</span>
-          </div>
-          <div className="max-h-[calc(100dvh-16rem)] flex-1 overflow-y-auto py-1.5 max-[760px]:max-h-none">
-            {picked && files === null && <p className="px-4 py-4 text-sm text-muted-foreground" role="status">Loading files...</p>}
-            {!picked && <p className="px-4 py-4 text-sm text-muted-foreground">Pick a ticket.</p>}
-            {picked && (
-              <button type="button" onClick={() => setSelected(LOG_ENTRY)} aria-current={selected === LOG_ENTRY ? 'true' : undefined} className={cn('flex w-full items-center gap-2 border-0 border-b border-border bg-transparent px-3.5 py-1.5 text-left text-[0.76rem] text-secondary-foreground hover:bg-surface-1', selected === LOG_ENTRY && 'bg-surface-1 text-foreground')}>
-                <ScrollText size={14} aria-hidden="true" className="flex-none" /><span>Log</span><span className="ml-auto font-mono text-[0.6rem] text-muted-foreground">execution</span>
+      <div className="grid min-h-[640px] grid-cols-[280px_minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-background max-[760px]:grid-cols-1">
+        {!picked ? (
+          <section className={cn('flex min-w-0 flex-col border-r border-border bg-surface-0', selected && 'max-[760px]:hidden')} aria-label="Tickets">
+            <div className="flex flex-col gap-2 border-b border-border px-3 py-2.5">
+              <Input type="search" aria-label="Search tickets" className="h-8 text-xs max-[760px]:h-11" placeholder="Search key or title" value={query} onChange={(event) => setQuery(event.target.value)} />
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="inline-flex overflow-hidden rounded-xs border border-border-glow font-mono text-[0.66rem]" role="group" aria-label="Board type">
+                  {([['all', 'Semua'], ['task', 'Task'], ['review', 'Review']] as const).map(([id, label]) => <button key={id} type="button" aria-pressed={filter === id} onClick={() => setFilter(id)} className={cn('px-2 py-1 max-[760px]:min-h-11', filter === id ? 'bg-surface-hover font-bold text-foreground' : 'text-secondary-foreground hover:bg-surface-1')}>{label}</button>)}
+                </span>
+                <label className="flex items-center gap-2 text-[0.7rem] text-muted-foreground max-[760px]:min-h-11 max-[760px]:text-xs"><Checkbox checked={hideDone} onChange={(event) => setHideDone(event.target.checked)} />Hide done</label>
+              </div>
+            </div>
+            <div className="max-h-[calc(100dvh-16rem)] min-h-[320px] flex-1 overflow-y-auto px-2 pb-2 max-[760px]:max-h-none">
+              <h3 className="flex items-center justify-between px-2 pt-3 pb-1 font-mono text-[0.62rem] font-bold uppercase tracking-wider text-muted-foreground">Root <span className="tabular-nums">1</span></h3>
+              <button type="button" onClick={() => pick(KAMUS_ENTRY)} aria-current={selected === KAMUS_ENTRY ? 'true' : undefined} className={cn('mb-0.5 flex w-full items-center gap-2 rounded-xs border border-transparent px-2.5 py-1.5 text-left text-[0.76rem] text-secondary-foreground hover:bg-surface-1 max-[760px]:min-h-11', selected === KAMUS_ENTRY && 'border-border-glow bg-surface-1 text-foreground')}>
+                <BookA size={14} aria-hidden="true" className="flex-none text-sky-200" /><span className="truncate font-mono">{KAMUS_FILE}</span><span className="ml-auto font-mono text-[0.6rem] text-muted-foreground">{kamus === null ? 'belum ada' : 'kamus'}</span>
               </button>
-            )}
-            {groups.map((group) => group.folder === ''
-              ? group.files.map((entry) => {
-                  const Icon = iconFor(entry);
-                  return (
-                    <button key={entry.path} type="button" onClick={() => setSelected(entry.path)} aria-current={selected === entry.path ? 'true' : undefined} className={cn('flex w-full items-center gap-2 border-0 bg-transparent px-3.5 py-1.5 text-left text-[0.76rem] text-secondary-foreground hover:bg-surface-1', selected === entry.path && 'bg-surface-1 text-foreground')}>
-                      <Icon size={14} aria-hidden="true" className="flex-none" /><span className="truncate">{entry.path}</span>
-                      {entry.generated && <span className="rounded-xs border border-border px-1 font-mono text-[0.54rem] text-muted-foreground">gen</span>}
-                      <span className="ml-auto font-mono text-[0.6rem] text-muted-foreground">{formatSize(entry.size)}</span>
-                    </button>
-                  );
-                })
-              : (
-                <button key={group.folder} type="button" onClick={() => setSelected(group.folder)} aria-current={selected === group.folder ? 'true' : undefined} className={cn('flex w-full items-center gap-2 border-0 bg-transparent px-3.5 py-1.5 text-left text-[0.76rem] text-foreground hover:bg-surface-1', selected === group.folder && 'bg-surface-1')}>
-                  {group.files.every((entry) => entry.kind === 'image') ? <ImageIcon size={14} aria-hidden="true" /> : <Folder size={14} aria-hidden="true" />}
-                  <span className="truncate">{group.folder}</span><span className="ml-auto font-mono text-[0.6rem] text-muted-foreground">{group.files.length}</span>
-                </button>
+              {tickets === null && !error && <p className="px-2 py-6 text-sm text-muted-foreground" role="status">Loading tickets...</p>}
+              {tickets !== null && sprints.length === 0 && <p className="px-2 py-6 text-sm text-muted-foreground">{tickets.length === 0 ? 'No ticket has a blackboard yet.' : filter === 'all' ? 'No ticket matches.' : `No ${filter === 'task' ? 'Task' : 'Review'} tickets.`}</p>}
+              {sprints.map((group) => (
+                <section key={group.sprint} aria-label={group.sprint}>
+                  <button type="button" aria-expanded={!closed[group.sprint]} onClick={() => setClosed((state) => ({ ...state, [group.sprint]: !state[group.sprint] }))} className="flex w-full items-center gap-1.5 border-0 bg-transparent px-2 pt-3 pb-1 font-mono text-[0.62rem] font-bold uppercase tracking-wider text-muted-foreground max-[760px]:min-h-11">
+                    {closed[group.sprint] ? <ChevronRight size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}{group.sprint}<span className="ml-auto tabular-nums">{group.tickets.length}</span>
+                  </button>
+                  {!closed[group.sprint] && group.tickets.map((ticket) => {
+                    const run = runs.get(ticket.key);
+                    return (
+                      <button key={`${ticket.epic ?? ''}/${ticket.key}`} type="button" onClick={() => pickTicket(ticket.key)} className="grid w-full grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-0.5 rounded-xs border-0 bg-transparent px-2.5 py-2 text-left hover:bg-surface-1">
+                        <span className="flex items-center gap-1.5 font-mono text-xs font-bold">{kindOf(ticket) === 'review' && <Eye size={12} aria-label="Review" className="text-sky-200" />}{ticket.key}</span>
+                        {run ? <span className={cn('self-start rounded-xs px-1.5 py-px font-mono text-[0.6rem] font-bold max-[760px]:text-xs', STAGE_TONE[run.stage] ?? 'bg-surface-2 text-secondary-foreground')}>{stageLabel(run.stage)}</span> : <span />}
+                        <span className="col-span-2 truncate text-[0.72rem] text-secondary-foreground max-[760px]:line-clamp-2 max-[760px]:whitespace-normal">{run?.title ?? (ticket.epic ? `in ${ticket.epic}` : 'No run on this DOCK')}</span>
+                        <span className="col-span-2 font-mono text-[0.6rem] text-muted-foreground max-[760px]:text-xs">{ticket.files} files · {when(ticket.updatedAt)}</span>
+                      </button>
+                    );
+                  })}
+                </section>
               ))}
-          </div>
-        </section>
+            </div>
+          </section>
+        ) : (
+          <section className={cn('flex min-w-0 flex-col border-r border-border bg-surface-0', selected && 'max-[760px]:hidden')} aria-label="Files">
+            <div className="flex flex-col gap-1 border-b border-border px-3 py-2.5">
+              <button type="button" onClick={() => { setPicked(null); setSelected(null); }} className="inline-flex items-center gap-1.5 self-start border-0 bg-transparent p-0 text-xs text-muted-foreground hover:text-foreground max-[760px]:min-h-11"><ArrowLeft size={13} aria-hidden="true" />Semua tiket</button>
+              <div className="flex flex-wrap items-center gap-2">
+                <b className="font-mono text-sm text-accent">{picked}</b>
+                {pickedRun && <span className={cn('rounded-xs px-1.5 py-px font-mono text-[0.6rem] font-bold', STAGE_TONE[pickedRun.stage] ?? 'bg-surface-2 text-secondary-foreground')}>{stageLabel(pickedRun.stage)}</span>}
+                {pickedTicket && sprintOf(pickedTicket) && <span className="font-mono text-[0.62rem] text-muted-foreground">{sprintOf(pickedTicket)}</span>}
+                {onTicketClick && <button type="button" onClick={() => onTicketClick(picked)} className="ml-auto border-0 bg-transparent p-0 text-[0.7rem] font-semibold text-accent hover:underline">Detail tiket</button>}
+              </div>
+              {pickedRun?.title && <p className="line-clamp-2 text-[0.74rem] text-secondary-foreground">{pickedRun.title}</p>}
+            </div>
+            <nav className="max-h-[calc(100dvh-16rem)] flex-1 overflow-y-auto py-1.5 max-[760px]:max-h-none" aria-label="Folders">
+              {files === null && <p className="px-4 py-4 text-sm text-muted-foreground" role="status">Loading files...</p>}
+              {dir('Dokumen')}
+              {entry(CONTRACT_ENTRY, FileSignature, 'Kontrak', contractFiles(files ?? []).length ? 'md' : 'belum ada')}
+              {entry(TRACE_ENTRY, Route, 'Tiket → kode', coverageText(trace))}
+              <button type="button" onClick={() => setSelected(LOG_ENTRY)} aria-current={selected === LOG_ENTRY ? 'true' : undefined} style={{ paddingLeft: '24px' }} className={cn('flex w-full items-center gap-2 border-0 bg-transparent py-1.5 pr-3.5 text-left text-[0.76rem] text-secondary-foreground hover:bg-surface-1 max-[760px]:min-h-11', selected === LOG_ENTRY && 'bg-surface-1 text-foreground')}>
+                <ScrollText size={14} aria-hidden="true" className="flex-none" /><span>Log eksekusi</span><span className="ml-auto font-mono text-[0.6rem] text-muted-foreground">{run?.failures?.length ? `${run.failures.length} gagal` : 'execution'}</span>
+              </button>
+              {tree.docs.map((item) => entry(item.path, iconFor(item), <>{item.path}{item.generated && <span className="ml-1.5 rounded-xs border border-border px-1 font-mono text-[0.54rem] text-muted-foreground">gen</span>}</>, formatSize(item.size)))}
+              {tree.artifacts.length > 0 && <>{dir('Artifacts')}{tree.artifacts.map(folderEntry)}</>}
+              {dir('Perubahan kode')}
+              {(repos.length ? repos : [null]).map((repo) => entry(pullEntry(repo), GitPullRequest, repo ?? 'Pull request tiket ini', 'diff'))}
+              {tree.other.map(folderEntry)}
+            </nav>
+          </section>
+        )}
 
-        <section className={cn('flex min-w-0 flex-col', !selected && 'max-[760px]:hidden', !picked && 'max-[1100px]:col-span-1')} aria-label="File">
+        <section className={cn('flex min-w-0 flex-col', !selected && 'max-[760px]:hidden')} aria-label="File">
           <div className="flex items-center justify-between gap-3 border-b border-border px-3.5 py-2">
             <span className="flex min-w-0 items-center gap-1.5 font-mono text-[0.72rem]">
               <button type="button" onClick={() => setSelected(null)} className="hidden border-0 bg-transparent p-0 text-muted-foreground max-[760px]:inline-flex max-[760px]:min-h-11 max-[760px]:min-w-11 max-[760px]:items-center"><ArrowLeft size={12} aria-hidden="true" /></button>
-              {picked && <span className="text-muted-foreground">{picked} /</span>}<span className="truncate">{selected === LOG_ENTRY ? 'Log' : selected ?? ''}</span>
+              {picked && selected !== KAMUS_ENTRY && <span className="text-muted-foreground">{picked} /</span>}<span className="truncate">{title}</span>
             </span>
             <span className="flex items-center gap-3 font-mono text-[0.62rem] text-muted-foreground max-[760px]:text-xs">
               {file && <span>changed {when(file.updatedAt)}</span>}
@@ -248,8 +315,20 @@ const BlackboardPage: React.FC = () => {
             </span>
           </div>
           <div className="max-h-[calc(100dvh-16rem)] min-h-[320px] flex-1 overflow-y-auto max-[760px]:max-h-none">
-            {picked && selected === LOG_ENTRY
-              ? <LogView ticket={picked} />
+            {selected === KAMUS_ENTRY
+              ? (kamus === undefined
+                ? <p className="p-6 text-sm text-muted-foreground" role="status">Loading {KAMUS_FILE}...</p>
+                : kamus
+                  ? <div className="min-w-0 px-6 py-5 text-[0.82rem] leading-relaxed text-secondary-foreground"><Markdown text={withoutComments(kamus)} /></div>
+                  : <p className="p-6 text-sm text-muted-foreground">Kamus pengucapan belum ada. Taruh {KAMUS_FILE} di root blackboard.</p>)
+              : picked && selected === LOG_ENTRY
+              ? <><ExecLog ticket={picked} run={run} timeline={run?.timeline ?? null} /><LogView ticket={picked} /></>
+              : picked && selected === TRACE_ENTRY
+              ? <AcMap trace={trace} loading={rawTrace === null} files={patches} onOpenRef={openRef} />
+              : picked && selected === CONTRACT_ENTRY
+              ? <ContractView ticket={picked} files={files ?? []} run={run} summary={summary} trace={trace} demoUrl={jiraTicket?.demoLink?.url ?? null} figmaUrl={jiraTicket?.figmaUrl ?? null} storyboard={storyboard} />
+              : picked && isPullEntry(selected)
+              ? <div className="p-4"><CodeChanges key={selected} ticketKey={picked} repo={pullRepo(selected)} onRepo={(repo) => setSelected(pullEntry(repo))} trace={trace} focusPath={focus} onSettings={onNavigate ? () => onNavigate('/settings') : undefined} /></div>
               : picked
               ? <FileView ticket={picked} file={file} folder={folder ? { name: folder.folder, files: folder.files } : null} onPick={setSelected} />
               : (

@@ -54,7 +54,7 @@ test('the effect is written under the picked option only', () => {
   const none = render();
   assert.doesNotMatch(none, new RegExp(KEEP_EFFECT), 'nothing picked, no effect');
   const kept = render({ choice: KEEP, text: '', unsure: false });
-  assert.match(kept, /aria-checked="true"[^>]*>.*Keep what sous built<\/span><\/button><div[^>]*><p[^>]*>Nothing changes; it is recorded as confirmed\.<\/p>/);
+  assert.match(kept, /aria-checked="true"[^>]*>.*Keep what sous built<\/span><span[^>]*>Pertahankan yang dibuat sous<\/span><\/span><\/button><div[^>]*><p[^>]*>Nothing changes; it is recorded as confirmed\.<\/p>/);
   assert.doesNotMatch(kept, /One constant changes/, 'the other options keep their effect hidden');
   const own = render({ choice: OWN, text: 'Use 10s', unsure: false });
   assert.match(own, /<textarea[^>]*>Use 10s<\/textarea>/);
@@ -169,4 +169,28 @@ test('Ready to submit needs every question answered and at least one answer not 
   assert.strictEqual(readyToSubmit(questions, { 'I-3': refresh, 'D-4': keep }), true);
   assert.strictEqual(readyToSubmit(questions, { 'I-3': refresh }), false, 'one question is open');
   assert.strictEqual(readyToSubmit(questions, { 'I-3': { ...refresh, sent: true }, 'D-4': { ...keep, sent: true } }), false, 'everything was sent already');
+});
+
+test('QRD-1534: every question and option has its Indonesian line in grey under the English, and the answer sous gets stays English', () => {
+  const translated = {
+    ...run,
+    issues: [{ ...issue(3, 'owner', 'open', ['Refresh', 'Log in again']), textId: 'Koneksinya disambung lagi gimana?', optionsId: ['Refresh dulu', null] }],
+    decisions: [{ n: 4, at: '', text: 'Backoff 1s to 30s', status: 'GUESS', by: 'sous', alts: [{ label: 'Fixed 5s' }], textId: 'Jeda naik dari 1 detik ke 30 detik', optionsId: ['Tetap 5 detik'] }],
+  } as AgentRun;
+  const [asked, guessed] = questionsOf(translated);
+  assert.strictEqual(asked.text, 'Issue 3');
+  assert.strictEqual(asked.textId, 'Koneksinya disambung lagi gimana?');
+  assert.deepStrictEqual(asked.options.map((option) => option.labelId), ['Refresh dulu', null]);
+  assert.deepStrictEqual(guessed.options.map((option) => [option.label, option.labelId]), [['Keep what sous built', 'Pertahankan yang dibuat sous'], ['Fixed 5s', 'Tetap 5 detik']]);
+  const view = renderToStaticMarkup(<QuestionView run={translated} question={asked} number={1} total={2} sentCount={0} readOnly={null} guessesLeft={0} onKeepAll={() => undefined} onChange={() => undefined} onPrevious={() => undefined} onNext={() => undefined} />);
+  assert.match(view, /Issue 3<\/h2><p class="[^"]*text-muted-foreground[^"]*" lang="id">Koneksinya disambung lagi gimana\?<\/p>/);
+  assert.match(view, />Refresh<\/span><span class="[^"]*text-muted-foreground[^"]*" lang="id">Refresh dulu<\/span>/);
+  assert.match(view, />Log in again<\/span><\/span>/, 'an option without a translation has no grey line');
+  assert.match(view, /Tulis jawaban sendiri/);
+  const sheet = renderToStaticMarkup(<AnswerSheet run={translated} questions={[asked, guessed]} drafts={{ 'I-3': { choice: 'o0', text: '', unsure: false } }} submitting={false} readOnly={null} error={null} onOpen={() => undefined} onKeepAll={() => undefined} onSubmit={() => undefined} />);
+  assert.match(sheet, /Jeda naik dari 1 detik ke 30 detik/);
+  assert.strictEqual(answerText(asked, { choice: 'o0', text: '', unsure: false }), 'Refresh', 'sous receives the English option');
+
+  const plain = renderToStaticMarkup(<QuestionView run={run} question={questionsOf(run)[0]} number={1} total={3} sentCount={0} readOnly={null} guessesLeft={0} onKeepAll={() => undefined} onChange={() => undefined} onPrevious={() => undefined} onNext={() => undefined} />);
+  assert.doesNotMatch(plain, /<\/h2><p[^>]*lang="id"/, 'no translation, no grey line under the question');
 });

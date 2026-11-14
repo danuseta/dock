@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { agentsRoute } from '../agents/plan';
+import { panelOf, planningRedirect, planningRoute } from '../agents/plan';
+import { applyTemplate, defaultFlow } from '../agents/planningFlow';
 import {
-  UNASSIGNED, barPlace, changeCount, dayOf, decisionLabel, findingKindLabel, lanes, parseWave, predictionTone, publishHint, scopeSummary, sortFindings,
-  forecastOf, lateDays, lateText, shortDate, underWay, planningChatTitle, questionsLine, spanOf, devColors, handOffs, landingDay, openQuestionsOf, ranks, teamStats, waitersOf, storyboardDecisionId, storyboardLine, tcsToText, textToTcs, waveRows, workingDayLabels, scheduleWindow, laneOf, laneCount, planRange, githubLine, scheduled, developerLine, freeFrom, moveLine, moveForecast, type DraftFinding, type DraftTicket,
+  UNASSIGNED, barPlace, changeCount, publishReadiness, dayOf, decisionLabel, findingKindLabel, lanes, parseWave, predictionTone, publishHint, scopeSummary, sortFindings,
+  forecastOf, lateDays, lateText, shortDate, underWay, planningChatTitle, questionsLine, spanOf, devColors, handOffs, landingDay, openQuestionsOf, ranks, teamStats, waitersOf, storyboardDecisionId, storyboardLine, tcsToText, textToTcs, waveRows, workingDayLabels, scheduleWindow, laneOf, laneCount, planRange, githubLine, scheduled, developerLine, freeFrom, moveLine, moveForecast, checklistTcs, myTickets, qaChecklist, undecidedFinding, type DraftFinding, type DraftTicket, type SprintDraft,
 } from '../agents/planning';
 
 const ticket = (over: Partial<DraftTicket>): DraftTicket => ({
@@ -14,9 +15,20 @@ const ticket = (over: Partial<DraftTicket>): DraftTicket => ({
 });
 const finding = (over: Partial<DraftFinding>): DraftFinding => ({ id: 'x', key: 'QRD-1', line: 1, text: 't', refKey: 'QRD-2', kind: 'lands-first', refEnd: 1, ownEnd: 2, decision: null, ...over });
 
-test('agentsRoute opens Sprint > Planning for sub=planning and keeps Plan as the default', () => {
-  assert.deepEqual(agentsRoute('?tab=sprint&sub=planning'), { tab: 'sprint', sub: 'planning' });
-  assert.deepEqual(agentsRoute('?tab=sprint&sub=nope'), { tab: 'sprint', sub: 'plan' });
+test('/planning opens Draft by default, reads the panel, and every old Agents link opens the matching tab', () => {
+  assert.deepEqual(planningRoute(''), { tab: 'draft', panel: null });
+  assert.deepEqual(planningRoute('?tab=retro'), { tab: 'retro', panel: null });
+  assert.deepEqual(planningRoute('?tab=draft&panel=qa'), { tab: 'draft', panel: 'qa' });
+  assert.deepEqual(planningRoute('?tab=nope&panel=nope'), { tab: 'draft', panel: null });
+  assert.equal(planningRedirect('/agents?tab=sprint&sub=planning'), '/planning?tab=draft');
+  assert.equal(planningRedirect('/agents?tab=sprint&sub=planning&panel=ac'), '/planning?tab=draft&panel=ac');
+  assert.equal(planningRedirect('/agents?tab=sprint&sub=plan'), '/planning?tab=plan');
+  assert.equal(planningRedirect('/agents?tab=sprint'), '/planning?tab=plan');
+  assert.equal(planningRedirect('/agents?tab=sprint&sub=retro'), '/planning?tab=retro');
+  assert.equal(planningRedirect('/agents?tab=retro'), '/planning?tab=retro');
+  assert.equal(planningRedirect('/agents?run=QRD-1'), '/agents?run=QRD-1', 'an Office link stays');
+  assert.equal(planningRedirect('/agents?tab=library'), '/agents?tab=library');
+  assert.equal(planningRedirect('/sprint?tab=sprint'), '/sprint?tab=sprint');
 });
 
 test('lanes follow the draft developers, sum SP, count backlog and add Unassigned last', () => {
@@ -55,7 +67,11 @@ test('findings sort after-it first and decisions read as words', () => {
   assert.deepEqual(['after-it', 'lands-first', 'outside-plan'].map(findingKindLabel), ['after it', 'lands first', 'outside plan']);
   const decision = (action: string, note: string | null = null) => ({ action, note, by: 'Alvin', at: '' });
   assert.equal(decisionLabel(decision('move'), 'QRD-2'), 'Moved to QRD-2');
-  assert.equal(decisionLabel(decision('wait')), 'Kept, waits');
+  assert.equal(decisionLabel(decision('dependency')), 'Dependency · link Blocks dipasang waktu Publish');
+  assert.equal(decisionLabel(decision('wait')), 'Dependency · link Blocks dipasang waktu Publish', 'an older wait reads as dependency');
+  assert.equal(decisionLabel(decision('reference')), 'Pindah ke Reference');
+  assert.equal(decisionLabel(decision('drop')), 'Pindah ke Reference', 'an older drop reads as reference');
+  assert.equal(decisionLabel(decision('approve')), 'Disetujui QA');
   assert.equal(decisionLabel(decision('fix', 'AC 3 rewritten')), 'Fixed: AC 3 rewritten');
   assert.equal(decisionLabel(null), null);
 });
@@ -89,7 +105,8 @@ test('Planning opens a Planning-<sprint> chat in the floating ChatDock, which po
   assert.match(tab, /<PlanningChat sprint=\{chosen\.name\} \/>/);
   assert.match(tab, /pollInterval: 10000/);
   assert.doesNotMatch(tab, /xl:grid-cols-\[420px/);
-  const chat = readFileSync(fileURLToPath(new URL('../agents/PlanningChat.tsx', import.meta.url)), 'utf8');
+  // The button and the hook that opens the chat live in two files, for fast refresh.
+  const chat = ['../agents/PlanningChat.tsx', '../agents/usePlanningChat.ts'].map((file) => readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8')).join('\n');
   assert.doesNotMatch(chat, /ChatThread/);
   assert.ok(chat.includes('chatStore.openSession('));
   assert.ok(chat.includes('Open planning chat'));
@@ -246,4 +263,100 @@ test('developer tile and move texts', () => {
   assert.equal(moveLine({ keys: ['QRD-1278', 'QRD-1290'], sp: 4, from: 'Shovian', to: 'Danu' }), 'QRD-1278, QRD-1290 4 SP · Shovian → Danu');
   assert.equal(moveForecast({ forecastBefore: 3, forecastAfter: 2 }, ['Mon 9 Nov', 'Tue 10 Nov', 'Wed 11 Nov']), 'forecast D3 (Wed 11 Nov) → D2 (Tue 10 Nov)');
   assert.equal(moveForecast({ forecastBefore: 17, forecastAfter: 13 }, []), 'forecast D17 → D13');
+});
+
+const ready = (over: Partial<SprintDraft> = {}) => ({
+  tickets: [ticket({ key: 'QRD-1', sp: 10 }), ticket({ key: 'QRD-2', sp: 10, storyboard: { version: 2, frames: ['F1'], held: false, checked: { action: 'checked', note: null, by: 'PO', at: '' } } })],
+  developers: [{ name: 'Danu', merged: 0, open: 2, sp: 20, leftSp: 20, end: null }], sprintDays: 10, spPerDay: 2, today: null,
+  findings: [finding({ id: 'f1', kind: 'after-it', decision: { action: 'wait', note: null, by: 'PO', at: '' } }), finding({ id: 'f2', linked: true })],
+  storyboards: [{ epic: 'QRD-100', version: 2, previous: 1, path: null, page: null, frames: 4, changed: ['F1'], changedAt: null, checkedAt: '', error: null }],
+  scopeCut: null,
+  ...over,
+});
+
+test('Siap publish 4 dari 4: SP fit, references and ESCALATED decided, storyboard recorded and checked', () => {
+  const result = publishReadiness(ready(), null);
+  assert.deepEqual([result.done, result.total, result.missing], [4, 4, []]);
+  assert.deepEqual(result.items.map((item) => item.id), ['scope', 'ac', 'qa', 'storyboard']);
+  assert.equal(result.items[0].text, '20 SP muat di kapasitas 20 SP');
+});
+
+test('Siap publish 2 dari 4: SP over capacity without a cut and an undecided ESCALATED ticket, each linked to its panel', () => {
+  const result = publishReadiness(ready({
+    tickets: [ticket({ key: 'QRD-1', sp: 25 }), ticket({ key: 'QRD-2', sp: 5, prediction: { prediction: 'ESCALATED', reasons: [], fix: null } })],
+  }), null);
+  assert.deepEqual([result.done, result.total], [2, 4]);
+  assert.deepEqual(result.missing.map((item) => [item.id, item.panel, item.text]), [
+    ['scope', 'scope', '30 SP untuk kapasitas 20 SP'],
+    ['qa', 'qa', '1 tiket diprediksi ESCALATED belum diputusin'],
+  ]);
+  assert.equal(result.missing[0].detail, 'Belum ada keputusan potong scope');
+  const cut = publishReadiness(ready({ tickets: [ticket({ key: 'QRD-1', sp: 25 })], scopeCut: { action: 'cut', note: 'QRD-1 pindah ke Sprint 28', by: 'PO', at: '' } }), null);
+  assert.equal(cut.items[0].ok, true, 'a written scope cut counts as fit');
+  const open = publishReadiness(ready({ findings: [finding({ id: 'f1', key: 'QRD-7', kind: 'after-it' })], storyboards: [] }), null);
+  assert.deepEqual(open.missing.map((item) => [item.id, item.detail]), [['ac', 'QRD-7'], ['storyboard', 'Belum ada storyboard yang dibaca']]);
+});
+
+test('Siap publish leaves out an item whose planning stage is skipped; no flow counts all four', () => {
+  const draft = ready({ storyboards: [], tickets: [ticket({ key: 'QRD-1', sp: 5, prediction: { prediction: 'ESCALATED', reasons: [], fix: null } })] });
+  assert.deepEqual([publishReadiness(draft, defaultFlow()).done, publishReadiness(draft, defaultFlow()).total], [2, 4]);
+  const short = publishReadiness(draft, applyTemplate(defaultFlow(), 'Cuma scope + publish'));
+  assert.deepEqual([short.done, short.total, short.items.map((item) => item.id)], [1, 1, ['scope']]);
+  const noQa = publishReadiness(draft, applyTemplate(defaultFlow(), 'Tanpa QA'));
+  assert.deepEqual([noQa.done, noQa.total, noQa.missing.map((item) => item.id)], [2, 3, ['storyboard']]);
+});
+
+test('the QA checklist splits the AC: a line for Reference or moved is not tested here, a line naming a dependency waits for it', () => {
+  const draftTicket = ticket({ key: 'QRD-1510', ac: ['Owner sees the rule', 'Allow is grey on the consent page (QRD-1307)', 'The MCP drawer greys its button (QRD-1312)', 'Token rotates (QRD-1500)'] });
+  const findings = [
+    finding({ id: 'a', key: 'QRD-1510', line: 2, refKey: 'QRD-1307', linked: true }),
+    finding({ id: 'b', key: 'QRD-1510', line: 3, refKey: 'QRD-1312', decision: { action: 'reference', note: null, by: 'Danu', at: '' } }),
+    finding({ id: 'c', key: 'QRD-1510', line: 4, refKey: 'QRD-1500' }),
+    finding({ id: 'd', key: 'QRD-9', line: 1, refKey: 'QRD-1510' }),
+  ];
+  const list = qaChecklist(draftTicket, findings, ['Owner lihat rule-nya']);
+  assert.deepEqual(list.here.map((line) => [line.n, line.waitsOn, line.textId]), [[1, [], 'Owner lihat rule-nya'], [2, ['QRD-1307'], null], [4, ['QRD-1500'], null]]);
+  assert.deepEqual(list.notHere.map((line) => [line.n, line.testedIn]), [[3, 'QRD-1312']]);
+  const tcs = checklistTcs(list);
+  assert.deepEqual(tcs.map((tc) => [tc.id, tc.ac, tc.steps]), [['TC-1', 1, []], ['TC-2', 2, ['Tunggu QRD-1307 sampai UAT CHECK']], ['TC-3', 4, ['Tunggu QRD-1500 sampai UAT CHECK']]]);
+  assert.equal(qaChecklist(draftTicket, [finding({ key: 'QRD-1510', line: 3, refKey: 'QRD-1312', decision: { action: 'drop', note: null, by: null, at: '' } })]).notHere.length, 1, 'an older drop is not tested here either');
+});
+
+test('Tiket saya lists the open draft tickets of the DOCK owner by Jira name, merged ones left out', () => {
+  const tickets = [ticket({ key: 'QRD-1510', dev: 'M Danu Seta W' }), ticket({ key: 'QRD-1292', dev: 'm danu seta w ' }), ticket({ key: 'QRD-1498', dev: 'Indra' }), ticket({ key: 'QRD-1312', dev: 'M Danu Seta W', merged: true })];
+  assert.deepEqual(myTickets({ tickets }, 'M Danu Seta W').map((item) => item.key), ['QRD-1292', 'QRD-1510']);
+  assert.deepEqual(myTickets({ tickets }, null), []);
+  assert.deepEqual(planningRoute('?tab=draft&panel=mine'), { tab: 'draft', panel: 'mine' });
+});
+
+test('Siap publish counts an after-it line with a Blocks link as decided', () => {
+  const linked = publishReadiness(ready({ findings: [finding({ id: 'f1', key: 'QRD-7', kind: 'after-it', linked: true })] }), null);
+  assert.equal(linked.items.find((item) => item.id === 'ac')!.ok, true);
+});
+
+test('Siap publish and AC check count the same undecided lines: every line naming another ticket with no Blocks link and no call', () => {
+  const findings = [
+    finding({ id: 'a', key: 'QRD-1', kind: 'lands-first' }), finding({ id: 'b', key: 'QRD-2', kind: 'outside-plan' }), finding({ id: 'c', key: 'QRD-3', kind: 'after-it' }),
+    finding({ id: 'd', key: 'QRD-4', linked: true }), finding({ id: 'e', key: 'QRD-5', decision: { action: 'reference', note: null, by: 'PO', at: '' } }),
+  ];
+  const item = publishReadiness(ready({ findings }), null).items.find((entry) => entry.id === 'ac')!;
+  assert.equal(findings.filter(undecidedFinding).length, 3);
+  assert.deepEqual([item.ok, item.text, item.detail], [false, '3 rujukan tiket lain belum diputusin', 'QRD-1, QRD-2, QRD-3']);
+  const source = readFileSync(fileURLToPath(new URL('../agents/PlanningTab.tsx', import.meta.url)), 'utf8');
+  assert.ok(source.includes('{findings.filter(undecidedFinding).length} belum diputusin'), 'AC check counts with the same predicate');
+});
+
+test('the Draft panel follows the URL on load and on Back / Forward', () => {
+  assert.equal(panelOf('?tab=draft&panel=ac', 'team'), 'ac');
+  assert.equal(panelOf('?tab=draft&panel=nope', 'team'), 'team');
+  const source = readFileSync(fileURLToPath(new URL('../agents/PlanningTab.tsx', import.meta.url)), 'utf8');
+  assert.ok(source.includes('useState<PlanningPanel>(() => panelOf(window.location.search, initialPanel))'));
+  assert.ok(source.includes("window.addEventListener('popstate', follow)"));
+});
+
+test("Tiket saya stays usable on a developer's read-only DOCK: it renders outside the disabled fieldset", () => {
+  const tab = readFileSync(fileURLToPath(new URL('../agents/PlanningTab.tsx', import.meta.url)), 'utf8');
+  const mine = tab.indexOf("shown === 'mine' && <MyTicketsPanel");
+  const fieldset = tab.indexOf('<fieldset disabled={!planner}');
+  assert.ok(mine > 0 && fieldset > 0 && mine < fieldset);
 });

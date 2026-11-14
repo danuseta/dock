@@ -3,7 +3,7 @@ import test from 'node:test';
 import { TICKET_TITLE, isTaskTitle, nextSessionTitle, ticketSessionTitle, ticketTitleFromText } from '../integrations/session-titles';
 import {
   CronInputError, DEFAULT_CRON_SETTINGS, MAX_RESUMES, OrchestratorCron, PARKED_TEXT, RESUME_GAVE_UP_TEXT, START_FAILED_TEXT, candidates, hasAcceptanceCriteria, labelOrder, ticketHasAcceptanceCriteria, outsideWindow, parseCronSettings,
-  OWNER_BUSY_TEXT, confirmedPrompt, isStackable, stackLine, ownerReplyPrompt, resumePrompt, sousConfirmedPrompt, sousStartPrompt, startPrompt, wib, type CronDeps, type CronRun, type CronSettings, type CronTicket,
+  OWNER_BUSY_TEXT, confirmedPrompt, dependencyState, isStackable, manualRefusal, stackLine, ownerReplyPrompt, resumePrompt, sousConfirmedPrompt, sousStartPrompt, startPrompt, wib, type CronDeps, type CronRun, type CronSettings, type CronTicket,
 } from '../integrations/orchestrator-cron';
 
 const AC = 'Context.\n\nAcceptance criteria\n\nReloading the page still shows Disconnected.\n\nA manually disabled channel keeps its status.';
@@ -15,12 +15,14 @@ const WED_0905 = new Date('2026-10-14T02:05:00.000Z');
 test('settings: defaults when nothing is saved, saved fields win, v1 keys are ignored, wrong values are refused', () => {
   assert.deepStrictEqual(parseCronSettings(null), DEFAULT_CRON_SETTINGS);
   assert.strictEqual(DEFAULT_CRON_SETTINGS.weeklyBrakePercent, 90);
+  assert.deepStrictEqual([DEFAULT_CRON_SETTINGS.waitForPublish, DEFAULT_CRON_SETTINGS.planAfterPublish], [false, false], 'the publish gate starts off');
   assert.deepStrictEqual(
     [DEFAULT_CRON_SETTINGS.enabled, DEFAULT_CRON_SETTINGS.workStart, DEFAULT_CRON_SETTINGS.workEnd, DEFAULT_CRON_SETTINGS.workDays, DEFAULT_CRON_SETTINGS.maxPerDay, DEFAULT_CRON_SETTINGS.mode],
     [false, 9, 17, [1, 2, 3, 4, 5], 6, null],
   );
   const saved = parseCronSettings(JSON.stringify({ enabled: true, hoursWib: [9], perRound: 3, workDays: [5, 1, 1], parallel: 1, labels: [' be ', 'be'], epicBase: { 'QRD-1232': 'feat/V1-Playbook' } }));
   assert.deepStrictEqual([saved.enabled, saved.workDays, saved.parallel, saved.labels], [true, [1, 5], 1, ['be']]);
+  assert.deepStrictEqual([saved.waitForPublish, saved.planAfterPublish], [false, false], 'a config saved before the publish gate keeps it off');
   assert.ok(!('hoursWib' in saved) && !('perRound' in saved) && !('epicBase' in saved), 'keys from older configs are dropped');
   for (const bad of [
     '{', '[]', '{"parallel":0}', '{"workStart":17,"workEnd":9}', '{"workEnd":25}', '{"workDays":[]}', '{"workDays":[8]}', '{"maxPerDay":0}',
@@ -102,6 +104,7 @@ interface Start {
   dockOrder?: Map<string, number>;
   manual?: Set<string>;
   now?: Date;
+  sousFlowLines?: (key: string) => Promise<string[]>;
 }
 
 type SessionState = 'queued' | 'running' | 'idle' | 'error';
@@ -188,6 +191,7 @@ function world(start: Start = {}) {
     stopTurn: async (sessionId) => { state.stopped.push(sessionId); },
     hasPushDevices: async () => start.pushDevices ?? false,
     push: async (message) => { state.pushes.push(message); },
+    ...(start.sousFlowLines ? { sousFlowLines: start.sousFlowLines } : {}),
   };
   const cron = new OrchestratorCron(deps);
   const byKey = (key: string) => state.sessions.filter((session) => session.ticketKey === key).at(-1)!;
@@ -594,6 +598,25 @@ test('the sous engine is the default; its start prompt runs the sous skill to a 
   assert.match(resumePrompt('QRD-7', 'sous'), /^Pakai skill sous\. Lanjutkan tiket QRD-7 dari blackboard dan ledger \(node \$K\/status\.cjs show QRD-7\)/);
 });
 
+test('QRD-1534: the default Sous flow leaves the cron start prompt byte for byte as before; a profile adds its lines at the end', async () => {
+  const before = world({ tickets: [ticket('QRD-7')], config: { engine: 'sous' } });
+  await before.cron.runFill();
+  const plain = world({ tickets: [ticket('QRD-7')], config: { engine: 'sous' }, sousFlowLines: async () => [] });
+  await plain.cron.runFill();
+  assert.strictEqual(plain.state.sent[0].text, before.state.sent[0].text);
+  assert.strictEqual(plain.state.sent[0].text, sousStartPrompt('QRD-7'));
+
+  const asked: string[] = [];
+  const flowed = world({ tickets: [ticket('QRD-7')], config: { engine: 'sous' }, sousFlowLines: async (key) => { asked.push(key); return ['Sous flow: stop after "plan".']; } });
+  await flowed.cron.runFill();
+  assert.deepStrictEqual(asked, ['QRD-7']);
+  assert.strictEqual(flowed.state.sent[0].text, `${sousStartPrompt('QRD-7')} Sous flow: stop after "plan".`);
+
+  const broken = world({ tickets: [ticket('QRD-7')], config: { engine: 'sous' }, sousFlowLines: async () => { throw new Error('settings unreadable'); } });
+  await broken.cron.runFill();
+  assert.strictEqual(broken.state.sent[0].text, sousStartPrompt('QRD-7'), 'a flow that cannot be read adds nothing');
+});
+
 test('a stalled sous run is resumed with the sous prompt even when the cron is switched back to the older flow', async () => {
   const w = await stalledWorld({ stalledDetail: LEFT_RUNNING, engine: 'sous' });
   await w.cron.runFill();
@@ -718,6 +741,41 @@ test('a parent is stackable while its PR is open or it is in PR Review, not once
   assert.strictEqual(isStackable('In Progress', { prFe: 'https://github.com/o/fe/pull/2', review: 'open' }), true);
   assert.strictEqual(isStackable('In Progress', { prFe: 'https://github.com/o/fe/pull/2', review: 'merged' }), false);
   assert.strictEqual(isStackable('In Progress', {}), false);
+});
+
+test('dependencyState is the cron rule on its own: blocked, stacked and waitsOn from the links, stacking off when stackedAllowed is off', async () => {
+  const tickets = new Map<string, CronTicket>([['QRD-2', ticket('QRD-2', { status: 'PR Review' })], ['QRD-3', ticket('QRD-3', { status: 'In Progress' })], ['QRD-4', ticket('QRD-4', { status: 'UAT CHECK' })]]);
+  const deps = {
+    dependencies: async () => [{ ticketKey: 'QRD-1', dependsOnKey: 'QRD-2' }, { ticketKey: 'QRD-5', dependsOnKey: 'QRD-3' }, { ticketKey: 'QRD-6', dependsOnKey: 'QRD-4' }],
+    ticket: async (key: string) => tickets.get(key) ?? null,
+    runs: async () => [] as CronRun[],
+  };
+  const on = await dependencyState(deps, settings({ engine: 'sous' }));
+  assert.deepStrictEqual([[...on.blocked], [...on.stacked], [...on.waitsOn]], [['QRD-5'], [['QRD-1', 'QRD-2']], [['QRD-5', 'QRD-3']]]);
+  const off = await dependencyState(deps, settings({ engine: 'sous', stackedAllowed: false }));
+  assert.deepStrictEqual([[...off.blocked].sort(), off.stacked.size, off.waitsOn.get('QRD-1')], [['QRD-1', 'QRD-5'], 0, 'QRD-2']);
+});
+
+test('stackedAllowed off makes the cron wait on a PR Review parent instead of stacking', async () => {
+  const w = world({ config: { engine: 'sous', stackedAllowed: false }, tickets: [ticket('QRD-1346'), ticket('QRD-1345', { status: 'PR Review' })], dependencies: [{ ticketKey: 'QRD-1346', dependsOnKey: 'QRD-1345' }] });
+  assert.deepStrictEqual((await w.cron.runFill()).started, []);
+  assert.deepStrictEqual(w.state.waits, [['QRD-1346', 'QRD-1345']]);
+});
+
+test('a manual session on a blocked ticket: tell names the dependency, stop refuses, off does not look, a stacked ticket opens', async () => {
+  const start = { tickets: [ticket('QRD-1'), ticket('QRD-2', { status: 'In Progress' }), ticket('QRD-3'), ticket('QRD-4', { status: 'PR Review' })], dependencies: [{ ticketKey: 'QRD-1', dependsOnKey: 'QRD-2' }, { ticketKey: 'QRD-3', dependsOnKey: 'QRD-4' }] };
+  assert.strictEqual(DEFAULT_CRON_SETTINGS.blockedManual, 'tell');
+  assert.strictEqual(DEFAULT_CRON_SETTINGS.stackedAllowed, true);
+  const tell = await world({ ...start, config: { engine: 'sous' } }).cron.manualCheck('QRD-1');
+  assert.deepStrictEqual(tell, { mode: 'tell', waitsOn: 'QRD-2', stackedOn: null });
+  assert.strictEqual(manualRefusal(tell), null, 'tell opens the session');
+  const stop = await world({ ...start, config: { engine: 'sous', blockedManual: 'stop' } }).cron;
+  assert.match(manualRefusal(await stop.manualCheck('QRD-1')) ?? '', /nunggu QRD-2/);
+  assert.deepStrictEqual(await stop.manualCheck('QRD-3'), { mode: 'stop', waitsOn: null, stackedOn: 'QRD-4' }, 'a stacked ticket is not blocked');
+  assert.strictEqual(manualRefusal(await stop.manualCheck('QRD-3')), null);
+  assert.deepStrictEqual(await world({ ...start, config: { blockedManual: 'off' } }).cron.manualCheck('QRD-1'), { mode: 'off', waitsOn: null, stackedOn: null });
+  assert.throws(() => parseCronSettings('{"blockedManual":"ask"}'), CronInputError);
+  assert.throws(() => parseCronSettings('{"stackedAllowed":"yes"}'), CronInputError);
 });
 
 test('a ticket session is titled Task-KEY, the next one Task-KEY (2); a review Review-KEY', () => {

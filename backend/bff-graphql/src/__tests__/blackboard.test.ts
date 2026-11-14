@@ -122,7 +122,8 @@ test('sprint boards: a ticket comes from its materials file or its own folder un
     const board = new Blackboard(root, sprints);
     const tickets = await board.tickets();
     const byKey = new Map(tickets.map((ticket) => [ticket.key, ticket]));
-    assert.deepStrictEqual(byKey.get('QRD-1278'), { key: 'QRD-1278', epic: 'Sprint-26 · V2-Playbook', files: 1, updatedAt: '2026-10-27T00:00:00.000Z' });
+    assert.deepStrictEqual(byKey.get('QRD-1278'), { key: 'QRD-1278', epic: 'Sprint-26 · V2-Playbook', files: 1, updatedAt: '2026-10-27T00:00:00.000Z', sprint: 'Sprint-26', kind: 'review' });
+    assert.strictEqual(byKey.get('QRD-1230')?.sprint, 'Sprint-26', 'a ledger board takes the sprint of its sprint board files');
     assert.deepStrictEqual([byKey.get('QRD-1491')?.epic, byKey.get('QRD-1491')?.files], ['Sprint-26 · Carry-over', 1]);
     assert.strictEqual(byKey.get('QRD-12780')?.files, 1);
     assert.strictEqual(byKey.has('QRD-9999'), false);

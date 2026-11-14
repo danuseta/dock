@@ -28,6 +28,7 @@ const SIGNALS: Record<string, Signal> = {
   AGENT_WAITING: { rank: 6, group: 'answer', label: 'WAITING' },
   PLAN_DEPENDENCY: { rank: 6, group: 'answer', label: 'DEPENDENCY' },
   AGENT_STALLED: { rank: 7, group: 'quiet', label: 'STALLED' },
+  JUDGE_DAY: { rank: 6, group: 'answer', label: 'JUDGE' },
 };
 
 export interface ReviewRoundInfo { status: string; summary?: string | null; threadUrl?: string | null; at?: string | null }
@@ -36,6 +37,16 @@ export const revisedRound = (session: object): ReviewRoundInfo | null => {
   const round = (session as { reviewRound?: ReviewRoundInfo | null }).reviewRound;
   return round && (round.status === 'reported' || round.status === 'answered') ? round : null;
 };
+
+export const JUDGE_ITEM = 'judge-';
+
+/** A Judge day still waiting on the owner, as a Needs you item on Home: "Judge: Thu 13 Nov waiting (5 findings)". */
+export const judgeAttention = (days: Array<{ day: string; findings: number }>, label: (day: string) => string) => days.map((day) => ({
+  id: `${JUDGE_ITEM}${day.day}`,
+  type: 'JUDGE_DAY',
+  message: `Judge: ${label(day.day)} waiting (${day.findings} ${day.findings === 1 ? 'finding' : 'findings'})`,
+  ticketKey: null,
+}));
 
 export const signalOf = (type: string): Signal => SIGNALS[type] ?? { rank: 8, group: 'quiet', label: type.replace(/_/g, ' ') };
 

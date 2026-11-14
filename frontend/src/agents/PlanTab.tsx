@@ -57,7 +57,7 @@ const DriftLine: React.FC<{ row: DriftRow; busy: boolean; onAction: (id: string,
             {held && <Button size="sm" variant="ghost" onClick={() => onAction(row.id, 'wait')} disabled={busy}><Clock size={13} aria-hidden="true" />Wait</Button>}
             {row.state === 'wait' && <Button size="sm" variant="ghost" onClick={() => onAction(row.id, 'clear')} disabled={busy}><Undo2 size={13} aria-hidden="true" />Undo</Button>}
             <Button size="sm" variant="ghost" onClick={() => onAction(row.id, 'needs-po')} disabled={busy}><Flag size={13} aria-hidden="true" />Needs PO</Button>
-            <Button size="sm" onClick={() => onAction(row.id, 'not-tested')} disabled={busy}><EyeOff size={13} aria-hidden="true" />Not tested here</Button>
+            <Button size="sm" onClick={() => onAction(row.id, 'not-tested')} disabled={busy}><EyeOff size={13} aria-hidden="true" />Pindah ke Reference</Button>
             <Button size="sm" variant="primary" onClick={() => onAction(row.id, 'move')} disabled={busy}><ArrowRightLeft size={13} aria-hidden="true" />Move to {row.refKey}{row.refDev ? ` (${row.refDev})` : ''}</Button>
           </>
         ) : <Button size="sm" variant="ghost" onClick={() => onAction(row.id, 'clear')} disabled={busy} title="Forget the call here; what was written to Jira stays"><Undo2 size={13} aria-hidden="true" />Undo</Button>}
@@ -144,7 +144,7 @@ const DriftSection: React.FC = () => {
       {notice && <p className="mt-2 text-sm text-status-conflict" role="alert">{notice}</p>}
       {drift.rows.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">Every AC line of your tickets has what it needs landed or planned before it.</p> : (
         <>
-          <p className="mt-2 text-pretty text-[0.8rem] text-muted-foreground">{held} held. Move and Not tested here write to Jira only on your own tickets, after reading the AC again; a line for a teammate's ticket waits for them under the label ac-move-pending.</p>
+          <p className="mt-2 text-pretty text-[0.8rem] text-muted-foreground">{held} held. Move and Pindah ke Reference (not tested here: the line leaves AC for the Reference field, no Jira comment) write to Jira only on your own tickets, after reading the AC again; a line for a teammate's ticket waits for them under the label ac-move-pending.</p>
           <ul className="mt-2 rounded-md border border-border bg-surface-0">{sortDrift(drift.rows).map((row) => <DriftLine key={row.id} row={row} busy={acting.loading} onAction={onAction} />)}</ul>
         </>
       )}

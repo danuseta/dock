@@ -84,13 +84,19 @@ test('a file stays viewed only while its patch is the same; storage that throws 
   }
 });
 
-test('the Changes page is a route in both modes and the phone shows unified only', async () => {
+test('Perubahan kode lives in Blackboard; the laptop, which has no Blackboard, opens it on its own; the phone shows unified only', async () => {
   const { readFileSync } = await import('node:fs');
   const app = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
-  assert.match(app, /path === '\/changes'/);
+  assert.match(app, /currentPath === '\/blackboard' && isPullEntry\(new URLSearchParams\(window\.location\.search\)\.get\('file'\)\) \? '\/changes' : '\/'/);
   assert.match(app, /case '\/changes': return/);
   const mode = readFileSync(new URL('../lib/dockMode.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(mode, /'\/changes'/);
-  const page = readFileSync(new URL('../pages/ChangesPage.tsx', import.meta.url), 'utf8');
-  assert.match(page, /const view: DiffView = phone \? 'unified' : chosenView;/);
+  const view = readFileSync(new URL('../pages/blackboard/CodeChanges.tsx', import.meta.url), 'utf8');
+  assert.match(view, /const view: DiffView = phone \? 'unified' : chosenView;/);
+  assert.match(view, /aria-pressed=\{mode === 'file'\}.*>Per file</);
+  assert.match(view, /aria-pressed=\{mode === 'ac'\}.*>Per AC</);
+  assert.match(view, /LONG_FILE_LINES/);
+  assert.match(view, /<FindingCard /);
+  assert.match(readFileSync(new URL('../pages/BlackboardPage.tsx', import.meta.url), 'utf8'), /<CodeChanges key=\{selected\} ticketKey=\{picked\} repo=\{pullRepo\(selected\)\}/);
+  assert.match(readFileSync(new URL('../pages/ChangesPage.tsx', import.meta.url), 'utf8'), /<CodeChanges ticketKey=\{ticketKey\}/);
 });

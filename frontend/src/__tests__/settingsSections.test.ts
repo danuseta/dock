@@ -12,10 +12,12 @@ test('the rail has three groups, and a workspace DOCK has no calendar', () => {
   assert.ok(!workspace.some((section) => section.id === 'calendar'));
 });
 
-test('Claude account sits in Agents on a workspace DOCK, which runs the turns; a laptop DOCK has none', () => {
-  assert.deepStrictEqual(workspace.filter((section) => section.group === 'Agents').map((section) => section.id), ['tokens', 'demo', 'claude']);
-  assert.ok(!laptop.some((section) => section.id === 'claude'));
+test('Claude account, Planning flow and Sous flow sit in Agents on a workspace DOCK, which runs the turns and Planning; a laptop DOCK has none of them', () => {
+  assert.deepStrictEqual(workspace.filter((section) => section.group === 'Agents').map((section) => section.id), ['tokens', 'demo', 'claude', 'planflow', 'sousflow', 'judge']);
+  assert.ok(!laptop.some((section) => section.id === 'claude' || section.id === 'planflow' || section.id === 'sousflow' || section.id === 'judge'));
+  assert.strictEqual(sectionFromSearch('?section=sousflow', workspace), 'sousflow');
   assert.strictEqual(sectionFromSearch('?section=claude', workspace), 'claude');
+  assert.strictEqual(sectionFromSearch('?section=planflow', workspace), 'planflow');
 });
 
 test('?section= opens a section, the Google redirect opens Calendar, anything else opens General', () => {
@@ -37,7 +39,7 @@ test('saved values start secrets blank and show a whole-minute interval in minut
 
 test('a section sends only its own keys, and General sends seconds', () => {
   assert.deepStrictEqual(sectionInput('general', { healthValue: '3', healthUnit: 'minutes' }), { serviceHealthRefreshSeconds: 180 });
-  assert.deepStrictEqual(Object.keys(sectionInput('jira', savedValues({}).jira)), ['jiraUrl', 'jiraEmail', 'jiraApiToken', 'jiraProjectKeys', 'planningConfluenceParent']);
+  assert.deepStrictEqual(Object.keys(sectionInput('jira', savedValues({}).jira)), ['jiraUrl', 'jiraEmail', 'jiraApiToken', 'jiraProjectKeys', 'planningConfluenceParent', 'planningPlanner']);
 });
 
 test('errors belong to their own section only', () => {

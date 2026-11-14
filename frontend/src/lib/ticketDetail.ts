@@ -1,4 +1,21 @@
 import type { AgentRun } from '../agents/runs';
+import { hasPage, type DockMode } from './dockMode';
+
+/**
+ * The slim ticket detail and run panel: on the workspace the brief, decisions, review, log and AC evidence live in
+ * Blackboard, so the detail links there. The laptop DOCK has no Blackboard and keeps every section.
+ */
+export const slimDetail = (mode: DockMode) => hasPage(mode, '/blackboard');
+
+/** The Intinya of a planning summary as hover text on a board card; parts it left empty are skipped. */
+export function intinyaTitle(summary: { made: string; checked: string; notHere: string; waitsOn: string[] }): string {
+  return [
+    summary.made && `Bikin apa: ${summary.made}`,
+    summary.checked && `Dicek di sini: ${summary.checked}`,
+    summary.notHere && `Bukan di sini: ${summary.notHere}`,
+    summary.waitsOn.length > 0 && `Nunggu tiket lain: ${summary.waitsOn.join(', ')}`,
+  ].filter(Boolean).join('\n');
+}
 
 /** The stops the ticket header walks; evidence and commit count as Verify, as on the flow graph. */
 export const TICKET_STEPS = [
@@ -120,3 +137,124 @@ export const matchesChoice = (choice: DependencyChoice, query: string) => {
   const needle = query.trim().toLowerCase();
   return !needle || `${choice.key} ${choice.title}`.toLowerCase().includes(needle);
 };
+
+// ---- Siap dikerjain (G2): what a ticket still misses before work starts. Only information; no status move is refused.
+
+const KEY_REF = /\bQRD-\d+\b/gi;
+
+/** The other tickets each AC line names, in line order; the ticket's own key is left out. */
+export function acRefs(key: string, lines: string[]): Array<{ n: number; text: string; refs: string[] }> {
+  const own = key.toUpperCase();
+  return lines.map((text, index) => ({ n: index + 1, text, refs: [...new Set((text.match(KEY_REF) ?? []).map((ref) => ref.toUpperCase()))].filter((ref) => ref !== own) }));
+}
+
+/** Every key the AC of these tickets names, for one status read of the whole board. */
+export const readinessRefs = (tickets: Array<{ key: string; acceptanceCriteria?: string | null }>): string[] => (
+  [...new Set(tickets.flatMap((ticket) => acRefs(ticket.key, jiraAcLines(ticket.acceptanceCriteria)).flatMap((line) => line.refs)))].sort()
+);
+
+/** Statuses from UAT CHECK on: the screen of a ticket there can be used to test another. */
+const IN_UAT = ['uatcheck', 'uatbuggimprovement', 'uatbugimprovement', 'readyforproduction', 'rfp', 'done', 'donemerged', 'merged'];
+export const inUat = (status?: string | null) => IN_UAT.includes(String(status ?? '').toLowerCase().replace(/[^a-z]/g, ''));
+
+export interface RefDecision { refKey: string; action: string }
+export interface ReadinessSummary { current: boolean; testData: string | null; ui: boolean }
+export interface ReadinessInput {
+  key: string; title: string; url?: string | null; acceptanceCriteria?: string | null; blockedBy?: string[] | null;
+  openToConfirm?: string | null; figmaUrl?: string | null;
+  summary?: ReadinessSummary | null; decisions?: RefDecision[] | null; tcApproved?: boolean | null;
+  statuses?: Record<string, string> | null;
+}
+export type ReadinessId = 'refs' | 'open' | 'summary' | 'alone' | 'data' | 'tc' | 'design';
+export interface ReadinessItem { id: ReadinessId; ok: boolean; text: string; detail: string | null; fix: string | null; href: string | null }
+export interface TicketReadiness { items: ReadinessItem[]; done: number; total: number; missing: ReadinessItem[] }
+
+const keyList = (keys: string[]) => `${keys.slice(0, 3).join(', ')}${keys.length > 3 ? ` +${keys.length - 3} lagi` : ''}`;
+const MOVED = ['reference', 'move'];
+
+/** A ticket with UI: its title says [FE], or the planning agent's summary says it changes a screen. */
+export const hasUi = (title: string, summary?: Pick<ReadinessSummary, 'ui'> | null) => /\[FE\]/i.test(title) || !!summary?.ui;
+
+/**
+ * "Siap dikerjain n dari 7": every ticket the AC names is decided, Open to confirm is empty, there is a current summary,
+ * no AC line needs a ticket that is not in UAT yet, the test data is named, QA approved the test cases, and a ticket with
+ * UI has its Figma link. Each missing item says what is missing and where it gets fixed.
+ */
+export function ticketReadiness(input: ReadinessInput): TicketReadiness {
+  const lines = acRefs(input.key, jiraAcLines(input.acceptanceCriteria));
+  const refs = [...new Set(lines.flatMap((line) => line.refs))];
+  const linked = new Set((input.blockedBy ?? []).map((key) => key.toUpperCase()));
+  const decided = new Map((input.decisions ?? []).map((item) => [item.refKey.toUpperCase(), item.action]));
+  const undecided = refs.filter((ref) => !linked.has(ref) && !decided.has(ref));
+  const waits = refs.filter((ref) => !MOVED.includes(decided.get(ref) ?? ''));
+  const statuses = input.statuses ?? {};
+  const notInUat = waits.filter((ref) => !inUat(statuses[ref]));
+  const summary = input.summary ?? null;
+  const open = (input.openToConfirm ?? '').trim();
+  const ui = hasUi(input.title, summary);
+  const jira = input.url ?? null;
+  const items: ReadinessItem[] = [
+    undecided.length
+      ? { id: 'refs', ok: false, text: `${undecided.length} rujukan tiket lain belum diputusin`, detail: `${keyList(undecided)}: pasang link Blocks kalau ditunggu, atau pindahin barisnya ke Reference`, fix: 'Planning › AC check', href: '/planning?tab=draft&panel=ac' }
+      : { id: 'refs', ok: true, text: refs.length ? 'Rujukan tiket lain udah jelas' : 'AC nggak nyebut tiket lain', detail: null, fix: null, href: null },
+    open
+      ? { id: 'open', ok: false, text: 'Open to confirm masih ada isinya', detail: open.length > 140 ? `${open.slice(0, 140)}…` : open, fix: 'Buka di Jira', href: jira }
+      : { id: 'open', ok: true, text: 'Open to confirm kosong', detail: null, fix: null, href: null },
+    !summary
+      ? { id: 'summary', ok: false, text: 'Belum ada ringkasan', detail: 'Ditulis agent planning waktu draft ditarik dari Jira', fix: 'Planning › Draft', href: '/planning?tab=draft' }
+      : summary.current
+        ? { id: 'summary', ok: true, text: 'Ringkasan ada', detail: null, fix: null, href: null }
+        : { id: 'summary', ok: false, text: 'Ringkasan basi: AC berubah sesudah ringkasan ditulis', detail: 'Agent planning nulis ulang waktu draft ditarik lagi', fix: 'Planning › Draft', href: '/planning?tab=draft' },
+    notInUat.length
+      ? { id: 'alone', ok: false, text: `${notInUat.length} tiket yang ditunggu AC belum di UAT`, detail: notInUat.map((ref) => `${ref} (${statuses[ref] ?? 'status belum kebaca'})`).join(', '), fix: 'Lihat baris AC', href: '#acceptance-criteria' }
+      : { id: 'alone', ok: true, text: waits.length ? 'Tiket yang ditunggu udah di UAT' : 'Bisa dites tanpa nunggu tiket lain', detail: null, fix: null, href: null },
+    !summary
+      ? { id: 'data', ok: false, text: 'Data uji: belum ada ringkasan', detail: null, fix: 'Planning › Draft', href: '/planning?tab=draft' }
+      : summary.testData
+        ? { id: 'data', ok: true, text: 'Data uji disebut', detail: summary.testData, fix: null, href: null }
+        : { id: 'data', ok: false, text: 'Data uji belum disebut', detail: 'Tulis data uji yang dipakai di tiket', fix: 'Buka di Jira', href: jira },
+    input.tcApproved
+      ? { id: 'tc', ok: true, text: 'Test case disetujui QA', detail: null, fix: null, href: null }
+      : { id: 'tc', ok: false, text: 'Test case belum disetujui QA', detail: null, fix: 'Planning › Test cases', href: '/planning?tab=draft&panel=tc' },
+    !summary && !ui
+      ? { id: 'design', ok: false, text: 'Desain: belum ada ringkasan', detail: 'Ringkasan yang bilang tiket ini ada UI atau nggak', fix: 'Planning › Draft', href: '/planning?tab=draft' }
+      : !ui
+        ? { id: 'design', ok: true, text: 'Tiket tanpa UI, nggak perlu desain', detail: null, fix: null, href: null }
+        : input.figmaUrl
+          ? { id: 'design', ok: true, text: 'Link desain ada di Figma Link', detail: null, fix: null, href: null }
+          : { id: 'design', ok: false, text: 'Tiket UI tanpa link desain', detail: 'Isi field Figma Link', fix: 'Buka di Jira', href: jira },
+  ];
+  const missing = items.filter((item) => !item.ok);
+  return { items, done: items.length - missing.length, total: items.length, missing };
+}
+
+/** The board shows the chip only on cards in the TODO column. */
+export const readinessOnBoard = (columnId: string, readiness: TicketReadiness | null | undefined): TicketReadiness | null => (columnId === 'TODO' ? readiness ?? null : null);
+
+export type LinkKind = 'reference' | 'blocks' | 'open';
+export interface TicketLinkRow { key: string; kind: LinkKind; text: string | null }
+
+/**
+ * "Nyambung ke N tiket": a ticket only mentioned in Reference (or decided to move there) is reference, a Blocks link or a
+ * line decided as a dependency is blocks, and an AC line naming a ticket with neither is open.
+ */
+export function ticketLinks(input: Pick<ReadinessInput, 'key' | 'acceptanceCriteria' | 'blockedBy' | 'decisions'> & { reference?: string | null }): TicketLinkRow[] {
+  const own = input.key.toUpperCase();
+  const lines = acRefs(input.key, jiraAcLines(input.acceptanceCriteria));
+  const decided = new Map((input.decisions ?? []).map((item) => [item.refKey.toUpperCase(), item.action]));
+  const linked = new Set((input.blockedBy ?? []).map((key) => key.toUpperCase()));
+  const links = new Map<string, TicketLinkRow>();
+  const textOf = (ref: string) => lines.find((line) => line.refs.includes(ref))?.text ?? null;
+  for (const ref of linked) links.set(ref, { key: ref, kind: 'blocks', text: textOf(ref) });
+  for (const ref of [...new Set(lines.flatMap((line) => line.refs))]) {
+    if (links.has(ref)) continue;
+    const action = decided.get(ref);
+    links.set(ref, { key: ref, kind: action === 'dependency' ? 'blocks' : action && MOVED.includes(action) ? 'reference' : 'open', text: textOf(ref) });
+  }
+  for (const line of jiraAcLines(input.reference)) {
+    for (const ref of new Set((line.match(KEY_REF) ?? []).map((item) => item.toUpperCase()))) {
+      if (ref !== own && !links.has(ref)) links.set(ref, { key: ref, kind: 'reference', text: line });
+    }
+  }
+  return [...links.values()];
+}

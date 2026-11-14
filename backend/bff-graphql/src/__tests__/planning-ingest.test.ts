@@ -7,6 +7,7 @@ import { planningChatPrompt, planningChatTitle, planningIngest, type PlanningIng
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { SprintInputError } from '../integrations/sprint-dashboard';
+import { OrchestratorInputError } from '../integrations/orchestrator';
 import type { DraftView } from '../integrations/sprint-draft';
 import { StoryboardMissing } from '../integrations/storyboard';
 import { createOrchestratorIngestRouter } from '../routes/orchestrator';
@@ -32,13 +33,24 @@ function fakes() {
         return { epic, version: 8, previous: 7, path: '/b/v8.html', page: '11', frames: [{ id: 'F7.3', text: 'Stop serving' }], changed: ['F7.3'] };
       },
     },
+    summaries: {
+      hashes: async (keys) => Object.fromEntries(keys.map((key) => [key, 'abc'])),
+      write: async (sprint, body) => {
+        calls.push(['summary', sprint, (body as { key: string }).key]);
+        if ((body as { acHash?: string }).acHash !== 'abc') throw new SprintInputError('The AC of QRD-1312 changed since this summary was written');
+        return body as never;
+      },
+    },
   };
   return { deps, calls, view };
 }
 
 test('the planning routes read and change the draft and turn the planner errors into 400s', async () => {
   const { deps, calls, view } = fakes();
-  assert.deepEqual(await planningIngest(deps, 'sprint-draft/get', { sprint: 'QRD Sprint 27' }), { ...view, tickets: [view.tickets[0]] }, 'the agent plans only the cards still to build');
+  assert.deepEqual(await planningIngest(deps, 'sprint-draft/get', { sprint: 'QRD Sprint 27' }), { ...view, tickets: [view.tickets[0]], summaries: { 'QRD-1312': 'abc' } }, 'the agent plans only the cards still to build, and sees which summaries it wrote');
+  await planningIngest(deps, 'sprint-draft/summary', { sprint: 'QRD Sprint 27', key: 'QRD-1312', acHash: 'abc' });
+  assert.deepEqual(calls.at(-1), ['summary', 'QRD Sprint 27', 'QRD-1312']);
+  await assert.rejects(planningIngest(deps, 'sprint-draft/summary', { sprint: 'QRD Sprint 27', key: 'QRD-1312', acHash: 'old' }), (error: unknown) => error instanceof OrchestratorInputError && /changed since this summary/.test(error.message));
   await assert.rejects(planningIngest(deps, 'sprint-draft/get', { sprint: 'QRD Sprint 9' }), /No draft for QRD Sprint 9/);
   await planningIngest(deps, 'sprint-draft/update', { sprint: 'QRD Sprint 27', key: 'qrd-1312', dev: 'Aken', wave: 2, sp: 3, ac: ['One', 'Two'] });
   assert.deepEqual(calls.at(-1), ['update', 'QRD Sprint 27', 'QRD-1312', { dev: 'Aken', wave: 2, sp: 3, ac: ['One', 'Two'] }]);

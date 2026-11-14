@@ -891,8 +891,10 @@ test('SQLite storage trims tool calls and activity flips but keeps spawns, stops
 
   await storage.addOrchestratorEvent('ZED-481', 'STAGE', 'plan', 2);
   await storage.addOrchestratorEvent('ZED-481', 'WAITING', 'GATE 1', 2);
+  await storage.addOrchestratorEvent('ZED-481', 'CHECKPOINT', '{"step":"plan","text":"Planned."}', 2);
   for (const kind of ['AGENT_ACTIVE', 'AGENT_IDLE', 'AGENT_ACTIVE', 'AGENT_IDLE']) await storage.addOrchestratorEvent('ZED-481', kind, null, 2);
   assert.deepStrictEqual((await storage.getOrchestratorEvents('ZED-481', undefined, ['STAGE', 'WAITING'])).map((event) => event.kind).sort(), ['STAGE', 'WAITING']);
+  assert.strictEqual((await storage.getOrchestratorEvents('ZED-481', undefined, ['CHECKPOINT'])).length, 1, 'a checkpoint outlives the activity flips');
   assert.strictEqual((await storage.getOrchestratorEvents('ZED-481')).filter((event) => event.kind.startsWith('AGENT_')).length, 2);
 });
 
@@ -1024,4 +1026,68 @@ test('SQLite storage keeps sprint plan edges, their state across a re-map, and m
   assert.ok(await storage.addOrchestratorEventOnce('P-2', 'DEP_WAIT', 'P-3', new Date(Date.now() + 60_000)), 'an older event does not count when since is later');
   for (let i = 0; i < 5; i += 1) await storage.addOrchestratorEvent('P-2', 'ACTIVITY', String(i), 2);
   assert.strictEqual(await storage.countEventTickets('DEP_WAIT', ['P-2', 'P-3'], new Date(Date.now() - 60_000), new Date(Date.now() + 60_000)), 1, 'DEP_WAIT survives the trim');
+});
+
+test('SQLite storage keeps the Judge queue, findings, examples and days, the session account and the retro line source', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }] = await Promise.all([import('../storage/service'), import('../storage/client')]);
+  const storage = new StorageService(prisma);
+  t.after(() => prisma.$disconnect());
+  const now = Date.now();
+  const hoursAgo = (hours: number) => new Date(now - hours * 3600_000);
+
+  await storage.createChatSession({ id: 'judge-a', source: 'dock', machine: 'workspace', title: 'QA-QRD-1516', ticketKey: 'QRD-1516', startedAt: hoursAgo(3), lastMessageAt: hoursAgo(2), origin: 'cron', account: 'claude4' });
+  await storage.createChatSession({ id: 'judge-b', source: 'dock', machine: 'laptop', title: 'Task-QRD-9', ticketKey: 'QRD-9', startedAt: hoursAgo(3), lastMessageAt: hoursAgo(2) });
+  await storage.createChatSession({ id: 'judge-c', source: 'dock', machine: 'workspace', title: 'Judge-judge-a', ticketKey: null, startedAt: hoursAgo(1), lastMessageAt: hoursAgo(1), origin: 'cron' });
+  const first = await storage.createChatMessage({ sessionId: 'judge-a', role: 'user', text: 'Pakai skill sous: QA QRD-1516', state: 'done', at: hoursAgo(3) });
+  const last = await storage.createChatMessage({ sessionId: 'judge-a', role: 'assistant', text: 'Isu I-8 (BLOCKER) naik ke kamu.', state: 'done', at: hoursAgo(2) });
+  assert.strictEqual((await storage.getChatSession('judge-a'))?.account, 'claude4');
+  assert.strictEqual((await storage.getChatSession('judge-b'))?.account, null, 'no account runs on the active one');
+
+  const candidates = await storage.getJudgeCandidates('workspace', hoursAgo(24));
+  const candidate = candidates.find((row) => row.id === 'judge-a');
+  assert.deepStrictEqual([candidate?.firstText, candidate?.lastMessageId], ['Pakai skill sous: QA QRD-1516', last.id]);
+  assert.ok(!candidates.some((row) => row.id === 'judge-b'), 'another machine is not read');
+  assert.deepStrictEqual((await storage.getJudgeMessages('judge-a', first.id)).map((row) => row.id), [last.id]);
+
+  const busy = await storage.countBusyChatSessions('workspace', 'Judge-');
+  await storage.createChatMessage({ sessionId: 'judge-c', role: 'user', text: 'Pakai skill judge: session judge-a', state: 'taken', at: hoursAgo(0) });
+  assert.strictEqual(await storage.countBusyChatSessions('workspace', 'Judge-'), busy, "Judge's own turn does not keep it waiting");
+  const queued = await storage.createChatMessage({ sessionId: 'judge-a', role: 'user', text: 'lanjut', state: 'queued', at: hoursAgo(0) });
+  assert.strictEqual(await storage.countBusyChatSessions('workspace', 'Judge-'), busy + 1);
+  await storage.deleteChatMessage(queued.id);
+  const reviews = await storage.countRunningAutoReviews();
+  await storage.createAutoReview({ prUrl: 'https://github.com/o/r/pull/9001', headSha: 'judge', ticketKey: 'QRD-1516', threadUrl: 'https://discord.com/channels/1/2', startedAt: new Date() });
+  assert.strictEqual(await storage.countRunningAutoReviews(), reviews + 1, 'a running auto review keeps Judge waiting');
+
+  await storage.upsertJudgeSession('judge-a', { day: '2026-11-13', status: 'pending' });
+  assert.strictEqual((await storage.getJudgeSessions({ statuses: ['pending'], days: ['2026-11-13'] })).length, 1);
+  await storage.updateJudgeSession('judge-a', { status: 'running', judgeChatId: 'judge-c', runUntilMessageId: last.id, startedAt: new Date() });
+  await storage.saveJudgeRun('judge-a', [
+    { day: '2026-11-13', messageId: last.id, threadUrl: null, cause: 'stopped-with-way-out', text: 'BLOCKER I-8 to the owner', quote: 'Isu I-8', shouldHave: 'Hand it to the lead', judgeCall: 'mistake' },
+    { day: '2026-11-13', messageId: null, threadUrl: 'https://discord.com/channels/1/2/3', cause: 'self-inflicted-rework', text: 'Two runs lost to the PIN', quote: '', shouldHave: 'Enter the PIN first', judgeCall: 'mistake' },
+  ], { judgedUntilMessageId: last.id, ownerWaitMinutes: 90, judgedAt: new Date() });
+  const row = await storage.getJudgeSession('judge-a');
+  assert.deepStrictEqual([row?.status, row?.judgedUntilMessageId, row?.runUntilMessageId, row?.judgeChatId, row?.ownerWaitMinutes], ['judged', last.id, null, null, 90]);
+  const findings = await storage.getJudgeFindings({ sessionIds: ['judge-a'] });
+  assert.deepStrictEqual(findings.map((finding) => [finding.cause, finding.ownerCall]).sort(), [['self-inflicted-rework', null], ['stopped-with-way-out', null]]);
+  assert.strictEqual((await storage.getJudgeFindings({ days: ['2026-11-13'] })).length, 2);
+  await storage.updateJudgeFinding(findings[1].id, { ownerCall: 'not', note: 'The PIN was not written down then' });
+  assert.deepStrictEqual((await storage.getJudgeExamples(30)).map((example) => example.note), ['The PIN was not written down then']);
+  await storage.deleteJudgeFindings('judge-a');
+  assert.deepStrictEqual((await storage.getJudgeFindings({ sessionIds: ['judge-a'] })).map((finding) => finding.ownerCall), ['not'], 'judging again keeps the examples');
+  await storage.upsertJudgeSession('judge-old', { day: '2026-10-30', status: 'pending' });
+  assert.strictEqual((await storage.deleteJudgeSessions(['judge-old', 'judge-a'])).count, 1, 'only a pending row that never ran goes');
+  assert.deepStrictEqual([await storage.getJudgeSession('judge-old'), (await storage.getJudgeSession('judge-a'))?.status], [null, 'judged']);
+
+  await storage.upsertJudgeDay('2026-11-13', { confirmedAt: new Date('2026-11-14T01:20:00Z'), note: null });
+  await storage.upsertJudgeDay('2026-11-13', { confirmedAt: new Date('2026-11-14T01:30:00Z'), note: 'ok' });
+  assert.deepStrictEqual((await storage.getJudgeDays(['2026-11-13', '2026-11-12'])).map((day) => [day.day, day.confirmedAt?.toISOString(), day.note]), [['2026-11-13', '2026-11-14T01:30:00.000Z', 'ok']]);
+
+  await storage.replaceRetroDraft('S-J', [{ kind: 'problem', text: 'Prettier drift at FINAL', evidence: ['QRD-1275'], dest: 'kit' }]);
+  await storage.replaceRetroDraft('S-J', [{ kind: 'problem', text: 'Guard refusal goes to the owner', evidence: ['QA-QRD-1516'], dest: 'kit', source: 'judge' }], ['judge']);
+  assert.deepStrictEqual((await storage.getRetroItems('S-J')).map((item) => item.source), ['ledger', 'judge'], 'a Judge draft keeps the ledger lines');
+  await storage.replaceRetroDraft('S-J', [], ['ledger']);
+  assert.deepStrictEqual((await storage.getRetroItems('S-J')).map((item) => item.source), ['judge'], 'a ledger draft keeps the Judge lines');
 });

@@ -22,6 +22,7 @@ import HealthPage from './pages/HealthPage';
 import SessionsPage from './pages/SessionsPage';
 import SprintPage from './pages/SprintPage';
 import WorkspacePage from './pages/WorkspacePage';
+import QaQueuePage from './pages/QaQueuePage';
 import { PageBoundary } from './components/PageBoundary';
 import { PinLockModal } from './components/PinLockModal';
 import { SetPinScreen } from './components/SetPinScreen';
@@ -30,9 +31,13 @@ import { LoadingSkeleton } from './components/LoadingSkeleton';
 import { Button, Page } from './components/ui';
 import { DockModeContext, hasPage, type DockMode } from './lib/dockMode';
 import { AgentLooksLoader } from './agents/library/AgentLooksLoader';
+import { planningRedirect } from './agents/plan';
+import { changesRedirect } from './changes/href';
+import { isPullEntry } from './lib/blackboard';
 
 const AgentsPage = lazy(() => import('./pages/AgentsPage'));
 const ChangesPage = lazy(() => import('./pages/ChangesPage'));
+const PlanningPage = lazy(() => import('./pages/PlanningPage'));
 
 function App() {
   const client = useApolloClient();
@@ -56,12 +61,17 @@ function App() {
   const [setMasterPin] = useMutation(SET_MASTER_PIN);
 
   const getInitialRoute = () => {
+    // An old Agents link to Planning, a bookmark or a notification, opens the matching /planning tab.
+    const moved = planningRedirect(`${window.location.pathname}${window.location.search}`);
+    if (moved !== `${window.location.pathname}${window.location.search}`) window.history.replaceState(window.history.state, '', moved);
+    // An old /changes link opens Perubahan kode in the ticket's Blackboard.
+    if (window.location.pathname === '/changes') window.history.replaceState(window.history.state, '', changesRedirect(window.location.search));
     const path = window.location.pathname;
     if (path.startsWith('/detail/') || path.startsWith('/ticket/')) {
       const key = decodeURIComponent(path.split('/').pop() || '');
       return { path: '/ticket', key: key || null };
     }
-    if (path === '/dashboard' || path === '/agents' || path === '/blackboard' || path === '/guide' || path === '/sessions' || path === '/calendar' || path === '/sprint' || path === '/monitoring' || path === '/docker' || path === '/demo-videos' || path === '/dev-servers' || path === '/machines' || path === '/decisions' || path === '/discord' || path === '/issues' || path === '/changes' || path === '/workspace' || path === '/settings') {
+    if (path === '/dashboard' || path === '/agents' || path === '/blackboard' || path === '/guide' || path === '/sessions' || path === '/calendar' || path === '/sprint' || path === '/monitoring' || path === '/docker' || path === '/demo-videos' || path === '/dev-servers' || path === '/machines' || path === '/decisions' || path === '/discord' || path === '/issues' || path === '/workspace' || path === '/settings' || path === '/planning' || path === '/qa-queue') {
       return { path, key: null };
     }
     return { path: '/', key: null };
@@ -105,7 +115,8 @@ function App() {
     }
   };
 
-  const handleNavigate = (path: string) => {
+  const handleNavigate = (to: string) => {
+    const path = to.startsWith('/changes') ? changesRedirect(to.includes('?') ? to.slice(to.indexOf('?')) : '') : planningRedirect(to);
     window.history.pushState({}, '', path);
     // A link like /agents?run=KEY keeps its query in the URL for the page to read.
     setCurrentPath(path.split('?')[0]);
@@ -121,15 +132,15 @@ function App() {
   };
 
   const mode: DockMode = data?.dockMode === 'workspace' ? 'workspace' : 'laptop';
-  // A page this DOCK leaves out, such as an old bookmark, opens Home.
-  const path = hasPage(mode, currentPath) ? currentPath : '/';
+  // A page this DOCK leaves out, such as an old bookmark, opens Home. The laptop has no Blackboard, so a pull request link opens Changes on its own.
+  const path = hasPage(mode, currentPath) ? currentPath : currentPath === '/blackboard' && isPullEntry(new URLSearchParams(window.location.search).get('file')) ? '/changes' : '/';
 
   const renderPage = () => {
     switch (path) {
       case '/': return <HomePage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;
       case '/dashboard': return <DashboardPage onTicketClick={navigateToTicket} />;
       case '/agents': return <Suspense fallback={<Page width="full"><LoadingSkeleton /></Page>}><AgentsPage onTicketClick={navigateToTicket} onNavigate={handleNavigate} /></Suspense>;
-      case '/blackboard': return <BlackboardPage />;
+      case '/blackboard': return <BlackboardPage onNavigate={handleNavigate} onTicketClick={navigateToTicket} />;
       case '/guide': return <GuidePage onNavigate={handleNavigate} />;
       case '/sessions': return <SessionsPage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;
       case '/calendar': return <CalendarPage onNavigate={handleNavigate} />;
@@ -144,7 +155,9 @@ function App() {
       case '/issues': return <DockIssuesPage onNavigate={handleNavigate} />;
       case '/changes': return <Suspense fallback={<Page width="full"><LoadingSkeleton /></Page>}><ChangesPage onNavigate={handleNavigate} onTicketClick={navigateToTicket} /></Suspense>;
       case '/workspace': return <WorkspacePage />;
+      case '/qa-queue': return <QaQueuePage onTicketClick={navigateToTicket} />;
       case '/settings': return <SettingsPage />;
+      case '/planning': return <Suspense fallback={<Page width="full"><LoadingSkeleton /></Page>}><PlanningPage onNavigate={handleNavigate} /></Suspense>;
       case '/ticket': return selectedTicketKey ? <TicketDetailPage ticketKey={selectedTicketKey} onBack={() => handleNavigate('/dashboard')} onNavigate={handleNavigate} /> : <DashboardPage onTicketClick={navigateToTicket} />;
       default: return <HomePage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;
     }

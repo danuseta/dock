@@ -1,6 +1,8 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { qaBusy, qaLine, qaPhase, qaVideoUrl, shortTc, verdictVariant, type QaRun, type QaTrigger } from '../chat/qa';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { PREDICTION_LABEL, qaBusy, qaLine, qaPhase, qaVideoUrl, shortTc, uatPrediction, verdictVariant, type QaRun, type QaTrigger } from '../chat/qa';
 
 const run = (extra: Partial<QaRun> = {}): QaRun => ({
   runId: '20261104T071926Z',
@@ -63,4 +65,26 @@ test('verdicts, ids and video links', () => {
   assert.strictEqual(verdictVariant('ESCALATED'), 'warn');
   assert.strictEqual(shortTc('QRD-1286-TC001'), 'TC001');
   assert.strictEqual(qaVideoUrl('QRD-1286', '20261104T071926Z', 'videos/QRD-1286-TC001.webm'), '/api/qa-local/QRD-1286/20261104T071926Z/videos/QRD-1286-TC001.webm');
+});
+
+test('QRD-1534: the local verdict reads as what UAT will likely say', () => {
+  assert.strictEqual(uatPrediction('LOLOS'), 'PASS');
+  assert.strictEqual(uatPrediction('ESCALATED'), 'ESCALATED');
+  assert.strictEqual(uatPrediction('REVISION'), 'NOT PASSED');
+  assert.strictEqual(uatPrediction('REVISION-RISK'), 'NOT PASSED');
+  assert.strictEqual(uatPrediction('NOT PASSED'), 'NOT PASSED');
+  assert.strictEqual(uatPrediction(null), null);
+  assert.strictEqual(uatPrediction('SOMETHING'), null);
+  assert.strictEqual(PREDICTION_LABEL, 'Prediksi di UAT');
+});
+
+test('QRD-1534: the QA panel has no verdict badge, no deploy gate line and no test case list, and never gates anything', () => {
+  const panel = readFileSync(fileURLToPath(new URL('../chat/QaPanel.tsx', import.meta.url)), 'utf8');
+  assert.doesNotMatch(panel, /<Badge|verdictVariant/, 'no verdict badge');
+  assert.doesNotMatch(panel, /DeployGate|GET_DEPLOY_GATE|UAT CHECK/, 'no deploy gate line');
+  assert.doesNotMatch(panel, /testCases|aria-label="Test cases"/, 'no list of test cases');
+  assert.match(panel, /Run after PR/);
+  assert.match(panel, /'Run QA'/);
+  assert.match(panel, /uatPrediction\(run\.verdict\)/);
+  assert.match(panel, /PREDICTION_LABEL/);
 });

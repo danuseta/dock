@@ -12,6 +12,9 @@ import { useAgentThread } from './activity/useAgentThread';
 import { useNow } from './activity/useNow';
 import { SLOW_POLL_MS } from './messages';
 import type { SidebarWorker } from './SessionSidebar';
+import { checkpointForAgent } from './checkpoints';
+import { useCheckpoints } from './useCheckpoints';
+import { CheckpointCard } from './CheckpointCard';
 
 type Tab = 'thread' | 'detail' | 'files';
 
@@ -21,6 +24,8 @@ const clock = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString('e
 
 interface PaneProps {
   sessionId: string;
+  /** The session's ticket, whose checkpoints end each agent's thread. */
+  ticketKey?: string | null;
   threadId: string;
   onOpen: (eventId: string) => void;
   onClose: () => void;
@@ -28,10 +33,12 @@ interface PaneProps {
 }
 
 /** One agent's thread beside the conversation, like a thread in a chat app; its workers open in the same place, with a way back. */
-export const AgentThreadPane: React.FC<PaneProps> = ({ sessionId, threadId, onOpen, onClose, className }) => {
+export const AgentThreadPane: React.FC<PaneProps> = ({ sessionId, ticketKey, threadId, onOpen, onClose, className }) => {
   const { data, loading } = useQuery<{ chatSessionWorkers: SidebarWorker[] }>(GET_CHAT_SESSION_WORKERS, { variables: { sessionId }, pollInterval: SLOW_POLL_MS });
   const workers = data?.chatSessionWorkers ?? [];
   const worker = workers.find((item) => item.id === threadId);
+  const checkpoints = useCheckpoints(ticketKey, SLOW_POLL_MS);
+  const report = worker ? checkpointForAgent(checkpoints, worker, workers) : null;
   const { rows, state, store } = useAgentThread(sessionId, worker?.turnId ?? null, worker?.status === 'running');
   const agent = rows.find((row) => row.eventId === threadId);
   const running = (agent?.status ?? worker?.status) === 'running';
@@ -71,7 +78,7 @@ export const AgentThreadPane: React.FC<PaneProps> = ({ sessionId, threadId, onOp
   if (!worker && !loading) body = <p className="p-4 text-sm text-muted-foreground">This worker is no longer in this session.</p>;
   else if (state === 'failed') body = <p className="p-4 text-sm text-status-conflict" role="alert">The thread could not be loaded.</p>;
   else if (!agent) body = <p className="p-4 text-sm text-muted-foreground" role="status">Loading the thread...</p>;
-  else if (tab === 'thread') body = <ul className="flex min-w-0 flex-col gap-3.5 p-3"><AgentThreadBody agent={agent} rows={rows} parentName={parentName} store={store} now={now} onOpenChild={onOpen} /></ul>;
+  else if (tab === 'thread') body = <ul className="flex min-w-0 flex-col gap-3.5 p-3"><AgentThreadBody agent={agent} rows={rows} parentName={parentName} store={store} now={now} onOpenChild={onOpen} />{report && <CheckpointCard checkpoint={report} compact />}</ul>;
   else if (tab === 'detail') body = <ThreadDetail agent={agent} rows={own} parentName={parentName} store={store} now={now} />;
   else body = files.length === 0 ? <p className="p-4 text-sm text-muted-foreground">No file read or changed yet.</p> : (
     <ul className="flex flex-col gap-1 p-3 font-mono text-[0.72rem] text-secondary-foreground">

@@ -7,7 +7,7 @@ const RUN_WITHOUT_LEDGER = {
   key: true, title: true, stage: true, waiting: true, payload: true, activity: true, activityDetail: true, activityEndedAt: true,
   lastEventAt: true, ledgerUpdatedAt: true, transcriptAt: true, dismissedAt: true, machine: true, jiraStatus: true, jiraStage: true, stalledDetail: true, stalledAt: true, createdAt: true, updatedAt: true,
 } as const;
-const KEPT_EVENT_KINDS = ['STAGE', 'WAITING', 'DEP_WAIT', 'CONFLICT'];
+const KEPT_EVENT_KINDS = ['STAGE', 'WAITING', 'DEP_WAIT', 'CONFLICT', 'CHECKPOINT'];
 
 export interface PlanEdgeInput { ticketKey: string; dependsOnKey: string; reason?: string | null }
 export interface SprintDraftInput { sprint: string; sprintId: number; sprintDays: number; startDate: Date | null; createdBy: string | null; refStatuses: string; merges?: string }
@@ -468,6 +468,11 @@ export class StorageService {
     return (await this.db.sprintDraftTicket.findMany({ where: { epic }, select: { draftSprint: true }, distinct: ['draftSprint'] })).map((row) => row.draftSprint);
   }
 
+  /** The drafts holding any of the tickets, for the ticket summary and readiness. */
+  async sprintDraftsWithKeys(keys: string[]): Promise<string[]> {
+    return (await this.db.sprintDraftTicket.findMany({ where: { key: { in: keys } }, select: { draftSprint: true }, distinct: ['draftSprint'] })).map((row) => row.draftSprint);
+  }
+
   updateSprintDraft(sprint: string, data: { decisions?: string; qaReason?: string | null; status?: string; publishedAt?: Date | null; storyboards?: string; questions?: string }) {
     return this.db.sprintDraft.update({ where: { sprint }, data });
   }
@@ -493,11 +498,11 @@ export class StorageService {
     return this.db.retroItem.findUnique({ where: { id } });
   }
 
-  /** A new draft replaces the lines still open; lines the owner accepted or closed stay. */
-  async replaceRetroDraft(sprint: string, items: Array<{ kind: string; text: string; evidence: string[]; dest: string }>) {
+  /** A new draft replaces the lines still open from the same sources; lines the owner accepted or closed stay. */
+  async replaceRetroDraft(sprint: string, items: Array<{ kind: string; text: string; evidence: string[]; dest: string; source?: string }>, sources: string[] = ['ledger']) {
     await this.db.$transaction([
-      this.db.retroItem.deleteMany({ where: { sprint, status: 'open' } }),
-      ...items.map((item) => this.db.retroItem.create({ data: { sprint, kind: item.kind, text: item.text, evidence: JSON.stringify(item.evidence), dest: item.dest } })),
+      this.db.retroItem.deleteMany({ where: { sprint, status: 'open', source: { in: sources } } }),
+      ...items.map((item) => this.db.retroItem.create({ data: { sprint, kind: item.kind, text: item.text, evidence: JSON.stringify(item.evidence), dest: item.dest, source: item.source ?? 'ledger' } })),
     ]);
     return items.length;
   }
@@ -512,6 +517,124 @@ export class StorageService {
 
   updateRetroItem(id: string, data: { status?: string; text?: string; sessionId?: string | null }) {
     return this.db.retroItem.update({ where: { id }, data });
+  }
+
+  /** The sessions on the machine that moved since `since`, with their first owner message and their newest message id. */
+  async getJudgeCandidates(machine: string, since: Date, take = 300) {
+    const sessions = await this.db.chatSession.findMany({
+      where: { machine, lastMessageAt: { gte: since } }, orderBy: { lastMessageAt: 'desc' }, take,
+      select: { id: true, title: true, ticketKey: true, status: true, origin: true, startedAt: true, lastMessageAt: true },
+    });
+    const ids = sessions.map((session) => session.id);
+    if (!ids.length) return [];
+    const [newest, firsts] = await Promise.all([
+      this.db.chatMessage.groupBy({ by: ['sessionId'], where: { sessionId: { in: ids }, state: { not: 'draft' } }, _max: { id: true } }),
+      this.db.chatMessage.groupBy({ by: ['sessionId'], where: { sessionId: { in: ids }, role: 'user' }, _min: { id: true } }),
+    ]);
+    const firstIds = firsts.map((row) => row._min.id).filter((id): id is number => id !== null);
+    const texts = new Map((firstIds.length ? await this.db.chatMessage.findMany({ where: { id: { in: firstIds } }, select: { sessionId: true, text: true } }) : []).map((row) => [row.sessionId, row.text]));
+    const last = new Map(newest.map((row) => [row.sessionId, row._max.id ?? null]));
+    return sessions.map((session) => ({ ...session, firstText: texts.get(session.id) ?? null, lastMessageId: last.get(session.id) ?? null }));
+  }
+
+  /** The session's messages after `afterId`, oldest first, drafts left out. */
+  getJudgeMessages(sessionId: string, afterId: number | null, take = 2000) {
+    return this.db.chatMessage.findMany({
+      where: { sessionId, state: { not: 'draft' }, ...(afterId !== null ? { id: { gt: afterId } } : {}) },
+      orderBy: { id: 'asc' }, take, select: { id: true, role: true, text: true, at: true },
+    });
+  }
+
+  /** The tool steps of the session's turns, oldest first. */
+  getJudgeActivity(sessionId: string, take = 3000) {
+    return this.db.chatActivity.findMany({
+      where: { sessionId, kind: { in: ['tool', 'agent', 'skill'] } }, orderBy: { seq: 'asc' }, take,
+      select: { name: true, label: true, summary: true, detail: true, status: true, agent: true, startedAt: true, kind: true },
+    });
+  }
+
+  /** Sessions on the machine with a turn running or waiting, Judge's own sessions left out. */
+  async countBusyChatSessions(machine: string, exceptTitlePrefix: string) {
+    const [row] = await this.db.$queryRaw<Array<{ total: number | bigint }>>(Prisma.sql`
+      SELECT COUNT(DISTINCT s."id") AS "total" FROM "ChatSession" s JOIN "ChatMessage" m ON m."sessionId" = s."id"
+      WHERE s."machine" = ${machine} AND s."source" = 'dock' AND m."state" IN ('taken', 'queued') AND s."title" NOT LIKE ${`${exceptTitlePrefix}%`}`);
+    return Number(row?.total ?? 0);
+  }
+
+  countRunningAutoReviews() {
+    return this.db.autoReview.count({ where: { status: { in: ['running', 'deciding'] } } });
+  }
+
+  getJudgeSession(sessionId: string) {
+    return this.db.judgeSession.findUnique({ where: { sessionId } });
+  }
+
+  getJudgeSessions(where: { sessionIds?: string[]; statuses?: string[]; days?: string[] } = {}) {
+    return this.db.judgeSession.findMany({
+      where: {
+        ...(where.sessionIds ? { sessionId: { in: where.sessionIds } } : {}),
+        ...(where.statuses ? { status: { in: where.statuses } } : {}),
+        ...(where.days ? { day: { in: where.days } } : {}),
+      },
+      orderBy: { updatedAt: 'asc' },
+    });
+  }
+
+  upsertJudgeSession(sessionId: string, data: { day: string; status: string; error?: string | null }) {
+    return this.db.judgeSession.upsert({ where: { sessionId }, create: { sessionId, ...data }, update: data });
+  }
+
+  /** Drops queue rows that never ran; a row that ran or was judged is left alone. */
+  deleteJudgeSessions(sessionIds: string[]) {
+    return this.db.judgeSession.deleteMany({ where: { sessionId: { in: sessionIds }, status: 'pending', judgedAt: null, judgedUntilMessageId: null } });
+  }
+
+  updateJudgeSession(sessionId: string, data: {
+    day?: string; status?: string; judgedUntilMessageId?: number | null; runUntilMessageId?: number | null; judgeChatId?: string | null; grade?: string | null;
+    ownerWaitMinutes?: number; attempts?: number; startedAt?: Date | null; judgedAt?: Date | null; error?: string | null;
+  }) {
+    return this.db.judgeSession.update({ where: { sessionId }, data });
+  }
+
+  /** Stores one Judge run: its findings and the session's new state, together. */
+  async saveJudgeRun(sessionId: string, findings: Array<{ day: string; messageId: number | null; threadUrl: string | null; cause: string; text: string; quote: string; shouldHave: string; judgeCall: string }>, data: { judgedUntilMessageId: number | null; ownerWaitMinutes: number; judgedAt: Date }) {
+    await this.db.$transaction([
+      ...findings.map((finding) => this.db.judgeFinding.create({ data: { sessionId, ...finding } })),
+      this.db.judgeSession.update({ where: { sessionId }, data: { ...data, status: 'judged', runUntilMessageId: null, judgeChatId: null, attempts: 0, error: null } }),
+    ]);
+  }
+
+  getJudgeFindings(where: { sessionIds?: string[]; days?: string[] }) {
+    return this.db.judgeFinding.findMany({
+      where: { ...(where.sessionIds ? { sessionId: { in: where.sessionIds } } : {}), ...(where.days ? { day: { in: where.days } } : {}) },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+  }
+
+  getJudgeFinding(id: string) {
+    return this.db.judgeFinding.findUnique({ where: { id } });
+  }
+
+  updateJudgeFinding(id: string, data: { ownerCall: string | null; note?: string | null }) {
+    return this.db.judgeFinding.update({ where: { id }, data });
+  }
+
+  /** Before judging a session again from the start: its findings go, except the ones the owner called not a mistake. */
+  deleteJudgeFindings(sessionId: string) {
+    return this.db.judgeFinding.deleteMany({ where: { sessionId, OR: [{ ownerCall: null }, { ownerCall: { not: 'not' } }] } });
+  }
+
+  /** The negative examples: the newest findings the owner called not a mistake. */
+  getJudgeExamples(take: number) {
+    return this.db.judgeFinding.findMany({ where: { ownerCall: 'not' }, orderBy: { createdAt: 'desc' }, take });
+  }
+
+  getJudgeDays(days: string[]) {
+    return this.db.judgeDay.findMany({ where: { day: { in: days } } });
+  }
+
+  upsertJudgeDay(day: string, data: { confirmedAt: Date | null; note: string | null }) {
+    return this.db.judgeDay.upsert({ where: { day }, create: { day, ...data }, update: data });
   }
 
   /** The ticket's chat sessions, so their activity can join the run's log. */
@@ -737,7 +860,7 @@ export class StorageService {
 
   createChatSession(data: {
     id: string; source: string; machine?: string; title: string; ticketKey: string | null; forkFrom?: string | null;
-    messageCount?: number; startedAt: Date; lastMessageAt: Date; origin?: 'cron' | 'manual'; options?: string | null;
+    messageCount?: number; startedAt: Date; lastMessageAt: Date; origin?: 'cron' | 'manual'; options?: string | null; account?: string | null;
   }) {
     return this.db.chatSession.create({ data });
   }

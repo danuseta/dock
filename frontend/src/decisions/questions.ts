@@ -2,7 +2,7 @@ import type { AgentRun } from '../agents/runs';
 import { isGuess, openIssues, reportDecisions } from '../lib/sousReport';
 
 /** One answer the owner can pick; `effect` is what happens once it is submitted. */
-export interface QuestionOption { key: string; label: string; effect: string }
+export interface QuestionOption { key: string; label: string; effect: string; /** The label in Indonesian, shown in grey under it; never sent to sous. */ labelId?: string | null }
 
 /**
  * Something sous needs from the owner on a ticket: an issue it could not decide (its work waits on the answer),
@@ -18,6 +18,8 @@ export interface Question {
   at: string;
   blocking: boolean;
   options: QuestionOption[];
+  /** The question in Indonesian, shown in grey under it when the ledger has it; sous still receives the English. */
+  textId?: string | null;
 }
 
 /** The owner's draft for one question: the picked option, or OWN with the text written. `sent` once it went to sous, at `sentAt`. */
@@ -29,6 +31,8 @@ export const KEEP = 'keep';
 const ISSUE_EFFECT = 'Sous goes on with this answer in a new session.';
 const ALT_EFFECT = 'Sous changes the work to this in a new session; the pull requests get the revision.';
 export const KEEP_EFFECT = 'Nothing changes; it is recorded as confirmed.';
+export const KEEP_ID = 'Pertahankan yang dibuat sous';
+export const OWN_ID: Record<Question['kind'], string> = { issue: 'Tulis jawaban sendiri', decision: 'Ganti sesuai yang aku tulis' };
 export const OWN_EFFECT: Record<Question['kind'], string> = {
   issue: 'Sous reads your answer in a new session and goes on.',
   decision: 'Sous reads what you wrote in a new session and changes the work; the pull requests get the revision.',
@@ -49,7 +53,8 @@ export function questionsOf(run: QuestionFacts): Question[] {
     detail: null,
     at: issue.at,
     blocking: true,
-    options: issue.options.map((label, index) => ({ key: `o${index}`, label, effect: issue.effects?.[index] || ISSUE_EFFECT })),
+    options: issue.options.map((label, index) => ({ key: `o${index}`, label, effect: issue.effects?.[index] || ISSUE_EFFECT, labelId: issue.optionsId?.[index] || null })),
+    textId: issue.textId || null,
   }));
   if (run.kind !== 'build') return issues;
   const confirmed = new Set(run.confirmedDecisions ?? []);
@@ -62,9 +67,10 @@ export function questionsOf(run: QuestionFacts): Question[] {
     at: decision.at,
     blocking: false,
     options: [
-      { key: KEEP, label: 'Keep what sous built', effect: KEEP_EFFECT },
-      ...(decision.alts ?? []).map((alt, index) => ({ key: `a${index}`, label: alt.label, effect: alt.effect || ALT_EFFECT })),
+      { key: KEEP, label: 'Keep what sous built', effect: KEEP_EFFECT, labelId: KEEP_ID },
+      ...(decision.alts ?? []).map((alt, index) => ({ key: `a${index}`, label: alt.label, effect: alt.effect || ALT_EFFECT, labelId: decision.optionsId?.[index] || null })),
     ],
+    textId: decision.textId || null,
   }));
   return [...issues, ...guesses];
 }

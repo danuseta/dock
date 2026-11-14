@@ -8,16 +8,23 @@ import {
   Circle,
   ClipboardList,
   ExternalLink,
+  FileSignature,
+  FileText,
   Figma,
+  FlaskConical,
   GitBranch,
   Link2,
   MessagesSquare,
   MoreVertical,
   RefreshCw,
+  Route,
+  ScrollText,
   Send,
   X,
 } from 'lucide-react';
-import { GET_DASHBOARD, GET_ORCHESTRATION, GET_TICKET_DETAIL_CORE, GET_TICKET_DETAIL_ENRICHMENT } from '../graphql/queries';
+import { GET_DASHBOARD, GET_ORCHESTRATION, GET_QA_QUEUE_POSITION, GET_TICKET_DETAIL_CORE, GET_TICKET_DETAIL_ENRICHMENT, GET_TICKET_SUMMARY } from '../graphql/queries';
+import { LinksMap, ReadinessCard, SummaryBlock } from '../components/ticket/TicketReady';
+import { useReadiness, type SummaryFacts } from '../components/ticket/useReadiness';
 import { stageLabel, type AgentRun } from '../agents/runs';
 import { machineOf } from '../chat/messages';
 import { useAnswerTicket } from '../chat/useAnswerTicket';
@@ -25,6 +32,7 @@ import { useOpenForTicket } from '../chat/useOpenForTicket';
 import { DependencyDialog } from '../components/ticket/DependencyDialog';
 import { NeedsYouCard } from '../components/ticket/NeedsYouCard';
 import { StackedOnBadge } from '../components/ticket/StackedOnBadge';
+import { TicketSousFlow } from '../components/ticket/TicketSousFlow';
 import { MENU_WIDTH, TicketMenu, type TicketMenuTarget } from '../components/ticket/TicketMenu';
 import { useTicketWork } from '../components/ticket/useTicketWork';
 import { APPROVE_REVIEW, SAVE_DEMO_LINK, SEND_TO_DISCORD, CHECK_CONFLICTS } from '../graphql/mutations';
@@ -38,9 +46,10 @@ import { changesHref } from '../changes/href';
 import { cn } from '../lib/cn';
 import { monitorsOnly, useDockMode } from '../lib/dockMode';
 import { CACHED_QUERY_OPTIONS, DETAIL_QUERY_OPTIONS, displayAssignee } from '../lib/queryPolicy';
-import { NO_DESCRIPTION, RUN_STATE_LABEL, dependencyChoices, isLongDescription, jiraAcLines, needsYou, runState, type NeedItem } from '../lib/ticketDetail';
+import { NO_DESCRIPTION, RUN_STATE_LABEL, dependencyChoices, isLongDescription, jiraAcLines, needsYou, runState, slimDetail, ticketLinks, type NeedItem } from '../lib/ticketDetail';
 import { getPassLabels } from '../lib/ticketApprovals';
-import { blackboardFileHref, blackboardHref, folderOf, useBlackboardFiles } from '../lib/blackboard';
+import { CONTRACT_ENTRY, LOG_ENTRY, TRACE_ENTRY, blackboardFileHref, blackboardHref, useBlackboardFiles } from '../lib/blackboard';
+import { coverageText, useAcTrace } from '../lib/acTrace';
 import { nextWorkOrder } from '../lib/workOrder';
 
 interface TicketDetailPageProps {
@@ -68,7 +77,7 @@ const AC_ICON = {
 const AC_TODO = <Circle size={10} className="mx-auto mt-1.5 text-muted-foreground" aria-hidden="true" />;
 
 /** One text field of the Jira ticket, folded to three lines when it is long. */
-const JiraField: React.FC<{ title: string; text: string }> = ({ title, text }) => {
+const JiraField: React.FC<{ title: string; text: string; field?: string }> = ({ title, text, field }) => {
   const [open, setOpen] = useState(false);
   const fold = isLongDescription(text, 3);
   return (
@@ -76,6 +85,7 @@ const JiraField: React.FC<{ title: string; text: string }> = ({ title, text }) =
       <h2 className="mb-1.5 flex items-center gap-3 font-display text-sm font-bold">
         {title}
         {fold && <button type="button" className="text-xs font-semibold text-accent hover:underline" aria-expanded={open} onClick={() => setOpen((value) => !value)}>{open ? 'Show less' : 'Show all'}</button>}
+        {field && <span className="ml-auto font-mono text-[0.62rem] font-normal text-muted-foreground">Jira field · {field}</span>}
       </h2>
       <div className={cn('whitespace-pre-wrap break-words text-sm leading-relaxed text-secondary-foreground', fold && !open && 'line-clamp-3')}>{text}</div>
     </section>
@@ -137,11 +147,18 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
   const [jiraAcOpen, setJiraAcOpen] = useState(false);
   const { data: runData } = useQuery(GET_ORCHESTRATION, { ...CACHED_QUERY_OPTIONS, variables: { key: ticketKey }, pollInterval: 30000 });
   const run: AgentRun | null = runData?.orchestration?.key?.toUpperCase() === ticketKey.toUpperCase() ? runData.orchestration : null;
-  const { openForTicket, opening: openingSession, error: sessionError } = useOpenForTicket();
+  const { data: qaData } = useQuery<{ qaQueuePosition: number | null }>(GET_QA_QUEUE_POSITION, { ...CACHED_QUERY_OPTIONS, variables: { key: ticketKey }, pollInterval: 60000 });
+  const { openForTicket, opening: openingSession, error: sessionError, notice: sessionNotice } = useOpenForTicket();
   const { answer, sending: answering } = useAnswerTicket();
-  const monitoring = monitorsOnly(useDockMode());
+  const dockMode = useDockMode();
+  const monitoring = monitorsOnly(dockMode);
+  const slim = slimDetail(dockMode);
   const blackboardFiles = useBlackboardFiles(ticketKey, !monitoring);
+  const trace = useAcTrace(ticketKey, slim && Boolean(blackboardFiles));
   const closeMenu = useCallback(() => setMenu(null), []);
+  const { data: summaryData } = useQuery<{ ticketSummary: SummaryFacts | null }>(GET_TICKET_SUMMARY, { ...CACHED_QUERY_OPTIONS, variables: { key: ticketKey }, skip: /^card-/i.test(ticketKey) });
+  const jiraTicket = coreTicketFromResponse ?? null;
+  const { readiness, facts: readinessFacts } = useReadiness(jiraTicket ? [jiraTicket] : [], !!jiraTicket);
 
   const renderBackButton = () => onBack ? (
     <button onClick={onBack} className="inline-flex min-h-6 max-[760px]:min-h-11 items-center gap-2 font-mono text-[0.82rem] font-semibold text-muted-foreground transition-colors duration-150 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
@@ -287,6 +304,9 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
   const description = ticket.description && ticket.description !== NO_DESCRIPTION ? ticket.description : null;
   const jiraAc = jiraAcLines(ticket.acceptanceCriteria);
   const blockedHere = monitoring ? 'This DOCK only monitors. Answer on the workspace DOCK.' : null;
+  const ready = readiness.get(ticket.key) ?? null;
+  const summary = summaryData?.ticketSummary?.key === ticket.key ? summaryData?.ticketSummary ?? null : null;
+  const links = ticketLinks({ key: ticket.key, acceptanceCriteria: ticket.acceptanceCriteria, blockedBy: ticket.blockedBy, reference: ticket.reference, decisions: readinessFacts?.tickets.find((item) => item.key === ticket.key)?.decisions ?? [] });
 
   const handleApprove = async () => {
     try {
@@ -303,7 +323,9 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
   };
 
   const state = runState(run);
-  const acItems = run?.ac ?? [];
+  // On the workspace the run's evidence per AC line lives in Blackboard › Tiket → kode; the detail keeps the Jira lines.
+  const acRun = slim ? null : run;
+  const acItems = acRun?.ac ?? [];
   const passLabels = getPassLabels(ticket.labels);
   const assignee = displayAssignee(ticket.assignee);
   const relation = coreData?.ticketRelationGroup;
@@ -357,6 +379,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
         </div>
       </div>
       {sessionError && <Card className="mb-4 border-status-conflict text-pretty text-sm text-status-conflict" role="alert">{sessionError}</Card>}
+      {sessionNotice && <Card className="mb-4 border-status-warn text-pretty text-sm text-status-warn" role="status">{sessionNotice}</Card>}
       {approval && (
         <Card className="mb-4" role="status">
           <h2 className="mb-1 font-display text-sm font-bold">Approval</h2>
@@ -380,9 +403,12 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
               {ticket.status && <PRBadge status={ticket.status} />}
               {ticket.sprintName && ticket.sprintName !== 'No Sprint' && <span className={cn(ticket.sprintState !== 'CLOSED' && 'text-status-merged')}>{ticket.sprintName}</span>}
               {run?.stackedOn && <StackedOnBadge stack={run.stackedOn} />}
+              {qaData?.qaQueuePosition && <button type="button" onClick={() => onNavigate('/qa-queue')} className="inline-flex items-center gap-1 rounded-xs bg-cyan-500/10 px-1.5 py-0.5 font-mono text-[0.68rem] font-bold text-cyan-300 hover:bg-cyan-500/20 max-[760px]:min-h-11"><FlaskConical size={11} aria-hidden="true" />Antrean QA: #{qaData.qaQueuePosition}</button>}
             </div>
             <h1 className="mt-2 text-balance font-display text-[1.6rem] leading-snug font-bold">{ticket.title}</h1>
           </div>
+
+          {ready && <ReadinessCard ready={ready} startOpen={/^to ?do$/i.test(ticket.status ?? '')} onNavigate={onNavigate} />}
 
           <NeedsYouCard
             items={needs}
@@ -400,23 +426,29 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
             }}
           />
 
+          {summary && <SummaryBlock summary={summary} jiraUrl={ticket.url} />}
+          {jiraTicket && <LinksMap ticketKey={ticket.key} links={links} onNavigate={onNavigate} />}
+
           <div className="grid grid-cols-2 items-start gap-8 max-[1280px]:grid-cols-1 max-[1280px]:gap-4">
             <div className="flex min-w-0 flex-col gap-4">
               {ticket.userStory && <JiraField title="User Story" text={ticket.userStory} />}
               {ticket.problemDefinition && <JiraField title="Problem Definition" text={ticket.problemDefinition} />}
               {(description || (!ticket.userStory && !ticket.problemDefinition)) && <JiraField title="Description" text={description || NO_DESCRIPTION} />}
+              {ticket.reference?.trim() && <JiraField title="Reference" field="customfield_10333" text={ticket.reference} />}
+              {ticket.developerContext?.trim() && <JiraField title="Developer Context" field="customfield_10340" text={ticket.developerContext} />}
+              {!monitoring && <TicketSousFlow ticketKey={ticket.key} />}
             </div>
 
             <section id="acceptance-criteria" className="min-w-0 scroll-mt-6">
               <h2 className="mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-1 font-display text-sm font-bold">
                 Acceptance criteria
-                {run
-                  ? <span className="font-body text-xs font-medium text-muted-foreground">{run.acPassed} of {run.acTotal} passing</span>
+                {acRun
+                  ? <span className="font-body text-xs font-medium text-muted-foreground">{acRun.acPassed} of {acRun.acTotal} passing</span>
                   : jiraAc.length > 0 && <span className="font-body text-xs font-medium text-muted-foreground">{jiraAc.length} from Jira</span>}
-                {(run ? acItems.length : jiraAc.length) > AC_FOLD && <button type="button" className="text-xs font-semibold text-accent hover:underline" aria-expanded={acOpen} onClick={() => setAcOpen((open) => !open)}>{acOpen ? 'Show less' : `Show all ${run ? acItems.length : jiraAc.length}`}</button>}
-                {run && ticket.acceptanceCriteria && <button type="button" className="text-xs font-semibold text-accent hover:underline" aria-expanded={jiraAcOpen} onClick={() => setJiraAcOpen((open) => !open)}>{jiraAcOpen ? 'Hide Jira original' : 'Jira original'}</button>}
+                {(acRun ? acItems.length : jiraAc.length) > AC_FOLD && <button type="button" className="text-xs font-semibold text-accent hover:underline" aria-expanded={acOpen} onClick={() => setAcOpen((open) => !open)}>{acOpen ? 'Show less' : `Show all ${acRun ? acItems.length : jiraAc.length}`}</button>}
+                {acRun && ticket.acceptanceCriteria && <button type="button" className="text-xs font-semibold text-accent hover:underline" aria-expanded={jiraAcOpen} onClick={() => setJiraAcOpen((open) => !open)}>{jiraAcOpen ? 'Hide Jira original' : 'Jira original'}</button>}
               </h2>
-              {run ? (
+              {acRun ? (
                 acItems.length === 0 ? (
                   <p className="text-pretty text-sm text-muted-foreground">No acceptance criteria recorded yet.</p>
                 ) : (
@@ -445,7 +477,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
                   ))}
                 </ol>
               )}
-              {run && jiraAcOpen && ticket.acceptanceCriteria && (
+              {acRun && jiraAcOpen && ticket.acceptanceCriteria && (
                 <div className="mt-2 whitespace-pre-wrap break-words rounded-sm border border-border bg-surface-1 p-3 text-xs leading-relaxed text-secondary-foreground">{ticket.acceptanceCriteria}</div>
               )}
             </section>
@@ -543,37 +575,53 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
                         : <PRBadge status={pr.status} />}
                     </span>
                   </div>
-                  <p className="mt-0.5 flex items-center gap-1 truncate font-mono text-[0.68rem] text-muted-foreground" title={`${pr.headBranch} → ${pr.baseBranch}`}>
-                    <GitBranch size={11} className="shrink-0" aria-hidden="true" />
-                    <span className="truncate">{pr.headBranch || 'feature'} → {pr.baseBranch || 'main'}</span>
-                  </p>
+                  {!slim && (
+                    <p className="mt-0.5 flex items-center gap-1 truncate font-mono text-[0.68rem] text-muted-foreground" title={`${pr.headBranch} → ${pr.baseBranch}`}>
+                      <GitBranch size={11} className="shrink-0" aria-hidden="true" />
+                      <span className="truncate">{pr.headBranch || 'feature'} → {pr.baseBranch || 'main'}</span>
+                    </p>
+                  )}
                 </li>
               );
             })}
           </ul>
-          {(ticket.pullRequests?.length ?? 0) > 1 && (
+          {!slim && (ticket.pullRequests?.length ?? 0) > 1 && (
             <Button size="sm" className="mt-2 self-start" onClick={() => onNavigate(changesHref(ticket.key, ticket.pullRequests[0].repo, 'ticket'))}>
               All changes · {new Set(ticket.pullRequests.map((pr: { repo: string }) => pr.repo)).size} repos
             </Button>
           )}
 
-          {blackboardFiles && (() => {
-            const latest = blackboardFiles.reduce((at, file) => (file.updatedAt > at ? file.updatedAt : at), '');
-            const shots = blackboardFiles.filter((file) => folderOf(file.path) === 'screenshots').length;
-            const quick = [
-              ...['NOW.md', 'review.md'].filter((name) => blackboardFiles.some((file) => file.path === name)).map((name) => ({ label: name, href: blackboardFileHref(ticket.key, name) })),
-              ...(shots ? [{ label: `screenshots · ${shots}`, href: blackboardFileHref(ticket.key, 'screenshots') }] : []),
-            ];
+          {slim && (() => {
+            const latest = (blackboardFiles ?? []).reduce((at, file) => (file.updatedAt > at ? file.updatedAt : at), '');
+            const line = (icon: React.ElementType, label: string, extra: React.ReactNode, href: string) => {
+              const Icon = icon;
+              return (
+                <li>
+                  <button type="button" onClick={() => onNavigate(href)} className="flex w-full items-center gap-2 border-0 bg-transparent py-1 text-left text-sm text-foreground hover:text-accent max-[760px]:min-h-11">
+                    <Icon size={13} aria-hidden="true" className="flex-none text-sky-200" /><span>{label}</span>{extra}<span className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground">buka<ArrowRight size={11} aria-hidden="true" /></span>
+                  </button>
+                </li>
+              );
+            };
             return (
               <>
                 <h2 className={sectionTitle}>Blackboard</h2>
-                <p className="font-mono text-[0.68rem] text-muted-foreground">{blackboardFiles.length} files{latest ? ` · changed ${new Date(latest).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</p>
-                {quick.length > 0 && (
-                  <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
-                    {quick.map((link) => <button key={link.label} type="button" onClick={() => onNavigate(link.href)} className="border-0 bg-transparent p-0 font-mono text-xs text-accent hover:underline">{link.label}</button>)}
-                  </p>
+                {!blackboardFiles ? <p className="text-sm text-muted-foreground">Belum ada blackboard. Muncul begitu sous mulai tiket ini.</p> : (
+                  <>
+                    <ul className="flex flex-col">
+                      {line(Route, 'Tiket → kode', <span className={cn('font-mono text-xs font-bold', trace?.readable && trace.covered === trace.total ? 'text-status-merged' : 'text-status-warn')}>{coverageText(trace)}</span>, blackboardFileHref(ticket.key, TRACE_ENTRY))}
+                      {line(FileSignature, 'Kontrak', null, blackboardFileHref(ticket.key, CONTRACT_ENTRY))}
+                      {line(ScrollText, 'Log eksekusi', run?.failures?.length ? <span className="font-mono text-xs text-status-conflict">{run.failures.length} gagal</span> : null, blackboardFileHref(ticket.key, LOG_ENTRY))}
+                      <li className="flex flex-wrap items-center gap-2 py-1 text-sm">
+                        <FileText size={13} aria-hidden="true" className="text-sky-200" />
+                        {[['Brief', CONTRACT_ENTRY], ['Decisions', 'decisions.md'], ['Review', 'review.md']].map(([label, entry], index) => (
+                          <React.Fragment key={label}>{index > 0 && <span className="text-muted-foreground">/</span>}<button type="button" onClick={() => onNavigate(blackboardFileHref(ticket.key, entry))} className="border-0 bg-transparent p-0 text-accent hover:underline">{label}</button></React.Fragment>
+                        ))}
+                      </li>
+                    </ul>
+                    <p className="mt-1 font-mono text-[0.68rem] text-muted-foreground">{blackboardFiles.length} files{latest ? ` · changed ${new Date(latest).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</p>
+                  </>
                 )}
-                <button type="button" onClick={() => onNavigate(blackboardHref(ticket.key))} className="mt-1.5 inline-flex items-center gap-1 border-0 bg-transparent p-0 text-xs text-secondary-foreground hover:text-foreground">See all<ArrowRight size={12} aria-hidden="true" /></button>
               </>
             );
           })()}

@@ -25,9 +25,11 @@ export interface AgentDecisionAlt { label: string; effect?: string | null }
 export interface AgentDecision {
   n?: number | null; at: string; text: string; status?: string | null; by?: string | null; issue?: number | null; cancelNote?: string | null;
   effect?: string | null; alts?: AgentDecisionAlt[]; replaces?: number | null; supersededBy?: number | null;
+  /** The decision and each alternative in Indonesian, for the owner only; sous still reads the English. */
+  textId?: string | null; optionsId?: Array<string | null> | null;
 }
 /** An issue raised during the run, I-n; level owner means it waits on the owner. */
-export interface AgentIssue { n: number; at: string; type: string; text: string; level: string; status: string; resolvedBy?: number | null; resolvedAt?: string | null; options: string[]; effects?: Array<string | null> }
+export interface AgentIssue { n: number; at: string; type: string; text: string; level: string; status: string; resolvedBy?: number | null; resolvedAt?: string | null; options: string[]; effects?: Array<string | null>; textId?: string | null; optionsId?: Array<string | null> | null }
 
 export interface AgentStackRepo { pr: string; branch?: string | null; base?: string | null; retargetedAt?: string | null }
 /** The parent ticket this run's pull requests are stacked on, per repo. */
@@ -155,13 +157,14 @@ export const STAGE_COLOR: Record<string, string> = {
   evidence: '#5cc0e0', commit: '#5cc0e0', pr: '#5cc0e0', done: '#62cf9f', blocked: '#d9695a',
 };
 
-export const stageLabel = (stage: string) => STAGE_LABEL[stage] ?? stage;
+/** A run the ledger sent without a stage reads as an empty label, never undefined. */
+export const stageLabel = (stage: string | null | undefined) => (stage ? STAGE_LABEL[stage] ?? stage : '');
 
 /** A review walks the same rail as a build but its stops mean different things. */
 const REVIEW_LABEL: Record<string, string> = {
   gate: 'Brief', plan: 'Plan', code: 'Review', test: 'Test', verify: 'Evidence', evidence: 'Evidence', commit: 'Verdict', pr: 'Verdict', done: 'Done', blocked: 'Blocked',
 };
-export const stageName = (stage: string, kind?: string) => (kind === 'review' ? REVIEW_LABEL[stage] : undefined) ?? stageLabel(stage);
+export const stageName = (stage: string | null | undefined, kind?: string) => (kind === 'review' ? REVIEW_LABEL[stage ?? ''] : undefined) ?? stageLabel(stage);
 
 /**
  * The lead hands each ticket to one sub-coordinator, which spawns the members.

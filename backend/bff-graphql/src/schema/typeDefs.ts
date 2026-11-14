@@ -10,6 +10,13 @@ export const typeDefs = gql`
     userStory: String
     problemDefinition: String
     figmaUrl: String
+    """The Jira Reference field: what the ticket only mentions about other tickets."""
+    reference: String
+    """The Jira Open to confirm field; empty when nothing is left to confirm."""
+    openToConfirm: String
+    developerContext: String
+    """Tickets this one is blocked by (Blocks links)."""
+    blockedBy: [String!]!
     status: String!
     assignee: String
     url: String!
@@ -197,6 +204,8 @@ export const typeDefs = gql`
     notificationPrefs: String!
     """Confluence page id the sprint contract page of Planning goes under; null skips the page."""
     planningConfluenceParent: String
+    """The planner (Jira display name or account id): only that DOCK edits and publishes the draft; null lets every DOCK plan."""
+    planningPlanner: String
   }
 
   type DiscordAttachment {
@@ -495,6 +504,10 @@ export const typeDefs = gql`
     question: String
     """Options the agent weighed and dropped, each with why."""
     rejected: [OrchestrationDecisionRejected!]!
+    """The decision in Indonesian for the owner, when the ledger has it; sous still reads text."""
+    textId: String
+    """Each alternative's label in Indonesian, in the order of alts; null where there is none."""
+    optionsId: [String]
   }
 
   type ThinkingOption {
@@ -583,7 +596,7 @@ export const typeDefs = gql`
   }
 
   type SprintDraftDecision {
-    """move, wait or drop for an AC line; accept or fix for a QA prediction."""
+    """dependency, reference or move for an AC line (older wait reads as dependency, drop as reference); accept or fix for a QA prediction; approve for test cases."""
     action: String!
     note: String
     by: String
@@ -625,6 +638,10 @@ export const typeDefs = gql`
     frames: [String!]!
     storyboard: SprintDraftStoryboardFlag
     tcs: [SprintDraftTc!]!
+    "QA approved the test cases as they are now (decision tc|KEY approve)."
+    tcApproved: Boolean!
+    "The hash of the AC lines; a ticket summary is written for one hash."
+    acHash: String!
     "A frame of the ticket changed in the storyboard after the test cases were written."
     tcStale: Boolean!
     "Publish posts the test cases: they differ from the last comment."
@@ -676,9 +693,11 @@ export const typeDefs = gql`
     refEnd: Float
     ownEnd: Float
     decision: SprintDraftDecision
+    """The ticket already has an "is blocked by" link to refKey: the line is a dependency."""
+    linked: Boolean!
   }
 
-  """A sprint being planned. Publish is held while blockers (finding or qa|KEY ids) remain."""
+  """A sprint being planned. blockers (finding or qa|KEY ids) are shown before publish; they never hold it."""
   type SprintDraft {
     sprint: String!
     sprintId: Int!
@@ -707,6 +726,8 @@ export const typeDefs = gql`
     "github when merge state came from GitHub, jira when GitHub could not be read"
     mergeSource: String!
     moves: [SprintMoveSuggestion!]!
+    "The planner's written scope cut, decision scope|cut; null while none is written."
+    scopeCut: SprintDraftDecision
   }
 
   """What Publish would write to one ticket. refused says why the ticket is skipped."""
@@ -716,7 +737,59 @@ export const typeDefs = gql`
     assigneeTo: String
     acRemoved: [String!]!
     acAdded: [String!]!
+    """Lines Publish appends to the Reference field."""
+    referenceAdded: [String!]!
+    """Tickets Publish links as blocking this one."""
+    blockedBy: [String!]!
     refused: String
+  }
+
+  """The planning agent's summary of a ticket, in Indonesian. Never written to Jira."""
+  type TicketSummary {
+    key: String!
+    acHash: String!
+    made: String!
+    checked: String!
+    notHere: String!
+    waitsOn: [String!]!
+    before: String!
+    after: String!
+    line: String!
+    testData: String
+    ui: Boolean!
+    """One Indonesian line per AC line."""
+    acId: [String!]!
+    titleId: String
+    writtenAt: String!
+    """Written for the AC the sprint draft holds now."""
+    current: Boolean!
+    """When the AC field last changed in Jira; only on ticketSummary."""
+    acChangedAt: String
+  }
+
+  type TicketRefDecision {
+    refKey: String!
+    """dependency, reference or move."""
+    action: String!
+  }
+
+  type TicketReadinessTicket {
+    key: String!
+    """The newest sprint draft holding the ticket."""
+    sprint: String
+    summary: TicketSummary
+    tcApproved: Boolean!
+    decisions: [TicketRefDecision!]!
+  }
+
+  type TicketStatus {
+    key: String!
+    status: String!
+  }
+
+  type TicketReadinessFacts {
+    tickets: [TicketReadinessTicket!]!
+    statuses: [TicketStatus!]!
   }
 
   """The outcome of Publish for one ticket: updated, refused or failed."""
@@ -804,7 +877,7 @@ export const typeDefs = gql`
     expected: String!
   }
 
-  "A question the planning chat raised; the planner marks it answered."
+  "A question the planning chat raised; the planner answers it in the chat."
   type SprintDraftQuestion {
     id: ID!
     text: String!
@@ -813,6 +886,45 @@ export const typeDefs = gql`
     answered: Boolean!
     answeredBy: String
     answeredAt: String
+    "The planner's answer: a draft decision, a Jira comment on the ticket and a contract decision on publish."
+    answer: String
+    "Quick replies the planning agent offered."
+    options: [String!]!
+  }
+
+  "One of this developer's To Do tickets of the published plan, in work order."
+  type SprintPlanOrderItem {
+    key: String!
+    summary: String!
+    status: String!
+    sp: Float
+    order: Int
+  }
+
+  "A sprint plan as every DOCK reads it from Jira's plan-published-rN labels."
+  type SprintPlanSignal {
+    sprint: String!
+    sprintId: Int!
+    sprintState: String!
+    activeSince: String
+    "draft, published or running"
+    stage: String!
+    revision: Int
+    publishedBy: String
+    publishedAt: String
+    planner: String
+    me: String
+    isPlanner: Boolean!
+    draftLoadedAt: String
+    draftStatus: String
+    "Sprint tickets without a plan label: they joined after the last publish."
+    joined: [String!]!
+    "Plan tickets whose AC changed in Jira after the revision went out."
+    acChanged: [String!]!
+    waitForPublish: Boolean!
+    planAfterPublish: Boolean!
+    myOrder: [SprintPlanOrderItem!]!
+    myOutside: [String!]!
   }
 
   type SprintStoryboard {
@@ -896,7 +1008,143 @@ export const typeDefs = gql`
     dest: String!
     status: String!
     sessionId: String
+    "ledger for a line drafted from the ticket ledgers, judge for one the Judge sprint summary posted."
+    source: String!
     updatedAt: String!
+  }
+
+  "One step Judge called a mistake (or not). call is the owner's answer when there is one, else Judge's call."
+  type JudgeFinding {
+    id: ID!
+    sessionId: String!
+    day: String!
+    messageId: Int
+    threadUrl: String
+    cause: String!
+    causeLabel: String!
+    text: String!
+    quote: String!
+    shouldHave: String!
+    judgeCall: String!
+    ownerCall: String
+    call: String!
+    note: String
+    createdAt: String!
+    "The session's grade after this answer; set only by setJudgeCall."
+    grade: String
+  }
+
+  "Judge's grade of one session: status pending, running, judged or failed."
+  type SessionJudge {
+    status: String!
+    grade: String
+    judgedAt: String
+    ownerWaitMinutes: Int!
+    error: String
+    findings: [JudgeFinding!]!
+  }
+
+  "status is waiting, confirmed, nothing (no findings) or stood (not confirmed by the cutoff: Judge's call stands)."
+  type JudgeDayRow {
+    day: String!
+    sessions: Int!
+    judged: Int!
+    pending: Int!
+    failed: Int!
+    findings: Int!
+    totalFindings: Int!
+    sessionsWithFindings: Int!
+    grade: String
+    status: String!
+    confirmedAt: String
+    cutoffAt: String!
+    judgedAt: String
+    ownerWaitMinutes: Int!
+  }
+
+  type JudgeCauseCount {
+    cause: String!
+    label: String!
+    count: Int!
+  }
+
+  type JudgeWaitingDay {
+    day: String!
+    findings: Int!
+  }
+
+  "The sprint summary run: waiting for the queue, running, or done."
+  type JudgeSprintSummary {
+    status: String!
+    requestedAt: String!
+    notJudged: Int
+  }
+
+  type JudgeSprintSheet {
+    dayCount: Int!
+    daysAnswered: Int!
+    sessions: Int!
+    judged: Int!
+    waiting: Int!
+    failed: Int!
+    lastRun: String
+    findings: Int!
+    findingSessions: Int!
+    grade: String!
+    previousGrade: String
+    ownerHours: Float!
+    causes: [JudgeCauseCount!]!
+    waitingDays: [JudgeWaitingDay!]!
+    summary: JudgeSprintSummary
+  }
+
+  type JudgeDays {
+    sprint: String!
+    activeSprint: String
+    previous: String
+    days: [JudgeDayRow!]!
+    sheet: JudgeSprintSheet!
+  }
+
+  type JudgeDaySession {
+    sessionId: String!
+    title: String!
+    ticketKey: String
+    origin: String!
+    startedAt: String
+    lastMessageAt: String
+    status: String!
+    grade: String
+    ownerWaitMinutes: Int!
+    error: String
+    findings: [JudgeFinding!]!
+  }
+
+  type JudgeDaySheet {
+    day: String!
+    sessions: Int!
+    judged: Int!
+    pending: Int!
+    failed: Int!
+    findings: Int!
+    totalFindings: Int!
+    sessionsWithFindings: Int!
+    grade: String
+    status: String!
+    confirmedAt: String
+    cutoffAt: String!
+    judgedAt: String
+    ownerWaitMinutes: Int!
+    note: String
+    sessionList: [JudgeDaySession!]!
+    previousDay: String
+    nextDay: String
+  }
+
+  "What one step of the Judge queue did: the Judge session it started, or why it started none."
+  type JudgeTick {
+    started: String
+    skipped: String
   }
 
   type RetroEscalationCause {
@@ -965,6 +1213,10 @@ export const typeDefs = gql`
     options: [String!]!
     """What choosing each option changes, in the order of options."""
     effects: [String]!
+    """The question in Indonesian for the owner, when the ledger has it; sous still reads text."""
+    textId: String
+    """Each option in Indonesian, in the order of options; null where there is none."""
+    optionsId: [String]
   }
 
   type OrchestrationStackRepo {
@@ -1240,6 +1492,117 @@ export const typeDefs = gql`
     reasons: [String!]!
   }
 
+  """The lead's report when one agent ends: the step, who, a short report, and on the final review two notes."""
+  type Checkpoint {
+    id: ID!
+    key: String!
+    step: String!
+    agentId: String
+    agent: String
+    text: String!
+    """AC lines that cannot be tested while the ticket is alone in UAT."""
+    untestable: [String!]!
+    """Test data the ticket still needs."""
+    missingData: [String!]!
+    at: String!
+  }
+
+  """The lines a Sous flow profile adds to the sous prompt, and the cron start prompt with them."""
+  type SousFlowPrompt {
+    lines: [String!]!
+    prompt: String!
+  }
+
+  "Settings › Sous flow › Aturan rules kept outside the cron config, each as JSON with its defaults filled in."
+  type OpsRules {
+    "{ enabled, next, ignoreDocsSync, laptop }: the Jira move after every pull request of a ticket merged."
+    statusAfterMerge: String!
+    "{ mode: notify | auto | off, days }: what DOCK does with worktrees whose ticket merged."
+    worktreeMerged: String!
+  }
+
+  type QaQueueRow {
+    position: Int!
+    key: String!
+    summary: String!
+    status: String!
+    assignee: String
+    "The QA bot's labels (QA-*)."
+    labels: [String!]!
+    "queue, dependency (QA-WAIT-DEPENDENCY) or escalated."
+    kind: String!
+    "The open is-blocked-by tickets of a QA-WAIT-DEPENDENCY row."
+    waitsOn: [String!]!
+    enteredAt: String
+    waitingMinutes: Int
+  }
+
+  type QaQueueMetrics {
+    total: Int!
+    queue: Int!
+    dependency: Int!
+    escalated: Int!
+    averageWaitMinutes: Int
+    oldestWaitMinutes: Int
+  }
+
+  type QaQueue {
+    at: String!
+    "DOCK's Jira user, for Punya saya."
+    me: String
+    rows: [QaQueueRow!]!
+    metrics: QaQueueMetrics!
+    error: String
+    "The search stopped at 500 issues."
+    capped: Boolean!
+    "Issues left unread when capped; -1 when Jira could not count them, null when not capped."
+    more: Int
+  }
+
+  type WorktreeRow {
+    repo: String!
+    path: String!
+    branch: String
+    ticketKey: String
+    "merged, open, none or unknown."
+    merge: String!
+    pulls: [String!]!
+    dirty: Boolean!
+    changes: [String!]!
+    session: Boolean!
+    devServer: Boolean!
+    mergedSince: String
+    "Why a cleanup is refused now; empty when it may go."
+    refusals: [String!]!
+  }
+
+  type WorktreeCleanResult {
+    path: String!
+    ok: Boolean!
+    output: String!
+    at: String
+    "owner or auto."
+    by: String
+    "True when wt.sh unlink took a node_modules junction away before the remove."
+    unlinked: Boolean
+  }
+
+  type WorktreeList {
+    root: String!
+    mode: String!
+    days: Int!
+    rows: [WorktreeRow!]!
+    history: [WorktreeCleanResult!]!
+    error: String
+  }
+
+  type QaGuideResult {
+    written: Boolean!
+    """off when the switch is off, unchanged when the block already holds these lines."""
+    reason: String
+    lines: [String!]!
+  }
+
   type Orchestration {
     key: ID!
     kind: String!
@@ -1276,6 +1639,8 @@ export const typeDefs = gql`
     productionData: Boolean
     draft: Boolean
     issues: [OrchestrationIssue!]!
+    """The menu path to the change, written by sous at the video step for the QA guide."""
+    qaMenu: String
     """Every step of the owner's last review approval succeeded (Jira Pass label and GitHub approve)."""
     approved: Boolean!
     """The guessed decisions (GUESS, USULAN) the owner confirmed in DOCK."""
@@ -1327,6 +1692,10 @@ export const typeDefs = gql`
     settled: [ChatSettled!]!
     options: ChatTurnOptions
     reviewRound: ReviewRoundInfo
+    "The dependency a ticket session waits on, set by createChatSession when the blocked-by rule tells."
+    waitsOn: String
+    "Judge's grade of the session; null before it is queued."
+    judge: SessionJudge
   }
 
   type ReviewRoundInfo {
@@ -1572,6 +1941,7 @@ export const typeDefs = gql`
     ownerReplySession: String
     notificationPrefs: String
     planningConfluenceParent: String
+    planningPlanner: String
   }
 
   input QuickLinkInput {
@@ -1843,6 +2213,10 @@ export const typeDefs = gql`
     ownerName: String!
     dashboard: [TicketGroup!]!
     ticketDetail(key: String!): Ticket
+    """The planning agent's summary of the ticket; null when none was written."""
+    ticketSummary(key: String!): TicketSummary
+    """What the readiness of each ticket needs beyond Jira (summary, test case approval, AC decisions), and the Jira status of refs."""
+    ticketReadiness(keys: [String!]!, refs: [String!]): TicketReadinessFacts!
     ticketRelationGroup(ticketKey: String!): TicketRelationGroup!
     needsAttention: [NeedsAttentionItem!]!
     discordThreads: DiscordThreads!
@@ -1919,6 +2293,32 @@ export const typeDefs = gql`
     planningSprints: [PlanningSprint!]!
     """The stored draft of a sprint by name, null before it is loaded."""
     sprintDraft(sprint: String!): SprintDraft
+    sprintPlanSignal(sprint: String!): SprintPlanSignal
+    "The Planning flow as JSON (stages, owner, approve); null when none is saved and every stage runs."
+    planningFlow: String
+    "Days of the sprint Judge read, newest first, and the sprint sheet; no name is the active sprint."
+    judgeDays(sprint: String): JudgeDays
+    "One day's sheet: the findings grouped by session."
+    judgeDay(day: String!): JudgeDaySheet!
+    "Days of the last two weeks still waiting on the owner's answer."
+    judgeWaiting: [JudgeWaitingDay!]!
+    "Settings › Judge as JSON (on, account, windows, idleMinutes, noonCutoff), defaults filled in."
+    judgeSettings: String!
+    "The ticket's checkpoints, oldest first."
+    checkpoints(key: String!): [Checkpoint!]!
+    "The Sous flow settings as JSON (profiles, mine, checkpoint, qaGuide, qaGuideField), defaults filled in."
+    sousFlow: String!
+    "The Sous flow profile the ticket was given; null when it follows the person's own profile."
+    ticketSousFlow(key: String!): String
+    "What a profile adds to the sous prompt; key names the ticket in the preview."
+    sousFlowPrompt(profile: String!, key: String): SousFlowPrompt!
+    opsRules: OpsRules!
+    "The QA bot's queue from Jira: UAT CHECK plus QA-WAIT-DEPENDENCY tickets, oldest in UAT CHECK first. One Jira search a minute at most."
+    qaQueue: QaQueue!
+    "The ticket's place in the QA queue; null when it is not in it."
+    qaQueuePosition(key: String!): Int
+    "The linked worktrees of the repos under the kit's ROOT, with their cleanup checks. Workspace DOCK only."
+    worktrees: WorktreeList!
     """The changes Publish would make, each ticket read from Jira again; writes nothing."""
     previewSprintDraftPublish(sprint: String!): [SprintDraftChange!]!
     "The owner's held AC lines in the active sprint's published plan; null when it was not published from Planning."
@@ -1943,7 +2343,7 @@ export const typeDefs = gql`
     loadSprintDraft(sprintId: Int!): SprintDraft!
     """Changes a draft ticket. wave 0 goes back to the wave its dependencies give; ac replaces every line."""
     updateSprintDraftTicket(sprint: String!, key: String!, dev: String, wave: Int, sp: Float, ac: [String!]): SprintDraft!
-    """Records a decision on a finding or a qa|KEY prediction; action clear removes it."""
+    """Records a decision on a finding, a qa|KEY prediction or the scope|cut note; action clear removes it."""
     decideSprintDraft(sprint: String!, id: ID!, action: String!, note: String): SprintDraft!
     refreshSprintDraftQa(sprint: String!): SprintDraft!
     "Reads the newest storyboard of each epic of the draft from Confluence and saves it under the blackboard."
@@ -1951,7 +2351,7 @@ export const typeDefs = gql`
     "Save an uploaded storyboard HTML as the newest version for the epic (used until the Confluence page exists)."
     uploadSprintStoryboard(sprint: String!, epic: String!, html: String!): SprintDraft!
     "Marks an open question of the planning chat answered, or open again."
-    answerSprintDraftQuestion(sprint: String!, id: ID!, answered: Boolean!): SprintDraft!
+    answerSprintDraftQuestion(sprint: String!, id: ID!, answered: Boolean!, text: String): SprintDraft!
     "Replaces a ticket's draft test cases."
     setSprintDraftTcs(sprint: String!, key: String!, tcs: [SprintDraftTcInput!]!): SprintDraft!
     "Assign cards to another developer in the draft only; Jira changes on Publish."
@@ -2050,6 +2450,31 @@ export const typeDefs = gql`
     backfillSprintDashboards(count: Int!): SprintRefreshState!
     updateSprintDashboardSettings(boardId: String!, config: String!): Boolean!
     updateOrchestratorCronSettings(config: String!): Boolean!
+    "Saves the Planning flow JSON after validation and returns it normalized; an empty string clears it."
+    setPlanningFlow(flow: String!): String
+    "The owner's call on a Judge finding, mistake or not, with an optional note."
+    setJudgeCall(findingId: ID!, call: String!, note: String): JudgeFinding!
+    confirmJudgeDay(day: String!, note: String): JudgeDaySheet!
+    "Runs the Judge queue now, outside its windows; it still waits while DOCK is busy."
+    judgeNow: JudgeTick!
+    "Asks for the sprint summary: it waits for an empty queue until 23:30, then runs."
+    judgeSprint(sprint: String!): JudgeSprintSummary!
+    "Judges the session again from the start."
+    judgeAgain(sessionId: ID!): JudgeTick!
+    "Saves Settings › Judge after validation and returns it normalized."
+    setJudgeSettings(settings: String!): String!
+    "Saves the Sous flow JSON after validation and returns it normalized; an empty string resets it."
+    setSousFlow(flow: String!): String!
+    "Gives the ticket a Sous flow profile; null makes it follow the person's own profile again."
+    setTicketSousFlow(key: String!, profile: String): String
+    "Writes the QA guide block in the ticket's Developer Context now, whatever the Sous flow switch says."
+    writeQaGuide(key: String!): QaGuideResult!
+    "Saves the status-after-merge rule JSON after validation and returns it normalized; an empty string resets it."
+    setStatusAfterMerge(value: String!): String!
+    "Saves the worktree-merged rule JSON after validation and returns it normalized; an empty string resets it."
+    setWorktreeMerged(value: String!): String!
+    "Removes merged worktrees through the kit's wt.sh; each one with local changes, a live session, a dev server or no merge is REFUSED and left alone."
+    cleanWorktrees(paths: [String!]!): [WorktreeCleanResult!]!
     runOrchestratorCronNow: String!
     confirmOrchestration(key: String!): Boolean!
     stopAllAgents: Int!

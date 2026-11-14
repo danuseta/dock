@@ -43,6 +43,19 @@ export const qaBusy = (phase: QaPhase | null) => phase === 'preparing' || phase 
 
 export const verdictVariant = (verdict: string | null): BadgeVariant => (verdict === 'LOLOS' ? 'success' : verdict === 'REVISION' ? 'danger' : verdict ? 'warn' : 'neutral');
 
+export type UatPrediction = 'PASS' | 'ESCALATED' | 'NOT PASSED';
+export const PREDICTION_LABEL = 'Prediksi di UAT';
+
+/** What UAT will likely say, from the local run's predicted verdict (LOLOS, REVISION, ESCALATED); null when it names none. */
+export function uatPrediction(verdict: string | null | undefined): UatPrediction | null {
+  const value = verdict?.trim().toUpperCase();
+  if (!value) return null;
+  if (value === 'LOLOS' || value === 'PASS' || value === 'PASSED') return 'PASS';
+  if (value === 'ESCALATED') return 'ESCALATED';
+  if (value === 'REVISION' || value === 'REVISION-RISK' || value === 'NOT PASSED' || value === 'FAILED' || value === 'FAIL') return 'NOT PASSED';
+  return null;
+}
+
 /** `QRD-1286-TC001` reads as `TC001` in the narrow panel. */
 export const shortTc = (id: string) => /TC-?\d+[A-Za-z]?$/i.exec(id)?.[0] ?? id;
 

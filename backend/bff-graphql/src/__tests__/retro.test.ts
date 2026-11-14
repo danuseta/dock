@@ -38,10 +38,14 @@ test('a draft keeps only lines with a known kind and evidence; an unknown destin
     { kind: 'wish', text: 'x', evidence: ['y'] },
   ] });
   assert.deepStrictEqual(draft, { sprint: 'QRD Sprint 26', items: [
-    { kind: 'try', text: 'Intake looks for the epic copy of an artifact', evidence: ['QRD-1268: I-4'], dest: 'kit' },
-    { kind: 'keep', text: 'One review per ticket', evidence: ['QRD-1498'], dest: 'note' },
-  ] });
+    { kind: 'try', text: 'Intake looks for the epic copy of an artifact', evidence: ['QRD-1268: I-4'], dest: 'kit', source: 'ledger' },
+    { kind: 'keep', text: 'One review per ticket', evidence: ['QRD-1498'], dest: 'note', source: 'ledger' },
+  ], sources: ['ledger'] });
   assert.throws(() => parseRetroDraft({ items: [] }), OrchestratorInputError);
+  const judged = parseRetroDraft({ sprint: 'S', items: [{ kind: 'problem', text: 'Guard refusal goes to the owner', evidence: ['QA-QRD-1516'], dest: 'kit', source: 'judge' }, { kind: 'try', text: 'x', evidence: ['e'], source: 'elsewhere' }] });
+  assert.deepStrictEqual(judged.items.map((item) => item.source), ['judge', 'ledger'], 'an unknown source is the ledger');
+  assert.deepStrictEqual(judged.sources, ['judge', 'ledger']);
+  assert.deepStrictEqual(parseRetroDraft({ sprint: 'S', source: 'judge', items: [] }).sources, ['judge'], 'an empty Judge draft clears only the open Judge lines');
   assert.strictEqual(retroApplyPrompt({ id: 'abc', text: 'T', dest: 'kit', evidence: ['QRD-1'] }), 'Pakai skill sous: retro apply abc\nDest: kit\nText: T\nEvidence: QRD-1');
 });
 

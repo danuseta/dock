@@ -977,7 +977,7 @@ export class ChatService {
     return nextSessionTitle(title, await this.storage.getChatSessionTitles(title));
   }
 
-  async createSession(input: { title?: string | null; ticketKey?: string | null; forkFrom?: string | null; machine?: string | null; origin?: 'cron' | 'manual'; options?: unknown }) {
+  async createSession(input: { title?: string | null; ticketKey?: string | null; forkFrom?: string | null; machine?: string | null; origin?: 'cron' | 'manual'; options?: unknown; account?: string | null }) {
     const forkFrom = optionalChatId(input.forkFrom, 'forkFrom');
     const source = forkFrom ? await this.storage.getChatSession(forkFrom) : null;
     if (forkFrom && source?.source !== 'cli') {
@@ -1001,6 +1001,7 @@ export class ChatService {
       lastMessageAt: now,
       origin: input.origin === 'cron' ? 'cron' : 'manual',
       ...(cronOptions ? { options: JSON.stringify(cronOptions) } : {}),
+      ...(text(input.account, 40) ? { account: text(input.account, 40) } : {}),
     });
     return toSession(row, null);
   }
@@ -1391,6 +1392,9 @@ export class ChatService {
         text: message.text,
         claudeSessionId: session.claudeSessionId,
         forkFrom: session.forkFrom,
+        // Every turn of the session runs on that Claude account instead of the machine's active one; a Judge turn is named.
+        ...(session.account ? { account: session.account } : {}),
+        ...(session.title.startsWith('Judge-') ? { title: session.title } : {}),
       };
       if (!caps) return taken;
       return {
