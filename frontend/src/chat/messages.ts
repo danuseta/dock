@@ -33,6 +33,7 @@ export interface ChatSession {
   settled?: SettledInteraction[] | null;
   options?: { model?: string | null; effort?: string | null; permissionMode?: string | null; fast?: boolean | null } | null;
   reviewRound?: { status: string; summary: string; threadUrl: string; at: string } | null;
+  judge?: { status: string; grade: string | null } | null;
 }
 
 export interface ChatMachine { name: string; online: boolean; lastSeenAt?: string | null; capabilities?: string[] | null; claudeVersion?: string | null }

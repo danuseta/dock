@@ -26,6 +26,8 @@ import { ELEVENLABS_ROUTES, elevenLabsKeys, elevenLabsRoute, type ElevenLabsKeys
 import { MAX_TRANSCRIPT_BYTES, OrchestratorInputError, OrchestratorService, orchestratorService, type Orchestration } from '../integrations/orchestrator';
 import { StorageService } from '../storage/service';
 import { checkpointsOn } from '../integrations/sous-flow-live';
+import type { JudgeQueue } from '../integrations/judge-queue';
+import { judgeQueue } from '../integrations/judge-live';
 
 const broadcastFailed = (error: unknown) => console.error('[Broadcast] automatic broadcast failed:', error instanceof Error ? error.message : 'unknown error');
 const gateFailed = (error: unknown) => console.error('[Decision gate] failed:', error instanceof Error ? error.message : 'unknown error');
@@ -81,6 +83,8 @@ export function createOrchestratorIngestRouter(
   planning: PlanningIngestDeps = { drafts: sprintDraftService, storyboards: storyboardReader, summaries: ticketSummaryService },
   // The Sous flow "Kirim checkpoint" switch; off, a checkpoint is answered as not recorded so the lead carries on.
   checkpointOn: () => Promise<boolean> = checkpointsOn,
+  // The Judge result of one session; DOCK computes the grade from the findings.
+  judge: Pick<JudgeQueue, 'receive'> = judgeQueue,
 ): Router {
   const router = Router();
 
@@ -123,7 +127,7 @@ export function createOrchestratorIngestRouter(
   }));
   router.post('/retro', small, handle(async (body) => {
     const draft = parseRetroDraft(body);
-    return { sprint: draft.sprint, items: await retroStore.replaceRetroDraft(draft.sprint, draft.items) };
+    return { sprint: draft.sprint, items: await retroStore.replaceRetroDraft(draft.sprint, draft.items, draft.sources) };
   }));
   router.post('/plan', small, handle((body) => planner.ingest(body)));
   router.post('/deploy-gate', small, handle(async (body) => {
@@ -149,6 +153,19 @@ export function createOrchestratorIngestRouter(
         return;
       }
       console.error('[Orchestrator] checkpoint failed:', error instanceof Error ? error.message : 'unknown error');
+      response.status(500).json({ error: 'Ingest failed' });
+    }
+  });
+  router.post('/judge', small, async (request: Request, response: Response) => {
+    try {
+      const result = await judge.receive(request.body);
+      response.status(200).json({ ok: true, ...result, result });
+    } catch (error) {
+      if (error instanceof OrchestratorInputError) {
+        response.status(400).json({ error: error.message });
+        return;
+      }
+      console.error('[Orchestrator] judge result failed:', error instanceof Error ? error.message : 'unknown error');
       response.status(500).json({ error: 'Ingest failed' });
     }
   });

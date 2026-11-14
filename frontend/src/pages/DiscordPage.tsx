@@ -50,6 +50,8 @@ const Title: React.FC<{ text: string }> = ({ text }) => (
 );
 
 const selectedFromUrl = () => new URLSearchParams(window.location.search).get('thread');
+/** `?message=<id>`: a reviewer's message a Judge finding points at, scrolled to and highlighted. */
+const messageFromUrl = () => new URLSearchParams(window.location.search).get('message');
 
 const writeFeed = (field: string) => (cache: any, result: any) => {
   if (result.data?.[field]) cache.writeQuery({ query: GET_DISCORD_THREADS, data: { discordThreads: result.data[field] } });
@@ -67,6 +69,7 @@ const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) 
   const [query, setQuery] = useState('');
   const [folded, setFolded] = useState<string[]>([]);
   const [picked, setPicked] = useState<string | null>(selectedFromUrl);
+  const [focusMessage, setFocusMessage] = useState<string | null>(messageFromUrl);
   const now = new Date();
 
   const feed = data?.discordThreads;
@@ -84,6 +87,7 @@ const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) 
 
   const open = (id: string) => {
     setPicked(id);
+    setFocusMessage(null);
     window.history.replaceState(window.history.state, '', `/discord?thread=${encodeURIComponent(id)}`);
   };
   const back = () => {
@@ -153,7 +157,7 @@ const DiscordPage: React.FC<DiscordPageProps> = ({ onTicketClick, onNavigate }) 
           </div>
         </section>
 
-        {selected ? <ThreadPane key={selected.id} thread={selected} onBack={back} picked={Boolean(picked)} onTicketClick={onTicketClick} onNavigate={onNavigate} onDismiss={() => void dismiss({ variables: { id: selected.id, lastActivity: selected.lastActivity } })} />
+        {selected ? <ThreadPane key={selected.id} thread={selected} focusMessage={selected.id === picked ? focusMessage : null} onBack={back} picked={Boolean(picked)} onTicketClick={onTicketClick} onNavigate={onNavigate} onDismiss={() => void dismiss({ variables: { id: selected.id, lastActivity: selected.lastActivity } })} />
           : <p className="p-6 text-sm text-muted-foreground max-[960px]:hidden">Pick a thread.</p>}
       </div>
     </Page>
@@ -345,8 +349,11 @@ const ChannelManager: React.FC<{ channels: DiscordChannel[]; configured: boolean
   );
 };
 
-const ThreadPane: React.FC<{ thread: DiscordThread; picked: boolean; onBack: () => void; onTicketClick: (key: string) => void; onNavigate: (path: string) => void; onDismiss: () => void }> = ({ thread, picked, onBack, onTicketClick, onNavigate, onDismiss }) => {
+const ThreadPane: React.FC<{ thread: DiscordThread; picked: boolean; focusMessage?: string | null; onBack: () => void; onTicketClick: (key: string) => void; onNavigate: (path: string) => void; onDismiss: () => void }> = ({ thread, picked, focusMessage = null, onBack, onTicketClick, onNavigate, onDismiss }) => {
   const [viewing, setViewing] = useState<{ files: DiscordFile[]; index: number } | null>(null);
+  useEffect(() => {
+    if (focusMessage) document.querySelector(`[data-discord-message="${CSS.escape(focusMessage)}"]`)?.scrollIntoView({ block: 'center' });
+  }, [focusMessage]);
   const [reading, setReading] = useState<DiscordFile | null>(null);
   const earlier = Math.max(0, thread.messageCount - thread.messages.length);
   const ticket = thread.tickets[0];
@@ -384,7 +391,7 @@ const ThreadPane: React.FC<{ thread: DiscordThread; picked: boolean; onBack: () 
           return (
             <React.Fragment key={message.id}>
               {divider && <p className="mx-5 my-2.5 flex items-center gap-2.5 font-mono text-[0.62rem] text-muted-foreground before:h-px before:flex-1 before:bg-border after:h-px after:flex-1 after:bg-border">{label.toUpperCase()}</p>}
-              <div className={cn('grid grid-cols-[32px_minmax(0,1fr)] gap-3 border-l-2 border-transparent px-5 py-1.5', hit && 'border-status-warn bg-status-warn/[0.08]')}>
+              <div data-discord-message={message.id} className={cn('grid grid-cols-[32px_minmax(0,1fr)] gap-3 border-l-2 border-transparent px-5 py-1.5', hit && 'border-status-warn bg-status-warn/[0.08]', focusMessage === message.id && 'border-accent bg-accent-dim')}>
                 <img src={message.avatar} alt="" loading="lazy" className="size-8 rounded-full bg-surface-2" />
                 <div className="min-w-0">
                   <p className="text-[0.76rem] font-semibold">{message.mine ? 'You' : message.author}<time className="ml-2 font-mono text-[0.6rem] font-normal text-muted-foreground">{wibTime(message.at)}</time></p>

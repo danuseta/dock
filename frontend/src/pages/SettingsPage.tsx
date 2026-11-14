@@ -27,6 +27,7 @@ import { GitHubSection } from '../settings/sections/GitHubSection';
 import { DiscordSection } from '../settings/sections/DiscordSection';
 import { CalendarSection, type GoogleReturn } from '../settings/sections/CalendarSection';
 import { PlanningFlowSection } from '../settings/sections/PlanningFlowSection';
+import { JudgeSection } from '../settings/sections/JudgeSection';
 import { SousFlowSection } from '../settings/sections/SousFlowSection';
 import { RulesCard } from '../settings/sections/RulesCard';
 
@@ -203,6 +204,7 @@ const SettingsPage: React.FC = () => {
           {active === 'claude' && <ClaudeAccountSection />}
           {active === 'planflow' && <PlanningFlowSection />}
           {active === 'sousflow' && <SousFlowSection />}
+          {active === 'judge' && <JudgeSection />}
         </main>
       </div>
 

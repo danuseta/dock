@@ -59,6 +59,9 @@ import { dockMode, ownRuns } from '../mode';
 import { buildIssueBody, currentBuild, dockIssueError, draftUrl, issueEnvironment, issueTitle, issuesRepo, reporterName, type IssueDraft } from '../integrations/dock-issues';
 import { ChangesInputError } from '../integrations/pull-changes';
 import { pullChangesService } from '../integrations/pull-changes-live';
+import { judgeQueue } from '../integrations/judge-live';
+import { JudgeInputError } from '../integrations/judge-queue';
+import { JUDGE_SETTINGS_KEY, JudgeSettingsError, parseJudgeSettings, storedJudgeSettings } from '../integrations/judge';
 
 const jiraAPI = new JiraAPI();
 const githubAPI = new GitHubAPI();
@@ -224,6 +227,24 @@ async function runSousPrompt(title: string, text: string) {
   const session = await chatService.createSession({ title, machine: CHAT_MACHINE }).catch(orchestratorInputError);
   await chatService.sendMessage(session.id, text, await orchestratorService.machines()).catch(orchestratorInputError);
   return session.id;
+}
+
+const judgeError = (error: unknown): never => {
+  if (error instanceof JudgeInputError || error instanceof JudgeSettingsError || error instanceof OrchestratorInputError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+  throw error;
+};
+
+type JudgeGrades = Awaited<ReturnType<typeof judgeQueue.grades>>;
+let judgeBatch: { ids: Set<string>; rows: Promise<JudgeGrades> } | null = null;
+
+/** The Judge row of a listed session; the sessions of one request are read in one query. */
+function sessionJudge(sessionId: string) {
+  if (!judgeBatch) {
+    const ids = new Set<string>();
+    judgeBatch = { ids, rows: new Promise<void>((resolve) => setImmediate(resolve)).then(() => { judgeBatch = null; return judgeQueue.grades([...ids]); }) };
+  }
+  judgeBatch.ids.add(sessionId);
+  return judgeBatch.rows.then((rows) => rows.get(sessionId) ?? null);
 }
 
 function orchestratorInputError(error: unknown): never {
@@ -401,6 +422,10 @@ export const resolvers = {
     sprintDraft: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.view(sprint).catch(planningError),
     sprintPlanSignal: (_: unknown, { sprint }: { sprint: string }) => planSignalService.view(sprint).catch(planningError),
     planningFlow: async () => storedPlanningFlow((await storageService.getSettingValues([PLANNING_FLOW_KEY]))[0]?.value),
+    judgeDays: (_: unknown, { sprint }: { sprint?: string | null }) => judgeQueue.days(sprint).catch(judgeError),
+    judgeDay: (_: unknown, { day }: { day: string }) => judgeQueue.day(day).catch(judgeError),
+    judgeWaiting: () => (dockMode() === 'workspace' ? judgeQueue.waitingDays() : []),
+    judgeSettings: async () => JSON.stringify(storedJudgeSettings((await storageService.getSettingValues([JUDGE_SETTINGS_KEY]))[0]?.value)),
     checkpoints: (_: unknown, { key }: { key: string }) => orchestratorService.checkpoints(key),
     sousFlow: async () => storedSousFlow((await storageService.getSettingValues([SOUS_FLOW_KEY]))[0]?.value),
     ticketSousFlow: (_: unknown, { key }: { key: string }) => ticketProfile(key),
@@ -734,6 +759,18 @@ export const resolvers = {
       sprintDraftService.answer(sprint, id, answered, reporterName(), text ?? null).catch(planningError)
     ),
     publishSprintDraft: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.publish(sprint, reporterName()).catch(planningError),
+    setJudgeCall: (_: unknown, { findingId, call, note }: { findingId: string; call: string; note?: string | null }) => { requireAgentControls(); return judgeQueue.setCall(findingId, call, note ?? null).catch(judgeError); },
+    confirmJudgeDay: (_: unknown, { day, note }: { day: string; note?: string | null }) => { requireAgentControls(); return judgeQueue.confirmDay(day, note ?? null).catch(judgeError); },
+    judgeNow: () => { requireAgentControls(); return judgeQueue.judgeNow().catch(judgeError); },
+    judgeSprint: (_: unknown, { sprint }: { sprint: string }) => { requireAgentControls(); return judgeQueue.requestSprint(sprint).catch(judgeError); },
+    judgeAgain: (_: unknown, { sessionId }: { sessionId: string }) => { requireAgentControls(); return judgeQueue.judgeAgain(sessionId).catch(judgeError); },
+    setJudgeSettings: async (_: unknown, { settings }: { settings: string }) => {
+      requireAgentControls();
+      let saved: string;
+      try { saved = JSON.stringify(parseJudgeSettings(settings)); } catch (error) { return judgeError(error); }
+      await storageService.upsertSetting(JUDGE_SETTINGS_KEY, saved, 'Settings › Judge');
+      return saved;
+    },
     setPlanningFlow: async (_: unknown, { flow }: { flow: string }) => {
       if (!flow.trim()) {
         await storageService.deleteSetting(PLANNING_FLOW_KEY);
@@ -1168,6 +1205,7 @@ export const resolvers = {
     },
   },
   ChatSession: {
+    judge: (session: { id: string }) => sessionJudge(session.id),
     pending: async (session: { id: string; status: string; machine: string }) => chatService.pending(session.id, session.status, session.machine),
     settled: async (session: { id: string; status: string; machine: string }) => chatService.settled(session.id, session.status, session.machine),
   },
@@ -1185,6 +1223,9 @@ export const resolvers = {
   ChatMessage: {
     attachments: (message: { attachments?: unknown[] }) => message.attachments ?? [],
   },
+  SessionJudge: {
+    findings: (judge: { sessionId: string }) => judgeQueue.findings(judge.sessionId),
+  },
   Checkpoint: {
     untestable: (checkpoint: Checkpoint) => checkpoint.notes.untestable,
     missingData: (checkpoint: Checkpoint) => checkpoint.notes.missingData,
@@ -1200,6 +1241,7 @@ export const protectedQueries = [
   'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro', 'sprintPlan',
   'planningSprints', 'sprintDraft', 'sprintPlanSignal', 'planningFlow', 'previewSprintDraftPublish', 'sprintDrift', 'acIncoming', 'ticketSummary', 'ticketReadiness',
   'checkpoints', 'sousFlow', 'ticketSousFlow', 'sousFlowPrompt', 'opsRules', 'qaQueue', 'qaQueuePosition', 'worktrees',
+  'judgeDays', 'judgeDay', 'judgeWaiting', 'judgeSettings',
 ] as const;
 export const protectedMutations = [
   'retroBuild',
@@ -1210,6 +1252,12 @@ export const protectedMutations = [
   'decideSprintDraft',
   'refreshSprintDraftQa',
   'setPlanningFlow',
+  'setJudgeCall',
+  'confirmJudgeDay',
+  'judgeNow',
+  'judgeSprint',
+  'judgeAgain',
+  'setJudgeSettings',
   'setSousFlow',
   'setTicketSousFlow',
   'writeQaGuide',

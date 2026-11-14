@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { useApolloClient, useQuery } from '@apollo/client';
 import { Loader2, Power, SendHorizontal } from 'lucide-react';
 import { SEND_CHAT_MESSAGE, STOP_CHAT_TURN } from '../graphql/mutations';
-import { GET_CHAT_MESSAGES, GET_CHAT_SESSION } from '../graphql/queries';
+import { GET_CHAT_MESSAGES, GET_CHAT_SESSION, GET_SESSION_JUDGE } from '../graphql/queries';
 import { Button } from '../components/ui';
 import { EmptyState } from '../components/EmptyState';
 import { TerminalScene } from '../components/empty/scenes/TerminalScene';
@@ -37,6 +37,7 @@ import { stepStage, type Checkpoint } from './checkpoints';
 import { useCheckpoints } from './useCheckpoints';
 import { CheckpointCard } from './CheckpointCard';
 import { useSessionFlow } from './composer/useSessionFlow';
+import { flaggedMessages, type SessionJudge } from '../agents/judge';
 import { continueText, stageAfterStop } from '../lib/sousFlow';
 
 interface ChatThreadProps {
@@ -57,6 +58,8 @@ interface ChatThreadProps {
   queuedBehind?: string[];
   /** The chat panel on a phone: the header comes from `renderHeader`, workers sit in one strip and the composer is compact. */
   compact?: boolean;
+  /** A message to scroll to and highlight, from `?message=`; older pages load until it is there. */
+  focusMessageId?: number | null;
 }
 
 export interface HeaderContext { control: TurnOptionsControl; dot: DotState; status: ChatSessionStatus | undefined; session: ChatSession; busy: boolean; turnStartedAt: string | null }
@@ -75,7 +78,7 @@ const PROMPT_EXAMPLES = [
 
 const messageOf = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
 
-export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, readOnlyAction, hideMachine, onActivity, renderHeader, threadId, onOpenThread, queuedBehind = [], compact }) => {
+export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, readOnlyAction, hideMachine, onActivity, renderHeader, threadId, onOpenThread, queuedBehind = [], compact, focusMessageId = null }) => {
   const client = useApolloClient();
   const [recalled] = useState(() => recallMessages(sessionId));
   const [messages, setMessages] = useState<ChatMessage[]>(() => recalled?.messages ?? []);
@@ -232,6 +235,22 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
     }
   };
 
+  const { data: judgeData } = useQuery<{ chatSession: { id: string; judge: SessionJudge | null } | null }>(GET_SESSION_JUDGE, { variables: { id: sessionId }, fetchPolicy: 'cache-and-network' });
+  const flags = useMemo(() => flaggedMessages(judgeData?.chatSession?.judge?.findings), [judgeData]);
+  const focusedRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!focusMessageId || focusedRef.current === focusMessageId || !loaded) return;
+    const element = scrollRef.current?.querySelector(`[data-message-id="${focusMessageId}"]`);
+    if (element) {
+      focusedRef.current = focusMessageId;
+      stickRef.current = false;
+      element.scrollIntoView({ block: 'center' });
+      return;
+    }
+    const oldest = oldestId(messages);
+    if (hasOlder && !loadingOlder && oldest !== undefined && oldest > focusMessageId) void loadOlder();
+  });
+
   const handleScroll = () => {
     const element = scrollRef.current;
     if (!element) return;
@@ -355,7 +374,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
             ))}
           />
         ))}
-        <TranscriptList items={activity.items} store={activity.store} threadId={threadId} onOpenThread={onOpenThread ? (eventId) => onOpenThread(eventId) : undefined} checkpoints={checkpoints} renderCheckpoint={(checkpoint) => <CheckpointCard checkpoint={checkpoint} onContinue={resumeText && canContinue(checkpoint) ? { label: resumeText, run: () => continueRef.current(resumeText) } : null} />} />
+        <TranscriptList items={activity.items} store={activity.store} flags={flags} focusId={focusMessageId} threadId={threadId} onOpenThread={onOpenThread ? (eventId) => onOpenThread(eventId) : undefined} checkpoints={checkpoints} renderCheckpoint={(checkpoint) => <CheckpointCard checkpoint={checkpoint} onContinue={resumeText && canContinue(checkpoint) ? { label: resumeText, run: () => continueRef.current(resumeText) } : null} />} />
         <PlanningQuestionCards questions={planning.questions} canAnswer={planning.canAnswer} busy={planning.answering} target={answering} planner={planning.planner} onAnswer={answerQuestion} onTarget={setAnswering} />
       </div>
 

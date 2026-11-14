@@ -711,7 +711,7 @@ export const GET_RETRO = gql`
       problems { label count tickets }
       tickets { key title kind hours rounds issues ownerWaitHours result }
       escalations { tickets planned causes { cause label count tickets } unpredicted { key summary causes prediction } }
-      items { id kind text evidence dest status sessionId updatedAt }
+      items { id kind text evidence dest status sessionId source updatedAt }
     }
   }
 `;
@@ -753,7 +753,107 @@ export const RETRO_BUILD = gql`
 
 export const RETRO_ITEM_ACTION = gql`
   mutation RetroItemAction($id: ID!, $action: String!, $text: String) {
-    retroItemAction(id: $id, action: $action, text: $text) { id kind text evidence dest status sessionId updatedAt }
+    retroItemAction(id: $id, action: $action, text: $text) { id kind text evidence dest status sessionId source updatedAt }
+  }
+`;
+
+export const JUDGE_FINDING_FIELDS = `
+  id sessionId day messageId threadUrl cause causeLabel text quote shouldHave judgeCall ownerCall call note createdAt
+`;
+
+export const JUDGE_DAY_FIELDS = `
+  day sessions judged pending failed findings totalFindings sessionsWithFindings grade status confirmedAt cutoffAt judgedAt ownerWaitMinutes
+`;
+
+export const GET_JUDGE_DAYS = gql`
+  query GetJudgeDays($sprint: String) {
+    judgeDays(sprint: $sprint) {
+      sprint
+      activeSprint
+      previous
+      days { ${JUDGE_DAY_FIELDS} }
+      sheet {
+        dayCount daysAnswered sessions judged waiting failed lastRun findings findingSessions grade previousGrade ownerHours
+        causes { cause label count }
+        waitingDays { day findings }
+        summary { status requestedAt notJudged }
+      }
+    }
+  }
+`;
+
+export const GET_JUDGE_DAY = gql`
+  query GetJudgeDay($day: String!) {
+    judgeDay(day: $day) {
+      ${JUDGE_DAY_FIELDS}
+      note
+      previousDay
+      nextDay
+      sessionList {
+        sessionId title ticketKey origin startedAt lastMessageAt status grade ownerWaitMinutes error
+        findings { ${JUDGE_FINDING_FIELDS} }
+      }
+    }
+  }
+`;
+
+export const GET_JUDGE_WAITING = gql`
+  query GetJudgeWaiting {
+    judgeWaiting { day findings }
+  }
+`;
+
+export const GET_SESSION_JUDGE = gql`
+  query GetSessionJudge($id: ID!) {
+    chatSession(id: $id) {
+      id
+      judge {
+        status grade judgedAt ownerWaitMinutes error
+        findings { ${JUDGE_FINDING_FIELDS} }
+      }
+    }
+  }
+`;
+
+export const SET_JUDGE_CALL = gql`
+  mutation SetJudgeCall($findingId: ID!, $call: String!, $note: String) {
+    setJudgeCall(findingId: $findingId, call: $call, note: $note) { ${JUDGE_FINDING_FIELDS} grade }
+  }
+`;
+
+export const CONFIRM_JUDGE_DAY = gql`
+  mutation ConfirmJudgeDay($day: String!, $note: String) {
+    confirmJudgeDay(day: $day, note: $note) { day status confirmedAt }
+  }
+`;
+
+export const JUDGE_NOW = gql`
+  mutation JudgeNow {
+    judgeNow { started skipped }
+  }
+`;
+
+export const JUDGE_AGAIN = gql`
+  mutation JudgeAgain($sessionId: ID!) {
+    judgeAgain(sessionId: $sessionId) { started skipped }
+  }
+`;
+
+export const JUDGE_SPRINT = gql`
+  mutation JudgeSprint($sprint: String!) {
+    judgeSprint(sprint: $sprint) { status requestedAt notJudged }
+  }
+`;
+
+export const GET_JUDGE_SETTINGS = gql`
+  query GetJudgeSettings {
+    judgeSettings
+  }
+`;
+
+export const SET_JUDGE_SETTINGS = gql`
+  mutation SetJudgeSettings($settings: String!) {
+    setJudgeSettings(settings: $settings)
   }
 `;
 
@@ -1024,6 +1124,7 @@ export const CHAT_SESSION_FIELDS = `
   waiting
   workerCount
   reviewRound { status summary threadUrl at }
+  judge { status grade }
 `;
 
 export const CHAT_INTERACTION_FIELDS = `

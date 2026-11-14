@@ -11,7 +11,7 @@ export interface RetroNumbers {
   mergeConflicts: number;
   stackedRebases: number;
 }
-export interface RetroItem { id: string; kind: string; text: string; evidence: string[]; dest: string; status: string; sessionId: string | null; updatedAt: string }
+export interface RetroItem { id: string; kind: string; text: string; evidence: string[]; dest: string; status: string; sessionId: string | null; source?: string; updatedAt: string }
 export interface Retro {
   sprint: string;
   sprintId: number;

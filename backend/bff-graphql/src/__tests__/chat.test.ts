@@ -295,6 +295,22 @@ test('onTurnEnded fires for every turn end, a cron session and a failed turn inc
   assert.strictEqual(ended.length, 2);
 });
 
+test('a session opened with a Claude account hands it to the bridge on the claim; one without carries none', async () => {
+  const { service } = clockedService();
+  const judge = await service.createSession({ title: 'Judge-a3c23286', origin: 'cron', account: ' claude4 ' });
+  const plain = await service.createSession({ title: 'plain' });
+  await service.sendMessage(judge.id, 'Pakai skill judge: session a3c23286 input /data/a.md until 40', MACHINES);
+  const taken = await service.claim({ wait: 0 }, undefined, 'laptop') as { message: { id: number; sessionId: string; account?: string; title?: string } };
+  assert.deepStrictEqual([taken.message.sessionId, taken.message.account, taken.message.title], [judge.id, 'claude4', 'Judge-a3c23286']);
+  await service.delta({ sessionId: judge.id, replyTo: taken.message.id, done: true, items: [] }, 'laptop');
+  await service.sendMessage(judge.id, 'lanjut', MACHINES);
+  const next = await service.claim({ wait: 0 }, undefined, 'laptop') as { message: { sessionId: string; account?: string } };
+  assert.deepStrictEqual([next.message.sessionId, next.message.account], [judge.id, 'claude4'], 'every turn of the session carries the account');
+  await service.sendMessage(plain.id, 'hello', MACHINES);
+  const other = await service.claim({ wait: 0 }, undefined, 'laptop') as { message: Record<string, unknown> };
+  assert.ok(!('account' in other.message), 'no account field without one');
+});
+
 test('a DOCK session takes one turn at a time and the bridge moves it through its states', async () => {
   const { service, sessions, advance } = clockedService();
   await service.syncSession(syncBody(), 'laptop');

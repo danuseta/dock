@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { GitBranch, Plus, RefreshCw, Trash2, X } from 'lucide-react';
-import { GET_DISCORD_THREADS, GET_HOME_CORE, GET_HOME_SECONDARY, GET_HOME_TICKET_PRS, GET_OWNER_NAME, GET_OWNER_QUESTIONS, GET_WORKTREES } from '../graphql/queries';
+import { GET_DISCORD_THREADS, GET_HOME_CORE, GET_HOME_SECONDARY, GET_HOME_TICKET_PRS, GET_JUDGE_WAITING, GET_OWNER_NAME, GET_OWNER_QUESTIONS, GET_WORKTREES } from '../graphql/queries';
 import { ADD_QUICK_LINK, REMOVE_QUICK_LINK } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { WebsiteIcon } from '../components/WebsiteIcon';
@@ -9,7 +9,8 @@ import { DockerRuntimeCard } from '../components/DockerRuntimeCard';
 import { ClaudeUsageCard } from '../components/ClaudeUsageCard';
 import { AgentRunStrip } from '../components/AgentRunStrip';
 import { HomeAttention, type HomeAttentionItem } from '../components/HomeAttention';
-import { ticketAttention, ticketQuestions } from '../lib/attention';
+import { judgeAttention, ticketAttention, ticketQuestions } from '../lib/attention';
+import { dayLabel } from '../agents/judge';
 import { openConflict, passCount, slotsForTicket } from '../lib/ticketApprovals';
 import { PRBadge } from '../components/PRBadge';
 import { discordAttention } from '../lib/discordThreads';
@@ -53,6 +54,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
   const { data: questionsData } = useQuery(GET_OWNER_QUESTIONS, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
   const { data: worktreeData } = useQuery<{ worktrees: WorktreeList }>(GET_WORKTREES, { ...CACHED_QUERY_OPTIONS, skip: !hasPage(mode, '/workspace') });
   const { data: discordData } = useQuery(GET_DISCORD_THREADS, { ...CACHED_QUERY_OPTIONS, pollInterval: 60000, skip: !hasPage(mode, '/discord') });
+  const { data: judgeData } = useQuery<{ judgeWaiting: Array<{ day: string; findings: number }> }>(GET_JUDGE_WAITING, { ...CACHED_QUERY_OPTIONS, pollInterval: 300000, skip: !hasPage(mode, '/planning') });
   const [addQuickLink, { loading: adding }] = useMutation(ADD_QUICK_LINK, { refetchQueries: [{ query: GET_HOME_CORE }] });
   const [removeQuickLink] = useMutation(REMOVE_QUICK_LINK, { refetchQueries: [{ query: GET_HOME_CORE }] });
   const [now, setNow] = useState(new Date());
@@ -86,7 +88,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
   const monitors = secondaryData?.monitors || [];
   const healthyServices = monitors.filter((monitor: any) => monitor.lastStatus === 'UP').length;
   const calendarEvents: CalendarEvent[] = secondaryData?.calendarEvents || [];
-  const attention = ticketAttention<HomeAttentionItem>([...(secondaryData?.needsAttention ?? []), ...discordAttention(discordData?.discordThreads?.rows ?? [])], ticketQuestions(questionsData?.orchestrations ?? []));
+  const attention = ticketAttention<HomeAttentionItem>([...(secondaryData?.needsAttention ?? []), ...discordAttention(discordData?.discordThreads?.rows ?? []), ...judgeAttention(judgeData?.judgeWaiting ?? [], dayLabel)], ticketQuestions(questionsData?.orchestrations ?? []));
   const agentRuns: Array<AgentRunSummary & { title: string }> = (secondaryData?.orchestrations || []).filter((run: AgentRunSummary) => !isArchived(run));
   const runOf = new Map(agentRuns.map((run) => [run.key, run]));
   const extraOf = new Map<string, any>((prData?.ticketPullRequests || []).map((ticket: any) => [ticket.key, ticket]));

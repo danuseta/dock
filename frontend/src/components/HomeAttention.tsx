@@ -9,6 +9,7 @@ import { cn } from '../lib/cn';
 import { QUESTIONS_RANK, signalOf, type SignalGroup, type TicketAttention } from '../lib/attention';
 import { pageOf } from '../agents/runs';
 import { DISCORD_ITEM } from '../lib/discordThreads';
+import { JUDGE_ITEM } from '../lib/attention';
 
 export interface HomeAttentionItem {
   id: string;
@@ -79,7 +80,9 @@ export const HomeAttention: React.FC<HomeAttentionProps> = ({ rows, titleOf, pan
     const conflictItem = row.items.find((item) => item.type === 'CONFLICT' && item.owner && item.repo && item.pullNumber);
     const prUrl = row.items.map(pullUrl).find(Boolean);
     const thread = row.items.find((item) => item.type === 'DISCORD')?.id.slice(DISCORD_ITEM.length);
-    const main = conflictItem && top === conflictItem ? 'inspect'
+    const judgeDay = row.items.find((item) => item.type === 'JUDGE_DAY')?.id.slice(JUDGE_ITEM.length);
+    const main = judgeDay && top?.type === 'JUDGE_DAY' ? 'judge'
+      : conflictItem && top === conflictItem ? 'inspect'
       : row.rank === QUESTIONS_RANK && row.questions ? 'answer'
       : thread && top?.type === 'DISCORD' ? 'discord'
       : top?.type === 'PLAN_DEPENDENCY' ? 'plan'
@@ -91,6 +94,7 @@ export const HomeAttention: React.FC<HomeAttentionProps> = ({ rows, titleOf, pan
       if (kind === 'inspect' && conflictItem) return <Button key={kind} size="sm" variant={variant} onClick={() => void inspect(conflictItem)}>Inspect file</Button>;
       if (kind === 'answer' && key) return <Button key={kind} size="sm" variant={variant} onClick={() => onNavigate(`/decisions?ticket=${encodeURIComponent(key)}`)}>Answer</Button>;
       if (kind === 'discord' && thread) return <Button key={kind} size="sm" variant={variant} onClick={() => onNavigate(`/discord?thread=${encodeURIComponent(thread)}`)}>Read thread</Button>;
+      if (kind === 'judge' && judgeDay) return <Button key={kind} size="sm" variant={variant} onClick={() => onNavigate(`/planning?tab=retro&day=${judgeDay}`)}>Answer</Button>;
       if (kind === 'plan') return <Button key={kind} size="sm" variant={variant} onClick={() => onNavigate('/planning?tab=plan')}>Open plan</Button>;
       if (kind === 'run' && key) return <Button key={kind} size="sm" variant={variant} onClick={() => onNavigate(`/agents?run=${encodeURIComponent(key)}`)}>Open run</Button>;
       if (kind === 'ticket' && key) return <Button key={kind} size="sm" variant={variant} onClick={() => onTicketClick(key)}>Open ticket</Button>;
@@ -119,7 +123,7 @@ export const HomeAttention: React.FC<HomeAttentionProps> = ({ rows, titleOf, pan
         return (
           <div key={row.id} className="grid grid-cols-[4px_82px_minmax(0,1fr)_auto] items-center gap-3.5 border-b border-border py-3 pr-4 last:border-b-0 max-[760px]:grid-cols-[4px_minmax(0,1fr)]">
             <span className={cn('h-full min-h-9 rounded-r-[3px] max-[760px]:row-span-3', BAR[group])} aria-hidden="true" />
-            {row.ticketKey ? <button type="button" className="border-0 bg-transparent p-0 text-left font-mono text-[0.69rem] font-bold text-accent hover:underline" onClick={() => onTicketClick(row.ticketKey as string)}>{row.ticketKey}</button> : <span className="font-mono text-[0.69rem] font-bold text-accent">{row.items.every((item) => item.type === 'DISCORD') ? 'DISCORD' : 'PR'}</span>}
+            {row.ticketKey ? <button type="button" className="border-0 bg-transparent p-0 text-left font-mono text-[0.69rem] font-bold text-accent hover:underline" onClick={() => onTicketClick(row.ticketKey as string)}>{row.ticketKey}</button> : <span className="font-mono text-[0.69rem] font-bold text-accent">{row.items.every((item) => item.type === 'DISCORD') ? 'DISCORD' : row.items.every((item) => item.type === 'JUDGE_DAY') ? 'JUDGE' : 'PR'}</span>}
             <div className="grid min-w-0 gap-1.5">
               {title && <span className="truncate text-[0.84rem] font-medium max-[760px]:line-clamp-2 max-[760px]:whitespace-normal max-[760px]:break-words">{title}</span>}
               <div className="flex min-w-0 flex-wrap items-center gap-1.5">

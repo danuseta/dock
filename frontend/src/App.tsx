@@ -157,7 +157,7 @@ function App() {
       case '/workspace': return <WorkspacePage />;
       case '/qa-queue': return <QaQueuePage onTicketClick={navigateToTicket} />;
       case '/settings': return <SettingsPage />;
-      case '/planning': return <Suspense fallback={<Page width="full"><LoadingSkeleton /></Page>}><PlanningPage /></Suspense>;
+      case '/planning': return <Suspense fallback={<Page width="full"><LoadingSkeleton /></Page>}><PlanningPage onNavigate={handleNavigate} /></Suspense>;
       case '/ticket': return selectedTicketKey ? <TicketDetailPage ticketKey={selectedTicketKey} onBack={() => handleNavigate('/dashboard')} onNavigate={handleNavigate} /> : <DashboardPage onTicketClick={navigateToTicket} />;
       default: return <HomePage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;
     }

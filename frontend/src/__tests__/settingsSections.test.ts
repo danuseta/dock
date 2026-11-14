@@ -13,8 +13,8 @@ test('the rail has three groups, and a workspace DOCK has no calendar', () => {
 });
 
 test('Claude account, Planning flow and Sous flow sit in Agents on a workspace DOCK, which runs the turns and Planning; a laptop DOCK has none of them', () => {
-  assert.deepStrictEqual(workspace.filter((section) => section.group === 'Agents').map((section) => section.id), ['tokens', 'demo', 'claude', 'planflow', 'sousflow']);
-  assert.ok(!laptop.some((section) => section.id === 'claude' || section.id === 'planflow' || section.id === 'sousflow'));
+  assert.deepStrictEqual(workspace.filter((section) => section.group === 'Agents').map((section) => section.id), ['tokens', 'demo', 'claude', 'planflow', 'sousflow', 'judge']);
+  assert.ok(!laptop.some((section) => section.id === 'claude' || section.id === 'planflow' || section.id === 'sousflow' || section.id === 'judge'));
   assert.strictEqual(sectionFromSearch('?section=sousflow', workspace), 'sousflow');
   assert.strictEqual(sectionFromSearch('?section=claude', workspace), 'claude');
   assert.strictEqual(sectionFromSearch('?section=planflow', workspace), 'planflow');

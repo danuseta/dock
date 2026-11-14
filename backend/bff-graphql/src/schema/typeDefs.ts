@@ -1008,7 +1008,143 @@ export const typeDefs = gql`
     dest: String!
     status: String!
     sessionId: String
+    "ledger for a line drafted from the ticket ledgers, judge for one the Judge sprint summary posted."
+    source: String!
     updatedAt: String!
+  }
+
+  "One step Judge called a mistake (or not). call is the owner's answer when there is one, else Judge's call."
+  type JudgeFinding {
+    id: ID!
+    sessionId: String!
+    day: String!
+    messageId: Int
+    threadUrl: String
+    cause: String!
+    causeLabel: String!
+    text: String!
+    quote: String!
+    shouldHave: String!
+    judgeCall: String!
+    ownerCall: String
+    call: String!
+    note: String
+    createdAt: String!
+    "The session's grade after this answer; set only by setJudgeCall."
+    grade: String
+  }
+
+  "Judge's grade of one session: status pending, running, judged or failed."
+  type SessionJudge {
+    status: String!
+    grade: String
+    judgedAt: String
+    ownerWaitMinutes: Int!
+    error: String
+    findings: [JudgeFinding!]!
+  }
+
+  "status is waiting, confirmed, nothing (no findings) or stood (not confirmed by the cutoff: Judge's call stands)."
+  type JudgeDayRow {
+    day: String!
+    sessions: Int!
+    judged: Int!
+    pending: Int!
+    failed: Int!
+    findings: Int!
+    totalFindings: Int!
+    sessionsWithFindings: Int!
+    grade: String
+    status: String!
+    confirmedAt: String
+    cutoffAt: String!
+    judgedAt: String
+    ownerWaitMinutes: Int!
+  }
+
+  type JudgeCauseCount {
+    cause: String!
+    label: String!
+    count: Int!
+  }
+
+  type JudgeWaitingDay {
+    day: String!
+    findings: Int!
+  }
+
+  "The sprint summary run: waiting for the queue, running, or done."
+  type JudgeSprintSummary {
+    status: String!
+    requestedAt: String!
+    notJudged: Int
+  }
+
+  type JudgeSprintSheet {
+    dayCount: Int!
+    daysAnswered: Int!
+    sessions: Int!
+    judged: Int!
+    waiting: Int!
+    failed: Int!
+    lastRun: String
+    findings: Int!
+    findingSessions: Int!
+    grade: String!
+    previousGrade: String
+    ownerHours: Float!
+    causes: [JudgeCauseCount!]!
+    waitingDays: [JudgeWaitingDay!]!
+    summary: JudgeSprintSummary
+  }
+
+  type JudgeDays {
+    sprint: String!
+    activeSprint: String
+    previous: String
+    days: [JudgeDayRow!]!
+    sheet: JudgeSprintSheet!
+  }
+
+  type JudgeDaySession {
+    sessionId: String!
+    title: String!
+    ticketKey: String
+    origin: String!
+    startedAt: String
+    lastMessageAt: String
+    status: String!
+    grade: String
+    ownerWaitMinutes: Int!
+    error: String
+    findings: [JudgeFinding!]!
+  }
+
+  type JudgeDaySheet {
+    day: String!
+    sessions: Int!
+    judged: Int!
+    pending: Int!
+    failed: Int!
+    findings: Int!
+    totalFindings: Int!
+    sessionsWithFindings: Int!
+    grade: String
+    status: String!
+    confirmedAt: String
+    cutoffAt: String!
+    judgedAt: String
+    ownerWaitMinutes: Int!
+    note: String
+    sessionList: [JudgeDaySession!]!
+    previousDay: String
+    nextDay: String
+  }
+
+  "What one step of the Judge queue did: the Judge session it started, or why it started none."
+  type JudgeTick {
+    started: String
+    skipped: String
   }
 
   type RetroEscalationCause {
@@ -1558,6 +1694,8 @@ export const typeDefs = gql`
     reviewRound: ReviewRoundInfo
     "The dependency a ticket session waits on, set by createChatSession when the blocked-by rule tells."
     waitsOn: String
+    "Judge's grade of the session; null before it is queued."
+    judge: SessionJudge
   }
 
   type ReviewRoundInfo {
@@ -2158,6 +2296,14 @@ export const typeDefs = gql`
     sprintPlanSignal(sprint: String!): SprintPlanSignal
     "The Planning flow as JSON (stages, owner, approve); null when none is saved and every stage runs."
     planningFlow: String
+    "Days of the sprint Judge read, newest first, and the sprint sheet; no name is the active sprint."
+    judgeDays(sprint: String): JudgeDays
+    "One day's sheet: the findings grouped by session."
+    judgeDay(day: String!): JudgeDaySheet!
+    "Days of the last two weeks still waiting on the owner's answer."
+    judgeWaiting: [JudgeWaitingDay!]!
+    "Settings › Judge as JSON (on, account, windows, idleMinutes, noonCutoff), defaults filled in."
+    judgeSettings: String!
     "The ticket's checkpoints, oldest first."
     checkpoints(key: String!): [Checkpoint!]!
     "The Sous flow settings as JSON (profiles, mine, checkpoint, qaGuide, qaGuideField), defaults filled in."
@@ -2306,6 +2452,17 @@ export const typeDefs = gql`
     updateOrchestratorCronSettings(config: String!): Boolean!
     "Saves the Planning flow JSON after validation and returns it normalized; an empty string clears it."
     setPlanningFlow(flow: String!): String
+    "The owner's call on a Judge finding, mistake or not, with an optional note."
+    setJudgeCall(findingId: ID!, call: String!, note: String): JudgeFinding!
+    confirmJudgeDay(day: String!, note: String): JudgeDaySheet!
+    "Runs the Judge queue now, outside its windows; it still waits while DOCK is busy."
+    judgeNow: JudgeTick!
+    "Asks for the sprint summary: it waits for an empty queue until 23:30, then runs."
+    judgeSprint(sprint: String!): JudgeSprintSummary!
+    "Judges the session again from the start."
+    judgeAgain(sessionId: ID!): JudgeTick!
+    "Saves Settings › Judge after validation and returns it normalized."
+    setJudgeSettings(settings: String!): String!
     "Saves the Sous flow JSON after validation and returns it normalized; an empty string resets it."
     setSousFlow(flow: String!): String!
     "Gives the ticket a Sous flow profile; null makes it follow the person's own profile again."

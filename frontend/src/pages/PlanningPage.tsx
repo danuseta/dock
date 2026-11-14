@@ -9,7 +9,7 @@ import { cn } from '../lib/cn';
 const TABS: Array<[PlanningPageTab, string]> = [['draft', 'Draft'], ['plan', 'Plan'], ['retro', 'Retro']];
 
 /** Planning, out of Agents: the sprint Draft the planner publishes, the published Plan, and the Retro. */
-const PlanningPage: React.FC = () => {
+const PlanningPage: React.FC<{ onNavigate?: (path: string) => void }> = ({ onNavigate }) => {
   const [route] = useState(() => planningRoute(window.location.search));
   const [tab, setTab] = useState<PlanningPageTab>(route.tab);
   useEffect(() => {
@@ -22,6 +22,10 @@ const PlanningPage: React.FC = () => {
     const params = new URLSearchParams(window.location.search);
     params.set('tab', next);
     if (next !== 'draft') params.delete('panel');
+    if (next !== 'retro') {
+      params.delete('day');
+      params.delete('sheet');
+    }
     window.history.replaceState(window.history.state, '', `${window.location.pathname}?${params.toString()}`);
   };
   return (
@@ -46,7 +50,7 @@ const PlanningPage: React.FC = () => {
           </button>
         ))}
       </div>
-      {tab === 'draft' ? <PlanningTab initialPanel={route.panel ?? undefined} /> : tab === 'plan' ? <PlanTab /> : <RetroTab />}
+      {tab === 'draft' ? <PlanningTab initialPanel={route.panel ?? undefined} /> : tab === 'plan' ? <PlanTab /> : <RetroTab onNavigate={onNavigate} />}
     </Page>
   );
 };

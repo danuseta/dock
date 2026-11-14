@@ -17,6 +17,7 @@ import { SessionMenu, type SessionMenuTarget } from './SessionMenu';
 import { StatusDot } from './StatusDot';
 import { checkpointForAgent, stepLabel } from './checkpoints';
 import { useCheckpoints } from './useCheckpoints';
+import { GRADES, type GradeFilter } from '../agents/judge';
 
 export type SidebarWorker = { id: string; parentId: string | null; turnId: number; name: string; label: string; status: string; startedAt: string; endedAt: string | null };
 
@@ -100,11 +101,14 @@ interface SessionSidebarProps {
   results?: React.ReactNode;
   filter: SessionFilter;
   onFilter: (filter: SessionFilter) => void;
+  /** Judge's grade the list is narrowed to; left out, the grade filter does not show. */
+  grade?: GradeFilter;
+  onGrade?: (grade: GradeFilter) => void;
 }
 
 const FILTERS: { value: SessionFilter; label: string }[] = [{ value: 'all', label: 'All' }, { value: 'task', label: 'Task' }, { value: 'review', label: 'Review' }];
 
-export const SessionSidebar: React.FC<SessionSidebarProps> = ({ sessions, machines, activeId, activeThreadId, onSelect, onOpenThread, onNew, onRename, onDelete, collapsed, onToggleCollapsed, searchOpen, onToggleSearch, search, limits, results, filter, onFilter }) => {
+export const SessionSidebar: React.FC<SessionSidebarProps> = ({ sessions, machines, activeId, activeThreadId, onSelect, onOpenThread, onNew, onRename, onDelete, collapsed, onToggleCollapsed, searchOpen, onToggleSearch, search, limits, results, filter, onFilter, grade, onGrade }) => {
   const [openOverride, setOpenOverride] = useState<ReadonlyMap<string, boolean>>(new Map());
   const now = useNow(true);
   const [menu, setMenu] = useState<SessionMenuTarget | null>(null);
@@ -168,8 +172,15 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({ sessions, machin
           ))}
         </span>
       )}
+      {!results && grade && onGrade && (
+        <span className={cn('mx-3 mt-1.5 inline-flex flex-none self-start overflow-hidden whitespace-nowrap rounded-xs border border-border-glow font-mono text-[0.66rem]', full)} role="group" aria-label="Filter by Judge grade">
+          {(['any', ...GRADES] as GradeFilter[]).map((option) => (
+            <button key={option} type="button" aria-pressed={grade === option} className={cn('px-2 py-1 max-[900px]:min-h-11 max-[900px]:px-3', grade === option ? 'bg-surface-hover font-bold text-foreground' : 'text-secondary-foreground hover:bg-surface-1')} onClick={() => onGrade(option)}>{option === 'any' ? 'Any grade' : option}</button>
+          ))}
+        </span>
+      )}
       <div className={cn('min-h-0 flex-1 overflow-y-auto px-2 pb-2', collapsed && 'min-[901px]:px-1')}>
-        {results ?? (sessions.length === 0 && filter !== 'all' ? <div className={full}><EmptyState size="panel" scene={<SearchScene />} description={`No ${filter === 'task' ? 'Task' : 'Review'} sessions.`} /></div> : null) ?? groupSessions(sessions, now).map((group) => (
+        {results ?? (sessions.length === 0 && (filter !== 'all' || (grade && grade !== 'any')) ? <div className={full}><EmptyState size="panel" scene={<SearchScene />} description={grade && grade !== 'any' ? `No sessions with grade ${grade}.` : `No ${filter === 'task' ? 'Task' : 'Review'} sessions.`} /></div> : null) ?? groupSessions(sessions, now).map((group) => (
           <section key={group.key} aria-label={group.label} className={cn(collapsed && 'min-[901px]:mt-2 min-[901px]:border-t min-[901px]:border-border min-[901px]:pt-2 min-[901px]:first:mt-0 min-[901px]:first:border-t-0')}>
             <h3 className={cn('flex items-center justify-between px-2 pb-1 pt-3 font-mono text-[0.62rem] max-[760px]:text-xs font-bold uppercase tracking-wider', group.key === 'needs-you' ? 'text-amber-300' : 'text-muted-foreground', full)}>{group.label} <span className="tabular-nums text-muted-foreground">{group.sessions.length}</span></h3>
             {group.sessions.map((session) => {

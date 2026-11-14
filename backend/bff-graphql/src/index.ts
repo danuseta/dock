@@ -19,6 +19,7 @@ import { worktrees } from './integrations/worktrees-live';
 import { autoBroadcast } from './integrations/broadcast';
 import { decisionGate, sweepReleases } from './integrations/decision-gate';
 import { claudeAccounts, cycleAvailable } from './integrations/claude-accounts-live';
+import { judgeQueue } from './integrations/judge-live';
 import { dockMode } from './mode';
 import { useBusyTimeout, useWriteAheadLog } from './storage/client';
 import { StorageService } from './storage/service';
@@ -37,6 +38,8 @@ const RELEASE_SWEEP_MS = 5 * 60 * 1000;
 const REVIEW_FINDINGS_MS = 60 * 1000;
 /** How often the worktree auto cleanup looks; it runs once a WIB day from 07:00, and only in auto mode. */
 const WORKTREE_AUTO_MS = 15 * 60 * 1000;
+/** How often the Judge queue looks for quiet sessions and, inside its windows, starts the next one. */
+const JUDGE_MS = 60 * 1000;
 
 export async function startServer(): Promise<void> {
   const journal = await useWriteAheadLog().catch((error) => `unchanged (${error instanceof Error ? error.message : 'unknown error'})`);
@@ -79,6 +82,9 @@ export async function startServer(): Promise<void> {
       const reviewOnIt = () => autoReview.tick()
         .catch((error) => console.warn('[AutoReview] check failed:', error instanceof Error ? error.message : 'unknown error'));
       setInterval(reviewOnIt, AUTO_REVIEW_MS).unref();
+      const judgeTick = () => judgeQueue.tick()
+        .catch((error) => console.warn('[Judge] check failed:', error instanceof Error ? error.message : 'unknown error'));
+      setInterval(judgeTick, JUDGE_MS).unref();
       const reviewFindingsTick = () => reviewFindings.tick()
         .catch((error) => console.warn('[ReviewFindings] check failed:', error instanceof Error ? error.message : 'unknown error'));
       setInterval(reviewFindingsTick, REVIEW_FINDINGS_MS).unref();

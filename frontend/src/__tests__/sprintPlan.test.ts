@@ -54,7 +54,7 @@ test('Planning shows Draft, Plan and Retro, Agents keeps Office and Library, Hom
   const page = source('../pages/AgentsPage.tsx');
   assert.match(page, /\['office', 'Office', Building2\], \['library', 'Library', Library\]\]/);
   assert.doesNotMatch(page, /PlanningTab|<PlanTab|<RetroTab/);
-  assert.match(source('../pages/PlanningPage.tsx'), /<PlanningTab initialPanel=\{route\.panel \?\? undefined\} \/> : tab === 'plan' \? <PlanTab \/> : <RetroTab \/>/);
+  assert.match(source('../pages/PlanningPage.tsx'), /<PlanningTab initialPanel=\{route\.panel \?\? undefined\} \/> : tab === 'plan' \? <PlanTab \/> : <RetroTab onNavigate=\{onNavigate\} \/>/);
   assert.doesNotMatch(source('../agents/PhoneTabs.tsx'), /'sprint'/);
   assert.match(source('../components/HomeAttention.tsx'), /\/planning\?tab=plan/);
   assert.match(source('../lib/notificationEvents.ts'), /PLAN_DEPENDENCY: \{ prefix: 'plan', title: 'waits for your call' \}/);

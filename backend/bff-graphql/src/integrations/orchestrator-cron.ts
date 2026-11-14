@@ -445,7 +445,7 @@ export interface CronDeps {
   park(key: string, waiting: string): Promise<unknown>;
   /** The newest cron session of each ticket; `stopped` when the owner stopped its last turn, `otherActive` when another session of the ticket works or spoke after it. */
   cronSessions(keys: string[]): Promise<Map<string, { id: string; status: string; stopped: boolean; otherActive: boolean }>>;
-  openSession(input: { ticketKey: string; machine: string; title: string; origin: 'cron'; options: Record<string, string> }): Promise<{ id: string }>;
+  openSession(input: { ticketKey: string; machine: string; title: string; origin: 'cron'; options: Record<string, string>; account?: string }): Promise<{ id: string }>;
   /** The turn options the machine takes: none when it never reported what it offers; throws when it refuses them. */
   machineOptions(machine: string, options: Record<string, string>): Promise<Record<string, string>>;
   deleteSession(sessionId: string): Promise<unknown>;
@@ -804,6 +804,28 @@ export class OrchestratorCron {
     const settings = await this.settings();
     const options = await this.deps.machineOptions(settings.machine, this.turnOptions(settings));
     const session = await this.deps.openSession({ ticketKey: key, machine: settings.machine, title: ticketSessionTitle(kind, key), origin: 'cron', options });
+    try {
+      await this.deps.send(session.id, prompt, options, { cronSlot: false });
+    } catch (error) {
+      await this.deps.deleteSession(session.id).catch(() => undefined);
+      throw error;
+    }
+    return session.id;
+  }
+
+  /**
+   * A `Judge-…` session on the cron's machine like openReview, with no ticket (an empty key), the Judge model and the Judge account
+   * (empty runs on the machine's active account). Removed again when its first message is refused.
+   */
+  async openJudge(title: string, prompt: string, account: string, model: string | null): Promise<string> {
+    const settings = await this.settings();
+    const base = this.turnOptions(settings);
+    if (model) {
+      delete base.effort;
+      base.model = model;
+    }
+    const options = await this.deps.machineOptions(settings.machine, base);
+    const session = await this.deps.openSession({ ticketKey: '', machine: settings.machine, title, origin: 'cron', options, ...(account ? { account } : {}) });
     try {
       await this.deps.send(session.id, prompt, options, { cronSlot: false });
     } catch (error) {

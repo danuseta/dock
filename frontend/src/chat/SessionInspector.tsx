@@ -22,6 +22,7 @@ import { changedFiles, filesTotal, stageLabel } from './headerState';
 import { machineOf, sessionTurnOptions, type ChatSession } from './messages';
 import { appliedOptions, type SessionMachineOptions } from './sessionOptions';
 import { QaPanel } from './QaPanel';
+import { SessionJudgeBlock } from './SessionJudgeBlock';
 import type { ChatFileChange } from './status';
 
 const SHOWN_FILES = 12;
@@ -132,6 +133,7 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, cos
           )}
         </div>
       </section>
+      <SessionJudgeBlock sessionId={session.id} canAct={!monitorsOnly(mode)} />
       {ticketKey && <QaPanel ticketKey={ticketKey} />}
       <div className="mt-auto flex flex-col gap-4">
         {run?.kind === 'review' && !monitorsOnly(mode) && <LgtmButton run={run} busy={approving} onLgtm={setLgtmTarget} className="w-full max-[900px]:h-11" />}

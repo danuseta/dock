@@ -72,6 +72,7 @@ const SECTIONS = [
   ['awasi', 'Ngawasin & kalau macet'],
   ['discord', 'Discord'],
   ['workspace', 'Workspace & update'],
+  ['judge', 'Retro Judge'],
 ] as const;
 
 /** How DOCK works day to day: the flows, the settings that steer them, their defaults and limits. */
@@ -183,6 +184,44 @@ const GuidePage: React.FC<GuidePageProps> = ({ onNavigate }) => (
           <li><Go to="/dev-servers" label="Dev Servers" onNavigate={onNavigate} />: jalankan BE/FE per worktree untuk tes atau rekam video.</li>
           <li>Ada yang aneh: cek workspace outdated, setting yang kosong, <Go to="/machines" label="Health" onNavigate={onNavigate} /> untuk koneksi chat, lalu lapor lewat ikon bug di pojok kiri bawah.</li>
         </ul>
+      </Section>
+
+      <Section id="judge" title="H. Retro Judge">
+        <p>Judge is a separate agent that reads the transcripts of the sprint's ticket sessions, records what the agent did wrong, and feeds the retro. It never touches tickets or code. Switch it on in <Go to="/settings?section=judge" label="Settings → Judge" onNavigate={onNavigate} />; it is off until you do.</p>
+        <Flow steps={['session quiet 30 min', 'queued', '21:00 and DOCK quiet', 'Judge-xxxx', 'findings + grade', 'you answer the day']} />
+        <h3 className="mb-2 mt-4 font-semibold text-foreground">What Judge reads</h3>
+        <ul>
+          <li>Sessions that work on a ticket: Task, Review, QA, and a chat whose first message names a ticket key. Never Plan, Planning, Retro, Judge or a chat without a ticket.</li>
+          <li>Your messages and the assistant's in full, tool calls by name with the refused and failed ones, the ticket ledger, the checkpoints, Log eksekusi, Tiket → kode coverage, other people's messages in the PR thread after their on it, and Jira status changes.</li>
+          <li>A session used again later is read again only from the last judged message; its new findings are added.</li>
+        </ul>
+        <h3 className="mb-2 mt-4 font-semibold text-foreground">When it runs</h3>
+        <p>From 21:00 to 23:30 WIB, and the leftovers from 08:00 to 09:00, one session at a time, only while no chat turn, auto review or cron ticket runs. A run cut off by a shutdown stays queued and is read again from the start; three failures mark it failed. <b>Judge now</b> on the Retro tab runs outside the window. On the sprint's last day at 16:00 the sprint summary waits for the queue until 23:30, then posts Problem and Try lines with the source Judge.</p>
+        <SettingsBlock rows={[
+          ['Judge', 'off', 'on / off', 'While off, nothing is queued and no Judge session opens.'],
+          ['Claude account', 'empty', 'name', 'The account Judge runs on, so it never shares a quota window with work. Empty uses the active account.'],
+          ['Windows (WIB)', '21:00–23:30, 08:00–09:00', 'HH:MM', 'Judge starts a session only inside one.'],
+          ['Idle minutes', '30', '5–1440', 'A session with no turn for this long is queued; a ticket that moves to PR Review or UAT queues it at once.'],
+          ['Answer cutoff', '12:00', 'HH:MM', "A day not confirmed by then on the next day keeps Judge's call."],
+        ]} />
+        <h3 className="mb-2 mt-4 font-semibold text-foreground">Causes and grade</h3>
+        <ul>
+          <li><b>Stopped with a way out</b>: a guard or an error, then straight to you without trying the allowed path (the lead, another skill).</li>
+          <li><b>Self-inflicted rework</b>: a rerun or fix round caused by the agent's own step.</li>
+          <li><b>Misread AC / scope</b>: you corrected the direction, a reviewer named an AC that was not met, or work outside the scope.</li>
+          <li><b>Skipped step</b>: a step the skill requires was not run.</li>
+          <li><b>Asked instead of looking</b>: a question whose answer is in the repo, the vault, the ticket or memory.</li>
+          <li><b>Wrong code</b>: a reviewer blocker, UAT BUG from QA, or red CI after a push.</li>
+          <li><b>Environment</b>: the tool or the access really is missing; recorded, not graded.</li>
+        </ul>
+        <p>Grade per session: <b>A</b> no finding · <b>B</b> minor, you were not involved · <b>C</b> you waited or work was redone · <b>D</b> wrong code reached a reviewer or QA. DOCK computes it; Judge only reports the findings.</p>
+        <h3 className="mb-2 mt-4 font-semibold text-foreground">Answering a day</h3>
+        <ol>
+          <li>Open <Go to="/planning?tab=retro" label="Planning → Retro" onNavigate={onNavigate} />, switch Judge or Both, and pick a day.</li>
+          <li>Every finding already carries Judge's call. Flip only what you disagree with to <b>Not a mistake</b>, with a note if it helps; the grade recounts at once.</li>
+          <li>Press <b>Confirm</b>. Not answered by noon the next day, Judge's call stands; you can still change it until the sprint sheet is accepted.</li>
+        </ol>
+        <p>A finding called not a mistake is hidden from the grade and kept as an example: the latest 30 go into every Judge prompt. The grade also shows in the session's side panel, where the flagged messages are framed red, and the Sessions list filters by it.</p>
       </Section>
     </div>
   </Page>
