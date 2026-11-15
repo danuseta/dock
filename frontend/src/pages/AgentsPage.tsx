@@ -755,7 +755,6 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
         </Card>
       </div>
 
-      {!slim && (
       <Card className="mt-4 p-0 max-[760px]:order-7">
         <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 border-b border-border bg-surface-0 px-5 py-2.5">
           <h2 className="font-display text-[0.95rem] font-bold">Session flow</h2>
@@ -775,7 +774,6 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
             ? <AgentFlowGraph run={selected} timeline={timeline} />
             : <p className="px-5 py-8 text-center text-pretty text-sm text-muted-foreground">{!selected ? 'Select a ticket to see its flow.' : sampling ? 'Select SAMPLE-2 to see a sample flow.' : 'Loading the flow...'}</p>}
       </Card>
-      )}
 
       <Dialog open={Boolean(dismissTarget)} onClose={() => !dismissing && setDismissTarget(null)} dismissible={!dismissing} labelledBy="hide-run-title" describedBy="hide-run-description">
         <Card className="w-[min(440px,calc(100vw-2rem))] shadow-card">
