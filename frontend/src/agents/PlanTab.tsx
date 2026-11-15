@@ -4,6 +4,7 @@ import { ArrowRightLeft, Check, Clock, EyeOff, Flag, RotateCcw, Undo2, X } from 
 import { Button, Input } from '../components/ui';
 import { AC_IN_ACTION, GET_AC_INCOMING, GET_SPRINT_DRIFT, GET_SPRINT_PLAN, SPRINT_DRIFT_ACTION, SPRINT_PLAN_EDGE_ACTION, SPRINT_PLAN_MAP } from '../graphql/queries';
 import { cn } from '../lib/cn';
+import { InfoTip } from './InfoTip';
 import {
   driftReason, driftStateLabel, edgeStateText, groupsText, hasMap, isMapping, mappedText, sortDrift, sourceLabel,
   type AcIn, type DriftRow, type PlanEdge, type SprintDrift, type SprintPlan,
@@ -106,9 +107,9 @@ const AcInSection: React.FC = () => {
   };
   return (
     <section aria-label="AC in" className="min-w-0">
-      <h3 className={head}>AC in · from teammates</h3>
+      <h3 className={head}>AC kiriman teman <InfoTip label="Tentang AC kiriman teman">Accept juga ngabarin DOCK pengirim biar barisnya dihapus dari tiket dia. Decline ngirim balik sebagai Held plus alasan kamu.</InfoTip></h3>
       {notice && <p className="mt-2 text-sm text-status-conflict" role="alert">{notice}</p>}
-      <p className="mt-2 text-pretty text-[0.8rem] text-muted-foreground">Accept writes the line into your ticket's AC and tells the sender's DOCK, which removes it from theirs. Decline sends it back to them as Held, with your reason.</p>
+      <p className="mt-1 text-pretty text-[0.8rem] text-muted-foreground">Accept = masuk ke AC kamu. Decline = balik ke dia.</p>
       <ul className="mt-2 rounded-md border border-border bg-surface-0">{rows.map((row) => <AcInLine key={`${row.to}|${row.id}`} row={row} busy={acting.loading} onAction={onAction} />)}</ul>
     </section>
   );
@@ -140,11 +141,14 @@ const DriftSection: React.FC = () => {
           ))}
         </ul>
       )}
-      <h3 className={head}>AC drift · your tickets {drift.today ? <span className="font-medium normal-case tracking-normal">· sprint day {drift.today}</span> : null}</h3>
+      <h3 className={head}>
+        AC kamu yang nunggu tiket lain {drift.today ? <span className="font-medium normal-case tracking-normal">· hari ke-{drift.today}</span> : null}
+        <InfoTip label="Tentang AC yang nunggu tiket lain">Move dan Pindah ke Reference cuma nulis ke tiket kamu sendiri, setelah AC dibaca ulang. Pindah ke Reference = baris keluar dari AC ke field Reference, nggak ada komentar Jira. Baris buat tiket teman nunggu dia, pakai label ac-move-pending.</InfoTip>
+      </h3>
       {notice && <p className="mt-2 text-sm text-status-conflict" role="alert">{notice}</p>}
       {drift.rows.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">Every AC line of your tickets has what it needs landed or planned before it.</p> : (
         <>
-          <p className="mt-2 text-pretty text-[0.8rem] text-muted-foreground">{held} held. Move and Pindah ke Reference (not tested here: the line leaves AC for the Reference field, no Jira comment) write to Jira only on your own tickets, after reading the AC again; a line for a teammate's ticket waits for them under the label ac-move-pending.</p>
+          <p className="mt-1 text-pretty text-[0.8rem] text-muted-foreground">Baris AC kamu yang tiket pendukungnya belum siap. <b className="text-foreground">{held} ditahan.</b></p>
           <ul className="mt-2 rounded-md border border-border bg-surface-0">{sortDrift(drift.rows).map((row) => <DriftLine key={row.id} row={row} busy={acting.loading} onAction={onAction} />)}</ul>
         </>
       )}

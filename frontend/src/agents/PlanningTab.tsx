@@ -14,18 +14,21 @@ import {
 } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import {
-  UNASSIGNED, devColors, changeCount, dayOf, decisionLabel, findingKindLabel, forecastOf, handOffs, lateDays, lateText, shortDate, underWay, landingDay, lanes, openQuestionsOf, parseWave, ranks, teamStats, waitersOf, predictionTone, publishHint, publishReadiness, scopeSummary, sortFindings,
+  UNASSIGNED, devColors, changeCount, dayOf, decisionLabel, findingKindLabel, forecastOf, handOffs, lateDays, lateText, shortDate, underWay, landingDay, lanes, openQuestionsOf, parseWave, ranks, teamStats, waitersOf, predictionTone, publishReadiness, scopeSummary, sortFindings,
   developerLine, freeFrom, githubLine, laneCount, laneOf, moveForecast, moveLine, planRange, scheduleWindow, scheduled, spanOf, tcsToText, textToTcs, uncheckedStoryboard, waveRows, workingDayLabels,
   checklistTcs, qaChecklist, undecidedFinding,
   type DraftChange, type DraftFinding, type DraftTc, type DraftTicket, type LaneBar, type PlanSignal, type PlanningPanel, type PlanningSprint, type PublishResult, type Readiness, type ReadyItem, type SprintDraft, type TicketSummaryLite,
 } from './planning';
 import { parseFlow, skippedStages } from './planningFlow';
 import { panelOf } from './plan';
+import { InfoTip } from './InfoTip';
 
 const head = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
 const chip = 'rounded-xs border px-1.5 font-mono text-[0.6rem] font-bold uppercase tracking-[0.08em]';
 const NO_DEV = '__none';
 const DRAFT_STALE_MS = 10 * 60 * 1000;
+const summaryChip = 'rounded-sm border border-border bg-surface-1 px-2 py-0.5 text-secondary-foreground';
+const warnChip = 'rounded-sm border border-status-warn px-2 py-0.5 text-[var(--color-status-warn-ink)]';
 const TONE: Record<string, string> = {
   ok: 'border-status-merged text-status-merged', conflict: 'border-status-conflict text-status-conflict', warn: 'border-status-warn text-status-warn', none: 'border-border text-muted-foreground',
 };
@@ -99,7 +102,10 @@ const TcTicket: React.FC<{ ticket: DraftTicket; checklist: DraftTc[]; busy: bool
 
 const TcPanel: React.FC<{ draft: SprintDraft; busy: boolean; onSave: (key: string, tcs: DraftTc[]) => Promise<boolean>; onDecide: (id: string, action: string) => void }> = ({ draft, busy, onSave, onDecide }) => (
   <section aria-label="Test cases" className="grid grid-cols-[minmax(0,1fr)] gap-3">
-    <p className="text-pretty text-[0.8rem] text-muted-foreground">Draft test cases per ticket, written by the planning agent, filled from the QA checklist, or here. QA approves each set: that approval is one of the Siap dikerjain items, and a changed set needs a new one. Publish posts a ticket's set as a QONFLO-TC v1 comment when it changed; local QA and the QA bot read the newest one.</p>
+    <p className="flex items-center gap-1 text-pretty text-[0.8rem] text-muted-foreground">
+      Test case tiap tiket. QA harus setujuin tiap set.
+      <InfoTip label="Tentang test case">Ditulis agent planning, dari checklist QA, atau manual di sini. Set yang berubah perlu disetujuin lagi. Publish ngirim set yang berubah sebagai komentar QONFLO-TC v1; QA lokal dan QA bot baca yang paling baru.</InfoTip>
+    </p>
     <ul className="overflow-hidden rounded-md border border-border bg-surface-0">
       {[...draft.tickets].sort((a, b) => Number(b.tcStale) - Number(a.tcStale) || a.key.localeCompare(b.key, undefined, { numeric: true })).map((ticket) => <TcTicket key={ticket.key} ticket={ticket} checklist={checklistTcs(qaChecklist(ticket, draft.findings))} busy={busy} onSave={onSave} onDecide={onDecide} />)}
     </ul>
@@ -265,8 +271,8 @@ const TeamPanel: React.FC<{ draft: SprintDraft; plan: DraftTicket[]; busy: boole
 
       {draft.moves.length > 0 && (
         <section aria-label="Suggested moves" className="min-w-0">
-          <h3 className={head}>Suggested moves</h3>
-          <p className="mt-2 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Only To Do cards, with the cards that wait on them. A move changes this draft; Jira gets the new assignee when you Publish.</p>
+          <h3 className={head}>Usulan pindah kartu <InfoTip label="Tentang usulan pindah kartu">Kartu yang nunggu kartu itu ikut pindah. Pindah cuma ngubah draft; assignee di Jira baru berubah waktu Publish.</InfoTip></h3>
+          <p className="mt-1 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Kartu To Do yang bisa dipindah ke orang yang lebih cepat kosong.</p>
           <ul className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
             {draft.moves.map((move) => (
               <li key={move.keys.join('|')} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-border px-3 py-2.5 last:border-b-0 max-[760px]:grid-cols-[minmax(0,1fr)]">
@@ -283,8 +289,8 @@ const TeamPanel: React.FC<{ draft: SprintDraft; plan: DraftTicket[]; busy: boole
       )}
 
       <section aria-label="Wave progress" className="min-w-0">
-        <h3 className={head}>Wave progress</h3>
-        <p className="mt-2 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">A wave is a card's depth in the Blocks chain: wave 1 waits on nothing in the plan, wave 2 waits on a wave 1 card. Each segment is one card at its scheduled days, in its owner's colour.</p>
+        <h3 className={head}>Gelombang kerja <InfoTip label="Tentang gelombang kerja">Tiap potongan di bar = satu kartu di hari jadwalnya, warnanya warna pemilik kartu.</InfoTip></h3>
+        <p className="mt-1 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Wave 1 nggak nunggu siapa-siapa, wave 2 nunggu wave 1, dan seterusnya.</p>
         <ul className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
           {waves.map((row) => (
             <li key={row.wave} className="grid grid-cols-[90px_minmax(0,1fr)_150px] items-center gap-x-3 gap-y-1 border-b border-border px-3 py-2.5 last:border-b-0 max-[760px]:grid-cols-[76px_minmax(0,1fr)]">
@@ -310,8 +316,8 @@ const TeamPanel: React.FC<{ draft: SprintDraft; plan: DraftTicket[]; busy: boole
       </section>
 
       <section aria-label="Schedule" className="min-w-0">
-        <h3 className={head}>Schedule · every developer</h3>
-        <p className="mt-2 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">One row per developer, from day 1 to the forecast. Every card of the sprint sits where the plan put it: in its owner's <b className="text-foreground">#N</b> label order, back to back, as long as its SP. Merged cards are drawn faded with a ✓; a card not merged whose place has passed is <b className="text-status-conflict">late</b>. The forecast counts only the work left on the open cards, from today. The hatched days are after the sprint. Hover or tap a card for its details; click it to see what it waits on and what waits on it.</p>
+        <h3 className={head}>Jadwal tiap orang <InfoTip label="Tentang jadwal">Panjang kartu = SP, {fmt(draft.spPerDay)} SP = 1 hari. Urutan ikut label #N di Jira. Perkiraan selesai cuma ngitung sisa kerja kartu yang belum merged, mulai hari ini.</InfoTip></h3>
+        <p className="mt-1 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Urutan kerja tiap orang per hari. Klik kartu buat lihat dia nunggu apa.</p>
         {draft.mergeSource === 'jira' && <p className="mt-2 font-mono text-[0.7rem] text-muted-foreground" role="status">Merge state from Jira status: GitHub unavailable</p>}
         <div className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
           <div className="overflow-x-auto">
@@ -443,24 +449,24 @@ const TeamPanel: React.FC<{ draft: SprintDraft; plan: DraftTicket[]; busy: boole
         </div>
         {hoverBar && hover && <PlanHover id={hoverId} anchor={hover.anchor} bar={hoverBar} color={color(hoverBar.ticket.dev)} labels={labels} spPerDay={draft.spPerDay} mergeSource={draft.mergeSource} />}
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[0.7rem] text-muted-foreground">
-          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] border border-status-conflict bg-status-conflict-bg shadow-[inset_3px_0_0_var(--color-status-conflict)]" aria-hidden="true" />red left edge = open question</span>
-          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-l-4 border-dashed border-secondary-foreground" style={{ borderLeftStyle: 'solid' }} aria-hidden="true" />To Do, no PR yet</span>
-          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-l-4 border-secondary-foreground bg-surface-2" aria-hidden="true" />in progress, PR open</span>
-          <span className="inline-flex items-center gap-1.5"><span className="inline-flex items-center gap-[3px] rounded-xs bg-[var(--color-status-warn-pill)] px-1 font-mono text-[0.6rem] font-semibold text-[var(--color-status-warn-ink)]"><AlertTriangle size={10} aria-hidden="true" />Jira says</span>Jira past merge, PR still open</span>
-          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-l-4 border-border" aria-hidden="true" />✓ merged</span>
-          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-l-4 border-status-conflict" style={{ borderLeftColor: 'var(--color-secondary-foreground)' }} aria-hidden="true" />late: not merged, its plan days have passed</span>
-          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] outline outline-1 outline-dashed outline-status-discord" aria-hidden="true" />moved in this draft</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] border border-status-conflict bg-status-conflict-bg shadow-[inset_3px_0_0_var(--color-status-conflict)]" aria-hidden="true" />tepi kiri merah = ada pertanyaan</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-l-4 border-dashed border-secondary-foreground" style={{ borderLeftStyle: 'solid' }} aria-hidden="true" />To Do, belum ada PR</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-l-4 border-secondary-foreground bg-surface-2" aria-hidden="true" />dikerjain, PR open</span>
+          <span className="inline-flex items-center gap-1.5"><span className="inline-flex items-center gap-[3px] rounded-xs bg-[var(--color-status-warn-pill)] px-1 font-mono text-[0.6rem] font-semibold text-[var(--color-status-warn-ink)]"><AlertTriangle size={10} aria-hidden="true" />Jira says</span>Jira bilang merged, PR masih open</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-l-4 border-border" aria-hidden="true" />✓ pudar = udah merged</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-l-4 border-status-conflict" style={{ borderLeftColor: 'var(--color-secondary-foreground)' }} aria-hidden="true" />merah = telat, harinya lewat tapi belum merged</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] outline outline-1 outline-dashed outline-status-discord" aria-hidden="true" />dipindah di draft ini</span>
           <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-0.5 bg-foreground" aria-hidden="true" />{dueLabel}</span>
           <span className="inline-flex items-center gap-1.5"><span className="h-2.5 border-l-2 border-dashed" style={{ borderColor: forecastColor }} aria-hidden="true" />{forecastLabel}</span>
-          {planToday && <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-0.5 bg-status-discord" aria-hidden="true" />today</span>}
-          <span className="inline-flex items-center gap-1.5"><span className="rounded-xs border border-secondary-foreground px-1 font-mono text-[0.6rem] font-semibold text-secondary-foreground">#1</span>the card's #N label in Jira: first in its owner's plan</span>
-          <span>1 SP = {fmt(1 / draft.spPerDay)} day</span>
+          {planToday && <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-0.5 bg-status-discord" aria-hidden="true" />hari ini</span>}
+          <span className="inline-flex items-center gap-1.5"><span className="rounded-xs border border-secondary-foreground px-1 font-mono text-[0.6rem] font-semibold text-secondary-foreground">#1</span>urutan dari label #N di Jira</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-border" style={{ backgroundImage: HATCH }} aria-hidden="true" />arsir = lewat sprint</span>
         </div>
       </section>
 
       <section aria-label="Order of work, per person" className="min-w-0">
-        <h3 className={head}>Order of work, per person</h3>
-        <p className="mt-2 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Work top to bottom; start days already respect blockers and wave order. The grey line names who waits on each card. Cards tagged <b className="text-foreground">after sprint</b> finish past day {draft.sprintDays}.</p>
+        <h3 className={head}>Urutan kerja <InfoTip label="Tentang urutan kerja">Hari mulai udah ngikutin blocker dan urutan wave. Baris abu di tiap kartu = siapa yang nunggu kartu itu. Tanda <b>after sprint</b> = selesai lewat hari {draft.sprintDays}.</InfoTip></h3>
+        <p className="mt-1 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Kerjain dari atas ke bawah.</p>
         <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(min(260px,100%),1fr))] gap-3">
           {rows.map((lane) => (
             <div key={lane.dev} className="min-w-0 rounded-md border border-border bg-surface-0 px-3.5 py-3">
@@ -498,8 +504,8 @@ const TeamPanel: React.FC<{ draft: SprintDraft; plan: DraftTicket[]; busy: boole
       </section>
 
       <section aria-label="Hand-offs" className="min-w-0">
-        <h3 className={head}>Hand-offs</h3>
-        <p className="mt-2 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">A hand-off is a blocker finished by one developer that unblocks a card of another. Float is how many days the finishing card can slip before the next one starts late. <b className="text-foreground">{hand.length} {hand.length === 1 ? 'hand-off' : 'hand-offs'}; {zeroFloat} with no float.</b></p>
+        <h3 className={head}>Serah terima <InfoTip label="Tentang serah terima">Jeda (float) = berapa hari kartu boleh telat sebelum kartu orang berikutnya ikut telat. Tanpa jeda = telat sehari, orang lain ikut telat.</InfoTip></h3>
+        <p className="mt-1 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Tiket yang ditunggu orang lain. <b className="text-foreground">{hand.length} serah terima · {zeroFloat} tanpa jeda.</b></p>
         {hand.length === 0 ? (
           <p className="mt-2 text-sm text-muted-foreground">No card waits on another developer's card.</p>
         ) : (
@@ -720,7 +726,10 @@ const QaPanel: React.FC<{ draft: SprintDraft; busy: boolean; summaries: Map<stri
   return (
     <section aria-label="QA check" className="grid grid-cols-[minmax(0,1fr)] gap-3">
       <div className="flex flex-wrap items-center gap-3">
-        <p className="min-w-0 flex-1 text-pretty text-[0.8rem] text-muted-foreground">The QA bot's triage rules run on the draft AC before publish, so a ticket that would escalate is fixed now instead of after QA in UAT.</p>
+        <p className="flex min-w-0 flex-1 items-center gap-1 text-pretty text-[0.8rem] text-muted-foreground">
+          Tiket yang bakal ditolak QA bot. Beresin sebelum publish.
+          <InfoTip label="Tentang cek QA">Aturan triage QA bot dijalanin ke AC draft. Yang ESCALATED di sini bakal ESCALATED juga di UAT.</InfoTip>
+        </p>
         <Button size="sm" onClick={onRefresh} disabled={busy}><RefreshCw size={13} aria-hidden="true" />Check again</Button>
       </div>
       {draft.qaReason && <p className="text-sm text-status-warn" role="status">{draft.qaReason}</p>}
@@ -826,7 +835,10 @@ const PublishDialog: React.FC<{
                 {missing.map((item) => <p key={item.id} className="flex items-start gap-2 py-0.5 text-[0.8rem] text-secondary-foreground"><AlertCircle size={13} className="mt-0.5 flex-none text-status-warn" aria-hidden="true" />{item.text}</p>)}
               </div>
             ) : <p className="mt-3 flex items-center gap-2 text-sm text-status-merged"><CheckCircle2 size={14} aria-hidden="true" />Siap publish, semua udah beres</p>}
-            <p className="mt-2 text-pretty text-sm text-muted-foreground">Only what differs from Jira now is written: AC lines and assignees. A ticket whose AC changed in Jira since it was loaded is skipped. The Confluence page "Sprint contract {sprint}" is written too, under the parent page set in Settings › Jira, and every changed set of test cases is posted as a QONFLO-TC v1 comment. Every ticket of the plan gets the Jira label plan-published-rN, the signal every developer's DOCK and the cron wait for.</p>
+            <p className="mt-2 flex items-center gap-1 text-pretty text-sm text-muted-foreground">
+              Yang ditulis ke Jira cuma AC dan assignee yang beda.
+              <InfoTip label="Apa aja yang ditulis Publish">Tiket yang AC-nya diubah di Jira setelah di-load dilewati. Ikut ditulis: halaman Confluence "Sprint contract {sprint}", komentar test case yang berubah, dan label plan-published-rN yang ditunggu DOCK tiap developer dan cron.</InfoTip>
+            </p>
             <ul className="mt-3 max-h-[50vh] overflow-y-auto">
               {changes.map((change) => (
                 <li key={change.key} className="border-b border-border py-2 text-[0.8rem] last:border-b-0">
@@ -1011,8 +1023,19 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
         </section>
       ) : (
         <>
-          <p className="text-[0.8rem] text-muted-foreground">
-            {draft.tickets.length} open tickets{draft.landed > 0 && ` (${draft.landed} already past merge)`}{!!draft.carriedPast && ` · ${draft.carriedPast} merged in an earlier sprint left out`} · {draft.sprintDays} working days · {draft.devs.length} developers · {late} AC {late === 1 ? 'line' : 'lines'} after it · {escalated} ESCALATED{storyboardChecks > 0 && ` · ${storyboardChecks} AC to check after a storyboard change`} · {publishHint(draft)}
+          <p aria-label="Ringkasan draft" className="flex flex-wrap items-center gap-1.5 font-mono text-[0.72rem] font-semibold">
+            <span className={summaryChip}>{draft.tickets.length} tiket open</span>
+            <span className={summaryChip}>{draft.sprintDays} hari kerja</span>
+            <span className={summaryChip}>{draft.devs.length} dev</span>
+            {late > 0 && <span className={warnChip}>{late} AC nunggu tiket lain</span>}
+            {escalated > 0 && <span className={warnChip}>{escalated} ESCALATED</span>}
+            {storyboardChecks > 0 && <span className={warnChip}>{storyboardChecks} AC dicek ulang, storyboard berubah</span>}
+            {draft.blockers.length > 0 && <span className={warnChip}>{draft.blockers.length} perlu diputusin</span>}
+            <InfoTip label="Tentang ringkasan">
+              {draft.landed > 0 ? `${draft.landed} tiket sprint ini udah merged dan nggak dihitung. ` : ''}
+              {draft.carriedPast ? `${draft.carriedPast} tiket bawaan sprint lalu yang udah merged nggak ditampilin. ` : ''}
+              Angka 0 nggak ditampilin.
+            </InfoTip>
           </p>
           {ready && <ReadyBlock id={readyId} ready={ready} onFix={showPanel} />}
           <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Planning panel">

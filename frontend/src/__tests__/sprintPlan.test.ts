@@ -82,6 +82,6 @@ test('the retro shows QA escalations by cause team-wide and labels the QA bot tr
 
 test('Plan lists AC lines teammates move in, with Accept into AC and Decline with a reason', () => {
   const tab = source('../agents/PlanTab.tsx');
-  for (const text of ['AC in · from teammates', 'Accept into AC', 'Decline', 'Why it does not belong here', '<AcInSection />']) assert.ok(tab.includes(text), text);
+  for (const text of ['AC kiriman teman', 'Accept into AC', 'Decline', 'Why it does not belong here', '<AcInSection />']) assert.ok(tab.includes(text), text);
   assert.equal(driftStateLabel('move-accepted'), 'Accepted, remove by hand');
 });
