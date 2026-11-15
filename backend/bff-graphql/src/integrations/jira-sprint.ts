@@ -215,6 +215,11 @@ export class JiraSprintClient {
       .filter((issue) => !/^(epic|sub-?task)$/i.test(issue.type));
   }
 
+  /** The keys of the sprint's tickets that are also in a closed sprint: Jira carried them over when that sprint closed. */
+  async fetchCarriedKeys(sprintId: number): Promise<string[]> {
+    return (await this.searchPlanning(`sprint = ${Number(sprintId)} AND sprint in closedSprints()`)).map((issue) => issue.key);
+  }
+
   /** Status by key, for tickets outside the sprint that an AC line or a link names. */
   async statusesOf(keys: string[]): Promise<Map<string, string>> {
     const safe = keys.filter((key) => /^[A-Z][A-Z0-9_]*-\d+$/.test(key));

@@ -25,6 +25,7 @@ import { panelOf } from './plan';
 const head = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
 const chip = 'rounded-xs border px-1.5 font-mono text-[0.6rem] font-bold uppercase tracking-[0.08em]';
 const NO_DEV = '__none';
+const DRAFT_STALE_MS = 10 * 60 * 1000;
 const TONE: Record<string, string> = {
   ok: 'border-status-merged text-status-merged', conflict: 'border-status-conflict text-status-conflict', warn: 'border-status-warn text-status-warn', none: 'border-border text-muted-foreground',
 };
@@ -140,6 +141,7 @@ const PlanHover: React.FC<{ id: string; anchor: HTMLElement; bar: LaneBar; color
         <dd className={github.tone === 'ok' ? 'text-status-merged' : github.tone === 'warn' ? 'text-[var(--color-status-warn-ink)]' : 'text-secondary-foreground'}>{github.text}</dd>
         <dt className={row}>PR</dt><dd className="break-words text-secondary-foreground">{ticket.pulls.length ? ticket.pulls.map((pull) => <span key={pull} className="block">{pull}</span>) : 'none found'}</dd>
         {bar.late && <><dt className={row}>late</dt><dd className="text-status-conflict">plan ended before today, not merged</dd></>}
+        {ticket.carried && <><dt className={row}>carried</dt><dd className="text-[var(--color-status-warn-ink)]">from an earlier sprint, not merged yet</dd></>}
       </dl>
     </div>,
     document.body,
@@ -391,7 +393,10 @@ const TeamPanel: React.FC<{ draft: SprintDraft; plan: DraftTicket[]; busy: boole
                           }}
                         >
                           <span className={cn('flex justify-between gap-1 whitespace-nowrap font-mono text-[11px]', done ? 'font-semibold text-secondary-foreground' : 'font-bold text-foreground')}>
-                            <span>{done && <span className="text-status-merged">✓ </span>}{ticket.key.replace(/^[A-Z]+-/, '')}</span>
+                            <span>
+                              {done && <span className="text-status-merged">✓ </span>}{ticket.key.replace(/^[A-Z]+-/, '')}
+                              {ticket.carried && <span className="ml-1 rounded-xs bg-[var(--color-status-warn-pill)] px-1 text-[9px] font-semibold text-[var(--color-status-warn-ink)]">earlier sprint</span>}
+                            </span>
                             {ticket.rank !== null && <span className="font-medium text-muted-foreground">#{ticket.rank}</span>}
                           </span>
                           <span className="block truncate text-[11px] leading-tight text-secondary-foreground">{plainSummary(ticket.summary)}</span>
@@ -907,6 +912,14 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
     work.then(() => Promise.all([draftQuery.refetch(), signalQuery.refetch()])).catch((failure: unknown) => setNotice(errorText(failure, fallback)));
   };
   const onLoad = () => chosen && run(loadDraft({ variables: { sprintId: chosen.id } }), 'The sprint could not be loaded from Jira');
+  // An unpublished draft is read from Jira again once per visit when it is stale: tickets moved in or out of the sprint
+  // since the last load show up. A published draft is left alone, a load would reset it to draft.
+  const refreshed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!full || full.status !== 'draft' || refreshed.current === full.sprint || busy) return;
+    refreshed.current = full.sprint;
+    if (Date.now() - Date.parse(full.loadedAt) > DRAFT_STALE_MS) onLoad();
+  }, [full?.sprint, full?.status, full?.loadedAt]);
   const onChange = (key: string, change: { dev?: string | null; wave?: number; sp?: number }) => draft && run(updateTicket({ variables: { sprint: draft.sprint, key, ...change } }), 'The ticket could not be changed');
   const onDecide = (id: string, action: string, note?: string) => draft && run(decide({ variables: { sprint: draft.sprint, id, action, note: note ?? null } }), 'The decision could not be saved');
   const onRefreshQa = () => draft && run(refreshQa({ variables: { sprint: draft.sprint } }), 'The QA check failed');
@@ -999,7 +1012,7 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
       ) : (
         <>
           <p className="text-[0.8rem] text-muted-foreground">
-            {draft.tickets.length} open tickets{draft.landed > 0 && ` (${draft.landed} already past merge)`} · {draft.sprintDays} working days · {draft.devs.length} developers · {late} AC {late === 1 ? 'line' : 'lines'} after it · {escalated} ESCALATED{storyboardChecks > 0 && ` · ${storyboardChecks} AC to check after a storyboard change`} · {publishHint(draft)}
+            {draft.tickets.length} open tickets{draft.landed > 0 && ` (${draft.landed} already past merge)`}{!!draft.carriedPast && ` · ${draft.carriedPast} merged in an earlier sprint left out`} · {draft.sprintDays} working days · {draft.devs.length} developers · {late} AC {late === 1 ? 'line' : 'lines'} after it · {escalated} ESCALATED{storyboardChecks > 0 && ` · ${storyboardChecks} AC to check after a storyboard change`} · {publishHint(draft)}
           </p>
           {ready && <ReadyBlock id={readyId} ready={ready} onFix={showPanel} />}
           <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Planning panel">
