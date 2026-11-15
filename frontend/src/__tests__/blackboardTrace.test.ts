@@ -132,14 +132,15 @@ test('3e + AC 5: the workspace ticket detail is slim with one Blackboard card; t
   for (const kept of ['ReadinessCard', 'SummaryBlock', 'title="User Story"', 'title="Problem Definition"', 'Pull requests']) assert.ok(detail.includes(kept), kept);
 });
 
-test('3f: the Agents run panel keeps the header, Waiting on you, Activity & info and one AC line on the workspace; folds and Session flow stay for the laptop', () => {
+test('3f: the Agents run panel keeps the header, Waiting on you, Activity & info and one AC line on the workspace; folds stay for the laptop; Session flow shows in every mode', () => {
   const agents = read('pages/AgentsPage.tsx');
   assert.match(agents, /const slim = slimDetail\(mode\);/);
   assert.match(agents, /Tiket → kode <span[^>]*>\{coverageText\(trace\)\}<\/span>/);
   assert.match(agents, />Buka Blackboard<\/Button>/);
   assert.match(agents, />Buka Session<\/Button>/);
   assert.match(agents, /\{!slim && \(\s*<>\s*<RunDecisions/);
-  assert.match(agents, /\{!slim && \(\s*<Card className="mt-4 p-0 max-\[760px\]:order-7">/);
+  assert.doesNotMatch(agents, /\{!slim && \(\s*<Card className="mt-4 p-0 max-\[760px\]:order-7">/);
+  assert.match(agents, /<Card className="mt-4 p-0 max-\[760px\]:order-7">\s*<div[^>]*>\s*<h2[^>]*>Session flow<\/h2>/);
   const slimAt = agents.indexOf('{slim && (');
   for (const kept of ['Waiting on you', 'Activity &amp; info', 'aria-label="Stages"']) assert.ok(agents.indexOf(kept) > 0 && agents.indexOf(kept) < slimAt, kept);
 });
