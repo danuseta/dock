@@ -42,6 +42,7 @@ async function planningJira(): Promise<DraftJira> {
       return closed.sort((a, b) => b.startDate.localeCompare(a.startDate))[0]?.endDate ?? null;
     },
     sprintIssues: (sprintId) => client.fetchPlanningIssues(sprintId),
+    carriedKeys: (sprintId) => client.fetchCarriedKeys(sprintId),
     statusesOf: (keys) => client.statusesOf(keys),
     issueNow: (key) => client.planningIssueNow(key),
     assignableAccounts: (key, name) => client.assignableAccounts(key, name),

@@ -549,6 +549,7 @@ model SprintDraftTicket {
   tcs         String  @default("[]") /// [{id, ac, title, steps, expected}]: the draft test cases
   tcAt        DateTime? /// when the test cases were last written
   tcPosted    String? /// the test cases of the last QONFLO-TC v1 comment posted on the ticket
+  carried     Boolean @default(false) /// also in a closed sprint: carried over from an earlier sprint
   position    Int     @default(0)
 
   @@id([draftSprint, key])

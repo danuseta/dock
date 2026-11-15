@@ -858,7 +858,7 @@ export const SET_JUDGE_SETTINGS = gql`
 `;
 
 export const SPRINT_DRAFT_FIELDS = `
-  sprint sprintId status sprintDays startDate spPerDay createdBy loadedAt publishedAt qaReason devs blockers canPublish landed today
+  sprint sprintId status sprintDays startDate spPerDay createdBy loadedAt publishedAt qaReason devs blockers canPublish landed carriedPast today
   tickets {
     key summary dev jiraDev sp left wave waveSet status ac dependsOn start dur end inSprint split
     prediction { prediction reasons fix }
@@ -866,7 +866,7 @@ export const SPRINT_DRAFT_FIELDS = `
     epic frames
     storyboard { version frames held checked { action note by at } }
     tcs { id ac title steps expected } tcStale tcPending tcApproved acHash
-    merge pulls jiraAhead merged rank planStart planDur
+    merge pulls jiraAhead merged carried rank planStart planDur
   }
   findings { id key line text refKey kind refEnd ownEnd linked decision { action note by at } }
   storyboards {

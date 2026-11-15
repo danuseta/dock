@@ -654,6 +654,8 @@ export const typeDefs = gql`
     jiraAhead: Boolean!
     "Past merge: drawn on the plan only; the schedule, AC check, QA and publish use the other tickets"
     merged: Boolean!
+    "Carried over from an earlier sprint and not past merge yet: first on its owner's lane"
+    carried: Boolean!
     "The number of the ticket's #N label in Jira, its place in the owner's plan; null without one"
     rank: Int
     "Where the plan puts the ticket: by rank on its owner's lane, back to back from day 1, at its full SP"
@@ -720,6 +722,8 @@ export const typeDefs = gql`
     canPublish: Boolean!
     """Tickets already past merge (UAT CHECK and later): out of the schedule and the AC check."""
     landed: Int!
+    "Tickets carried over from an earlier sprint that are past merge: left out of the draft entirely."
+    carriedPast: Int!
     "Today's working day on the plan's axis, 1-based; null before day 1."
     today: Int
     developers: [SprintDeveloper!]!

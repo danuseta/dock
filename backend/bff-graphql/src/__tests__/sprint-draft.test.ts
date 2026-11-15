@@ -529,3 +529,42 @@ test('QA approves a ticket test cases in the draft, and a changed set needs a ne
   store.draft.tickets.find((item: any) => item.key === 'QRD-1489').tcAt = new Date('2026-10-27T00:00:00Z');
   assert.equal((await service.view('QRD Sprint 26'))!.tickets.find((ticket) => ticket.key === 'QRD-1489')!.tcApproved, false);
 });
+
+test('a ticket carried over from a closed sprint is left out once merged, and goes first on its lane while open', async () => {
+  const store = new MemoryStore();
+  const jira = new FakeJira([
+    issue('QRD-10', { status: 'UAT CHECK', labels: ['#1'] }),
+    issue('QRD-11', { status: 'UAT BUG / Improvement', labels: ['#4'] }),
+    issue('QRD-20', { labels: ['#1'] }),
+    issue('QRD-21', { status: 'UAT CHECK' }),
+  ]);
+  (jira as DraftJira).carriedKeys = async () => ['QRD-10', 'QRD-11'];
+  const service = new SprintDraftService(store, async () => jira, predictions({}), () => new Date('2026-10-26T10:00:00Z'));
+  const view = await service.load(SPRINT.id, 'Rina');
+  assert.deepEqual(view.tickets.map((ticket) => ticket.key).sort(), ['QRD-11', 'QRD-20', 'QRD-21']);
+  assert.equal(view.carriedPast, 1);
+  assert.equal(view.landed, 1);
+  const byKey = new Map(view.tickets.map((ticket) => [ticket.key, ticket]));
+  assert.equal(byKey.get('QRD-11')!.carried, true);
+  assert.equal(byKey.get('QRD-20')!.carried, false);
+  assert.equal(byKey.get('QRD-11')!.planStart, 0);
+  assert.equal(byKey.get('QRD-20')!.planStart, 1);
+  assert.equal(view.developers.find((developer) => developer.name === 'Danu')!.merged, 1);
+});
+
+test('without carriedKeys every ticket of the sprint stays in the draft', async () => {
+  const { service } = setup();
+  const view = await service.load(SPRINT.id, 'Rina');
+  assert.equal(view.carriedPast, 0);
+  assert.ok(view.tickets.every((ticket) => ticket.carried === false));
+});
+
+test('the Jira client reads the carried over tickets as the sprint tickets that are also in a closed sprint', async () => {
+  const bodies: unknown[] = [];
+  const client = new JiraSprintClient({
+    get: async () => ({}),
+    post: async (_url: string, body: unknown) => { bodies.push(body); return { issues: [{ key: 'QRD-5', fields: { issuetype: { name: 'Story' }, status: { name: 'UAT CHECK' } } }] }; },
+  });
+  assert.deepEqual(await client.fetchCarriedKeys(699), ['QRD-5']);
+  assert.equal((bodies[0] as { jql: string }).jql, 'sprint = 699 AND sprint in closedSprints()');
+});

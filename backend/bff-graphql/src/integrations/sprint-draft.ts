@@ -38,6 +38,8 @@ export interface DraftJira {
   /** The end date of the sprint closed before this one on the board; null when there is none. */
   previousSprintEnd?(sprint: PlanningSprint): Promise<string | null>;
   sprintIssues(sprintId: number): Promise<PlanningIssue[]>;
+  /** The keys of the sprint's tickets that are also in a closed sprint: carried over from an earlier one. */
+  carriedKeys?(sprintId: number): Promise<string[]>;
   statusesOf(keys: string[]): Promise<Map<string, string>>;
   issueNow(key: string): Promise<PlanningIssue | null>;
   assignableAccounts(key: string, name: string): Promise<string[]>;
@@ -69,7 +71,7 @@ interface DraftRow {
   tickets: Array<{
     key: string; summary: string; dev: string | null; sp: number | null; wave: number | null; planRank?: number | null; ac: string; jiraAc: string; jiraDev: string | null;
     dependsOn: string; status: string; prediction: string | null; position: number; epic?: string | null; frames?: string;
-    tcs?: string; tcAt?: Date | null; tcPosted?: string | null;
+    tcs?: string; tcAt?: Date | null; tcPosted?: string | null; carried?: boolean;
   }>;
 }
 
@@ -120,6 +122,8 @@ export interface DraftTicketView extends Omit<ScheduledTicket, 'dev' | 'wave'> {
   jiraAhead: boolean;
   /** Past merge: kept on the plan only; the schedule, AC check, QA and publish use the other tickets. */
   merged: boolean;
+  /** Carried over from an earlier sprint and not past merge yet: first on its owner's lane. */
+  carried: boolean;
   /** The number of the ticket's #N label in Jira; null without one. */
   rank: number | null;
   /** Where the plan put the ticket: by rank on its owner's lane, back to back from day 1, at its full SP. */
@@ -140,6 +144,8 @@ export interface DraftView {
   devs: string[]; tickets: DraftTicketView[]; findings: DraftFindingView[]; blockers: string[]; canPublish: boolean;
   /** Tickets of the sprint already past merge: in tickets as merged, left out of the schedule and the AC check. */
   landed: number;
+  /** Tickets carried over from an earlier sprint that are past merge: left out of the draft entirely. */
+  carriedPast: number;
   /** Today's working day on the plan's axis, 1-based; null before day 1. Open tickets are not laid before it. */
   today: number | null;
   storyboards: StoryboardState[];
@@ -409,6 +415,7 @@ export class SprintDraftService {
     const sprint = (await jira.listSprints()).find((item) => item.id === sprintId);
     if (!sprint) throw new SprintInputError('That sprint is not an active or future sprint of the board');
     const issues = await jira.sprintIssues(sprint.id);
+    const carried = new Set(jira.carriedKeys ? await jira.carriedKeys(sprint.id) : []);
     const keys = new Set(issues.map((issue) => issue.key));
     const read = this.mergeStates ? await this.mergeStates([...keys]).catch(() => null) : null;
     const merges: DraftMerges = read ? { source: 'github', tickets: Object.fromEntries(read) } : { source: 'jira', tickets: {} };
@@ -418,7 +425,7 @@ export class SprintDraftService {
         key: issue.key, summary: issue.summary, dev: issue.assignee, sp: issue.sp, wave: null, planRank: rankOf(issue.labels ?? []), status: issue.status,
         ac, jiraAc: ac, jiraDev: issue.assignee,
         dependsOn: [...new Set(issue.links.filter((link) => link.relation === 'blockedBy').map((link) => link.key))],
-        epic: issue.epic ?? null, frames: framesIn([...ac, ...fieldLines(issue.descriptionRaw)]),
+        epic: issue.epic ?? null, frames: framesIn([...ac, ...fieldLines(issue.descriptionRaw)]), carried: carried.has(issue.key),
       };
     });
     const outside = new Set<string>();
@@ -452,10 +459,10 @@ export class SprintDraftService {
   private compute(row: DraftRow, spPerDay: number): DraftView {
     const decisions = parse<Decisions>(row.decisions, {});
     const refStatuses = parse<Record<string, string>>(row.refStatuses, {});
-    const all = row.tickets.map((ticket) => ({
+    const loaded = row.tickets.map((ticket) => ({
       ...ticket, ac: parse<string[]>(ticket.ac, []), jiraAc: parse<string[]>(ticket.jiraAc, []), dependsOn: parse<string[]>(ticket.dependsOn, []),
       prediction: parse<QaPrediction | null>(ticket.prediction, null), epic: ticket.epic ?? null, frames: parse<string[]>(ticket.frames, []),
-      tcs: parse<DraftTc[]>(ticket.tcs, []),
+      tcs: parse<DraftTc[]>(ticket.tcs, []), carried: !!ticket.carried,
     }));
     const merges = parse<Partial<DraftMerges>>(row.merges, {});
     const mergeSource = merges.source === 'github' ? 'github' : 'jira';
@@ -467,6 +474,8 @@ export class SprintDraftService {
       if (merge === 'open') return false;
       return isDoneStatus(ticket.status);
     };
+    // A ticket carried over from an earlier sprint that is past merge was that sprint's work: this draft leaves it out.
+    const all = loaded.filter((ticket) => !(ticket.carried && pastMerge(ticket)));
     const tickets = all.filter((ticket) => !pastMerge(ticket));
     // Once the sprint has started, a draft lays open tickets from today's working day, never in the past. A published
     // plan keeps its days, so AC drift can still tell a ticket that slipped past its planned day.
@@ -510,7 +519,7 @@ export class SprintDraftService {
         end: ends.length ? endDay(Math.max(...ends), from) : null,
       };
     });
-    const plan = new Map(planLayout(all.map((ticket) => ({ key: ticket.key, dev: ticket.dev, sp: ticket.sp, rank: ticket.planRank ?? null })), { spPerDay }).map((item) => [item.key, item]));
+    const plan = new Map(planLayout(all.map((ticket) => ({ key: ticket.key, dev: ticket.dev, sp: ticket.sp, rank: ticket.planRank ?? null, carried: ticket.carried })), { spPerDay }).map((item) => [item.key, item]));
     const view = (ticket: (typeof all)[number], placed: Omit<ScheduledTicket, 'key' | 'dev'>, merged: boolean): DraftTicketView => ({
       key: ticket.key, summary: ticket.summary, dev: ticket.dev, jiraDev: ticket.jiraDev, sp: ticket.sp, left: left.get(ticket.key) ?? null, wave: placed.wave, waveSet: ticket.wave !== null,
       status: ticket.status, ac: ticket.ac, dependsOn: ticket.dependsOn, start: placed.start, dur: placed.dur, end: placed.end,
@@ -519,7 +528,7 @@ export class SprintDraftService {
       tcs: ticket.tcs, tcApproved: tcApproved(ticket, decisions[tcId(ticket.key)]), acHash: acHash(ticket.ac), tcStale: tcStale(ticket), tcPending: ticket.tcs.length > 0 && JSON.stringify(ticket.tcs) !== (ticket.tcPosted ?? ''),
       merge: mergeOf(ticket.key)?.merge ?? 'unknown', pulls: mergeOf(ticket.key)?.pulls ?? [],
       jiraAhead: isDoneStatus(ticket.status) && mergeOf(ticket.key)?.merge === 'open',
-      merged, rank: ticket.planRank ?? null, planStart: plan.get(ticket.key)!.planStart, planDur: plan.get(ticket.key)!.planDur,
+      merged, carried: ticket.carried, rank: ticket.planRank ?? null, planStart: plan.get(ticket.key)!.planStart, planDur: plan.get(ticket.key)!.planDur,
     });
     const openKeys = new Set(tickets.map((ticket) => ticket.key));
     const merged = all.filter((ticket) => !openKeys.has(ticket.key)).map((ticket) => {
@@ -533,7 +542,7 @@ export class SprintDraftService {
     return {
       sprint: row.sprint, sprintId: row.sprintId, status: row.status, sprintDays: row.sprintDays, startDate: row.startDate?.toISOString() ?? null,
       spPerDay, createdBy: row.createdBy, loadedAt: row.loadedAt.toISOString(), publishedAt: row.publishedAt?.toISOString() ?? null, qaReason: row.qaReason,
-      devs, today, landed: all.length - tickets.length, storyboards, questions: parse<DraftQuestion[]>(row.questions, []), developers, mergeSource, moves,
+      devs, today, landed: all.length - tickets.length, carriedPast: loaded.length - all.length, storyboards, questions: parse<DraftQuestion[]>(row.questions, []), developers, mergeSource, moves,
       tickets: [
         ...tickets.map((ticket) => view(ticket, schedule.get(ticket.key)!, false)).sort((a, b) => a.start - b.start || a.key.localeCompare(b.key, undefined, { numeric: true })),
         ...merged.sort((a, b) => a.planStart - b.planStart || a.key.localeCompare(b.key, undefined, { numeric: true })),

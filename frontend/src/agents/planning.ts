@@ -21,6 +21,8 @@ export interface DraftTicket {
   merge: string; pulls: string[]; jiraAhead: boolean;
   /** Past merge: drawn on the plan only, left out of everything else. */
   merged: boolean;
+  /** Carried over from an earlier sprint, not past merge yet. */
+  carried?: boolean;
   /** The ticket's #N label in Jira, its place in the owner's plan. */
   rank: number | null;
   /** Where the plan puts the ticket: by rank on its owner's lane, back to back from day 1, at its full SP. */
@@ -44,6 +46,8 @@ export interface DraftFinding {
 export interface SprintDraft {
   sprint: string; sprintId: number; status: string; sprintDays: number; startDate: string | null; spPerDay: number; createdBy: string | null;
   loadedAt: string; publishedAt: string | null; qaReason: string | null; devs: string[]; blockers: string[]; canPublish: boolean; landed: number; today: number | null;
+  /** Carried over from an earlier sprint and past merge: left out of the draft. */
+  carriedPast?: number;
   tickets: DraftTicket[]; findings: DraftFinding[]; storyboards: StoryboardState[]; questions: DraftQuestion[];
   developers: SprintDeveloper[]; mergeSource: string; moves: SprintMove[];
   /** The planner's written scope cut; null while none is written. */
