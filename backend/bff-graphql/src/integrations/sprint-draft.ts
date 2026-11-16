@@ -477,6 +477,8 @@ export class SprintDraftService {
     // A ticket carried over from an earlier sprint that is past merge was that sprint's work: this draft leaves it out.
     const all = loaded.filter((ticket) => !(ticket.carried && pastMerge(ticket)));
     const tickets = all.filter((ticket) => !pastMerge(ticket));
+    // A carried ticket still open was planned in its own sprint: its AC references, QA prediction and storyboard are not asked again.
+    const planned = tickets.filter((ticket) => !ticket.carried);
     // Once the sprint has started, a draft lays open tickets from today's working day, never in the past. A published
     // plan keeps its days, so AC drift can still tell a ticket that slipped past its planned day.
     const today = workingDayOf(row.startDate?.toISOString() ?? null, this.now());
@@ -489,14 +491,16 @@ export class SprintDraftService {
     const ends = new Map([...schedule.values()].map((item) => [item.key, item.end]));
     const status = new Map(all.map((ticket) => [ticket.key, ticket.status]));
     const blockedBy = new Map(all.map((ticket) => [ticket.key, ticket.dependsOn]));
-    const findings = acFindings(tickets, ends, (key) => status.get(key) ?? refStatuses[key] ?? null).map((finding) => {
+    const findings = acFindings(planned, ends, (key) => status.get(key) ?? refStatuses[key] ?? null).map((finding) => {
       const decision = decisions[finding.id] ?? null;
       return { ...finding, decision: decision && { ...decision, action: acAction(decision.action) }, linked: (blockedBy.get(finding.key) ?? []).includes(finding.refKey) };
     });
-    const blockers = publishBlockers(findings, tickets, decisions);
-    const storyboards = Object.values(parse<Record<string, StoryboardState>>(row.storyboards, {})).sort((a, b) => a.epic.localeCompare(b.epic));
+    const blockers = publishBlockers(findings, planned, decisions);
+    const epics = new Set(all.filter((ticket) => !ticket.carried).map((ticket) => ticket.epic));
+    const storyboards = Object.values(parse<Record<string, StoryboardState>>(row.storyboards, {})).filter((board) => epics.has(board.epic)).sort((a, b) => a.epic.localeCompare(b.epic));
     const boardOf = new Map(storyboards.map((board) => [board.epic, board]));
-    const flagOf = (ticket: { key: string; epic: string | null; frames: string[]; ac: string[]; status: string }): StoryboardFlag | null => {
+    const flagOf = (ticket: { key: string; epic: string | null; frames: string[]; ac: string[]; status: string; carried?: boolean }): StoryboardFlag | null => {
+      if (ticket.carried) return null;
       const board = ticket.epic ? boardOf.get(ticket.epic) : undefined;
       if (!board?.version || !board.changed.length) return null;
       const named = new Set([...ticket.frames, ...framesIn(ticket.ac)]);
@@ -559,7 +563,7 @@ export class SprintDraftService {
     const view = (await this.view(sprint))!;
     const open = openTickets(view);
     const ends = new Map(open.map((ticket) => [ticket.key, ticket.end]));
-    const input: QaInputTicket[] = open.map((ticket) => ({
+    const input: QaInputTicket[] = open.filter((ticket) => !ticket.carried).map((ticket) => ({
       key: ticket.key, summary: ticket.summary, ac: ticket.ac, endDay: ticket.end,
       waitsOn: [...new Set([...ticket.dependsOn, ...view.findings.filter((finding) => finding.key === ticket.key).map((finding) => finding.refKey)])]
         .map((key) => ({ key, endDay: ends.get(key) ?? null })),
@@ -705,7 +709,7 @@ export class SprintDraftService {
   async checkStoryboards(sprint: string): Promise<DraftView> {
     const row = await this.row(sprint);
     if (!this.storyboard) return (await this.view(sprint))!;
-    const epics = [...new Set(row.tickets.map((ticket) => ticket.epic).filter((epic): epic is string => !!epic))].sort();
+    const epics = [...new Set(row.tickets.filter((ticket) => !ticket.carried).map((ticket) => ticket.epic).filter((epic): epic is string => !!epic))].sort();
     const boards = parse<Record<string, StoryboardState>>(row.storyboards, {});
     for (const epic of epics) {
       try {

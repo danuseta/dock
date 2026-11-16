@@ -29,7 +29,6 @@ import { sessionStats, type ChatActivity } from '../chat/activity/activity';
 import { AgentLanes } from '../chat/activity/AgentLanes';
 import { chatStore } from '../chat/store';
 import { SESSIONS_PATH, messageIdFromSearch, sessionIdFromSearch, sessionUrl, threadIdFromSearch } from '../chat/sessionRoute';
-import { filterByGrade, type GradeFilter } from '../agents/judge';
 import { AgentThreadPane } from '../chat/AgentThreadPane';
 
 interface SearchHit { session: ChatSession; messageId: number; snippet: string; at: string }
@@ -72,7 +71,6 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate
   const [inspectorOpen, setInspectorOpen] = useState(() => window.matchMedia(WIDE_QUERY).matches);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(initialSidebarCollapsed);
   const [filter, setFilter] = useState<SessionFilter>(readSessionFilter);
-  const [grade, setGrade] = useState<GradeFilter>('any');
   const [focusMessage, setFocusMessage] = useState<number | null>(() => messageIdFromSearch(window.location.search));
   const closeGone = useCallback(() => setGone(false), []);
   const toggleSidebar = () => {
@@ -227,10 +225,8 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate
         <Card className={cn('flex min-h-0 min-w-0 flex-col overflow-hidden bg-surface-0 p-0', selected && 'max-[900px]:hidden')}>
           <div className="min-h-0 flex-1">
             <SessionSidebar
-              sessions={filterByGrade(filterSessions(sessions, filter), grade)}
+              sessions={filterSessions(sessions, filter)}
               filter={filter}
-              grade={grade}
-              onGrade={setGrade}
               onFilter={changeFilter}
               machines={machinesData?.chatMachines}
               activeId={selectedId}

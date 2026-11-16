@@ -44,7 +44,6 @@ export function judgeOnlySprint(input: { view: RetroView; picked: string | null;
 }
 export interface SessionJudge { status: string; grade: string | null; judgedAt: string | null; ownerWaitMinutes: number; error: string | null; findings: JudgeFinding[] }
 
-export const GRADES: JudgeGrade[] = ['A', 'B', 'C', 'D'];
 const OWNER_CAUSES = new Set(['stopped-with-way-out', 'self-inflicted-rework', 'misread-ac-scope', 'asked-instead-of-looking']);
 
 /** The owner's answer when there is one, else Judge's call. */
@@ -177,10 +176,6 @@ export function mergeRetroItems(items: RetroItem[], view: RetroView): MergedRetr
   }
   return merged;
 }
-
-/** The grade filter of the Sessions list: any, or one grade. */
-export type GradeFilter = 'any' | JudgeGrade;
-export const filterByGrade = <T extends { judge?: { grade?: string | null } | null }>(sessions: T[], grade: GradeFilter) => (grade === 'any' ? sessions : sessions.filter((session) => session.judge?.grade === grade));
 
 export const GRADE_CLASS: Record<string, string> = {
   A: 'border-status-merged/40 text-status-merged',

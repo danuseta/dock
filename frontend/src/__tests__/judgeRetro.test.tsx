@@ -6,7 +6,7 @@ import { JudgeDays } from '../agents/JudgeDays';
 import { JudgeDaySheetView } from '../agents/JudgeDaySheetView';
 import { SprintSheet } from '../agents/SprintSheet';
 import {
-  callOf, dayLabel, flagText, dayStatusText, discordFindingHref, filterByGrade, findingHref, flaggedMessages, gradeOf, judgeHref, judgeOnlySprint, judgeRoute, mergeRetroItems, retroSprintOptions,
+  callOf, dayLabel, flagText, dayStatusText, discordFindingHref, findingHref, flaggedMessages, gradeOf, judgeHref, judgeOnlySprint, judgeRoute, mergeRetroItems, retroSprintOptions,
   type JudgeDaySheet, type JudgeDays as JudgeDaysData, type JudgeFinding,
 } from '../agents/judge';
 import { planningRedirect } from '../agents/plan';
@@ -129,10 +129,7 @@ test('routes: ?day opens a sheet, the old Agents link keeps its day, and the lis
   assert.strictEqual(judgeHref('?tab=retro', { day: '2026-11-12' }), '/planning?tab=retro&day=2026-11-12');
 });
 
-test('Sessions filter by grade, the sidebar block and Home\'s Needs you line', () => {
-  const sessions = [{ id: 'a', judge: { status: 'judged', grade: 'C' } }, { id: 'b', judge: null }, { id: 'c', judge: { status: 'judged', grade: 'A' } }];
-  assert.deepStrictEqual(filterByGrade(sessions, 'C').map((session) => session.id), ['a']);
-  assert.strictEqual(filterByGrade(sessions, 'any').length, 3);
+test('the session\'s Judge block and Home\'s Needs you line', () => {
   const block = renderToStaticMarkup(<SessionJudgeView judge={{ status: 'judged', grade: 'C', judgedAt: '2026-11-13T14:12:00.000Z', ownerWaitMinutes: 90, error: null, findings: [finding('f1', 'stopped-with-way-out', { causeLabel: 'Stopped with a way out' }), finding('f2', 'self-inflicted-rework', { causeLabel: 'Self-inflicted rework' })] }} canAct busy={false} notice={null} onAgain={noop} />);
   assert.match(block, /Judge · 13 Nov 21:12/);
   assert.match(block, /aria-label="Grade C"/);

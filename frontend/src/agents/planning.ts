@@ -360,9 +360,10 @@ export function publishReadiness(
   const cut = draft.scopeCut?.note ?? null;
   // The same undecided set the AC check lists: every line naming another ticket with no Blocks link and no call.
   const late = draft.findings.filter(undecidedFinding);
-  const escalated = open.filter((ticket) => ticket.prediction?.prediction === 'ESCALATED' && !ticket.qaDecision);
+  const planned = open.filter((ticket) => !ticket.carried);
+  const escalated = planned.filter((ticket) => ticket.prediction?.prediction === 'ESCALATED' && !ticket.qaDecision);
   const unread = draft.storyboards.filter((board) => board.version === null);
-  const unchecked = uncheckedStoryboard({ tickets: open });
+  const unchecked = uncheckedStoryboard({ tickets: planned });
   const recorded = draft.storyboards.length > 0 && unread.length === 0;
   const items: ReadyItem[] = [
     {
