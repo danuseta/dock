@@ -14,7 +14,7 @@ export interface AcTracePull { side: AcSide | null; url: string; label: string }
 export interface AcTrace { key: string; readable: boolean; total: number; covered: number; lines: AcTraceLine[]; pulls: AcTracePull[]; sources: string[]; formats: string[] }
 
 /** What the page says where there is nothing it can read. */
-export const NOTHING_YET = 'belum ada';
+export const NOTHING_YET = 'none yet';
 
 export const hasCode = (line: AcTraceLine) => line.refs.some((ref) => ref.line !== null);
 

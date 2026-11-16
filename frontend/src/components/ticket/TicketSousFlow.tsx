@@ -20,34 +20,34 @@ export const TicketSousFlow: React.FC<{ ticketKey: string }> = ({ ticketKey }) =
 
   const pick = (value: string) => {
     setNote(null);
-    setFlow({ variables: { key: ticketKey, profile: value === MINE ? null : value } }).catch((error: unknown) => setNote({ text: messageOf(error, 'Flow tiket nggak kesimpen'), bad: true }));
+    setFlow({ variables: { key: ticketKey, profile: value === MINE ? null : value } }).catch((error: unknown) => setNote({ text: messageOf(error, 'Ticket flow not saved'), bad: true }));
   };
   const write = async () => {
     setNote(null);
     try {
       const result = (await writeGuide({ variables: { key: ticketKey } })).data?.writeQaGuide;
-      setNote({ text: result?.written ? 'QA guide ditulis ke Developer Context.' : 'QA guide di Developer Context udah sama, nggak ditulis ulang.', bad: false });
+      setNote({ text: result?.written ? 'QA guide written to Developer Context.' : 'QA guide in Developer Context is already the same, not rewritten.', bad: false });
     } catch (error) {
-      setNote({ text: messageOf(error, 'QA guide nggak ketulis'), bad: true });
+      setNote({ text: messageOf(error, 'QA guide not written'), bad: true });
     }
   };
 
   return (
-    <section className="flex flex-col gap-2 rounded-md border border-border bg-surface-0 p-3" aria-label="Sous flow tiket ini">
-      <h2 className="flex items-center gap-1.5 font-display text-sm font-bold"><Workflow size={14} aria-hidden="true" />Sous flow tiket ini</h2>
+    <section className="flex flex-col gap-2 rounded-md border border-border bg-surface-0 p-3" aria-label="Sous flow for this ticket">
+      <h2 className="flex items-center gap-1.5 font-display text-sm font-bold"><Workflow size={14} aria-hidden="true" />Sous flow for this ticket</h2>
       <div className="flex flex-wrap items-center gap-2">
         <span className="min-w-0 flex-1">
           <Select
-            aria-label="Sous flow tiket ini"
+            aria-label="Sous flow for this ticket"
             value={own}
             onValueChange={pick}
             disabled={setting.loading}
-            options={[{ value: MINE, label: `Ikut profil saya (${settings.mine})` }, ...profileNames(settings).map((name) => ({ value: name, label: name }))]}
+            options={[{ value: MINE, label: `Use my profile (${settings.mine})` }, ...profileNames(settings).map((name) => ({ value: name, label: name }))]}
             className="h-9 text-xs"
           />
         </span>
-        <Button size="sm" variant="ghost" onClick={() => void write()} disabled={writing.loading} title="Nulis blok QA guide (DOCK) di Developer Context: URL/route dan jalur menu. Isi lain nggak disentuh.">
-          <FileEdit size={13} aria-hidden="true" />{writing.loading ? 'Nulis…' : 'Tulis QA guide'}
+        <Button size="sm" variant="ghost" onClick={() => void write()} disabled={writing.loading} title="Writes the QA guide (DOCK) block in Developer Context: URL/route and menu path. Nothing else is touched.">
+          <FileEdit size={13} aria-hidden="true" />{writing.loading ? 'Writing…' : 'Write QA guide'}
         </Button>
       </div>
       {note && <p className={note.bad ? 'text-xs text-status-conflict' : 'text-xs text-status-merged'} role={note.bad ? 'alert' : 'status'}>{note.text}</p>}

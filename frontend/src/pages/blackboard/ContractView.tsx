@@ -29,14 +29,14 @@ export const ContractView: React.FC<{ ticket: string; files: BlackboardFile[]; r
 
   return (
     <div className="min-w-0 px-6 py-5 text-[0.82rem] leading-relaxed text-secondary-foreground max-[760px]:px-3">
-      <div className="mb-3 flex flex-wrap items-center gap-2"><FileSignature size={15} aria-hidden="true" className="text-sky-200" /><b className="font-display text-foreground">Kontrak {ticket}</b></div>
-      <p className={heading}>Tujuan</p>
+      <div className="mb-3 flex flex-wrap items-center gap-2"><FileSignature size={15} aria-hidden="true" className="text-sky-200" /><b className="font-display text-foreground">Contract {ticket}</b></div>
+      <p className={heading}>Goal</p>
       <p className="text-pretty">{summary?.made || NOTHING_YET}</p>
-      <p className={heading}>Tiket dan branch</p>
+      <p className={heading}>Ticket and branch</p>
       <ul className="list-disc space-y-0.5 pl-5">
-        <li>Tiket: {ticket}</li>
+        <li>Ticket: {ticket}</li>
         <li>Pull request: {pulls.length ? pulls.join(', ') : NOTHING_YET}</li>
-        <li>Kontrak: {saved ? <code className="rounded-xs bg-surface-2 px-1 font-mono text-[0.76rem]">{saved.path}</code> : NOTHING_YET}</li>
+        <li>Contract: {saved ? <code className="rounded-xs bg-surface-2 px-1 font-mono text-[0.76rem]">{saved.path}</code> : NOTHING_YET}</li>
       </ul>
       <p className={heading}>Definition of done</p>
       {trace?.readable
@@ -45,33 +45,33 @@ export const ContractView: React.FC<{ ticket: string; files: BlackboardFile[]; r
             {trace.lines.map((line) => (
               <li key={line.n} className="flex items-start gap-1.5">
                 <span className={cn('mt-[5px] inline-block size-[11px] flex-none rounded-[3px] border', hasCode(line) ? 'border-status-merged bg-status-merged' : 'border-border-glow')} aria-hidden="true" />
-                <span className="text-pretty"><span className="sr-only">{hasCode(line) ? 'Ada kode: ' : 'Belum: '}</span><b className="font-mono text-[0.74rem] text-foreground">{line.label}</b> {line.textId || line.text || NOTHING_YET}</span>
+                <span className="text-pretty"><span className="sr-only">{hasCode(line) ? 'Has code: ' : 'Not yet: '}</span><b className="font-mono text-[0.74rem] text-foreground">{line.label}</b> {line.textId || line.text || NOTHING_YET}</span>
               </li>
             ))}
           </ul>
         )
         : <p>{NOTHING_YET}</p>}
-      <p className="text-xs text-muted-foreground">Dicentang dari Tiket → kode. Baris AC di Jira dan file AC di blackboard nggak diubah.</p>
-      <p className={heading}>Batasan</p>
+      <p className="text-xs text-muted-foreground">Checked from Ticket → code. AC lines in Jira and the AC file on the blackboard are not changed.</p>
+      <p className={heading}>Limits</p>
       {run?.brief ? <p className="whitespace-pre-wrap break-words">{run.brief}</p> : <p>{NOTHING_YET}</p>}
-      <p className={heading}>Party <span className="ml-1 rounded-xs bg-sky-300/10 px-1.5 py-px font-mono text-[0.62rem] text-sky-200">opsional</span></p>
-      <p className="text-xs text-muted-foreground">Kosong: semua agent sous-ticket-runner dipanggil kayak biasa, checkpoint ikut System Settings.</p>
+      <p className={heading}>Party <span className="ml-1 rounded-xs bg-sky-300/10 px-1.5 py-px font-mono text-[0.62rem] text-sky-200">optional</span></p>
+      <p className="text-xs text-muted-foreground">Empty: every sous-ticket-runner agent is called as usual, checkpoints follow System Settings.</p>
       {(demoUrl || figmaUrl || storyboard) && (
         <>
-          <p className={heading}>Demo dan desain</p>
+          <p className={heading}>Demo and design</p>
           {demoUrl && (isPlayableVideo(demoUrl)
             ? <video className="my-1 block max-h-[420px] w-full rounded-sm bg-black" src={demoUrl} controls preload="metadata" aria-label={`Demo ${ticket}`} />
             : <a href={demoUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 font-mono text-xs text-accent hover:underline"><ExternalLink size={12} aria-hidden="true" /><span className="truncate">Demo · {demoUrl.replace(/^https?:\/\//, '')}</span></a>)}
           {figmaUrl && <a href={figmaUrl} target="_blank" rel="noreferrer" className="mt-1 flex items-center gap-1.5 font-mono text-xs text-accent hover:underline"><Figma size={12} aria-hidden="true" />Figma Link (Jira)</a>}
           {storyboard && (
             <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
-              <ImageIcon size={12} aria-hidden="true" className="text-sky-200" />Storyboard {storyboard.epic} v{storyboard.version}{storyboard.frames ? ` · ${storyboard.frames} frame` : ''} di draft sprint
-              {storyboard.htmlUrl && <a href={storyboard.htmlUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline">buka</a>}
+              <ImageIcon size={12} aria-hidden="true" className="text-sky-200" />Storyboard {storyboard.epic} v{storyboard.version}{storyboard.frames ? ` · ${storyboard.frames} frames` : ''} in the sprint draft
+              {storyboard.htmlUrl && <a href={storyboard.htmlUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline">open</a>}
             </p>
           )}
         </>
       )}
-      <p className={heading}>Halaman kontrak</p>
+      <p className={heading}>Contract page</p>
       {!saved
         ? <p>{NOTHING_YET}</p>
         : text === null

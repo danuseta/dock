@@ -25,10 +25,10 @@ interface JudgeDaysProps {
 export const JudgeDays: React.FC<JudgeDaysProps> = ({ data, onOpenDay, onOpenSprint, onJudgeNow, busy }) => (
   <section aria-label="Days of the sprint" className="min-w-0">
     <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-      <h3 className={head}>Hari sprint</h3>
-      <InfoTip label="Tentang Judge">Judge baca session yang udah sepi, malam hari. Hari muncul di sini setelah ada session sprint ini yang dinilai.</InfoTip>
-      <span className="text-[0.76rem] text-muted-foreground">{data.days.length ? answeredText(data.days) : 'belum ada session yang dinilai'}</span>
-      <Button size="sm" variant="ghost" className="ml-auto" onClick={onJudgeNow} disabled={busy}><Gavel size={13} aria-hidden="true" />Nilai sekarang</Button>
+      <h3 className={head}>Sprint days</h3>
+      <InfoTip label="About Judge">Judge reads quiet sessions at night. A day shows here once a session from this sprint is judged.</InfoTip>
+      <span className="text-[0.76rem] text-muted-foreground">{data.days.length ? answeredText(data.days) : 'no sessions judged yet'}</span>
+      <Button size="sm" variant="ghost" className="ml-auto" onClick={onJudgeNow} disabled={busy}><Gavel size={13} aria-hidden="true" />Judge now</Button>
     </div>
     <ul className="border-t border-border">
       {data.days.map((row) => (
@@ -44,7 +44,7 @@ export const JudgeDays: React.FC<JudgeDaysProps> = ({ data, onOpenDay, onOpenSpr
       ))}
       <li>
         <button type="button" onClick={onOpenSprint} className="grid w-full grid-cols-[112px_minmax(0,1fr)_16px] items-center gap-3 border-b border-border px-1 py-3 text-left hover:bg-surface-1 max-[760px]:grid-cols-[minmax(0,1fr)_16px] max-[760px]:min-h-11">
-          <span className="font-display text-[0.86rem] font-semibold">Lembar sprint</span>
+          <span className="font-display text-[0.86rem] font-semibold">Sprint sheet</span>
           <span className="min-w-0 truncate text-[0.78rem] text-secondary-foreground max-[760px]:col-start-1 max-[760px]:row-start-2">{sheetLine(data.sheet)}</span>
           <ChevronRight size={14} aria-hidden="true" className="text-muted-foreground max-[760px]:col-start-2 max-[760px]:row-start-1" />
         </button>

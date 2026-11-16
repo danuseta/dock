@@ -75,7 +75,7 @@ test('QRD-1534: the local verdict reads as what UAT will likely say', () => {
   assert.strictEqual(uatPrediction('NOT PASSED'), 'NOT PASSED');
   assert.strictEqual(uatPrediction(null), null);
   assert.strictEqual(uatPrediction('SOMETHING'), null);
-  assert.strictEqual(PREDICTION_LABEL, 'Prediksi di UAT');
+  assert.strictEqual(PREDICTION_LABEL, 'UAT prediction');
 });
 
 test('QRD-1534: the QA panel has no verdict badge, no deploy gate line and no test case list, and never gates anything', () => {

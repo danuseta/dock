@@ -67,7 +67,7 @@ export function boardTree(files: BlackboardFile[]): BoardTree {
 }
 
 export type BoardFilter = 'all' | 'task' | 'review';
-export const NO_SPRINT = 'Tanpa sprint';
+export const NO_SPRINT = 'No sprint';
 
 /** The ticket list per sprint, newest sprint first, filtered to Task or Review boards. */
 export function sprintGroups(tickets: BlackboardTicket[], filter: BoardFilter, sprintOf: (ticket: BlackboardTicket) => string | null = (ticket) => ticket.sprint ?? null, kindOf: (ticket: BlackboardTicket) => BlackboardKind = (ticket) => ticket.kind ?? 'task'): Array<{ sprint: string; tickets: BlackboardTicket[] }> {

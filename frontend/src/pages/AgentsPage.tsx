@@ -590,12 +590,12 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
                     <span className="font-mono tabular-nums">{selected.acPassed}/{selected.acTotal}</span>
                     {selected.acFailed > 0 && <span className="font-mono text-status-conflict">{selected.acFailed} failed</span>}
                     <span className="text-muted-foreground">·</span>
-                    <span className="inline-flex items-center gap-1 text-secondary-foreground"><Route size={12} aria-hidden="true" className="text-sky-200" />Tiket → kode <span className="font-mono tabular-nums text-foreground">{coverageText(trace)}</span></span>
+                    <span className="inline-flex items-center gap-1 text-secondary-foreground"><Route size={12} aria-hidden="true" className="text-sky-200" />Ticket → code <span className="font-mono tabular-nums text-foreground">{coverageText(trace)}</span></span>
                   </p>
                   {!selected.sample && (
                     <div className="flex flex-wrap gap-2">
-                      <Button size="sm" onClick={() => onNavigate(blackboardFileHref(selected.key, TRACE_ENTRY))}><ClipboardList size={13} aria-hidden="true" />Buka Blackboard</Button>
-                      <Button size="sm" disabled={openingChat} onClick={() => void openForTicket(selected.key)}><MessagesSquare size={13} aria-hidden="true" />Buka Session</Button>
+                      <Button size="sm" onClick={() => onNavigate(blackboardFileHref(selected.key, TRACE_ENTRY))}><ClipboardList size={13} aria-hidden="true" />Open Blackboard</Button>
+                      <Button size="sm" disabled={openingChat} onClick={() => void openForTicket(selected.key)}><MessagesSquare size={13} aria-hidden="true" />Open Session</Button>
                     </div>
                   )}
                 </div>

@@ -11,7 +11,7 @@ import { isInitialQueryLoading } from '../lib/queryPolicy';
 interface QaQueuePageProps { onTicketClick: (key: string) => void }
 
 const KIND_BADGE: Record<QaQueueKind, { label: string; variant: 'neutral' | 'warn' | 'accent' }> = {
-  queue: { label: 'Antre', variant: 'neutral' },
+  queue: { label: 'Queued', variant: 'neutral' },
   dependency: { label: 'QA-WAIT-DEPENDENCY', variant: 'accent' },
   escalated: { label: 'ESCALATED', variant: 'warn' },
 };
@@ -30,11 +30,11 @@ const QaQueuePage: React.FC<QaQueuePageProps> = ({ onTicketClick }) => {
   const people = peopleOf(rows);
   const shown = filterQueue(rows, who, mine, queue?.me ?? null);
   const metrics = queue ? [
-    { label: 'Di antrean', value: `${queue.metrics.total}${moreText(queue) ? ` ${moreText(queue)}` : ''}`, tone: '' },
+    { label: 'In queue', value: `${queue.metrics.total}${moreText(queue) ? ` ${moreText(queue)}` : ''}`, tone: '' },
     { label: 'ESCALATED', value: queue.metrics.escalated, tone: 'text-status-warn' },
-    { label: 'Nunggu dependency', value: queue.metrics.dependency, tone: 'text-sky-200' },
-    { label: 'Rata-rata nunggu', value: formatWait(queue.metrics.averageWaitMinutes), tone: '' },
-    { label: 'Paling lama', value: formatWait(queue.metrics.oldestWaitMinutes), tone: '' },
+    { label: 'Waiting on dependency', value: queue.metrics.dependency, tone: 'text-sky-200' },
+    { label: 'Average wait', value: formatWait(queue.metrics.averageWaitMinutes), tone: '' },
+    { label: 'Longest wait', value: formatWait(queue.metrics.oldestWaitMinutes), tone: '' },
   ] : [];
   const refresh = async () => {
     setRefreshing(true);
@@ -46,16 +46,16 @@ const QaQueuePage: React.FC<QaQueuePageProps> = ({ onTicketClick }) => {
       <PageHeader>
         <div>
           <h1 className="text-balance font-display text-3xl font-black">QA queue</h1>
-          <p className="mt-1 text-pretty text-secondary-foreground">Antrean bot QA dari Jira: tiket di UAT CHECK plus yang dikasih QA-WAIT-DEPENDENCY. Diperbarui tiap 60 detik.</p>
+          <p className="mt-1 text-pretty text-secondary-foreground">The QA bot's queue from Jira: tickets in UAT CHECK plus those labeled QA-WAIT-DEPENDENCY. Refreshed every 60 seconds.</p>
         </div>
         <Button onClick={() => void refresh()} disabled={refreshing}><RefreshCw size={16} className={cn(refreshing && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />{refreshing ? 'Checking...' : 'Check now'}</Button>
       </PageHeader>
 
-      <section className="mb-6 grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3" aria-label="Ringkasan antrean">
+      <section className="mb-6 grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3" aria-label="Queue summary">
         {metrics.map((item) => <Card key={item.label}><strong className={cn('font-display text-3xl tabular-nums', item.tone)}>{item.value}</strong><div className="text-xs text-muted-foreground">{item.label}</div></Card>)}
       </section>
 
-      {(error || queue?.error) && <Card className="mb-4 border-status-conflict text-pretty text-sm text-status-conflict" role="alert">{queue?.error ? `Jira nggak kebaca, ini antrean terakhir yang kesimpen: ${queue.error}` : error?.message}</Card>}
+      {(error || queue?.error) && <Card className="mb-4 border-status-conflict text-pretty text-sm text-status-conflict" role="alert">{queue?.error ? `Jira could not be read, showing the last saved queue: ${queue.error}` : error?.message}</Card>}
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         {[{ name: EVERYONE, count: rows.length }, ...people].map((person) => (
@@ -63,17 +63,17 @@ const QaQueuePage: React.FC<QaQueuePageProps> = ({ onTicketClick }) => {
             {person.name}<span className="ml-1 font-mono text-xs tabular-nums opacity-70">{person.count}</span>
           </Button>
         ))}
-        <label className="ml-auto flex items-center gap-2 text-xs text-secondary-foreground"><Checkbox checked={mine} disabled={!queue?.me} onChange={(event) => setMine(event.target.checked)} />Punya saya</label>
+        <label className="ml-auto flex items-center gap-2 text-xs text-secondary-foreground"><Checkbox checked={mine} disabled={!queue?.me} onChange={(event) => setMine(event.target.checked)} />Mine</label>
       </div>
 
       <Card className="overflow-hidden p-0">
         <PhoneCards>
           <table className="w-full min-w-[860px] border-collapse text-left text-sm">
             <thead className="bg-surface-1 text-xs text-muted-foreground">
-              <tr><th className="px-4 py-3 font-medium">#</th><th className="px-4 py-3 font-medium">Ticket</th><th className="px-4 py-3 font-medium">Assignee</th><th className="px-4 py-3 font-medium">Nunggu</th><th className="px-4 py-3 font-medium">Label QA</th><th className="px-4 py-3 font-medium" /></tr>
+              <tr><th className="px-4 py-3 font-medium">#</th><th className="px-4 py-3 font-medium">Ticket</th><th className="px-4 py-3 font-medium">Assignee</th><th className="px-4 py-3 font-medium">Waiting</th><th className="px-4 py-3 font-medium">QA label</th><th className="px-4 py-3 font-medium" /></tr>
             </thead>
             <tbody>
-              {shown.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground"><FlaskConical size={28} className="mx-auto mb-2 text-muted-foreground" aria-hidden="true" />{rows.length ? `Nggak ada tiket ${mine ? 'kamu' : who} di antrean.` : 'Antrean QA kosong.'}</td></tr>}
+              {shown.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground"><FlaskConical size={28} className="mx-auto mb-2 text-muted-foreground" aria-hidden="true" />{rows.length ? `No ${mine ? 'tickets of yours' : `tickets for ${who}`} in the queue.` : 'The QA queue is empty.'}</td></tr>}
               {shown.map((row) => {
                 const badge = KIND_BADGE[row.kind];
                 const own = Boolean(queue?.me && row.assignee?.trim().toLowerCase() === queue.me.trim().toLowerCase());
@@ -85,15 +85,15 @@ const QaQueuePage: React.FC<QaQueuePageProps> = ({ onTicketClick }) => {
                       <p className="max-w-[420px] truncate text-[0.8rem] text-secondary-foreground" title={row.summary}>{row.summary}</p>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-[0.8rem]" title={row.assignee ?? undefined}>{shortName(row.assignee)}</td>
-                    <td className="px-4 py-3 font-mono text-xs tabular-nums" title={row.enteredAt ? `Masuk UAT CHECK ${new Date(row.enteredAt).toLocaleString('en-GB')}` : undefined}>{formatWait(row.waitingMinutes)}</td>
+                    <td className="px-4 py-3 font-mono text-xs tabular-nums" title={row.enteredAt ? `Entered UAT CHECK ${new Date(row.enteredAt).toLocaleString('en-GB')}` : undefined}>{formatWait(row.waitingMinutes)}</td>
                     <td className="px-4 py-3">
                       <span className="flex flex-wrap gap-1">
                         <Badge variant={badge.variant}>{badge.label}</Badge>
-                        {row.kind === 'dependency' && <span className="inline-flex items-center gap-1 rounded-xs bg-surface-2 px-1.5 py-0.5 font-mono text-[0.68rem] font-semibold text-sky-200" title="Dari link is blocked by. Bot QA ngetes otomatis begitu tiket itu masuk UAT CHECK."><Link2 size={11} aria-hidden="true" />{waitText(row)}</span>}
+                        {row.kind === 'dependency' && <span className="inline-flex items-center gap-1 rounded-xs bg-surface-2 px-1.5 py-0.5 font-mono text-[0.68rem] font-semibold text-sky-200" title="From the is blocked by link. The QA bot tests it automatically once that ticket enters UAT CHECK."><Link2 size={11} aria-hidden="true" />{waitText(row)}</span>}
                         {row.labels.filter((label) => label !== badge.label).map((label) => <Badge key={label}>{label}</Badge>)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right">{own && <Badge variant="accent">punya saya</Badge>}</td>
+                    <td className="px-4 py-3 text-right">{own && <Badge variant="accent">mine</Badge>}</td>
                   </tr>
                 );
               })}
@@ -101,8 +101,8 @@ const QaQueuePage: React.FC<QaQueuePageProps> = ({ onTicketClick }) => {
           </table>
         </PhoneCards>
       </Card>
-      {queue && moreText(queue) && <p className="mt-3 text-pretty text-xs text-status-warn" role="status">Cuma 500 tiket pertama yang dibaca dari Jira, {moreText(queue)} nggak ditampilin.</p>}
-      <p className="mt-3 text-pretty text-xs text-muted-foreground">Urut dari waktu masuk UAT CHECK. "Nunggu QRD-x" muncul kalau bot QA kasih label QA-WAIT-DEPENDENCY, dari link is blocked by; dihitung terpisah dari ESCALATED.</p>
+      {queue && moreText(queue) && <p className="mt-3 text-pretty text-xs text-status-warn" role="status">Only the first 500 tickets are read from Jira; {moreText(queue)} are not shown.</p>}
+      <p className="mt-3 text-pretty text-xs text-muted-foreground">Sorted by time entered UAT CHECK. "Waiting on QRD-x" shows when the QA bot adds the QA-WAIT-DEPENDENCY label, from the is blocked by link; counted apart from ESCALATED.</p>
     </Page>
   );
 };

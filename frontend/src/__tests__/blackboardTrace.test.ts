@@ -38,7 +38,7 @@ test('QRD-1292: n/total, grouped FE / BE, and the filter keeps only the line wit
 
 test('an unreadable or missing trace reads "belum ada", never a number', () => {
   assert.strictEqual(coverageText(null), NOTHING_YET);
-  assert.strictEqual(coverageText({ ...QRD_1292, readable: false, total: 0, covered: 0, lines: [] }), 'belum ada');
+  assert.strictEqual(coverageText({ ...QRD_1292, readable: false, total: 0, covered: 0, lines: [] }), 'none yet');
   assert.doesNotThrow(() => refreshAcTrace('QRD-1292'), 'a refresh with nobody listening is a no-op');
 });
 
@@ -72,14 +72,14 @@ test('3a: one ticket\'s folders: Dokumen, Artifacts, the rest; the contract is t
 
 test('AC 1 + 3a: the Files column has Tiket → kode with n/total directly above Log; opening a ticket swaps the list for its folders with a way back; kamus at the root', () => {
   const page = read('pages/BlackboardPage.tsx');
-  const traceAt = page.indexOf("entry(TRACE_ENTRY, Route, 'Tiket → kode', coverageText(trace))");
+  const traceAt = page.indexOf("entry(TRACE_ENTRY, Route, 'Ticket → code', coverageText(trace))");
   const logAt = page.indexOf('onClick={() => setSelected(LOG_ENTRY)}');
   assert.ok(traceAt > 0 && logAt > traceAt, 'Tiket → kode sits above Log');
   assert.ok(page.slice(traceAt, logAt).split('\n').length <= 3, 'nothing between them');
   assert.match(page, /\{!picked \? \(\s*<section[^>]*aria-label="Tickets"/);
-  assert.match(page, />Semua tiket</);
+  assert.match(page, />All tickets</);
   assert.match(page, /fetchRootText\(KAMUS_FILE\)/);
-  assert.match(page, /\(\[\['all', 'Semua'\], \['task', 'Task'\], \['review', 'Review'\]\] as const\)/);
+  assert.match(page, /\(\[\['all', 'All'\], \['task', 'Task'\], \['review', 'Review'\]\] as const\)/);
   assert.match(page, /<AcMap trace=\{trace\}/);
   assert.match(page, /<ContractView ticket=\{picked\}/);
   assert.match(page, /<ExecLog ticket=\{picked\} run=\{run\} timeline=\{run\?\.timeline \?\? null\} \/><LogView ticket=\{picked\} \/>/);
@@ -88,12 +88,12 @@ test('AC 1 + 3a: the Files column has Tiket → kode with n/total directly above
 
 test('AC 2–4: the map shows the task with its status, the PR and path:line per line, marks a line without one, and opens a line with its text, Indonesian line, tests and PR', () => {
   const map = read('pages/blackboard/AcMap.tsx');
-  assert.match(map, /<span>Baris AC<\/span><span>Task<\/span><span>Kode \(PR · path:line\)<\/span>/);
+  assert.match(map, /<span>AC line<\/span><span>Task<\/span><span>Code \(PR · path:line\)<\/span>/);
   assert.match(map, /task\.done \? <CheckCircle2/);
-  assert.match(map, /belum ada path:line/);
-  assert.match(map, /Cuma yang belum ada path:line/);
+  assert.match(map, /no path:line yet/);
+  assert.match(map, /Only lines without path:line/);
   assert.match(map, /\{line\.textId && <p/);
-  assert.match(map, /Tes yang nutup/);
+  assert.match(map, /Covering tests/);
   assert.match(map, />Pull request</);
 });
 
@@ -105,14 +105,14 @@ test('3d: log rows from spawn and stop, with failures and events, oldest first',
       { id: 'a1', parentId: 'main', name: 'sous-planner', detail: 'Pecah AC jadi task', state: 'done', tool: null, tools: 44, since: '2026-11-12T09:00:00Z', until: '2026-11-12T09:04:00Z' },
     ] }, { stageIndex: 2, round: 1, agents: [{ id: 'a1', parentId: 'main', name: 'sous-planner', detail: null, state: 'done', tool: null, tools: 44, since: '2026-11-12T09:00:00Z' }] }] },
   );
-  assert.deepStrictEqual(rows.map((row) => [row.kind, row.agent, row.result]), [['agent', 'sous-planner', 'OK'], ['event', 'event', ''], ['fail', 'defect', 'GAGAL #1']]);
+  assert.deepStrictEqual(rows.map((row) => [row.kind, row.agent, row.result]), [['agent', 'sous-planner', 'OK'], ['event', 'event', ''], ['fail', 'defect', 'FAILED #1']]);
   assert.deepStrictEqual([rows[0].seconds, duration(rows[0].seconds), filterExec(rows, 'fail').length], [240, '4m', 1]);
   assert.deepStrictEqual(execRows(null, null), []);
 });
 
 test('3d: Kontrak shows the goal, the definition of done from Tiket → kode, the limits and a read-only Party', () => {
   const contract = read('pages/blackboard/ContractView.tsx');
-  for (const heading of ['Tujuan', 'Tiket dan branch', 'Definition of done', 'Batasan', 'Halaman kontrak']) assert.match(contract, new RegExp(`>${heading}<`));
+  for (const heading of ['Goal', 'Ticket and branch', 'Definition of done', 'Limits', 'Contract page']) assert.match(contract, new RegExp(`>${heading}<`));
   assert.match(contract, /Party <span/);
   assert.doesNotMatch(contract, /useMutation|method: 'POST'/, 'Party is display only');
 });
@@ -125,8 +125,8 @@ test('3e + AC 5: the workspace ticket detail is slim with one Blackboard card; t
   assert.match(detail, /const acRun = slim \? null : run;/);
   assert.match(detail, /\{!slim && \(\s*<p className="mt-0\.5 flex items-center gap-1 truncate font-mono/);
   assert.match(detail, /\{!slim && \(ticket\.pullRequests\?\.length \?\? 0\) > 1 && \(/);
-  assert.match(detail, /line\(Route, 'Tiket → kode', <span[^>]*>\{coverageText\(trace\)\}<\/span>, blackboardFileHref\(ticket\.key, TRACE_ENTRY\)\)/);
-  assert.match(detail, /buka<ArrowRight/);
+  assert.match(detail, /line\(Route, 'Ticket → code', <span[^>]*>\{coverageText\(trace\)\}<\/span>, blackboardFileHref\(ticket\.key, TRACE_ENTRY\)\)/);
+  assert.match(detail, /open<ArrowRight/);
   assert.match(detail, /<h2 className=\{sectionTitle\}>Demo<\/h2>/, 'Demo URL stays editable on the detail');
   assert.match(detail, /onSubmit=\{\(event\) => \{ event\.preventDefault\(\); void handleSaveDemo\(\); \}\}/);
   for (const kept of ['ReadinessCard', 'SummaryBlock', 'title="User Story"', 'title="Problem Definition"', 'Pull requests']) assert.ok(detail.includes(kept), kept);
@@ -135,9 +135,9 @@ test('3e + AC 5: the workspace ticket detail is slim with one Blackboard card; t
 test('3f: the Agents run panel keeps the header, Waiting on you, Activity & info and one AC line on the workspace; folds stay for the laptop; Session flow shows in every mode', () => {
   const agents = read('pages/AgentsPage.tsx');
   assert.match(agents, /const slim = slimDetail\(mode\);/);
-  assert.match(agents, /Tiket → kode <span[^>]*>\{coverageText\(trace\)\}<\/span>/);
-  assert.match(agents, />Buka Blackboard<\/Button>/);
-  assert.match(agents, />Buka Session<\/Button>/);
+  assert.match(agents, /Ticket → code <span[^>]*>\{coverageText\(trace\)\}<\/span>/);
+  assert.match(agents, />Open Blackboard<\/Button>/);
+  assert.match(agents, />Open Session<\/Button>/);
   assert.match(agents, /\{!slim && \(\s*<>\s*<RunDecisions/);
   assert.doesNotMatch(agents, /\{!slim && \(\s*<Card className="mt-4 p-0 max-\[760px\]:order-7">/);
   assert.match(agents, /<Card className="mt-4 p-0 max-\[760px\]:order-7">\s*<div[^>]*>\s*<h2[^>]*>Session flow<\/h2>/);
@@ -148,7 +148,7 @@ test('3f: the Agents run panel keeps the header, Waiting on you, Activity & info
 test('AC 6: the Sessions right panel shows the short Tiket → kode line, read again on the poll and on refreshAcTrace', () => {
   const inspector = read('chat/SessionInspector.tsx');
   assert.match(inspector, /const trace = useAcTrace\(ticketKey, onBlackboard\);/);
-  assert.match(inspector, /Tiket → kode <span[^>]*>\{coverageText\(trace\)\}<\/span>/);
+  assert.match(inspector, /Ticket → code <span[^>]*>\{coverageText\(trace\)\}<\/span>/);
   const hook = read('lib/acTrace.ts');
   assert.match(hook, /export function refreshAcTrace\(key: string\)/);
   assert.match(hook, /window\.setInterval\(load, pollMs\)/);

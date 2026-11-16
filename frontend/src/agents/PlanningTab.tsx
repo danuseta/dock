@@ -32,7 +32,7 @@ const warnChip = 'rounded-sm border border-status-warn px-2 py-0.5 text-[var(--c
 const TONE: Record<string, string> = {
   ok: 'border-status-merged text-status-merged', conflict: 'border-status-conflict text-status-conflict', warn: 'border-status-warn text-status-warn', none: 'border-border text-muted-foreground',
 };
-const PANELS: Array<[PlanningPanel, string]> = [['mine', 'Tiket saya'], ['team', 'Team map'], ['scope', 'Scope'], ['ac', 'AC check'], ['qa', 'QA check'], ['tc', 'Test cases'], ['storyboard', 'Storyboard']];
+const PANELS: Array<[PlanningPanel, string]> = [['mine', 'My tickets'], ['team', 'Team map'], ['scope', 'Scope'], ['ac', 'AC check'], ['qa', 'QA check'], ['tc', 'Test cases'], ['storyboard', 'Storyboard']];
 
 const errorText = (failure: unknown, fallback: string) => (failure instanceof Error ? failure.message : fallback);
 /** Opens the ticket page the way a link inside DOCK does: the app reads the new path on popstate. */
@@ -72,12 +72,12 @@ const TcTicket: React.FC<{ ticket: DraftTicket; checklist: DraftTc[]; busy: bool
         {ticket.tcStale && <span className={cn(chip, TONE.warn)} title="A frame of this ticket changed in the storyboard after these were written">Stale</span>}
         {ticket.tcPending && <span className={cn(chip, 'border-accent text-accent')} title="Publish posts them as a QONFLO-TC v1 comment">Not posted</span>}
         <span className="min-w-0 flex-1 truncate text-secondary-foreground">{ticket.summary}</span>
-        {ticket.tcApproved && <span className={cn(chip, TONE.ok)}>Disetujui QA</span>}
-        {!editing && !ticket.tcs.length && checklist.length > 0 && <Button size="sm" variant="ghost" onClick={() => void onSave(ticket.key, checklist)} disabled={busy}><ListChecks size={13} aria-hidden="true" />Isi dari checklist QA</Button>}
+        {ticket.tcApproved && <span className={cn(chip, TONE.ok)}>Approved by QA</span>}
+        {!editing && !ticket.tcs.length && checklist.length > 0 && <Button size="sm" variant="ghost" onClick={() => void onSave(ticket.key, checklist)} disabled={busy}><ListChecks size={13} aria-hidden="true" />Fill from QA checklist</Button>}
         {!editing && <Button size="sm" variant="ghost" onClick={start} disabled={busy}>Edit</Button>}
         {!editing && ticket.tcs.length > 0 && (ticket.tcApproved
-          ? <Button size="sm" variant="ghost" onClick={() => onDecide(`tc|${ticket.key}`, 'clear')} disabled={busy}><Undo2 size={13} aria-hidden="true" />Batal setuju</Button>
-          : <Button size="sm" variant="primary" onClick={() => onDecide(`tc|${ticket.key}`, 'approve')} disabled={busy}><Check size={13} aria-hidden="true" />Setujui</Button>)}
+          ? <Button size="sm" variant="ghost" onClick={() => onDecide(`tc|${ticket.key}`, 'clear')} disabled={busy}><Undo2 size={13} aria-hidden="true" />Undo approval</Button>
+          : <Button size="sm" variant="primary" onClick={() => onDecide(`tc|${ticket.key}`, 'approve')} disabled={busy}><Check size={13} aria-hidden="true" />Approve</Button>)}
       </div>
       {editing ? (
         <div className="mt-2 grid gap-2">
@@ -103,8 +103,8 @@ const TcTicket: React.FC<{ ticket: DraftTicket; checklist: DraftTc[]; busy: bool
 const TcPanel: React.FC<{ draft: SprintDraft; busy: boolean; onSave: (key: string, tcs: DraftTc[]) => Promise<boolean>; onDecide: (id: string, action: string) => void }> = ({ draft, busy, onSave, onDecide }) => (
   <section aria-label="Test cases" className="grid grid-cols-[minmax(0,1fr)] gap-3">
     <p className="flex items-center gap-1 text-pretty text-[0.8rem] text-muted-foreground">
-      Test case tiap tiket. QA harus setujuin tiap set.
-      <InfoTip label="Tentang test case">Ditulis agent planning, dari checklist QA, atau manual di sini. Set yang berubah perlu disetujuin lagi. Publish ngirim set yang berubah sebagai komentar QONFLO-TC v1; QA lokal dan QA bot baca yang paling baru.</InfoTip>
+      Test cases per ticket. QA approves each set.
+      <InfoTip label="About test cases">Written by the planning agent, from the QA checklist, or by hand here. A set that changes needs approval again. Publish posts changed sets as a QONFLO-TC v1 comment; local QA and the QA bot read the latest one.</InfoTip>
     </p>
     <ul className="overflow-hidden rounded-md border border-border bg-surface-0">
       {[...draft.tickets].sort((a, b) => Number(b.tcStale) - Number(a.tcStale) || a.key.localeCompare(b.key, undefined, { numeric: true })).map((ticket) => <TcTicket key={ticket.key} ticket={ticket} checklist={checklistTcs(qaChecklist(ticket, draft.findings))} busy={busy} onSave={onSave} onDecide={onDecide} />)}
@@ -271,8 +271,8 @@ const TeamPanel: React.FC<{ draft: SprintDraft; plan: DraftTicket[]; busy: boole
 
       {draft.moves.length > 0 && (
         <section aria-label="Suggested moves" className="min-w-0">
-          <h3 className={head}>Usulan pindah kartu <InfoTip label="Tentang usulan pindah kartu">Kartu yang nunggu kartu itu ikut pindah. Pindah cuma ngubah draft; assignee di Jira baru berubah waktu Publish.</InfoTip></h3>
-          <p className="mt-1 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Kartu To Do yang bisa dipindah ke orang yang lebih cepat kosong.</p>
+          <h3 className={head}>Suggested card moves <InfoTip label="About suggested card moves">Cards waiting on that card move with it. A move only changes the draft; the Jira assignee changes on Publish.</InfoTip></h3>
+          <p className="mt-1 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">To Do cards that can move to someone who frees up sooner.</p>
           <ul className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
             {draft.moves.map((move) => (
               <li key={move.keys.join('|')} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-border px-3 py-2.5 last:border-b-0 max-[760px]:grid-cols-[minmax(0,1fr)]">
@@ -289,8 +289,8 @@ const TeamPanel: React.FC<{ draft: SprintDraft; plan: DraftTicket[]; busy: boole
       )}
 
       <section aria-label="Wave progress" className="min-w-0">
-        <h3 className={head}>Gelombang kerja <InfoTip label="Tentang gelombang kerja">Tiap potongan di bar = satu kartu di hari jadwalnya, warnanya warna pemilik kartu.</InfoTip></h3>
-        <p className="mt-1 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Wave 1 nggak nunggu siapa-siapa, wave 2 nunggu wave 1, dan seterusnya.</p>
+        <h3 className={head}>Work waves <InfoTip label="About work waves">Each piece of a bar = one card on its scheduled days, in the card owner's colour.</InfoTip></h3>
+        <p className="mt-1 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Wave 1 waits on no one, wave 2 waits on wave 1, and so on.</p>
         <ul className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
           {waves.map((row) => (
             <li key={row.wave} className="grid grid-cols-[90px_minmax(0,1fr)_150px] items-center gap-x-3 gap-y-1 border-b border-border px-3 py-2.5 last:border-b-0 max-[760px]:grid-cols-[76px_minmax(0,1fr)]">
@@ -316,8 +316,8 @@ const TeamPanel: React.FC<{ draft: SprintDraft; plan: DraftTicket[]; busy: boole
       </section>
 
       <section aria-label="Schedule" className="min-w-0">
-        <h3 className={head}>Jadwal tiap orang <InfoTip label="Tentang jadwal">Panjang kartu = SP, {fmt(draft.spPerDay)} SP = 1 hari. Urutan ikut label #N di Jira. Perkiraan selesai cuma ngitung sisa kerja kartu yang belum merged, mulai hari ini.</InfoTip></h3>
-        <p className="mt-1 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Urutan kerja tiap orang per hari. Klik kartu buat lihat dia nunggu apa.</p>
+        <h3 className={head}>Schedule per person <InfoTip label="About the schedule">Card length = SP, {fmt(draft.spPerDay)} SP = 1 day. Order follows the #N label in Jira. The forecast counts only the work left on unmerged cards, from today.</InfoTip></h3>
+        <p className="mt-1 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Each person's order of work by day. Click a card to see what it waits on.</p>
         {draft.mergeSource === 'jira' && <p className="mt-2 font-mono text-[0.7rem] text-muted-foreground" role="status">Merge state from Jira status: GitHub unavailable</p>}
         <div className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
           <div className="overflow-x-auto">
@@ -449,24 +449,24 @@ const TeamPanel: React.FC<{ draft: SprintDraft; plan: DraftTicket[]; busy: boole
         </div>
         {hoverBar && hover && <PlanHover id={hoverId} anchor={hover.anchor} bar={hoverBar} color={color(hoverBar.ticket.dev)} labels={labels} spPerDay={draft.spPerDay} mergeSource={draft.mergeSource} />}
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[0.7rem] text-muted-foreground">
-          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] border border-status-conflict bg-status-conflict-bg shadow-[inset_3px_0_0_var(--color-status-conflict)]" aria-hidden="true" />tepi kiri merah = ada pertanyaan</span>
-          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-l-4 border-dashed border-secondary-foreground" style={{ borderLeftStyle: 'solid' }} aria-hidden="true" />To Do, belum ada PR</span>
-          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-l-4 border-secondary-foreground bg-surface-2" aria-hidden="true" />dikerjain, PR open</span>
-          <span className="inline-flex items-center gap-1.5"><span className="inline-flex items-center gap-[3px] rounded-xs bg-[var(--color-status-warn-pill)] px-1 font-mono text-[0.6rem] font-semibold text-[var(--color-status-warn-ink)]"><AlertTriangle size={10} aria-hidden="true" />Jira says</span>Jira bilang merged, PR masih open</span>
-          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-l-4 border-border" aria-hidden="true" />✓ pudar = udah merged</span>
-          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-l-4 border-status-conflict" style={{ borderLeftColor: 'var(--color-secondary-foreground)' }} aria-hidden="true" />merah = telat, harinya lewat tapi belum merged</span>
-          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] outline outline-1 outline-dashed outline-status-discord" aria-hidden="true" />dipindah di draft ini</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] border border-status-conflict bg-status-conflict-bg shadow-[inset_3px_0_0_var(--color-status-conflict)]" aria-hidden="true" />red left edge = open question</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-l-4 border-dashed border-secondary-foreground" style={{ borderLeftStyle: 'solid' }} aria-hidden="true" />To Do, no PR yet</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-l-4 border-secondary-foreground bg-surface-2" aria-hidden="true" />in progress, PR open</span>
+          <span className="inline-flex items-center gap-1.5"><span className="inline-flex items-center gap-[3px] rounded-xs bg-[var(--color-status-warn-pill)] px-1 font-mono text-[0.6rem] font-semibold text-[var(--color-status-warn-ink)]"><AlertTriangle size={10} aria-hidden="true" />Jira says</span>Jira says merged, PR still open</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-l-4 border-border" aria-hidden="true" />faded ✓ = merged</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-l-4 border-status-conflict" style={{ borderLeftColor: 'var(--color-secondary-foreground)' }} aria-hidden="true" />red = late, its days passed but not merged</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] outline outline-1 outline-dashed outline-status-discord" aria-hidden="true" />moved in this draft</span>
           <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-0.5 bg-foreground" aria-hidden="true" />{dueLabel}</span>
           <span className="inline-flex items-center gap-1.5"><span className="h-2.5 border-l-2 border-dashed" style={{ borderColor: forecastColor }} aria-hidden="true" />{forecastLabel}</span>
-          {planToday && <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-0.5 bg-status-discord" aria-hidden="true" />hari ini</span>}
-          <span className="inline-flex items-center gap-1.5"><span className="rounded-xs border border-secondary-foreground px-1 font-mono text-[0.6rem] font-semibold text-secondary-foreground">#1</span>urutan dari label #N di Jira</span>
-          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-border" style={{ backgroundImage: HATCH }} aria-hidden="true" />arsir = lewat sprint</span>
+          {planToday && <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-0.5 bg-status-discord" aria-hidden="true" />today</span>}
+          <span className="inline-flex items-center gap-1.5"><span className="rounded-xs border border-secondary-foreground px-1 font-mono text-[0.6rem] font-semibold text-secondary-foreground">#1</span>order from the #N label in Jira</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-[3px] border border-border" style={{ backgroundImage: HATCH }} aria-hidden="true" />hatched = past the sprint</span>
         </div>
       </section>
 
       <section aria-label="Order of work, per person" className="min-w-0">
-        <h3 className={head}>Urutan kerja <InfoTip label="Tentang urutan kerja">Hari mulai udah ngikutin blocker dan urutan wave. Baris abu di tiap kartu = siapa yang nunggu kartu itu. Tanda <b>after sprint</b> = selesai lewat hari {draft.sprintDays}.</InfoTip></h3>
-        <p className="mt-1 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Kerjain dari atas ke bawah.</p>
+        <h3 className={head}>Order of work <InfoTip label="About the order of work">Start days already follow blockers and wave order. The grey line on each card = who waits on that card. <b>after sprint</b> = finishes after day {draft.sprintDays}.</InfoTip></h3>
+        <p className="mt-1 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Work from top to bottom.</p>
         <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(min(260px,100%),1fr))] gap-3">
           {rows.map((lane) => (
             <div key={lane.dev} className="min-w-0 rounded-md border border-border bg-surface-0 px-3.5 py-3">
@@ -504,8 +504,8 @@ const TeamPanel: React.FC<{ draft: SprintDraft; plan: DraftTicket[]; busy: boole
       </section>
 
       <section aria-label="Hand-offs" className="min-w-0">
-        <h3 className={head}>Serah terima <InfoTip label="Tentang serah terima">Jeda (float) = berapa hari kartu boleh telat sebelum kartu orang berikutnya ikut telat. Tanpa jeda = telat sehari, orang lain ikut telat.</InfoTip></h3>
-        <p className="mt-1 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Tiket yang ditunggu orang lain. <b className="text-foreground">{hand.length} serah terima · {zeroFloat} tanpa jeda.</b></p>
+        <h3 className={head}>Hand-offs <InfoTip label="About hand-offs">Float = how many days a card can slip before the next person's card slips too. No float = one day late makes someone else late.</InfoTip></h3>
+        <p className="mt-1 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Tickets someone else waits on. <b className="text-foreground">{hand.length} hand-offs · {zeroFloat} with no float.</b></p>
         {hand.length === 0 ? (
           <p className="mt-2 text-sm text-muted-foreground">No card waits on another developer's card.</p>
         ) : (
@@ -603,7 +603,7 @@ const ScopePanel: React.FC<{ draft: SprintDraft; busy: boolean; onChange: (key: 
       <section aria-label="In the sprint"><h3 className={head}>In the sprint</h3>{inSprint.length ? list(inSprint) : <p className="mt-2 text-sm text-muted-foreground">Nothing fits the sprint.</p>}</section>
       <section aria-label="Backlog"><h3 className={head}>Backlog · lands after the last day</h3>{backlog.length ? list(backlog) : <p className="mt-2 text-sm text-muted-foreground">Everything fits.</p>}</section>
       <section aria-label="Scope cut">
-        <h3 className={head}>Potong scope</h3>
+        <h3 className={head}>Scope cut</h3>
         {draft.scopeCut?.note ? (
           <p className="mt-2 flex flex-wrap items-center gap-2 text-[0.8rem] text-secondary-foreground">
             {draft.scopeCut.note}
@@ -612,8 +612,8 @@ const ScopePanel: React.FC<{ draft: SprintDraft; busy: boolean; onChange: (key: 
           </p>
         ) : (
           <form className="mt-2 flex gap-2 max-[760px]:flex-col" onSubmit={(event) => { event.preventDefault(); onDecide('scope|cut', 'cut', cut); setCut(''); }}>
-            <Input aria-label="Scope cut" className="h-9" value={cut} onChange={(event) => setCut(event.target.value)} placeholder="Apa yang keluar dari sprint, atau tanggal yang digeser" />
-            <Button size="sm" type="submit" variant="primary" disabled={busy || !cut.trim()}><Scissors size={13} aria-hidden="true" />Tulis</Button>
+            <Input aria-label="Scope cut" className="h-9" value={cut} onChange={(event) => setCut(event.target.value)} placeholder="What leaves the sprint, or the date that moves" />
+            <Button size="sm" type="submit" variant="primary" disabled={busy || !cut.trim()}><Scissors size={13} aria-hidden="true" />Write</Button>
           </form>
         )}
       </section>
@@ -643,7 +643,7 @@ const FindingRow: React.FC<{ draft: SprintDraft; finding: DraftFinding; busy: bo
           <span className={cn(chip, late ? TONE.conflict : finding.kind === 'lands-first' ? TONE.ok : TONE.none)}>{findingKindLabel(finding.kind)}</span>
         </p>
         <p className={cn('mt-0.5 text-pretty text-[0.76rem] text-muted-foreground', long && !full && 'line-clamp-2')}>{finding.text}</p>
-        {long && <button type="button" className="text-[0.7rem] font-semibold text-accent hover:underline max-[760px]:min-h-11" aria-expanded={full} onClick={() => setFull((value) => !value)}>{full ? 'Ringkas' : 'Lihat semua'}</button>}
+        {long && <button type="button" className="text-[0.7rem] font-semibold text-accent hover:underline max-[760px]:min-h-11" aria-expanded={full} onClick={() => setFull((value) => !value)}>{full ? 'Show less' : 'Show all'}</button>}
       </div>
       <div className="flex flex-wrap items-start justify-end gap-1.5 max-[760px]:justify-start">
         {decided ? (
@@ -652,11 +652,11 @@ const FindingRow: React.FC<{ draft: SprintDraft; finding: DraftFinding; busy: bo
             <Button size="sm" variant="ghost" onClick={() => onDecide(finding.id, 'clear')} disabled={busy}><Undo2 size={13} aria-hidden="true" />Undo</Button>
           </>
         ) : finding.linked ? (
-          <span className="self-center font-mono text-[0.64rem] text-muted-foreground">Dependency · link Blocks udah ada</span>
+          <span className="self-center font-mono text-[0.64rem] text-muted-foreground">Dependency · Blocks link exists</span>
         ) : (
           <>
             <Button size="sm" variant="ghost" onClick={() => onDecide(finding.id, 'dependency')} disabled={busy}><Link2 size={13} aria-hidden="true" />Dependency</Button>
-            <Button size="sm" onClick={() => onDecide(finding.id, 'reference')} disabled={busy}><FileInput size={13} aria-hidden="true" />Pindah ke Reference</Button>
+            <Button size="sm" onClick={() => onDecide(finding.id, 'reference')} disabled={busy}><FileInput size={13} aria-hidden="true" />Move to Reference</Button>
             {inPlan && <Button size="sm" variant="primary" onClick={() => onDecide(finding.id, 'move')} disabled={busy}><ArrowRightLeft size={13} aria-hidden="true" />Move to {finding.refKey}</Button>}
           </>
         )}
@@ -672,9 +672,9 @@ const AcPanel: React.FC<{ draft: SprintDraft; busy: boolean; onDecide: (id: stri
   return (
     <section aria-label="AC check">
       <p className="text-[0.84rem] text-secondary-foreground">
-        <b className="text-foreground">{unlinked.length}</b> baris AC nyebut tiket lain tanpa link Blocks; {findings.filter(undecidedFinding).length} belum diputusin.
+        <b className="text-foreground">{unlinked.length}</b> AC lines name another ticket without a Blocks link; {findings.filter(undecidedFinding).length} not decided.
       </p>
-      <p className="mt-1 max-w-[76ch] text-pretty text-[0.76rem] text-sky-200">AC cuma isi yang dites di tiket ini. Nunggu tiket yang disebut? Pilih Dependency: link Blocks dipasang waktu Publish, bot QA nahan tiketnya sampai tiket itu di UAT CHECK. Cuma info? Pindah ke Reference. Nggak ada yang diubah di Jira sebelum Publish, dan DOCK nggak nulis komentar.</p>
+      <p className="mt-1 max-w-[76ch] text-pretty text-[0.76rem] text-sky-200">AC holds only what is tested on this ticket. Waits on the named ticket? Pick Dependency: the Blocks link is added on Publish, and the QA bot holds the ticket until that one is in UAT CHECK. Info only? Move to Reference. Nothing changes in Jira before Publish, and DOCK writes no comments.</p>
       <ul className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
         {findings.map((finding) => <FindingRow key={finding.id} draft={draft} finding={finding} busy={busy} onDecide={onDecide} />)}
       </ul>
@@ -694,24 +694,24 @@ const QaChecklistBox: React.FC<{ ticket: DraftTicket; findings: DraftFinding[]; 
     <div className="mt-2 rounded-md border border-border bg-surface-1 px-3 py-2.5">
       <div className="grid grid-cols-2 gap-4 max-[900px]:grid-cols-1">
         <div>
-          <p className={cn(head, 'mb-1 flex items-center gap-1.5')}><Check size={12} aria-hidden="true" />Dites di tiket ini</p>
-          {list.here.length === 0 && <p className="py-1 text-[0.8rem] text-muted-foreground">Nggak ada baris AC yang dites di sini.</p>}
+          <p className={cn(head, 'mb-1 flex items-center gap-1.5')}><Check size={12} aria-hidden="true" />Tested on this ticket</p>
+          {list.here.length === 0 && <p className="py-1 text-[0.8rem] text-muted-foreground">No AC line is tested here.</p>}
           {list.here.map((row) => (
             <p key={row.n} className="py-1 text-pretty text-[0.8rem] text-foreground">
               {line(row)}
-              {row.waitsOn.map((key) => <span key={key} className={cn(chip, TONE.warn, 'ml-1.5')}>nunggu {key}</span>)}
+              {row.waitsOn.map((key) => <span key={key} className={cn(chip, TONE.warn, 'ml-1.5')}>waits for {key}</span>)}
             </p>
           ))}
         </div>
         <div>
-          <p className={cn(head, 'mb-1 flex items-center gap-1.5')}><Ban size={12} aria-hidden="true" />Jangan dites di sini</p>
-          {list.notHere.length === 0 && <p className="py-1 text-[0.8rem] text-muted-foreground">Semua baris AC dites di tiket ini.</p>}
+          <p className={cn(head, 'mb-1 flex items-center gap-1.5')}><Ban size={12} aria-hidden="true" />Not tested here</p>
+          {list.notHere.length === 0 && <p className="py-1 text-[0.8rem] text-muted-foreground">Every AC line is tested on this ticket.</p>}
           {list.notHere.map((row) => <p key={row.n} className="py-1 text-pretty text-[0.8rem] text-muted-foreground">{line(row)} <span className="font-mono text-[0.66rem]">→ {row.testedIn}</span></p>)}
-          {summary?.testData && <p className="mt-2 text-xs text-muted-foreground">Data uji: {summary.testData}</p>}
+          {summary?.testData && <p className="mt-2 text-xs text-muted-foreground">Test data: {summary.testData}</p>}
         </div>
       </div>
       <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        Dibikin dari AC dan keputusan AC check. Field Reference nggak jadi test case. Edit di Test cases, terus setujui.
+        Built from the AC and the AC check decisions. The Reference field does not become a test case. Edit in Test cases, then approve.
         <Button size="sm" variant="ghost" onClick={onTestCases}>Test cases<ArrowRight size={13} aria-hidden="true" /></Button>
       </p>
     </div>
@@ -727,8 +727,8 @@ const QaPanel: React.FC<{ draft: SprintDraft; busy: boolean; summaries: Map<stri
     <section aria-label="QA check" className="grid grid-cols-[minmax(0,1fr)] gap-3">
       <div className="flex flex-wrap items-center gap-3">
         <p className="flex min-w-0 flex-1 items-center gap-1 text-pretty text-[0.8rem] text-muted-foreground">
-          Tiket yang bakal ditolak QA bot. Beresin sebelum publish.
-          <InfoTip label="Tentang cek QA">Aturan triage QA bot dijalanin ke AC draft. Yang ESCALATED di sini bakal ESCALATED juga di UAT.</InfoTip>
+          Tickets the QA bot will reject. Fix them before publish.
+          <InfoTip label="About the QA check">The QA bot's triage rules run on the draft AC. What is ESCALATED here will be ESCALATED in UAT too.</InfoTip>
         </p>
         <Button size="sm" onClick={onRefresh} disabled={busy}><RefreshCw size={13} aria-hidden="true" />Check again</Button>
       </div>
@@ -748,7 +748,7 @@ const QaPanel: React.FC<{ draft: SprintDraft; busy: boolean; summaries: Map<stri
                 {ticket.prediction?.reasons.length ? <ul className="mt-1 grid gap-0.5 text-[0.76rem] text-muted-foreground">{ticket.prediction.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul> : null}
                 {ticket.prediction?.fix && <p className="mt-1 text-[0.76rem] text-secondary-foreground">Fix: {ticket.prediction.fix}</p>}
                 <button type="button" aria-expanded={listOpen === ticket.key} onClick={() => setListOpen(listOpen === ticket.key ? null : ticket.key)} className="mt-1.5 inline-flex items-center gap-1 text-[0.74rem] font-semibold text-sky-200 hover:underline max-[760px]:min-h-11">
-                  {listOpen === ticket.key ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}Checklist QA{ticket.tcApproved ? ' · test case disetujui' : ''}
+                  {listOpen === ticket.key ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}QA checklist{ticket.tcApproved ? ' · test cases approved' : ''}
                 </button>
                 {listOpen === ticket.key && <QaChecklistBox ticket={ticket} findings={draft.findings} summary={summaries.get(ticket.key)} onTestCases={onTestCases} />}
                 {fixing === ticket.key && (
@@ -783,11 +783,11 @@ const QaPanel: React.FC<{ draft: SprintDraft; busy: boolean; summaries: Map<stri
 const ReadyBlock: React.FC<{ id: string; ready: Readiness; onFix: (panel: PlanningPanel) => void }> = ({ id, ready, onFix }) => {
   if (!ready.total) return null;
   return (
-    <section id={id} aria-label="Siap publish" className="rounded-md border border-border bg-surface-1 px-3.5 py-3">
+    <section id={id} aria-label="Ready to publish" className="rounded-md border border-border bg-surface-1 px-3.5 py-3">
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="flex items-center gap-1.5 font-display text-sm font-bold"><CalendarCheck size={14} aria-hidden="true" />Siap publish</h3>
-        <span className={cn(chip, ready.done === ready.total ? TONE.ok : TONE.warn)}>{ready.done} dari {ready.total}</span>
-        <span className="text-xs text-muted-foreground">cuma info, Publish tetap aktif</span>
+        <h3 className="flex items-center gap-1.5 font-display text-sm font-bold"><CalendarCheck size={14} aria-hidden="true" />Ready to publish</h3>
+        <span className={cn(chip, ready.done === ready.total ? TONE.ok : TONE.warn)}>{ready.done} of {ready.total}</span>
+        <span className="text-xs text-muted-foreground">info only, Publish stays on</span>
       </div>
       <ul className="mt-2">
         {ready.items.map((item) => (
@@ -831,13 +831,13 @@ const PublishDialog: React.FC<{
           <>
             {missing.length > 0 ? (
               <div className="mt-3 rounded-md border border-border bg-surface-1 px-3.5 py-3">
-                <p className="mb-1 flex flex-wrap items-center gap-1.5 font-display text-sm font-bold"><AlertTriangle size={14} className="text-status-warn" aria-hidden="true" />Masih kurang {missing.length} hal<span className="ml-auto font-body text-xs font-normal text-muted-foreground">nggak nahan publish</span></p>
+                <p className="mb-1 flex flex-wrap items-center gap-1.5 font-display text-sm font-bold"><AlertTriangle size={14} className="text-status-warn" aria-hidden="true" />Still missing: {missing.length}<span className="ml-auto font-body text-xs font-normal text-muted-foreground">does not block publish</span></p>
                 {missing.map((item) => <p key={item.id} className="flex items-start gap-2 py-0.5 text-[0.8rem] text-secondary-foreground"><AlertCircle size={13} className="mt-0.5 flex-none text-status-warn" aria-hidden="true" />{item.text}</p>)}
               </div>
-            ) : <p className="mt-3 flex items-center gap-2 text-sm text-status-merged"><CheckCircle2 size={14} aria-hidden="true" />Siap publish, semua udah beres</p>}
+            ) : <p className="mt-3 flex items-center gap-2 text-sm text-status-merged"><CheckCircle2 size={14} aria-hidden="true" />Ready to publish, everything is done</p>}
             <p className="mt-2 flex items-center gap-1 text-pretty text-sm text-muted-foreground">
-              Yang ditulis ke Jira cuma AC dan assignee yang beda.
-              <InfoTip label="Apa aja yang ditulis Publish">Tiket yang AC-nya diubah di Jira setelah di-load dilewati. Ikut ditulis: halaman Confluence "Sprint contract {sprint}", komentar test case yang berubah, dan label plan-published-rN yang ditunggu DOCK tiap developer dan cron.</InfoTip>
+              Jira gets only the AC and assignees that differ.
+              <InfoTip label="What Publish writes">A ticket whose AC changed in Jira after the load is skipped. Also written: the Confluence page "Sprint contract {sprint}", comments for changed test cases, and the plan-published-rN label that every developer's DOCK and the cron wait for.</InfoTip>
             </p>
             <ul className="mt-3 max-h-[50vh] overflow-y-auto">
               {changes.map((change) => (
@@ -857,8 +857,8 @@ const PublishDialog: React.FC<{
           </>
         )}
         <div className="mt-6 flex justify-end gap-2">
-          {!results && missing.length > 0 ? <Button onClick={onFix} disabled={publishing}>Beresin dulu</Button> : <Button onClick={onClose} disabled={publishing}>{results ? 'Close' : 'Cancel'}</Button>}
-          {!results && <Button variant="primary" onClick={onConfirm} disabled={publishing || loading || !changes}><Send size={14} aria-hidden="true" />{publishing ? 'Publishing...' : missing.length ? 'Tetap publish' : count ? `Publish ${count} ${count === 1 ? 'ticket' : 'tickets'}` : 'Publish'}</Button>}
+          {!results && missing.length > 0 ? <Button onClick={onFix} disabled={publishing}>Fix first</Button> : <Button onClick={onClose} disabled={publishing}>{results ? 'Close' : 'Cancel'}</Button>}
+          {!results && <Button variant="primary" onClick={onConfirm} disabled={publishing || loading || !changes}><Send size={14} aria-hidden="true" />{publishing ? 'Publishing...' : missing.length ? 'Publish anyway' : count ? `Publish ${count} ${count === 1 ? 'ticket' : 'tickets'}` : 'Publish'}</Button>}
         </div>
       </Card>
     </Dialog>
@@ -1023,18 +1023,18 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
         </section>
       ) : (
         <>
-          <p aria-label="Ringkasan draft" className="flex flex-wrap items-center gap-1.5 font-mono text-[0.72rem] font-semibold">
-            <span className={summaryChip}>{draft.tickets.length} tiket open</span>
-            <span className={summaryChip}>{draft.sprintDays} hari kerja</span>
+          <p aria-label="Draft summary" className="flex flex-wrap items-center gap-1.5 font-mono text-[0.72rem] font-semibold">
+            <span className={summaryChip}>{draft.tickets.length} open tickets</span>
+            <span className={summaryChip}>{draft.sprintDays} working days</span>
             <span className={summaryChip}>{draft.devs.length} dev</span>
-            {late > 0 && <span className={warnChip}>{late} AC nunggu tiket lain</span>}
+            {late > 0 && <span className={warnChip}>{late} AC waiting on other tickets</span>}
             {escalated > 0 && <span className={warnChip}>{escalated} ESCALATED</span>}
-            {storyboardChecks > 0 && <span className={warnChip}>{storyboardChecks} AC dicek ulang, storyboard berubah</span>}
-            {draft.blockers.length > 0 && <span className={warnChip}>{draft.blockers.length} perlu diputusin</span>}
-            <InfoTip label="Tentang ringkasan">
-              {draft.landed > 0 ? `${draft.landed} tiket sprint ini udah merged dan nggak dihitung. ` : ''}
-              {draft.carriedPast ? `${draft.carriedPast} tiket bawaan sprint lalu yang udah merged nggak ditampilin. ` : ''}
-              Angka 0 nggak ditampilin.
+            {storyboardChecks > 0 && <span className={warnChip}>{storyboardChecks} AC to recheck, storyboard changed</span>}
+            {draft.blockers.length > 0 && <span className={warnChip}>{draft.blockers.length} need a decision</span>}
+            <InfoTip label="About the summary">
+              {draft.landed > 0 ? `${draft.landed} tickets of this sprint are merged and not counted. ` : ''}
+              {draft.carriedPast ? `${draft.carriedPast} merged tickets carried from the last sprint are not shown. ` : ''}
+              Zero counts are not shown.
             </InfoTip>
           </p>
           {ready && <ReadyBlock id={readyId} ready={ready} onFix={showPanel} />}

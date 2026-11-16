@@ -10,10 +10,10 @@ const tone = (ready: TicketReadiness) => (ready.done === ready.total ? 'bg-statu
 export const ReadinessChip: React.FC<{ ready: TicketReadiness }> = ({ ready }) => (
   <span className="group/ready relative flex flex-col gap-1">
     <span className={cn('inline-flex w-fit items-center gap-1 rounded-xs px-1.5 py-0.5 font-mono text-[0.68rem] font-bold', tone(ready))} title={ready.missing.map((item) => item.text).join('\n') || undefined}>
-      <ClipboardCheck size={11} aria-hidden="true" />Siap dikerjain {ready.done}/{ready.total}
+      <ClipboardCheck size={11} aria-hidden="true" />Ready to start {ready.done}/{ready.total}
     </span>
     {ready.missing.length > 0 && (
-      <span className="hidden flex-col gap-0.5 rounded-xs border border-border bg-surface-0 px-2 py-1.5 text-[0.72rem] text-muted-foreground group-hover/ready:flex" role="list" aria-label="Yang masih kurang">
+      <span className="hidden flex-col gap-0.5 rounded-xs border border-border bg-surface-0 px-2 py-1.5 text-[0.72rem] text-muted-foreground group-hover/ready:flex" role="list" aria-label="Still missing">
         {ready.missing.map((item) => <span key={item.id} role="listitem" className="flex gap-1.5"><AlertCircle size={12} className="mt-0.5 flex-none text-status-warn" aria-hidden="true" />{item.text}</span>)}
       </span>
     )}
@@ -32,11 +32,11 @@ const FixButton: React.FC<{ item: ReadinessItem; onNavigate: (path: string) => v
 export const ReadinessCard: React.FC<{ ready: TicketReadiness; startOpen: boolean; onNavigate: (path: string) => void }> = ({ ready, startOpen, onNavigate }) => {
   const [open, setOpen] = useState(startOpen);
   return (
-    <section aria-label="Siap dikerjain" className="rounded-md border border-border bg-surface-1 px-3.5 py-3">
+    <section aria-label="Ready to start" className="rounded-md border border-border bg-surface-1 px-3.5 py-3">
       <button type="button" className="flex w-full flex-wrap items-center gap-2 text-left" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-        <h2 className="flex items-center gap-1.5 font-display text-sm font-bold"><ClipboardCheck size={14} className="text-sky-200" aria-hidden="true" />Siap dikerjain</h2>
-        <span className={cn('rounded-xs px-1.5 py-0.5 font-mono text-[0.68rem] font-bold', tone(ready))}>{ready.done} dari {ready.total}</span>
-        <span className="text-xs text-muted-foreground">cuma info, status tetap bisa dipindah</span>
+        <h2 className="flex items-center gap-1.5 font-display text-sm font-bold"><ClipboardCheck size={14} className="text-sky-200" aria-hidden="true" />Ready to start</h2>
+        <span className={cn('rounded-xs px-1.5 py-0.5 font-mono text-[0.68rem] font-bold', tone(ready))}>{ready.done} of {ready.total}</span>
+        <span className="text-xs text-muted-foreground">info only, the status can still move</span>
         <span className="ml-auto text-muted-foreground">{open ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}</span>
       </button>
       <div className="mt-2 grid gap-[3px]" style={{ gridTemplateColumns: `repeat(${ready.total}, minmax(0, 1fr))` }} aria-hidden="true">
@@ -78,27 +78,27 @@ export const SummaryBlock: React.FC<{ summary: SummaryFacts; jiraUrl?: string | 
     <button type="button" aria-pressed={view === id} onClick={() => setView(id)} className={cn('h-6 rounded-xs px-2.5 font-display text-[0.68rem] font-semibold max-[760px]:h-11', view === id ? 'bg-accent text-black' : 'text-secondary-foreground hover:text-foreground')}>{label}</button>
   );
   return (
-    <section aria-label="Intinya" className="rounded-md border border-border bg-surface-1 px-3.5 py-3">
+    <section aria-label="Summary" className="rounded-md border border-border bg-surface-1 px-3.5 py-3">
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <h2 className="flex items-center gap-1.5 font-display text-sm font-bold"><Sparkles size={14} className="text-sky-200" aria-hidden="true" />Intinya</h2>
-        <span className="inline-flex rounded-sm border border-border bg-surface-0 p-0.5" role="group" aria-label="Tampilan ringkasan">{seg('three', 'Tiga baris')}{seg('ba', 'Sebelum / sesudah')}</span>
-        {!summary.current && <span className="inline-flex items-center gap-1 rounded-xs bg-status-warn-bg px-1.5 py-0.5 font-mono text-[0.66rem] font-semibold text-status-warn"><History size={11} aria-hidden="true" />AC berubah sesudah ringkasan ditulis</span>}
+        <h2 className="flex items-center gap-1.5 font-display text-sm font-bold"><Sparkles size={14} className="text-sky-200" aria-hidden="true" />Summary</h2>
+        <span className="inline-flex rounded-sm border border-border bg-surface-0 p-0.5" role="group" aria-label="Summary view">{seg('three', 'Three lines')}{seg('ba', 'Before / after')}</span>
+        {!summary.current && <span className="inline-flex items-center gap-1 rounded-xs bg-status-warn-bg px-1.5 py-0.5 font-mono text-[0.66rem] font-semibold text-status-warn"><History size={11} aria-hidden="true" />AC changed after the summary was written</span>}
         <span className="ml-auto flex flex-wrap items-center gap-x-2 font-mono text-[0.62rem] text-muted-foreground">
-          {summary.acChangedAt && <span>AC terakhir berubah {dateText(summary.acChangedAt)}</span>}
-          {jiraUrl && <a href={jiraUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-accent hover:underline">AC asli di Jira<ExternalLink size={11} aria-hidden="true" /></a>}
+          {summary.acChangedAt && <span>AC last changed {dateText(summary.acChangedAt)}</span>}
+          {jiraUrl && <a href={jiraUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-accent hover:underline">Original AC in Jira<ExternalLink size={11} aria-hidden="true" /></a>}
         </span>
       </div>
       {view === 'ba' ? (
         <div className="grid grid-cols-2 gap-2.5 max-[700px]:grid-cols-1">
-          <div className="rounded-sm border border-border bg-surface-0 px-3 py-2.5"><p className="mb-1 font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground">Sekarang</p><p className="text-pretty text-sm text-foreground">{summary.before}</p></div>
-          <div className="rounded-sm border border-status-merged/40 bg-surface-0 px-3 py-2.5"><p className="mb-1 font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-status-merged">Setelah tiket ini</p><p className="text-pretty text-sm text-foreground">{summary.after}</p></div>
+          <div className="rounded-sm border border-border bg-surface-0 px-3 py-2.5"><p className="mb-1 font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground">Now</p><p className="text-pretty text-sm text-foreground">{summary.before}</p></div>
+          <div className="rounded-sm border border-status-merged/40 bg-surface-0 px-3 py-2.5"><p className="mb-1 font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-status-merged">After this ticket</p><p className="text-pretty text-sm text-foreground">{summary.after}</p></div>
         </div>
       ) : (
         <>
-          {row(Hammer, 'bg-sky-300/10 text-sky-200', 'Bikin apa', summary.made)}
-          {row(CheckCheck, 'bg-status-merged-bg text-status-merged', 'Dicek di sini', summary.checked)}
-          {row(ArrowRightLeft, 'bg-surface-2 text-muted-foreground', 'Bukan di sini', summary.notHere || 'Nggak ada')}
-          {row(Hourglass, 'bg-surface-2 text-muted-foreground', 'Nunggu tiket lain', summary.waitsOn.length ? summary.waitsOn.join(', ') : 'Nggak nunggu tiket lain')}
+          {row(Hammer, 'bg-sky-300/10 text-sky-200', 'Builds', summary.made)}
+          {row(CheckCheck, 'bg-status-merged-bg text-status-merged', 'Checked here', summary.checked)}
+          {row(ArrowRightLeft, 'bg-surface-2 text-muted-foreground', 'Not here', summary.notHere || 'None')}
+          {row(Hourglass, 'bg-surface-2 text-muted-foreground', 'Waits on', summary.waitsOn.length ? summary.waitsOn.join(', ') : 'No other ticket')}
         </>
       )}
     </section>
@@ -121,11 +121,11 @@ const LinksSvg: React.FC<{ ticketKey: string; links: TicketLinkRow[] }> = ({ tic
       <rect x={x} y={y} width={NODE_W} height={NODE_H} rx="8" fill="var(--color-surface-0)" stroke={link.kind === 'blocks' ? 'var(--color-status-warn)' : link.kind === 'open' ? 'var(--color-status-warn)' : 'var(--color-border-glow)'} strokeDasharray={link.kind === 'blocks' ? undefined : '5 4'} />
       <text x={x + 10} y={y + 17} fill="var(--color-foreground)" style={{ font: '700 12px var(--font-mono)' }}>{link.key}</text>
       <text x={x + 10} y={y + 32} fill="var(--color-muted-foreground)" style={{ font: '500 11px var(--font-body)' }}>{short(link.text)}</text>
-      {link.kind !== 'reference' && <text x={x + NODE_W - 8} y={y + 17} textAnchor="end" fill="var(--color-status-warn)" style={{ font: '700 9.5px var(--font-mono)' }}>{link.kind === 'blocks' ? 'BLOCKS' : 'BELUM JELAS'}</text>}
+      {link.kind !== 'reference' && <text x={x + NODE_W - 8} y={y + 17} textAnchor="end" fill="var(--color-status-warn)" style={{ font: '700 9.5px var(--font-mono)' }}>{link.kind === 'blocks' ? 'BLOCKS' : 'UNDECIDED'}</text>}
     </g>
   );
   return (
-    <svg className="block h-auto w-full min-w-[720px]" viewBox={`0 0 900 ${height}`} role="img" aria-label={`Peta tiket yang nyambung ke ${ticketKey}`}>
+    <svg className="block h-auto w-full min-w-[720px]" viewBox={`0 0 900 ${height}`} role="img" aria-label={`Map of tickets linked to ${ticketKey}`}>
       <defs><marker id={`arrow-${ticketKey}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--color-status-warn)" /></marker></defs>
       {left.map((link, index) => {
         const y = 20 + index * 52;
@@ -156,31 +156,31 @@ export const LinksMap: React.FC<{ ticketKey: string; links: TicketLinkRow[]; onN
   const chip = (text: string, warn = false) => <span className={cn('rounded-xs border px-1.5 font-mono text-[0.6rem] font-bold uppercase tracking-[0.08em]', warn ? 'border-status-warn text-status-warn' : 'border-border text-muted-foreground')}>{text}</span>;
   const unclear = links.filter((link) => link.kind === 'open');
   return (
-    <section aria-label="Nyambung ke tiket lain" className="rounded-md border border-border bg-surface-1 px-3.5 py-2.5">
+    <section aria-label="Linked tickets" className="rounded-md border border-border bg-surface-1 px-3.5 py-2.5">
       <button type="button" className="flex w-full flex-wrap items-center gap-2 text-left text-sm" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         <GitFork size={14} className="text-sky-200" aria-hidden="true" />
-        <b className="font-display">Nyambung ke {links.length} tiket</b>
-        {count('reference') > 0 && chip(`${count('reference')} cuma disebut`)}
-        {count('blocks') > 0 && chip(`${count('blocks')} ditunggu`, true)}
-        {unclear.length > 0 && chip(`${unclear.length} tanpa link Blocks`, true)}
-        <span className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-accent">{open ? <ChevronUp size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />}{open ? 'tutup peta' : 'buka peta'}</span>
+        <b className="font-display">Linked to {links.length} tickets</b>
+        {count('reference') > 0 && chip(`${count('reference')} mentioned only`)}
+        {count('blocks') > 0 && chip(`${count('blocks')} blocking`, true)}
+        {unclear.length > 0 && chip(`${unclear.length} without a Blocks link`, true)}
+        <span className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-accent">{open ? <ChevronUp size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />}{open ? 'close map' : 'open map'}</span>
       </button>
       {open && (
         <>
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[0.72rem] text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5"><i className="inline-block w-6 border-t-2 border-dashed border-muted-foreground" aria-hidden="true" />pindah ke Reference</span>
-            <span className="inline-flex items-center gap-1.5"><i className="inline-block w-6 border-t-[3px] border-status-warn" aria-hidden="true" />ditunggu (link Blocks)</span>
-            <span className="inline-flex items-center gap-1.5"><i className="inline-block w-6 border-t-2 border-dashed border-status-warn" aria-hidden="true" />belum diputusin</span>
+            <span className="inline-flex items-center gap-1.5"><i className="inline-block w-6 border-t-2 border-dashed border-muted-foreground" aria-hidden="true" />moved to Reference</span>
+            <span className="inline-flex items-center gap-1.5"><i className="inline-block w-6 border-t-[3px] border-status-warn" aria-hidden="true" />blocking (Blocks link)</span>
+            <span className="inline-flex items-center gap-1.5"><i className="inline-block w-6 border-t-2 border-dashed border-status-warn" aria-hidden="true" />not decided</span>
           </div>
           <div className="mt-2 overflow-x-auto"><LinksSvg ticketKey={ticketKey} links={links} /></div>
           {unclear.length > 0 && (
             <div className="mt-2 flex flex-wrap items-start gap-2.5 rounded-sm border border-status-warn/40 bg-status-warn-bg px-3 py-2 text-sm">
               <AlertCircle size={15} className="mt-0.5 text-status-warn" aria-hidden="true" />
               <div className="min-w-0 flex-1">
-                <b className="font-display">{unclear.length} rujukan belum diputusin</b>
-                <p className="text-pretty text-xs text-secondary-foreground">{unclear.map((link) => link.key).join(', ')} disebut di AC tanpa link Blocks. Kalau ditunggu, pilih Dependency. Kalau cuma info, pindahin barisnya ke Reference.</p>
+                <b className="font-display">Undecided references: {unclear.length}</b>
+                <p className="text-pretty text-xs text-secondary-foreground">{unclear.map((link) => link.key).join(', ')} named in the AC without a Blocks link. If this ticket waits on it, pick Dependency. If it is only info, move the line to Reference.</p>
               </div>
-              <button type="button" className="inline-flex h-7 items-center gap-1 rounded-sm px-2 text-xs font-semibold text-accent hover:bg-surface-2 max-[760px]:h-11" onClick={() => onNavigate('/planning?tab=draft&panel=ac')}>Buka AC check<ArrowRight size={12} aria-hidden="true" /></button>
+              <button type="button" className="inline-flex h-7 items-center gap-1 rounded-sm px-2 text-xs font-semibold text-accent hover:bg-surface-2 max-[760px]:h-11" onClick={() => onNavigate('/planning?tab=draft&panel=ac')}>Open AC check<ArrowRight size={12} aria-hidden="true" /></button>
             </div>
           )}
         </>

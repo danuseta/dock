@@ -40,8 +40,8 @@ export const CheckpointCard: React.FC<CheckpointCardProps> = ({ checkpoint, comp
       <p className="mt-1.5 text-pretty text-[0.82rem] leading-relaxed text-foreground [overflow-wrap:anywhere]">{checkpoint.text}</p>
       {hasNotes(checkpoint) && (
         <div className="mt-2 flex flex-col gap-2 border-t border-border pt-2">
-          {checkpoint.untestable.length > 0 && <NoteList icon={<TestTube2 size={12} aria-hidden="true" />} title="Belum bisa dites selama tiket ini sendirian di UAT" items={checkpoint.untestable} />}
-          {checkpoint.missingData.length > 0 && <NoteList icon={<Database size={12} aria-hidden="true" />} title="Data uji yang belum ada" items={checkpoint.missingData} />}
+          {checkpoint.untestable.length > 0 && <NoteList icon={<TestTube2 size={12} aria-hidden="true" />} title="Not testable while this ticket is alone in UAT" items={checkpoint.untestable} />}
+          {checkpoint.missingData.length > 0 && <NoteList icon={<Database size={12} aria-hidden="true" />} title="Test data still missing" items={checkpoint.missingData} />}
         </div>
       )}
       {onContinue && (

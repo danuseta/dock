@@ -770,7 +770,7 @@ test('a manual session on a blocked ticket: tell names the dependency, stop refu
   assert.deepStrictEqual(tell, { mode: 'tell', waitsOn: 'QRD-2', stackedOn: null });
   assert.strictEqual(manualRefusal(tell), null, 'tell opens the session');
   const stop = await world({ ...start, config: { engine: 'sous', blockedManual: 'stop' } }).cron;
-  assert.match(manualRefusal(await stop.manualCheck('QRD-1')) ?? '', /nunggu QRD-2/);
+  assert.match(manualRefusal(await stop.manualCheck('QRD-1')) ?? '', /waits on QRD-2/);
   assert.deepStrictEqual(await stop.manualCheck('QRD-3'), { mode: 'stop', waitsOn: null, stackedOn: 'QRD-4' }, 'a stacked ticket is not blocked');
   assert.strictEqual(manualRefusal(await stop.manualCheck('QRD-3')), null);
   assert.deepStrictEqual(await world({ ...start, config: { blockedManual: 'off' } }).cron.manualCheck('QRD-1'), { mode: 'off', waitsOn: null, stackedOn: null });

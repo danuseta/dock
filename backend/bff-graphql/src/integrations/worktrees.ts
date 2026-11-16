@@ -8,11 +8,11 @@ import type { MergeRead } from './merge-state';
 import { DEFAULT_WORKTREE_MERGED, type WorktreeMerged } from './ops-rules';
 
 export const REFUSALS = {
-  dirty: 'ada perubahan lokal',
-  session: 'dipakai sesi aktif',
-  devServer: 'dev server jalan di sini',
-  notMerged: 'belum merged',
-  unknown: 'bukan worktree yang DOCK kenal',
+  dirty: 'local changes',
+  session: 'used by an active session',
+  devServer: 'dev server running here',
+  notMerged: 'not merged',
+  unknown: 'not a worktree DOCK knows',
 } as const;
 
 const HISTORY_KEPT = 50;

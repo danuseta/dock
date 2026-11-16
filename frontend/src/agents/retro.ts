@@ -28,17 +28,17 @@ export interface Retro {
 
 /** The numbers shown, in order, with their label and unit. */
 export const RETRO_NUMBERS: Array<[keyof RetroNumbers, string, string]> = [
-  ['tickets', 'tiket dibikin agent', ''],
+  ['tickets', 'tickets built by agents', ''],
   ['reviews', 'review', ''],
-  ['fixRounds', 'fix round per tiket', ''],
-  ['ownerIssues', 'eskalasi ke kamu', ''],
-  ['ownerWaitHours', 'total nunggu kamu', ' j'],
-  ['medianHours', 'lama tiket selesai', ' j'],
-  ['blockedWaits', 'nunggu tiket lain', ''],
-  ['mergeConflicts', 'PR konflik merge', ''],
+  ['fixRounds', 'fix rounds per ticket', ''],
+  ['ownerIssues', 'escalations to you', ''],
+  ['ownerWaitHours', 'total waiting on you', ' h'],
+  ['medianHours', 'time to finish a ticket', ' h'],
+  ['blockedWaits', 'waiting on another ticket', ''],
+  ['mergeConflicts', 'PRs with merge conflicts', ''],
   ['stackedRebases', 'stacked rebase', ''],
-  ['replans', 'replan per tiket', ''],
-  ['requestChanges', 'review minta perubahan', ''],
+  ['replans', 'replans per ticket', ''],
+  ['requestChanges', 'reviews requesting changes', ''],
 ];
 
 /** A number the Indonesian way: 1,7 not 1.7. */
@@ -53,17 +53,17 @@ export function shownNumbers(now: RetroNumbers, before: RetroNumbers | null) {
 export function beforeText(before: RetroNumbers | null, field: keyof RetroNumbers, unit: string, previous: string | null): string | null {
   if (!before || !previous) return null;
   const value = before[field];
-  return `${value == null ? '—' : `${idNumber(value)}${unit}`} di ${previous}`;
+  return `${value == null ? '—' : `${idNumber(value)}${unit}`} in ${previous}`;
 }
 
-const FAILURE_LABEL: Record<string, string> = { transient: 'Gagal sementara (transient)', defect: 'Gagal karena defect', spec: 'Gagal karena spec', env: 'Gagal karena environment', permission: 'Gagal karena izin' };
+const FAILURE_LABEL: Record<string, string> = { transient: 'Transient failure', defect: 'Failed on a defect', spec: 'Failed on the spec', env: 'Failed on the environment', permission: 'Failed on permissions' };
 
 /** A recurring problem in Indonesian: "Failure: env" reads "Gagal karena environment". */
 export function problemLabel(label: string): string {
   const [kind, value = ''] = label.split(': ');
-  if (kind === 'Failure') return FAILURE_LABEL[value] ?? `Gagal: ${value}`;
-  if (kind === 'Review finding') return `Temuan review ${value}`;
-  if (kind === 'Escalated to the owner') return `Eskalasi ${value} ke kamu`;
+  if (kind === 'Failure') return FAILURE_LABEL[value] ?? `Failed: ${value}`;
+  if (kind === 'Review finding') return `Review finding ${value}`;
+  if (kind === 'Escalated to the owner') return `${value} escalated to you`;
   return label;
 }
 
@@ -73,16 +73,16 @@ const SHOWN_KEYS = 3;
 /** The first three keys and how many more: "QRD-1, QRD-2, QRD-3 +4". */
 export const keyList = (keys: string[]) => `${keys.slice(0, SHOWN_KEYS).join(', ')}${keys.length > SHOWN_KEYS ? ` +${keys.length - SHOWN_KEYS}` : ''}`;
 
-const STAGE_LABEL: Record<string, string> = { done: 'selesai', pr: 'di PR', gate: 'di gate', build: 'dikerjain', verify: 'dicek', review: 'direview', parked: 'diparkir' };
+const STAGE_LABEL: Record<string, string> = { done: 'done', pr: 'in PR', gate: 'at gate', build: 'building', verify: 'verifying', review: 'in review', parked: 'parked' };
 
 /** A built ticket's state, with its hours once done: "selesai · 26,3 j". */
-export const buildResult = (ticket: Pick<RetroTicket, 'result' | 'hours'>) => `${STAGE_LABEL[ticket.result] ?? ticket.result}${ticket.result === 'done' && ticket.hours != null ? ` · ${idNumber(ticket.hours)} j` : ''}`;
+export const buildResult = (ticket: Pick<RetroTicket, 'result' | 'hours'>) => `${STAGE_LABEL[ticket.result] ?? ticket.result}${ticket.result === 'done' && ticket.hours != null ? ` · ${idNumber(ticket.hours)} h` : ''}`;
 
 /** The folded line of a sprint's reviews: "5 review · semua approve · 20 temuan". */
 export function reviewSummary(reviews: RetroTicket[]): string {
   const approved = reviews.filter((review) => review.result === 'approve').length;
-  const verdict = approved === reviews.length ? 'semua approve' : `${approved} approve, ${reviews.length - approved} lainnya`;
-  return `${reviews.length} review · ${verdict} · ${reviews.reduce((sum, review) => sum + review.findings, 0)} temuan`;
+  const verdict = approved === reviews.length ? 'all approved' : `${approved} approved, ${reviews.length - approved} other`;
+  return `${reviews.length} reviews · ${verdict} · ${reviews.reduce((sum, review) => sum + review.findings, 0)} findings`;
 }
 
 export interface RetroEscalations {
@@ -91,7 +91,7 @@ export interface RetroEscalations {
   unpredicted: Array<{ key: string; summary: string; causes: string[]; prediction: string | null }>;
 }
 
-export const CAUSE_LABEL: Record<string, string> = { dependency: 'Nunggu tiket lain', access: 'Akses', data: 'Data uji', environment: 'Environment', unspecified: 'Tanpa alasan' };
+export const CAUSE_LABEL: Record<string, string> = { dependency: 'Waiting on another ticket', access: 'Access', data: 'Test data', environment: 'Environment', unspecified: 'No reason given' };
 
 /** The bar width of a cause against the largest one, in percent. */
 export const causeShare = (count: number, causes: Array<{ count: number }>) => Math.round((count / Math.max(1, ...causes.map((item) => item.count))) * 100);

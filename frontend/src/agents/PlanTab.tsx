@@ -58,7 +58,7 @@ const DriftLine: React.FC<{ row: DriftRow; busy: boolean; onAction: (id: string,
             {held && <Button size="sm" variant="ghost" onClick={() => onAction(row.id, 'wait')} disabled={busy}><Clock size={13} aria-hidden="true" />Wait</Button>}
             {row.state === 'wait' && <Button size="sm" variant="ghost" onClick={() => onAction(row.id, 'clear')} disabled={busy}><Undo2 size={13} aria-hidden="true" />Undo</Button>}
             <Button size="sm" variant="ghost" onClick={() => onAction(row.id, 'needs-po')} disabled={busy}><Flag size={13} aria-hidden="true" />Needs PO</Button>
-            <Button size="sm" onClick={() => onAction(row.id, 'not-tested')} disabled={busy}><EyeOff size={13} aria-hidden="true" />Pindah ke Reference</Button>
+            <Button size="sm" onClick={() => onAction(row.id, 'not-tested')} disabled={busy}><EyeOff size={13} aria-hidden="true" />Move to Reference</Button>
             <Button size="sm" variant="primary" onClick={() => onAction(row.id, 'move')} disabled={busy}><ArrowRightLeft size={13} aria-hidden="true" />Move to {row.refKey}{row.refDev ? ` (${row.refDev})` : ''}</Button>
           </>
         ) : <Button size="sm" variant="ghost" onClick={() => onAction(row.id, 'clear')} disabled={busy} title="Forget the call here; what was written to Jira stays"><Undo2 size={13} aria-hidden="true" />Undo</Button>}
@@ -107,9 +107,9 @@ const AcInSection: React.FC = () => {
   };
   return (
     <section aria-label="AC in" className="min-w-0">
-      <h3 className={head}>AC kiriman teman <InfoTip label="Tentang AC kiriman teman">Accept juga ngabarin DOCK pengirim biar barisnya dihapus dari tiket dia. Decline ngirim balik sebagai Held plus alasan kamu.</InfoTip></h3>
+      <h3 className={head}>AC from teammates <InfoTip label="About AC from teammates">Accept also tells the sender's DOCK to remove the line from their ticket. Decline sends it back as Held with your reason.</InfoTip></h3>
       {notice && <p className="mt-2 text-sm text-status-conflict" role="alert">{notice}</p>}
-      <p className="mt-1 text-pretty text-[0.8rem] text-muted-foreground">Accept = masuk ke AC kamu. Decline = balik ke dia.</p>
+      <p className="mt-1 text-pretty text-[0.8rem] text-muted-foreground">Accept = goes into your AC. Decline = goes back to them.</p>
       <ul className="mt-2 rounded-md border border-border bg-surface-0">{rows.map((row) => <AcInLine key={`${row.to}|${row.id}`} row={row} busy={acting.loading} onAction={onAction} />)}</ul>
     </section>
   );
@@ -142,13 +142,13 @@ const DriftSection: React.FC = () => {
         </ul>
       )}
       <h3 className={head}>
-        AC kamu yang nunggu tiket lain {drift.today ? <span className="font-medium normal-case tracking-normal">· hari ke-{drift.today}</span> : null}
-        <InfoTip label="Tentang AC yang nunggu tiket lain">Move dan Pindah ke Reference cuma nulis ke tiket kamu sendiri, setelah AC dibaca ulang. Pindah ke Reference = baris keluar dari AC ke field Reference, nggak ada komentar Jira. Baris buat tiket teman nunggu dia, pakai label ac-move-pending.</InfoTip>
+        Your AC waiting on other tickets {drift.today ? <span className="font-medium normal-case tracking-normal">· day {drift.today}</span> : null}
+        <InfoTip label="About AC waiting on other tickets">Move and Move to Reference only write to your own ticket, after the AC is read again. Move to Reference = the line leaves the AC for the Reference field, with no Jira comment. A line for a teammate's ticket waits for them, with the ac-move-pending label.</InfoTip>
       </h3>
       {notice && <p className="mt-2 text-sm text-status-conflict" role="alert">{notice}</p>}
       {drift.rows.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">Every AC line of your tickets has what it needs landed or planned before it.</p> : (
         <>
-          <p className="mt-1 text-pretty text-[0.8rem] text-muted-foreground">Baris AC kamu yang tiket pendukungnya belum siap. <b className="text-foreground">{held} ditahan.</b></p>
+          <p className="mt-1 text-pretty text-[0.8rem] text-muted-foreground">Your AC lines whose supporting ticket is not ready. <b className="text-foreground">{held} held.</b></p>
           <ul className="mt-2 rounded-md border border-border bg-surface-0">{sortDrift(drift.rows).map((row) => <DriftLine key={row.id} row={row} busy={acting.loading} onAction={onAction} />)}</ul>
         </>
       )}

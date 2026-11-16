@@ -19,7 +19,7 @@ test('a new session on a blocked ticket names what it waits on; the Aturan block
   const { readFileSync } = await import('node:fs');
   const read = (file: string) => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
   const hook = read('chat/useOpenForTicket.ts');
-  assert.match(hook, /tiket ini masih nunggu \$\{waitsOn\}/);
+  assert.match(hook, /this ticket still waits on \$\{waitsOn\}/);
   assert.match(hook, /if \(created\.data\?\.createChatSession\.waitsOn\) setNotice/);
   assert.match(read('settings/sections/SousFlowSection.tsx'), /<div id="rules"><RulesCard \/><\/div>/);
   assert.match(read('pages/SettingsPage.tsx'), /active === 'jira' && mode === 'laptop' && <div className="mt-5"><RulesCard scope="merge" \/><\/div>/);

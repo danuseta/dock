@@ -389,7 +389,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
         {sendError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">Not sent: {sendError}</p>}
         {answering && (
           <p className="flex items-center gap-2 font-mono text-[0.66rem] text-muted-foreground" role="status">
-            Balas ke pertanyaan {answering.number}{answering.key ? ` · ${answering.key}` : ''}
+            Reply to question {answering.number}{answering.key ? ` · ${answering.key}` : ''}
             <button type="button" className="text-accent hover:underline" onClick={() => setAnswering(null)}>batal</button>
           </p>
         )}

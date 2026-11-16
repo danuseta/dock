@@ -3,28 +3,28 @@
 // the BFF's; this module only edits the profiles. A profile where every stage runs adds nothing to the prompt.
 
 export type SousStageId = 'jira' | 'block' | 'park' | 'plan' | 'code' | 'loop' | 'verify' | 'final' | 'video' | 'publish' | 'decide' | 'discord' | 'qa' | 'review' | 'status';
-export type SousPhase = 'Mulai' | 'Cek' | 'Kirim' | 'Sesudah PR';
+export type SousPhase = 'Start' | 'Check' | 'Ship' | 'After PR';
 export interface SousStage { id: SousStageId; phase: SousPhase; title: string; agent: string; required?: boolean; asks?: boolean }
 export interface SousFlowProfile { skip: SousStageId[]; ask: SousStageId[]; stop: SousStageId }
 export interface SousFlowSettings { profiles: Record<string, SousFlowProfile>; mine: string; checkpoint: boolean; qaGuide: boolean; qaGuideField: string }
 export type StageAfter = 'go' | 'ask' | 'stop';
 
 export const SOUS_STAGES: SousStage[] = [
-  { id: 'jira', phase: 'Mulai', title: 'Ambil tiket', agent: 'DOCK · To Do + sprint aktif', required: true },
-  { id: 'block', phase: 'Mulai', title: 'Cek blocked-by', agent: 'DOCK · stacked PR kalau dependency di PR Review' },
-  { id: 'park', phase: 'Mulai', title: 'Parkir kalau AC kosong', agent: 'owner · Confirm' },
-  { id: 'plan', phase: 'Mulai', title: 'Rencana kerja', agent: 'sous-planner · opus', required: true, asks: true },
-  { id: 'code', phase: 'Mulai', title: 'Ngoding per task', agent: 'sous-ticket-worker · sonnet', required: true, asks: true },
-  { id: 'loop', phase: 'Cek', title: 'Review loop', agent: 'sous-reviewer LOOP · maks 2 balik', required: true, asks: true },
-  { id: 'verify', phase: 'Cek', title: 'Verify', agent: 'sous-verifier · tes + tsc', asks: true },
-  { id: 'final', phase: 'Cek', title: 'Review akhir', agent: 'sous-reviewer FINAL · opus', asks: true },
-  { id: 'video', phase: 'Kirim', title: 'Video demo', agent: 'demo-video · BE didemo lewat UI' },
-  { id: 'publish', phase: 'Kirim', title: 'Publish', agent: 'sous-publisher · commit, push, PR' },
-  { id: 'decide', phase: 'Kirim', title: 'Decisions', agent: 'owner · DOCK tandain ready', required: true },
-  { id: 'discord', phase: 'Kirim', title: 'Post Discord', agent: 'DOCK broadcast · PR ready + video' },
-  { id: 'qa', phase: 'Sesudah PR', title: 'QA lokal', agent: 'qa-local · di PR, boleh pas draft' },
-  { id: 'review', phase: 'Sesudah PR', title: 'Review PR', agent: 'auto review · setelah on it' },
-  { id: 'status', phase: 'Sesudah PR', title: 'Status Jira', agent: 'DOCK · In Progress → PR Review → UAT MERGED' },
+  { id: 'jira', phase: 'Start', title: 'Pick ticket', agent: 'DOCK · To Do + active sprint', required: true },
+  { id: 'block', phase: 'Start', title: 'Check blocked-by', agent: 'DOCK · stacked PR when the dependency is in PR Review' },
+  { id: 'park', phase: 'Start', title: 'Park when AC is empty', agent: 'owner · Confirm' },
+  { id: 'plan', phase: 'Start', title: 'Work plan', agent: 'sous-planner · opus', required: true, asks: true },
+  { id: 'code', phase: 'Start', title: 'Code per task', agent: 'sous-ticket-worker · sonnet', required: true, asks: true },
+  { id: 'loop', phase: 'Check', title: 'Review loop', agent: 'sous-reviewer LOOP · max 2 rounds', required: true, asks: true },
+  { id: 'verify', phase: 'Check', title: 'Verify', agent: 'sous-verifier · tests + tsc', asks: true },
+  { id: 'final', phase: 'Check', title: 'Final review', agent: 'sous-reviewer FINAL · opus', asks: true },
+  { id: 'video', phase: 'Ship', title: 'Demo video', agent: 'demo-video · BE demoed through the UI' },
+  { id: 'publish', phase: 'Ship', title: 'Publish', agent: 'sous-publisher · commit, push, PR' },
+  { id: 'decide', phase: 'Ship', title: 'Decisions', agent: 'owner · DOCK marks ready', required: true },
+  { id: 'discord', phase: 'Ship', title: 'Post Discord', agent: 'DOCK broadcast · PR ready + video' },
+  { id: 'qa', phase: 'After PR', title: 'Local QA', agent: 'qa-local · on the PR, allowed while draft' },
+  { id: 'review', phase: 'After PR', title: 'Review PR', agent: 'auto review · after on it' },
+  { id: 'status', phase: 'After PR', title: 'Status Jira', agent: 'DOCK · In Progress → PR Review → UAT MERGED' },
 ];
 
 export const DEFAULT_PROFILE = 'Default';
@@ -96,13 +96,13 @@ export function stageAfterStop(profile: SousFlowProfile): SousStage | null {
 }
 
 /** The chat message "Lanjut" sends after a stop. */
-export const continueText = (stage: SousStage) => `Lanjut dari ${stage.title}`;
+export const continueText = (stage: SousStage) => `Continue from ${stage.title}`;
 
 /** A name for a new profile that no profile has yet. */
 export function newProfileName(settings: SousFlowSettings): string {
   let n = 1;
-  while (settings.profiles[`Profil baru ${n}`]) n += 1;
-  return `Profil baru ${n}`;
+  while (settings.profiles[`New profile ${n}`]) n += 1;
+  return `New profile ${n}`;
 }
 
 /** A chat message that starts sous on a ticket: the only message a session flow adds its lines to. */

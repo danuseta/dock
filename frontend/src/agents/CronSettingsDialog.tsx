@@ -168,11 +168,11 @@ export const CronSettingsDialog = ({ open, onClose }: { open: boolean; onClose: 
                 <Section title="Sprint plan">
                   <label className="flex items-start gap-3 text-sm">
                     <Checkbox checked={form.waitForPublish} onChange={(event) => set('waitForPublish', event.target.checked)} />
-                    <span>Mulai kerja setelah plan dipublish<span className="block text-xs text-muted-foreground">Cron cuma ambil tiket yang ada label plan-published-rN. Tiket yang masuk sprint setelah publish nunggu publish ulang.</span></span>
+                    <span>Start work after the plan is published<span className="block text-xs text-muted-foreground">Cron only takes tickets with a plan-published-rN label. A ticket that joins the sprint after publish waits for a republish.</span></span>
                   </label>
                   <label className="flex items-start gap-3 text-sm">
                     <Checkbox checked={form.planAfterPublish} onChange={(event) => set('planAfterPublish', event.target.checked)} />
-                    <span>Plan per developer dibikin setelah publish<span className="block text-xs text-muted-foreground">Sesi Plan-&lt;sprint&gt; nunggu plan dipublish, bukan langsung jalan waktu sprint aktif.</span></span>
+                    <span>Make the per-developer plan after publish<span className="block text-xs text-muted-foreground">The Plan-&lt;sprint&gt; session waits for the plan to be published instead of starting when the sprint goes active.</span></span>
                   </label>
                 </Section>
 

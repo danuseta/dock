@@ -144,7 +144,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
       {worktreeReminder && (
         <p className="mb-3.5 flex flex-wrap items-center gap-2 rounded-md border border-dashed border-border-glow px-4 py-2.5 text-[0.8rem] text-secondary-foreground" role="status">
           <GitBranch size={14} aria-hidden="true" className="text-sky-200" />{worktreeReminder}
-          <Button variant="ghost" size="sm" className={cn(textActionClass, 'ml-auto')} onClick={() => onNavigate('/workspace?tab=worktrees')}>Buka Worktrees →</Button>
+          <Button variant="ghost" size="sm" className={cn(textActionClass, 'ml-auto')} onClick={() => onNavigate('/workspace?tab=worktrees')}>Open Worktrees →</Button>
         </p>
       )}
 

@@ -49,10 +49,10 @@ export const PlanningQuestionCards: React.FC<CardsProps> = ({ questions, canAnsw
                 {(question.options ?? []).map((option) => (
                   <button key={option} type="button" disabled={busy} onClick={() => onAnswer(question.id, option)} className="h-7 rounded-pill border border-border bg-surface-0 px-3 font-mono text-[0.7rem] text-secondary-foreground hover:border-accent hover:text-accent disabled:opacity-50 max-[900px]:h-11">{option}</button>
                 ))}
-                <button type="button" onClick={() => onTarget({ id: question.id, key: question.key, number })} className="h-7 px-2 text-[0.72rem] font-semibold text-accent hover:underline max-[900px]:h-11">Balas di kotak ketik</button>
+                <button type="button" onClick={() => onTarget({ id: question.id, key: question.key, number })} className="h-7 px-2 text-[0.72rem] font-semibold text-accent hover:underline max-[900px]:h-11">Reply in the composer</button>
               </div>
             ) : (
-              <p className="mt-2 font-mono text-[0.66rem] text-muted-foreground">nunggu jawaban {planner ?? 'planner'}</p>
+              <p className="mt-2 font-mono text-[0.66rem] text-muted-foreground">waiting for an answer from {planner ?? 'planner'}</p>
             )}
           </li>
         );

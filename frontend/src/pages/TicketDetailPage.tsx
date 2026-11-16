@@ -403,7 +403,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
               {ticket.status && <PRBadge status={ticket.status} />}
               {ticket.sprintName && ticket.sprintName !== 'No Sprint' && <span className={cn(ticket.sprintState !== 'CLOSED' && 'text-status-merged')}>{ticket.sprintName}</span>}
               {run?.stackedOn && <StackedOnBadge stack={run.stackedOn} />}
-              {qaData?.qaQueuePosition && <button type="button" onClick={() => onNavigate('/qa-queue')} className="inline-flex items-center gap-1 rounded-xs bg-cyan-500/10 px-1.5 py-0.5 font-mono text-[0.68rem] font-bold text-cyan-300 hover:bg-cyan-500/20 max-[760px]:min-h-11"><FlaskConical size={11} aria-hidden="true" />Antrean QA: #{qaData.qaQueuePosition}</button>}
+              {qaData?.qaQueuePosition && <button type="button" onClick={() => onNavigate('/qa-queue')} className="inline-flex items-center gap-1 rounded-xs bg-cyan-500/10 px-1.5 py-0.5 font-mono text-[0.68rem] font-bold text-cyan-300 hover:bg-cyan-500/20 max-[760px]:min-h-11"><FlaskConical size={11} aria-hidden="true" />QA queue: #{qaData.qaQueuePosition}</button>}
             </div>
             <h1 className="mt-2 text-balance font-display text-[1.6rem] leading-snug font-bold">{ticket.title}</h1>
           </div>
@@ -598,7 +598,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
               return (
                 <li>
                   <button type="button" onClick={() => onNavigate(href)} className="flex w-full items-center gap-2 border-0 bg-transparent py-1 text-left text-sm text-foreground hover:text-accent max-[760px]:min-h-11">
-                    <Icon size={13} aria-hidden="true" className="flex-none text-sky-200" /><span>{label}</span>{extra}<span className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground">buka<ArrowRight size={11} aria-hidden="true" /></span>
+                    <Icon size={13} aria-hidden="true" className="flex-none text-sky-200" /><span>{label}</span>{extra}<span className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground">open<ArrowRight size={11} aria-hidden="true" /></span>
                   </button>
                 </li>
               );
@@ -606,12 +606,12 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
             return (
               <>
                 <h2 className={sectionTitle}>Blackboard</h2>
-                {!blackboardFiles ? <p className="text-sm text-muted-foreground">Belum ada blackboard. Muncul begitu sous mulai tiket ini.</p> : (
+                {!blackboardFiles ? <p className="text-sm text-muted-foreground">No blackboard yet. It appears once sous starts this ticket.</p> : (
                   <>
                     <ul className="flex flex-col">
-                      {line(Route, 'Tiket → kode', <span className={cn('font-mono text-xs font-bold', trace?.readable && trace.covered === trace.total ? 'text-status-merged' : 'text-status-warn')}>{coverageText(trace)}</span>, blackboardFileHref(ticket.key, TRACE_ENTRY))}
-                      {line(FileSignature, 'Kontrak', null, blackboardFileHref(ticket.key, CONTRACT_ENTRY))}
-                      {line(ScrollText, 'Log eksekusi', run?.failures?.length ? <span className="font-mono text-xs text-status-conflict">{run.failures.length} gagal</span> : null, blackboardFileHref(ticket.key, LOG_ENTRY))}
+                      {line(Route, 'Ticket → code', <span className={cn('font-mono text-xs font-bold', trace?.readable && trace.covered === trace.total ? 'text-status-merged' : 'text-status-warn')}>{coverageText(trace)}</span>, blackboardFileHref(ticket.key, TRACE_ENTRY))}
+                      {line(FileSignature, 'Contract', null, blackboardFileHref(ticket.key, CONTRACT_ENTRY))}
+                      {line(ScrollText, 'Execution log', run?.failures?.length ? <span className="font-mono text-xs text-status-conflict">{run.failures.length} failed</span> : null, blackboardFileHref(ticket.key, LOG_ENTRY))}
                       <li className="flex flex-wrap items-center gap-2 py-1 text-sm">
                         <FileText size={13} aria-hidden="true" className="text-sky-200" />
                         {[['Brief', CONTRACT_ENTRY], ['Decisions', 'decisions.md'], ['Review', 'review.md']].map(([label, entry], index) => (
