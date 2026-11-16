@@ -50,11 +50,12 @@ test('the retro lists the three dependency numbers and Home ranks PLAN_DEPENDENC
   assert.deepEqual(signalOf('PLAN_DEPENDENCY'), { rank: 6, group: 'answer', label: 'DEPENDENCY' });
 });
 
-test('Planning shows Draft, Plan and Retro, Agents keeps Office and Library, Home opens the plan, and the phone ping is wired', () => {
+test('Planning shows Now, Draft, Plan and Retro, Agents keeps Office and Library, Home opens the plan, and the phone ping is wired', () => {
   const page = source('../pages/AgentsPage.tsx');
   assert.match(page, /\['office', 'Office', Building2\], \['library', 'Library', Library\]\]/);
   assert.doesNotMatch(page, /PlanningTab|<PlanTab|<RetroTab/);
-  assert.match(source('../pages/PlanningPage.tsx'), /<PlanningTab initialPanel=\{route\.panel \?\? undefined\} \/> : tab === 'plan' \? <PlanTab \/> : <RetroTab onNavigate=\{onNavigate\} \/>/);
+  assert.match(source('../pages/PlanningPage.tsx'), /\[\['now', 'Now'\], \['draft', 'Draft'\], \['plan', 'Plan'\], \['retro', 'Retro'\]\]/);
+  assert.match(source('../pages/PlanningPage.tsx'), /\{tab === 'now' \? <SprintTab \/> : tab === 'draft' \? <PlanningTab initialPanel=\{route\.panel \?\? undefined\} \/> : tab === 'plan' \? <PlanTab \/> : <RetroTab onNavigate=\{onNavigate\} \/>/);
   assert.doesNotMatch(source('../agents/PhoneTabs.tsx'), /'sprint'/);
   assert.match(source('../components/HomeAttention.tsx'), /\/planning\?tab=plan/);
   assert.match(source('../lib/notificationEvents.ts'), /PLAN_DEPENDENCY: \{ prefix: 'plan', title: 'waits for your call' \}/);

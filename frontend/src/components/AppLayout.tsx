@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, BarChart3, BookOpen, Bot, Box, Bug, CalendarDays, CalendarRange, ClipboardList, ChevronLeft, ChevronRight, FlaskConical, History, Home as HomeIcon, LayoutDashboard, ListChecks, MessagesSquare, MoreHorizontal, Settings as SettingsIcon, Clapperboard, FolderTree, Server, Stethoscope } from 'lucide-react';
+import { Activity, BookOpen, Bot, Box, Bug, CalendarDays, CalendarRange, ClipboardList, ChevronLeft, ChevronRight, FlaskConical, History, Home as HomeIcon, LayoutDashboard, ListChecks, MessagesSquare, MoreHorizontal, Settings as SettingsIcon, Clapperboard, FolderTree } from 'lucide-react';
 import { useQuery } from '@apollo/client';
 import { GET_DISCORD_THREADS, GET_NEEDS_ATTENTION, GET_OWNER_QUESTIONS } from '../graphql/queries';
 import { ticketAttention, ticketQuestions } from '../lib/attention';
@@ -10,6 +10,7 @@ import { UPDATE_CHECK_MS, applyUpdate, checkForUpdate } from '../lib/appUpdate';
 import { cn } from '../lib/cn';
 import { PHONE_PRIMARY_PATHS, phoneMore } from '../lib/phoneNavigation';
 import { useNotificationEvents } from '../lib/useNotificationEvents';
+import { opensReportedBugs } from '../lib/movedPages';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 import { ChatDock } from '../chat/ChatDock';
 import { NoticeToasts } from './NoticeToasts';
@@ -27,9 +28,9 @@ const versionTitle = appCommit ? `${versionLabel} (${appCommit})` : versionLabel
 // A phone tab: icon over a short label, 44 px tall.
 const PHONE_TAB = 'max-[760px]:h-11 max-[760px]:w-[60px] max-[760px]:flex-col max-[760px]:gap-0.5 max-[760px]:text-[0.6875rem]';
 
-interface AppLayoutProps { currentPath: string; onNavigate: (path: string) => void; unreachable: boolean; onRetry: () => void; children: React.ReactNode; }
+interface AppLayoutProps { currentPath: string; onNavigate: (path: string) => void; unreachable: boolean; onRetry: () => void; locked?: boolean; children: React.ReactNode; }
 
-export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, unreachable, onRetry, children }) => {
+export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, unreachable, onRetry, locked = false, children }) => {
   const mode = useDockMode();
   const [preferences, setPreferences] = useState(readNavigationPreferences);
   const { data, loading: attentionLoading } = useQuery(GET_NEEDS_ATTENTION, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
@@ -41,7 +42,13 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
   const attentionCount = ticketAttention([...(data?.needsAttention ?? []), ...discordAttention(discordData?.discordThreads?.rows ?? [])], ticketQuestions(questionsData?.orchestrations ?? [])).length;
   const [moreOpen, setMoreOpen] = useState(false);
   const [updateOffered, setUpdateOffered] = useState(false);
-  const [reporting, setReporting] = useState(false);
+  const [reporting, setReporting] = useState<'new' | 'issues' | null>(null);
+
+  useEffect(() => {
+    if (locked || !opensReportedBugs(window.location.search)) return;
+    setReporting('issues');
+    window.history.replaceState(window.history.state, '', window.location.pathname);
+  }, [currentPath, locked]);
 
   // A phone keeps the app alive in the background for days, so a deploy is looked for each time it comes back,
   // and a tab that stays open on a desk looks again every minute.
@@ -79,17 +86,12 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
     { path: '/decisions', label: 'Decisions', icon: ListChecks, badge: decisionCount, group: 'Work' },
     { path: '/demo-videos', label: 'Demo Videos', icon: Clapperboard, badge: 0, group: 'Work' },
     { path: '/calendar', label: 'Calendar', icon: CalendarDays, badge: 0, group: 'Work' },
-    { path: '/sprint', label: 'Sprint', icon: BarChart3, badge: 0, group: 'Team' },
     { path: '/planning', label: 'Planning', icon: CalendarRange, badge: 0, group: 'Team' },
     { path: '/qa-queue', label: 'QA queue', icon: FlaskConical, badge: 0, group: 'Team' },
     { path: '/discord', label: 'Discord', icon: MessagesSquare, badge: discordCount, group: 'Team' },
     { path: '/monitoring', label: 'Monitoring', icon: Activity, badge: 0, group: 'System' },
     { path: '/docker', label: 'Docker Services', icon: Box, badge: 0, group: 'System' },
-    { path: '/dev-servers', label: 'Dev Servers', icon: Server, badge: 0, group: 'System' },
     { path: '/workspace', label: 'Workspace', icon: FolderTree, badge: 0, group: 'System' },
-    // Not /health: the server answers that path itself for its health check.
-    { path: '/machines', label: 'Health', icon: Stethoscope, badge: 0, group: 'System' },
-    { path: '/issues', label: 'DOCK Issues', icon: Bug, badge: 0, group: 'System' },
     { path: '/settings', label: 'System Settings', icon: SettingsIcon, badge: 0, group: 'System' },
   ].filter((item) => hasPage(mode, item.path));
 
@@ -217,7 +219,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
         </nav>
         <span className={cn('hidden items-center gap-1 min-[761px]:flex', isSidebar && !preferences.collapsed ? 'min-[761px]:flex-row' : 'min-[761px]:flex-col')}>
           <IconButton variant="ghost" className={cn('size-8', currentPath === '/guide' && 'text-accent')} aria-label="How to use DOCK" title="How to use DOCK" aria-current={currentPath === '/guide' ? 'page' : undefined} onClick={() => onNavigate('/guide')}><BookOpen size={16} aria-hidden="true" /></IconButton>
-          <IconButton variant="ghost" className="size-8" aria-label="Report bug" title="Report a DOCK bug (opens a GitHub issue on danuseta/dock)" onClick={() => setReporting(true)}><Bug size={16} aria-hidden="true" /></IconButton>
+          <IconButton variant="ghost" className="size-8" aria-label="Report bug" title="Report a DOCK bug (opens a GitHub issue on danuseta/dock)" onClick={() => setReporting('new')}><Bug size={16} aria-hidden="true" /></IconButton>
         </span>
         <span className={cn(
           'hidden whitespace-nowrap font-mono text-[0.67rem] font-bold text-muted-foreground min-[761px]:block',
@@ -276,7 +278,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentPath, onNavigate, u
         )}
         {children}
       </main>
-      <ReportDockIssue open={reporting} onClose={() => setReporting(false)} onNavigate={onNavigate} />
+      <ReportDockIssue open={reporting !== null} initialTab={reporting ?? 'new'} onClose={() => setReporting(null)} onNavigate={onNavigate} />
       {showsChatDock(mode, currentPath) && <ChatDock inset={chatInset} onNavigate={onNavigate} />}
       <NoticeToasts onNavigate={onNavigate} />
     </div>

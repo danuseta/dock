@@ -10,17 +10,13 @@ import BlackboardPage from './pages/BlackboardPage';
 import GuidePage from './pages/GuidePage';
 import DecisionsPage from './pages/DecisionsPage';
 import DiscordPage from './pages/DiscordPage';
-import DockIssuesPage from './pages/DockIssuesPage';
 import SettingsPage from './pages/SettingsPage';
 import HomePage from './pages/HomePage';
 import CalendarPage from './pages/CalendarPage';
 import MonitoringPage from './pages/MonitoringPage';
 import DockerServicesPage from './pages/DockerServicesPage';
 import DemoVideosPage from './pages/DemoVideosPage';
-import DevServersPage from './pages/DevServersPage';
-import HealthPage from './pages/HealthPage';
 import SessionsPage from './pages/SessionsPage';
-import SprintPage from './pages/SprintPage';
 import WorkspacePage from './pages/WorkspacePage';
 import QaQueuePage from './pages/QaQueuePage';
 import { PageBoundary } from './components/PageBoundary';
@@ -33,6 +29,7 @@ import { DockModeContext, hasPage, type DockMode } from './lib/dockMode';
 import { AgentLooksLoader } from './agents/library/AgentLooksLoader';
 import { planningRedirect } from './agents/plan';
 import { changesRedirect } from './changes/href';
+import { movedPageRedirect } from './lib/movedPages';
 import { isPullEntry } from './lib/blackboard';
 
 const AgentsPage = lazy(() => import('./pages/AgentsPage'));
@@ -62,7 +59,7 @@ function App() {
 
   const getInitialRoute = () => {
     // An old Agents link to Planning, a bookmark or a notification, opens the matching /planning tab.
-    const moved = planningRedirect(`${window.location.pathname}${window.location.search}`);
+    const moved = movedPageRedirect(planningRedirect(`${window.location.pathname}${window.location.search}`));
     if (moved !== `${window.location.pathname}${window.location.search}`) window.history.replaceState(window.history.state, '', moved);
     // An old /changes link opens Perubahan kode in the ticket's Blackboard.
     if (window.location.pathname === '/changes') window.history.replaceState(window.history.state, '', changesRedirect(window.location.search));
@@ -71,7 +68,7 @@ function App() {
       const key = decodeURIComponent(path.split('/').pop() || '');
       return { path: '/ticket', key: key || null };
     }
-    if (path === '/dashboard' || path === '/agents' || path === '/blackboard' || path === '/guide' || path === '/sessions' || path === '/calendar' || path === '/sprint' || path === '/monitoring' || path === '/docker' || path === '/demo-videos' || path === '/dev-servers' || path === '/machines' || path === '/decisions' || path === '/discord' || path === '/issues' || path === '/workspace' || path === '/settings' || path === '/planning' || path === '/qa-queue') {
+    if (path === '/dashboard' || path === '/agents' || path === '/blackboard' || path === '/guide' || path === '/sessions' || path === '/calendar' || path === '/monitoring' || path === '/docker' || path === '/demo-videos' || path === '/decisions' || path === '/discord' || path === '/workspace' || path === '/settings' || path === '/planning' || path === '/qa-queue') {
       return { path, key: null };
     }
     return { path: '/', key: null };
@@ -116,7 +113,7 @@ function App() {
   };
 
   const handleNavigate = (to: string) => {
-    const path = to.startsWith('/changes') ? changesRedirect(to.includes('?') ? to.slice(to.indexOf('?')) : '') : planningRedirect(to);
+    const path = to.startsWith('/changes') ? changesRedirect(to.includes('?') ? to.slice(to.indexOf('?')) : '') : movedPageRedirect(planningRedirect(to));
     window.history.pushState({}, '', path);
     // A link like /agents?run=KEY keeps its query in the URL for the page to read.
     setCurrentPath(path.split('?')[0]);
@@ -144,15 +141,11 @@ function App() {
       case '/guide': return <GuidePage onNavigate={handleNavigate} />;
       case '/sessions': return <SessionsPage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;
       case '/calendar': return <CalendarPage onNavigate={handleNavigate} />;
-      case '/sprint': return <SprintPage />;
       case '/monitoring': return <MonitoringPage onNavigate={handleNavigate} />;
       case '/docker': return <DockerServicesPage />;
       case '/demo-videos': return <DemoVideosPage onTicketClick={navigateToTicket} />;
-      case '/dev-servers': return <DevServersPage />;
-      case '/machines': return <HealthPage />;
       case '/decisions': return <DecisionsPage />;
       case '/discord': return <DiscordPage onTicketClick={navigateToTicket} onNavigate={handleNavigate} />;
-      case '/issues': return <DockIssuesPage onNavigate={handleNavigate} />;
       case '/changes': return <Suspense fallback={<Page width="full"><LoadingSkeleton /></Page>}><ChangesPage onNavigate={handleNavigate} onTicketClick={navigateToTicket} /></Suspense>;
       case '/workspace': return <WorkspacePage />;
       case '/qa-queue': return <QaQueuePage onTicketClick={navigateToTicket} />;
@@ -194,7 +187,7 @@ function App() {
 
   return (
     <DockModeContext.Provider value={mode}>
-      <AppLayout currentPath={path === '/ticket' ? '/dashboard' : path} onNavigate={handleNavigate} unreachable={unreachable} onRetry={() => void refetch()}>
+      <AppLayout currentPath={path === '/ticket' ? '/dashboard' : path} onNavigate={handleNavigate} unreachable={unreachable} onRetry={() => void refetch()} locked={isLocked}>
         {!isLocked && <AgentLooksLoader />}
         {!isLocked && <PageBoundary key={path}>{renderPage()}</PageBoundary>}
         <PinLockModal

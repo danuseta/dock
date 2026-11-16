@@ -3,12 +3,13 @@ import { Page, PageHeader } from '../components/ui';
 import { PlanningTab } from '../agents/PlanningTab';
 import { PlanTab } from '../agents/PlanTab';
 import { RetroTab } from '../agents/RetroTab';
+import { SprintTab } from '../sprint/SprintTab';
 import { planningRoute, type PlanningPageTab } from '../agents/plan';
 import { cn } from '../lib/cn';
 
-const TABS: Array<[PlanningPageTab, string]> = [['draft', 'Draft'], ['plan', 'Plan'], ['retro', 'Retro']];
+const TABS: Array<[PlanningPageTab, string]> = [['now', 'Now'], ['draft', 'Draft'], ['plan', 'Plan'], ['retro', 'Retro']];
 
-/** Planning, out of Agents: the sprint Draft the planner publishes, the published Plan, and the Retro. */
+/** Planning: the sprint as it runs Now, the Draft the planner publishes, the published Plan, and the Retro. */
 const PlanningPage: React.FC<{ onNavigate?: (path: string) => void }> = ({ onNavigate }) => {
   const [route] = useState(() => planningRoute(window.location.search));
   const [tab, setTab] = useState<PlanningPageTab>(route.tab);
@@ -33,7 +34,7 @@ const PlanningPage: React.FC<{ onNavigate?: (path: string) => void }> = ({ onNav
       <PageHeader>
         <div>
           <h1 className="text-balance font-display text-3xl font-black">Planning</h1>
-          <p className="mt-1 text-pretty text-secondary-foreground">The sprint draft and its publish, the dependency map and work order, and the retro of the agents' work.</p>
+          <p className="mt-1 text-pretty text-secondary-foreground">The sprint as it runs, the draft and its publish, the dependency map and work order, and the retro of the agents' work.</p>
         </div>
       </PageHeader>
       <div className="mb-4 flex border-b border-border" role="tablist" aria-label="Planning">
@@ -50,7 +51,7 @@ const PlanningPage: React.FC<{ onNavigate?: (path: string) => void }> = ({ onNav
           </button>
         ))}
       </div>
-      {tab === 'draft' ? <PlanningTab initialPanel={route.panel ?? undefined} /> : tab === 'plan' ? <PlanTab /> : <RetroTab onNavigate={onNavigate} />}
+      {tab === 'now' ? <SprintTab /> : tab === 'draft' ? <PlanningTab initialPanel={route.panel ?? undefined} /> : tab === 'plan' ? <PlanTab /> : <RetroTab onNavigate={onNavigate} />}
     </Page>
   );
 };

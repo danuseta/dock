@@ -1,16 +1,18 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { Download, Play, RefreshCw, RotateCcw, Search, Server, Square, Terminal } from 'lucide-react';
-import { GET_DEV_SERVER_LOG, GET_DEV_SERVERS } from '../graphql/queries';
+import { GET_DEV_SERVER_LOG, GET_DEV_SERVERS, GET_DOCTOR_REPORTS } from '../graphql/queries';
 import { RESTART_DEV_SERVER, START_ALL_DEV_SERVERS, START_DEV_SERVER, STOP_ALL_DEV_SERVERS, STOP_DEV_SERVER, STOP_WORKTREE_SERVER } from '../graphql/mutations';
-import { LoadingSkeleton } from '../components/LoadingSkeleton';
-import { EmptyState } from '../components/EmptyState';
-import { RackScene } from '../components/empty/scenes/RackScene';
-import { Button, Card, ConfirmDialog, Dialog, IconButton, Input, Page, PageHeader } from '../components/ui';
+import { LoadingSkeleton } from './LoadingSkeleton';
+import { EmptyState } from './EmptyState';
+import { RackScene } from './empty/scenes/RackScene';
+import { Badge, Button, Card, ConfirmDialog, Dialog, IconButton, Input } from './ui';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { cn } from '../lib/cn';
 import { isPhone } from '../lib/phone';
 import { canStop, filterLog, type DevServer, type DevServerAction } from '../lib/devServers';
+import { reportAge } from '../lib/sousReport';
+import { isStale, workspaceReport, type DoctorReport } from '../lib/doctorReport';
 
 const POLL_MS = 5000;
 
@@ -18,7 +20,27 @@ const DOT_CLASS: Record<DevServer['state'], string> = { running: 'bg-status-merg
 
 const StatusDot = ({ state }: { state: DevServer['state'] }) => <span className={cn('size-2.5 shrink-0 rounded-full', DOT_CLASS[state])} aria-hidden="true" />;
 
-const DevServersPage = () => {
+const HealthLine = ({ onOpen }: { onOpen: () => void }) => {
+  const { data } = useQuery(GET_DOCTOR_REPORTS, CACHED_QUERY_OPTIONS);
+  const report = workspaceReport((data?.doctorReports || []) as DoctorReport[]);
+  const failing = report ? report.checks.filter((check) => !check.ok).length : 0;
+  return (
+    <Card className="mb-4 flex flex-wrap items-center justify-between gap-3 py-3">
+      <span className="flex flex-wrap items-center gap-2 text-sm">
+        <strong className="font-display">Health</strong>
+        {report ? (
+          <>
+            <Badge variant={failing ? 'danger' : 'success'}>{failing ? `${failing} of ${report.checks.length} not ok` : 'All ok'}</Badge>
+            <Badge variant={isStale(report.at) ? 'warn' : 'neutral'}>checked {reportAge(report.at)}</Badge>
+          </>
+        ) : <span className="text-muted-foreground">no report yet</span>}
+      </span>
+      <Button size="sm" variant="ghost" onClick={onOpen}>Open Health</Button>
+    </Card>
+  );
+};
+
+export const DevServersTab = ({ onOpenHealth }: { onOpenHealth: () => void }) => {
   const { data, loading, error, refetch } = useQuery(GET_DEV_SERVERS, { ...CACHED_QUERY_OPTIONS, pollInterval: POLL_MS });
   const [logApp, setLogApp] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -46,7 +68,7 @@ const DevServersPage = () => {
     }
   };
 
-  if (isInitialQueryLoading(loading, data)) return <Page width="full"><LoadingSkeleton /></Page>;
+  if (isInitialQueryLoading(loading, data)) return <LoadingSkeleton />;
 
   const main: DevServer[] = data?.devServers?.main || [];
   const secondary: DevServer[] = data?.devServers?.secondary || [];
@@ -77,15 +99,17 @@ const DevServersPage = () => {
   );
 
   return (
-    <Page width="full">
-      <PageHeader>
-        <div><h1 className="text-balance font-display text-3xl font-black">Dev servers</h1><p className="mt-1 text-pretty text-secondary-foreground">The apps of this workspace. Main runs from the main clones with qonflo-dev; secondary are the servers agents started in ticket worktrees.</p></div>
+    <>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="max-w-2xl text-pretty text-sm text-secondary-foreground">The apps of this workspace. Main runs from the main clones with qonflo-dev; secondary are the servers agents started in ticket worktrees.</p>
         <span className="flex flex-wrap items-center gap-2">
           <Button onClick={() => void act('all', () => startAll())} disabled={busy !== null}><Play size={16} aria-hidden="true" />Start all</Button>
           <Button onClick={() => setConfirmStopAll(true)} disabled={busy !== null}><Square size={16} aria-hidden="true" />Stop all</Button>
           <Button className="max-[760px]:w-11 max-[760px]:px-0" onClick={() => void refetch()} disabled={loading}><RefreshCw size={16} className={cn(loading && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" /><span className="max-[760px]:sr-only">Refresh</span></Button>
         </span>
-      </PageHeader>
+      </div>
+
+      <HealthLine onOpen={onOpenHealth} />
 
       {error && <Card className="mb-4 border-status-conflict text-pretty text-sm text-status-conflict" role="alert">{error.message}</Card>}
       {actionError && <Card className="mb-4 border-status-conflict text-pretty text-sm text-status-conflict" role="alert">{actionError}</Card>}
@@ -153,8 +177,6 @@ const DevServersPage = () => {
         onCancel={() => setConfirmStopAll(false)}
         onConfirm={() => void act('all', () => stopAll()).then(() => setConfirmStopAll(false))}
       />
-    </Page>
+    </>
   );
 };
-
-export default DevServersPage;

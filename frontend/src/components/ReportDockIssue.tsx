@@ -1,20 +1,29 @@
-import React, { useId, useState } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 import { useApolloClient, useMutation, useQuery } from '@apollo/client';
 import { ExternalLink, Send } from 'lucide-react';
 import { GET_DOCK_BUILD, GET_DOCK_ISSUES, GET_DOCK_ISSUE_DRAFT_URL } from '../graphql/queries';
 import { REPORT_DOCK_ISSUE } from '../graphql/mutations';
 import { Button, Card, Dialog, Input, Textarea } from './ui';
 import { Toast } from './Toast';
+import { DockIssuesBrowser } from './DockIssuesBrowser';
+import { cn } from '../lib/cn';
 import { environmentPreview, imageLinksOf } from '../lib/dockIssues';
 import { useDockMode } from '../lib/dockMode';
 
-interface ReportDockIssueProps { open: boolean; onClose: () => void; onNavigate: (path: string) => void }
+export type ReportTab = 'new' | 'issues';
+
+interface ReportDockIssueProps { open: boolean; initialTab?: ReportTab; onClose: () => void; onNavigate: (path: string) => void }
 
 const FIELD = 'flex flex-col gap-1.5 text-xs font-semibold text-secondary-foreground';
 
-/** The bug form: posts an issue to the DOCK repo, or opens GitHub's new-issue page filled in so a screenshot can be pasted. */
-export const ReportDockIssue: React.FC<ReportDockIssueProps> = ({ open, onClose, onNavigate }) => {
+const TABS: Array<[ReportTab, string]> = [['new', 'New report'], ['issues', 'Reported bugs']];
+
+/** The bug form: posts an issue to the DOCK repo, or opens GitHub's new-issue page filled in so a screenshot can be pasted. Its second tab lists the bugs already reported. */
+export const ReportDockIssue: React.FC<ReportDockIssueProps> = ({ open, initialTab = 'new', onClose, onNavigate }) => {
   const id = useId();
+  const [tab, setTab] = useState<ReportTab>(initialTab);
+  useEffect(() => { if (open) setTab(initialTab); }, [open, initialTab]);
+  const openSettings = () => { onClose(); onNavigate('/settings'); };
   const client = useApolloClient();
   const mode = useDockMode();
   const { data } = useQuery(GET_DOCK_ISSUES, { variables: { filter: 'OPEN' }, skip: !open });
@@ -64,9 +73,15 @@ export const ReportDockIssue: React.FC<ReportDockIssueProps> = ({ open, onClose,
   return (
     <>
       <Dialog open={open} onClose={onClose} dismissible={!posting} labelledBy={`${id}-title`}>
-        <Card className="max-h-[calc(100dvh-2rem)] w-[min(560px,calc(100vw-2rem))] overflow-y-auto">
+        <Card className={cn('max-h-[calc(100dvh-2rem)] overflow-y-auto', tab === 'new' ? 'w-[min(560px,calc(100vw-2rem))]' : 'w-[min(960px,calc(100vw-2rem))]')}>
+          <h2 id={`${id}-title`} className="mb-3 font-display text-xl font-bold">Report a bug</h2>
+          <div className="mb-4 flex border-b border-border" role="tablist" aria-label="Report a bug">
+            {TABS.map(([value, label]) => (
+              <button key={value} type="button" role="tab" aria-selected={tab === value} onClick={() => setTab(value)} className={cn('-mb-px flex h-10 items-center border-b-2 border-transparent px-4 font-display text-sm font-semibold text-secondary-foreground max-[760px]:h-11', tab === value && 'border-accent text-foreground')}>{label}</button>
+            ))}
+          </div>
+          {tab === 'issues' ? <DockIssuesBrowser onNewIssue={() => setTab('new')} onOpenSettings={openSettings} /> : (
           <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-3.5">
-            <h2 id={`${id}-title`} className="font-display text-xl font-bold">Report a bug</h2>
             <label className={FIELD}>Title
               <Input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={200} required />
             </label>
@@ -88,7 +103,7 @@ export const ReportDockIssue: React.FC<ReportDockIssueProps> = ({ open, onClose,
             {tokenMissing && (
               <p className="text-xs text-status-warn" role="status">
                 Add a GitHub token in Settings to post from DOCK.{' '}
-                <button type="button" className="border-0 bg-transparent p-0 text-status-warn underline" onClick={() => { onClose(); onNavigate('/settings'); }}>Open Settings</button>
+                <button type="button" className="border-0 bg-transparent p-0 text-status-warn underline" onClick={openSettings}>Open Settings</button>
               </p>
             )}
             {error && <p className="text-xs text-status-conflict" role="alert">{error}</p>}
@@ -99,6 +114,7 @@ export const ReportDockIssue: React.FC<ReportDockIssueProps> = ({ open, onClose,
             </div>
             <p className="text-[0.7rem] text-muted-foreground max-[760px]:text-xs">Have a screenshot? Use Continue on GitHub - the form is filled in, just paste the image.</p>
           </form>
+          )}
         </Card>
       </Dialog>
       {posted && <Toast message={`Posted #${posted.number}`} type="success" link={{ href: posted.url, label: 'Open' }} onClose={() => setPosted(null)} />}

@@ -181,8 +181,8 @@ const GuidePage: React.FC<GuidePageProps> = ({ onNavigate }) => (
         <ul>
           <li><b>Kode DOCK dan kit</b> ikut cabang stable lewat updater, kira-kira tiap 5 menit, selama workspace menyala.</li>
           <li><b>Template Coder baru</b> (misalnya token bot Discord) baru masuk setelah klik <b>Update</b> di halaman workspace di Coder.</li>
-          <li><Go to="/dev-servers" label="Dev Servers" onNavigate={onNavigate} />: jalankan BE/FE per worktree untuk tes atau rekam video.</li>
-          <li>Ada yang aneh: cek workspace outdated, setting yang kosong, <Go to="/machines" label="Health" onNavigate={onNavigate} /> untuk koneksi chat, lalu lapor lewat ikon bug di pojok kiri bawah.</li>
+          <li><Go to="/workspace?tab=servers" label="Workspace → Servers" onNavigate={onNavigate} />: jalankan BE/FE per worktree untuk tes atau rekam video.</li>
+          <li>Ada yang aneh: cek workspace outdated, setting yang kosong, <Go to="/workspace?tab=health" label="Workspace → Health" onNavigate={onNavigate} /> untuk koneksi chat, lalu lapor lewat ikon bug di pojok kiri bawah.</li>
         </ul>
       </Section>
 

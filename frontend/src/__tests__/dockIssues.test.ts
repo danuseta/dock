@@ -3,28 +3,32 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { hasPage } from '../lib/dockMode';
+import { movedPageRedirect, opensReportedBugs } from '../lib/movedPages';
 import { environmentPreview, imageLinksOf, ISSUE_FILTERS, matchesIssue } from '../lib/dockIssues';
 
 const src = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (file: string) => readFileSync(join(src, file), 'utf8');
 
-test('DOCK Issues has a route and sits in the System group of the navigation', () => {
+test('DOCK Issues has no page or sidebar entry: an old /issues link opens Report bug on Reported bugs', () => {
   const app = read('App.tsx');
-  assert.match(app, /path === '\/issues'/);
-  assert.match(app, /case '\/issues': return <DockIssuesPage/);
+  assert.doesNotMatch(app, /path === '\/issues'|case '\/issues'/);
   const layout = read('components/AppLayout.tsx');
-  assert.match(layout, /\{ path: '\/issues', label: 'DOCK Issues', icon: Bug, badge: 0, group: 'System' \}/);
-  assert.equal(hasPage('laptop', '/issues') && hasPage('workspace', '/issues'), true);
+  assert.doesNotMatch(layout, /label: 'DOCK Issues'/);
+  assert.equal(movedPageRedirect('/issues'), '/?report=issues');
+  assert.equal(opensReportedBugs('?report=issues'), true);
+  assert.equal(opensReportedBugs('?report=new'), false);
+  assert.match(layout, /if \(locked \|\| !opensReportedBugs\(window\.location\.search\)\) return;\n {4}setReporting\('issues'\);/);
 });
 
-test('the sidebar offers Report bug on every page, and the issues page offers New issue, both opening the same form', () => {
+test('Report bug has two tabs, New report and Reported bugs, and New issue in the list goes back to the form', () => {
   const layout = read('components/AppLayout.tsx');
   assert.match(layout, /aria-label="Report bug"/);
-  assert.match(layout, /<ReportDockIssue open=\{reporting\}/);
-  const page = read('pages/DockIssuesPage.tsx');
-  assert.match(page, /New issue/);
-  assert.match(page, /<ReportDockIssue open=\{reporting\}/);
+  assert.match(layout, /onClick=\{\(\) => setReporting\('new'\)\}/);
+  assert.match(layout, /<ReportDockIssue open=\{reporting !== null\} initialTab=\{reporting \?\? 'new'\}/);
+  const form = read('components/ReportDockIssue.tsx');
+  assert.match(form, /\[\['new', 'New report'\], \['issues', 'Reported bugs'\]\]/);
+  assert.match(form, /<DockIssuesBrowser onNewIssue=\{\(\) => setTab\('new'\)\} onOpenSettings=\{openSettings\} \/>/);
+  assert.match(read('components/DockIssuesBrowser.tsx'), /onClick=\{onNewIssue\}><Plus size=\{14\} aria-hidden="true" \/>New issue/);
 });
 
 test('the form has its fields, the read-only Environment and both buttons', () => {
@@ -56,8 +60,8 @@ test('a failed post keeps the draft and shows the error, a good one closes the f
   assert.match(form, /role="alert">\{error\}/);
 });
 
-test('the issues page is read only: tabs, search, detail with Markdown and comments, no close or edit', () => {
-  const page = read('pages/DockIssuesPage.tsx');
+test('the reported bugs list is read only: tabs, search, detail with Markdown and comments, no close or edit', () => {
+  const page = read('components/DockIssuesBrowser.tsx');
   assert.deepEqual(ISSUE_FILTERS.map((entry) => entry.label), ['Open', 'Closed', 'Mine']);
   assert.match(page, /<Markdown text=\{issue\.body\} overrides=\{ISSUE_MARKDOWN\}/);
   assert.match(page, /referrerPolicy="no-referrer"/);
