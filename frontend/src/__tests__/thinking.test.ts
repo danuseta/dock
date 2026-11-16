@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { filterRows, groupRows, nextAt, rowsMarkdown, type ThinkingRow } from '../agents/thinking';
-import { numberDelta } from '../agents/retro';
+import { beforeText, buildResult, keyList, problemLabel, reviewSummary, shownNumbers } from '../agents/retro';
 
 const row = (id: string, at: string, overrides: Partial<ThinkingRow> = {}): ThinkingRow => ({
   id, at: `2026-10-28T${at}:00.000Z`, stageIndex: 2, round: 2, agent: 'sous-ticket-runner', kind: 'ask', topic: 'thinking', text: id, answer: null, options: [], flag: null, ...overrides,
@@ -39,10 +39,20 @@ test('the log exports as Markdown with every option under its row', () => {
   assert.match(md, /_\(while sous was still working\)_/);
 });
 
-test('retro numbers compare with the sprint before and say which way is better', () => {
-  const now = { tickets: 11, medianHours: 5.8, fixRounds: 1.6, replans: 0, ownerIssues: 23, medianOwnerWaitHours: 4.1, reviews: 3, requestChanges: 2 };
-  const before = { ...now, medianHours: 7, ownerIssues: 14 };
-  assert.deepEqual(numberDelta(now, before, 'medianHours', 'down'), { text: '-1.2 vs before', good: true });
-  assert.deepEqual(numberDelta(now, before, 'ownerIssues', 'down'), { text: '+9 vs before', good: false });
-  assert.equal(numberDelta(now, null, 'tickets', null), null);
+test('retro numbers show the sprint before, leave out a number zero in both, and read the Indonesian way', () => {
+  const now = { tickets: 3, medianHours: 26.3, fixRounds: 1.7, replans: 0, ownerIssues: 6, medianOwnerWaitHours: 0.3, ownerWaitHours: 1.4, reviews: 5, requestChanges: 0, blockedWaits: 2, mergeConflicts: 2, stackedRebases: 0 };
+  const before = { ...now, fixRounds: 8.5, stackedRebases: 9, blockedWaits: 0 };
+  assert.equal(beforeText(before, 'fixRounds', '', 'QRD Sprint 26'), '8,5 di QRD Sprint 26');
+  assert.equal(beforeText(null, 'tickets', '', null), null);
+  const fields = shownNumbers(now, before).map(([field]) => field);
+  assert.ok(fields.includes('stackedRebases'), 'zero now but not before stays');
+  assert.ok(!fields.includes('replans') && !fields.includes('requestChanges'), 'zero in both goes');
+  assert.equal(problemLabel('Failure: env'), 'Gagal karena environment');
+  assert.equal(problemLabel('Review finding: non-blocking'), 'Temuan review non-blocking');
+  assert.equal(problemLabel('Escalated to the owner: BLOCKER'), 'Eskalasi BLOCKER ke kamu');
+  assert.equal(keyList(['QRD-1', 'QRD-2', 'QRD-3', 'QRD-4', 'QRD-5']), 'QRD-1, QRD-2, QRD-3 +2');
+  assert.equal(buildResult({ result: 'done', hours: 26.3 }), 'selesai · 26,3 j');
+  assert.equal(buildResult({ result: 'pr', hours: null }), 'di PR');
+  const review = (key: string, result: string, findings: number) => ({ key, title: key, kind: 'review', hours: null, rounds: 0, issues: 0, findings, ownerWaitHours: null, result });
+  assert.equal(reviewSummary([review('QRD-1', 'approve', 3), review('QRD-2', 'approve', 4)]), '2 review · semua approve · 7 temuan');
 });

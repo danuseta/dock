@@ -77,7 +77,7 @@ test('the retro shows QA escalations by cause team-wide and labels the QA bot tr
   assert.equal(causeShare(2, [{ count: 4 }, { count: 2 }]), 50);
   assert.equal(causeShare(0, []), 0);
   const tab = source('../agents/RetroTab.tsx');
-  for (const text of ['QA escalations by cause', 'team-wide', "'qa-agent': 'QA bot triage rule", 'Planning did not predict']) assert.ok(tab.includes(text), text);
+  for (const text of ['Eskalasi QA', "'qa-agent': 'aturan triage QA bot", 'Planning nggak memprediksi']) assert.ok(tab.includes(text), text);
 });
 
 test('Plan lists AC lines teammates move in, with Accept into AC and Decline with a reason', () => {

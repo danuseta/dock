@@ -722,7 +722,7 @@ const QaPanel: React.FC<{ draft: SprintDraft; busy: boolean; summaries: Map<stri
   const [fixing, setFixing] = useState<string | null>(null);
   const [note, setNote] = useState('');
   const [listOpen, setListOpen] = useState<string | null>(null);
-  const rows = [...draft.tickets].sort((a, b) => Number(b.prediction?.prediction === 'ESCALATED') - Number(a.prediction?.prediction === 'ESCALATED') || a.key.localeCompare(b.key, undefined, { numeric: true }));
+  const rows = draft.tickets.filter((ticket) => !ticket.carried).sort((a, b) => Number(b.prediction?.prediction === 'ESCALATED') - Number(a.prediction?.prediction === 'ESCALATED') || a.key.localeCompare(b.key, undefined, { numeric: true }));
   return (
     <section aria-label="QA check" className="grid grid-cols-[minmax(0,1fr)] gap-3">
       <div className="flex flex-wrap items-center gap-3">
@@ -983,7 +983,7 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
   if (sprints.error && !sprints.data) return <p className="text-sm text-status-conflict" role="alert">{sprints.error.message}</p>;
   if (!sprints.data && sprints.loading) return <p className="text-sm text-muted-foreground" role="status">Loading the board's sprints...</p>;
   if (!chosen) return <p className="text-sm text-muted-foreground">No active or future sprint on the board. Create the sprint in Jira, then come back.</p>;
-  const escalated = draft?.tickets.filter((ticket) => ticket.prediction?.prediction === 'ESCALATED').length ?? 0;
+  const escalated = draft?.tickets.filter((ticket) => !ticket.carried && ticket.prediction?.prediction === 'ESCALATED').length ?? 0;
   const late = draft?.findings.filter((finding) => finding.kind === 'after-it').length ?? 0;
   const storyboardChecks = draft ? uncheckedStoryboard(draft).length : 0;
   const ready = draft ? publishReadiness(draft, flow) : null;

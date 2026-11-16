@@ -2,7 +2,8 @@ import React from 'react';
 import { ChevronRight, Gavel } from 'lucide-react';
 import { Button } from '../components/ui';
 import { cn } from '../lib/cn';
-import { GRADE_CLASS, answeredText, dayCounts, dayLabel, dayStatusText, type JudgeDays as JudgeDaysData } from './judge';
+import { GRADE_CLASS, answeredText, dayCounts, dayLabel, dayStatusText, sheetLine, type JudgeDays as JudgeDaysData } from './judge';
+import { InfoTip } from './InfoTip';
 
 const head = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
 
@@ -24,11 +25,11 @@ interface JudgeDaysProps {
 export const JudgeDays: React.FC<JudgeDaysProps> = ({ data, onOpenDay, onOpenSprint, onJudgeNow, busy }) => (
   <section aria-label="Days of the sprint" className="min-w-0">
     <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-      <h3 className={head}>Days of the sprint</h3>
-      <span className="text-[0.76rem] text-muted-foreground">{data.days.length ? answeredText(data.days) : 'nothing judged yet'}</span>
-      <Button size="sm" variant="ghost" className="ml-auto" onClick={onJudgeNow} disabled={busy}><Gavel size={13} aria-hidden="true" />Judge now</Button>
+      <h3 className={head}>Hari sprint</h3>
+      <InfoTip label="Tentang Judge">Judge baca session yang udah sepi, malam hari. Hari muncul di sini setelah ada session sprint ini yang dinilai.</InfoTip>
+      <span className="text-[0.76rem] text-muted-foreground">{data.days.length ? answeredText(data.days) : 'belum ada session yang dinilai'}</span>
+      <Button size="sm" variant="ghost" className="ml-auto" onClick={onJudgeNow} disabled={busy}><Gavel size={13} aria-hidden="true" />Nilai sekarang</Button>
     </div>
-    {data.days.length === 0 && <p className="text-sm text-muted-foreground">Judge reads a session once it is quiet for a while, in the evening window. Days show here once a session of this sprint is judged.</p>}
     <ul className="border-t border-border">
       {data.days.map((row) => (
         <li key={row.day}>
@@ -43,8 +44,8 @@ export const JudgeDays: React.FC<JudgeDaysProps> = ({ data, onOpenDay, onOpenSpr
       ))}
       <li>
         <button type="button" onClick={onOpenSprint} className="grid w-full grid-cols-[112px_minmax(0,1fr)_16px] items-center gap-3 border-b border-border px-1 py-3 text-left hover:bg-surface-1 max-[760px]:grid-cols-[minmax(0,1fr)_16px] max-[760px]:min-h-11">
-          <span className="font-display text-[0.86rem] font-semibold">Sprint sheet</span>
-          <span className="min-w-0 truncate text-[0.78rem] text-secondary-foreground max-[760px]:col-start-1 max-[760px]:row-start-2">patterns to accept · grade {data.sheet.grade} · {data.sheet.ownerHours} h owner time lost</span>
+          <span className="font-display text-[0.86rem] font-semibold">Lembar sprint</span>
+          <span className="min-w-0 truncate text-[0.78rem] text-secondary-foreground max-[760px]:col-start-1 max-[760px]:row-start-2">{sheetLine(data.sheet)}</span>
           <ChevronRight size={14} aria-hidden="true" className="text-muted-foreground max-[760px]:col-start-2 max-[760px]:row-start-1" />
         </button>
       </li>

@@ -295,6 +295,10 @@ test('Siap publish 2 dari 4: SP over capacity without a cut and an undecided ESC
   assert.equal(cut.items[0].ok, true, 'a written scope cut counts as fit');
   const open = publishReadiness(ready({ findings: [finding({ id: 'f1', key: 'QRD-7', kind: 'after-it' })], storyboards: [] }), null);
   assert.deepEqual(open.missing.map((item) => [item.id, item.detail]), [['ac', 'QRD-7'], ['storyboard', 'Belum ada storyboard yang dibaca']]);
+  const carried = publishReadiness(ready({
+    tickets: [ticket({ key: 'QRD-1', sp: 5 }), ticket({ key: 'QRD-2', sp: 5, carried: true, prediction: { prediction: 'ESCALATED', reasons: [], fix: null } })],
+  }), null);
+  assert.equal(carried.items.find((item) => item.id === 'qa')!.ok, true, 'a carried ticket was decided in its own sprint');
 });
 
 test('Siap publish leaves out an item whose planning stage is skipped; no flow counts all four', () => {

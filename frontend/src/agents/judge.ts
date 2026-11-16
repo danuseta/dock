@@ -19,7 +19,7 @@ export interface JudgeDaySession {
 export interface JudgeDaySheet extends JudgeDayRow { note: string | null; previousDay: string | null; nextDay: string | null; sessionList: JudgeDaySession[] }
 export interface JudgeSprintSheet {
   dayCount: number; daysAnswered: number; sessions: number; judged: number; waiting: number; failed: number; lastRun: string | null; findings: number; findingSessions: number;
-  grade: string; previousGrade: string | null; ownerHours: number; causes: Array<{ cause: string; label: string; count: number }>; waitingDays: Array<{ day: string; findings: number }>;
+  grade: string | null; previousGrade: string | null; ownerHours: number; causes: Array<{ cause: string; label: string; count: number }>; waitingDays: Array<{ day: string; findings: number }>;
   summary: { status: string; requestedAt: string; notJudged: number | null } | null;
 }
 export interface JudgeDays { sprint: string; activeSprint: string | null; previous: string | null; days: JudgeDayRow[]; sheet: JudgeSprintSheet }
@@ -44,7 +44,6 @@ export function judgeOnlySprint(input: { view: RetroView; picked: string | null;
 }
 export interface SessionJudge { status: string; grade: string | null; judgedAt: string | null; ownerWaitMinutes: number; error: string | null; findings: JudgeFinding[] }
 
-export const GRADES: JudgeGrade[] = ['A', 'B', 'C', 'D'];
 const OWNER_CAUSES = new Set(['stopped-with-way-out', 'self-inflicted-rework', 'misread-ac-scope', 'asked-instead-of-looking']);
 
 /** The owner's answer when there is one, else Judge's call. */
@@ -178,9 +177,10 @@ export function mergeRetroItems(items: RetroItem[], view: RetroView): MergedRetr
   return merged;
 }
 
-/** The grade filter of the Sessions list: any, or one grade. */
-export type GradeFilter = 'any' | JudgeGrade;
-export const filterByGrade = <T extends { judge?: { grade?: string | null } | null }>(sessions: T[], grade: GradeFilter) => (grade === 'any' ? sessions : sessions.filter((session) => session.judge?.grade === grade));
+/** The Sprint sheet row: the grade and the owner time lost once Judge judged a session, until then that nothing is judged. */
+export const sheetLine = (sheet: Pick<JudgeSprintSheet, 'grade' | 'ownerHours'>) => (
+  sheet.grade ? `pola buat diterima · grade ${sheet.grade} · ${String(sheet.ownerHours).replace('.', ',')} j waktu kamu kebuang` : 'pola buat diterima · belum dinilai Judge'
+);
 
 export const GRADE_CLASS: Record<string, string> = {
   A: 'border-status-merged/40 text-status-merged',

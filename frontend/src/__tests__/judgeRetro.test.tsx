@@ -6,7 +6,7 @@ import { JudgeDays } from '../agents/JudgeDays';
 import { JudgeDaySheetView } from '../agents/JudgeDaySheetView';
 import { SprintSheet } from '../agents/SprintSheet';
 import {
-  callOf, dayLabel, flagText, dayStatusText, discordFindingHref, filterByGrade, findingHref, flaggedMessages, gradeOf, judgeHref, judgeOnlySprint, judgeRoute, mergeRetroItems, retroSprintOptions,
+  callOf, dayLabel, flagText, dayStatusText, discordFindingHref, findingHref, flaggedMessages, gradeOf, judgeHref, judgeOnlySprint, judgeRoute, mergeRetroItems, retroSprintOptions,
   type JudgeDaySheet, type JudgeDays as JudgeDaysData, type JudgeFinding,
 } from '../agents/judge';
 import { planningRedirect } from '../agents/plan';
@@ -55,8 +55,11 @@ test('days list: one row per day with counts, grade and status, and the Sprint s
   assert.match(html, /Waiting for you/);
   assert.match(html, /Confirmed 13 Nov 08:20/);
   assert.match(html, /1 to answer · 1 of 2 answered/);
-  assert.ok(html.indexOf('Sprint sheet') > html.indexOf('Thu 12 Nov'), 'the Sprint sheet is the last row');
-  assert.match(html, /patterns to accept · grade B · 6.4 h owner time lost/);
+  assert.ok(html.indexOf('Lembar sprint') > html.indexOf('Thu 12 Nov'), 'the Sprint sheet is the last row');
+  const fresh = renderToStaticMarkup(<JudgeDays data={{ ...data, days: [], sheet: { ...sheet, grade: null } }} busy={false} onOpenDay={noop} onOpenSprint={noop} onJudgeNow={noop} />);
+  assert.match(fresh, /belum ada session yang dinilai/);
+  assert.match(fresh, /belum dinilai Judge/, 'no grade A before Judge judged anything');
+  assert.match(html, /pola buat diterima · grade B · 6,4 j waktu kamu kebuang/);
   assert.strictEqual(dayStatusText({ status: 'stood', confirmedAt: null }), "Judge's call stood (not answered)");
   assert.strictEqual(dayStatusText({ status: 'nothing', confirmedAt: null }), 'Nothing to answer');
   assert.strictEqual(dayLabel('2026-11-13'), 'Fri 13 Nov');
@@ -129,10 +132,7 @@ test('routes: ?day opens a sheet, the old Agents link keeps its day, and the lis
   assert.strictEqual(judgeHref('?tab=retro', { day: '2026-11-12' }), '/planning?tab=retro&day=2026-11-12');
 });
 
-test('Sessions filter by grade, the sidebar block and Home\'s Needs you line', () => {
-  const sessions = [{ id: 'a', judge: { status: 'judged', grade: 'C' } }, { id: 'b', judge: null }, { id: 'c', judge: { status: 'judged', grade: 'A' } }];
-  assert.deepStrictEqual(filterByGrade(sessions, 'C').map((session) => session.id), ['a']);
-  assert.strictEqual(filterByGrade(sessions, 'any').length, 3);
+test('the session\'s Judge block and Home\'s Needs you line', () => {
   const block = renderToStaticMarkup(<SessionJudgeView judge={{ status: 'judged', grade: 'C', judgedAt: '2026-11-13T14:12:00.000Z', ownerWaitMinutes: 90, error: null, findings: [finding('f1', 'stopped-with-way-out', { causeLabel: 'Stopped with a way out' }), finding('f2', 'self-inflicted-rework', { causeLabel: 'Self-inflicted rework' })] }} canAct busy={false} notice={null} onAgain={noop} />);
   assert.match(block, /Judge · 13 Nov 21:12/);
   assert.match(block, /aria-label="Grade C"/);

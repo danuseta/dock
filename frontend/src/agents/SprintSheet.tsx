@@ -48,7 +48,7 @@ export const SprintSheet: React.FC<SprintSheetProps> = ({ sprint, previous, shee
           </div>
         ))}
         <div className="px-4 py-3">
-          <dd><GradeChip grade={sheet.grade} className="size-8 text-base" /></dd>
+          <dd>{sheet.grade ? <GradeChip grade={sheet.grade} className="size-8 text-base" /> : <span className="font-display text-sm text-muted-foreground">belum dinilai</span>}</dd>
           <dt className="text-[0.72rem] text-muted-foreground">sprint grade{sheet.previousGrade ? ` · ${previous ?? 'last sprint'} was ${sheet.previousGrade}` : ''}</dt>
         </div>
       </dl>

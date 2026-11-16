@@ -443,7 +443,7 @@ export class JudgeQueue {
         lastRun: lastRun?.toISOString() ?? null,
         findings: counted.length,
         findingSessions: new Set(counted.map((finding) => finding.sessionId)).size,
-        grade: sprintGrade(data.rows.filter((row) => row.status === 'judged').map((row) => row.grade)),
+        grade: data.rows.some((row) => row.status === 'judged') ? sprintGrade(data.rows.filter((row) => row.status === 'judged').map((row) => row.grade)) : null,
         previousGrade: before && before.rows.some((row) => row.status === 'judged') ? sprintGrade(before.rows.filter((row) => row.status === 'judged').map((row) => row.grade)) : null,
         ownerHours: Math.round((rows.reduce((sum, row) => sum + row.ownerWaitMinutes, 0) / 60) * 10) / 10,
         causes,

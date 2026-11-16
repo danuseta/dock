@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowDown, ArrowRight, ArrowUp, Building2, CalendarRange, ChevronLeft, ChevronRight, ClipboardList, Clock, ExternalLink, EyeOff, FileDiff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Route, Square, Table2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Building2, ChevronLeft, ChevronRight, ClipboardList, Clock, ExternalLink, EyeOff, FileDiff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Route, Square, Table2, X } from 'lucide-react';
 import { GET_AUTO_REVIEWS, GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
 import { APPROVE_REVIEW, CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
@@ -831,9 +831,6 @@ const AgentsPage: React.FC<AgentsPageProps> = (props) => {
           <Icon size={14} aria-hidden="true" />{label}
         </button>
       ))}
-      <button type="button" onClick={() => props.onNavigate('/planning')} className="-mb-px ml-2 flex h-10 items-center gap-1.5 px-3 font-display text-xs text-muted-foreground transition-colors duration-150 hover:text-foreground">
-        <CalendarRange size={13} aria-hidden="true" />Sprint pindah ke Planning<ArrowRight size={12} aria-hidden="true" />
-      </button>
     </div>
   );
   if (tab === 'office') return <OfficeTab {...props} tabs={tabs} library={library} startArchive={startArchive} onPickTab={pickPhoneTab} />;

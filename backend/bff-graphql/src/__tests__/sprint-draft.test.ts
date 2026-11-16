@@ -552,6 +552,27 @@ test('a ticket carried over from a closed sprint is left out once merged, and go
   assert.equal(view.developers.find((developer) => developer.name === 'Danu')!.merged, 1);
 });
 
+test('an open carried ticket stays on the plan but is not checked again: no AC reference, QA prediction or storyboard', async () => {
+  const store = new MemoryStore();
+  const jira = new FakeJira([
+    issue('QRD-11', { status: 'UAT BUG / Improvement', epic: 'QRD-21', acRaw: '- Works after QRD-99' }),
+    issue('QRD-20', { epic: 'QRD-1233', acRaw: '- Works after QRD-98' }),
+  ]);
+  (jira as DraftJira).carriedKeys = async () => ['QRD-11'];
+  let seen: string[] = [];
+  const predict = async (tickets: QaInputTicket[]) => { seen = tickets.map((ticket) => ticket.key); return predictions({ 'QRD-11': 'ESCALATED', 'QRD-20': 'ESCALATED' })(tickets); };
+  const read: string[] = [];
+  const storyboard = async (epic: string) => { read.push(epic); return { epic, version: 2, previous: 1, path: 'p', page: '1', frames: [], changed: [] }; };
+  const service = new SprintDraftService(store, async () => jira, predict, () => new Date('2026-10-26T10:00:00Z'), undefined, storyboard);
+  const view = await service.load(SPRINT.id, 'Rina');
+  assert.deepEqual(view.tickets.map((ticket) => ticket.key).sort(), ['QRD-11', 'QRD-20']);
+  assert.deepEqual(view.findings.map((finding) => finding.key), ['QRD-20']);
+  assert.deepEqual(seen, ['QRD-20']);
+  assert.equal(view.tickets.find((ticket) => ticket.key === 'QRD-11')!.prediction, null);
+  assert.deepEqual(read, ['QRD-1233']);
+  assert.deepEqual(view.storyboards.map((board) => board.epic), ['QRD-1233']);
+});
+
 test('without carriedKeys every ticket of the sprint stays in the draft', async () => {
   const { service } = setup();
   const view = await service.load(SPRINT.id, 'Rina');
