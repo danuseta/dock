@@ -9,6 +9,8 @@ import { formatSize } from '../lib/blackboard';
 import { cn } from '../lib/cn';
 import { joinPath, nameProblem, renamedPath } from '../lib/workspacePaths';
 import { WorktreesPanel } from '../components/WorktreesPanel';
+import { DevServersTab } from '../components/DevServersTab';
+import { HealthTab } from '../components/HealthTab';
 
 interface Entry { name: string; path: string; kind: 'dir' | 'file' | 'link' | 'other'; size: number | null; modifiedAt: string | null; masked: boolean }
 interface Dir { path: string; parent: string | null; truncated: boolean; entries: Entry[] }
@@ -20,13 +22,15 @@ function readQuery() {
   return { path: params.get('path') ?? '', file: params.get('file') };
 }
 
-type WorkspaceTab = 'files' | 'worktrees';
+type WorkspaceTab = 'files' | 'worktrees' | 'servers' | 'health';
 
-const readTab = (): WorkspaceTab => (new URLSearchParams(window.location.search).get('tab') === 'worktrees' ? 'worktrees' : 'files');
+const WORKSPACE_TABS: Array<[WorkspaceTab, string]> = [['files', 'Files'], ['worktrees', 'Worktrees'], ['servers', 'Servers'], ['health', 'Health']];
+
+const readTab = (): WorkspaceTab => WORKSPACE_TABS.find(([id]) => id === new URLSearchParams(window.location.search).get('tab'))?.[0] ?? 'files';
 
 function writeQuery(path: string, file: string | null, tab: WorkspaceTab = 'files') {
   const params = new URLSearchParams();
-  if (tab === 'worktrees') params.set('tab', tab);
+  if (tab !== 'files') params.set('tab', tab);
   if (path) params.set('path', path);
   if (file) params.set('file', file);
   const search = params.toString();
@@ -223,10 +227,10 @@ const WorkspacePage: React.FC = () => {
       <header className="mb-4 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-bold">Workspace</h1>
-          <p className="mt-1 text-xs text-muted-foreground max-[760px]:line-clamp-1">The folders and files of this workspace, from the home folder down. Keys, logins and .env files are listed but never opened or changed.</p>
+          <p className="mt-1 text-xs text-muted-foreground max-[760px]:line-clamp-1">The folders and files of this workspace, from the home folder down, its worktrees, its dev servers and its health. Keys, logins and .env files are listed but never opened or changed.</p>
         </div>
         <div className="flex flex-wrap gap-2" role="tablist" aria-label="Workspace">
-          {([['files', 'Files'], ['worktrees', 'Worktrees']] as const).map(([id, label]) => <Button key={id} size="sm" role="tab" aria-selected={tab === id} variant={tab === id ? 'primary' : 'default'} onClick={() => setTab(id)}>{label}</Button>)}
+          {WORKSPACE_TABS.map(([id, label]) => <Button key={id} size="sm" role="tab" aria-selected={tab === id} variant={tab === id ? 'primary' : 'default'} onClick={() => setTab(id)}>{label}</Button>)}
         </div>
         {tab === 'files' && <div className="flex flex-wrap gap-2">
           <Button size="sm" onClick={() => { setActionError(null); setAsking({ kind: 'folder' }); }} disabled={!dir}><FolderPlus size={13} aria-hidden="true" />New folder</Button>
@@ -237,6 +241,8 @@ const WorkspacePage: React.FC = () => {
       </header>
 
       {tab === 'worktrees' && <WorktreesPanel />}
+      {tab === 'servers' && <DevServersTab onOpenHealth={() => setTab('health')} />}
+      {tab === 'health' && <HealthTab />}
 
       {(notice || (actionError && !asking && !deleting)) && (
         <p className={cn('mb-3 text-xs', actionError && !asking && !deleting ? 'text-status-conflict' : 'text-muted-foreground')} role={actionError ? 'alert' : 'status'}>{actionError && !asking && !deleting ? actionError : notice}</p>

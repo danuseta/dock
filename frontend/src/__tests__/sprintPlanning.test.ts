@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { panelOf, planningRedirect, planningRoute } from '../agents/plan';
+import { movedPageRedirect } from '../lib/movedPages';
 import { applyTemplate, defaultFlow } from '../agents/planningFlow';
 import {
   UNASSIGNED, barPlace, changeCount, publishReadiness, dayOf, decisionLabel, findingKindLabel, lanes, parseWave, predictionTone, publishHint, scopeSummary, sortFindings,
@@ -15,11 +16,13 @@ const ticket = (over: Partial<DraftTicket>): DraftTicket => ({
 });
 const finding = (over: Partial<DraftFinding>): DraftFinding => ({ id: 'x', key: 'QRD-1', line: 1, text: 't', refKey: 'QRD-2', kind: 'lands-first', refEnd: 1, ownEnd: 2, decision: null, ...over });
 
-test('/planning opens Draft by default, reads the panel, and every old Agents link opens the matching tab', () => {
-  assert.deepEqual(planningRoute(''), { tab: 'draft', panel: null });
+test('/planning opens Now by default, Draft when a panel is named, and every old Agents or Sprint link opens the matching tab', () => {
+  assert.deepEqual(planningRoute(''), { tab: 'now', panel: null });
+  assert.deepEqual(planningRoute('?panel=qa'), { tab: 'draft', panel: 'qa' });
+  assert.equal(movedPageRedirect('/sprint'), '/planning?tab=now');
   assert.deepEqual(planningRoute('?tab=retro'), { tab: 'retro', panel: null });
   assert.deepEqual(planningRoute('?tab=draft&panel=qa'), { tab: 'draft', panel: 'qa' });
-  assert.deepEqual(planningRoute('?tab=nope&panel=nope'), { tab: 'draft', panel: null });
+  assert.deepEqual(planningRoute('?tab=nope&panel=nope'), { tab: 'now', panel: null });
   assert.equal(planningRedirect('/agents?tab=sprint&sub=planning'), '/planning?tab=draft');
   assert.equal(planningRedirect('/agents?tab=sprint&sub=planning&panel=ac'), '/planning?tab=draft&panel=ac');
   assert.equal(planningRedirect('/agents?tab=sprint&sub=plan'), '/planning?tab=plan');

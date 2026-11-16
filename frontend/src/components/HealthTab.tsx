@@ -3,10 +3,10 @@ import { useMutation, useQuery } from '@apollo/client';
 import { RefreshCw } from 'lucide-react';
 import { GET_DOCTOR_REPORTS } from '../graphql/queries';
 import { REQUEST_DOCTOR_RUN } from '../graphql/mutations';
-import { LoadingSkeleton } from '../components/LoadingSkeleton';
-import { EmptyState } from '../components/EmptyState';
-import { RackScene } from '../components/empty/scenes/RackScene';
-import { Badge, Button, Card, Page, PageHeader, PhoneCards } from '../components/ui';
+import { LoadingSkeleton } from './LoadingSkeleton';
+import { EmptyState } from './EmptyState';
+import { RackScene } from './empty/scenes/RackScene';
+import { Badge, Button, Card, PhoneCards } from './ui';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { cn } from '../lib/cn';
 import { reportAge } from '../lib/sousReport';
@@ -17,7 +17,7 @@ const RUN_POLL_MS = 3000;
 const RUN_TIMEOUT_MS = 90000;
 
 /** The latest doctor report of the workspace: what the kit needs on it, and whether it is there. */
-const HealthPage = () => {
+export const HealthTab = () => {
   const { data, loading, error, refetch } = useQuery(GET_DOCTOR_REPORTS, { ...CACHED_QUERY_OPTIONS, pollInterval: 60000 });
   const [requestRun] = useMutation(REQUEST_DOCTOR_RUN);
   // Refresh asks the workspace bridge to run the doctor; it is done when a report with a new receivedAt arrives.
@@ -46,17 +46,17 @@ const HealthPage = () => {
     requestRun({ variables: { machine: 'workspace' } }).catch((e: Error) => { setRunning(null); setRunError(e.message); });
   };
 
-  if (isInitialQueryLoading(loading, data)) return <Page width="full"><LoadingSkeleton /></Page>;
+  if (isInitialQueryLoading(loading, data)) return <LoadingSkeleton />;
 
   const failing = report ? report.checks.filter((check) => !check.ok).length : 0;
   const stale = report ? isStale(report.at) : false;
 
   return (
-    <Page width="full">
-      <PageHeader>
-        <div><h1 className="text-balance font-display text-3xl font-black">Health</h1><p className="mt-1 text-pretty text-secondary-foreground">What the workspace doctor found the last time it ran: rtk, ffmpeg, the DOCK config, hooks, Playwright and the demo bucket.</p></div>
+    <>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="max-w-2xl text-pretty text-sm text-secondary-foreground">What the workspace doctor found the last time it ran: rtk, ffmpeg, the DOCK config, hooks, Playwright and the demo bucket.</p>
         <Button onClick={runDoctor} disabled={Boolean(running)}><RefreshCw size={16} className={cn(running && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />{running ? 'Running doctor' : 'Refresh'}</Button>
-      </PageHeader>
+      </div>
 
       {error && <Card className="mb-4 border-status-conflict text-pretty text-sm text-status-conflict" role="alert">{error.message}</Card>}
       {runError && <Card className="mb-4 border-status-conflict text-pretty text-sm text-status-conflict" role="alert">{runError}</Card>}
@@ -97,8 +97,6 @@ const HealthPage = () => {
           </PhoneCards>
         </Card>
       )}
-    </Page>
+    </>
   );
 };
-
-export default HealthPage;
