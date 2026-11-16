@@ -9,7 +9,7 @@ import { upstreamMonitorService } from '../integrations/upstream-monitor';
 import { dockerRuntimeService } from '../integrations/docker-runtime';
 import { OrchestratorInputError, attentionItems, normalizeTicketKey, orchestratorService, type Orchestration } from '../integrations/orchestrator';
 import { CHAT_MACHINE, chatService } from '../integrations/chat';
-import { MANUAL_DESTS, qaEscalations, retroApplyPrompt, retroNumbers, retroProblems, retroTickets, triageSuggestions } from '../integrations/retro';
+import { MANUAL_DESTS, qaEscalations, retroApplyPrompt, retroNumbers, retroProblems, retroTickets, runsInWindow, triageSuggestions } from '../integrations/retro';
 import { StorageService } from '../storage/service';
 import { activeSprint } from '../integrations/sprint-plan';
 import { lookupDependencies } from '../integrations/dependency-lookup';
@@ -129,9 +129,11 @@ async function sprintRuns(keys: string[]) {
   return (await orchestratorService.list()).filter((run) => wanted.has(run.key));
 }
 
+const sprintWindow = (sprint: { startDate: string; endDate: string }) => ({ from: new Date(sprint.startDate), to: new Date(sprint.endDate) });
+
 async function sprintLoad(sprint: { id: number; startDate: string; endDate: string }) {
   const keys = await sprintKeyList(sprint.id);
-  const runs = await sprintRuns(keys);
+  const runs = runsInWindow(await sprintRuns(keys), sprintWindow(sprint));
   return { runs, numbers: await sprintRetroNumbers(sprint, runs, keys) };
 }
 
@@ -208,14 +210,14 @@ async function retroView(sprintId?: number | null) {
 }
 
 /** QA escalations of the whole team by cause, from the sprint dashboard's tickets; the ones Planning did not predict become proposed triage rules. */
-async function sprintEscalations(sprint: { id: number; name: string }) {
-  let issues: Array<{ key: string; summary?: string; labels?: string[]; events?: Array<{ field: string; to: string | null }> }> = [];
+async function sprintEscalations(sprint: { id: number; name: string; startDate: string; endDate: string }) {
+  let issues: Array<{ key: string; summary?: string; labels?: string[]; events?: Array<{ field: string; at?: string; from?: string | null; to: string | null }> }> = [];
   try { issues = JSON.parse(await sprintDashboardService.issueEvents(sprint.id)); } catch { issues = []; }
   const draft = await storageService.getSprintDraft(sprint.name);
   const predictions = draft ? new Map(draft.tickets.map((ticket) => {
     try { return [ticket.key, ticket.prediction ? String(JSON.parse(ticket.prediction).prediction ?? '') || null : null] as const; } catch { return [ticket.key, null] as const; }
   })) : null;
-  const escalations = qaEscalations(Array.isArray(issues) ? issues : [], predictions);
+  const escalations = qaEscalations(Array.isArray(issues) ? issues : [], predictions, sprintWindow(sprint));
   for (const item of triageSuggestions(escalations)) await storageService.upsertRetroSuggestion(sprint.name, item);
   return escalations;
 }

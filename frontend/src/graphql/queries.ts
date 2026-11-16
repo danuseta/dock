@@ -706,10 +706,10 @@ export const GET_RETRO = gql`
       sprint
       sprintId
       previous
-      numbers { tickets medianHours fixRounds replans ownerIssues medianOwnerWaitHours reviews requestChanges blockedWaits mergeConflicts stackedRebases }
-      previousNumbers { tickets medianHours fixRounds replans ownerIssues medianOwnerWaitHours reviews requestChanges blockedWaits mergeConflicts stackedRebases }
+      numbers { tickets medianHours fixRounds replans ownerIssues medianOwnerWaitHours ownerWaitHours reviews requestChanges blockedWaits mergeConflicts stackedRebases }
+      previousNumbers { tickets medianHours fixRounds replans ownerIssues medianOwnerWaitHours ownerWaitHours reviews requestChanges blockedWaits mergeConflicts stackedRebases }
       problems { label count tickets }
-      tickets { key title kind hours rounds issues ownerWaitHours result }
+      tickets { key title kind hours rounds issues findings ownerWaitHours result }
       escalations { tickets planned causes { cause label count tickets } unpredicted { key summary causes prediction } }
       items { id kind text evidence dest status sessionId source updatedAt }
     }

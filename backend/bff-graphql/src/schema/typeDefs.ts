@@ -542,6 +542,7 @@ export const typeDefs = gql`
     replans: Float!
     ownerIssues: Int!
     medianOwnerWaitHours: Float
+    ownerWaitHours: Float!
     reviews: Int!
     requestChanges: Int!
     blockedWaits: Int!
@@ -999,6 +1000,7 @@ export const typeDefs = gql`
     hours: Float
     rounds: Int!
     issues: Int!
+    findings: Int!
     ownerWaitHours: Float
     result: String!
   }
@@ -1094,7 +1096,8 @@ export const typeDefs = gql`
     lastRun: String
     findings: Int!
     findingSessions: Int!
-    grade: String!
+    """Null until Judge has judged a session of the sprint."""
+    grade: String
     previousGrade: String
     ownerHours: Float!
     causes: [JudgeCauseCount!]!
