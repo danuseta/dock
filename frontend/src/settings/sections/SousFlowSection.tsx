@@ -17,9 +17,9 @@ const seg = (on: boolean, tone?: 'ask' | 'stop') => cn('inline-flex items-center
   on ? (tone === 'stop' ? 'border-status-conflict/50 bg-status-conflict-bg text-status-conflict' : tone === 'ask' ? 'border-status-warn/50 bg-status-warn-bg text-status-warn' : 'border-accent bg-accent-dim text-foreground') : 'border-border bg-surface-1 text-secondary-foreground hover:border-border-glow');
 
 const AFTER_HELP: Record<StageAfter, string> = {
-  go: 'Lead nulis checkpoint, terus lanjut sendiri.',
-  ask: 'Lead nulis checkpoint dan nunggu kamu bilang lanjut.',
-  stop: 'Flow selesai di sini. Satu flow cuma punya satu titik berhenti.',
+  go: 'Lead writes a checkpoint, then carries on.',
+  ask: 'Lead writes a checkpoint and waits for you to say continue.',
+  stop: 'The flow ends here. A flow has only one stop point.',
 };
 
 /** Settings › Sous flow: the sous stages, per profile which run and what happens after each, and the checkpoint switch. Saves on each change. */
@@ -56,7 +56,7 @@ export const SousFlowSection = () => {
     if (rename.trim() === name) return;
     const next = renameProfile(settings, name, rename);
     if (!next) {
-      setError('Nama profil itu udah dipakai atau kosong.');
+      setError('That profile name is taken or empty.');
       setRename(name);
       return;
     }
@@ -70,36 +70,36 @@ export const SousFlowSection = () => {
 
   return (
     <div className="flex flex-col gap-5">
-      <SettingsCard title="Checkpoint" caption="Lead nulis laporan singkat ke DOCK tiap agent selesai, muncul sebagai kartu di Sessions. Kalau mati, perintahnya diam dan sous jalan kayak biasa.">
+      <SettingsCard title="Checkpoint" caption="Lead writes a short report to DOCK each time an agent finishes, shown as a card in Sessions. When off, the command stays silent and sous runs as usual.">
         <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={settings.checkpoint} disabled={busy} onChange={(event) => store({ ...settings, checkpoint: event.target.checked })} />
-          Kirim checkpoint
+          Send checkpoints
         </label>
       </SettingsCard>
 
       <SettingsCard
-        title="Dari tiket Jira sampai status Jira"
-        caption="Profil kamu dipakai tiket yang nggak punya flow sendiri. Per tiket diatur di detail tiket, per sesi di kotak ketik Sessions. Semua tahap jalan dan lanjut berarti prompt sous sama persis kayak sekarang."
-        aside={<Badge>{running} tahap jalan · {asking} tanya dulu</Badge>}
+        title="From Jira ticket to Jira status"
+        caption="Your profile applies to tickets without their own flow. Set it per ticket in the ticket detail, per session in the Sessions composer. With every stage running and going on, the sous prompt stays exactly as it is now."
+        aside={<Badge>{running} stages run · {asking} ask first</Badge>}
       >
-        <div className="mb-3 flex flex-wrap items-center gap-1.5" role="listbox" aria-label="Profil">
+        <div className="mb-3 flex flex-wrap items-center gap-1.5" role="listbox" aria-label="Profiles">
           {profileNames(settings).map((item) => (
             <button key={item} type="button" role="option" aria-selected={item === name} onClick={() => setCurrent(item)} className={cn('inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-1.5 text-[0.8rem] max-[900px]:min-h-11', item === name ? 'border-accent bg-accent-dim text-foreground' : 'border-border bg-surface-1 text-secondary-foreground hover:border-border-glow')}>
-              <Workflow size={14} aria-hidden="true" />{item}{item === settings.mine && <span className="font-mono text-[0.6rem] text-sky-200">· profil kamu</span>}
+              <Workflow size={14} aria-hidden="true" />{item}{item === settings.mine && <span className="font-mono text-[0.6rem] text-sky-200">· your profile</span>}
             </button>
           ))}
-          <Button size="sm" variant="ghost" onClick={addProfile} disabled={busy}><Plus size={14} aria-hidden="true" />Profil baru</Button>
+          <Button size="sm" variant="ghost" onClick={addProfile} disabled={busy}><Plus size={14} aria-hidden="true" />New profile</Button>
         </div>
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <Input aria-label="Nama profil" className="h-9 w-56 max-w-full" value={rename} disabled={busy || name === DEFAULT_PROFILE} onChange={(event) => setRename(event.target.value)} onBlur={applyRename} onKeyDown={(event) => { if (event.key === 'Enter') applyRename(); }} />
-          <Button size="sm" onClick={() => store({ ...settings, mine: name })} disabled={busy || settings.mine === name}><UserCheck size={14} aria-hidden="true" />Jadikan profil saya</Button>
-          <Button size="sm" variant="ghost" onClick={() => storeProfile({ skip: [], ask: [], stop: 'status' })} disabled={busy}><RotateCcw size={14} aria-hidden="true" />Semua jalan</Button>
-          {name !== DEFAULT_PROFILE && <Button size="sm" variant="ghost" onClick={() => { store(removeProfile(settings, name)); setCurrent(DEFAULT_PROFILE); }} disabled={busy}><Trash2 size={14} aria-hidden="true" />Hapus profil</Button>}
+          <Input aria-label="Profile name" className="h-9 w-56 max-w-full" value={rename} disabled={busy || name === DEFAULT_PROFILE} onChange={(event) => setRename(event.target.value)} onBlur={applyRename} onKeyDown={(event) => { if (event.key === 'Enter') applyRename(); }} />
+          <Button size="sm" onClick={() => store({ ...settings, mine: name })} disabled={busy || settings.mine === name}><UserCheck size={14} aria-hidden="true" />Make it my profile</Button>
+          <Button size="sm" variant="ghost" onClick={() => storeProfile({ skip: [], ask: [], stop: 'status' })} disabled={busy}><RotateCcw size={14} aria-hidden="true" />Run all</Button>
+          {name !== DEFAULT_PROFILE && <Button size="sm" variant="ghost" onClick={() => { store(removeProfile(settings, name)); setCurrent(DEFAULT_PROFILE); }} disabled={busy}><Trash2 size={14} aria-hidden="true" />Delete profile</Button>}
         </div>
 
         <div className="grid grid-cols-[minmax(0,1fr)_300px] gap-3.5 max-[1100px]:grid-cols-1">
           <div className="min-w-0">
-            <div className="grid grid-cols-4 gap-2.5 max-[760px]:grid-cols-2" role="listbox" aria-label="Tahap sous">
+            <div className="grid grid-cols-4 gap-2.5 max-[760px]:grid-cols-2" role="listbox" aria-label="Sous stages">
               {SOUS_STAGES.map((item, index) => {
                 const head = index === 0 || SOUS_STAGES[index - 1].phase !== item.phase ? item.phase : null;
                 const off = index > stopIndex;
@@ -115,14 +115,14 @@ export const SousFlowSection = () => {
                       onClick={() => setSelected(item.id)}
                       className={cn('relative flex min-h-[104px] flex-col items-start gap-1 rounded-md border border-border bg-surface-0 p-2.5 text-left', item.id === selected && 'border-accent', (off || skip) && 'opacity-55', flag === 'stop' && 'border-status-conflict/60', flag === 'ask' && !off && 'border-status-warn/60')}
                     >
-                      {item.required && <Lock size={12} aria-label="Nggak bisa dilewati" className="absolute top-2.5 right-2.5 text-muted-foreground" />}
+                      {item.required && <Lock size={12} aria-label="Cannot be skipped" className="absolute top-2.5 right-2.5 text-muted-foreground" />}
                       <span className="font-mono text-[0.62rem] text-muted-foreground">{String(index + 1).padStart(2, '0')}</span>
                       <span className="text-[0.8rem] font-semibold text-foreground">{item.title}</span>
                       <span className="font-mono text-[0.64rem] text-muted-foreground">{item.agent}</span>
                       <span className="mt-auto flex flex-wrap items-center gap-1">
-                        <Badge>{off ? 'nggak jalan' : skip ? 'lewati' : 'jalan'}</Badge>
-                        {flag === 'stop' && <Badge variant="danger"><Flag size={10} aria-hidden="true" className="mr-0.5 inline" />berhenti</Badge>}
-                        {flag === 'ask' && !off && <Badge variant="warn"><Hand size={10} aria-hidden="true" className="mr-0.5 inline" />tanya dulu</Badge>}
+                        <Badge>{off ? 'not run' : skip ? 'skip' : 'run'}</Badge>
+                        {flag === 'stop' && <Badge variant="danger"><Flag size={10} aria-hidden="true" className="mr-0.5 inline" />stop</Badge>}
+                        {flag === 'ask' && !off && <Badge variant="warn"><Hand size={10} aria-hidden="true" className="mr-0.5 inline" />ask first</Badge>}
                       </span>
                     </button>
                   </React.Fragment>
@@ -131,30 +131,30 @@ export const SousFlowSection = () => {
             </div>
             <p className="mt-3 flex flex-wrap items-center gap-2 rounded-sm border border-dashed border-border-glow px-3 py-2 text-[0.8rem] text-secondary-foreground">
               {notRun.length === 0
-                ? <><FlagTriangleRight size={15} aria-hidden="true" />Jalan sampai akhir, nggak ada tahap yang dipotong.</>
-                : <><Flag size={15} aria-hidden="true" className="text-status-conflict" /><b className="text-foreground">Selesai di {SOUS_STAGES[stopIndex].title}.</b> Nggak dijalanin: {notRun.join(', ')}.</>}
+                ? <><FlagTriangleRight size={15} aria-hidden="true" />Runs to the end, no stage cut off.</>
+                : <><Flag size={15} aria-hidden="true" className="text-status-conflict" /><b className="text-foreground">Ends at {SOUS_STAGES[stopIndex].title}.</b> Not run: {notRun.join(', ')}.</>}
             </p>
           </div>
 
           <div className="rounded-md border border-border bg-surface-0 p-3.5 text-[0.82rem]">
             <p className="font-display text-[0.95rem] font-bold">{stage.title}</p>
             <p className="font-mono text-[0.68rem] text-muted-foreground">{stage.agent}</p>
-            {pastStop && <p className="mt-2 rounded-xs border border-status-warn/40 bg-status-warn-bg px-2.5 py-1.5 text-[0.76rem] text-status-warn">Tahap ini ada sesudah titik berhenti, jadi nggak jalan. Pindahin titik berhenti ke sini kalau mau dijalanin.</p>}
+            {pastStop && <p className="mt-2 rounded-xs border border-status-warn/40 bg-status-warn-bg px-2.5 py-1.5 text-[0.76rem] text-status-warn">This stage comes after the stop point, so it does not run. Move the stop point here to run it.</p>}
             <div className="border-b border-border py-2.5">
-              <p className={cn(sectionLabel, 'mb-1.5')}>Tahap ini</p>
+              <p className={cn(sectionLabel, 'mb-1.5')}>This stage</p>
               <div className="flex gap-1.5">
-                <button type="button" className={seg(!skipped)} disabled={busy || !skipped} onClick={() => storeProfile(setRuns(profile, selected, true))}><Play size={13} aria-hidden="true" />Jalan</button>
-                <button type="button" className={seg(skipped)} disabled={busy || skipped || Boolean(stage.required) || profile.stop === selected} onClick={() => storeProfile(setRuns(profile, selected, false))}><SkipForward size={13} aria-hidden="true" />Lewati</button>
+                <button type="button" className={seg(!skipped)} disabled={busy || !skipped} onClick={() => storeProfile(setRuns(profile, selected, true))}><Play size={13} aria-hidden="true" />Run</button>
+                <button type="button" className={seg(skipped)} disabled={busy || skipped || Boolean(stage.required) || profile.stop === selected} onClick={() => storeProfile(setRuns(profile, selected, false))}><SkipForward size={13} aria-hidden="true" />Skip</button>
               </div>
-              {stage.required && <p className="mt-1.5 text-xs text-muted-foreground">{selected === 'decide' ? 'Nggak bisa dilewati. Cuma DOCK yang tandain PR ready setelah kamu jawab di Decisions, tapi boleh jadi titik berhenti.' : 'Nggak bisa dilewati, tahap sesudahnya butuh hasilnya.'}</p>}
-              {selected === 'park' && <p className="mt-1.5 text-xs text-muted-foreground">Cuma kejadian kalau AC tiketnya kosong. Tiket diparkir sampai kamu klik Confirm di Agents.</p>}
+              {stage.required && <p className="mt-1.5 text-xs text-muted-foreground">{selected === 'decide' ? 'Cannot be skipped. Only DOCK marks the PR ready after you answer in Decisions, but it can be the stop point.' : 'Cannot be skipped. The next stage needs its result.'}</p>}
+              {selected === 'park' && <p className="mt-1.5 text-xs text-muted-foreground">Only happens when the ticket's AC is empty. The ticket stays parked until you click Confirm in Agents.</p>}
             </div>
             <div className="border-b border-border py-2.5">
-              <p className={cn(sectionLabel, 'mb-1.5')}>Setelah selesai</p>
+              <p className={cn(sectionLabel, 'mb-1.5')}>When done</p>
               <div className="flex flex-wrap gap-1.5">
-                <button type="button" className={seg(after === 'go')} disabled={busy || skipped} onClick={() => storeProfile(setAfter(profile, selected, 'go'))}><ArrowRight size={13} aria-hidden="true" />Lanjut</button>
-                <button type="button" className={seg(after === 'ask', 'ask')} disabled={busy || skipped || selected === 'status'} onClick={() => storeProfile(setAfter(profile, selected, 'ask'))}><Hand size={13} aria-hidden="true" />Tanya dulu</button>
-                <button type="button" className={seg(after === 'stop', 'stop')} disabled={busy || skipped || selected === 'status'} onClick={() => storeProfile(setAfter(profile, selected, 'stop'))}><Flag size={13} aria-hidden="true" />Berhenti</button>
+                <button type="button" className={seg(after === 'go')} disabled={busy || skipped} onClick={() => storeProfile(setAfter(profile, selected, 'go'))}><ArrowRight size={13} aria-hidden="true" />Continue</button>
+                <button type="button" className={seg(after === 'ask', 'ask')} disabled={busy || skipped || selected === 'status'} onClick={() => storeProfile(setAfter(profile, selected, 'ask'))}><Hand size={13} aria-hidden="true" />Ask first</button>
+                <button type="button" className={seg(after === 'stop', 'stop')} disabled={busy || skipped || selected === 'status'} onClick={() => storeProfile(setAfter(profile, selected, 'stop'))}><Flag size={13} aria-hidden="true" />Stop</button>
               </div>
               <p className="mt-1.5 text-xs text-muted-foreground">{AFTER_HELP[after]}</p>
             </div>
@@ -162,21 +162,21 @@ export const SousFlowSection = () => {
               <div className="border-b border-border py-2.5">
                 <label className="flex items-center gap-2">
                   <Checkbox checked={settings.qaGuide} disabled={busy} onChange={(event) => store({ ...settings, qaGuide: event.target.checked })} />
-                  Tulis QA guide ke Developer Context
+                  Write a QA guide to Developer Context
                 </label>
-                <p className="mt-1.5 text-xs text-muted-foreground">Waktu tiket pindah ke UAT, DOCK nulis satu blok "QA guide (DOCK)" di field Developer Context: URL/route dan jalur menu. Diganti tiap update, isi manual dan Description nggak disentuh.</p>
+                <p className="mt-1.5 text-xs text-muted-foreground">When the ticket moves to UAT, DOCK writes one "QA guide (DOCK)" block in the Developer Context field: URL/route and menu path. It is replaced on every update; manual content and the Description are left alone.</p>
                 <Input aria-label="Field Developer Context" className="mt-2 h-9 font-mono text-xs" defaultValue={settings.qaGuideField} key={settings.qaGuideField} disabled={busy} onBlur={(event) => { if (event.target.value.trim() !== settings.qaGuideField) store({ ...settings, qaGuideField: event.target.value.trim() }); }} />
               </div>
             )}
             {selected === 'decide' && (
-              <p className="flex items-start gap-1.5 border-b border-border py-2.5 text-xs text-muted-foreground"><RotateCcw size={13} aria-hidden="true" className="mt-0.5 flex-none text-sky-200" /><span>Keep balik ke gate DOCK, dan DOCK yang tandain PR ready. Change atau jawaban bikin sesi sous baru: revisi, push ke PR yang sama, balik ke gate.</span></p>
+              <p className="flex items-start gap-1.5 border-b border-border py-2.5 text-xs text-muted-foreground"><RotateCcw size={13} aria-hidden="true" className="mt-0.5 flex-none text-sky-200" /><span>Keep goes back to the DOCK gate, and DOCK marks the PR ready. Change or an answer starts a new sous session: revise, push to the same PR, back to the gate.</span></p>
             )}
-            {stage.asks && <p className="pt-2.5 text-xs text-muted-foreground">Pertanyaan ke owner tetap lewat Decisions (I-n). Blocker dan keputusan selalu berhenti.</p>}
+            {stage.asks && <p className="pt-2.5 text-xs text-muted-foreground">Questions to the owner still go through Decisions (I-n). Blockers and decisions always stop.</p>}
           </div>
         </div>
 
         <div className="mt-3.5 overflow-hidden rounded-md border border-border bg-surface-0">
-          <p className={cn(sectionLabel, 'flex flex-wrap justify-between gap-2 border-b border-border bg-surface-1 px-3 py-2')}><span>Yang dikirim DOCK ke sous waktu sesi mulai</span><span>{preview?.sousFlowPrompt.lines.length ? `+${preview.sousFlowPrompt.lines.length} baris flow` : 'sama kayak sekarang'}</span></p>
+          <p className={cn(sectionLabel, 'flex flex-wrap justify-between gap-2 border-b border-border bg-surface-1 px-3 py-2')}><span>What DOCK sends sous when a session starts</span><span>{preview?.sousFlowPrompt.lines.length ? `+${preview.sousFlowPrompt.lines.length} flow lines` : 'same as now'}</span></p>
           <pre className="m-0 whitespace-pre-wrap px-3.5 py-3 font-mono text-[0.74rem] leading-[1.7] text-foreground">{preview?.sousFlowPrompt.prompt ?? '…'}</pre>
         </div>
         {error && <p className="mt-3 text-sm text-status-conflict" role="alert">{error}</p>}

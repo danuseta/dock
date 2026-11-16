@@ -42,17 +42,17 @@ test('the log exports as Markdown with every option under its row', () => {
 test('retro numbers show the sprint before, leave out a number zero in both, and read the Indonesian way', () => {
   const now = { tickets: 3, medianHours: 26.3, fixRounds: 1.7, replans: 0, ownerIssues: 6, medianOwnerWaitHours: 0.3, ownerWaitHours: 1.4, reviews: 5, requestChanges: 0, blockedWaits: 2, mergeConflicts: 2, stackedRebases: 0 };
   const before = { ...now, fixRounds: 8.5, stackedRebases: 9, blockedWaits: 0 };
-  assert.equal(beforeText(before, 'fixRounds', '', 'QRD Sprint 26'), '8,5 di QRD Sprint 26');
+  assert.equal(beforeText(before, 'fixRounds', '', 'QRD Sprint 26'), '8,5 in QRD Sprint 26');
   assert.equal(beforeText(null, 'tickets', '', null), null);
   const fields = shownNumbers(now, before).map(([field]) => field);
   assert.ok(fields.includes('stackedRebases'), 'zero now but not before stays');
   assert.ok(!fields.includes('replans') && !fields.includes('requestChanges'), 'zero in both goes');
-  assert.equal(problemLabel('Failure: env'), 'Gagal karena environment');
-  assert.equal(problemLabel('Review finding: non-blocking'), 'Temuan review non-blocking');
-  assert.equal(problemLabel('Escalated to the owner: BLOCKER'), 'Eskalasi BLOCKER ke kamu');
+  assert.equal(problemLabel('Failure: env'), 'Failed on the environment');
+  assert.equal(problemLabel('Review finding: non-blocking'), 'Review finding non-blocking');
+  assert.equal(problemLabel('Escalated to the owner: BLOCKER'), 'BLOCKER escalated to you');
   assert.equal(keyList(['QRD-1', 'QRD-2', 'QRD-3', 'QRD-4', 'QRD-5']), 'QRD-1, QRD-2, QRD-3 +2');
-  assert.equal(buildResult({ result: 'done', hours: 26.3 }), 'selesai · 26,3 j');
-  assert.equal(buildResult({ result: 'pr', hours: null }), 'di PR');
+  assert.equal(buildResult({ result: 'done', hours: 26.3 }), 'done · 26,3 h');
+  assert.equal(buildResult({ result: 'pr', hours: null }), 'in PR');
   const review = (key: string, result: string, findings: number) => ({ key, title: key, kind: 'review', hours: null, rounds: 0, issues: 0, findings, ownerWaitHours: null, result });
-  assert.equal(reviewSummary([review('QRD-1', 'approve', 3), review('QRD-2', 'approve', 4)]), '2 review · semua approve · 7 temuan');
+  assert.equal(reviewSummary([review('QRD-1', 'approve', 3), review('QRD-2', 'approve', 4)]), '2 reviews · all approved · 7 findings');
 });

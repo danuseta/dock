@@ -179,7 +179,7 @@ export function mergeRetroItems(items: RetroItem[], view: RetroView): MergedRetr
 
 /** The Sprint sheet row: the grade and the owner time lost once Judge judged a session, until then that nothing is judged. */
 export const sheetLine = (sheet: Pick<JudgeSprintSheet, 'grade' | 'ownerHours'>) => (
-  sheet.grade ? `pola buat diterima · grade ${sheet.grade} · ${String(sheet.ownerHours).replace('.', ',')} j waktu kamu kebuang` : 'pola buat diterima · belum dinilai Judge'
+  sheet.grade ? `patterns to accept · grade ${sheet.grade} · ${String(sheet.ownerHours).replace('.', ',')} h of your time lost` : 'patterns to accept · not judged yet'
 );
 
 export const GRADE_CLASS: Record<string, string> = {

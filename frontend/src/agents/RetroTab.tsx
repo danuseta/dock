@@ -12,7 +12,7 @@ import { JudgeDaySheet } from './JudgeDaySheet';
 import { JUDGE_ONLY_OPTION, judgeHref, judgeOnlySprint, judgeRoute, mergeRetroItems, readRetroView, retroSprintOptions, writeRetroView, type JudgeDays as JudgeDaysData, type MergedRetroItem, type RetroView } from './judge';
 
 const KIND_LABEL: Record<string, string> = { keep: 'Keep', problem: 'Problem', try: 'Try' };
-const DEST_LABEL: Record<string, string> = { kit: 'PR kit', memory: 'memory', dock: 'issue DOCK', note: 'catatan aja', 'qa-agent': 'aturan triage QA bot (PR oleh developer)' };
+const DEST_LABEL: Record<string, string> = { kit: 'PR kit', memory: 'memory', dock: 'issue DOCK', note: 'note only', 'qa-agent': 'QA bot triage rule (PR by a developer)' };
 const CAUSE_COLOR: Record<string, string> = {
   dependency: 'var(--color-status-warn)', access: 'var(--color-status-discord)', data: 'var(--color-secondary-foreground)', environment: 'var(--color-status-conflict)', unspecified: 'var(--color-muted-foreground)',
 };
@@ -33,29 +33,29 @@ const Line: React.FC<{ item: RetroItem; onAction: (id: string, action: string, t
       <span className="flex flex-col gap-1 pt-0.5 font-mono text-[0.66rem] font-bold uppercase tracking-[0.08em] text-secondary-foreground">{KIND_LABEL[item.kind] ?? item.kind}{sources && <SourceChips sources={sources} />}</span>
       <div className="min-w-0">
         {editing
-          ? <Textarea aria-label="Ubah baris" className="min-h-[72px] text-sm" value={text} onChange={(event) => setText(event.target.value)} />
+          ? <Textarea aria-label="Edit line" className="min-h-[72px] text-sm" value={text} onChange={(event) => setText(event.target.value)} />
           : <p className="text-pretty text-[0.84rem] text-foreground">{item.text}</p>}
         {evidence.length > 0 && <ul className="mt-1 grid gap-0.5 text-[0.72rem] text-muted-foreground">{evidence.map((line) => <li key={line}>{line}</li>)}</ul>}
-        {more > 0 && <button type="button" className={fold} onClick={() => setAllEvidence(!allEvidence)}>{allEvidence ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}{allEvidence ? 'Tutup bukti' : `${more} bukti lagi`}</button>}
+        {more > 0 && <button type="button" className={fold} onClick={() => setAllEvidence(!allEvidence)}>{allEvidence ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}{allEvidence ? 'Hide evidence' : `${more} more evidence`}</button>}
         <p className="mt-1 font-mono text-[0.64rem] text-muted-foreground">
-          masuk ke {DEST_LABEL[item.dest] ?? item.dest}
-          {item.status === 'accepted' && <span className="text-status-merged"> · diterima{item.sessionId ? ', sous lagi nerapin' : item.dest === 'qa-agent' ? ', buka PR ke repo QA bot' : ''}</span>}
-          {item.status === 'closed' && <span> · ditutup</span>}
+          goes to {DEST_LABEL[item.dest] ?? item.dest}
+          {item.status === 'accepted' && <span className="text-status-merged"> · accepted{item.sessionId ? ', sous is applying it' : item.dest === 'qa-agent' ? ', open a PR to the QA bot repo' : ''}</span>}
+          {item.status === 'closed' && <span> · closed</span>}
         </p>
       </div>
       <div className="flex flex-wrap items-start justify-end gap-1.5 max-[760px]:justify-start">
         {editing ? (
           <>
-            <Button size="sm" onClick={() => { setEditing(false); setText(item.text); }} disabled={busy}>Batal</Button>
-            <Button size="sm" variant="primary" disabled={busy || !text.trim() || text === item.text} onClick={() => void onAction(item.id, 'edit', text).then(() => setEditing(false))}>Simpan</Button>
+            <Button size="sm" onClick={() => { setEditing(false); setText(item.text); }} disabled={busy}>Cancel</Button>
+            <Button size="sm" variant="primary" disabled={busy || !text.trim() || text === item.text} onClick={() => void onAction(item.id, 'edit', text).then(() => setEditing(false))}>Save</Button>
           </>
         ) : done ? (
-          <Button size="sm" variant="ghost" onClick={() => void onAction(item.id, 'reopen')} disabled={busy || item.status === 'accepted'}><RotateCcw size={13} aria-hidden="true" />Buka lagi</Button>
+          <Button size="sm" variant="ghost" onClick={() => void onAction(item.id, 'reopen')} disabled={busy || item.status === 'accepted'}><RotateCcw size={13} aria-hidden="true" />Reopen</Button>
         ) : (
           <>
             <Button size="sm" variant="ghost" onClick={() => setEditing(true)} disabled={busy}><Pencil size={13} aria-hidden="true" />Edit</Button>
-            <Button size="sm" variant="ghost" onClick={() => void onAction(item.id, 'close')} disabled={busy}><X size={13} aria-hidden="true" />Tutup</Button>
-            <Button size="sm" variant="primary" onClick={() => void onAction(item.id, 'accept')} disabled={busy}><Check size={13} aria-hidden="true" />Terima</Button>
+            <Button size="sm" variant="ghost" onClick={() => void onAction(item.id, 'close')} disabled={busy}><X size={13} aria-hidden="true" />Close</Button>
+            <Button size="sm" variant="primary" onClick={() => void onAction(item.id, 'accept')} disabled={busy}><Check size={13} aria-hidden="true" />Accept</Button>
           </>
         )}
       </div>
@@ -65,9 +65,9 @@ const Line: React.FC<{ item: RetroItem; onAction: (id: string, action: string, t
 
 /** QA escalations of the whole team by cause, counted from the labels added during the sprint. */
 const Escalations: React.FC<{ escalations: RetroEscalations }> = ({ escalations }) => (
-  <section aria-label="Eskalasi QA" className="min-w-0">
-    <h3 className={head}>Eskalasi QA <span className="font-medium normal-case tracking-normal">· {escalations.tickets} tiket</span></h3>
-    {escalations.causes.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">Nggak ada label eskalasi QA yang dipasang di sprint ini.</p> : (
+  <section aria-label="QA escalations" className="min-w-0">
+    <h3 className={head}>QA escalations <span className="font-medium normal-case tracking-normal">· {escalations.tickets} tickets</span></h3>
+    {escalations.causes.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">No QA escalation labels were added this sprint.</p> : (
       <ul className="mt-2">
         {escalations.causes.map((row) => (
           <li key={row.cause} className="grid grid-cols-[180px_minmax(0,1fr)_32px] items-center gap-3 border-b border-border py-2 text-[0.8rem] last:border-b-0 max-[760px]:grid-cols-[minmax(0,1fr)_32px]">
@@ -80,9 +80,9 @@ const Escalations: React.FC<{ escalations: RetroEscalations }> = ({ escalations 
       </ul>
     )}
     {!escalations.planned
-      ? <p className="mt-2 text-pretty text-[0.76rem] text-muted-foreground">Sprint ini nggak di-plan di Planning DOCK, jadi nggak ada prediksi QA buat dibandingin.</p>
+      ? <p className="mt-2 text-pretty text-[0.76rem] text-muted-foreground">This sprint was not planned in DOCK Planning, so there is no QA prediction to compare.</p>
       : escalations.unpredicted.length > 0 && (
-        <p className="mt-2 text-pretty text-[0.76rem] text-muted-foreground">Planning nggak memprediksi {escalations.unpredicted.length} dari {escalations.tickets} tiket. Usulan aturan triage-nya ada di Try.</p>
+        <p className="mt-2 text-pretty text-[0.76rem] text-muted-foreground">Planning did not predict {escalations.unpredicted.length} of {escalations.tickets} tickets. The proposed triage rules are under Try.</p>
       )}
   </section>
 );
@@ -96,7 +96,7 @@ const Numbers: React.FC<{ retro: Retro }> = ({ retro }) => (
       return (
         <div key={field} className="border-b border-r border-border px-4 py-3">
           <dd className="font-display text-2xl font-bold tabular-nums">{value == null ? '—' : `${idNumber(value)}${unit}`}</dd>
-          <dt className="flex items-center gap-1 text-[0.72rem] text-secondary-foreground">{label}{field === 'medianHours' && <InfoTip label="Tentang lama tiket">Median tiket yang selesai di sprint ini, dari mulai sampai selesai, termasuk waktu nunggu.</InfoTip>}</dt>
+          <dt className="flex items-center gap-1 text-[0.72rem] text-secondary-foreground">{label}{field === 'medianHours' && <InfoTip label="About ticket time">Median of the tickets finished this sprint, from start to finish, including waiting time.</InfoTip>}</dt>
           {before && <dd className="font-mono text-[0.64rem] text-muted-foreground">{before}</dd>}
         </div>
       );
@@ -109,9 +109,9 @@ const Recurring: React.FC<{ problems: Retro['problems'] }> = ({ problems }) => {
   const shown = all ? problems : problems.slice(0, SHOWN_PROBLEMS);
   const rest = problems.slice(SHOWN_PROBLEMS);
   return (
-    <section aria-label="Yang berulang">
-      <h3 className={head}>Yang berulang</h3>
-      {problems.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">Nggak ada yang berulang di sprint ini.</p> : (
+    <section aria-label="Recurring">
+      <h3 className={head}>Recurring</h3>
+      {problems.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">Nothing recurred this sprint.</p> : (
         <ol className="mt-2">
           {shown.map((problem) => (
             <li key={problem.label} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 border-b border-border py-2 text-[0.82rem] last:border-b-0">
@@ -122,7 +122,7 @@ const Recurring: React.FC<{ problems: Retro['problems'] }> = ({ problems }) => {
           ))}
         </ol>
       )}
-      {rest.length > 0 && <button type="button" className={fold} aria-expanded={all} onClick={() => setAll(!all)}>{all ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}{all ? 'Tutup' : `${rest.length} lagi: ${rest.map((problem) => `${problemLabel(problem.label).toLowerCase()} ${problem.count}`).join(', ')}`}</button>}
+      {rest.length > 0 && <button type="button" className={fold} aria-expanded={all} onClick={() => setAll(!all)}>{all ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}{all ? 'Hide' : `${rest.length} more: ${rest.map((problem) => `${problemLabel(problem.label).toLowerCase()} ${problem.count}`).join(', ')}`}</button>}
     </section>
   );
 };
@@ -134,12 +134,12 @@ const PerTicket: React.FC<{ tickets: Retro['tickets'] }> = ({ tickets }) => {
   const builds = tickets.filter((ticket) => ticket.kind !== 'review');
   const reviews = tickets.filter((ticket) => ticket.kind === 'review');
   return (
-    <section aria-label="Per tiket" className="min-w-0 overflow-x-auto">
-      <h3 className={head}>Per tiket</h3>
-      {tickets.length === 0 && <p className="mt-2 text-sm text-muted-foreground">Nggak ada run agent di sprint ini.</p>}
+    <section aria-label="Per ticket" className="min-w-0 overflow-x-auto">
+      <h3 className={head}>Per ticket</h3>
+      {tickets.length === 0 && <p className="mt-2 text-sm text-muted-foreground">No agent runs this sprint.</p>}
       {builds.length > 0 && (
         <table className="mt-2 w-full border-collapse text-[0.78rem]">
-          <thead><tr className="text-left font-mono text-[0.6rem] uppercase tracking-[0.08em] text-muted-foreground">{['Tiket', 'Fix round', 'Isu', 'Temuan', 'Nunggu kamu', 'Hasil'].map((h) => <th key={h} className="border-b border-border-glow py-1.5 pr-3 font-bold">{h}</th>)}</tr></thead>
+          <thead><tr className="text-left font-mono text-[0.6rem] uppercase tracking-[0.08em] text-muted-foreground">{['Ticket', 'Fix rounds', 'Issues', 'Findings', 'Waiting on you', 'Result'].map((h) => <th key={h} className="border-b border-border-glow py-1.5 pr-3 font-bold">{h}</th>)}</tr></thead>
           <tbody>
             {builds.map((ticket) => (
               <tr key={ticket.key} className="border-b border-border text-secondary-foreground">
@@ -147,7 +147,7 @@ const PerTicket: React.FC<{ tickets: Retro['tickets'] }> = ({ tickets }) => {
                 <td className={cn(cell, 'tabular-nums')}>{ticket.rounds}</td>
                 <td className={cn(cell, 'tabular-nums')}>{ticket.issues}</td>
                 <td className={cn(cell, 'tabular-nums')}>{ticket.findings}</td>
-                <td className={cn(cell, 'tabular-nums')}>{ticket.ownerWaitHours == null ? '—' : `${idNumber(ticket.ownerWaitHours)} j`}</td>
+                <td className={cn(cell, 'tabular-nums')}>{ticket.ownerWaitHours == null ? '—' : `${idNumber(ticket.ownerWaitHours)} h`}</td>
                 <td className={cell}>{buildResult(ticket)}</td>
               </tr>
             ))}
@@ -162,7 +162,7 @@ const PerTicket: React.FC<{ tickets: Retro['tickets'] }> = ({ tickets }) => {
               {reviews.map((ticket) => (
                 <tr key={ticket.key} className="border-b border-border text-secondary-foreground">
                   <td className={cn(cell, 'font-mono font-semibold text-foreground')} title={ticket.title}>{ticket.key}</td>
-                  <td className={cn(cell, 'tabular-nums')}>{ticket.findings} temuan</td>
+                  <td className={cn(cell, 'tabular-nums')}>{ticket.findings} findings</td>
                   <td className={cell}>{ticket.result}</td>
                 </tr>
               ))}
@@ -264,8 +264,8 @@ export const RetroTab: React.FC<{ onNavigate?: (path: string) => void }> = ({ on
   };
 
   if (error && !data) return <p className="text-sm text-status-conflict" role="alert">{error.message}</p>;
-  if (!data && loading) return <p className="text-sm text-muted-foreground" role="status">Lagi muat retro...</p>;
-  if (!retro) return <p className="text-sm text-muted-foreground">Belum ada sprint. Dashboard sprint baru nampilin sprint setelah Jira diisi di Settings.</p>;
+  if (!data && loading) return <p className="text-sm text-muted-foreground" role="status">Loading retro...</p>;
+  if (!retro) return <p className="text-sm text-muted-foreground">No sprints yet. The sprint dashboard shows sprints once Jira is set up in Settings.</p>;
   const merged = mergeRetroItems(retro.items, view);
   const open = merged.filter((entry) => entry.item.status === 'open').length;
   const days = judge.data?.judgeDays ?? null;
@@ -277,13 +277,13 @@ export const RetroTab: React.FC<{ onNavigate?: (path: string) => void }> = ({ on
   const header = (
     <div className="flex flex-wrap items-center gap-3">
       <Select aria-label="Sprint" className="w-[280px] max-[760px]:w-full" value={pickerValue} onValueChange={pickSprint} options={options.length ? options : [{ value: String(retro.sprintId), label: retro.sprint }]} />
-      <span className="text-sm text-muted-foreground">{judgeOnly ? `belum ada retro ledger untuk ${judgeOnly}` : retro.previous ? `dibanding ${retro.previous}` : 'belum ada sprint sebelumnya'}</span>
+      <span className="text-sm text-muted-foreground">{judgeOnly ? `no ledger retro for ${judgeOnly} yet` : retro.previous ? `compared with ${retro.previous}` : 'no previous sprint'}</span>
       <span className="inline-flex overflow-hidden whitespace-nowrap rounded-xs border border-border-glow font-mono text-[0.66rem]" role="group" aria-label="Retro source">
         {VIEWS.map(([id, label]) => <button key={id} type="button" aria-pressed={view === id} onClick={() => chooseView(id)} className={cn('px-2.5 py-1 max-[760px]:min-h-11 max-[760px]:px-3.5', view === id ? 'bg-surface-hover font-bold text-foreground' : 'text-secondary-foreground hover:bg-surface-1')}>{label}</button>)}
       </span>
       <span className="ml-auto flex flex-wrap gap-2 max-[760px]:ml-0">
         {showJudge && <Button onClick={() => void onJudgeSprint()} disabled={summing.loading}><Gavel size={14} aria-hidden="true" />Judge sprint</Button>}
-        {!judgeOnly && <Button onClick={() => void onBuild()} disabled={building.loading}><Sparkles size={14} aria-hidden="true" />{retro.items.length ? 'Draft ulang' : 'Bikin draft'}</Button>}
+        {!judgeOnly && <Button onClick={() => void onBuild()} disabled={building.loading}><Sparkles size={14} aria-hidden="true" />{retro.items.length ? 'Redraft' : 'Draft'}</Button>}
       </span>
     </div>
   );
@@ -332,9 +332,9 @@ export const RetroTab: React.FC<{ onNavigate?: (path: string) => void }> = ({ on
       <Escalations escalations={retro.escalations} />
 
       <section aria-label="Keep, Problem, Try">
-        <h3 className={head}>Keep · Problem · Try {merged.length > 0 && <span className="font-medium normal-case tracking-normal">· {open} nunggu kamu</span>}</h3>
+        <h3 className={head}>Keep · Problem · Try {merged.length > 0 && <span className="font-medium normal-case tracking-normal">· {open} waiting on you</span>}</h3>
         {merged.length === 0
-          ? <p className="mt-2 text-sm text-muted-foreground">Belum ada draft. Bikin draft minta sous nulis dari run sprint ini, tiap baris ada buktinya.</p>
+          ? <p className="mt-2 text-sm text-muted-foreground">No draft yet. Draft asks sous to write one from this sprint's runs, with evidence on every line.</p>
           : <ol className="mt-1">{merged.map((entry) => <Line key={entry.item.id} item={entry.item} sources={view === 'both' ? entry.sources : undefined} onAction={(_id, action, text) => onMerged(entry, action, text)} busy={acting.loading} />)}</ol>}
       </section>
       </>}

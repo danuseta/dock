@@ -70,11 +70,11 @@ test('findings sort after-it first and decisions read as words', () => {
   assert.deepEqual(['after-it', 'lands-first', 'outside-plan'].map(findingKindLabel), ['after it', 'lands first', 'outside plan']);
   const decision = (action: string, note: string | null = null) => ({ action, note, by: 'Alvin', at: '' });
   assert.equal(decisionLabel(decision('move'), 'QRD-2'), 'Moved to QRD-2');
-  assert.equal(decisionLabel(decision('dependency')), 'Dependency · link Blocks dipasang waktu Publish');
-  assert.equal(decisionLabel(decision('wait')), 'Dependency · link Blocks dipasang waktu Publish', 'an older wait reads as dependency');
-  assert.equal(decisionLabel(decision('reference')), 'Pindah ke Reference');
-  assert.equal(decisionLabel(decision('drop')), 'Pindah ke Reference', 'an older drop reads as reference');
-  assert.equal(decisionLabel(decision('approve')), 'Disetujui QA');
+  assert.equal(decisionLabel(decision('dependency')), 'Dependency · Blocks link added on Publish');
+  assert.equal(decisionLabel(decision('wait')), 'Dependency · Blocks link added on Publish', 'an older wait reads as dependency');
+  assert.equal(decisionLabel(decision('reference')), 'Moved to Reference');
+  assert.equal(decisionLabel(decision('drop')), 'Moved to Reference', 'an older drop reads as reference');
+  assert.equal(decisionLabel(decision('approve')), 'Approved by QA');
   assert.equal(decisionLabel(decision('fix', 'AC 3 rewritten')), 'Fixed: AC 3 rewritten');
   assert.equal(decisionLabel(null), null);
 });
@@ -281,7 +281,7 @@ test('Siap publish 4 dari 4: SP fit, references and ESCALATED decided, storyboar
   const result = publishReadiness(ready(), null);
   assert.deepEqual([result.done, result.total, result.missing], [4, 4, []]);
   assert.deepEqual(result.items.map((item) => item.id), ['scope', 'ac', 'qa', 'storyboard']);
-  assert.equal(result.items[0].text, '20 SP muat di kapasitas 20 SP');
+  assert.equal(result.items[0].text, '20 SP fits the 20 SP capacity');
 });
 
 test('Siap publish 2 dari 4: SP over capacity without a cut and an undecided ESCALATED ticket, each linked to its panel', () => {
@@ -290,14 +290,14 @@ test('Siap publish 2 dari 4: SP over capacity without a cut and an undecided ESC
   }), null);
   assert.deepEqual([result.done, result.total], [2, 4]);
   assert.deepEqual(result.missing.map((item) => [item.id, item.panel, item.text]), [
-    ['scope', 'scope', '30 SP untuk kapasitas 20 SP'],
-    ['qa', 'qa', '1 tiket diprediksi ESCALATED belum diputusin'],
+    ['scope', 'scope', '30 SP for a 20 SP capacity'],
+    ['qa', 'qa', '1 ticket predicted ESCALATED not decided'],
   ]);
-  assert.equal(result.missing[0].detail, 'Belum ada keputusan potong scope');
+  assert.equal(result.missing[0].detail, 'No scope cut decided yet');
   const cut = publishReadiness(ready({ tickets: [ticket({ key: 'QRD-1', sp: 25 })], scopeCut: { action: 'cut', note: 'QRD-1 pindah ke Sprint 28', by: 'PO', at: '' } }), null);
   assert.equal(cut.items[0].ok, true, 'a written scope cut counts as fit');
   const open = publishReadiness(ready({ findings: [finding({ id: 'f1', key: 'QRD-7', kind: 'after-it' })], storyboards: [] }), null);
-  assert.deepEqual(open.missing.map((item) => [item.id, item.detail]), [['ac', 'QRD-7'], ['storyboard', 'Belum ada storyboard yang dibaca']]);
+  assert.deepEqual(open.missing.map((item) => [item.id, item.detail]), [['ac', 'QRD-7'], ['storyboard', 'No storyboard read yet']]);
   const carried = publishReadiness(ready({
     tickets: [ticket({ key: 'QRD-1', sp: 5 }), ticket({ key: 'QRD-2', sp: 5, carried: true, prediction: { prediction: 'ESCALATED', reasons: [], fix: null } })],
   }), null);
@@ -325,7 +325,7 @@ test('the QA checklist splits the AC: a line for Reference or moved is not teste
   assert.deepEqual(list.here.map((line) => [line.n, line.waitsOn, line.textId]), [[1, [], 'Owner lihat rule-nya'], [2, ['QRD-1307'], null], [4, ['QRD-1500'], null]]);
   assert.deepEqual(list.notHere.map((line) => [line.n, line.testedIn]), [[3, 'QRD-1312']]);
   const tcs = checklistTcs(list);
-  assert.deepEqual(tcs.map((tc) => [tc.id, tc.ac, tc.steps]), [['TC-1', 1, []], ['TC-2', 2, ['Tunggu QRD-1307 sampai UAT CHECK']], ['TC-3', 4, ['Tunggu QRD-1500 sampai UAT CHECK']]]);
+  assert.deepEqual(tcs.map((tc) => [tc.id, tc.ac, tc.steps]), [['TC-1', 1, []], ['TC-2', 2, ['Wait for QRD-1307 to reach UAT CHECK']], ['TC-3', 4, ['Wait for QRD-1500 to reach UAT CHECK']]]);
   assert.equal(qaChecklist(draftTicket, [finding({ key: 'QRD-1510', line: 3, refKey: 'QRD-1312', decision: { action: 'drop', note: null, by: null, at: '' } })]).notHere.length, 1, 'an older drop is not tested here either');
 });
 
@@ -348,9 +348,9 @@ test('Siap publish and AC check count the same undecided lines: every line namin
   ];
   const item = publishReadiness(ready({ findings }), null).items.find((entry) => entry.id === 'ac')!;
   assert.equal(findings.filter(undecidedFinding).length, 3);
-  assert.deepEqual([item.ok, item.text, item.detail], [false, '3 rujukan tiket lain belum diputusin', 'QRD-1, QRD-2, QRD-3']);
+  assert.deepEqual([item.ok, item.text, item.detail], [false, '3 references to other tickets not decided', 'QRD-1, QRD-2, QRD-3']);
   const source = readFileSync(fileURLToPath(new URL('../agents/PlanningTab.tsx', import.meta.url)), 'utf8');
-  assert.ok(source.includes('{findings.filter(undecidedFinding).length} belum diputusin'), 'AC check counts with the same predicate');
+  assert.ok(source.includes('{findings.filter(undecidedFinding).length} not decided'), 'AC check counts with the same predicate');
 });
 
 test('the Draft panel follows the URL on load and on Back / Forward', () => {

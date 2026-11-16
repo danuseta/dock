@@ -86,9 +86,9 @@ export const CodeChanges: React.FC<{ ticketKey: string; repo: string | null; onR
 
 /** Per AC: each AC line with the path:line it names in this pull request; a click opens that file in Per file. */
 const AcOrder: React.FC<{ trace: AcTrace | null; files: string[]; onPick: (path: string) => void }> = ({ trace, files, onPick }) => {
-  if (!trace?.readable) return <Notice>Tiket → kode belum ada buat tiket ini, jadi urutan per AC belum bisa dipakai.</Notice>;
+  if (!trace?.readable) return <Notice>This ticket has no Ticket → code yet, so the per-AC order is not available.</Notice>;
   const lines = trace.lines.filter((line) => line.refs.some((ref) => files.some((path) => refMatches(ref, path))));
-  if (!lines.length) return <Notice>Nggak ada baris AC yang kodenya di repo ini.</Notice>;
+  if (!lines.length) return <Notice>No AC line has code in this repo.</Notice>;
   return (
     <ol className="mb-3 flex flex-col rounded-sm border border-border bg-surface-0 px-3 py-1">
       {lines.map((line) => (
@@ -101,7 +101,7 @@ const AcOrder: React.FC<{ trace: AcTrace | null; files: string[]; onPick: (path:
                 ? <button key={ref.text} type="button" onClick={() => onPick(path)} title={refDisplay(ref, trace.pulls).title ?? undefined} className="inline-flex items-center gap-1 rounded-xs bg-surface-2 px-1.5 py-px font-mono text-[0.72rem] text-accent hover:underline"><FileCode size={11} aria-hidden="true" />{refDisplay(ref, trace.pulls).label}</button>
                 : <span key={ref.text} title={refDisplay(ref, trace.pulls).title ?? undefined} className="rounded-xs bg-surface-2 px-1.5 py-px font-mono text-[0.72rem] text-muted-foreground">{refDisplay(ref, trace.pulls).label}</span>;
             })}
-            {!hasCode(line) && <span className="text-xs text-status-warn">belum ada path:line</span>}
+            {!hasCode(line) && <span className="text-xs text-status-warn">no path:line yet</span>}
           </p>
         </li>
       ))}
@@ -257,7 +257,7 @@ const PullView: React.FC<PullViewProps> = ({ ticketKey, title, pulls, pull, revi
             {phone && <Button size="sm" onClick={() => setSheet(true)}><ListTree size={14} aria-hidden="true" />Files · {viewedCount}/{files.length}</Button>}
             <label className={cn('flex items-center gap-1.5 px-1 text-xs', review ? 'text-secondary-foreground' : 'text-muted-foreground opacity-60')}><Checkbox checked={findingsOn && Boolean(review)} disabled={!review} onChange={(event) => setFindingsOn(event.target.checked)} />Findings</label>
             <label className="flex items-center gap-1.5 px-1 text-xs text-secondary-foreground max-[760px]:hidden"><Checkbox checked={hideSpaces} onChange={(event) => setHideSpaces(event.target.checked)} />Hide whitespace</label>
-            <div className="flex rounded-sm border border-border p-0.5" role="group" aria-label="Urutan">
+            <div className="flex rounded-sm border border-border p-0.5" role="group" aria-label="Order">
               <button type="button" aria-pressed={mode === 'file'} onClick={() => setMode('file')} className={cn(toggle, mode === 'file' ? 'bg-surface-2 text-foreground' : 'bg-transparent')}>Per file</button>
               <button type="button" aria-pressed={mode === 'ac'} onClick={() => setMode('ac')} className={cn(toggle, mode === 'ac' ? 'bg-surface-2 text-foreground' : 'bg-transparent')}>Per AC</button>
             </div>

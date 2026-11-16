@@ -44,7 +44,7 @@ export const qaBusy = (phase: QaPhase | null) => phase === 'preparing' || phase 
 export const verdictVariant = (verdict: string | null): BadgeVariant => (verdict === 'LOLOS' ? 'success' : verdict === 'REVISION' ? 'danger' : verdict ? 'warn' : 'neutral');
 
 export type UatPrediction = 'PASS' | 'ESCALATED' | 'NOT PASSED';
-export const PREDICTION_LABEL = 'Prediksi di UAT';
+export const PREDICTION_LABEL = 'UAT prediction';
 
 /** What UAT will likely say, from the local run's predicted verdict (LOLOS, REVISION, ESCALATED); null when it names none. */
 export function uatPrediction(verdict: string | null | undefined): UatPrediction | null {

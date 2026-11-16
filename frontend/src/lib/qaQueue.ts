@@ -19,8 +19,8 @@ export interface QaQueueMetrics { total: number; queue: number; dependency: numb
 export interface QaQueue { at: string; me: string | null; error: string | null; metrics: QaQueueMetrics; rows: QaQueueRow[]; capped: boolean; more: number | null }
 
 export const QA_QUEUE_REFRESH_MS = 60_000;
-export const EVERYONE = 'Semua';
-export const UNASSIGNED = 'Belum ada';
+export const EVERYONE = 'All';
+export const UNASSIGNED = 'Unassigned';
 
 /** The first name, the way the team calls each other; a leading initial ("M Danu Seta W") is skipped. */
 export function shortName(name: string | null): string {
@@ -49,6 +49,6 @@ export function formatWait(minutes: number | null): string {
 }
 
 /** The note under a queue the search stopped reading: "+n lagi", or "+ lagi" when Jira could not count the rest. */
-export const moreText = (queue: Pick<QaQueue, 'capped' | 'more'>) => (!queue.capped ? null : queue.more !== null && queue.more > 0 ? `+${queue.more} lagi` : '+ lagi');
+export const moreText = (queue: Pick<QaQueue, 'capped' | 'more'>) => (!queue.capped ? null : queue.more !== null && queue.more > 0 ? `+${queue.more} more` : '+ more');
 
-export const waitText = (row: Pick<QaQueueRow, 'waitsOn'>) => (row.waitsOn.length ? `Nunggu ${row.waitsOn.join(', ')}` : 'Nunggu dependency');
+export const waitText = (row: Pick<QaQueueRow, 'waitsOn'>) => (row.waitsOn.length ? `Waiting on ${row.waitsOn.join(', ')}` : 'Waiting on dependency');

@@ -37,6 +37,6 @@ export function reminderText(list: Pick<WorktreeList, 'mode' | 'rows'> | null | 
   const merged = list.rows.filter(isMerged);
   if (!merged.length) return null;
   const ready = merged.filter(cleanable).length;
-  const waits = list.mode === 'auto' ? ' Mode auto bakal hapus yang udah lewat batas hari.' : '';
-  return `${merged.length} worktree udah merged, ${ready} bisa dibersihin sekarang.${waits}`;
+  const waits = list.mode === 'auto' ? ' Auto mode deletes the ones past the day limit.' : '';
+  return `${merged.length} worktrees merged, ${ready} can be cleaned up now.${waits}`;
 }

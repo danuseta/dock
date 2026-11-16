@@ -71,18 +71,18 @@ test('AC drift rows name why a line is held and put held ones first', () => {
   assert.equal(driftStateLabel('move-pending'), 'Move pending');
   assert.deepEqual(sortDrift([{ ...row, id: 'b', state: 'wait' }, row]).map((item) => item.id), ['a', 'b']);
   const tab = source('../agents/PlanTab.tsx');
-  for (const text of ['Pindah ke Reference', 'Needs PO', 'Move to', 'ac-move-pending']) assert.ok(tab.includes(text), text);
+  for (const text of ['Move to Reference', 'Needs PO', 'Move to', 'ac-move-pending']) assert.ok(tab.includes(text), text);
 });
 
 test('the retro shows QA escalations by cause team-wide and labels the QA bot triage rules', () => {
   assert.equal(causeShare(2, [{ count: 4 }, { count: 2 }]), 50);
   assert.equal(causeShare(0, []), 0);
   const tab = source('../agents/RetroTab.tsx');
-  for (const text of ['Eskalasi QA', "'qa-agent': 'aturan triage QA bot", 'Planning nggak memprediksi']) assert.ok(tab.includes(text), text);
+  for (const text of ['QA escalations', "'qa-agent': 'QA bot triage rule", 'Planning did not predict']) assert.ok(tab.includes(text), text);
 });
 
 test('Plan lists AC lines teammates move in, with Accept into AC and Decline with a reason', () => {
   const tab = source('../agents/PlanTab.tsx');
-  for (const text of ['AC kiriman teman', 'Accept into AC', 'Decline', 'Why it does not belong here', '<AcInSection />']) assert.ok(tab.includes(text), text);
+  for (const text of ['AC from teammates', 'Accept into AC', 'Decline', 'Why it does not belong here', '<AcInSection />']) assert.ok(tab.includes(text), text);
   assert.equal(driftStateLabel('move-accepted'), 'Accepted, remove by hand');
 });

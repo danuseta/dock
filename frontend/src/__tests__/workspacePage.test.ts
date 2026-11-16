@@ -25,12 +25,12 @@ test('the Worktrees tab cleans only merged rows without a refusal, and Home remi
   const base = { repo: 'be', branch: 'feat/QRD-1-x', ticketKey: 'QRD-1', pulls: [], dirty: false, changes: [], session: false, devServer: false, mergedSince: null };
   const rows = [
     { ...base, path: '/p/.worktrees/QRD-1-be', merge: 'merged', refusals: [] },
-    { ...base, path: '/p/.worktrees/QRD-2-be', merge: 'merged', dirty: true, refusals: ['ada perubahan lokal'] },
-    { ...base, path: '/p/.worktrees/QRD-3-be', merge: 'open', refusals: ['belum merged'] },
+    { ...base, path: '/p/.worktrees/QRD-2-be', merge: 'merged', dirty: true, refusals: ['local changes'] },
+    { ...base, path: '/p/.worktrees/QRD-3-be', merge: 'open', refusals: ['not merged'] },
   ];
   assert.deepEqual(rows.filter(cleanable).map((row) => folderOf(row.path)), ['QRD-1-be']);
   assert.deepEqual(filterWorktrees(rows, 'open').map((row) => folderOf(row.path)), ['QRD-3-be']);
-  assert.equal(reminderText({ mode: 'notify', rows }), '2 worktree udah merged, 1 bisa dibersihin sekarang.');
+  assert.equal(reminderText({ mode: 'notify', rows }), '2 worktrees merged, 1 can be cleaned up now.');
   assert.equal(reminderText({ mode: 'off', rows }), null);
   assert.equal(reminderText({ mode: 'notify', rows: [rows[2]] }), null);
 });

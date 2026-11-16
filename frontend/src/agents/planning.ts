@@ -64,7 +64,7 @@ export interface PlanSignal {
   myOrder: Array<{ key: string; summary: string; status: string; sp: number | null; order: number | null }>;
 }
 
-export const PLAN_STEPS = ['Draft', 'Dipublish', 'Jalan'] as const;
+export const PLAN_STEPS = ['Draft', 'Published', 'Running'] as const;
 
 /** How far the sprint got: 0 Draft, 1 Dipublish, 2 Jalan (published and active in Jira with the cron gate on). */
 export function stepIndex(signal: Pick<PlanSignal, 'stage'> | null): number {
@@ -83,10 +83,10 @@ export const whenText = (iso: string | null): string => {
 export function planMetaLine(signal: PlanSignal | null, draft: { loadedAt: string } | null): string {
   if (signal?.revision) {
     const by = signal.publishedBy ?? signal.planner ?? 'planner';
-    return `${signal.isPlanner ? 'Dipublish' : `Dari ${by}`} · dipublish ${whenText(signal.publishedAt)} · r${signal.revision}${signal.activeSince ? ` · aktif di Jira sejak ${whenText(signal.activeSince)}` : ''}`;
+    return `${signal.isPlanner ? 'Published' : `From ${by}`} · published ${whenText(signal.publishedAt)} · r${signal.revision}${signal.activeSince ? ` · active in Jira since ${whenText(signal.activeSince)}` : ''}`;
   }
-  const parts = [draft ? `Draft dimuat ${whenText(draft.loadedAt)}` : 'Draft belum dimuat'];
-  parts.push(signal?.activeSince ? `aktif di Jira sejak ${whenText(signal.activeSince)}` : 'belum aktif di Jira');
+  const parts = [draft ? `Draft loaded ${whenText(draft.loadedAt)}` : 'Draft not loaded yet'];
+  parts.push(signal?.activeSince ? `active in Jira since ${whenText(signal.activeSince)}` : 'not active in Jira yet');
   return parts.join(' · ');
 }
 
@@ -96,14 +96,14 @@ export interface StatusItem { text: string; action?: 'chat' | 'republish' }
 export function planAttention(signal: PlanSignal | null, draft: Pick<SprintDraft, 'questions'> | null): StatusItem[] {
   const items: StatusItem[] = [];
   const planner = signal?.planner ?? 'planner';
-  if (signal && !signal.revision && signal.waitForPublish) items.push({ text: signal.isPlanner ? 'Cron nunggu publish' : `Cron nunggu ${planner} publish` });
+  if (signal && !signal.revision && signal.waitForPublish) items.push({ text: signal.isPlanner ? 'Cron waits for publish' : `Cron waits for ${planner} to publish` });
   const open = draft?.questions.filter((question) => !question.answered).length ?? 0;
-  if (open) items.push({ text: `${open} pertanyaan di chat`, action: 'chat' });
+  if (open) items.push({ text: `${open} ${open === 1 ? 'question' : 'questions'} in chat`, action: 'chat' });
   const changed = signal ? signal.joined.length + signal.acChanged.length : 0;
   if (signal?.revision && changed) {
     items.push(signal.isPlanner
-      ? { text: `Perlu publish ulang (r${signal.revision + 1}): ${changeText(signal)}`, action: 'republish' }
-      : { text: `Plan r${signal.revision} · ada perubahan nunggu planner (${changeText(signal)})` });
+      ? { text: `Needs a republish (r${signal.revision + 1}): ${changeText(signal)}`, action: 'republish' }
+      : { text: `Plan r${signal.revision} · changes wait for the planner (${changeText(signal)})` });
   }
   return items;
 }
@@ -112,8 +112,8 @@ const SHOWN_CHANGES = 3;
 
 /** "QRD-9001 masuk sprint, QRD-1533 AC berubah", the first few and how many more. */
 export function changeText(signal: Pick<PlanSignal, 'joined' | 'acChanged'>): string {
-  const all = [...signal.joined.map((key) => `${key} masuk sprint`), ...signal.acChanged.map((key) => `${key} AC berubah`)];
-  return `${all.slice(0, SHOWN_CHANGES).join(', ')}${all.length > SHOWN_CHANGES ? ` +${all.length - SHOWN_CHANGES} lagi` : ''}`;
+  const all = [...signal.joined.map((key) => `${key} joined the sprint`), ...signal.acChanged.map((key) => `${key} AC changed`)];
+  return `${all.slice(0, SHOWN_CHANGES).join(', ')}${all.length > SHOWN_CHANGES ? ` +${all.length - SHOWN_CHANGES} more` : ''}`;
 }
 
 /** The chat session Planning opens for a sprint; the planning agent and the kit find it by this title. */
@@ -314,9 +314,9 @@ export function decisionLabel(decision: DraftDecision | null, refKey?: string): 
   if (!decision) return null;
   switch (decision.action) {
     case 'move': return refKey ? `Moved to ${refKey}` : 'Moved';
-    case 'dependency': case 'wait': return 'Dependency · link Blocks dipasang waktu Publish';
-    case 'reference': case 'drop': return 'Pindah ke Reference';
-    case 'approve': return 'Disetujui QA';
+    case 'dependency': case 'wait': return 'Dependency · Blocks link added on Publish';
+    case 'reference': case 'drop': return 'Moved to Reference';
+    case 'approve': return 'Approved by QA';
     case 'accept': return 'Risk accepted';
     case 'fix': return decision.note ? `Fixed: ${decision.note}` : 'Fixed';
     default: return decision.action;
@@ -340,7 +340,7 @@ export interface ReadyItem { id: 'scope' | 'ac' | 'qa' | 'storyboard'; ok: boole
 export interface Readiness { items: ReadyItem[]; done: number; total: number; missing: ReadyItem[] }
 
 const SHOWN_KEYS = 3;
-const keysText = (keys: string[]) => `${keys.slice(0, SHOWN_KEYS).join(', ')}${keys.length > SHOWN_KEYS ? ` +${keys.length - SHOWN_KEYS} lagi` : ''}`;
+const keysText = (keys: string[]) => `${keys.slice(0, SHOWN_KEYS).join(', ')}${keys.length > SHOWN_KEYS ? ` +${keys.length - SHOWN_KEYS} more` : ''}`;
 
 /**
  * G1 "Siap publish": the SP fit the team's capacity or a scope cut is written, every AC line naming another ticket has a Blocks link or a decision,
@@ -368,24 +368,24 @@ export function publishReadiness(
   const items: ReadyItem[] = [
     {
       id: 'scope', panel: 'scope', fix: 'Scope', ok: fits || !!cut,
-      text: fits ? `${sp} SP muat di kapasitas ${capacity} SP` : cut ? `Potong scope ditulis · ${sp} SP untuk kapasitas ${capacity} SP` : `${sp} SP untuk kapasitas ${capacity} SP`,
-      detail: fits ? null : cut ?? 'Belum ada keputusan potong scope',
+      text: fits ? `${sp} SP fits the ${capacity} SP capacity` : cut ? `Scope cut written · ${sp} SP for a ${capacity} SP capacity` : `${sp} SP for a ${capacity} SP capacity`,
+      detail: fits ? null : cut ?? 'No scope cut decided yet',
     },
     {
       id: 'ac', panel: 'ac', fix: 'AC check', ok: late.length === 0,
-      text: late.length ? `${late.length} rujukan tiket lain belum diputusin` : 'Rujukan tiket lain udah diputusin',
+      text: late.length ? `${late.length} ${late.length === 1 ? 'reference' : 'references'} to other tickets not decided` : 'References to other tickets decided',
       detail: late.length ? keysText([...new Set(late.map((finding) => finding.key))]) : null,
     },
     {
       id: 'qa', panel: 'qa', fix: 'QA check', ok: escalated.length === 0,
-      text: escalated.length ? `${escalated.length} tiket diprediksi ESCALATED belum diputusin` : 'QA check udah diputusin semua',
+      text: escalated.length ? `${escalated.length} ${escalated.length === 1 ? 'ticket' : 'tickets'} predicted ESCALATED not decided` : 'QA check fully decided',
       detail: escalated.length ? keysText(escalated.map((ticket) => ticket.key)) : null,
     },
     {
       id: 'storyboard', panel: 'storyboard', fix: 'Storyboard', ok: recorded && unchecked.length === 0,
-      text: !recorded ? 'Versi storyboard belum dicatat' : unchecked.length ? `${unchecked.length} AC belum dicek ke storyboard terbaru` : 'Versi storyboard dicatat, AC udah dicek',
+      text: !recorded ? 'Storyboard version not recorded' : unchecked.length ? `${unchecked.length} AC not checked against the latest storyboard` : 'Storyboard version recorded, AC checked',
       detail: !recorded
-        ? (unread.length ? unread.map((board) => board.epic).join(', ') : 'Belum ada storyboard yang dibaca')
+        ? (unread.length ? unread.map((board) => board.epic).join(', ') : 'No storyboard read yet')
         : unchecked.length ? keysText(unchecked.map((ticket) => ticket.key)) : draft.storyboards.map((board) => `${board.epic} v${board.version}`).join(', '),
     },
   ];
@@ -553,6 +553,6 @@ export function qaChecklist(ticket: Pick<DraftTicket, 'key' | 'ac'>, findings: D
 /** Draft test cases from the "dites di tiket ini" lines, for QA to edit and approve in Test cases. */
 export const checklistTcs = (list: QaChecklist): DraftTc[] => list.here.map((line, index) => ({
   id: `TC-${index + 1}`, ac: line.n, title: line.text.slice(0, 300),
-  steps: line.waitsOn.length ? [`Tunggu ${line.waitsOn.join(', ')} sampai UAT CHECK`] : [],
+  steps: line.waitsOn.length ? [`Wait for ${line.waitsOn.join(', ')} to reach UAT CHECK`] : [],
   expected: line.text,
 }));

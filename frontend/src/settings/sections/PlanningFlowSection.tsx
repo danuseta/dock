@@ -29,9 +29,9 @@ export const PlanningFlowSection = () => {
   return (
     <div className="flex flex-col gap-5">
       <SettingsCard
-        title="Dari Jira sampai Publish"
-        caption="Tahap yang dilewati nggak muncul di Planning › Draft dan nggak dihitung di Siap publish. Kosong berarti semua tahap jalan."
-        aside={<Badge>{data?.planningFlow ? flow.template ?? 'Diubah' : 'Semua tahap jalan'}</Badge>}
+        title="From Jira to Publish"
+        caption="Skipped stages do not show in Planning › Draft and do not count toward Ready to publish. Empty means every stage runs."
+        aside={<Badge>{data?.planningFlow ? flow.template ?? 'Changed' : 'All stages run'}</Badge>}
       >
         <div className="mb-3 flex flex-wrap items-center gap-1.5">
           {FLOW_TEMPLATES.map((template) => (
@@ -39,7 +39,7 @@ export const PlanningFlowSection = () => {
               <Workflow size={14} aria-hidden="true" />{template.name}
             </Button>
           ))}
-          <Button size="sm" variant="ghost" onClick={() => store(null)} disabled={busy || !data?.planningFlow}><RotateCcw size={14} aria-hidden="true" />Semua jalan</Button>
+          <Button size="sm" variant="ghost" onClick={() => store(null)} disabled={busy || !data?.planningFlow}><RotateCcw size={14} aria-hidden="true" />Run all</Button>
         </div>
         <div className="grid grid-cols-[minmax(0,1fr)_280px] gap-3.5 max-[1000px]:grid-cols-1">
           <div className="grid grid-cols-4 gap-2.5 max-[760px]:grid-cols-2" role="listbox" aria-label="Planning stages">
@@ -58,8 +58,8 @@ export const PlanningFlowSection = () => {
                   <span className="text-[0.8rem] font-semibold text-foreground">{label}</span>
                   <span className="font-mono text-[0.64rem] text-muted-foreground">{item.owner}</span>
                   <span className="mt-auto flex flex-wrap gap-1">
-                    <Badge>{item.skip ? 'lewati' : 'jalan'}</Badge>
-                    {item.approve && <Badge>perlu approve</Badge>}
+                    <Badge>{item.skip ? 'skip' : 'run'}</Badge>
+                    {item.approve && <Badge>needs approval</Badge>}
                   </span>
                 </button>
               );
@@ -68,23 +68,23 @@ export const PlanningFlowSection = () => {
           <div className="rounded-md border border-border bg-surface-0 p-3.5 text-[0.82rem]">
             <p className="font-display text-[0.95rem] font-bold">{info.label}</p>
             <div className="border-b border-border py-2.5">
-              <p className="mb-1.5 text-xs font-semibold text-muted-foreground">Tahap ini</p>
+              <p className="mb-1.5 text-xs font-semibold text-muted-foreground">This stage</p>
               <div className="flex gap-1.5">
-                <Button size="sm" variant={stage.skip ? 'default' : 'primary'} onClick={() => store(updateStage(flow, selected, { skip: false }))} disabled={busy || !stage.skip}>Jalan</Button>
-                <Button size="sm" variant={stage.skip ? 'primary' : 'default'} onClick={() => store(updateStage(flow, selected, { skip: true }))} disabled={busy || required || stage.skip}>Lewati</Button>
+                <Button size="sm" variant={stage.skip ? 'default' : 'primary'} onClick={() => store(updateStage(flow, selected, { skip: false }))} disabled={busy || !stage.skip}>Run</Button>
+                <Button size="sm" variant={stage.skip ? 'primary' : 'default'} onClick={() => store(updateStage(flow, selected, { skip: true }))} disabled={busy || required || stage.skip}>Skip</Button>
               </div>
-              {required && <p className="mt-1.5 text-xs text-muted-foreground">Nggak bisa dilewati.</p>}
+              {required && <p className="mt-1.5 text-xs text-muted-foreground">Cannot be skipped.</p>}
             </div>
             <div className="border-b border-border py-2.5">
-              <p className="mb-1.5 text-xs font-semibold text-muted-foreground">Yang pegang</p>
-              <Select aria-label={`Yang pegang ${info.label}`} value={stage.owner} onValueChange={(owner) => store(updateStage(flow, selected, { owner }))} options={PLAN_STAGE_ROLES.map((role) => ({ value: role, label: role }))} disabled={busy} />
+              <p className="mb-1.5 text-xs font-semibold text-muted-foreground">Owner</p>
+              <Select aria-label={`Owner of ${info.label}`} value={stage.owner} onValueChange={(owner) => store(updateStage(flow, selected, { owner }))} options={PLAN_STAGE_ROLES.map((role) => ({ value: role, label: role }))} disabled={busy} />
             </div>
             <div className="py-2.5">
               <label className="flex items-center gap-2">
                 <Checkbox checked={stage.approve} onChange={(event) => store(updateStage(flow, selected, { approve: event.target.checked }))} disabled={busy || stage.skip} />
-                Perlu approve
+                Needs approval
               </label>
-              <p className="mt-1 text-xs text-muted-foreground">Tahap berikutnya nunggu yang pegang tahap ini setuju.</p>
+              <p className="mt-1 text-xs text-muted-foreground">The next stage waits for this stage's owner to approve.</p>
             </div>
           </div>
         </div>

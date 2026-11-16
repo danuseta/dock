@@ -39,13 +39,13 @@ test('Decisions cannot be skipped, but it can be the stop point; ask first and s
 test('Lanjut after a stop sends "Lanjut dari <tahap>" for the next stage that runs', () => {
   const next = stageAfterStop({ skip: ['publish'], ask: [], stop: 'video' });
   assert.equal(next?.id, 'decide');
-  assert.equal(continueText(next!), 'Lanjut dari Decisions');
+  assert.equal(continueText(next!), 'Continue from Decisions');
   assert.equal(stageAfterStop(allRun()), null);
 });
 
 test('profiles can be added, renamed and removed; Default stays', () => {
   const settings = withProfile(defaultSettings(), 'Sampai video demo', { skip: [], ask: [], stop: 'video' });
-  assert.equal(newProfileName(settings), 'Profil baru 1');
+  assert.equal(newProfileName(settings), 'New profile 1');
   const renamed = renameProfile({ ...settings, mine: 'Sampai video demo' }, 'Sampai video demo', 'Video');
   assert.ok(renamed?.profiles.Video);
   assert.equal(renamed?.mine, 'Video');
@@ -62,7 +62,7 @@ test('a session runs its picked profile, else the ticket\'s, else the person\'s 
   assert.equal(sessionProfileName(settings, null, 'Plan'), 'Plan');
   assert.equal(sessionProfileName(settings, 'Gone', null), 'Video');
   assert.ok(startsSous('Pakai skill sous: kerjakan QRD-1534'));
-  assert.ok(!startsSous('Lanjut dari Publish'));
+  assert.ok(!startsSous('Continue from Publish'));
   assert.equal(withFlowLines('Pakai skill sous: kerjakan QRD-1', settings.profiles.Plan, ['Sous flow: stop after plan.']), 'Pakai skill sous: kerjakan QRD-1\nSous flow: stop after plan.');
   assert.equal(withFlowLines('Pakai skill sous: kerjakan QRD-1', allRun(), ['x']), 'Pakai skill sous: kerjakan QRD-1', 'a flow where every stage runs adds nothing');
   assert.equal(withFlowLines('Explain this repo', settings.profiles.Plan, ['x']), 'Explain this repo');
@@ -70,8 +70,8 @@ test('a session runs its picked profile, else the ticket\'s, else the person\'s 
 
 test('the section has the checkpoint switch, the QA guide switch under Video demo and the prompt preview', () => {
   const section = source('../settings/sections/SousFlowSection.tsx');
-  assert.match(section, /Kirim checkpoint/);
-  assert.match(section, /selected === 'video'[\s\S]*Tulis QA guide ke Developer Context/);
+  assert.match(section, /Send checkpoints/);
+  assert.match(section, /selected === 'video'[\s\S]*Write a QA guide to Developer Context/);
   assert.match(section, /GET_SOUS_FLOW_PROMPT/);
   assert.match(source('../pages/SettingsPage.tsx'), /active === 'sousflow' && <SousFlowSection \/>/);
 });

@@ -26,13 +26,13 @@ export function execRows(run: Pick<AgentRun, 'failures' | 'events'> | null, time
       if (!since) continue;
       const until = agent.until ?? null;
       rows.push({
-        at: since, kind: 'agent', until, agent: agent.name, doing: agent.detail ?? '', result: agent.state === 'done' ? 'OK' : agent.state === 'waiting' ? 'nunggu' : 'jalan',
+        at: since, kind: 'agent', until, agent: agent.name, doing: agent.detail ?? '', result: agent.state === 'done' ? 'OK' : agent.state === 'waiting' ? 'waiting' : 'running',
         tools: agent.tools, seconds: until ? Math.max(0, Math.round((Date.parse(until) - Date.parse(since)) / 1000)) : null,
       });
     }
   }
   for (const failure of run?.failures ?? []) {
-    rows.push({ at: failure.at, kind: 'fail', until: null, agent: failure.type, doing: failure.what || failure.type, result: `GAGAL #${failure.attempt}`, tools: null, seconds: null });
+    rows.push({ at: failure.at, kind: 'fail', until: null, agent: failure.type, doing: failure.what || failure.type, result: `FAILED #${failure.attempt}`, tools: null, seconds: null });
   }
   for (const event of run?.events ?? []) {
     rows.push({ at: event.at, kind: 'event', until: null, agent: 'event', doing: `${event.kind}${event.detail ? ` ${event.detail}` : ''}`, result: '', tools: null, seconds: null });
@@ -42,4 +42,4 @@ export function execRows(run: Pick<AgentRun, 'failures' | 'events'> | null, time
 
 export const filterExec = (rows: ExecRow[], filter: ExecFilter) => (filter === 'all' ? rows : rows.filter((row) => row.kind === filter));
 
-export const duration = (seconds: number | null) => (seconds === null ? '–' : seconds < 60 ? `${seconds}d` : `${Math.round(seconds / 60)}m`);
+export const duration = (seconds: number | null) => (seconds === null ? '–' : seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)}m`);

@@ -215,7 +215,7 @@ const BlackboardPage: React.FC<{ onNavigate?: (path: string) => void; onTicketCl
   };
   const pickedTicket = (tickets ?? []).find((ticket) => ticket.key === picked) ?? null;
   const pickedRun = picked ? runs.get(picked) : undefined;
-  const title = selected === LOG_ENTRY ? 'Log eksekusi' : selected === TRACE_ENTRY ? 'Tiket → kode' : selected === CONTRACT_ENTRY ? 'Kontrak' : selected === KAMUS_ENTRY ? KAMUS_FILE : isPullEntry(selected) ? `Perubahan kode${pullRepo(selected) ? ` · ${pullRepo(selected)}` : ''}` : selected ?? '';
+  const title = selected === LOG_ENTRY ? 'Execution log' : selected === TRACE_ENTRY ? 'Ticket → code' : selected === CONTRACT_ENTRY ? 'Contract' : selected === KAMUS_ENTRY ? KAMUS_FILE : isPullEntry(selected) ? `Code changes${pullRepo(selected) ? ` · ${pullRepo(selected)}` : ''}` : selected ?? '';
   const entry = (id: string, Icon: React.ElementType, label: React.ReactNode, meta: React.ReactNode, depth = 1) => (
     <button key={id} type="button" onClick={() => pick(id)} aria-current={selected === id ? 'true' : undefined} style={{ paddingLeft: `${10 + depth * 14}px` }} className={cn('flex w-full items-center gap-2 border-0 bg-transparent py-1.5 pr-3.5 text-left text-[0.76rem] text-secondary-foreground hover:bg-surface-1 max-[760px]:min-h-11', selected === id && 'bg-surface-1 text-foreground')}>
       <Icon size={14} aria-hidden="true" className="flex-none" /><span className="truncate">{label}</span><span className="ml-auto flex-none font-mono text-[0.6rem] text-muted-foreground">{meta}</span>
@@ -229,7 +229,7 @@ const BlackboardPage: React.FC<{ onNavigate?: (path: string) => void; onTicketCl
       <header className="mb-4 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-bold">Blackboard</h1>
-          <p className="mt-1 text-xs text-muted-foreground">The agents' working board per ticket: contract, log, Tiket → kode, code changes, decisions, review notes and evidence. Read-only.</p>
+          <p className="mt-1 text-xs text-muted-foreground">The agents' working board per ticket: contract, log, Ticket → code, code changes, decisions, review notes and evidence. Read-only.</p>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-xs border border-border px-2 py-1 text-[0.68rem] text-muted-foreground"><Lock size={12} aria-hidden="true" />Read-only</span>
       </header>
@@ -242,7 +242,7 @@ const BlackboardPage: React.FC<{ onNavigate?: (path: string) => void; onTicketCl
               <Input type="search" aria-label="Search tickets" className="h-8 text-xs max-[760px]:h-11" placeholder="Search key or title" value={query} onChange={(event) => setQuery(event.target.value)} />
               <div className="flex flex-wrap items-center gap-3">
                 <span className="inline-flex overflow-hidden rounded-xs border border-border-glow font-mono text-[0.66rem]" role="group" aria-label="Board type">
-                  {([['all', 'Semua'], ['task', 'Task'], ['review', 'Review']] as const).map(([id, label]) => <button key={id} type="button" aria-pressed={filter === id} onClick={() => setFilter(id)} className={cn('px-2 py-1 max-[760px]:min-h-11', filter === id ? 'bg-surface-hover font-bold text-foreground' : 'text-secondary-foreground hover:bg-surface-1')}>{label}</button>)}
+                  {([['all', 'All'], ['task', 'Task'], ['review', 'Review']] as const).map(([id, label]) => <button key={id} type="button" aria-pressed={filter === id} onClick={() => setFilter(id)} className={cn('px-2 py-1 max-[760px]:min-h-11', filter === id ? 'bg-surface-hover font-bold text-foreground' : 'text-secondary-foreground hover:bg-surface-1')}>{label}</button>)}
                 </span>
                 <label className="flex items-center gap-2 text-[0.7rem] text-muted-foreground max-[760px]:min-h-11 max-[760px]:text-xs"><Checkbox checked={hideDone} onChange={(event) => setHideDone(event.target.checked)} />Hide done</label>
               </div>
@@ -250,7 +250,7 @@ const BlackboardPage: React.FC<{ onNavigate?: (path: string) => void; onTicketCl
             <div className="max-h-[calc(100dvh-16rem)] min-h-[320px] flex-1 overflow-y-auto px-2 pb-2 max-[760px]:max-h-none">
               <h3 className="flex items-center justify-between px-2 pt-3 pb-1 font-mono text-[0.62rem] font-bold uppercase tracking-wider text-muted-foreground">Root <span className="tabular-nums">1</span></h3>
               <button type="button" onClick={() => pick(KAMUS_ENTRY)} aria-current={selected === KAMUS_ENTRY ? 'true' : undefined} className={cn('mb-0.5 flex w-full items-center gap-2 rounded-xs border border-transparent px-2.5 py-1.5 text-left text-[0.76rem] text-secondary-foreground hover:bg-surface-1 max-[760px]:min-h-11', selected === KAMUS_ENTRY && 'border-border-glow bg-surface-1 text-foreground')}>
-                <BookA size={14} aria-hidden="true" className="flex-none text-sky-200" /><span className="truncate font-mono">{KAMUS_FILE}</span><span className="ml-auto font-mono text-[0.6rem] text-muted-foreground">{kamus === null ? 'belum ada' : 'kamus'}</span>
+                <BookA size={14} aria-hidden="true" className="flex-none text-sky-200" /><span className="truncate font-mono">{KAMUS_FILE}</span><span className="ml-auto font-mono text-[0.6rem] text-muted-foreground">{kamus === null ? 'none yet' : 'glossary'}</span>
               </button>
               {tickets === null && !error && <p className="px-2 py-6 text-sm text-muted-foreground" role="status">Loading tickets...</p>}
               {tickets !== null && sprints.length === 0 && <p className="px-2 py-6 text-sm text-muted-foreground">{tickets.length === 0 ? 'No ticket has a blackboard yet.' : filter === 'all' ? 'No ticket matches.' : `No ${filter === 'task' ? 'Task' : 'Review'} tickets.`}</p>}
@@ -277,27 +277,27 @@ const BlackboardPage: React.FC<{ onNavigate?: (path: string) => void; onTicketCl
         ) : (
           <section className={cn('flex min-w-0 flex-col border-r border-border bg-surface-0', selected && 'max-[760px]:hidden')} aria-label="Files">
             <div className="flex flex-col gap-1 border-b border-border px-3 py-2.5">
-              <button type="button" onClick={() => { setPicked(null); setSelected(null); }} className="inline-flex items-center gap-1.5 self-start border-0 bg-transparent p-0 text-xs text-muted-foreground hover:text-foreground max-[760px]:min-h-11"><ArrowLeft size={13} aria-hidden="true" />Semua tiket</button>
+              <button type="button" onClick={() => { setPicked(null); setSelected(null); }} className="inline-flex items-center gap-1.5 self-start border-0 bg-transparent p-0 text-xs text-muted-foreground hover:text-foreground max-[760px]:min-h-11"><ArrowLeft size={13} aria-hidden="true" />All tickets</button>
               <div className="flex flex-wrap items-center gap-2">
                 <b className="font-mono text-sm text-accent">{picked}</b>
                 {pickedRun && <span className={cn('rounded-xs px-1.5 py-px font-mono text-[0.6rem] font-bold', STAGE_TONE[pickedRun.stage] ?? 'bg-surface-2 text-secondary-foreground')}>{stageLabel(pickedRun.stage)}</span>}
                 {pickedTicket && sprintOf(pickedTicket) && <span className="font-mono text-[0.62rem] text-muted-foreground">{sprintOf(pickedTicket)}</span>}
-                {onTicketClick && <button type="button" onClick={() => onTicketClick(picked)} className="ml-auto border-0 bg-transparent p-0 text-[0.7rem] font-semibold text-accent hover:underline">Detail tiket</button>}
+                {onTicketClick && <button type="button" onClick={() => onTicketClick(picked)} className="ml-auto border-0 bg-transparent p-0 text-[0.7rem] font-semibold text-accent hover:underline">Ticket detail</button>}
               </div>
               {pickedRun?.title && <p className="line-clamp-2 text-[0.74rem] text-secondary-foreground">{pickedRun.title}</p>}
             </div>
             <nav className="max-h-[calc(100dvh-16rem)] flex-1 overflow-y-auto py-1.5 max-[760px]:max-h-none" aria-label="Folders">
               {files === null && <p className="px-4 py-4 text-sm text-muted-foreground" role="status">Loading files...</p>}
-              {dir('Dokumen')}
-              {entry(CONTRACT_ENTRY, FileSignature, 'Kontrak', contractFiles(files ?? []).length ? 'md' : 'belum ada')}
-              {entry(TRACE_ENTRY, Route, 'Tiket → kode', coverageText(trace))}
+              {dir('Documents')}
+              {entry(CONTRACT_ENTRY, FileSignature, 'Contract', contractFiles(files ?? []).length ? 'md' : 'none yet')}
+              {entry(TRACE_ENTRY, Route, 'Ticket → code', coverageText(trace))}
               <button type="button" onClick={() => setSelected(LOG_ENTRY)} aria-current={selected === LOG_ENTRY ? 'true' : undefined} style={{ paddingLeft: '24px' }} className={cn('flex w-full items-center gap-2 border-0 bg-transparent py-1.5 pr-3.5 text-left text-[0.76rem] text-secondary-foreground hover:bg-surface-1 max-[760px]:min-h-11', selected === LOG_ENTRY && 'bg-surface-1 text-foreground')}>
-                <ScrollText size={14} aria-hidden="true" className="flex-none" /><span>Log eksekusi</span><span className="ml-auto font-mono text-[0.6rem] text-muted-foreground">{run?.failures?.length ? `${run.failures.length} gagal` : 'execution'}</span>
+                <ScrollText size={14} aria-hidden="true" className="flex-none" /><span>Execution log</span><span className="ml-auto font-mono text-[0.6rem] text-muted-foreground">{run?.failures?.length ? `${run.failures.length} failed` : 'execution'}</span>
               </button>
               {tree.docs.map((item) => entry(item.path, iconFor(item), <>{item.path}{item.generated && <span className="ml-1.5 rounded-xs border border-border px-1 font-mono text-[0.54rem] text-muted-foreground">gen</span>}</>, formatSize(item.size)))}
               {tree.artifacts.length > 0 && <>{dir('Artifacts')}{tree.artifacts.map(folderEntry)}</>}
-              {dir('Perubahan kode')}
-              {(repos.length ? repos : [null]).map((repo) => entry(pullEntry(repo), GitPullRequest, repo ?? 'Pull request tiket ini', 'diff'))}
+              {dir('Code changes')}
+              {(repos.length ? repos : [null]).map((repo) => entry(pullEntry(repo), GitPullRequest, repo ?? 'Pull request for this ticket', 'diff'))}
               {tree.other.map(folderEntry)}
             </nav>
           </section>
@@ -320,7 +320,7 @@ const BlackboardPage: React.FC<{ onNavigate?: (path: string) => void; onTicketCl
                 ? <p className="p-6 text-sm text-muted-foreground" role="status">Loading {KAMUS_FILE}...</p>
                 : kamus
                   ? <div className="min-w-0 px-6 py-5 text-[0.82rem] leading-relaxed text-secondary-foreground"><Markdown text={withoutComments(kamus)} /></div>
-                  : <p className="p-6 text-sm text-muted-foreground">Kamus pengucapan belum ada. Taruh {KAMUS_FILE} di root blackboard.</p>)
+                  : <p className="p-6 text-sm text-muted-foreground">No pronunciation glossary yet. Put {KAMUS_FILE} at the blackboard root.</p>)
               : picked && selected === LOG_ENTRY
               ? <><ExecLog ticket={picked} run={run} timeline={run?.timeline ?? null} /><LogView ticket={picked} /></>
               : picked && selected === TRACE_ENTRY

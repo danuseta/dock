@@ -110,7 +110,7 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, cos
         )}
         {onBlackboard && trace && onNavigate && (
           <button type="button" onClick={() => onNavigate(blackboardFileHref(ticketKey, TRACE_ENTRY))} className="flex items-center gap-1.5 border-0 bg-transparent p-0 text-left font-mono text-[0.72rem] text-secondary-foreground hover:text-foreground max-[900px]:min-h-11">
-            <Route size={12} aria-hidden="true" className="flex-none text-sky-200" />Tiket → kode <span className="text-foreground tabular-nums">{coverageText(trace)}</span><span className="ml-auto text-muted-foreground">buka</span>
+            <Route size={12} aria-hidden="true" className="flex-none text-sky-200" />Ticket → code <span className="text-foreground tabular-nums">{coverageText(trace)}</span><span className="ml-auto text-muted-foreground">open</span>
           </button>
         )}
         <div>

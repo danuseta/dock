@@ -85,24 +85,24 @@ test('each missing readiness item says what is missing and links to where it get
     summary: { current: true, testData: null, ui: false }, statuses: { 'QRD-1307': 'In Progress' },
   });
   assert.deepStrictEqual(ready.missing.map((item) => [item.id, item.text, item.href]), [
-    ['refs', '2 rujukan tiket lain belum diputusin', '/planning?tab=draft&panel=ac'],
-    ['open', 'Open to confirm masih ada isinya', 'https://jira/browse/QRD-1510'],
-    ['alone', '2 tiket yang ditunggu AC belum di UAT', '#acceptance-criteria'],
-    ['data', 'Data uji belum disebut', 'https://jira/browse/QRD-1510'],
-    ['tc', 'Test case belum disetujui QA', '/planning?tab=draft&panel=tc'],
-    ['design', 'Tiket UI tanpa link desain', 'https://jira/browse/QRD-1510'],
+    ['refs', 'Undecided references to other tickets: 2', '/planning?tab=draft&panel=ac'],
+    ['open', 'Open to confirm is not empty', 'https://jira/browse/QRD-1510'],
+    ['alone', 'Tickets the AC waits on, not in UAT yet: 2', '#acceptance-criteria'],
+    ['data', 'Test data not named', 'https://jira/browse/QRD-1510'],
+    ['tc', 'Test cases not approved by QA', '/planning?tab=draft&panel=tc'],
+    ['design', 'UI ticket without a design link', 'https://jira/browse/QRD-1510'],
   ]);
-  assert.strictEqual(ready.missing[2].detail, 'QRD-1307 (In Progress), QRD-1312 (status belum kebaca)');
+  assert.strictEqual(ready.missing[2].detail, 'QRD-1307 (In Progress), QRD-1312 (status not read yet)');
   assert.strictEqual(ready.done, 1);
 });
 
 test('without a summary the summary item is missing and test data and UI say there is no summary yet; [FE] still means UI', () => {
   const none = ticketReadiness({ ...base, title: 'Expose Playbook folders', summary: null });
   assert.deepStrictEqual(none.missing.map((item) => [item.id, item.text]), [
-    ['summary', 'Belum ada ringkasan'], ['data', 'Data uji: belum ada ringkasan'], ['design', 'Desain: belum ada ringkasan'],
+    ['summary', 'No summary yet'], ['data', 'Test data: no summary yet'], ['design', 'Design: no summary yet'],
   ]);
   assert.strictEqual(ticketReadiness({ ...base, summary: null }).items.find((item) => item.id === 'design')!.ok, true, '[FE] with a Figma link');
-  assert.strictEqual(ticketReadiness({ ...base, summary: { ...base.summary, current: false } }).items[2].text, 'Ringkasan basi: AC berubah sesudah ringkasan ditulis');
+  assert.strictEqual(ticketReadiness({ ...base, summary: { ...base.summary, current: false } }).items[2].text, 'Summary is stale: AC changed after it was written');
   assert.strictEqual(hasUi('[BE] API'), false);
 });
 

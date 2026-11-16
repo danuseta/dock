@@ -11,16 +11,16 @@ import {
 } from '../../lib/opsRules';
 import { SettingRow, SettingsCard } from '../SettingsParts';
 
-const errorText = (failure: unknown) => (failure instanceof Error ? failure.message : 'Aturan nggak kesimpen');
+const errorText = (failure: unknown) => (failure instanceof Error ? failure.message : 'The rule could not be saved');
 const seg = (on: boolean) => cn('inline-flex items-center rounded-xs border px-2.5 py-1.5 text-[0.78rem] disabled:cursor-not-allowed disabled:opacity-45 max-[900px]:min-h-11',
   on ? 'border-accent bg-accent-dim text-foreground' : 'border-border bg-surface-1 text-secondary-foreground hover:border-border-glow');
 
-const BLOCKED_MODES: Array<[BlockedManualMode, string]> = [['tell', 'Kasih tahu aja'], ['stop', 'Jangan mulai'], ['off', 'Nggak dicek']];
-const WORKTREE_MODES: Array<[WorktreeMode, string]> = [['notify', 'Kasih tahu aja'], ['auto', 'Hapus otomatis'], ['off', 'Mati']];
+const BLOCKED_MODES: Array<[BlockedManualMode, string]> = [['tell', 'Notify only'], ['stop', 'Do not start'], ['off', 'Not checked']];
+const WORKTREE_MODES: Array<[WorktreeMode, string]> = [['notify', 'Notify only'], ['auto', 'Delete automatically'], ['off', 'Off']];
 const WORKTREE_HELP: Record<WorktreeMode, string> = {
-  notify: 'Tiap hari kasih tahu di Workspace dan Home. Nggak pernah ngehapus sendiri.',
-  auto: 'Tiap hari 07:00 WIB, worktree yang udah merged lebih dari batas hari dihapus lewat wt.sh.',
-  off: 'Nggak dicek sama sekali.',
+  notify: 'Notifies daily in Workspace and Home. Never deletes anything itself.',
+  auto: 'Daily at 07:00 WIB, worktrees merged longer than the day limit are deleted through wt.sh.',
+  off: 'Not checked at all.',
 };
 
 /**
@@ -51,28 +51,28 @@ export const RulesCard = ({ scope = 'all', onOpenWorktrees }: { scope?: 'all' | 
   const nextOptions = [...new Set([...NEXT_STATUSES, status.next])].map((value) => ({ value, label: `PR Review → ${value}` }));
 
   return (
-    <SettingsCard title="Aturan" caption="Kapan sous boleh mulai tiket, apa yang terjadi di Jira setelah PR merge, dan worktree yang udah merged. Tiap aturan kesimpen langsung.">
-      {all && <SettingRow label="Kalau tiket ke-block" help="Buat sesi yang kamu buka sendiri dari tiket. Cron selalu nunggu dependency-nya beres.">
-        <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Kalau tiket ke-block">
+    <SettingsCard title="Rules" caption="When sous may start a ticket, what happens in Jira after a PR merges, and merged worktrees. Each rule saves at once.">
+      {all && <SettingRow label="When a ticket is blocked" help="For sessions you open yourself from a ticket. Cron always waits for its dependencies to finish.">
+        <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="When a ticket is blocked">
           {BLOCKED_MODES.map(([mode, label]) => <button key={mode} type="button" role="radio" aria-checked={cron.blockedManual === mode} className={seg(cron.blockedManual === mode)} disabled={busy || !config} onClick={() => setCron({ blockedManual: mode })}>{label}</button>)}
         </div>
       </SettingRow>}
-      {all && <SettingRow label="Stacked PR boleh jalan" help="Tiket boleh mulai di atas branch tiket induk yang belum merge (PR Review atau PR yang masih open).">
-        <label className="flex items-center gap-2 text-sm"><Checkbox checked={cron.stackedAllowed} disabled={busy || !config} onChange={(event) => setCron({ stackedAllowed: event.target.checked })} />Boleh</label>
+      {all && <SettingRow label="Allow stacked PRs" help="A ticket may start on top of a parent ticket's branch that is not merged yet (PR Review or a PR still open).">
+        <label className="flex items-center gap-2 text-sm"><Checkbox checked={cron.stackedAllowed} disabled={busy || !config} onChange={(event) => setCron({ stackedAllowed: event.target.checked })} />Allow</label>
       </SettingRow>}
-      <SettingRow label="Pindah status setelah merge" help="Waktu semua PR tiket di PR Review merge, status Jira pindah ke:">
+      <SettingRow label="Move status after merge" help="When every PR of a ticket in PR Review merges, the Jira status moves to:">
         <div className="flex flex-wrap items-center gap-3">
-          <Checkbox aria-label="Pindah status setelah merge" checked={status.enabled} disabled={busy} onChange={(event) => setStatus({ enabled: event.target.checked })} />
-          <span className="min-w-0 flex-1"><Select aria-label="Status tujuan" value={status.next} options={nextOptions} disabled={busy || !status.enabled} onValueChange={(next) => setStatus({ next })} /></span>
+          <Checkbox aria-label="Move status after merge" checked={status.enabled} disabled={busy} onChange={(event) => setStatus({ enabled: event.target.checked })} />
+          <span className="min-w-0 flex-1"><Select aria-label="Target status" value={status.next} options={nextOptions} disabled={busy || !status.enabled} onValueChange={(next) => setStatus({ next })} /></span>
         </div>
       </SettingRow>
-      <SettingRow label="Abaikan PR docs-sync" help="PR docs-sync dari bot (docs/auto-update/…) yang masih open nggak nahan perpindahan status.">
-        <label className="flex items-center gap-2 text-sm"><Checkbox checked={status.ignoreDocsSync} disabled={busy || !status.enabled} onChange={(event) => setStatus({ ignoreDocsSync: event.target.checked })} />Abaikan</label>
+      <SettingRow label="Ignore docs-sync PRs" help="Open docs-sync PRs from the bot (docs/auto-update/…) do not hold back the status move.">
+        <label className="flex items-center gap-2 text-sm"><Checkbox checked={status.ignoreDocsSync} disabled={busy || !status.enabled} onChange={(event) => setStatus({ ignoreDocsSync: event.target.checked })} />Ignore</label>
       </SettingRow>
-      <SettingRow label="Jalan juga di DOCK laptop" help="Biasanya cuma DOCK workspace. Kalau dua-duanya nyala, status Jira dicek ulang sebelum pindah, jadi tiketnya nggak pindah dua kali.">
-        <label className="flex items-center gap-2 text-sm"><Checkbox checked={status.laptop} disabled={busy || !status.enabled} onChange={(event) => setStatus({ laptop: event.target.checked })} />Nyala di laptop</label>
+      <SettingRow label="Also run on laptop DOCK" help="Usually only the workspace DOCK. When both are on, the Jira status is checked again before the move, so the ticket does not move twice.">
+        <label className="flex items-center gap-2 text-sm"><Checkbox checked={status.laptop} disabled={busy || !status.enabled} onChange={(event) => setStatus({ laptop: event.target.checked })} />On for laptop</label>
       </SettingRow>
-      {all && <SettingRow label="Worktree merged" help="Apa yang DOCK lakuin ke worktree yang tiketnya udah merged.">
+      {all && <SettingRow label="Worktree merged" help="What DOCK does with worktrees whose ticket is merged.">
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Worktree merged">
             {WORKTREE_MODES.map(([mode, label]) => <button key={mode} type="button" role="radio" aria-checked={worktree.mode === mode} className={seg(worktree.mode === mode)} disabled={busy} onClick={() => setWorktree({ mode })}>{label}</button>)}
@@ -80,15 +80,15 @@ export const RulesCard = ({ scope = 'all', onOpenWorktrees }: { scope?: 'all' | 
           <p className="text-xs text-muted-foreground">{WORKTREE_HELP[worktree.mode]}</p>
           {worktree.mode === 'auto' && (
             <div className="flex flex-col gap-2 rounded-sm border border-border bg-surface-0 p-3 text-xs">
-              <label className="flex flex-wrap items-center gap-2"><span className="w-28 text-muted-foreground">Merged lebih dari</span>
-                <Input aria-label="Hari" inputMode="numeric" className="h-8 w-16 text-center font-mono text-xs" defaultValue={String(worktree.days)} key={worktree.days} disabled={busy}
+              <label className="flex flex-wrap items-center gap-2"><span className="w-28 text-muted-foreground">Merged more than</span>
+                <Input aria-label="Days" inputMode="numeric" className="h-8 w-16 text-center font-mono text-xs" defaultValue={String(worktree.days)} key={worktree.days} disabled={busy}
                   onBlur={(event) => { const days = Number(event.target.value); if (Number.isInteger(days) && days !== worktree.days) setWorktree({ days }); }} />
-                <span className="text-muted-foreground">hari</span></label>
-              <ul className="flex flex-col gap-0.5">{['Nggak ada perubahan lokal', 'Nggak dipakai sesi aktif', 'Nggak ada dev server yang jalan'].map((line) => <li key={line} className="flex items-center gap-1.5 text-secondary-foreground"><Lock size={11} aria-hidden="true" className="text-muted-foreground" />{line}</li>)}</ul>
-              <p className="flex items-center gap-1.5 text-status-warn"><AlertTriangle size={12} aria-hidden="true" />Worktree yang dihapus nggak bisa dibalikin. Branch tetap ada di remote.</p>
+                <span className="text-muted-foreground">days</span></label>
+              <ul className="flex flex-col gap-0.5">{['No local changes', 'Not used by an active session', 'No dev server running'].map((line) => <li key={line} className="flex items-center gap-1.5 text-secondary-foreground"><Lock size={11} aria-hidden="true" className="text-muted-foreground" />{line}</li>)}</ul>
+              <p className="flex items-center gap-1.5 text-status-warn"><AlertTriangle size={12} aria-hidden="true" />A deleted worktree cannot be restored. The branch stays on the remote.</p>
             </div>
           )}
-          {onOpenWorktrees && <div><Button size="sm" variant="ghost" onClick={onOpenWorktrees}>Buka Worktrees</Button></div>}
+          {onOpenWorktrees && <div><Button size="sm" variant="ghost" onClick={onOpenWorktrees}>Open Worktrees</Button></div>}
         </div>
       </SettingRow>}
       {error && <p className="mt-3 text-sm text-status-conflict" role="alert">{error}</p>}

@@ -216,7 +216,7 @@ export interface ManualCheck { mode: BlockedManualMode; waitsOn: string | null; 
 
 /** Why a manual session on a blocked ticket is not opened, or null when it may open. */
 export function manualRefusal(check: ManualCheck): string | null {
-  return check.mode === 'stop' && check.waitsOn ? `Tiket ini nunggu ${check.waitsOn} dulu, jadi sesinya nggak dibuka. Ganti di Settings › Sous flow › Aturan kalau mau tetap mulai.` : null;
+  return check.mode === 'stop' && check.waitsOn ? `This ticket waits on ${check.waitsOn}, so the session was not opened. Change it in Settings › Sous flow › Rules to start anyway.` : null;
 }
 
 /**

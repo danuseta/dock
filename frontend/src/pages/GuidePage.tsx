@@ -11,7 +11,7 @@ const Settings: React.FC<{ rows: Row[] }> = ({ rows }) => (
   <div className="my-3 overflow-x-auto rounded-sm border border-border">
     <table className="w-full min-w-[560px] border-collapse text-left text-xs">
       <thead className="bg-surface-1 font-mono text-[0.66rem] uppercase tracking-wide text-muted-foreground">
-        <tr><th className="px-3 py-2">Setting</th><th className="px-3 py-2">Default</th><th className="px-3 py-2">Batas</th><th className="px-3 py-2">Artinya</th></tr>
+        <tr><th className="px-3 py-2">Setting</th><th className="px-3 py-2">Default</th><th className="px-3 py-2">Range</th><th className="px-3 py-2">Meaning</th></tr>
       </thead>
       <tbody>
         {rows.map(([setting, value, range, meaning]) => (
@@ -65,11 +65,11 @@ const Flow: React.FC<{ steps: string[] }> = ({ steps }) => (
 );
 
 const SECTIONS = [
-  ['tiket', 'Ngerjain tiket'],
-  ['slot', 'Slot & kapasitas'],
-  ['review', 'Review PR teman'],
-  ['akun', 'Akun Claude'],
-  ['awasi', 'Ngawasin & kalau macet'],
+  ['tiket', 'Working a ticket'],
+  ['slot', 'Slots & capacity'],
+  ['review', "Reviewing a teammate's PR"],
+  ['akun', 'Claude account'],
+  ['awasi', 'Watching & when stuck'],
   ['discord', 'Discord'],
   ['workspace', 'Workspace & update'],
   ['judge', 'Retro Judge'],
@@ -80,109 +80,109 @@ const GuidePage: React.FC<GuidePageProps> = ({ onNavigate }) => (
   <Page width="medium">
     <header className="mb-6">
       <p className="mb-1 flex items-center gap-2 text-xs font-semibold text-muted-foreground"><BookOpen size={14} aria-hidden="true" />HOW TO USE</p>
-      <h1 className="font-display text-3xl font-bold">Tata kerja DOCK</h1>
-      <p className="mt-2 text-sm text-muted-foreground">Alur kerja tiket, review, dan agent di DOCK, setting yang mengaturnya, berikut default dan batasnya.</p>
-      <nav aria-label="Isi" className="mt-4 flex flex-wrap gap-2 max-[760px]:flex-nowrap max-[760px]:overflow-x-auto">
+      <h1 className="font-display text-3xl font-bold">How DOCK works</h1>
+      <p className="mt-2 text-sm text-muted-foreground">The ticket, review and agent flows in DOCK, the settings that steer them, and their defaults and limits.</p>
+      <nav aria-label="Contents"className="mt-4 flex flex-wrap gap-2 max-[760px]:flex-nowrap max-[760px]:overflow-x-auto">
         {SECTIONS.map(([id, label]) => <a key={id} href={`#${id}`} className="rounded-pill border border-border px-3 py-1 text-xs max-[760px]:flex max-[760px]:min-h-11 max-[760px]:shrink-0 max-[760px]:items-center max-[760px]:whitespace-nowrap max-[760px]:px-4 text-secondary-foreground hover:border-border-glow hover:text-foreground">{label}</a>)}
       </nav>
     </header>
 
     <div className="flex flex-col gap-8 text-sm leading-relaxed text-secondary-foreground">
-      <Section id="tiket" title="A. Ngerjain tiket">
-        <h3 className="mb-2 font-semibold text-foreground">1. Cron: tiket jalan sendiri</h3>
-        <p>Buka <Go to="/agents" label="Agents" onNavigate={onNavigate} />, tombol <b>Cron</b>, nyalakan. Tiap menit di jam kerja, cron mengambil tiket To Do dari sprint aktif dan membuka sesi <code className="font-mono text-xs">Task-QRD-xxx</code>.</p>
-        <Flow steps={['To Do', 'cron ambil', 'Task-QRD-xxx', 'plan', 'kode', 'review', 'video', 'PR']} />
+      <Section id="tiket" title="A. Working a ticket">
+        <h3 className="mb-2 font-semibold text-foreground">1. Cron: tickets run on their own</h3>
+        <p>Open <Go to="/agents" label="Agents" onNavigate={onNavigate} />, press <b>Cron</b>, and switch it on. Every minute during work hours, cron takes a To Do ticket from the active sprint and opens a <code className="font-mono text-xs">Task-QRD-xxx</code> session.</p>
+        <Flow steps={['To Do', 'cron picks', 'Task-QRD-xxx', 'plan', 'code', 'review', 'video', 'PR']} />
         <SettingsBlock rows={[
-          ['Agents at once', '2', '1–5', 'Tiket cron (termasuk auto review) yang jalan bersamaan. Chat manual tidak dihitung di sini.'],
-          ['New tickets per day', '6', '1–50', 'Tiket baru yang dimulai per hari (WIB). Angka yang sama juga batas tiket yang diparkir.'],
-          ['From hour / Until hour', '9 / 17', '0–24 WIB', 'Di luar jam ini cron tidak memulai tiket baru; yang sudah jalan tetap selesai.'],
-          ['Work days', 'Sen–Jum', '1–7', 'Hari cron boleh memulai tiket.'],
-          ['Active from / until', 'kosong', 'tanggal', 'Opsional: cron hanya aktif di rentang tanggal ini.'],
-          ['Tickets from', 'active sprint', 'active / any', 'Sprint yang diambil.'],
-          ['Jira statuses to pick up', 'To Do', 'daftar', 'Status Jira yang dianggap siap dikerjakan.'],
-          ['Move a started ticket to', 'In Progress', 'status', 'Status Jira setelah tiket mulai.'],
-          ['Usage brake (%)', '70', '0–100', 'Kalau usage 5 jam sudah segini, cron berhenti memulai tiket baru. Akun Ultra tidak punya window 5 jam, jadi batas ini dilewati.'],
-          ['Weekly brake (%)', '90', '0–100', 'Kalau usage 7 hari sudah segini, cron berhenti memulai tiket baru.'],
+          ['Agents at once', '2', '1–5', 'Cron tickets (auto review included) that run at the same time. Manual chats do not count here.'],
+          ['New tickets per day', '6', '1–50', 'New tickets started per day (WIB). The same number also caps parked tickets.'],
+          ['From hour / Until hour', '9 / 17', '0–24 WIB', 'Outside these hours cron starts no new ticket; tickets already running still finish.'],
+          ['Work days', 'Mon–Fri', '1–7', 'Days cron may start a ticket.'],
+          ['Active from / until', 'empty', 'date', 'Optional: cron is active only in this date range.'],
+          ['Tickets from', 'active sprint', 'active / any', 'The sprint tickets are taken from.'],
+          ['Jira statuses to pick up', 'To Do', 'list', 'Jira statuses that count as ready to work on.'],
+          ['Move a started ticket to', 'In Progress', 'status', 'The Jira status once a ticket starts.'],
+          ['Usage brake (%)', '70', '0–100', 'When 5-hour usage reaches this, cron stops starting new tickets. Ultra accounts have no 5-hour window, so this limit is skipped.'],
+          ['Weekly brake (%)', '90', '0–100', 'When 7-day usage reaches this, cron stops starting new tickets.'],
         ]} />
-        <h3 className="mb-2 mt-4 font-semibold text-foreground">2. Tiket manual</h3>
-        <p>Buka sesi dari chat panel atau dari tiket. Bedanya dengan cron: sesi manual berhenti di <b>gate</b> dan bertanya dulu sebelum menulis kode; cron jalan terus tanpa bertanya kalau AC tiketnya lengkap. Tiket tanpa AC diparkir dan menunggu kamu.</p>
-        <h3 className="mb-2 mt-4 font-semibold text-foreground">3. Urutan & dependency</h3>
-        <p>Di <Go to="/dashboard" label="Board" onNavigate={onNavigate} />, atur urutan kerja, tandai tiket <b>manual</b> (cron tidak mengambilnya), dan pasang dependency. Cron mengikuti urutan itu dan melewati tiket yang dependency-nya belum selesai.</p>
-        <h3 className="mb-2 mt-4 font-semibold text-foreground">4. Agent bertanya</h3>
-        <p>Pertanyaan agent masuk sebagai notifikasi dan muncul di <Go to="/decisions" label="Decisions" onNavigate={onNavigate} /> serta Agents. Jawabanmu masuk antrean paling depan dan mengambil slot pertama yang kosong.</p>
-        <h3 className="mb-2 mt-4 font-semibold text-foreground">5. Selesai</h3>
-        <p>Tiket selesai dengan PR terbuka (draft kalau diminta), video demo di Demo Videos, status Jira bergeser, dan run di Agents jadi Done.</p>
+        <h3 className="mb-2 mt-4 font-semibold text-foreground">2. Manual tickets</h3>
+        <p>Open a session from the chat panel or from a ticket. The difference from cron: a manual session stops at the <b>gate</b> and asks before it writes code; cron keeps going without asking when the ticket's AC is complete. A ticket without AC is parked and waits for you.</p>
+        <h3 className="mb-2 mt-4 font-semibold text-foreground">3. Order & dependencies</h3>
+        <p>On the <Go to="/dashboard" label="Board" onNavigate={onNavigate} />, set the work order, mark tickets <b>manual</b> (cron does not take them), and add dependencies. Cron follows that order and skips tickets whose dependencies are not done.</p>
+        <h3 className="mb-2 mt-4 font-semibold text-foreground">4. The agent asks</h3>
+        <p>Agent questions arrive as notifications and show in <Go to="/decisions" label="Decisions" onNavigate={onNavigate} /> and Agents. Your answer goes to the front of the queue and takes the first free slot.</p>
+        <h3 className="mb-2 mt-4 font-semibold text-foreground">5. Done</h3>
+        <p>A ticket finishes with an open PR (draft when asked), a demo video in Demo Videos, its Jira status moved, and its run in Agents marked Done.</p>
       </Section>
 
-      <Section id="slot" title="B. Slot & kapasitas">
+      <Section id="slot" title="B. Slots & capacity">
         <SettingsBlock rows={[
-          ['Turns at once (Settings → Chat)', '3', '1–6', 'Batas total giliran yang jalan bersamaan di mesin ini: cron, auto review, dan chat manual.'],
-          ['Agents at once (Cron)', '2', '1–5', 'Bagian dari Turns at once yang boleh dipakai cron dan auto review.'],
+          ['Turns at once (Settings → Chat)', '3', '1–6', 'Total turns that run at the same time on this machine: cron, auto review and manual chat.'],
+          ['Agents at once (Cron)', '2', '1–5', 'The part of Turns at once that cron and auto review may use.'],
         ]} />
-        <p>Contoh: Turns at once 4 dan Agents at once 2 berarti 2 slot untuk tiket cron atau auto review (dipakai bergantian) dan 2 slot sisa untuk chat manual. Kalau Agents at once lebih besar dari Turns at once, yang berlaku tetap Turns at once.</p>
-        <p>Subagent di dalam satu sesi (worker, reviewer, verifier) tidak memakai slot, tapi tetap memakai kuota akun Claude.</p>
+        <p>Example: Turns at once 4 and Agents at once 2 means 2 slots for cron tickets or auto reviews (shared) and the other 2 for manual chat. When Agents at once is larger than Turns at once, Turns at once still applies.</p>
+        <p>Subagents inside one session (worker, reviewer, verifier) take no slot, but they still use the Claude account's quota.</p>
       </Section>
 
-      <Section id="review" title="C. Review PR teman">
-        <p>Atur di <Go to="/settings?section=discord" label="Settings → Discord" onNavigate={onNavigate} />, kartu <b>Auto review</b>.</p>
+      <Section id="review" title="C. Reviewing a teammate's PR">
+        <p>Set it up in <Go to="/settings?section=discord" label="Settings → Discord" onNavigate={onNavigate} />, card <b>Auto review</b>.</p>
         <SettingsBlock rows={[
-          ['Review when I say on it', 'off', 'on / off', 'Kamu bilang "on it" di thread pr-review → sesi Review-QRD-xxx jalan di slot cron. Syarat: "on it" milikmu, umurnya di bawah 6 jam, PR masih open. Sekali per head commit.'],
-          ['LGTM when the review is clean', 'off', 'on / off', 'Hanya bisa nyala kalau auto review nyala. Verdict approve tanpa blocker terbuka → DOCK menjalankan LGTM yang sama dengan tombolnya.'],
+          ['Review when I say on it', 'off', 'on / off', 'You say "on it" in a pr-review thread → a Review-QRD-xxx session runs in a cron slot. Requires: the "on it" is yours, it is under 6 hours old, and the PR is still open. Once per head commit.'],
+          ['LGTM when the review is clean', 'off', 'on / off', 'Can be on only when auto review is on. An approve verdict with no open blocker → DOCK runs the same LGTM as the button.'],
         ]} />
-        <Flow steps={['on it', 'Review-QRD-xxx', 'verdict', 'clean? LGTM', 'notif ke kamu']} />
+        <Flow steps={['on it', 'Review-QRD-xxx', 'verdict', 'clean? LGTM', 'notifies you']} />
         <ul>
-          <li><b>Hasil review</b>: verdict dan temuan di <Go to="/agents" label="Agents" onNavigate={onNavigate} />; diff PR dengan temuan di barisnya lewat tombol <b>Changes</b>.</li>
-          <li><b>LGTM</b>: label Pass-mu di Jira plus approve di GitHub. PR yang sudah merged cukup dapat label. Tidak ada yang diposting ke Discord, jadi balas sendiri di thread.</li>
-          <li><b>Review manual</b>: minta lewat chat; memakai slot chat, bukan slot cron.</li>
+          <li><b>Review result</b>: verdict and findings in <Go to="/agents" label="Agents" onNavigate={onNavigate} />; the PR diff with findings on their lines through the <b>Changes</b> button.</li>
+          <li><b>LGTM</b>: your Pass label in Jira plus an approve on GitHub. A PR that is already merged only gets the label. Nothing is posted to Discord, so reply in the thread yourself.</li>
+          <li><b>Manual review</b>: ask in chat; it uses a chat slot, not a cron slot.</li>
         </ul>
-        <p><b>QA lokal.</b> Hanya muncul di DOCK workspace yang punya <code>qonflo-qa-local</code> (<code>~/qa-local</code>). Kartu <b>QA local</b> ada di panel kanan sesi tiket.</p>
+        <p><b>Local QA.</b> Shows only on a DOCK workspace that has <code>qonflo-qa-local</code> (<code>~/qa-local</code>). The <b>QA local</b> card is in the right panel of a ticket session.</p>
         <SettingsBlock rows={[
-          ['Run after PR', 'off', 'on / off', 'Tiket yang dibangun di mesin cron dapat PR → sesi QA-QRD-xxx jalan: tulis tes dari AC Jira (hanya baca) kalau belum ada, lalu qonflo-qa-local. Sekali per set PR; PR baru memicu lagi.'],
+          ['Run after PR', 'off', 'on / off', 'A ticket built on the cron machine gets a PR → a QA-QRD-xxx session runs: it writes tests from the Jira AC (read only) when none exist, then runs qonflo-qa-local. Once per PR set; a new PR triggers it again.'],
         ]} />
-        <Flow steps={['PR', 'QA-QRD-xxx', 'tulis tes', 'stack lokal + Playwright', 'LOLOS / REVISION / ESCALATED']} />
+        <Flow steps={['PR', 'QA-QRD-xxx', 'write tests', 'local stack + Playwright', 'LOLOS / REVISION / ESCALATED']} />
         <ul>
-          <li><b>Progres</b>: Stack, Login, Tests n/total, Verdict; tiap TC dengan status dan video.</li>
-          <li><b>Run again</b>: jalankan QA sekarang tanpa menunggu PR baru.</li>
-          <li>Tidak ada yang ditulis ke Jira, UAT, atau <code>~/qa</code>; verdict hanya prediksi.</li>
+          <li><b>Progress</b>: Stack, Login, Tests n/total, Verdict; each TC with its status and video.</li>
+          <li><b>Run again</b>: run QA now without waiting for a new PR.</li>
+          <li>Nothing is written to Jira, UAT or <code>~/qa</code>; the verdict is only a prediction.</li>
         </ul>
       </Section>
 
-      <Section id="akun" title="D. Akun Claude">
-        <p>Di <Go to="/settings?section=claude" label="Settings → Claude account" onNavigate={onNavigate} />. Akun berasal dari <code className="font-mono text-xs">/cycle</code> di workspace (parameter token Coder).</p>
+      <Section id="akun" title="D. Claude account">
+        <p>In <Go to="/settings?section=claude" label="Settings → Claude account" onNavigate={onNavigate} />. Accounts come from <code className="font-mono text-xs">/cycle</code> on the workspace (a Coder token parameter).</p>
         <SettingsBlock rows={[
-          ['Use', '–', 'per akun', 'Pindah akun. Berlaku untuk giliran berikutnya; giliran yang sedang jalan selesai di akun lama.'],
-          ['Rotate automatically', 'off', 'on / off', 'Pindah ke akun berikutnya kalau akun aktif mencapai batas 5h atau batas 7d, mana saja yang lebih dulu.'],
+          ['Use', '–', 'per account', 'Switch accounts. Applies from the next turn; a turn already running finishes on the old account.'],
+          ['Rotate automatically', 'off', 'on / off', 'Move to the next account when the active one reaches the 5h or 7d limit, whichever comes first.'],
           ['Rotate when 5h reaches', '90%', '50–100', ''],
           ['Rotate when 7d reaches', '95%', '50–100', ''],
-          ['Back to main when it resets', 'on', 'on / off', 'Setelah rotasi otomatis, kembali ke main begitu main di bawah batas lagi.'],
-          ['Rotate when 5h reaches (%)', '-', '50–100', 'Akun Ultra tidak punya window 5 jam; akun itu hanya dirotasi lewat batas 7d.'],
+          ['Back to main when it resets', 'on', 'on / off', 'After an automatic rotation, go back to main once main is under the limit again.'],
+          ['Rotate when 5h reaches (%)', '-', '50–100', 'Ultra accounts have no 5-hour window; they rotate only on the 7d limit.'],
         ]} />
-        <p>Usage sebuah akun hanya diketahui saat akun itu dipakai. Akun yang belum pernah dipakai bertuliskan "no usage seen yet" sampai giliran pertamanya.</p>
+        <p>An account's usage is known only while it is in use. An account never used yet reads "no usage seen yet" until its first turn.</p>
       </Section>
 
-      <Section id="awasi" title="E. Ngawasin & kalau macet">
+      <Section id="awasi" title="E. Watching & when stuck">
         <ul>
-          <li><Go to="/sessions" label="Sessions" onNavigate={onNavigate} />: isi sesi, worker dan tool yang sedang jalan, tombol stop.</li>
-          <li><Go to="/blackboard" label="Blackboard" onNavigate={onNavigate} />: papan kerja agent per tiket. <b>Log</b> berisi jejak eksekusi (stage, gate, agent, tool, LGTM); <code className="font-mono text-xs">video-scenario.md</code> berisi skenario video.</li>
-          <li>Sesi macet: stop giliran di Sessions lalu kirim ulang, atau reset run di Agents.</li>
+          <li><Go to="/sessions" label="Sessions" onNavigate={onNavigate} />: session contents, the workers and tools running, and the stop button.</li>
+          <li><Go to="/blackboard" label="Blackboard" onNavigate={onNavigate} />: the agents' working board per ticket. <b>Log</b> holds the execution trail (stage, gate, agent, tool, LGTM); <code className="font-mono text-xs">video-scenario.md</code> holds the video scenario.</li>
+          <li>Stuck session: stop the turn in Sessions and send it again, or reset the run in Agents.</li>
         </ul>
       </Section>
 
       <Section id="discord" title="F. Discord">
         <ul>
-          <li><b>Setup</b>: cukup isi user id Discord di <Go to="/settings?section=discord" label="Settings → Discord" onNavigate={onNavigate} />. Bot token, server, dan tiga forum tim (bug, UAT, PR) datang dari workspace.</li>
-          <li><b>Alur thread</b>: Needs you, Your turn, Waiting. "On it" berarti klaim. Agent bisa membaca isi thread dan file PDF/txt di dalamnya.</li>
-          <li><b>"updated" tidak bergerak</b>: DOCK hanya menerima event dari Discord, tanpa refresh berkala. Kalau sepi, jamnya diam.</li>
-          <li>Forum tim bisa dimatikan di Channels, tidak bisa dihapus.</li>
+          <li><b>Setup</b>: just fill in your Discord user id in <Go to="/settings?section=discord" label="Settings → Discord" onNavigate={onNavigate} />. The bot token, server and the three team forums (bug, UAT, PR) come from the workspace.</li>
+          <li><b>Thread flow</b>: Needs you, Your turn, Waiting. "On it" means a claim. The agent can read the thread and the PDF/txt files in it.</li>
+          <li><b>"updated" does not move</b>: DOCK only receives events from Discord, with no periodic refresh. When it is quiet, the clock stays still.</li>
+          <li>Team forums can be turned off in Channels, not deleted.</li>
         </ul>
       </Section>
 
-      <Section id="workspace" title="G. Workspace & update">
+      <Section id="workspace" title="G. Workspace & updates">
         <ul>
-          <li><b>Kode DOCK dan kit</b> ikut cabang stable lewat updater, kira-kira tiap 5 menit, selama workspace menyala.</li>
-          <li><b>Template Coder baru</b> (misalnya token bot Discord) baru masuk setelah klik <b>Update</b> di halaman workspace di Coder.</li>
-          <li><Go to="/workspace?tab=servers" label="Workspace → Servers" onNavigate={onNavigate} />: jalankan BE/FE per worktree untuk tes atau rekam video.</li>
-          <li>Ada yang aneh: cek workspace outdated, setting yang kosong, <Go to="/workspace?tab=health" label="Workspace → Health" onNavigate={onNavigate} /> untuk koneksi chat, lalu lapor lewat ikon bug di pojok kiri bawah.</li>
+          <li><b>DOCK code and the kit</b> follow the stable branch through the updater, about every 5 minutes, while the workspace is on.</li>
+          <li><b>A new Coder template</b> (for example a Discord bot token) only arrives after you click <b>Update</b> on the workspace page in Coder.</li>
+          <li><Go to="/workspace?tab=servers" label="Workspace → Servers" onNavigate={onNavigate} />: run BE/FE per worktree to test or record a video.</li>
+          <li>Something looks off: check for an outdated workspace, empty settings, <Go to="/workspace?tab=health" label="Workspace → Health" onNavigate={onNavigate} /> for the chat connection, then report it through the bug icon at the bottom left.</li>
         </ul>
       </Section>
 
@@ -192,7 +192,7 @@ const GuidePage: React.FC<GuidePageProps> = ({ onNavigate }) => (
         <h3 className="mb-2 mt-4 font-semibold text-foreground">What Judge reads</h3>
         <ul>
           <li>Sessions that work on a ticket: Task, Review, QA, and a chat whose first message names a ticket key. Never Plan, Planning, Retro, Judge or a chat without a ticket.</li>
-          <li>Your messages and the assistant's in full, tool calls by name with the refused and failed ones, the ticket ledger, the checkpoints, Log eksekusi, Tiket → kode coverage, other people's messages in the PR thread after their on it, and Jira status changes.</li>
+          <li>Your messages and the assistant's in full, tool calls by name with the refused and failed ones, the ticket ledger, the checkpoints, the execution log, Ticket → code coverage, other people's messages in the PR thread after their on it, and Jira status changes.</li>
           <li>A session used again later is read again only from the last judged message; its new findings are added.</li>
         </ul>
         <h3 className="mb-2 mt-4 font-semibold text-foreground">When it runs</h3>

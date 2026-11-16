@@ -12,26 +12,26 @@ const checkpoint = (extra: Partial<Checkpoint> = {}): Checkpoint => ({
 test('a checkpoint card shows the step, the agent, the time and the report', () => {
   const html = renderToStaticMarkup(<ol><CheckpointCard checkpoint={checkpoint()} /></ol>);
   assert.match(html, /Checkpoint/);
-  assert.match(html, />Rencana kerja</, 'a Sous flow stage reads by its name');
+  assert.match(html, />Work plan</, 'a Sous flow stage reads by its name');
   assert.match(html, /sous-planner/);
   assert.match(html, /<time dateTime="2026-11-13T09:10:00.000Z"/);
   assert.match(html, /Planned 3 tasks\./);
-  assert.doesNotMatch(html, /Data uji/);
+  assert.doesNotMatch(html, /Test data still missing/);
   assert.strictEqual(stepLabel('Task 2'), 'Task 2', 'a step the flow does not name reads as written');
 });
 
 test('the final review card carries the untestable AC lines and the missing test data', () => {
   const html = renderToStaticMarkup(<ol><CheckpointCard checkpoint={checkpoint({ step: 'final', agent: 'sous-reviewer', untestable: ['AC 3 needs QRD-1307 in UAT'], missingData: ['a workspace with two agents'] })} /></ol>);
-  assert.match(html, />Review akhir</);
-  assert.match(html, /Belum bisa dites selama tiket ini sendirian di UAT/);
+  assert.match(html, />Final review</);
+  assert.match(html, /Not testable while this ticket is alone in UAT/);
   assert.match(html, /AC 3 needs QRD-1307 in UAT/);
-  assert.match(html, /Data uji yang belum ada/);
+  assert.match(html, /Test data still missing/);
   assert.match(html, /a workspace with two agents/);
 });
 
 test('after a stop the card offers to go on with a plain chat line', () => {
-  const html = renderToStaticMarkup(<ol><CheckpointCard checkpoint={checkpoint({ step: 'video' })} onContinue={{ label: 'Lanjut dari Publish', run: () => undefined }} /></ol>);
-  assert.match(html, /Lanjut dari Publish/);
+  const html = renderToStaticMarkup(<ol><CheckpointCard checkpoint={checkpoint({ step: 'video' })} onContinue={{ label: 'Continue from Publish', run: () => undefined }} /></ol>);
+  assert.match(html, /Continue from Publish/);
 });
 
 test('an agent\'s checkpoint is the one with its id, else the next of its type after it started', () => {
@@ -65,12 +65,12 @@ test('only a checkpoint that arrives after the first read counts as new', () => 
 
 test('the kit steps map to Sous flow stages, task steps keep their task, anything else reads as written', () => {
   const cases: Array<[string, string | null, string | null, string]> = [
-    ['planner', 'plan', null, 'Rencana kerja'],
-    ['T2-work', 'code', 'T2', 'Ngoding per task · T2'],
+    ['planner', 'plan', null, 'Work plan'],
+    ['T2-work', 'code', 'T2', 'Code per task · T2'],
     ['T3-review', 'loop', 'T3', 'Review loop · T3'],
     ['t1-verify', 'verify', 'T1', 'Verify · T1'],
-    ['final-review', 'final', null, 'Review akhir'],
-    ['video', 'video', null, 'Video demo'],
+    ['final-review', 'final', null, 'Final review'],
+    ['video', 'video', null, 'Demo video'],
     ['publish', 'publish', null, 'Publish'],
     ['decide', 'decide', null, 'Decisions'],
     ['T2-deploy', null, null, 'T2-deploy'],
@@ -81,5 +81,5 @@ test('the kit steps map to Sous flow stages, task steps keep their task, anythin
     assert.strictEqual(stepLabel(step), label, step);
   }
   const html = renderToStaticMarkup(<ol><CheckpointCard checkpoint={checkpoint({ step: 'T2-work', agent: 'sous-ticket-worker' })} /></ol>);
-  assert.match(html, />Ngoding per task · T2</);
+  assert.match(html, />Code per task · T2</);
 });

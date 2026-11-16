@@ -40,7 +40,7 @@ test('2: the snippet is the hunk slice around the line, 5 lines each side, with 
 
 test('2: the AC line detail shows a snippet per path:line from the Perubahan kode data, or "snippet belum ada", and keeps the link', () => {
   const map = read('pages/blackboard/AcMap.tsx');
-  assert.match(map, /snippet belum ada/);
+  assert.match(map, /no snippet yet/);
   assert.match(map, /\{ref\.line !== null && <RefSnippet value=\{ref\} pulls=\{pulls\} files=\{files\} \/>\}/);
   assert.match(map, /title=\{shown\.title \?\? undefined\}/);
   const page = read('pages/BlackboardPage.tsx');
@@ -65,7 +65,7 @@ test('3: Kontrak shows the demo, the Figma link and the draft storyboard, each h
 });
 
 test('4: board cards show the summary line in blue with the Intinya on hover, from the one readiness query of the board', () => {
-  assert.strictEqual(intinyaTitle({ made: 'Tab Versions', checked: 'Restore', notHere: '', waitsOn: ['QRD-1307'] }), 'Bikin apa: Tab Versions\nDicek di sini: Restore\nNunggu tiket lain: QRD-1307');
+  assert.strictEqual(intinyaTitle({ made: 'Tab Versions', checked: 'Restore', notHere: '', waitsOn: ['QRD-1307'] }), 'Builds: Tab Versions\nChecked here: Restore\nWaits on: QRD-1307');
   const card = read('components/TicketCard.tsx');
   assert.match(card, /\{summary\?\.line\?\.trim\(\) && <span className="[^"]*text-sky-200" title=\{intinyaTitle\(summary\)\}>\{summary\.line\}<\/span>\}/);
   const board = read('pages/DashboardPage.tsx');

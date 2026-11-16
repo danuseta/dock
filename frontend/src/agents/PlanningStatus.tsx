@@ -25,10 +25,10 @@ export const PlanningStatus: React.FC<PlanningStatusProps> = ({ sprint, signal, 
   const planner = signal ? signal.isPlanner : true;
   const items = planAttention(signal, draft);
   const pending = !!signal?.revision && (signal.joined.length + signal.acChanged.length) > 0;
-  const label = !signal?.revision ? 'Publish' : pending ? `Publish ulang r${signal.revision + 1}` : 'Publish ulang';
+  const label = !signal?.revision ? 'Publish' : pending ? `Republish r${signal.revision + 1}` : 'Republish';
   const onAction = signal?.revision ? onRepublish : onPublish;
   const actions: Record<string, () => void> = { chat: onOpenChat, republish: onRepublish };
-  const linkText: Record<string, string> = { chat: 'buka', republish: 'publish ulang' };
+  const linkText: Record<string, string> = { chat: 'open', republish: 'republish' };
 
   return (
     <section aria-label="Sprint plan status" className="rounded-md border border-border bg-surface-1 px-4 py-3">
@@ -47,8 +47,8 @@ export const PlanningStatus: React.FC<PlanningStatusProps> = ({ sprint, signal, 
         </ol>
         <span className="ml-auto flex items-center gap-2 max-[760px]:ml-0">
           {ready && ready.total > 0 && (
-            <button type="button" onClick={onShowReady} title="Cuma info, Publish tetap aktif" className={cn('rounded-xs border px-1.5 py-0.5 font-mono text-[0.68rem] font-bold', ready.done === ready.total ? 'border-status-merged text-status-merged' : 'border-status-warn text-status-warn')}>
-              Siap publish {ready.done} dari {ready.total}
+            <button type="button" onClick={onShowReady} title="Info only, Publish stays on" className={cn('rounded-xs border px-1.5 py-0.5 font-mono text-[0.68rem] font-bold', ready.done === ready.total ? 'border-status-merged text-status-merged' : 'border-status-warn text-status-warn')}>
+              Ready to publish {ready.done} of {ready.total}
             </button>
           )}
           {planner ? (
@@ -56,7 +56,7 @@ export const PlanningStatus: React.FC<PlanningStatusProps> = ({ sprint, signal, 
               <Send size={13} aria-hidden="true" />{label}
             </Button>
           ) : (
-            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" title={`Cuma ${signal?.planner ?? 'planner'} yang bisa ubah dan publish draft`}><Lock size={12} aria-hidden="true" />Read-only</span>
+            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" title={`Only ${signal?.planner ?? 'planner'} can change and publish the draft`}><Lock size={12} aria-hidden="true" />Read-only</span>
           )}
         </span>
       </div>
@@ -81,14 +81,14 @@ export const DeveloperOrder: React.FC<{ signal: PlanSignal }> = ({ signal }) => 
   if (!signal.revision) {
     return (
       <section aria-label="Your work order" className="rounded-md border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
-        Plan per developer dibikin setelah publish. {signal.sprint} masih draft di {signal.planner ?? 'planner'}.
+        The per-developer plan is made after publish. {signal.sprint} is still a draft with {signal.planner ?? 'planner'}.
       </section>
     );
   }
   return (
     <section aria-label="Your work order" className="min-w-0 rounded-md border border-border bg-surface-0 px-4 py-3">
-      <h3 className="font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground">Urutan kerja {signal.me ?? ''} · plan r{signal.revision}</h3>
-      {signal.myOrder.length === 0 && signal.myOutside.length === 0 && <p className="mt-2 text-sm text-muted-foreground">Tidak ada tiket To Do kamu di plan ini.</p>}
+      <h3 className="font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground">Work order {signal.me ?? ''} · plan r{signal.revision}</h3>
+      {signal.myOrder.length === 0 && signal.myOutside.length === 0 && <p className="mt-2 text-sm text-muted-foreground">You have no To Do tickets in this plan.</p>}
       <ol className="mt-1">
         {signal.myOrder.map((item, index) => (
           <li key={item.key} className="flex flex-wrap items-baseline gap-x-3 border-b border-border py-2 last:border-b-0">
@@ -102,7 +102,7 @@ export const DeveloperOrder: React.FC<{ signal: PlanSignal }> = ({ signal }) => 
           <li key={key} className="flex items-center gap-3 py-2 text-[0.8rem] text-muted-foreground">
             <span className="w-6" />
             <span className="font-mono font-semibold">{key}</span>
-            <span>di luar plan · cron lewati sampai publish ulang</span>
+            <span>outside the plan · cron skips it until republish</span>
           </li>
         ))}
       </ol>

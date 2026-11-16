@@ -6,7 +6,7 @@ import type { ChatSession } from './messages';
 import { chatStore } from './store';
 
 /** The line shown when a new session opens on a ticket whose dependency is not settled yet. */
-export const blockedNotice = (waitsOn: string) => `Sesi dibuka, tapi tiket ini masih nunggu ${waitsOn}. Cek dulu sebelum mulai ngoding.`;
+export const blockedNotice = (waitsOn: string) => `Session opened, but this ticket still waits on ${waitsOn}. Check it before you start coding.`;
 
 /**
  * Opens the chat on a ticket: the newest DOCK session for that ticket when there is one,

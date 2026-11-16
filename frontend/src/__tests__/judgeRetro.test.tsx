@@ -55,11 +55,11 @@ test('days list: one row per day with counts, grade and status, and the Sprint s
   assert.match(html, /Waiting for you/);
   assert.match(html, /Confirmed 13 Nov 08:20/);
   assert.match(html, /1 to answer · 1 of 2 answered/);
-  assert.ok(html.indexOf('Lembar sprint') > html.indexOf('Thu 12 Nov'), 'the Sprint sheet is the last row');
+  assert.ok(html.indexOf('Sprint sheet') > html.indexOf('Thu 12 Nov'), 'the Sprint sheet is the last row');
   const fresh = renderToStaticMarkup(<JudgeDays data={{ ...data, days: [], sheet: { ...sheet, grade: null } }} busy={false} onOpenDay={noop} onOpenSprint={noop} onJudgeNow={noop} />);
-  assert.match(fresh, /belum ada session yang dinilai/);
-  assert.match(fresh, /belum dinilai Judge/, 'no grade A before Judge judged anything');
-  assert.match(html, /pola buat diterima · grade B · 6,4 j waktu kamu kebuang/);
+  assert.match(fresh, /no sessions judged yet/);
+  assert.match(fresh, /not judged yet/, 'no grade A before Judge judged anything');
+  assert.match(html, /patterns to accept · grade B · 6,4 h of your time lost/);
   assert.strictEqual(dayStatusText({ status: 'stood', confirmedAt: null }), "Judge's call stood (not answered)");
   assert.strictEqual(dayStatusText({ status: 'nothing', confirmedAt: null }), 'Nothing to answer');
   assert.strictEqual(dayLabel('2026-11-13'), 'Fri 13 Nov');

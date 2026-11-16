@@ -10,10 +10,10 @@ export const slimDetail = (mode: DockMode) => hasPage(mode, '/blackboard');
 /** The Intinya of a planning summary as hover text on a board card; parts it left empty are skipped. */
 export function intinyaTitle(summary: { made: string; checked: string; notHere: string; waitsOn: string[] }): string {
   return [
-    summary.made && `Bikin apa: ${summary.made}`,
-    summary.checked && `Dicek di sini: ${summary.checked}`,
-    summary.notHere && `Bukan di sini: ${summary.notHere}`,
-    summary.waitsOn.length > 0 && `Nunggu tiket lain: ${summary.waitsOn.join(', ')}`,
+    summary.made && `Builds: ${summary.made}`,
+    summary.checked && `Checked here: ${summary.checked}`,
+    summary.notHere && `Not here: ${summary.notHere}`,
+    summary.waitsOn.length > 0 && `Waits on: ${summary.waitsOn.join(', ')}`,
   ].filter(Boolean).join('\n');
 }
 
@@ -169,7 +169,7 @@ export type ReadinessId = 'refs' | 'open' | 'summary' | 'alone' | 'data' | 'tc' 
 export interface ReadinessItem { id: ReadinessId; ok: boolean; text: string; detail: string | null; fix: string | null; href: string | null }
 export interface TicketReadiness { items: ReadinessItem[]; done: number; total: number; missing: ReadinessItem[] }
 
-const keyList = (keys: string[]) => `${keys.slice(0, 3).join(', ')}${keys.length > 3 ? ` +${keys.length - 3} lagi` : ''}`;
+const keyList = (keys: string[]) => `${keys.slice(0, 3).join(', ')}${keys.length > 3 ? ` +${keys.length - 3} more` : ''}`;
 const MOVED = ['reference', 'move'];
 
 /** A ticket with UI: its title says [FE], or the planning agent's summary says it changes a screen. */
@@ -195,34 +195,34 @@ export function ticketReadiness(input: ReadinessInput): TicketReadiness {
   const jira = input.url ?? null;
   const items: ReadinessItem[] = [
     undecided.length
-      ? { id: 'refs', ok: false, text: `${undecided.length} rujukan tiket lain belum diputusin`, detail: `${keyList(undecided)}: pasang link Blocks kalau ditunggu, atau pindahin barisnya ke Reference`, fix: 'Planning › AC check', href: '/planning?tab=draft&panel=ac' }
-      : { id: 'refs', ok: true, text: refs.length ? 'Rujukan tiket lain udah jelas' : 'AC nggak nyebut tiket lain', detail: null, fix: null, href: null },
+      ? { id: 'refs', ok: false, text: `Undecided references to other tickets: ${undecided.length}`, detail: `${keyList(undecided)}: add a Blocks link if it waits on them, or move the line to Reference`, fix: 'Planning › AC check', href: '/planning?tab=draft&panel=ac' }
+      : { id: 'refs', ok: true, text: refs.length ? 'References to other tickets are decided' : 'AC names no other ticket', detail: null, fix: null, href: null },
     open
-      ? { id: 'open', ok: false, text: 'Open to confirm masih ada isinya', detail: open.length > 140 ? `${open.slice(0, 140)}…` : open, fix: 'Buka di Jira', href: jira }
-      : { id: 'open', ok: true, text: 'Open to confirm kosong', detail: null, fix: null, href: null },
+      ? { id: 'open', ok: false, text: 'Open to confirm is not empty', detail: open.length > 140 ? `${open.slice(0, 140)}…` : open, fix: 'Open in Jira', href: jira }
+      : { id: 'open', ok: true, text: 'Open to confirm is empty', detail: null, fix: null, href: null },
     !summary
-      ? { id: 'summary', ok: false, text: 'Belum ada ringkasan', detail: 'Ditulis agent planning waktu draft ditarik dari Jira', fix: 'Planning › Draft', href: '/planning?tab=draft' }
+      ? { id: 'summary', ok: false, text: 'No summary yet', detail: 'Written by the planning agent when the draft is pulled from Jira', fix: 'Planning › Draft', href: '/planning?tab=draft' }
       : summary.current
-        ? { id: 'summary', ok: true, text: 'Ringkasan ada', detail: null, fix: null, href: null }
-        : { id: 'summary', ok: false, text: 'Ringkasan basi: AC berubah sesudah ringkasan ditulis', detail: 'Agent planning nulis ulang waktu draft ditarik lagi', fix: 'Planning › Draft', href: '/planning?tab=draft' },
+        ? { id: 'summary', ok: true, text: 'Summary exists', detail: null, fix: null, href: null }
+        : { id: 'summary', ok: false, text: 'Summary is stale: AC changed after it was written', detail: 'The planning agent rewrites it when the draft is pulled again', fix: 'Planning › Draft', href: '/planning?tab=draft' },
     notInUat.length
-      ? { id: 'alone', ok: false, text: `${notInUat.length} tiket yang ditunggu AC belum di UAT`, detail: notInUat.map((ref) => `${ref} (${statuses[ref] ?? 'status belum kebaca'})`).join(', '), fix: 'Lihat baris AC', href: '#acceptance-criteria' }
-      : { id: 'alone', ok: true, text: waits.length ? 'Tiket yang ditunggu udah di UAT' : 'Bisa dites tanpa nunggu tiket lain', detail: null, fix: null, href: null },
+      ? { id: 'alone', ok: false, text: `Tickets the AC waits on, not in UAT yet: ${notInUat.length}`, detail: notInUat.map((ref) => `${ref} (${statuses[ref] ?? 'status not read yet'})`).join(', '), fix: 'See AC lines', href: '#acceptance-criteria' }
+      : { id: 'alone', ok: true, text: waits.length ? 'Tickets it waits on are in UAT' : 'Testable without other tickets', detail: null, fix: null, href: null },
     !summary
-      ? { id: 'data', ok: false, text: 'Data uji: belum ada ringkasan', detail: null, fix: 'Planning › Draft', href: '/planning?tab=draft' }
+      ? { id: 'data', ok: false, text: 'Test data: no summary yet', detail: null, fix: 'Planning › Draft', href: '/planning?tab=draft' }
       : summary.testData
-        ? { id: 'data', ok: true, text: 'Data uji disebut', detail: summary.testData, fix: null, href: null }
-        : { id: 'data', ok: false, text: 'Data uji belum disebut', detail: 'Tulis data uji yang dipakai di tiket', fix: 'Buka di Jira', href: jira },
+        ? { id: 'data', ok: true, text: 'Test data named', detail: summary.testData, fix: null, href: null }
+        : { id: 'data', ok: false, text: 'Test data not named', detail: 'Write the test data to use in the ticket', fix: 'Open in Jira', href: jira },
     input.tcApproved
-      ? { id: 'tc', ok: true, text: 'Test case disetujui QA', detail: null, fix: null, href: null }
-      : { id: 'tc', ok: false, text: 'Test case belum disetujui QA', detail: null, fix: 'Planning › Test cases', href: '/planning?tab=draft&panel=tc' },
+      ? { id: 'tc', ok: true, text: 'Test cases approved by QA', detail: null, fix: null, href: null }
+      : { id: 'tc', ok: false, text: 'Test cases not approved by QA', detail: null, fix: 'Planning › Test cases', href: '/planning?tab=draft&panel=tc' },
     !summary && !ui
-      ? { id: 'design', ok: false, text: 'Desain: belum ada ringkasan', detail: 'Ringkasan yang bilang tiket ini ada UI atau nggak', fix: 'Planning › Draft', href: '/planning?tab=draft' }
+      ? { id: 'design', ok: false, text: 'Design: no summary yet', detail: 'The summary says whether this ticket has UI', fix: 'Planning › Draft', href: '/planning?tab=draft' }
       : !ui
-        ? { id: 'design', ok: true, text: 'Tiket tanpa UI, nggak perlu desain', detail: null, fix: null, href: null }
+        ? { id: 'design', ok: true, text: 'No UI, no design needed', detail: null, fix: null, href: null }
         : input.figmaUrl
-          ? { id: 'design', ok: true, text: 'Link desain ada di Figma Link', detail: null, fix: null, href: null }
-          : { id: 'design', ok: false, text: 'Tiket UI tanpa link desain', detail: 'Isi field Figma Link', fix: 'Buka di Jira', href: jira },
+          ? { id: 'design', ok: true, text: 'Design link in Figma Link', detail: null, fix: null, href: null }
+          : { id: 'design', ok: false, text: 'UI ticket without a design link', detail: 'Fill in the Figma Link field', fix: 'Open in Jira', href: jira },
   ];
   const missing = items.filter((item) => !item.ok);
   return { items, done: items.length - missing.length, total: items.length, missing };
