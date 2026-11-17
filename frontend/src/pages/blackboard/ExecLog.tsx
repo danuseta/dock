@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ScrollText } from 'lucide-react';
 import type { AgentRun, AgentTimeline } from '../../agents/runs';
 import { cn } from '../../lib/cn';
+import { dayKey, dayLabel, stamp } from '../../lib/logDays';
 import { duration, execRows, filterExec, type ExecFilter } from '../../lib/execLog';
 
 const FILTERS: Array<[ExecFilter, string]> = [['all', 'All'], ['fail', 'Failed'], ['event', 'Event']];
@@ -32,15 +33,18 @@ export const ExecLog: React.FC<{ ticket: string; run: AgentRun | null; timeline:
                 <thead><tr>{['Start', 'End', 'Agent', 'Doing', 'Result', 'Tools', 'Duration'].map((name) => <th key={name} className="border-b border-border bg-surface-1 px-2 py-1.5 text-left font-mono text-[0.6rem] font-bold uppercase tracking-[0.08em] text-muted-foreground">{name}</th>)}</tr></thead>
                 <tbody>
                   {rows.map((row, index) => (
-                    <tr key={`${row.at}-${index}`} className={cn(row.kind === 'fail' && 'bg-status-conflict-bg')}>
-                      <td className={cn(cell, 'font-mono text-[0.7rem] whitespace-nowrap')}>{time(row.at)}</td>
-                      <td className={cn(cell, 'font-mono text-[0.7rem] whitespace-nowrap')}>{row.kind === 'agent' ? time(row.until) : ''}</td>
+                    <React.Fragment key={`${row.at}-${index}`}>
+                    {(index === 0 || dayKey(rows[index - 1].at) !== dayKey(row.at)) && <tr><th colSpan={7} scope="colgroup" className="border-b border-border bg-surface-0 px-2 pt-2.5 pb-1 text-left font-mono text-[0.6rem] font-bold tracking-[0.1em] text-muted-foreground">{dayLabel(row.at)}</th></tr>}
+                    <tr className={cn(row.kind === 'fail' && 'bg-status-conflict-bg')}>
+                      <td title={stamp(row.at)} className={cn(cell, 'font-mono text-[0.7rem] whitespace-nowrap')}>{time(row.at)}</td>
+                      <td title={row.kind === 'agent' && row.until ? stamp(row.until) : undefined} className={cn(cell, 'font-mono text-[0.7rem] whitespace-nowrap')}>{row.kind === 'agent' ? time(row.until) : ''}</td>
                       <td className={cn(cell, 'font-mono text-[0.7rem] whitespace-nowrap', row.kind === 'fail' ? 'font-bold text-status-conflict' : row.kind === 'event' ? 'text-muted-foreground' : 'text-foreground')}>{row.agent}</td>
                       <td className={cn(cell, 'text-pretty text-secondary-foreground')}>{row.doing}</td>
                       <td className={cn(cell, 'font-mono text-[0.7rem]', row.kind === 'fail' && 'text-status-conflict')}>{row.result}</td>
                       <td className={cn(cell, 'font-mono text-[0.7rem] tabular-nums')}>{row.tools ?? ''}</td>
                       <td className={cn(cell, 'font-mono text-[0.7rem] tabular-nums')}>{row.kind === 'agent' ? duration(row.seconds) : ''}</td>
                     </tr>
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>
