@@ -1333,6 +1333,27 @@ export const typeDefs = gql`
     locked: LibraryAgentLock!
   }
 
+  type GuildMasterProposal {
+    summary: String!
+    diff: String!
+    at: String!
+  }
+
+  "One change a Guild Master wrote, or a rollback of one, in the manager log all Guild Master sessions share."
+  type GuildMasterLogEntry {
+    id: Int!
+    at: String!
+    by: String!
+    sessionId: String
+    kind: String!
+    target: String!
+    summary: String!
+    diff: String!
+    backup: String!
+    rollbackOf: Int
+    rolledBack: Boolean!
+  }
+
   type LibraryAgentDetail {
     slug: String!
     source: String!
@@ -1686,6 +1707,10 @@ export const typeDefs = gql`
     title: String!
     ticketKey: String
     forkFrom: String
+    "work or gm (Guild Master), fixed when the session is created."
+    mode: String!
+    "The change a Guild Master session waits on, exactly as a plain ya would write it."
+    gmProposal: GuildMasterProposal
     machine: String!
     status: String!
     statusDetail: String
@@ -2257,6 +2282,7 @@ export const typeDefs = gql`
     agentLooks: [AgentLook!]!
     libraryAgents(machine: String): [LibraryAgent!]!
     libraryAgent(slug: String!, machine: String): LibraryAgentDetail!
+    guildMasterLog: [GuildMasterLogEntry!]!
     demoVideos: DemoVideoList!
     demoStorage: DemoStorage!
     devServers: DevServers!
@@ -2426,7 +2452,11 @@ export const typeDefs = gql`
     removeElevenLabsKey(name: String!): Boolean!
     unparkElevenLabsKey(name: String!): Boolean!
     dismissOrchestration(key: String!): Boolean!
-    createChatSession(title: String, ticketKey: String, forkFrom: ID, machine: String): ChatSession!
+    "mode gm opens a Guild Master session and needs the master PIN."
+    createChatSession(title: String, ticketKey: String, forkFrom: ID, machine: String, mode: String, pin: String): ChatSession!
+    "Sends a summary of a Work session's structured state (no transcript, ticket or PR text) to the newest Guild Master session."
+    askGuildMaster(sessionId: ID!): ChatSession!
+    guildMasterRollback(id: Int!): GuildMasterLogEntry!
     sendChatMessage(sessionId: ID!, text: String!, attachmentIds: [ID!], options: ChatTurnOptionsInput, mode: String): ChatMessage!
     answerChatInteraction(sessionId: ID!, id: Int!, decision: String!, answers: [ChatAnswerInput!], note: String): ChatInteraction!
     answerTicket(ticketKey: String!, text: String!, issue: Int): Boolean!

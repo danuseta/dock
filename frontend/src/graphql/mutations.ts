@@ -231,11 +231,25 @@ export const DISMISS_ORCHESTRATION = gql`
 `;
 
 export const CREATE_CHAT_SESSION = gql`
-  mutation CreateChatSession($title: String, $ticketKey: String, $forkFrom: ID, $machine: String) {
-    createChatSession(title: $title, ticketKey: $ticketKey, forkFrom: $forkFrom, machine: $machine) {
+  mutation CreateChatSession($title: String, $ticketKey: String, $forkFrom: ID, $machine: String, $mode: String, $pin: String) {
+    createChatSession(title: $title, ticketKey: $ticketKey, forkFrom: $forkFrom, machine: $machine, mode: $mode, pin: $pin) {
       ${CHAT_SESSION_FIELDS}
       waitsOn
     }
+  }
+`;
+
+export const ASK_GUILD_MASTER = gql`
+  mutation AskGuildMaster($sessionId: ID!) {
+    askGuildMaster(sessionId: $sessionId) {
+      ${CHAT_SESSION_FIELDS}
+    }
+  }
+`;
+
+export const GUILD_MASTER_ROLLBACK = gql`
+  mutation GuildMasterRollback($id: Int!) {
+    guildMasterRollback(id: $id) { id }
   }
 `;
 

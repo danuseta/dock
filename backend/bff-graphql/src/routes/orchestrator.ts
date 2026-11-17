@@ -28,6 +28,8 @@ import { StorageService } from '../storage/service';
 import { checkpointsOn } from '../integrations/sous-flow-live';
 import type { JudgeQueue } from '../integrations/judge-queue';
 import { judgeQueue } from '../integrations/judge-live';
+import { gmSettings as gmSettingsStore } from '../integrations/guild-master-live';
+import { parseGmSettings } from '../integrations/guild-master';
 
 const broadcastFailed = (error: unknown) => console.error('[Broadcast] automatic broadcast failed:', error instanceof Error ? error.message : 'unknown error');
 const gateFailed = (error: unknown) => console.error('[Decision gate] failed:', error instanceof Error ? error.message : 'unknown error');
@@ -85,6 +87,8 @@ export function createOrchestratorIngestRouter(
   checkpointOn: () => Promise<boolean> = checkpointsOn,
   // The Judge result of one session; DOCK computes the grade from the findings.
   judge: Pick<JudgeQueue, 'receive'> = judgeQueue,
+  // The settings a Guild Master turn may read and change, for the kit's gm.cjs.
+  gmSettings: { view: () => Promise<unknown>; put: (values: Record<string, string>) => Promise<unknown> } = gmSettingsStore,
 ): Router {
   const router = Router();
 
@@ -206,6 +210,21 @@ export function createOrchestratorIngestRouter(
   router.post('/chat/activity', small, handle((body, _signal, machine) => chat.activity(body, machine)));
   router.post('/chat/status', small, handle(async (body, _signal, machine) => chat.ingestStatus(body, machine)));
   router.post('/chat/agents/result', express.json({ limit: '1mb' }), handle(async (body, _signal, machine) => agents.receive(body, machine)));
+  // Guild Master sessions run on the chat machine only, so only its bridge reads or writes these settings. A write also consumes the
+  // one-use nonce DOCK minted for the owner's "ya" (or a panel rollback): the ingest token alone writes nothing.
+  router.post('/chat/gm/settings', small, handle(async (body, _signal, machine) => {
+    if (machine !== CHAT_MACHINE) throw new OrchestratorInputError(`Guild Master runs on ${CHAT_MACHINE} only`);
+    const values = parseGmSettings(body);
+    if (!values) return gmSettings.view();
+    chat.gmNonces.consume(body, values);
+    return gmSettings.put(values);
+  }));
+  // An agent write or rollback the kit does itself: DOCK consumes the nonce first.
+  router.post('/chat/gm/confirm', small, handle(async (body, _signal, machine) => {
+    if (machine !== CHAT_MACHINE) throw new OrchestratorInputError(`Guild Master runs on ${CHAT_MACHINE} only`);
+    return chat.gmNonces.consume(body);
+  }));
+  router.post('/chat/gm/proposal', express.json({ limit: '512kb' }), handle((body, _signal, machine) => chat.gmPropose(body, machine)));
   router.post('/chat/wait', small, handle((body, signal, machine) => chat.wait(body, signal, machine)));
   router.post('/chat/ask', small, handle((body, _signal, machine) => chat.ask(body, machine)));
   router.post('/chat/catalog', express.json({ limit: '512kb' }), handle((body, _signal, machine) => chat.ingestCatalog(body, machine)));

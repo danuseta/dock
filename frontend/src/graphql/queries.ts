@@ -1114,6 +1114,8 @@ export const CHAT_SESSION_FIELDS = `
   title
   ticketKey
   forkFrom
+  mode
+  gmProposal { summary diff at }
   machine
   status
   statusDetail
@@ -1415,6 +1417,12 @@ export const GET_DEMO_STORAGE = gql`
 export const GET_AGENT_LOOKS = gql`
   query GetAgentLooks {
     agentLooks { slug displayName initials color avatarUrl }
+  }
+`;
+
+export const GET_GUILD_MASTER_LOG = gql`
+  query GuildMasterLog {
+    guildMasterLog { id at by sessionId kind target summary diff backup rollbackOf rolledBack }
   }
 `;
 
