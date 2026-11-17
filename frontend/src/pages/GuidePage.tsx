@@ -126,7 +126,7 @@ const GuidePage: React.FC<GuidePageProps> = ({ onNavigate }) => (
       <Section id="review" title="C. Reviewing a teammate's PR">
         <p>Set it up in <Go to="/settings?section=discord" label="Settings → Discord" onNavigate={onNavigate} />, card <b>Auto review</b>.</p>
         <SettingsBlock rows={[
-          ['Review when I say on it', 'off', 'on / off', 'You say "on it" in a pr-review thread → a Review-QRD-xxx session runs in a cron slot. Requires: the "on it" is yours, it is under 6 hours old, and the PR is still open. Once per head commit.'],
+          ['Review when I say on it', 'off', 'on / off', 'You say "on it" in a pr-review thread → a Review-QRD-xxx session runs in a cron slot. Requires: the "on it" is yours, it is under 72 hours old and said after the setting was turned on, and the PR is still open. An on it said while the workspace was off runs when it starts again. Once per head commit.'],
           ['LGTM when the review is clean', 'off', 'on / off', 'Can be on only when auto review is on. An approve verdict with no open blocker → DOCK runs the same LGTM as the button.'],
         ]} />
         <Flow steps={['on it', 'Review-QRD-xxx', 'verdict', 'clean? LGTM', 'notifies you']} />

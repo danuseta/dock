@@ -1,8 +1,8 @@
 import type { ThreadRow } from './discord-threads';
 import type { Orchestration } from './orchestrator';
 
-/** How long an "on it" starts a review: an old one does not fire when the setting is turned on later. */
-export const ON_IT_WINDOW_MS = 6 * 60 * 60 * 1000;
+/** How long an "on it" starts a review: long enough for one said while the workspace was off, through a weekend. */
+export const ON_IT_WINDOW_MS = 72 * 60 * 60 * 1000;
 const PULL = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/;
 
 export interface AutoReviewSettings { enabled: boolean; autoLgtm: boolean }
@@ -67,6 +67,8 @@ export class AutoReview {
   private busy = false;
   private readonly skipped = new Map<string, string>();
   private readonly deciding = new Set<string>();
+  private wasEnabled: boolean | null = null;
+  private enabledAt: number | null = null;
 
   constructor(private readonly deps: AutoReviewDeps) {}
 
@@ -78,8 +80,11 @@ export class AutoReview {
       const settings = await this.deps.settings();
       if (!settings.enabled) {
         this.skipped.clear();
+        this.wasEnabled = false;
         return 0;
       }
+      if (this.wasEnabled === false) this.enabledAt = this.deps.now().getTime();
+      this.wasEnabled = true;
       let started = 0;
       for (const row of await this.deps.rows()) started += await this.consider(row);
       return started;
@@ -109,7 +114,8 @@ export class AutoReview {
     const ownClaim = row.ownClaim === undefined ? (row.claim?.mine ? row.claim : null) : row.ownClaim;
     if (!ownClaim) return 0;
     const saidAt = Date.parse(ownClaim.at);
-    if (!(this.deps.now().getTime() - saidAt <= ON_IT_WINDOW_MS)) return this.skip(row, ['older than 6 h']);
+    if (!(this.deps.now().getTime() - saidAt <= ON_IT_WINDOW_MS)) return this.skip(row, ['older than 72 h']);
+    if (this.enabledAt !== null && saidAt < this.enabledAt) return this.skip(row, ['said before the setting was turned on']);
     const key = ticketOf(row);
     if (!key) return this.skip(row, ['no ticket key']);
     const due: Array<{ url: string; headSha: string }> = [];

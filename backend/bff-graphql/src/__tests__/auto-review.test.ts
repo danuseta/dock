@@ -64,7 +64,7 @@ test('the owner\'s on it in a pr-review thread starts one Review session for the
   }
 });
 
-test("a second reviewer saying on it later does not stop the review, and the 6 h window counts from the owner's on it", async () => {
+test("a second reviewer saying on it later does not stop the review, and the 72 h window counts from the owner's on it", async () => {
   const later = { messageId: 'm3', authorId: 'x', author: 'Aken', mine: false, at: NOW.toISOString() };
   const w = world({ rows: [row({ claim: later })] });
   assert.strictEqual(await w.review.tick(), 1);
@@ -73,7 +73,7 @@ test("a second reviewer saying on it later does not stop the review, and the 6 h
   const old = new Date(NOW.getTime() - ON_IT_WINDOW_MS - 1).toISOString();
   const stale = world({ rows: [row({ claim: later, ownClaim: { messageId: 'm2', authorId: 'me', author: 'Danu', mine: true, at: old } })] });
   assert.strictEqual(await stale.review.tick(), 0, "the other reviewer's fresh on it does not restart the window");
-  assert.strictEqual(stale.review.skipReason('t1'), 'older than 6 h');
+  assert.strictEqual(stale.review.skipReason('t1'), 'older than 72 h');
 });
 
 test('a skipped pull request thread records why', async () => {
@@ -216,4 +216,22 @@ test('the Agents list drops an auto review the pull request has moved past, keep
   ];
   assert.deepStrictEqual((await currentReviews(rows, pull)).map((item) => item.id), ['same-head', 'running', 'unknown']);
   assert.deepStrictEqual(asked.sort(), ['ms-admin-worker-backend#1307', 'ms-admin-worker-backend#9', 'ms-client-dashboard-frontend#1000', 'ms-client-dashboard-frontend#1081'], 'each pull request is asked once');
+});
+
+test('an on it said while the workspace was off starts the review when DOCK comes back the next morning', async () => {
+  const night = new Date(NOW.getTime() - 11 * 60 * 60 * 1000).toISOString();
+  const w = world({ rows: [row({ ownClaim: { messageId: 'm2', authorId: 'me', author: 'Danu', mine: true, at: night } })] });
+  assert.strictEqual(await w.review.tick(), 1);
+  assert.strictEqual(w.opened[0].key, 'QRD-1473');
+});
+
+test('turning the setting on does not start reviews for on its said before it', async () => {
+  let enabled = false;
+  const w = world({ rows: [row({ ownClaim: { messageId: 'm2', authorId: 'me', author: 'Danu', mine: true, at: new Date(NOW.getTime() - 60_000).toISOString() } })] });
+  w.deps.settings = async () => ({ enabled, autoLgtm: false });
+  assert.strictEqual(await w.review.tick(), 0);
+  enabled = true;
+  assert.strictEqual(await w.review.tick(), 0);
+  assert.strictEqual(w.review.skipReason('t1'), 'said before the setting was turned on');
+  assert.strictEqual(w.opened.length, 0);
 });
