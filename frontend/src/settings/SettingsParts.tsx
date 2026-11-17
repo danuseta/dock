@@ -2,7 +2,6 @@ import { useState, type ReactNode } from 'react';
 import { Eye, EyeOff, Save } from 'lucide-react';
 import { Button, Card, IconButton, Input } from '../components/ui';
 import { cn } from '../lib/cn';
-import type { NavigationMode } from '../lib/navigationPreferences';
 
 export const SettingsCard = ({ title, caption, aside, danger = false, children }: { title: string; caption?: string; aside?: ReactNode; danger?: boolean; children: ReactNode }) => (
   <Card className={cn('p-5', danger && 'border-status-conflict/40 bg-status-conflict-bg/40')}>
@@ -74,31 +73,26 @@ export const TestResultText = ({ busy, result }: { busy: boolean; result?: { ok:
 
 export type SaveOutcome = { ok: boolean; message: string } | null;
 
-/** The save bar of the open section; another section's unsaved changes show as a dot in the rail. */
-export const SaveBar = ({ section, changes, errors, saving, outcome, navigationMode, onSave, onDiscard }: {
+/** The save controls of the open section, shown in the page header; another section's unsaved changes show as a dot in the rail. */
+export const SaveBar = ({ section, changes, errors, saving, outcome, onSave, onDiscard }: {
   section: string;
   changes: number;
   errors: string[];
   saving: boolean;
   outcome: SaveOutcome;
-  navigationMode: NavigationMode;
   onSave: () => void;
   onDiscard: () => void;
 }) => {
   const message = saving ? 'Saving…'
     : errors.length ? `Fix ${errors.length === 1 ? 'the field' : `${errors.length} fields`} before saving`
-      : changes ? `${section} · ${changes} change${changes === 1 ? '' : 's'}`
-        : outcome ? outcome.message : 'No changes';
+      : changes ? `${changes} change${changes === 1 ? '' : 's'}`
+        : outcome ? outcome.message : '';
   const tone = errors.length || (outcome && !outcome.ok && !changes) ? 'text-status-conflict' : outcome?.ok && !changes ? 'text-status-merged' : 'text-muted-foreground';
   return (
-    <div className={cn(
-      'fixed right-[76px] z-20 flex items-center gap-3 rounded-md border border-border-glow bg-surface-2 p-2 pl-4 shadow-card max-[760px]:bottom-[86px] max-[760px]:left-2.5 max-[760px]:h-12 max-[760px]:justify-between max-[760px]:gap-2 max-[760px]:p-1.5 max-[760px]:pl-3',
-      !changes && !outcome && 'max-[760px]:hidden',
-      navigationMode === 'bottom' ? 'bottom-[max(6rem,calc(env(safe-area-inset-bottom)+6rem))]' : 'bottom-[max(1.5rem,env(safe-area-inset-bottom))]',
-    )} role="status">
-      <span className={cn('flex min-w-0 items-center gap-2 truncate text-xs', tone)}>{changes > 0 && !saving && !errors.length && <span className="size-2 shrink-0 rounded-full bg-status-warn" aria-hidden="true" />}{message}</span>
+    <div className="flex flex-wrap items-center justify-end gap-3 max-[760px]:w-full" role="status">
+      <span className={cn('flex min-w-0 items-center gap-2 text-xs', tone)}>{changes > 0 && !saving && !errors.length && <span className="size-2 shrink-0 rounded-full bg-status-warn" aria-hidden="true" />}{message}</span>
       {changes > 0 && !saving && <Button variant="ghost" size="sm" onClick={onDiscard}>Discard</Button>}
-      <Button variant="primary" className="h-10 px-4 max-[760px]:h-9" onClick={onSave} disabled={!changes || errors.length > 0 || saving}><Save size={16} aria-hidden="true" />{saving ? 'Saving…' : `Save ${section}`}</Button>
+      {changes > 0 && <Button variant="primary" className="h-10 px-4 max-[760px]:h-9" onClick={onSave} disabled={errors.length > 0 || saving}><Save size={16} aria-hidden="true" />{saving ? 'Saving…' : `Save ${section}`}</Button>}
     </div>
   );
 };

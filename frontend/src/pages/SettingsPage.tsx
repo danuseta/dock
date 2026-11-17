@@ -12,7 +12,6 @@ import { normalizeCaveman, normalizeRtk } from '../chat/chatDefaults';
 import { Card, Page, Select } from '../components/ui';
 import { cn } from '../lib/cn';
 import { useDockMode } from '../lib/dockMode';
-import { NAVIGATION_PREFERENCES_EVENT, readNavigationPreferences, type NavigationPreferences } from '../lib/navigationPreferences';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import {
   SECTION_GROUPS, changedKeys, isDraftSection, savedValues, sectionErrors, sectionFromSearch, sectionInput, sectionStatus, visibleSections,
@@ -55,7 +54,6 @@ const SettingsPage: React.FC = () => {
   const [saving, setSaving] = useState<DraftSectionId | null>(null);
   const [outcome, setOutcome] = useState<{ section: DraftSectionId; result: SaveOutcome } | null>(null);
   const [tests, setTests] = useState<Partial<Record<TestedSection, TestResult>>>({});
-  const [navigationMode, setNavigationMode] = useState(() => readNavigationPreferences().mode);
   const { data, loading, error, refetch } = useQuery(GET_SETTINGS, CACHED_QUERY_OPTIONS);
   const { data: tokenData } = useQuery(GET_INGEST_TOKENS, CACHED_QUERY_OPTIONS);
   const { data: storageData } = useQuery(GET_DEMO_STORAGE, CACHED_QUERY_OPTIONS);
@@ -98,12 +96,6 @@ const SettingsPage: React.FC = () => {
     window.history.replaceState(window.history.state, '', `/settings?section=${active}`);
   }, [active]);
 
-  useEffect(() => {
-    const handleChange = (event: Event) => setNavigationMode((event as CustomEvent<NavigationPreferences>).detail.mode);
-    window.addEventListener(NAVIGATION_PREFERENCES_EVENT, handleChange);
-    return () => window.removeEventListener(NAVIGATION_PREFERENCES_EVENT, handleChange);
-  }, []);
-
   const anyDirty = dirtySections.length > 0;
   useEffect(() => {
     if (!anyDirty) return undefined;
@@ -144,17 +136,29 @@ const SettingsPage: React.FC = () => {
   const chat = valuesOf('chat');
 
   return (
-    <Page width="full" className="pb-28">
-      <header className="mb-7 flex flex-wrap items-end justify-between gap-4">
+    <Page width="full">
+      <header className="sticky top-0 z-20 mb-7 flex flex-wrap items-end justify-between gap-4 bg-background py-3">
         <div><p className="mb-1 text-xs font-semibold text-muted-foreground">SYSTEM</p><h1 className="text-balance font-display text-3xl font-bold">Settings</h1></div>
-        <p className={cn('text-xs', anyDirty ? 'text-status-warn' : 'text-muted-foreground')} role="status">{anyDirty ? `Unsaved: ${dirtySections.map((section) => section.label).join(', ')}` : 'All changes saved'}</p>
+        {isDraftSection(active) && (changesOf(active) > 0 || saving === active || outcome?.section === active) ? (
+          <SaveBar
+            section={info.label}
+            changes={changesOf(active)}
+            errors={sectionErrors(active, valuesOf(active))}
+            saving={saving === active}
+            outcome={outcome?.section === active ? outcome.result : null}
+            onSave={() => void save(active)}
+            onDiscard={() => setDrafts((current) => { const next = { ...current }; delete next[active]; return next; })}
+          />
+        ) : (
+          <p className={cn('text-xs', anyDirty ? 'text-status-warn' : 'text-muted-foreground')} role="status">{anyDirty ? `Unsaved: ${dirtySections.map((section) => section.label).join(', ')}` : 'All changes saved'}</p>
+        )}
       </header>
 
       <div className="grid grid-cols-[220px_minmax(0,1fr)] items-start gap-7 max-[760px]:grid-cols-1">
         <div className="hidden max-[760px]:block">
           <Select aria-label="Settings section" value={active} onValueChange={(value) => setActive(value as SectionId)} options={sections.map((section) => ({ value: section.id, label: `${section.group} · ${section.label}${changesOf(section.id) ? ' · unsaved' : ''}` }))} />
         </div>
-        <aside className="sticky top-6 min-w-0 max-[760px]:hidden" aria-label="Settings sections">
+        <aside className="sticky top-24 min-w-0 max-[760px]:hidden" aria-label="Settings sections">
           {SECTION_GROUPS.map((group) => {
             const items = sections.filter((section) => section.group === group);
             if (!items.length) return null;
@@ -183,7 +187,7 @@ const SettingsPage: React.FC = () => {
           })}
         </aside>
 
-        <main className="min-w-0 max-w-[920px]">
+        <main className="min-w-0">
           <header className="mb-5"><h2 className="text-balance font-display text-2xl font-bold">{info.title}</h2><p className="mt-1 text-pretty text-sm text-secondary-foreground">{info.description}</p></header>
           {active === 'general' && <GeneralSection values={valuesOf('general')} set={setter('general')} />}
           {active === 'chat' && (
@@ -208,18 +212,6 @@ const SettingsPage: React.FC = () => {
         </main>
       </div>
 
-      {isDraftSection(active) && (
-        <SaveBar
-          section={info.label}
-          changes={changesOf(active)}
-          errors={sectionErrors(active, valuesOf(active))}
-          saving={saving === active}
-          outcome={outcome?.section === active ? outcome.result : null}
-          navigationMode={navigationMode}
-          onSave={() => void save(active)}
-          onDiscard={() => setDrafts((current) => { const next = { ...current }; delete next[active]; return next; })}
-        />
-      )}
     </Page>
   );
 };
