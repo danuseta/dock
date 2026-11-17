@@ -14,11 +14,13 @@ import { repoName } from '../changes/href';
 import type { SummaryFacts } from '../components/ticket/useReadiness';
 import { coverageText, useAcTrace, withIndonesian, type AcRef } from '../lib/acTrace';
 import { cn } from '../lib/cn';
+import { dateTime } from '../lib/logDays';
 import { CONTRACT_ENTRY, KAMUS_ENTRY, KAMUS_FILE, LOG_ENTRY, TRACE_ENTRY, boardTree, contractFiles, fetchFiles, fetchRootText, fetchText, fetchTickets, fileUrl, formatSize, groupFiles, isPullEntry, pullEntry, pullRepo, sprintGroups, withoutComments, type BlackboardFile, type BlackboardKind, type BlackboardTicket, type BoardFilter } from '../lib/blackboard';
 import { AcMap } from './blackboard/AcMap';
 import { CodeChanges } from './blackboard/CodeChanges';
 import { ContractView } from './blackboard/ContractView';
 import { ExecLog } from './blackboard/ExecLog';
+import { execRows } from '../lib/execLog';
 
 interface RunInfo { key: string; title: string | null; stage: string; kind?: string | null }
 
@@ -41,13 +43,16 @@ const when = (iso: string) => {
 
 const readQuery = () => {
   const params = new URLSearchParams(window.location.search);
-  return { key: params.get('key'), file: params.get('file'), path: params.get('path') };
+  return { key: params.get('key'), file: params.get('file'), path: params.get('path'), log: params.get('log') === 'activity' ? 'activity' as const : 'runs' as const };
 };
 
-const writeQuery = (key: string | null, file: string | null) => {
+type LogTab = 'runs' | 'activity';
+
+const writeQuery = (key: string | null, file: string | null, log: LogTab) => {
   const params = new URLSearchParams();
   if (key) params.set('key', key);
   if (file) params.set('file', file);
+  if (file === LOG_ENTRY && log === 'activity') params.set('log', log);
   const search = params.toString();
   window.history.replaceState({}, '', `/blackboard${search ? `?${search}` : ''}`);
 };
@@ -109,7 +114,7 @@ const LOG_FILTERS: Array<[RowFilter, string]> = [['all', 'All'], ['owner', 'Owne
 /** The ticket's audit log: every agent's asks, decisions and actions, the owner's answers, git and PR steps, across every round. */
 const LogView: React.FC<{ ticket: string }> = ({ ticket }) => {
   const [filter, setFilter] = useState<RowFilter>('all');
-  const { data, loading, error } = useQuery<{ runThinking: ThinkingRow[] }>(GET_RUN_THINKING, { variables: { key: ticket }, fetchPolicy: 'cache-and-network', pollInterval: 30000 });
+  const { data, loading, error } = useQuery<{ runThinking: ThinkingRow[] }>(GET_RUN_THINKING, { variables: { key: ticket }, fetchPolicy: 'cache-first' });
   if (error && !data) return <p className="p-6 text-sm text-status-conflict" role="alert">{error.message}</p>;
   if (!data && loading) return <p className="p-6 text-sm text-muted-foreground" role="status">Loading the log...</p>;
   const all = data?.runThinking ?? [];
@@ -135,9 +140,25 @@ const LogView: React.FC<{ ticket: string }> = ({ ticket }) => {
         <Button size="sm" className="ml-auto" onClick={exportMarkdown}><Download size={13} aria-hidden="true" />Export .md</Button>
       </div>
       <div className="bg-surface-0 px-4 pb-4">
-        <ThinkingList runKey={ticket} rows={rows} allRows={all} empty="Nothing matches this filter." />
+        <ThinkingList runKey={ticket} rows={rows} allRows={all} days empty="Nothing matches this filter." />
       </div>
     </div>
+  );
+};
+
+const LogTabs: React.FC<{ ticket: string; run: AgentRun | null; timeline: AgentTimeline | null; tab: LogTab; onTab: (tab: LogTab) => void }> = ({ ticket, run, timeline, tab, onTab }) => {
+  const { data } = useQuery<{ runThinking: ThinkingRow[] }>(GET_RUN_THINKING, { variables: { key: ticket }, fetchPolicy: 'cache-and-network', pollInterval: 30000 });
+  const counts: Record<LogTab, number | null> = { runs: execRows(run, timeline).length, activity: data ? data.runThinking.length : null };
+  return (
+    <>
+      <div className="flex gap-1 border-b border-border px-4 pt-2" role="tablist" aria-label="Execution log">
+        {([['runs', 'Agent runs'], ['activity', 'Activity']] as Array<[LogTab, string]>).map(([id, label]) => (
+          <button key={id} type="button" role="tab" id={`log-tab-${id}`} aria-selected={tab === id} aria-controls={`log-panel-${id}`} onClick={() => onTab(id)} className={cn('-mb-px h-8 border-0 border-b-2 border-transparent bg-transparent px-3 font-display text-[0.74rem] font-semibold text-secondary-foreground max-[760px]:h-11', tab === id && 'border-accent text-foreground')}>{label}{counts[id] !== null && <span className="ml-1.5 font-mono text-[0.66rem] font-medium opacity-70">{counts[id]}</span>}</button>
+        ))}
+      </div>
+      <div role="tabpanel" id="log-panel-runs" aria-labelledby="log-tab-runs" hidden={tab !== 'runs'}><ExecLog ticket={ticket} run={run} timeline={timeline} /></div>
+      <div role="tabpanel" id="log-panel-activity" aria-labelledby="log-tab-activity" hidden={tab !== 'activity'}><LogView ticket={ticket} /></div>
+    </>
   );
 };
 
@@ -154,6 +175,7 @@ const BlackboardPage: React.FC<{ onNavigate?: (path: string) => void; onTicketCl
   const [files, setFiles] = useState<BlackboardFile[] | null>(null);
   const [selected, setSelected] = useState<string | null>(initial.file);
   const [focus, setFocus] = useState<string | null>(initial.path);
+  const [logTab, setLogTab] = useState<LogTab>(initial.log);
   const [kamus, setKamus] = useState<string | null | undefined>(undefined);
   const { data } = useQuery<{ orchestrations: RunInfo[] }>(GET_ORCHESTRATIONS, { fetchPolicy: 'cache-and-network' });
   const runs = useMemo(() => new Map((data?.orchestrations ?? []).map((run) => [run.key.toUpperCase(), run])), [data]);
@@ -179,7 +201,7 @@ const BlackboardPage: React.FC<{ onNavigate?: (path: string) => void; onTicketCl
     return () => { gone = true; };
   }, [picked]);
 
-  useEffect(() => { writeQuery(picked, selected); }, [picked, selected]);
+  useEffect(() => { writeQuery(picked, selected, logTab); }, [picked, selected, logTab]);
 
   const kindOf = (ticket: BlackboardTicket): BlackboardKind => {
     const kind = runs.get(ticket.key)?.kind;
@@ -266,7 +288,7 @@ const BlackboardPage: React.FC<{ onNavigate?: (path: string) => void; onTicketCl
                         <span className="flex items-center gap-1.5 font-mono text-xs font-bold">{kindOf(ticket) === 'review' && <Eye size={12} aria-label="Review" className="text-sky-200" />}{ticket.key}</span>
                         {run ? <span className={cn('self-start rounded-xs px-1.5 py-px font-mono text-[0.6rem] font-bold max-[760px]:text-xs', STAGE_TONE[run.stage] ?? 'bg-surface-2 text-secondary-foreground')}>{stageLabel(run.stage)}</span> : <span />}
                         <span className="col-span-2 truncate text-[0.72rem] text-secondary-foreground max-[760px]:line-clamp-2 max-[760px]:whitespace-normal">{run?.title ?? (ticket.epic ? `in ${ticket.epic}` : 'No run on this DOCK')}</span>
-                        <span className="col-span-2 font-mono text-[0.6rem] text-muted-foreground max-[760px]:text-xs">{ticket.files} files · {when(ticket.updatedAt)}</span>
+                        <span className="col-span-2 font-mono text-[0.6rem] text-muted-foreground max-[760px]:text-xs">{ticket.files} files · {dateTime(ticket.updatedAt)}</span>
                       </button>
                     );
                   })}
@@ -322,7 +344,7 @@ const BlackboardPage: React.FC<{ onNavigate?: (path: string) => void; onTicketCl
                   ? <div className="min-w-0 px-6 py-5 text-[0.82rem] leading-relaxed text-secondary-foreground"><Markdown text={withoutComments(kamus)} /></div>
                   : <p className="p-6 text-sm text-muted-foreground">No pronunciation glossary yet. Put {KAMUS_FILE} at the blackboard root.</p>)
               : picked && selected === LOG_ENTRY
-              ? <><ExecLog ticket={picked} run={run} timeline={run?.timeline ?? null} /><LogView ticket={picked} /></>
+              ? <LogTabs ticket={picked} run={run} timeline={run?.timeline ?? null} tab={logTab} onTab={setLogTab} />
               : picked && selected === TRACE_ENTRY
               ? <AcMap trace={trace} loading={rawTrace === null} files={patches} onOpenRef={openRef} />
               : picked && selected === CONTRACT_ENTRY
