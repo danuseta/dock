@@ -811,6 +811,8 @@ export const resolvers = {
     },
     setStatusAfterMerge: (_: unknown, { value }: { value: string }) => saveOpsRule(STATUS_AFTER_MERGE_KEY, value, parseStatusAfterMerge),
     setWorktreeMerged: (_: unknown, { value }: { value: string }) => saveOpsRule(WORKTREE_MERGED_KEY, value, parseWorktreeMerged),
+    cancelAutoReviewPost: (_: unknown, { id }: { id: string }) => autoReview.cancelPost(id),
+    editAutoReviewPost: (_: unknown, { id, text }: { id: string; text: string }) => autoReview.editPost(id, text),
     cleanWorktrees: (_: unknown, { paths }: { paths: string[] }) => {
       requireWorktrees();
       return worktrees.clean(paths.slice(0, 50));
@@ -1302,6 +1304,8 @@ export const protectedMutations = [
   'writeQaGuide',
   'setStatusAfterMerge',
   'setWorktreeMerged',
+  'cancelAutoReviewPost',
+  'editAutoReviewPost',
   'cleanWorktrees',
   'checkSprintStoryboards',
   'uploadSprintStoryboard',

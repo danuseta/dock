@@ -7,7 +7,8 @@ import { channelIdOf, type Channel, type ChannelKind, type SyncStatus, type Thre
  * followed thread always. "on it" marks who took a thread.
  */
 
-export const ON_IT = /\bon\s?it\b/i;
+/** "on it" said by a person: a DOCK-REVIEW or DOCK-FIX post names "on it" in its marker line and is never a claim. */
+export const ON_IT = /^(?![\s\S]*\bDOCK-(?:REVIEW|FIX)\b)[\s\S]*\bon\s?it\b/i;
 /** "fix" or "fixed" said as done: not after belum, gak, not and the like. */
 export const FIXED = /(?<!\b(?:belum|blm|gak|ga|nggak|ngga|tidak|not|can't|cannot|isn't|bukan)\s+)\bfix(?:ed)?\b/i;
 /** The words a reporter, or anyone, says when the bug works now: "sdh aman", "udah bisa", "done", "geser ke rfp". */

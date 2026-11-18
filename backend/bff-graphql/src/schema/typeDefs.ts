@@ -185,6 +185,14 @@ export const typeDefs = gql`
     discordUserId: String
     autoReviewOnIt: Boolean!
     autoLgtm: Boolean!
+    "Post the auto review verdict to the pr-review thread through the owner webhook."
+    autoReviewPostDiscord: Boolean!
+    "Minutes a review post waits, with Cancel and Edit, before it goes out."
+    reviewPostDelayMinutes: Int!
+    "Minutes after the last commit before a new head is reviewed again without a DOCK-FIX."
+    reviewReReviewWaitMinutes: Int!
+    "Review rounds an on it allows before the arena closes."
+    reviewMaxRounds: Int!
     reviewFindingsToTask: Boolean!
     hasGoogleClientSecret: Boolean!
     googleCalendarConnected: Boolean!
@@ -1988,6 +1996,10 @@ export const typeDefs = gql`
     discordUserId: String
     autoReviewOnIt: String
     autoLgtm: String
+    autoReviewPostDiscord: String
+    reviewPostDelayMinutes: Int
+    reviewReReviewWaitMinutes: Int
+    reviewMaxRounds: Int
     reviewFindingsToTask: String
     googleClientId: String
     googleClientSecret: String
@@ -2118,6 +2130,13 @@ export const typeDefs = gql`
     detail: String
     startedAt: String!
     finishedAt: String
+    round: Int!
+    "pending, sent, cancelled, failed or skipped; null when nothing was scheduled."
+    postStatus: String
+    postAt: String
+    postText: String
+    postMessageId: String
+    postDetail: String
   }
 
   type ClaudeUsageWindow {
@@ -2541,6 +2560,10 @@ export const typeDefs = gql`
     setStatusAfterMerge(value: String!): String!
     "Saves the worktree-merged rule JSON after validation and returns it normalized; an empty string resets it."
     setWorktreeMerged(value: String!): String!
+    "Stops an auto review post that has not gone out yet."
+    cancelAutoReviewPost(id: ID!): Boolean!
+    "Replaces the text of an auto review post that has not gone out yet; the DOCK-REVIEW marker line stays."
+    editAutoReviewPost(id: ID!, text: String!): Boolean!
     "Removes merged worktrees through the kit's wt.sh; each one with local changes, a live session, a dev server or no merge is REFUSED and left alone."
     cleanWorktrees(paths: [String!]!): [WorktreeCleanResult!]!
     runOrchestratorCronNow: String!
