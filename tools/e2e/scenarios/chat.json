@@ -1,0 +1,7 @@
+{
+  "name": "chat",
+  "match": { "priority": -100 },
+  "turns": [
+    { "model": "sonnet", "tokens": 2000, "steps": [{ "say": "e2e: pesan diterima, tidak ada skenario khusus untuk pesan ini." }] }
+  ]
+}

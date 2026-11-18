@@ -1,0 +1,7 @@
+{
+  "name": "guild-master-chat",
+  "match": { "mode": "gm", "priority": 0 },
+  "turns": [
+    { "model": "sonnet", "tokens": 3000, "steps": [{ "say": "Guild Master siap. Sebut tiketnya (mis. QRD-9002) dan mode light atau full untuk Party." }] }
+  ]
+}

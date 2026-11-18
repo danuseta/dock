@@ -1,0 +1,16 @@
+{
+  "name": "guild-master",
+  "match": { "mode": "gm", "gmConfirm": false, "needsKey": true, "priority": 10 },
+  "turns": [
+    {
+      "model": "sonnet",
+      "tokens": 7000,
+      "costUsd": 0.03,
+      "steps": [
+        { "tool": "Bash", "text": "node gm.cjs party {{key}}" },
+        { "gm": { "op": "propose-party", "key": "{{key}}", "mode": "{{askedMode}}", "worker": "sonnet" } },
+        { "say": "{{gmDiff}}\n\nPending: {{gmSummary}}. Nothing is written until the owner answers \"ya\" in this chat.\n\nTulis?" }
+      ]
+    }
+  ]
+}
