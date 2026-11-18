@@ -102,7 +102,7 @@ interface SessionSidebarProps {
   onFilter: (filter: SessionFilter) => void;
 }
 
-const FILTERS: { value: SessionFilter; label: string }[] = [{ value: 'all', label: 'All' }, { value: 'task', label: 'Task' }, { value: 'review', label: 'Review' }, { value: 'work', label: 'Work' }, { value: 'gm', label: 'Guild Master' }];
+const FILTERS: { value: SessionFilter; label: string }[] = [{ value: 'all', label: 'All' }, { value: 'task', label: 'Task' }, { value: 'review', label: 'Review' }, { value: 'gm', label: 'Guild Master' }];
 
 export const SessionSidebar: React.FC<SessionSidebarProps> = ({ sessions, machines, activeId, activeThreadId, onSelect, onOpenThread, onNew, onRename, onDelete, collapsed, onToggleCollapsed, searchOpen, onToggleSearch, search, limits, results, filter, onFilter }) => {
   const [openOverride, setOpenOverride] = useState<ReadonlyMap<string, boolean>>(new Map());

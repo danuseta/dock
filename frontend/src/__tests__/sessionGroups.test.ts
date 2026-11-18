@@ -59,10 +59,10 @@ test('filterSessions keeps all, only Task, or only Review', () => {
   assert.deepStrictEqual(filterSessions(list, 'review').map((s) => s.id), ['Review-QRD-7']);
 });
 
-test('filterSessions by mode: a session without a mode is a Work session', () => {
+test('filterSessions: Guild Master shows only gm sessions, Task and Review never show a gm session', () => {
   const list = [make('Task-QRD-1', 'idle'), { ...make('Guild Master', 'idle'), mode: 'gm' }, { ...make('Fix login', 'idle'), mode: 'work' }];
   assert.deepStrictEqual(filterSessions(list, 'gm').map((s) => s.id), ['Guild Master']);
-  assert.deepStrictEqual(filterSessions(list, 'work').map((s) => s.id), ['Task-QRD-1', 'Fix login']);
+  assert.deepStrictEqual(filterSessions(list, 'task').map((s) => s.id), ['Task-QRD-1']);
 });
 
 test('readSessionFilter falls back to all when storage throws or holds an unknown value', () => {
