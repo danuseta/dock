@@ -949,6 +949,18 @@ export const typeDefs = gql`
     expected: String!
   }
 
+  "An HTML visual the planning agent made; stale when the draft changed after it was made."
+  type SprintDraftVisual {
+    id: ID!
+    title: String!
+    createdAt: String!
+    saved: Boolean!
+    stale: Boolean!
+    "Where the sandboxed frame loads it from, relative to the DOCK API."
+    url: String!
+    sessionId: String
+  }
+
   input SprintDraftTcInput {
     id: String!
     ac: Int!
@@ -2487,6 +2499,10 @@ export const typeDefs = gql`
     planningSprints: [PlanningSprint!]!
     """The stored draft of a sprint by name, null before it is loaded."""
     sprintDraft(sprint: String!): SprintDraft
+    "The HTML visuals the planning agent made for the sprint's draft, oldest first."
+    sprintDraftVisuals(sprint: String!): [SprintDraftVisual!]!
+    "The sprint-planner prompt of the Planning chat: the sprint and the epics of its draft."
+    planningChatPrompt(sprint: String!): String!
     sprintPlanSignal(sprint: String!): SprintPlanSignal
     "The Planning flow as JSON (stages, owner, approve); null when none is saved and every stage runs."
     planningFlow: String
@@ -2552,6 +2568,10 @@ export const typeDefs = gql`
     answerSprintDraftQuestion(sprint: String!, id: ID!, answered: Boolean!, text: String): SprintDraft!
     "Replaces a ticket's draft test cases."
     setSprintDraftTcs(sprint: String!, key: String!, tcs: [SprintDraftTcInput!]!): SprintDraft!
+    "Keeps a visual past Publish; an unsaved visual is deleted when the sprint is published."
+    saveSprintDraftVisual(sprint: String!, id: ID!): [SprintDraftVisual!]!
+    "Deletes a visual's file and row."
+    dropSprintDraftVisual(sprint: String!, id: ID!): [SprintDraftVisual!]!
     "Assign cards to another developer in the draft only; Jira changes on Publish."
     moveSprintDraftCards(sprint: String!, keys: [String!]!, to: String!): SprintDraft!
     """Writes AC lines and assignees that differ from Jira. Refused while a blocker has no decision."""
@@ -2560,7 +2580,7 @@ export const typeDefs = gql`
     sprintDriftAction(id: ID!, action: String!, note: String): SprintDrift!
     "accept (adds the line to the AC of to) or decline (with a reason) an AC line a teammate offers."
     acInAction(to: String!, id: ID!, action: String!, reason: String): [AcIn!]!
-    "Opens the chat session Planning-<sprint> on the workspace with a first message that runs the kit skill sprint-planner. Returns the session id."
+    "Creates the chat session Planning-<sprint> on the workspace without sending anything. Returns the session id."
     openPlanningChat(sprint: String!): String!
     """accept, close, reopen or edit (with text). Accepting a line that goes to kit, memory or dock asks sous to apply it."""
     retroItemAction(id: ID!, action: String!, text: String): RetroItem!

@@ -467,6 +467,36 @@ export class StorageService {
     });
   }
 
+  /** When the draft row or one of its tickets last changed; null without a draft. */
+  async sprintDraftChangedAt(sprint: string): Promise<Date | null> {
+    const draft = await this.db.sprintDraft.findUnique({ where: { sprint }, select: { updatedAt: true } });
+    if (!draft) return null;
+    const tickets = await this.db.sprintDraftTicket.aggregate({ where: { draftSprint: sprint }, _max: { updatedAt: true } });
+    const latest = tickets._max.updatedAt;
+    return latest && latest > draft.updatedAt ? latest : draft.updatedAt;
+  }
+
+  listSprintDraftVisuals(sprint: string) {
+    return this.db.sprintDraftVisual.findMany({ where: { sprint }, orderBy: { createdAt: 'asc' } });
+  }
+
+  getSprintDraftVisual(id: string) {
+    return this.db.sprintDraftVisual.findUnique({ where: { id } });
+  }
+
+  putSprintDraftVisual(data: { id: string; sprint: string; title: string; sessionId: string | null; draftStamp: Date; createdAt: Date }) {
+    const { id, ...rest } = data;
+    return this.db.sprintDraftVisual.upsert({ where: { id }, create: data, update: rest });
+  }
+
+  setSprintDraftVisualSaved(id: string, saved: boolean) {
+    return this.db.sprintDraftVisual.update({ where: { id }, data: { saved } });
+  }
+
+  deleteSprintDraftVisual(id: string) {
+    return this.db.sprintDraftVisual.deleteMany({ where: { id } });
+  }
+
   /** The drafts holding a ticket of the epic, so a new storyboard version flags them all. */
   async sprintDraftsWithEpic(epic: string): Promise<string[]> {
     return (await this.db.sprintDraftTicket.findMany({ where: { epic }, select: { draftSprint: true }, distinct: ['draftSprint'] })).map((row) => row.draftSprint);

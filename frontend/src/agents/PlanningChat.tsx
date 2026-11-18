@@ -1,5 +1,5 @@
-// The planning chat of Agents > Sprint > Planning: the DOCK chat session titled Planning-<sprint>, opened with a first
-// message that runs the kit skill sprint-planner. The button opens it in the floating ChatDock; the agent changes the
+// The planning chat of Agents > Sprint > Planning: the DOCK chat session titled Planning-<sprint>, opened empty: its
+// suggestion chips fill the message box with the sprint-planner prompt. The button opens it in the floating ChatDock; the agent changes the
 // draft through the ingest routes and the panel polls that draft. Its open questions are asked and answered there.
 import React from 'react';
 import { MessagesSquare } from 'lucide-react';

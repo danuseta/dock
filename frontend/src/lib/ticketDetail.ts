@@ -215,7 +215,7 @@ export function ticketReadiness(input: ReadinessInput): TicketReadiness {
         : { id: 'data', ok: false, text: 'Test data not named', detail: 'Write the test data to use in the ticket', fix: 'Open in Jira', href: jira },
     input.tcApproved
       ? { id: 'tc', ok: true, text: 'Test cases approved by QA', detail: null, fix: null, href: null }
-      : { id: 'tc', ok: false, text: 'Test cases not approved by QA', detail: null, fix: 'Planning › Test cases', href: '/planning?tab=draft&panel=tc' },
+      : { id: 'tc', ok: false, text: 'Test cases not approved by QA', detail: null, fix: 'Planning › QA check', href: '/planning?tab=draft&panel=qa' },
     !summary && !ui
       ? { id: 'design', ok: false, text: 'Design: no summary yet', detail: 'The summary says whether this ticket has UI', fix: 'Planning › Draft', href: '/planning?tab=draft' }
       : !ui

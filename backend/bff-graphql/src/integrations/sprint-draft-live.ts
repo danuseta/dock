@@ -6,6 +6,7 @@ import { AcDriftService, type DriftJira } from './ac-drift';
 import { AcInService, MOVE_PENDING_LABEL, type AcMoveJira } from './ac-move';
 import { confluenceFrom, type ConfluenceClient } from './confluence';
 import { StoryboardReader } from './storyboard';
+import { PlanningVisualService } from './planning-visual';
 import { defaultBlackboardRoot } from './blackboard';
 import { CONTRACT_PARENT_KEY } from './sprint-contract';
 import { SPLIT_PAGE_KEY, readSplitPage, splitTestLine } from './split-page';
@@ -117,7 +118,10 @@ export async function testSplitPage(page: string): Promise<{ success: boolean; m
   return { success: !state.error, message: splitTestLine(state) };
 }
 
-export const sprintDraftService = new SprintDraftService(storage, planningJira, undefined, undefined, planningContract, (epic) => storyboardReader.sync(epic), (keys) => readMergeStates(keys, github), () => planSignalService.editRefusal(), splitSource);
+/** The HTML visuals the planning agent made, kept next to the storyboards under the blackboard root. */
+export const planningVisuals = new PlanningVisualService(storage, defaultBlackboardRoot);
+
+export const sprintDraftService = new SprintDraftService(storage, planningJira, undefined, undefined, planningContract, (epic) => storyboardReader.sync(epic), (keys) => readMergeStates(keys, github), () => planSignalService.editRefusal(), splitSource, (sprint) => planningVisuals.dropUnsaved(sprint));
 
 /** The owner's side of a published plan, on the same Jira credentials. */
 async function driftJira(): Promise<DriftJira> {

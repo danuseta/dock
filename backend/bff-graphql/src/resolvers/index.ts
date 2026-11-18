@@ -16,7 +16,7 @@ import { StorageService } from '../storage/service';
 import { activeSprint } from '../integrations/sprint-plan';
 import { lookupDependencies } from '../integrations/dependency-lookup';
 import { sprintPlanner } from '../integrations/sprint-plan-live';
-import { acDriftService, acInService, planSignalService, sprintDraftService, storyboardReader, testSplitPage, ticketSummaryService } from '../integrations/sprint-draft-live';
+import { acDriftService, acInService, planSignalService, planningVisuals, sprintDraftService, storyboardReader, testSplitPage, ticketSummaryService } from '../integrations/sprint-draft-live';
 import { StoryboardMissing, StoryboardRefused } from '../integrations/storyboard';
 import { SPLIT_PAGE_KEY, pageRef } from '../integrations/split-page';
 import { PLANNING_FLOW_KEY, PlanningFlowError, parsePlanningFlow, storedPlanningFlow } from '../integrations/planning-flow';
@@ -239,12 +239,25 @@ async function sprintEscalations(sprint: { id: number; name: string; startDate: 
 }
 
 /** A new session on the workspace that runs one sous prompt, for the retro draft and for an accepted line. */
-async function runSousPrompt(title: string, text: string) {
+async function openSousSession(title: string) {
   requireAgentControls();
   if (!(await orchestratorService.machines()).includes(CHAT_MACHINE)) throw new GraphQLError('The workspace is not connected', { extensions: { code: 'BAD_USER_INPUT' } });
-  const session = await chatService.createSession({ title, machine: CHAT_MACHINE }).catch(orchestratorInputError);
+  return chatService.createSession({ title, machine: CHAT_MACHINE }).catch(orchestratorInputError);
+}
+
+async function runSousPrompt(title: string, text: string) {
+  const session = await openSousSession(title);
   await chatService.sendMessage(session.id, text, await orchestratorService.machines()).catch(orchestratorInputError);
   return session.id;
+}
+
+/** The sprint-planner prompt of the Planning chat: the sprint and the epics of its draft. */
+async function planningPrompt(sprint: string) {
+  const name = sprint.trim();
+  if (!name) throw new GraphQLError('sprint is required', { extensions: { code: 'BAD_USER_INPUT' } });
+  const draft = await sprintDraftService.view(name).catch(() => null);
+  const epics = (draft?.tickets ?? []).map((ticket) => ticket.epic).filter((epic): epic is string => !!epic);
+  return planningChatPrompt(name, epics);
 }
 
 const judgeError = (error: unknown): never => {
@@ -440,6 +453,8 @@ export const resolvers = {
     sprintPlan: () => sprintPlanView(),
     planningSprints: () => sprintDraftService.sprints().catch(planningError),
     sprintDraft: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.view(sprint).catch(planningError),
+    sprintDraftVisuals: (_: unknown, { sprint }: { sprint: string }) => planningVisuals.list(sprint).catch(planningError),
+    planningChatPrompt: (_: unknown, { sprint }: { sprint: string }) => planningPrompt(sprint),
     sprintPlanSignal: (_: unknown, { sprint }: { sprint: string }) => planSignalService.view(sprint).catch(planningError),
     planningSplitPage: async () => (await storageService.getSettingValues([SPLIT_PAGE_KEY]))[0]?.value || null,
     planningFlow: async () => storedPlanningFlow((await storageService.getSettingValues([PLANNING_FLOW_KEY]))[0]?.value),
@@ -801,6 +816,8 @@ export const resolvers = {
     answerSprintDraftQuestion: (_: unknown, { sprint, id, answered, text }: { sprint: string; id: string; answered: boolean; text?: string | null }) => (
       sprintDraftService.answer(sprint, id, answered, reporterName(), text ?? null).catch(planningError)
     ),
+    saveSprintDraftVisual: (_: unknown, { sprint, id }: { sprint: string; id: string }) => planningVisuals.save(sprint, id).catch(planningError),
+    dropSprintDraftVisual: (_: unknown, { sprint, id }: { sprint: string; id: string }) => planningVisuals.drop(sprint, id).catch(planningError),
     publishSprintDraft: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.publish(sprint, reporterName()).catch(planningError),
     setJudgeCall: (_: unknown, { findingId, call, note }: { findingId: string; call: string; note?: string | null }) => { requireAgentControls(); return judgeQueue.setCall(findingId, call, note ?? null).catch(judgeError); },
     confirmJudgeDay: (_: unknown, { day, note }: { day: string; note?: string | null }) => { requireAgentControls(); return judgeQueue.confirmDay(day, note ?? null).catch(judgeError); },
@@ -883,9 +900,7 @@ export const resolvers = {
     openPlanningChat: async (_: unknown, { sprint }: { sprint: string }) => {
       const name = sprint.trim();
       if (!name) throw new GraphQLError('sprint is required', { extensions: { code: 'BAD_USER_INPUT' } });
-      const draft = await sprintDraftService.view(name).catch(() => null);
-      const epics = (draft?.tickets ?? []).map((ticket) => ticket.epic).filter((epic): epic is string => !!epic);
-      return runSousPrompt(planningChatTitle(name), planningChatPrompt(name, epics));
+      return (await openSousSession(planningChatTitle(name))).id;
     },
     acInAction: (_: unknown, { to, id, action, reason }: { to: string; id: string; action: string; reason?: string | null }) => (
       acInService.act(to.trim().toUpperCase(), id, action, reason ?? null, reporterName()).catch(planningError)
@@ -1330,7 +1345,7 @@ export const protectedQueries = [
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'claudeSessionUsage', 'claudeTicketUsage', 'agentLooks', 'libraryAgents', 'libraryAgent', 'guildMasterLog', 'guildMasterParty',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
   'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro', 'sprintPlan',
-  'planningSprints', 'sprintDraft', 'sprintPlanSignal', 'planningFlow', 'planningSplitPage', 'previewSprintDraftPublish', 'sprintDrift', 'acIncoming', 'ticketSummary', 'ticketReadiness',
+  'planningSprints', 'sprintDraft', 'sprintDraftVisuals', 'planningChatPrompt', 'sprintPlanSignal', 'planningFlow', 'planningSplitPage', 'previewSprintDraftPublish', 'sprintDrift', 'acIncoming', 'ticketSummary', 'ticketReadiness',
   'checkpoints', 'sousFlow', 'ticketSousFlow', 'sousFlowPrompt', 'opsRules', 'qaQueue', 'qaQueuePosition', 'worktrees',
   'judgeDays', 'judgeDay', 'judgeWaiting', 'judgeSettings',
 ] as const;
@@ -1341,6 +1356,8 @@ export const protectedMutations = [
   'loadSprintDraft',
   'updateSprintDraftTicket',
   'decideSprintDraft',
+  'saveSprintDraftVisual',
+  'dropSprintDraftVisual',
   'refreshSprintDraftQa',
   'setPlanningFlow',
   'setPlanningSplitPage',

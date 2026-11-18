@@ -88,14 +88,16 @@ test('the routes sit behind the ingest token and answer {result}', async () => {
   }
 });
 
-test('the Planning chat opens with a first message that runs the kit skill sprint-planner with the sprint and its epics', () => {
+test('the sprint-planner prompt names the sprint and its epics, and opening the Planning chat sends no message', () => {
   assert.equal(planningChatTitle('QRD Sprint 27'), 'Planning-QRD Sprint 27');
   const prompt = planningChatPrompt('QRD Sprint 27', ['QRD-1300', 'QRD-1233', 'QRD-1233']);
   assert.equal(prompt.split('\n')[0], 'Pakai skill sprint-planner: QRD Sprint 27 epic QRD-1233, QRD-1300');
   assert.match(prompt, /^Sprint: QRD Sprint 27$/m);
   assert.match(prompt, /^Epic: QRD-1233, QRD-1300$/m);
   assert.equal(planningChatPrompt('QRD Sprint 27', []).split('\n')[0], 'Pakai skill sprint-planner: QRD Sprint 27');
-  // Opened like the Plan-<sprint> map session: a workspace session, then the prompt as its first message.
   const resolvers = readFileSync(path.join(__dirname, '../resolvers/index.ts'), 'utf8');
-  assert.match(resolvers, /openPlanningChat: async[\s\S]{0,400}runSousPrompt\(planningChatTitle\(name\), planningChatPrompt\(name, epics\)\)/);
+  const opener = /openPlanningChat: async[\s\S]*?\n {4}\},/.exec(resolvers.replace(/\r\n/g, '\n'))![0];
+  assert.match(opener, /openSousSession\(planningChatTitle\(name\)\)/);
+  assert.doesNotMatch(opener, /sendMessage|runSousPrompt|planningChatPrompt/, 'opening the chat sends nothing');
+  assert.match(resolvers, /planningChatPrompt: \(_: unknown, \{ sprint \}: \{ sprint: string \}\) => planningPrompt\(sprint\)/);
 });

@@ -397,6 +397,8 @@ export class SprintDraftService {
     /** Why this DOCK may not change the draft (it is not the planner's), or null when it may. */
     private readonly editGuard: (() => Promise<string | null>) | null = null,
     private readonly split: SplitSource | null = null,
+    /** Runs once a publish has marked the draft published: the visuals nobody saved go. */
+    private readonly afterPublish: ((sprint: string) => Promise<unknown>) | null = null,
   ) {}
 
   private async mayEdit(): Promise<void> {
@@ -882,7 +884,10 @@ export class SprintDraftService {
     const published = (await this.view(sprint))!;
     const contract = await writeContract(target.client, target.parentId, { ...published, tickets: openTickets(published) }, by, this.now());
     results.push({ key: 'Confluence', kind: 'contract', status: contract.status, detail: contract.detail });
-    if (tickets.every((result) => result.status === 'updated') && labelled?.status !== 'failed') await this.store.updateSprintDraft(sprint, { status: 'published', publishedAt: this.now() });
+    if (tickets.every((result) => result.status === 'updated') && labelled?.status !== 'failed') {
+      await this.store.updateSprintDraft(sprint, { status: 'published', publishedAt: this.now() });
+      if (this.afterPublish) await this.afterPublish(sprint).catch(() => null);
+    }
     return results;
   }
 

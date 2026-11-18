@@ -1078,6 +1078,32 @@ export const SPRINT_DRIFT_FIELDS = `
   storyboard { key version frames held checked }
 `;
 
+export const GET_PLANNING_CHAT_PROMPT = gql`
+  query GetPlanningChatPrompt($sprint: String!) {
+    planningChatPrompt(sprint: $sprint)
+  }
+`;
+
+export const SPRINT_DRAFT_VISUAL_FIELDS = `id title createdAt saved stale url sessionId`;
+
+export const GET_SPRINT_DRAFT_VISUALS = gql`
+  query GetSprintDraftVisuals($sprint: String!) {
+    sprintDraftVisuals(sprint: $sprint) { ${SPRINT_DRAFT_VISUAL_FIELDS} }
+  }
+`;
+
+export const SAVE_SPRINT_DRAFT_VISUAL = gql`
+  mutation SaveSprintDraftVisual($sprint: String!, $id: ID!) {
+    saveSprintDraftVisual(sprint: $sprint, id: $id) { ${SPRINT_DRAFT_VISUAL_FIELDS} }
+  }
+`;
+
+export const DROP_SPRINT_DRAFT_VISUAL = gql`
+  mutation DropSprintDraftVisual($sprint: String!, $id: ID!) {
+    dropSprintDraftVisual(sprint: $sprint, id: $id) { ${SPRINT_DRAFT_VISUAL_FIELDS} }
+  }
+`;
+
 export const OPEN_PLANNING_CHAT = gql`
   mutation OpenPlanningChat($sprint: String!) {
     openPlanningChat(sprint: $sprint)

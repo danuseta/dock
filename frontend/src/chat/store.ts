@@ -118,6 +118,36 @@ export const chatStore = {
   setActive: (id: string) => update(setActive(state, id)),
   markSeen: (sessionId: string, messageId: number) => update(markSeen(state, sessionId, messageId)),
   setDrawerHeight: (height: number) => update(setDrawerHeight(state, height, window.innerHeight)),
+  prefill: (sessionId: string, text: string) => prefillStore.set(sessionId, text),
+};
+
+/** Text for a session's message box, filled but never sent; kept out of the persisted state. */
+export interface ChatPrefill { sessionId: string; text: string }
+
+let pending: ChatPrefill | null = null;
+const prefillListeners = new Set<() => void>();
+
+export const prefillStore = {
+  subscribe: (listener: () => void) => {
+    prefillListeners.add(listener);
+    return () => { prefillListeners.delete(listener); };
+  },
+  getSnapshot: () => pending,
+  set: (sessionId: string, text: string) => {
+    pending = { sessionId, text };
+    for (const listener of prefillListeners) listener();
+  },
+  clear: (sessionId: string) => {
+    if (pending?.sessionId !== sessionId) return;
+    pending = null;
+    for (const listener of prefillListeners) listener();
+  },
+};
+
+/** The text waiting for this session's message box, or null. */
+export const usePrefill = (sessionId: string): ChatPrefill | null => {
+  const current = useSyncExternalStore(prefillStore.subscribe, prefillStore.getSnapshot, prefillStore.getSnapshot);
+  return current?.sessionId === sessionId ? current : null;
 };
 
 export const useChatState = () => useSyncExternalStore(chatStore.subscribe, chatStore.getSnapshot, chatStore.getSnapshot);
