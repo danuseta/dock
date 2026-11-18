@@ -866,6 +866,7 @@ export const SPRINT_DRAFT_FIELDS = `
     epic frames
     storyboard { version frames held checked { action note by at } }
     tcs { id ac title steps expected } tcStale tcPending tcApproved acHash
+    scout { line mode files repos contractChange at } scoutRunning
     merge pulls jiraAhead merged carried rank planStart planDur
   }
   findings { id key line text refKey kind refEnd ownEnd linked decision { action note by at } }
@@ -1000,6 +1001,12 @@ export const MOVE_SPRINT_DRAFT_CARDS = gql`
 export const DECIDE_SPRINT_DRAFT = gql`
   mutation DecideSprintDraft($sprint: String!, $id: ID!, $action: String!, $note: String) {
     decideSprintDraft(sprint: $sprint, id: $id, action: $action, note: $note) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const RUN_SCOUT = gql`
+  mutation RunScout($key: String!) {
+    runScout(key: $key)
   }
 `;
 

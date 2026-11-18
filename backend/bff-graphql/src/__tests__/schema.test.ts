@@ -237,6 +237,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'revokeIngestToken',
       'runOrchestratorCronNow',
       'runQa',
+      'runScout',
       'saveAgentLook',
       'saveDemoLink',
       'saveDemoStorage',

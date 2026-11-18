@@ -619,6 +619,16 @@ export const typeDefs = gql`
     fix: String
   }
 
+  """The Scout line of a ticket: what sous-explorer measured, and whether the change runs light or full."""
+  type SprintDraftScout {
+    line: String!
+    mode: String!
+    files: Int!
+    repos: String!
+    contractChange: Boolean!
+    at: String!
+  }
+
   """A draft ticket on its developer's lane. Days count working days from the sprint start; end past sprintDays is backlog."""
   type SprintDraftTicket {
     key: String!
@@ -647,6 +657,10 @@ export const typeDefs = gql`
     frames: [String!]!
     storyboard: SprintDraftStoryboardFlag
     tcs: [SprintDraftTc!]!
+    "The Scout line from the ticket's materials/contract.md; null until a scout ran."
+    scout: SprintDraftScout
+    "A scout session for the ticket is still running."
+    scoutRunning: Boolean!
     "QA approved the test cases as they are now (decision tc|KEY approve)."
     tcApproved: Boolean!
     "The hash of the AC lines; a ticket summary is written for one hash."
@@ -2429,6 +2443,8 @@ export const typeDefs = gql`
     """Records a decision on a finding, a qa|KEY prediction or the scope|cut note; action clear removes it."""
     decideSprintDraft(sprint: String!, id: ID!, action: String!, note: String): SprintDraft!
     refreshSprintDraftQa(sprint: String!): SprintDraft!
+    """Opens a read-only session that has sous-explorer scout the ticket and write its Scout line; false when one already runs for the ticket."""
+    runScout(key: String!): Boolean!
     "Reads the newest storyboard of each epic of the draft from Confluence and saves it under the blackboard."
     checkSprintStoryboards(sprint: String!): SprintDraft!
     "Save an uploaded storyboard HTML as the newest version for the epic (used until the Confluence page exists)."

@@ -33,6 +33,8 @@ import { qaQueueService } from '../integrations/qa-queue-live';
 import { worktrees } from '../integrations/worktrees-live';
 import { CronInputError, manualRefusal, type OwnerAnswer, type OwnerChange } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
+import { ScoutRunner, readScout } from '../integrations/scout';
+import { blackboard } from '../integrations/blackboard';
 import { autoReview, listedAutoReviews } from '../integrations/auto-review-live';
 import { labelOrder } from '../integrations/orchestrator-cron';
 import { pushService } from '../integrations/push';
@@ -362,6 +364,8 @@ function devServerError(error: unknown): never {
 function elevenLabsError(error: unknown): never {
   throw new GraphQLError(error instanceof Error ? error.message : 'ElevenLabs keys failed', { extensions: { code: 'BAD_USER_INPUT' } });
 }
+
+const scoutRunner = new ScoutRunner(blackboard, (key, prompt) => orchestratorCron.openReview(key, prompt, 'Scout'));
 
 function cronError(error: unknown): never {
   if (error instanceof CronInputError || error instanceof OrchestratorInputError) {
@@ -763,6 +767,11 @@ export const resolvers = {
       sprintDraftService.decide(sprint, id, action, note ?? null, reporterName()).catch(planningError)
     ),
     refreshSprintDraftQa: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.refreshQa(sprint).catch(planningError),
+    runScout: (_: unknown, { key }: { key: string }) => {
+      let ticket: string;
+      try { ticket = normalizeTicketKey(key); } catch { throw new GraphQLError('A valid ticket key is required', { extensions: { code: 'BAD_USER_INPUT' } }); }
+      return scoutRunner.run(ticket).catch(cronError);
+    },
     checkSprintStoryboards: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.checkStoryboards(sprint).catch(planningError),
     uploadSprintStoryboard: (_: unknown, { sprint, epic, html }: { sprint: string; epic: string; html: string }) => uploadStoryboard(sprint, epic, html),
     setSprintDraftTcs: (_: unknown, { sprint, key, tcs }: { sprint: string; key: string; tcs: unknown[] }) => sprintDraftService.setTcs(sprint, key, tcs).catch(planningError),
@@ -1253,6 +1262,10 @@ export const resolvers = {
   DiscordChannel: {
     team: (channel: { team?: boolean }) => Boolean(channel.team),
   },
+  SprintDraftTicket: {
+    scout: (ticket: { key: string }) => readScout(blackboard, ticket.key),
+    scoutRunning: (ticket: { key: string }) => scoutRunner.running(ticket.key),
+  },
   SprintDraftQuestion: {
     options: (question: { options?: string[] }) => question.options ?? [],
   },
@@ -1308,6 +1321,7 @@ export const protectedMutations = [
   'editAutoReviewPost',
   'cleanWorktrees',
   'checkSprintStoryboards',
+  'runScout',
   'uploadSprintStoryboard',
   'answerSprintDraftQuestion',
   'setSprintDraftTcs',
