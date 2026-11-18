@@ -2,6 +2,7 @@ import type { AgentRun, AgentTimeline } from '../agents/runs';
 
 /** One row of Log eksekusi: an agent's work from spawn to stop, a failure, or an event the run recorded. */
 export interface ExecRow {
+  id?: string;
   at: string;
   kind: 'agent' | 'fail' | 'event';
   until: string | null;
@@ -26,7 +27,7 @@ export function execRows(run: Pick<AgentRun, 'failures' | 'events'> | null, time
       if (!since) continue;
       const until = agent.until ?? null;
       rows.push({
-        at: since, kind: 'agent', until, agent: agent.name, doing: agent.detail ?? '', result: agent.state === 'done' ? 'OK' : agent.state === 'waiting' ? 'waiting' : 'running',
+        id: agent.id, at: since, kind: 'agent', until, agent: agent.name, doing: agent.detail ?? '', result: agent.state === 'done' ? 'OK' : agent.state === 'waiting' ? 'waiting' : 'running',
         tools: agent.tools, seconds: until ? Math.max(0, Math.round((Date.parse(until) - Date.parse(since)) / 1000)) : null,
       });
     }

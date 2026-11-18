@@ -1283,6 +1283,35 @@ export const typeDefs = gql`
     error: String
   }
 
+  type ClaudeAgentUsage {
+    agentId: String!
+    name: String!
+    model: String
+    totalTokens: Float!
+    peakContext: Float!
+    cost: Float!
+  }
+
+  type ClaudeSessionUsage {
+    available: Boolean!
+    found: Boolean!
+    totalTokens: Float!
+    totalCost: Float!
+    mainTokens: Float!
+    agents: [ClaudeAgentUsage!]!
+    error: String
+  }
+
+  type ClaudeTicketUsage {
+    available: Boolean!
+    sessions: Int!
+    totalTokens: Float!
+    totalCost: Float!
+    mainTokens: Float!
+    agents: [ClaudeAgentUsage!]!
+    error: String
+  }
+
   type DoctorCheck {
     name: String!
     ok: Boolean!
@@ -2279,6 +2308,8 @@ export const typeDefs = gql`
     ingestTokens: [IngestToken!]!
     doctorReports: [DoctorReport!]!
     claudeUsage(from: String!, to: String!): ClaudeUsage!
+    claudeSessionUsage(sessionId: ID!): ClaudeSessionUsage!
+    claudeTicketUsage(key: String!): ClaudeTicketUsage!
     agentLooks: [AgentLook!]!
     libraryAgents(machine: String): [LibraryAgent!]!
     libraryAgent(slug: String!, machine: String): LibraryAgentDetail!

@@ -83,7 +83,7 @@ test('AC 1 + 3a: the Files column has Tiket → kode with n/total directly above
   assert.match(page, /<AcMap trace=\{trace\}/);
   assert.match(page, /<ContractView ticket=\{picked\}/);
   assert.match(page, /<LogTabs ticket=\{picked\} run=\{run\} timeline=\{run\?\.timeline \?\? null\} tab=\{logTab\}/);
-  assert.match(page, /<ExecLog ticket=\{ticket\} run=\{run\} timeline=\{timeline\} \/><\/div>/);
+  assert.match(page, /<ExecLog ticket=\{ticket\} run=\{run\} timeline=\{timeline\} usage=\{usageData\?\.claudeTicketUsage\} \/><\/div>/);
   assert.match(page, /<LogView ticket=\{ticket\} \/><\/div>/);
   assert.equal([LOG_ENTRY, TRACE_ENTRY, CONTRACT_ENTRY].every((entry) => entry.startsWith('@')), true, 'generated entries never clash with a file path');
 });
