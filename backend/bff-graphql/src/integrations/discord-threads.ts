@@ -32,6 +32,8 @@ export interface ThreadMessage {
   /** The author's Discord avatar, or Discord's default one. */
   avatar: string;
   mine: boolean;
+  /** Set when a webhook posted the message, as DOCK does. */
+  webhookId?: string | null;
   at: string;
   text: string;
   mentions: ThreadMention[];

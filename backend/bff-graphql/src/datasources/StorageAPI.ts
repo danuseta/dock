@@ -1,9 +1,19 @@
 import { StorageService } from '../storage/service';
 import { discordTeam, workspaceDiscordSetting } from '../integrations/discord-team';
+import { ARENA_SETTINGS, arenaSetting, isArenaSetting } from '../integrations/auto-review';
 import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, normalizeDiscordMessageTemplate } from '../integrations/discord';
 import { forgetNotificationPrefs, parseNotificationPrefs, validateNotificationPrefs } from '../integrations/notification-prefs';
 
 const MIN_SERVICE_HEALTH_REFRESH_SECONDS = 5;
+/** A Discord webhook link: https on discord.com or discordapp.com, /api/webhooks/<id>/<token>. */
+export const isDiscordWebhookUrl = (value: string) => {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && ['discord.com', 'discordapp.com'].includes(url.hostname) && /^\/api\/webhooks\/\d+\/[\w-]+\/?$/.test(url.pathname);
+  } catch {
+    return false;
+  }
+};
 const MAX_SERVICE_HEALTH_REFRESH_SECONDS = 86_400;
 export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'] as const;
 /** What a chat offers; "default" (ask before each tool) stays for the cron's manual mode only. */
@@ -156,7 +166,7 @@ export class StorageAPI {
   }
 
   async getAutoReviews(take = 30) {
-    return (await this.storage.getAutoReviews(take)).map((row) => ({ ...row, startedAt: row.startedAt.toISOString(), finishedAt: row.finishedAt?.toISOString() ?? null }));
+    return (await this.storage.getAutoReviews(take)).map((row) => ({ ...row, startedAt: row.startedAt.toISOString(), finishedAt: row.finishedAt?.toISOString() ?? null, postAt: row.postAt?.toISOString() ?? null }));
   }
 
   hasMasterPin() {
@@ -188,6 +198,10 @@ export class StorageAPI {
       discordUserId: settings.discordUserId || null,
       autoReviewOnIt: settings.autoReviewOnIt === 'true',
       autoLgtm: settings.autoLgtm === 'true',
+      autoReviewPostDiscord: settings.autoReviewPostDiscord !== 'false',
+      reviewPostDelayMinutes: arenaSetting('reviewPostDelayMinutes', settings.reviewPostDelayMinutes),
+      reviewReReviewWaitMinutes: arenaSetting('reviewReReviewWaitMinutes', settings.reviewReReviewWaitMinutes),
+      reviewMaxRounds: arenaSetting('reviewMaxRounds', settings.reviewMaxRounds),
       reviewFindingsToTask: settings.reviewFindingsToTask !== 'false',
       hasGoogleClientSecret: Boolean(settings.googleClientSecret),
       googleCalendarConnected: Boolean(settings.googleRefreshToken),
@@ -223,11 +237,15 @@ export class StorageAPI {
       if (input.chatParallelTurns != null && input.chatParallelTurns !== '' && parallelTurns(input.chatParallelTurns) === null) throw new Error('Invalid turn count');
       if (input.ownerReplySession != null && !(OWNER_REPLY_SESSIONS as readonly string[]).includes(String(input.ownerReplySession))) throw new Error('Invalid owner reply session');
       if (input.discordMessageTemplate != null) normalizeDiscordMessageTemplate(String(input.discordMessageTemplate));
-      for (const key of ['autoReviewOnIt', 'autoLgtm', 'reviewFindingsToTask'] as const) {
+      for (const key of ['autoReviewOnIt', 'autoLgtm', 'reviewFindingsToTask', 'autoReviewPostDiscord'] as const) {
         if (input[key] != null && input[key] !== 'true' && input[key] !== 'false') throw new Error('Invalid auto review setting');
+      }
+      for (const key of Object.keys(ARENA_SETTINGS) as Array<keyof typeof ARENA_SETTINGS>) {
+        if (input[key] != null && !isArenaSetting(key, input[key])) throw new Error('Invalid review arena setting');
       }
       if (input.planningConfluenceParent != null && input.planningConfluenceParent !== '' && !/^\d{1,20}$/.test(String(input.planningConfluenceParent).trim())) throw new Error('Invalid Confluence page id');
       if (input.planningPlanner != null && String(input.planningPlanner).length > 120) throw new Error('Invalid planner');
+      if (input.discordWebhookUrl != null && String(input.discordWebhookUrl).trim() !== '' && !isDiscordWebhookUrl(String(input.discordWebhookUrl).trim())) throw new Error('Invalid Discord webhook');
       if (input.discordUserId != null && input.discordUserId !== '' && !/^\d{5,25}$/.test(String(input.discordUserId).trim())) throw new Error('Invalid Discord user id');
       const saved = input.notificationPrefs == null ? input : { ...input, notificationPrefs: JSON.stringify(validateNotificationPrefs(String(input.notificationPrefs))) };
       await Promise.all(Object.entries(saved)

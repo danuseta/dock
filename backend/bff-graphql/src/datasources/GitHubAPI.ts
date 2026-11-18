@@ -150,6 +150,14 @@ export class GitHubAPI {
     return { open: pull?.state === 'open' && !pull?.merged_at, headSha: String(pull?.head?.sha ?? '') };
   }
 
+  /** When a commit was made; null when GitHub does not say. Throws when there is no token. */
+  async commitAt(owner: string, repo: string, sha: string): Promise<Date | null> {
+    const auth = await this.getAuth();
+    if (!auth.hasToken) throw new Error('GitHub token is not configured in Settings');
+    const date = await new GitHubClient(auth.headers.Authorization.replace('Bearer ', '')).getCommitDate(owner, repo, sha);
+    return date ? new Date(date) : null;
+  }
+
   /** Submits an APPROVE review; throws when there is no token or GitHub refuses. */
   async approvePullRequest(owner: string, repo: string, pullNumber: number) {
     const auth = await this.getAuth();
