@@ -1,7 +1,8 @@
 import { isAbsolute } from 'node:path';
 import { StorageService } from '../storage/service';
 import { discordTeam, workspaceDiscordSetting } from '../integrations/discord-team';
-import { ARENA_SETTINGS, arenaSetting, isArenaSetting } from '../integrations/auto-review';
+import { ARENA_SETTINGS, MESSAGE_KEYS, arenaSetting, isArenaSetting, isMessageSetting, messageFormat } from '../integrations/auto-review';
+import { LIGHT_KEYS, isLightSetting, lightSettings } from '../integrations/light-runner';
 import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, normalizeDiscordMessageTemplate } from '../integrations/discord';
 import { forgetNotificationPrefs, parseNotificationPrefs, validateNotificationPrefs } from '../integrations/notification-prefs';
 
@@ -182,6 +183,9 @@ export class StorageAPI {
 
   async getPublicSettings() {
     const settings: any = await this.getSettings();
+    const saved = new Map<string, string>(Object.entries(settings));
+    const post = messageFormat('post', saved);
+    const reply = messageFormat('reply', saved);
     return {
       jiraUrl: settings.jiraUrl || null,
       jiraEmail: settings.jiraEmail || null,
@@ -206,6 +210,14 @@ export class StorageAPI {
       reviewReReviewWaitMinutes: arenaSetting('reviewReReviewWaitMinutes', settings.reviewReReviewWaitMinutes),
       reviewMaxRounds: arenaSetting('reviewMaxRounds', settings.reviewMaxRounds),
       reviewFindingsToTask: settings.reviewFindingsToTask !== 'false',
+      reviewFindingsAutoReply: settings.reviewFindingsAutoReply !== 'false',
+      reviewPostFormat: post.format,
+      reviewPostSkill: post.skill,
+      reviewPostTemplate: post.template,
+      reviewReplyFormat: reply.format,
+      reviewReplySkill: reply.skill,
+      reviewReplyTemplate: reply.template,
+      ...lightSettings(saved),
       hasGoogleClientSecret: Boolean(settings.googleClientSecret),
       googleCalendarConnected: Boolean(settings.googleRefreshToken),
       serviceHealthRefreshSeconds: isValidServiceHealthRefreshSeconds(settings.serviceHealthRefreshSeconds)
@@ -243,8 +255,14 @@ export class StorageAPI {
       if (input.voicePlugin != null && !(VOICE_PLUGINS as readonly string[]).includes(String(input.voicePlugin))) throw new Error('Invalid voice plugin');
       if (input.storageLocalDir != null && input.storageLocalDir !== '' && (String(input.storageLocalDir).length > 500 || !isAbsolute(String(input.storageLocalDir).trim()))) throw new Error('Invalid local folder');
       if (input.discordMessageTemplate != null) normalizeDiscordMessageTemplate(String(input.discordMessageTemplate));
-      for (const key of ['autoReviewOnIt', 'autoLgtm', 'reviewFindingsToTask', 'autoReviewPostDiscord'] as const) {
+      for (const key of ['autoReviewOnIt', 'autoLgtm', 'reviewFindingsToTask', 'autoReviewPostDiscord', 'reviewFindingsAutoReply'] as const) {
         if (input[key] != null && input[key] !== 'true' && input[key] !== 'false') throw new Error('Invalid auto review setting');
+      }
+      for (const key of [...Object.values(MESSAGE_KEYS.post), ...Object.values(MESSAGE_KEYS.reply)]) {
+        if (input[key] != null && input[key] !== '' && !isMessageSetting(key, input[key])) throw new Error('Invalid Discord message setting');
+      }
+      for (const key of LIGHT_KEYS) {
+        if (input[key] != null && !isLightSetting(key, input[key])) throw new Error('Invalid light runner setting');
       }
       for (const key of Object.keys(ARENA_SETTINGS) as Array<keyof typeof ARENA_SETTINGS>) {
         if (input[key] != null && !isArenaSetting(key, input[key])) throw new Error('Invalid review arena setting');

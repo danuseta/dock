@@ -309,11 +309,12 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate
           ) : (
             <>
               {actionError && !deleteTarget && <p className="flex-none border-b border-border px-3.5 py-1.5 text-pretty text-xs break-words text-status-conflict" role="alert">{actionError}</p>}
-              {revisedRound(selected) && (
+              {(revisedRound(selected) || (selected.reviewRound && selected.ticketKey)) && (
                 <div className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-3.5 py-1.5 text-xs">
-                  <span className="rounded-pill border border-accent/40 px-1.5 font-mono text-[0.62rem] leading-4 text-accent">Revised from review</span>
-                  <span className="min-w-0 flex-1 truncate text-secondary-foreground">{revisedRound(selected)?.summary}</span>
-                  {revisedRound(selected)?.threadUrl && <a className="text-accent hover:underline" href={revisedRound(selected)?.threadUrl ?? undefined} target="_blank" rel="noreferrer">Open thread</a>}
+                  <span className="rounded-pill border border-accent/40 px-1.5 font-mono text-[0.62rem] leading-4 text-accent">{revisedRound(selected) ? 'Revised from review' : 'Review round'}</span>
+                  <span className="min-w-0 flex-1 truncate text-secondary-foreground">{selected.reviewRound?.summary}</span>
+                  {selected.ticketKey && onNavigate && <button type="button" className="border-0 bg-transparent p-0 text-accent hover:underline" onClick={() => onNavigate(`/blackboard?key=${encodeURIComponent(selected.ticketKey as string)}&file=%40review`)}>Blackboard › Review findings</button>}
+                  {selected.reviewRound?.threadUrl && <a className="text-accent hover:underline" href={selected.reviewRound.threadUrl} target="_blank" rel="noreferrer">Open thread</a>}
                 </div>
               )}
               <div className="flex min-h-0 flex-1">

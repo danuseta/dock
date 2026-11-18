@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { AutoReview, ON_IT_WINDOW_MS, answeredFindings, currentReviews, reviewBody, reviewMarker, reviewPost, reviewPrompt, withMarker, type AutoReviewDeps, type AutoReviewRecord, type AutoReviewSettings, type PushMessage } from '../integrations/auto-review';
+import { AutoReview, DEFAULT_REVIEW_POST_TEMPLATE, markerVerdict, DEFAULT_REVIEW_REPLY_TEMPLATE, ON_IT_WINDOW_MS, WAITING_SKILL, fillTemplate, isMessageSetting, messageFormat, reviewTemplateValues, answeredFindings, currentReviews, reviewBody, reviewMarker, reviewPost, reviewPrompt, withMarker, type AutoReviewDeps, type AutoReviewRecord, type AutoReviewSettings, type PushMessage } from '../integrations/auto-review';
 import { sortThread } from '../integrations/discord-reader';
 import type { ThreadRow } from '../integrations/discord-threads';
 import type { Orchestration } from '../integrations/orchestrator';
@@ -17,7 +17,7 @@ const row = (extra: Partial<ThreadRow> = {}): ThreadRow => ({
   onIt: ['Danu'], claimerRepliedAt: null, mentionedAt: null, repliedAt: null, messages: [], ...extra,
 });
 
-const SETTINGS: AutoReviewSettings = { enabled: true, autoLgtm: false, post: true, postDelayMinutes: 2, reReviewWaitMinutes: 10, maxRounds: 3 };
+const SETTINGS: AutoReviewSettings = { enabled: true, autoLgtm: false, post: true, postDelayMinutes: 2, reReviewWaitMinutes: 10, maxRounds: 3, message: { format: 'template', skill: 'review-message', template: DEFAULT_REVIEW_POST_TEMPLATE } };
 
 function world(options: { enabled?: boolean; autoLgtm?: boolean; rows?: ThreadRow[]; open?: boolean; headSha?: string; approve?: boolean; failOpen?: boolean } = {}) {
   const records: AutoReviewRecord[] = [];
@@ -34,7 +34,7 @@ function world(options: { enabled?: boolean; autoLgtm?: boolean; rows?: ThreadRo
     duePosts: async (now) => records.filter((record) => record.postStatus === 'pending' && record.postAt && record.postAt <= now),
     latest: async (prUrl) => [...records].reverse().find((record) => record.prUrl === prUrl) ?? null,
     running: async (key) => [...records].reverse().find((record) => record.ticketKey === key && record.status === 'running') ?? null,
-    create: async (data) => { const record: AutoReviewRecord = { id: `r${(n += 1)}`, sessionId: null, status: 'running', detail: null, finishedAt: null, postStatus: null, postAt: null, postText: null, postMessageId: null, postDetail: null, ...data }; records.push(record); return record; },
+    create: async (data) => { const record: AutoReviewRecord = { id: `r${(n += 1)}`, sessionId: null, status: 'running', detail: null, finishedAt: null, postStatus: null, postAt: null, postText: null, postMessageId: null, postDetail: null, postImages: null, ...data }; records.push(record); return record; },
     update: async (id, data) => { Object.assign(records.find((record) => record.id === id) as AutoReviewRecord, data); },
     updatePending: async (id, data) => {
       const record = records.find((item) => item.id === id);
@@ -42,11 +42,20 @@ function world(options: { enabled?: boolean; autoLgtm?: boolean; rows?: ThreadRo
       Object.assign(record, data);
       return true;
     },
+    updateWaitingSkill: async (id, data) => {
+      const record = records.find((item) => item.id === id);
+      if (record?.postStatus !== 'pending' || record.postDetail !== WAITING_SKILL) return false;
+      Object.assign(record, data);
+      return true;
+    },
     openReview: async (key, prompt) => { if (options.failOpen) throw new Error('No slot'); opened.push({ key, prompt }); return `s${opened.length}`; },
     approve: async (key) => { approved.push(key); return options.approve ?? true; },
     push: async (message) => { pushes.push(message); },
     owner: async () => ({ discordUserId: '111', webhookUrl: 'https://discord.com/api/webhooks/9/hook', name: 'Danu' }),
-    postDiscord: async () => 'msg1',
+    postDiscord: async () => ({ id: 'msg1', skipped: [] }),
+    newestReply: async () => null,
+    skills: async () => ['review-message'],
+    imageRoot: async (key) => `/evidence/${key}/screenshots`,
     now: () => NOW,
   };
   return { review: new AutoReview(deps), records, opened, approved, pushes, deps };
@@ -270,19 +279,19 @@ test('the review post carries the verdict, open blockers and non-blocking findin
     '1) blocker: Empty state still says No data yet, EmptyState.tsx:42',
     '2) non-blocking: Retry button has no aria-label',
     'nit: 1, di ledger',
-    'DOCK-REVIEW on it by <@111> · round 1 · @ abc1234',
+    'DOCK-REVIEW on it by <@111> · round 1 · @ abc1234 · Request change · 1 blocker',
   ].join('\n'));
 
   const comments = reviewPost({ key: 'QRD-1473', verdict: 'approve', findings: [finding('non-blocking', 'Badge is faint in light mode')] } as unknown as Orchestration, pulls, 2, '111');
   assert.match(comments, /^QRD-1473 · Approve with comments · 1 non-blocking\n/);
-  assert.match(comments, /\nDOCK-REVIEW on it by <@111> · round 2 · @ abc1234$/);
+  assert.match(comments, /\nDOCK-REVIEW on it by <@111> · round 2 · @ abc1234 · Approve with comments · 0 blocker$/);
 
   const nits = reviewPost({ key: 'QRD-1473', verdict: 'approve', findings: [finding('nit', 'a'), finding('nit', 'b')] } as unknown as Orchestration, pulls, 1, '111');
-  assert.strictEqual(nits, ['QRD-1473 · Approve', `<${PR}> @ abc1234`, 'nit: 2, di ledger', 'DOCK-REVIEW on it by <@111> · round 1 · @ abc1234'].join('\n'));
+  assert.strictEqual(nits, ['QRD-1473 · Approve', `<${PR}> @ abc1234`, 'nit: 2, di ledger', 'DOCK-REVIEW on it by <@111> · round 1 · @ abc1234 · Approve · 0 blocker'].join('\n'));
   assert.strictEqual(reviewMarker('111', 3, 'b71e0d4aa'), 'DOCK-REVIEW on it by <@111> · round 3 · @ b71e0d4');
 
   const long = reviewPost({ key: 'QRD-1473', verdict: 'request-change', findings: [finding('blocker', 'x'.repeat(3000))] } as unknown as Orchestration, pulls, 1, '111');
-  assert.ok(long.length <= 2000 && long.endsWith('DOCK-REVIEW on it by <@111> · round 1 · @ abc1234'), 'a long post is cut, the marker stays');
+  assert.ok(long.length <= 2000 && long.endsWith('DOCK-REVIEW on it by <@111> · round 1 · @ abc1234 · Request change · 1 blocker'), 'a long post is cut, the marker stays');
 });
 
 test('a finding the author answered "tidak diubah karena" in a DOCK-FIX reply is not posted again', () => {
@@ -308,13 +317,13 @@ test('a finding the author answered "tidak diubah karena" in a DOCK-FIX reply is
 test('a verdict schedules the post for later; the tick sends it to the thread through the webhook once it is due', async () => {
   const w = world({ rows: [row({ url: THREAD })] });
   const sent: Array<{ webhookUrl: string; content: string; options: { threadId: string; username: string } }> = [];
-  w.deps.postDiscord = async (webhookUrl, content, options) => { sent.push({ webhookUrl, content, options }); return 'msg42'; };
+  w.deps.postDiscord = async (webhookUrl, content, options) => { sent.push({ webhookUrl, content, options }); return { id: 'msg42', skipped: [] }; };
   await w.review.tick();
   await w.review.ledger(verdict({ verdict: 'request-change', findings: [finding('blocker', 'No tooltip')] } as Partial<Orchestration>));
   const record = w.records[0];
   assert.strictEqual(record.postStatus, 'pending');
   assert.strictEqual(record.postAt?.getTime(), NOW.getTime() + 2 * 60_000);
-  assert.match(record.postText ?? '', /DOCK-REVIEW on it by <@111> · round 1 · @ abc1234$/);
+  assert.match(record.postText ?? '', /DOCK-REVIEW on it by <@111> · round 1 · @ abc1234 · Request change · 1 blocker$/);
   await w.review.tick();
   assert.strictEqual(sent.length, 0, 'not before the delay');
   w.deps.now = () => new Date(NOW.getTime() + 3 * 60_000);
@@ -350,7 +359,7 @@ test('a verdict schedules the post for later; the tick sends it to the thread th
 test('a pending post can be cancelled or edited; the marker line stays as DOCK wrote it, and a sent post cannot be changed', async () => {
   const w = world({ rows: [row({ url: THREAD })] });
   let posts = 0;
-  w.deps.postDiscord = async () => { posts += 1; return 'msg1'; };
+  w.deps.postDiscord = async () => { posts += 1; return { id: 'msg1', skipped: [] }; };
   await w.review.tick();
   await w.review.ledger(verdict());
   const record = w.records[0];
@@ -367,7 +376,7 @@ test('a pending post can be cancelled or edited; the marker line stays as DOCK w
   await assert.rejects(w.review.editPost(record.id, 'x'), /pending/);
 
   const closed = world({ rows: [row({ url: THREAD })] });
-  closed.deps.postDiscord = async () => { posts += 1; return 'msg1'; };
+  closed.deps.postDiscord = async () => { posts += 1; return { id: 'msg1', skipped: [] }; };
   await closed.review.tick();
   await closed.review.ledger(verdict());
   closed.deps.pull = async () => ({ open: false, headSha: 'abc1234' });
@@ -385,7 +394,7 @@ function arena(options: { round?: number; status?: string; startedAt?: Date; mes
   w.records.push({
     id: 'r0', prUrl: PR, headSha: 'abc1234', ticketKey: 'QRD-1473', threadUrl: THREAD, sessionId: 's0', status: options.status ?? 'blockers', detail: '1 blocker',
     startedAt: options.startedAt ?? new Date(NOW.getTime() - 50 * 60_000), finishedAt: null, round: options.round ?? 1,
-    postStatus: 'sent', postAt: null, postText: null, postMessageId: 'msg1', postDetail: null,
+    postStatus: 'sent', postAt: null, postText: null, postMessageId: 'msg1', postDetail: null, postImages: null,
   });
   w.deps.commitAt = async () => options.commitAt ?? null;
   return w;
@@ -452,7 +461,7 @@ test('the arena closes on approve, on a closed pull request, after the last roun
   last.records[0].round = 3;
   await last.review.ledger(verdict({ verdict: 'request-change', findings: [finding('blocker', 'Retry count resets')] } as Partial<Orchestration>));
   assert.strictEqual(last.pushes.at(-1)?.title, 'QRD-1473: 3 rounds, still 1 blocker');
-  assert.match(last.records[0].postText ?? '', /round 3 · @ abc1234$/, 'the last round is still posted');
+  assert.match(last.records[0].postText ?? '', /round 3 · @ abc1234 · Request change · 1 blocker$/, 'the last round is still posted');
 });
 
 test('a new on it after the arena closed opens a new arena, counting rounds from 1 again', async () => {
@@ -485,7 +494,7 @@ test('a post taken for sending cannot be cancelled or edited, goes out with the 
   w.deps.postDiscord = async (_url, content) => {
     sent.push(content);
     during = Promise.allSettled([w.review.cancelPost('r1'), w.review.editPost('r1', 'too late')]);
-    return 'msg1';
+    return { id: 'msg1', skipped: [] };
   };
   await w.review.tick();
   await w.review.ledger(verdict());
@@ -548,4 +557,153 @@ test('a marker typed into a body in any spelling is dropped, and finding text ca
   }
   const body = reviewBody({ key: 'QRD-1473', verdict: 'request-change', findings: [finding('blocker', 'See [the docs](https://evil.example/x) and https://github.com/o/r/pull/1')] } as unknown as Orchestration, [{ url: PR, headSha: 'abc1234' }]);
   assert.match(body, /1\) blocker: See \[the docs\]\u200B\(<https:\/\/evil\.example\/x>\) and <https:\/\/github\.com\/o\/r\/pull\/1>/);
+});
+
+const SKILL_SETTINGS: AutoReviewSettings = { ...SETTINGS, message: { format: 'skill', skill: 'review-message', template: DEFAULT_REVIEW_POST_TEMPLATE } };
+const SKILL_BLOCK = 'Verdict ditulis.\n<<<DISCORD\nmas indra, ada blocker 1. 1) blocker, be: tooltip hilang (gambar 01-tooltip-dark.png)\nDOCK-REVIEW on it by <@999> · round 9 · @ fake\nGAMBAR: 01-tooltip-dark.png\n<<<AKHIR DISCORD>>>';
+const at = (minutes: number) => () => new Date(NOW.getTime() + minutes * 60_000);
+
+test('in skill mode the review prompt asks for the message with that skill in the DISCORD block, and the post goes out with the block and its images', async () => {
+  const w = world({ rows: [row({ url: THREAD })] });
+  w.deps.settings = async () => SKILL_SETTINGS;
+  const sent: Array<{ content: string; files?: { root: string; names: string[] } }> = [];
+  w.deps.postDiscord = async (_url, content, options) => { sent.push({ content, files: options.files }); return { id: 'msg7', skipped: ['01-tooltip-dark.png'] }; };
+  await w.review.tick();
+  assert.strictEqual(w.opened[0].prompt, reviewPrompt('QRD-1473', [PR], THREAD, 'review-message'));
+  assert.match(w.opened[0].prompt, /tulis pesan Discord hasil review pakai skill review-message/);
+  assert.match(w.opened[0].prompt, /<<<DISCORD dan <<<AKHIR DISCORD>>>.*GAMBAR: <nama file>.*screenshots\/ di blackboard QRD-1473, maksimal 10/);
+  assert.match(w.opened[0].prompt, /jangan post sendiri/);
+  await w.review.ledger(verdict({ verdict: 'request-change', findings: [finding('blocker', 'No tooltip')] } as Partial<Orchestration>));
+  const record = w.records[0];
+  assert.deepStrictEqual([record.postStatus, record.postDetail], ['pending', WAITING_SKILL]);
+  assert.match(record.postText ?? '', /^mas Indra, ada blocker 1\. catatan:\nDOCK-REVIEW on it by <@111> · round 1 · @ abc1234 · Request change · 1 blocker$/, 'the template waits as the fallback');
+  w.deps.newestReply = async (sessionId) => (sessionId === 's1' ? SKILL_BLOCK : null);
+  w.deps.now = at(3);
+  await w.review.tick();
+  assert.strictEqual(sent.length, 0, 'a skill message waits the post delay again so the owner reads it first');
+  assert.deepStrictEqual([record.postStatus, record.postDetail, record.postAt?.getTime()], ['pending', null, NOW.getTime() + 5 * 60_000]);
+  assert.strictEqual(w.pushes.at(-1)?.title, 'QRD-1473: review post ready, sends in 2 min');
+  w.deps.now = at(6);
+  await w.review.tick();
+  assert.strictEqual(sent[0].content, 'mas indra, ada blocker 1. 1) blocker, be: tooltip hilang (gambar 01-tooltip-dark.png)\nDOCK-REVIEW on it by <@111> · round 1 · @ abc1234 · Request change · 1 blocker');
+  assert.deepStrictEqual(sent[0].files, { root: '/evidence/QRD-1473/screenshots', names: ['01-tooltip-dark.png'] });
+  assert.deepStrictEqual([record.postStatus, record.postMessageId, record.postDetail], ['sent', 'msg7', null]);
+  assert.deepStrictEqual([w.pushes.at(-1)?.title, w.pushes.at(-1)?.body], ['QRD-1473: images left out of the review post', '01-tooltip-dark.png']);
+});
+
+test('in skill mode with no block the post waits up to 15 min after the verdict, then the template goes out and the owner is told; an edit stops the wait', async () => {
+  const w = world({ rows: [row({ url: THREAD })] });
+  w.deps.settings = async () => SKILL_SETTINGS;
+  let posts: string[] = [];
+  w.deps.postDiscord = async (_url, content) => { posts.push(content); return { id: 'msg1', skipped: [] }; };
+  await w.review.tick();
+  await w.review.ledger(verdict());
+  const record = w.records[0];
+  w.deps.now = at(3);
+  await w.review.tick();
+  assert.deepStrictEqual([posts.length, record.postStatus, record.postAt?.getTime()], [0, 'pending', NOW.getTime() + 4 * 60_000]);
+  w.deps.now = at(16);
+  await w.review.tick();
+  assert.strictEqual(posts.length, 1);
+  assert.match(posts[0], /^mas Indra, gak ada blocker\. lgtm catatan:\nDOCK-REVIEW on it by <@111>/);
+  assert.strictEqual(w.pushes.find((push) => /no skill message/.test(push.title))?.title, 'QRD-1473: no skill message, DOCK template posted');
+
+  const edited = world({ rows: [row({ url: THREAD })] });
+  edited.deps.settings = async () => SKILL_SETTINGS;
+  posts = [];
+  edited.deps.postDiscord = async (_url, content) => { posts.push(content); return { id: 'msg1', skipped: [] }; };
+  await edited.review.tick();
+  await edited.review.ledger(verdict());
+  await edited.review.editPost('r1', 'mas indra, aman semua.');
+  assert.strictEqual(edited.records[0].postDetail, null);
+  edited.deps.now = at(3);
+  await edited.review.tick();
+  assert.match(posts[0], /^mas indra, aman semua\.\nDOCK-REVIEW on it by/);
+});
+
+test('a skill that is not installed gets no prompt lines, and the post uses the template with a notification', async () => {
+  const w = world({ rows: [row({ url: THREAD })] });
+  w.deps.settings = async () => ({ ...SKILL_SETTINGS, message: { ...SKILL_SETTINGS.message, skill: 'gone-skill' } });
+  await w.review.tick();
+  assert.strictEqual(w.opened[0].prompt, reviewPrompt('QRD-1473', [PR], THREAD));
+  await w.review.ledger(verdict());
+  assert.deepStrictEqual([w.records[0].postStatus, w.records[0].postDetail], ['pending', null]);
+  assert.match(w.records[0].postText ?? '', /^mas Indra, gak ada blocker\. lgtm catatan:\nDOCK-REVIEW on it by <@111>/);
+  assert.strictEqual(w.pushes[0].title, 'QRD-1473: skill gone-skill not installed');
+});
+
+test('the template fills its placeholders from the ledger: blockers, no blocker, only notes; an unknown placeholder is empty; the marker stays', () => {
+  const pulls = [{ url: PR, headSha: 'abc1234def' }];
+  const values = (findings: ReturnType<typeof finding>[], verdictText = 'request-change') => reviewTemplateValues({ key: 'QRD-1473', verdict: verdictText, findings } as unknown as Orchestration, pulls, 2, 'Indra');
+  const blockers = values([finding('blocker', 'No tooltip on [size](https://evil.example)'), finding('non-blocking', 'Rename helper'), finding('nit', 'spacing')]);
+  assert.deepStrictEqual(blockers, {
+    author: 'Indra', ticket: 'QRD-1473', round: '2', sha: 'abc1234', pr: `<${PR}>`, status: 'ada blocker 1', lgtm: '',
+    blockers: '1) No tooltip on [size]\u200B(<https://evil.example>)', notes: '1) Rename helper',
+  });
+  const clean = values([], 'approve');
+  assert.strictEqual(fillTemplate(DEFAULT_REVIEW_POST_TEMPLATE, clean), 'mas Indra, gak ada blocker. lgtm catatan:');
+  const notes = values([finding('non-blocking', 'Copy kurang jelas'), finding('non-blocking', 'Label inggris')], 'approve');
+  assert.strictEqual(fillTemplate('{{ticket}} r{{round}} @ {{sha}}: {{status}}, {{lgtm}}. {{notes}} {{nope}}', notes), 'QRD-1473 r2 @ abc1234: gak ada blocker, lgtm. 1) Copy kurang jelas 2) Label inggris');
+  assert.strictEqual(withMarker(fillTemplate('{{blockers}}\nDOCK-FIX round 1 · head x', blockers), 'M'), '1) No tooltip on [size]\u200B(<https://evil.example>)\nM');
+});
+
+test('the message format settings: formats, skill names and template length', () => {
+  assert.ok(isMessageSetting('reviewPostFormat', 'skill') && isMessageSetting('reviewPostFormat', 'template') && !isMessageSetting('reviewPostFormat', 'builtin'));
+  assert.ok(isMessageSetting('reviewReplyFormat', 'builtin') && !isMessageSetting('reviewReplyFormat', 'html'));
+  assert.ok(isMessageSetting('reviewPostSkill', 'plugin:skill_2') && !isMessageSetting('reviewPostSkill', '-bad') && !isMessageSetting('reviewReplySkill', 'a'.repeat(62)));
+  assert.ok(isMessageSetting('reviewReplyTemplate', 'x'.repeat(2000)) && !isMessageSetting('reviewReplyTemplate', 'x'.repeat(2001)) && !isMessageSetting('reviewPostTemplate', ' '));
+  assert.deepStrictEqual(messageFormat('reply', new Map([['reviewReplyFormat', 'template'], ['reviewReplySkill', 'Bad Name']])), { format: 'template', skill: 'review-message', template: DEFAULT_REVIEW_REPLY_TEMPLATE });
+});
+
+test('the marker carries the ledger verdict, so a skill body that claims no blocker cannot hide one; a skill post waits at least a minute', async () => {
+  const w = world({ rows: [row({ url: THREAD })] });
+  w.deps.settings = async () => ({ ...SKILL_SETTINGS, postDelayMinutes: 0 });
+  const sent: string[] = [];
+  w.deps.postDiscord = async (_url, content) => { sent.push(content); return { id: 'msg1', skipped: [] }; };
+  await w.review.tick();
+  await w.review.ledger(verdict({ verdict: 'request-change', findings: [finding('blocker', 'No tooltip'), finding('blocker', 'Old', '2026-10-27')] } as Partial<Orchestration>));
+  const record = w.records[0];
+  assert.strictEqual(record.postAt?.getTime(), NOW.getTime() + 60_000, 'a delay of 0 still waits a minute in skill mode');
+  w.deps.newestReply = async () => '<<<DISCORD\nmas indra, gak ada blocker, lgtm!\n<<<AKHIR DISCORD>>>';
+  w.deps.now = at(1);
+  await w.review.tick();
+  assert.strictEqual(w.pushes.at(-1)?.title, 'QRD-1473: review post ready, sends in 1 min');
+  w.deps.now = at(2);
+  await w.review.tick();
+  assert.strictEqual(sent[0], 'mas indra, gak ada blocker, lgtm!\nDOCK-REVIEW on it by <@111> · round 1 · @ abc1234 · Request change · 1 blocker');
+  assert.strictEqual(markerVerdict({ key: 'QRD-1473', verdict: 'approve', findings: [finding('non-blocking', 'x')] } as unknown as Orchestration), 'Approve with comments · 0 blocker');
+});
+
+test('an owner edit made after the due list was read is never overwritten by the skill message or the fallback', async () => {
+  for (const reply of [SKILL_BLOCK, null]) {
+    const w = world({ rows: [row({ url: THREAD })] });
+    w.deps.settings = async () => SKILL_SETTINGS;
+    const sent: string[] = [];
+    w.deps.postDiscord = async (_url, content) => { sent.push(content); return { id: 'msg1', skipped: [] }; };
+    w.deps.newestReply = async () => reply;
+    await w.review.tick();
+    await w.review.ledger(verdict());
+    const stale = { ...w.records[0] };
+    await w.review.editPost('r1', 'mas indra, owner text.');
+    w.deps.duePosts = async () => [stale];
+    w.deps.now = at(16);
+    await w.review.tick();
+    assert.match(sent[0] ?? '', /^mas indra, owner text\.\nDOCK-REVIEW on it by <@111>/, String(reply));
+  }
+});
+
+test('template values cannot hide a link, and images of a ticket that is not on this blackboard are not uploaded', async () => {
+  const w = world({ rows: [row({ url: THREAD, createdBy: '[Indra](https://evil.example/a)' })] });
+  const sent: Array<{ content: string; files?: unknown }> = [];
+  w.deps.postDiscord = async (_url, content, options) => { sent.push({ content, files: options.files }); return { id: 'msg1', skipped: [] }; };
+  await w.review.tick();
+  await w.review.ledger(verdict());
+  assert.match(w.records[0].postText ?? '', /^mas \[Indra\]\u200B\(<https:\/\/evil\.example\/a>\), gak ada blocker/);
+
+  w.records[0].postImages = JSON.stringify(['a.png']);
+  w.deps.imageRoot = async () => null;
+  w.deps.now = at(3);
+  await w.review.tick();
+  assert.strictEqual(sent[0].files, undefined);
+  assert.deepStrictEqual([w.pushes.at(-1)?.title, w.pushes.at(-1)?.body], ['QRD-1473: images left out of the review post', 'a.png']);
 });

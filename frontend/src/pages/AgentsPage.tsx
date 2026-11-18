@@ -1,7 +1,7 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { ArrowDown, ArrowUp, Building2, ChevronLeft, ChevronRight, ClipboardList, Clock, ExternalLink, EyeOff, FileDiff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Route, Square, Table2, X } from 'lucide-react';
-import { GET_AUTO_REVIEWS, GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
+import { GET_AUTO_REVIEWS, GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS, GET_TICKET_REVIEW_ROUNDS } from '../graphql/queries';
 import { APPROVE_REVIEW, CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { EmptyState } from '../components/EmptyState';
@@ -27,8 +27,9 @@ import { RunDecisions } from '../agents/RunDecisions';
 import { VerdictBadge } from '../agents/VerdictBadge';
 import { LgtmButton } from '../agents/lgtm';
 import { LGTM_CONFIRM, lgtmResult } from '../agents/lgtmCopy';
-import { AutoReviewBadge, AutoReviewList } from '../agents/AutoReviewList';
+import { AutoReviewBadge, AutoReviewList, LightBadge } from '../agents/AutoReviewList';
 import { latestByTicket, type AutoReviewRow } from '../agents/autoReviews';
+import { lightTickets, type SessionRounds } from '../lib/reviewRounds';
 import { RAIL_STAGES, railIndex } from '../agents/office/layout';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 import { AgentFlowGraph } from '../components/AgentFlowGraph';
@@ -133,6 +134,8 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
   const { data: autoData } = useQuery<{ autoReviews: AutoReviewRow[] }>(GET_AUTO_REVIEWS, { ...CACHED_QUERY_OPTIONS, pollInterval: POLL_MS, skip: !chat });
   const autoReviews = useMemo(() => autoData?.autoReviews ?? [], [autoData]);
   const autoByTicket = useMemo(() => latestByTicket(autoReviews), [autoReviews]);
+  const { data: roundData } = useQuery<{ chatSessions: SessionRounds[] }>(GET_TICKET_REVIEW_ROUNDS, { ...CACHED_QUERY_OPTIONS, pollInterval: POLL_MS, skip: !chat });
+  const lightKeys = useMemo(() => lightTickets(roundData?.chatSessions ?? []), [roundData]);
   const { openForTicket, opening: openingChat, error: chatError, notice: chatNotice } = useOpenForTicket();
   const [view, setView] = useState<View>(() => (isPhone() ? 'table' : 'office'));
   const [flowView, setFlowView] = useState<FlowView>('live');
@@ -489,7 +492,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
                       const lgtmShown = runActions(run, monitorsOnly(mode)).hide && (canLgtm(run) || (run.kind === 'review' && run.approved));
                       return (
                       <tr key={run.key} className={cn('cursor-pointer border-t border-border hover:bg-surface-1', selected?.key === run.key && 'bg-surface-1')} onClick={() => pickRun(run.key)}>
-                        <td className="px-3 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => pickRun(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><VerdictBadge run={run} className="ml-2" /><AutoReviewBadge row={autoByTicket.get(run.key)} className="ml-1.5" /><span className="mt-0.5 block max-w-[200px] truncate text-[0.8rem] text-foreground max-[760px]:line-clamp-2 max-[760px]:max-w-none max-[760px]:whitespace-normal">{run.title || 'Untitled'}</span><span className="mt-1.5 hidden flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground max-[760px]:flex"><StatusChip status={statusOf(run)} review={run.review} /><span>{kindLabel(run.kind)} · {stageName(run.stage, run.kind)} · AC {run.acPassed}/{run.acTotal}{run.acFailed > 0 && <span className="text-status-conflict"> {run.acFailed} failed</span>} · {formatAge(run.idleSeconds + drift)} ago</span></span></button></td>
+                        <td className="px-3 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => pickRun(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><VerdictBadge run={run} className="ml-2" /><AutoReviewBadge row={autoByTicket.get(run.key)} className="ml-1.5" />{lightKeys.has(run.key.toUpperCase()) && <LightBadge className="ml-1.5" />}<span className="mt-0.5 block max-w-[200px] truncate text-[0.8rem] text-foreground max-[760px]:line-clamp-2 max-[760px]:max-w-none max-[760px]:whitespace-normal">{run.title || 'Untitled'}</span><span className="mt-1.5 hidden flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground max-[760px]:flex"><StatusChip status={statusOf(run)} review={run.review} /><span>{kindLabel(run.kind)} · {stageName(run.stage, run.kind)} · AC {run.acPassed}/{run.acTotal}{run.acFailed > 0 && <span className="text-status-conflict"> {run.acFailed} failed</span>} · {formatAge(run.idleSeconds + drift)} ago</span></span></button></td>
                         <td className="px-3 py-3 text-xs text-secondary-foreground max-[760px]:hidden!">{kindLabel(run.kind)}</td>
                         <td className="px-3 py-3 max-[760px]:hidden!"><StageChip stage={run.stage} kind={run.kind} /></td>
                         <td className="px-3 py-3 max-[760px]:hidden!"><StatusChip status={statusOf(run)} review={run.review} /></td>

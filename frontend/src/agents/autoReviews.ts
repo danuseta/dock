@@ -9,6 +9,11 @@ export interface AutoReviewRow {
   detail: string | null;
   startedAt: string;
   finishedAt: string | null;
+  round?: number;
+  postStatus?: string | null;
+  postAt?: string | null;
+  postText?: string | null;
+  postDetail?: string | null;
 }
 
 export const AUTO_REVIEW_LABEL: Record<string, string> = {

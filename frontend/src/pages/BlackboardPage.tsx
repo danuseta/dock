@@ -3,7 +3,7 @@ import { useQuery } from '@apollo/client';
 import { ArrowLeft, BookA, ChevronDown, ChevronRight, ClipboardList, Download, Eye, File, FileCheck2, FileSignature, Folder, FolderOpen, GitPullRequest, Image as ImageIcon, Info, List, Lock, MapPin, HelpCircle, Route, Scale, ScrollText, Video } from 'lucide-react';
 import { Button, Checkbox, Input, Page } from '../components/ui';
 import { Markdown } from '../chat/Markdown';
-import { GET_CLAUDE_TICKET_USAGE, GET_DASHBOARD, GET_ORCHESTRATION, GET_ORCHESTRATIONS, GET_RUN_THINKING, GET_SPRINT_DRAFT, GET_TICKET_DETAIL_CORE, GET_TICKET_READINESS, GET_TICKET_SUMMARY } from '../graphql/queries';
+import { GET_AUTO_REVIEWS, GET_CLAUDE_TICKET_USAGE, GET_DASHBOARD, GET_ORCHESTRATION, GET_ORCHESTRATIONS, GET_RUN_THINKING, GET_SPRINT_DRAFT, GET_TICKET_DETAIL_CORE, GET_REVIEW_ROUNDS_FOR_TICKET, GET_TICKET_READINESS, GET_TICKET_SUMMARY } from '../graphql/queries';
 import { usePullPatches } from '../lib/usePullPatches';
 import { draftStoryboard } from '../lib/contractLinks';
 import type { SprintDraft } from '../agents/planning';
@@ -15,11 +15,15 @@ import type { SummaryFacts } from '../components/ticket/useReadiness';
 import { coverageText, useAcTrace, withIndonesian, type AcRef } from '../lib/acTrace';
 import { cn } from '../lib/cn';
 import { dateTime } from '../lib/logDays';
-import { CONTRACT_ENTRY, KAMUS_ENTRY, KAMUS_FILE, LOG_ENTRY, TRACE_ENTRY, boardTree, contractFiles, fetchFiles, fetchRootText, fetchText, fetchTickets, fileUrl, formatSize, groupFiles, isPullEntry, pullEntry, pullRepo, sprintGroups, withoutComments, type BlackboardFile, type BlackboardKind, type BlackboardTicket, type BoardFilter } from '../lib/blackboard';
+import { CONTRACT_ENTRY, KAMUS_ENTRY, KAMUS_FILE, LOG_ENTRY, REVIEW_ENTRY, TRACE_ENTRY, boardTree, contractFiles, fetchFiles, fetchRootText, fetchText, fetchTickets, fileUrl, formatSize, groupFiles, isPullEntry, pullEntry, pullRepo, sprintGroups, withoutComments, type BlackboardFile, type BlackboardKind, type BlackboardTicket, type BoardFilter } from '../lib/blackboard';
 import { AcMap } from './blackboard/AcMap';
 import { CodeChanges } from './blackboard/CodeChanges';
 import { ContractView } from './blackboard/ContractView';
 import { ExecLog } from './blackboard/ExecLog';
+import { ReviewFindings } from './blackboard/ReviewFindings';
+import { hasReviewHistory, reviewHistory, type ReviewRound } from '../lib/reviewRounds';
+import type { AutoReviewRow } from '../agents/autoReviews';
+import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 import { execRows } from '../lib/execLog';
 import type { ClaudeTicketUsage } from '../lib/claudeUsage';
 
@@ -187,6 +191,10 @@ const BlackboardPage: React.FC<{ onNavigate?: (path: string) => void; onTicketCl
   const run = picked && detail?.orchestration?.key?.toUpperCase() === picked.toUpperCase() ? detail.orchestration : null;
   const { data: summaryData } = useQuery<{ ticketSummary: SummaryFacts | null }>(GET_TICKET_SUMMARY, { variables: { key: picked ?? '' }, skip: !picked, fetchPolicy: 'cache-first' });
   const summary = summaryData?.ticketSummary?.key === picked ? summaryData?.ticketSummary ?? null : null;
+  const { data: autoData } = useQuery<{ autoReviews: AutoReviewRow[] }>(GET_AUTO_REVIEWS, { ...CACHED_QUERY_OPTIONS, skip: !picked });
+  const { data: roundData } = useQuery<{ reviewRoundsForTicket: ReviewRound[] }>(GET_REVIEW_ROUNDS_FOR_TICKET, { ...CACHED_QUERY_OPTIONS, variables: { key: picked ?? '' }, skip: !picked });
+  const pickedAutoReviews = (autoData?.autoReviews ?? []).filter((row) => row.ticketKey.toUpperCase() === picked?.toUpperCase());
+  const pickedRounds = roundData?.reviewRoundsForTicket ?? [];
   const rawTrace = useAcTrace(picked, Boolean(picked));
   const trace = useMemo(() => (rawTrace ? withIndonesian(rawTrace, summary) : null), [rawTrace, summary]);
 
@@ -239,7 +247,7 @@ const BlackboardPage: React.FC<{ onNavigate?: (path: string) => void; onTicketCl
   };
   const pickedTicket = (tickets ?? []).find((ticket) => ticket.key === picked) ?? null;
   const pickedRun = picked ? runs.get(picked) : undefined;
-  const title = selected === LOG_ENTRY ? 'Execution log' : selected === TRACE_ENTRY ? 'Ticket → code' : selected === CONTRACT_ENTRY ? 'Contract' : selected === KAMUS_ENTRY ? KAMUS_FILE : isPullEntry(selected) ? `Code changes${pullRepo(selected) ? ` · ${pullRepo(selected)}` : ''}` : selected ?? '';
+  const title = selected === LOG_ENTRY ? 'Execution log' : selected === TRACE_ENTRY ? 'Ticket → code' : selected === CONTRACT_ENTRY ? 'Contract' : selected === REVIEW_ENTRY ? 'Review findings' : selected === KAMUS_ENTRY ? KAMUS_FILE : isPullEntry(selected) ? `Code changes${pullRepo(selected) ? ` · ${pullRepo(selected)}` : ''}` : selected ?? '';
   const entry = (id: string, Icon: React.ElementType, label: React.ReactNode, meta: React.ReactNode, depth = 1) => (
     <button key={id} type="button" onClick={() => pick(id)} aria-current={selected === id ? 'true' : undefined} style={{ paddingLeft: `${10 + depth * 14}px` }} className={cn('flex w-full items-center gap-2 border-0 bg-transparent py-1.5 pr-3.5 text-left text-[0.76rem] text-secondary-foreground hover:bg-surface-1 max-[760px]:min-h-11', selected === id && 'bg-surface-1 text-foreground')}>
       <Icon size={14} aria-hidden="true" className="flex-none" /><span className="truncate">{label}</span><span className="ml-auto flex-none font-mono text-[0.6rem] text-muted-foreground">{meta}</span>
@@ -318,6 +326,7 @@ const BlackboardPage: React.FC<{ onNavigate?: (path: string) => void; onTicketCl
               <button type="button" onClick={() => setSelected(LOG_ENTRY)} aria-current={selected === LOG_ENTRY ? 'true' : undefined} style={{ paddingLeft: '24px' }} className={cn('flex w-full items-center gap-2 border-0 bg-transparent py-1.5 pr-3.5 text-left text-[0.76rem] text-secondary-foreground hover:bg-surface-1 max-[760px]:min-h-11', selected === LOG_ENTRY && 'bg-surface-1 text-foreground')}>
                 <ScrollText size={14} aria-hidden="true" className="flex-none" /><span>Execution log</span><span className="ml-auto font-mono text-[0.6rem] text-muted-foreground">{run?.failures?.length ? `${run.failures.length} failed` : 'execution'}</span>
               </button>
+              {hasReviewHistory(pickedAutoReviews, pickedRounds) && entry(REVIEW_ENTRY, Eye, 'Review findings', `${reviewHistory(pickedAutoReviews, pickedRounds).length} rounds`)}
               {tree.docs.map((item) => entry(item.path, iconFor(item), <>{item.path}{item.generated && <span className="ml-1.5 rounded-xs border border-border px-1 font-mono text-[0.54rem] text-muted-foreground">gen</span>}</>, formatSize(item.size)))}
               {tree.artifacts.length > 0 && <>{dir('Artifacts')}{tree.artifacts.map(folderEntry)}</>}
               {dir('Code changes')}
@@ -349,6 +358,8 @@ const BlackboardPage: React.FC<{ onNavigate?: (path: string) => void; onTicketCl
               ? <LogTabs ticket={picked} run={run} timeline={run?.timeline ?? null} tab={logTab} onTab={setLogTab} />
               : picked && selected === TRACE_ENTRY
               ? <AcMap trace={trace} loading={rawTrace === null} files={patches} onOpenRef={openRef} />
+              : picked && selected === REVIEW_ENTRY
+              ? <ReviewFindings ticketKey={picked} />
               : picked && selected === CONTRACT_ENTRY
               ? <ContractView ticket={picked} files={files ?? []} run={run} summary={summary} trace={trace} demoUrl={jiraTicket?.demoLink?.url ?? null} figmaUrl={jiraTicket?.figmaUrl ?? null} storyboard={storyboard} />
               : picked && isPullEntry(selected)

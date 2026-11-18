@@ -34,7 +34,7 @@ export interface ChatSession {
   pending?: ChatInteraction[] | null;
   settled?: SettledInteraction[] | null;
   options?: { model?: string | null; effort?: string | null; permissionMode?: string | null; fast?: boolean | null } | null;
-  reviewRound?: { status: string; summary: string; threadUrl: string; at: string } | null;
+  reviewRound?: { id?: string; status: string; summary: string; threadUrl: string; at: string; mode?: string | null; replyStatus?: string | null; replyAt?: string | null; replyText?: string | null; replyDetail?: string | null } | null;
   judge?: { status: string; grade: string | null } | null;
 }
 

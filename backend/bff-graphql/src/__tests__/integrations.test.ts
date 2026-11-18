@@ -978,6 +978,31 @@ test('internal integration behavior', async (t) => {
     assert.deepStrictEqual(writes, [['autoReviewPostDiscord', 'false'], ['reviewPostDelayMinutes', '0'], ['reviewReReviewWaitMinutes', '15'], ['reviewMaxRounds', '5']]);
   });
 
+  await t.test('defaults the Discord message formats and the light runner, takes a default for a saved value that no longer fits, and rejects invalid values', async () => {
+    const writes: Array<[string, string]> = [];
+    const saved = [{ key: 'reviewPostFormat', value: 'markdown' }, { key: 'lightMaxLines', value: '0' }, { key: 'lightWorkerModel', value: 'haiku' }];
+    const storage = { getSettings: async () => saved, hasMasterPin: async () => false, upsertSetting: async (key: string, value: string) => { writes.push([key, value]); } };
+    const api = new StorageAPI(storage as any);
+    const settings = await api.getPublicSettings();
+    assert.deepStrictEqual(
+      [settings.reviewFindingsAutoReply, settings.reviewPostFormat, settings.reviewPostSkill, settings.reviewPostTemplate, settings.reviewReplyFormat, settings.reviewReplySkill],
+      [true, 'skill', 'review-message', 'mas {{author}}, {{status}}. {{lgtm}} catatan: {{notes}}', 'builtin', 'review-message'],
+    );
+    assert.deepStrictEqual(
+      [settings.lightRunnerOn, settings.lightForFindings, settings.lightForParty, settings.lightForRetro, settings.lightMaxLines, settings.lightMaxFiles, settings.lightWorkerModel, settings.lightBrowserCheck, settings.lightBlastCheck, settings.lightBlastLoops, settings.lightPublish],
+      [true, true, true, false, 150, 3, 'haiku', true, true, 2, 'push'],
+    );
+    for (const bad of [
+      { reviewFindingsAutoReply: 'yes' }, { reviewPostFormat: 'builtin' }, { reviewReplyFormat: 'html' }, { reviewPostSkill: '../evil' }, { reviewReplySkill: 'Review Message' },
+      { reviewPostTemplate: 'x'.repeat(2001) }, { lightRunnerOn: 'on' }, { lightMaxLines: 0 }, { lightMaxFiles: 1.5 }, { lightBlastLoops: 6 }, { lightWorkerModel: 'opus' }, { lightPublish: 'merge' },
+    ]) {
+      assert.strictEqual(await api.updateSettings(bad), false, JSON.stringify(bad));
+    }
+    assert.deepStrictEqual(writes, []);
+    assert.strictEqual(await api.updateSettings({ reviewPostFormat: 'template', reviewReplySkill: 'my-team:reply_v2', reviewReplyTemplate: 'mas {{author}}', lightForRetro: 'true', lightMaxLines: 200, lightPublish: 'draft' }), true);
+    assert.deepStrictEqual(writes, [['reviewPostFormat', 'template'], ['reviewReplySkill', 'my-team:reply_v2'], ['reviewReplyTemplate', 'mas {{author}}'], ['lightForRetro', 'true'], ['lightMaxLines', '200'], ['lightPublish', 'draft']]);
+  });
+
   await t.test('saves only a Discord webhook link as the webhook', async () => {
     const writes: Array<[string, string]> = [];
     const storage = { getSettings: async () => [], hasMasterPin: async () => false, upsertSetting: async (key: string, value: string) => { writes.push([key, value]); } };

@@ -773,14 +773,14 @@ export class StorageService {
 
   updateAutoReview(id: string, data: {
     sessionId?: string | null; status?: string; detail?: string | null; finishedAt?: Date | null;
-    postStatus?: string | null; postAt?: Date | null; postText?: string | null; postMessageId?: string | null; postDetail?: string | null;
+    postStatus?: string | null; postAt?: Date | null; postText?: string | null; postMessageId?: string | null; postDetail?: string | null; postImages?: string | null;
   }) {
     return this.db.autoReview.update({ where: { id }, data });
   }
 
-  /** Changes an auto review post only while it is still pending; false when another change got there first. */
-  async updatePendingAutoReview(id: string, data: { postStatus?: string | null; postText?: string | null; postDetail?: string | null }) {
-    return (await this.db.autoReview.updateMany({ where: { id, postStatus: 'pending' }, data })).count > 0;
+  /** Changes an auto review post only while it is still pending, and with `detail` only while its detail is that; false when another change got there first. */
+  async updatePendingAutoReview(id: string, data: { postStatus?: string | null; postAt?: Date | null; postText?: string | null; postDetail?: string | null; postImages?: string | null }, detail?: string) {
+    return (await this.db.autoReview.updateMany({ where: { id, postStatus: 'pending', ...(detail ? { postDetail: detail } : {}) }, data })).count > 0;
   }
 
   createReviewRound(data: { threadId: string; ticketKey: string; threadUrl: string; prUrls: string; messageIds: string; findings?: string; lastMessageId: string; lastMessageAt: Date }) {
@@ -789,9 +789,29 @@ export class StorageService {
 
   updateReviewRound(id: string, data: {
     sessionId?: string | null; opened?: boolean; status?: string; attempts?: number;
-    valid?: number | null; invalid?: number | null; pushed?: boolean | null; detail?: string | null; reportedAt?: Date | null;
+    valid?: number | null; invalid?: number | null; pushed?: boolean | null; detail?: string | null; reportedAt?: Date | null; mode?: string | null;
+    replyStatus?: string | null; replyAt?: Date | null; replyText?: string | null; replyMessageId?: string | null; replyDetail?: string | null; replyImages?: string | null;
   }) {
     return this.db.reviewRound.update({ where: { id }, data });
+  }
+
+  /** Changes a round's reply only while it is still pending; false when another change got there first. */
+  async updatePendingReviewReply(id: string, data: { replyStatus?: string | null; replyAt?: Date | null; replyText?: string | null; replyMessageId?: string | null; replyDetail?: string | null; replyImages?: string | null }) {
+    return (await this.db.reviewRound.updateMany({ where: { id, replyStatus: 'pending' }, data })).count > 0;
+  }
+
+  /** The rounds of a thread with a reply scheduled or sent. */
+  getThreadReplies(threadId: string) {
+    return this.db.reviewRound.findMany({ where: { threadId, replyStatus: { in: ['pending', 'sending', 'sent'] } } });
+  }
+
+  getDueReviewReplies(now: Date) {
+    return this.db.reviewRound.findMany({ where: { replyStatus: 'pending', replyAt: { lte: now } }, orderBy: { replyAt: 'asc' }, take: 20 });
+  }
+
+  /** 1 for the first round of a thread, one more for each round created after it. */
+  reviewRoundNumber(threadId: string, createdAt: Date) {
+    return this.db.reviewRound.count({ where: { threadId, createdAt: { lte: createdAt } } });
   }
 
   /** Sessions owing a result: `sending` and `sent` rounds, and rounds expired in the last 24 h whose late marker may still arrive. */
@@ -827,6 +847,11 @@ export class StorageService {
     const rows = await this.db.reviewRound.findMany({ where: { sessionId: { in: sessionIds } }, orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }] });
     for (const row of rows) if (row.sessionId && !latest.has(row.sessionId)) latest.set(row.sessionId, row);
     return latest;
+  }
+
+  /** Every round of a ticket, newest first. */
+  roundsForTicket(ticketKey: string) {
+    return this.db.reviewRound.findMany({ where: { ticketKey }, orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }] });
   }
 
   /** The round a session still owes a result for, newest first. */

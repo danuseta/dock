@@ -1,6 +1,9 @@
 import type { ReviewRound } from '@prisma/client';
+import { discordBlockLines, fillTemplate, plainText, saysStop, withMarker, type AutoReviewOwner, type MessageFormat, type PullState } from './auto-review';
+import { parseDiscordBlock, threadIdOf, type DiscordPostFiles, type DiscordPostResult } from './discord-post';
 import { ON_IT } from './discord-reader';
 import type { ThreadMessage, ThreadRow } from './discord-threads';
+import { lightSettingsLine, type LightSettings } from './light-runner';
 
 /** Findings posted within this long of each other go in one round; a round is sent once its newest finding is this old. */
 export const ROUND_QUIET_MS = 5 * 60 * 1000;
@@ -24,13 +27,31 @@ const QUOTE_OPEN = '<<<TEMUAN';
 const QUOTE_CLOSE = '<<<AKHIR TEMUAN>>>';
 /** Expired rounds are looked for on every fifth tick. */
 const EXPIRE_EVERY = 5;
+const USER_ID = /^\d{5,25}$/;
+const REPLY_NOT_PENDING = 'Only a pending reply can be changed';
+const LIGHT_LINE = /(light[\s\u200B]*settings)[\s\u200B]*:/gi;
 
-/** The finding blocks a round keeps at create time, so a retry sends the same text. */
-interface StoredFindings { since: string; blocks: string[] }
+/** The finding blocks a round keeps at create time, so a retry sends the same text; `authors` are the reviewers the reply mentions. */
+interface StoredFindings { since: string; blocks: string[]; authors?: Array<{ id: string; name: string }> }
 
 export interface PushMessage { title: string; body: string; url: string; tag: string }
 export interface RoundResult { roundId: string; valid: number; invalid: number; pushed: boolean }
 export interface TurnEnded { sessionId: string; ticketKey: string | null; failed: boolean }
+/** `delayMinutes` and `maxRounds` are the review arena's; `light` is null when the light runner does not take review findings. */
+export interface FindingsSettings { autoReply: boolean; delayMinutes: number; maxRounds: number; reply: MessageFormat; light: LightSettings | null }
+export interface ReplyUpdate { replyStatus?: string | null; replyAt?: Date | null; replyText?: string | null; replyMessageId?: string | null; replyDetail?: string | null; replyImages?: string | null }
+
+/** The line DOCK puts under every reply after a fix; the reviewer's DOCK reviews the head it names again. */
+export const fixMarker = (round: number, sha: string) => `DOCK-FIX round ${round} · head ${sha.slice(0, 7)}`;
+
+/** The placeholders of the reply template: the reviewers, what the round fixed and the session's own reply as the notes. */
+export function replyTemplateValues(input: { key: string; prUrls: string[]; round: number; sha: string; authors: string[]; result: RoundResult; notes: string }): Record<string, string> {
+  const status = [input.result.valid ? `${input.result.valid} temuan difix` : '', input.result.invalid ? `${input.result.invalid} tidak diubah` : ''].filter(Boolean).join(', ');
+  return {
+    author: input.authors.join(', '), status, lgtm: '', blockers: '', notes: input.notes, ticket: input.key,
+    pr: input.prUrls.map((url) => `<${url}>`).join(' '), sha: input.sha.slice(0, 7), round: String(input.round),
+  };
+}
 
 export interface ReviewFindingsDeps {
   /** The `reviewFindingsToTask` setting. */
@@ -43,7 +64,7 @@ export interface ReviewFindingsDeps {
   latestRounds(threadIds: string[]): Promise<Map<string, ReviewRound>>;
   /** Throws a P2002 error when the round already exists. */
   create(data: { threadId: string; ticketKey: string; threadUrl: string; prUrls: string; messageIds: string; lastMessageId: string; lastMessageAt: Date; findings?: string }): Promise<ReviewRound>;
-  update(id: string, data: { sessionId?: string | null; opened?: boolean; status?: string; attempts?: number; valid?: number | null; invalid?: number | null; pushed?: boolean | null; detail?: string | null; reportedAt?: Date | null }): Promise<unknown>;
+  update(id: string, data: ReplyUpdate & { sessionId?: string | null; opened?: boolean; status?: string; attempts?: number; valid?: number | null; invalid?: number | null; pushed?: boolean | null; detail?: string | null; reportedAt?: Date | null; mode?: string | null }): Promise<unknown>;
   roundsToSend(maxAttempts: number): Promise<ReviewRound[]>;
   expire(before: Date, maxAttempts: number, detail: string): Promise<ReviewRound[]>;
   roundById(id: string): Promise<ReviewRound | null>;
@@ -53,6 +74,23 @@ export interface ReviewFindingsDeps {
   newestReply(sessionId: string): Promise<string | null>;
   taskMessage(key: string, prompt: string): Promise<{ sessionId: string; opened: boolean }>;
   push(message: PushMessage): Promise<unknown>;
+  settings(): Promise<FindingsSettings>;
+  /** The pull request as GitHub has it now; null when GitHub cannot be asked. */
+  pull(prUrl: string): Promise<PullState | null>;
+  owner(): Promise<AutoReviewOwner>;
+  /** The names of the skills installed where the sessions read them. */
+  skills(): Promise<string[]>;
+  /** The folder a ticket's screenshots are uploaded from; null when the key is not one of this DOCK's blackboard tickets. */
+  imageRoot(key: string): Promise<string | null>;
+  /** The rounds of a thread with a reply scheduled or sent. */
+  threadReplies(threadId: string): Promise<ReviewRound[]>;
+  /** 1 for the first round of a thread, one more for each round created after it. */
+  roundNumber(round: ReviewRound): Promise<number>;
+  /** Pending replies whose time has come, oldest first. */
+  dueReplies(now: Date): Promise<ReviewRound[]>;
+  /** Changes a reply only while it is still pending; false when it already went out, was taken for sending or was cancelled. */
+  updatePendingReply(id: string, data: ReplyUpdate): Promise<boolean>;
+  postDiscord(webhookUrl: string, content: string, options: { threadId: string; username: string; users: string[]; files?: DiscordPostFiles }): Promise<DiscordPostResult>;
   now(): Date;
 }
 
@@ -114,18 +152,31 @@ export function dueRound(row: ThreadRow, cursor: number, now: Date, webhookId: s
   return end < found.length || now.getTime() - lastAt >= ROUND_QUIET_MS ? found.slice(0, end) : [];
 }
 
-/** One finding as a quoted block; a delimiter inside the text is defused so the quote cannot be closed early. */
+/**
+ * One finding as a quoted block; a delimiter inside the text is defused so the quote cannot be closed early, and so is a
+ * `Light settings:` line, so only DOCK's own line above the findings sets the light runner.
+ */
 export const findingBlock = (message: Pick<ThreadMessage, 'author' | 'at' | 'text' | 'attachments'>) => {
   const files = message.attachments.length ? `\n(lampiran: ${message.attachments.map((file) => file.name).join(', ')})` : '';
   const text = message.text.length > MAX_FINDING_TEXT ? `${message.text.slice(0, MAX_FINDING_TEXT)}…` : message.text;
-  return `${QUOTE_OPEN} ${message.author} ${message.at}>>>\n${`${text}${files}`.split('<<<').join('‹‹‹')}\n${QUOTE_CLOSE}`;
+  return `${QUOTE_OPEN} ${message.author} ${message.at}>>>\n${`${text}${files}`.split('<<<').join('‹‹‹').replace(LIGHT_LINE, '$1\u200B:')}\n${QUOTE_CLOSE}`;
 };
 
-/** The message a round sends to the Task session; at most 7500 characters. */
-export function findingsPrompt(input: { key: string; threadUrl: string; threadId: string; roundId: string; prUrls: string[]; since: string; blocks: string[] }): string {
+/**
+ * The message a round sends to the Task session; at most 7500 characters. With `light`, sous runs the round through
+ * sous-light-runner with the owner's light settings; the runner keeps its own gate. With `autoReply` the reply goes in the
+ * block DOCK posts, written with `skill` when one is given; without it the session drafts a reply for the owner to copy.
+ */
+export function findingsPrompt(input: { key: string; threadUrl: string; threadId: string; roundId: string; prUrls: string[]; since: string; blocks: string[]; light?: LightSettings | null; autoReply?: boolean; skill?: string | null }): string {
   const { key, roundId } = input;
+  const start = input.light
+    ? [
+      `Pakai skill sous. Jalankan sous-light-runner untuk round ini di tiket ${key} (source findings), dari blackboard dan ledger (node $K/status.cjs show ${key}), jangan mulai dari awal. Gerbang light dicek runner; kalau jatuh, lanjut di full runner.`,
+      lightSettingsLine(input.light),
+    ]
+    : [`Pakai skill sous. Lanjutkan tiket ${key} dari blackboard dan ledger (node $K/status.cjs show ${key}), jangan mulai dari awal.`];
   const head = [
-    `Pakai skill sous. Lanjutkan tiket ${key} dari blackboard dan ledger (node $K/status.cjs show ${key}), jangan mulai dari awal.`,
+    ...start,
     `Temuan review baru dari thread Discord pr-review: ${input.threadUrl} (round ${roundId}).`,
     `PR: ${input.prUrls.join(' ')}`,
     `Temuan teammate setelah on it mereka, sejak ${input.since}. Kalau ada yang terpotong, baca thread lengkap lewat discord-files.cjs ${input.threadId}:`,
@@ -137,7 +188,15 @@ export function findingsPrompt(input: { key: string; threadUrl: string; threadId
     '2. Tidak valid: tulis alasannya dengan path:line, kutipan AC, atau kutipan kontrak.',
     '3. Ragu: perlakukan sebagai tidak valid, tulis apa yang perlu diputuskan owner, jangan push tebakan.',
     'Jangan posting apa pun ke Discord, Jira, atau komentar GitHub. Jangan merge, jangan force-push, jangan ganti base branch.',
-    'Di akhir, tulis draft balasan Discord untuk owner salin (bahasa santai tim, satu baris per temuan: "fixed di <sha pendek>" atau "tidak diubah karena ..."), lalu baris terakhir persis:',
+    ...(input.autoReply
+      ? [
+        input.skill
+          ? `Di akhir, tulis balasan Discord untuk reviewer pakai skill ${input.skill}, satu poin per temuan: "fixed di <sha pendek>" atau "tidak diubah karena ...".`
+          : 'Di akhir, tulis balasan Discord untuk reviewer (bahasa santai tim, satu baris per temuan: "fixed di <sha pendek>" atau "tidak diubah karena ...").',
+        ...discordBlockLines(key),
+        'Setelah blok itu, baris terakhir persis:',
+      ]
+      : ['Di akhir, tulis draft balasan Discord untuk owner salin (bahasa santai tim, satu baris per temuan: "fixed di <sha pendek>" atau "tidak diubah karena ..."), lalu baris terakhir persis:']),
     `DOCK-REVIEW-ROUND ${roundId} valid=<jumlah valid> invalid=<jumlah tidak valid> pushed=<yes|no>`,
   ].join('\n');
   let room = MAX_PROMPT - head.length - tail.length - 2;
@@ -195,6 +254,7 @@ export class ReviewFindings {
       await this.seed();
       const now = this.deps.now();
       const all = await this.deps.rows();
+      await this.sendDueReplies(all);
       if (this.ticks++ % EXPIRE_EVERY === 0) await this.deps.expire(new Date(now.getTime() - ROUND_EXPIRY_MS), MAX_ROUND_ATTEMPTS, EXPIRED_DETAIL);
       const byId = new Map(all.map((row) => [row.id, row]));
       let sent = 0;
@@ -223,7 +283,8 @@ export class ReviewFindings {
   private async start(row: ThreadRow, messages: ThreadMessage[]): Promise<number> {
     if (!messages.length || !row.tickets[0] || !row.posterPrs?.length) return 0;
     const lastMessage = messages[messages.length - 1];
-    const stored: StoredFindings = { since: messages[0].at, blocks: messages.map(findingBlock) };
+    const authors = [...new Map(messages.map((message) => [message.authorId, { id: message.authorId, name: message.author }])).values()];
+    const stored: StoredFindings = { since: messages[0].at, blocks: messages.map(findingBlock), authors };
     let round: ReviewRound;
     try {
       round = await this.deps.create({
@@ -247,9 +308,10 @@ export class ReviewFindings {
       const messages = (row?.messages ?? []).filter((message) => ids.includes(message.id));
       stored = { since: messages[0]?.at ?? round.lastMessageAt.toISOString(), blocks: messages.map(findingBlock) };
     }
+    const settings = await this.deps.settings();
     const prompt = findingsPrompt({
       key: round.ticketKey, threadUrl: round.threadUrl, threadId: round.threadId, roundId: round.id, prUrls: JSON.parse(round.prUrls) as string[],
-      since: stored.since, blocks: stored.blocks,
+      since: stored.since, blocks: stored.blocks, light: settings.light, autoReply: settings.autoReply, skill: await this.replySkill(settings),
     });
     let sessionId: string;
     let opened: boolean;
@@ -265,7 +327,7 @@ export class ReviewFindings {
     }
     this.owing.set(sessionId, (this.owing.get(sessionId) ?? 0) + 1);
     try {
-      await this.deps.update(round.id, { sessionId, opened, status: 'sent', detail: null });
+      await this.deps.update(round.id, { sessionId, opened, status: 'sent', detail: null, mode: settings.light ? 'light' : 'full' });
     } catch (error) {
       console.warn(`[ReviewFindings] round ${round.id} reached ${sessionId} but was not marked sent:`, errorText(error));
     }
@@ -277,7 +339,8 @@ export class ReviewFindings {
     if (!turn.ticketKey) return false;
     await this.seed();
     if (!this.owing.has(turn.sessionId)) return false;
-    const result = parseRoundResult(await this.deps.newestReply(turn.sessionId));
+    const reply = await this.deps.newestReply(turn.sessionId);
+    const result = parseRoundResult(reply);
     if (!result || this.reporting.has(result.roundId)) return false;
     this.reporting.add(result.roundId);
     try {
@@ -288,13 +351,137 @@ export class ReviewFindings {
       if (left > 0) this.owing.set(turn.sessionId, left);
       else this.owing.delete(turn.sessionId);
       await this.deps.update(round.id, { sessionId: turn.sessionId, status: 'reported', valid: result.valid, invalid: result.invalid, pushed: result.pushed, reportedAt: this.deps.now() });
+      const delay = turn.failed ? null : await this.scheduleReply(round, result, reply).catch((error: unknown) => {
+        console.warn(`[ReviewFindings] reply of round ${round.id} not scheduled:`, errorText(error));
+        return null;
+      });
       await this.deps.push({
-        title: `${round.ticketKey}: ${roundSummary(result)}`, body: 'Copy the drafted Discord reply from the session.',
+        title: `${round.ticketKey}: ${roundSummary(result)}`,
+        body: delay === null ? 'Copy the drafted Discord reply from the session.' : `DOCK posts the reply to the thread in ${delay} min; cancel or edit it before then.`,
         url: `/sessions?session=${turn.sessionId}`, tag: `review-round-${round.id}`,
       });
       return true;
     } finally {
       this.reporting.delete(result.roundId);
+    }
+  }
+
+  /** The skill the round session writes the reply with; null for the built-in and template replies, or when the skill is not installed. */
+  private async replySkill(settings: FindingsSettings): Promise<string | null> {
+    if (!settings.autoReply || settings.reply.format !== 'skill') return null;
+    const installed = await this.deps.skills().catch(() => [] as string[]);
+    return installed.includes(settings.reply.skill) ? settings.reply.skill : null;
+  }
+
+  /**
+   * Keeps the DOCK-FIX reply of a reported round for later, so the owner can cancel or edit it: after a push, or when every
+   * finding was not valid. The session's block is the body; the template fills it in template mode, and stands in for a missing
+   * skill or an empty skill block. An empty built-in block posts nothing, and neither does a second reply for the same head or
+   * one past the arena's round limit in the thread. The minutes until it goes out, or null.
+   */
+  private async scheduleReply(round: ReviewRound, result: RoundResult, reply: string | null): Promise<number | null> {
+    const settings = await this.deps.settings();
+    if (!settings.autoReply || !(result.pushed || (result.valid === 0 && result.invalid > 0))) return null;
+    const block = parseDiscordBlock(reply);
+    const { format, skill, template } = settings.reply;
+    const fallback = format === 'skill' && (!block || !(await this.replySkill(settings)));
+    if (!block && format === 'builtin') return null;
+    const prUrls = JSON.parse(round.prUrls) as string[];
+    const state = prUrls[0] ? await this.deps.pull(prUrls[0]) : null;
+    if (!state) {
+      await this.deps.update(round.id, { replyStatus: 'failed', replyDetail: 'GitHub did not give the pull request head' });
+      return null;
+    }
+    const replies = (await this.deps.threadReplies(round.threadId)).filter((other) => other.id !== round.id);
+    const head = ` · head ${state.headSha.slice(0, 7)}`;
+    const skip = replies.some((other) => other.replyText?.split('\n').pop()?.endsWith(head)) ? 'Already replied for this head'
+      : replies.length >= settings.maxRounds ? `${settings.maxRounds} replies in this thread` : null;
+    if (skip) {
+      await this.deps.update(round.id, { replyStatus: 'skipped', replyDetail: skip });
+      return null;
+    }
+    const number = await this.deps.roundNumber(round);
+    const stored = round.findings ? JSON.parse(round.findings) as StoredFindings : null;
+    const authors = stored?.authors ?? [];
+    const body = format === 'template' || fallback
+      ? fillTemplate(template, replyTemplateValues({ key: round.ticketKey, prUrls, round: number, sha: state.headSha, authors: authors.map((author) => author.name), result, notes: block?.body ?? '' }))
+      : block!.body;
+    const mentions = authors.filter((author) => USER_ID.test(author.id)).map((author) => `<@${author.id}>`).join(' ');
+    const delay = settings.delayMinutes;
+    await this.deps.update(round.id, {
+      replyStatus: 'pending', replyAt: new Date(this.deps.now().getTime() + delay * 60_000), replyText: withMarker(`${mentions ? `${mentions} ` : ''}${plainText(body)}`, fixMarker(number, state.headSha)),
+      replyImages: block?.images.length ? JSON.stringify(block.images) : null, replyDetail: null,
+    });
+    if (fallback) {
+      await this.deps.push({ title: `${round.ticketKey}: ${block ? `skill ${skill} not installed` : 'no skill reply'}, DOCK template used`, body: 'The reply after the fix uses the DOCK template.', url: '/blackboard', tag: `review-reply-${round.id}` });
+    }
+    return delay;
+  }
+
+  /** Stops a reply that has not gone out yet. */
+  async cancelReply(id: string): Promise<boolean> {
+    if (!(await this.deps.updatePendingReply(id, { replyStatus: 'cancelled', replyDetail: 'Cancelled by the owner' }))) throw new Error(REPLY_NOT_PENDING);
+    return true;
+  }
+
+  /** Replaces the text of a reply that has not gone out yet; the DOCK-FIX marker line stays as DOCK wrote it. */
+  async editReply(id: string, text: string): Promise<boolean> {
+    const round = await this.deps.roundById(id);
+    if (!round || round.replyStatus !== 'pending') throw new Error(REPLY_NOT_PENDING);
+    const marker = round.replyText?.split('\n').pop() ?? '';
+    if (!marker.startsWith('DOCK-FIX round')) throw new Error('The reply has no DOCK marker');
+    if (!withMarker(text, '').trim()) throw new Error('The reply text is empty');
+    if (!(await this.deps.updatePendingReply(id, { replyText: withMarker(text, marker) }))) throw new Error(REPLY_NOT_PENDING);
+    return true;
+  }
+
+  /** Sends the replies that are due, unless auto reply was turned off, the pull request closed or a person wrote stop dock. */
+  private async sendDueReplies(rows: ThreadRow[]): Promise<void> {
+    const due = await this.deps.dueReplies(this.deps.now());
+    if (!due.length) return;
+    const [owner, settings] = await Promise.all([this.deps.owner(), this.deps.settings()]);
+    for (const round of due) {
+      try {
+        await this.sendReply(round, rows, settings, owner);
+      } catch (error) {
+        console.warn('[ReviewFindings] reply failed:', errorText(error));
+      }
+    }
+  }
+
+  /** One due reply: taken for sending first, so a Cancel or Edit after that is refused and nothing goes out twice. */
+  private async sendReply(round: ReviewRound, rows: ThreadRow[], settings: FindingsSettings, owner: AutoReviewOwner): Promise<void> {
+    const row = rows.find((item) => item.id === round.threadId);
+    const since = (round.reportedAt ?? round.createdAt).getTime();
+    const stopped = row?.messages.some((message) => Date.parse(message.at) > since && saysStop(message));
+    const prUrl = (JSON.parse(round.prUrls) as string[])[0];
+    const state = prUrl ? await this.deps.pull(prUrl) : null;
+    const cancel = !settings.autoReply ? 'Auto reply is turned off' : stopped ? 'stop dock' : state && !state.open ? 'pull request closed' : null;
+    if (cancel) {
+      await this.deps.updatePendingReply(round.id, { replyStatus: 'cancelled', replyDetail: cancel });
+      return;
+    }
+    const threadId = threadIdOf(round.threadUrl);
+    if (!owner.webhookUrl || !threadId) {
+      await this.deps.updatePendingReply(round.id, { replyStatus: 'failed', replyDetail: !owner.webhookUrl ? 'No Discord webhook in Settings' : 'Nothing to post to this thread' });
+      return;
+    }
+    if (!(await this.deps.updatePendingReply(round.id, { replyStatus: 'sending' }))) return;
+    try {
+      const current = await this.deps.roundById(round.id);
+      if (!current?.replyText) throw new Error('Nothing to post to this thread');
+      const names = current.replyImages ? JSON.parse(current.replyImages) as string[] : [];
+      const users = ((current.findings ? JSON.parse(current.findings) as StoredFindings : null)?.authors ?? []).map((author) => author.id);
+      const root = names.length ? await this.deps.imageRoot(round.ticketKey) : null;
+      const posted = await this.deps.postDiscord(owner.webhookUrl, current.replyText, { threadId, username: `${owner.name} (DOCK)`, users, files: root ? { root, names } : undefined });
+      const { id } = posted;
+      const skipped = root ? posted.skipped : names;
+      await this.deps.update(round.id, { replyStatus: 'sent', replyMessageId: id, replyDetail: null });
+      if (skipped.length) await this.deps.push({ title: `${round.ticketKey}: images left out of the reply`, body: skipped.join(', '), url: '/blackboard', tag: `review-reply-${round.id}` });
+    } catch (error) {
+      const detail = errorText(error) || 'Discord refused the post';
+      await this.deps.update(round.id, { replyStatus: 'failed', replyDetail: detail });
+      await this.deps.push({ title: `${round.ticketKey}: review reply failed`, body: detail, url: '/blackboard', tag: `review-reply-${round.id}` });
     }
   }
 
