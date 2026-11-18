@@ -41,6 +41,7 @@ import { demoStorage, type DemoStorageInput } from '../integrations/demo-storage
 import { DevServerError, devServers } from '../integrations/dev-servers';
 import { WorkspaceFilesError, workspaceFiles } from '../integrations/workspace-files';
 import { elevenLabsKeys } from '../integrations/elevenlabs-keys';
+import { livePlugins } from '../integrations/plugins';
 import { broadcastDeps, sendBroadcast } from '../integrations/broadcast';
 import { ReviewApprovalError, approvalRecords, lgtmReview, ownerPassLabel, resetOwnerPassLabel } from '../integrations/review-approval';
 import { MAX_ROUND_ATTEMPTS, roundSummary } from '../integrations/review-findings';
@@ -580,7 +581,8 @@ export const resolvers = {
       return withoutSettledTickets(items, statusOf);
     },
     settings: async () => {
-      return await storageAPI.getPublicSettings();
+      const { storage, voice, storageLocalDir } = await livePlugins();
+      return { ...await storageAPI.getPublicSettings(), storagePlugin: storage, voicePlugin: voice, storageLocalDir };
     },
     jiraProjects: async (_: any, { url, email, token }: { url?: string, email?: string, token?: string }) => {
       return await jiraAPI.listProjects(url, email, token);

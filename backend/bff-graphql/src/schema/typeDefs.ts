@@ -208,6 +208,12 @@ export const typeDefs = gql`
     chatParallelTurns: String
     """Where an answer to an I-n or D-n goes: new (a new session) or last (the ticket's last Task session)."""
     ownerReplySession: String!
+    """Where demo videos go: s3, local or none. An install that never chose gets s3 when the demo storage is set, else none."""
+    storagePlugin: String!
+    """Narration of demo videos: elevenlabs or none. An install that never chose gets elevenlabs when it has keys, else none."""
+    voicePlugin: String!
+    """The folder the local storage plugin copies demo videos to."""
+    storageLocalDir: String!
     """JSON: the volume and, per event, whether it notifies and with which bundled sound."""
     notificationPrefs: String!
     """Confluence page id the sprint contract page of Planning goes under; null skips the page."""
@@ -1481,6 +1487,7 @@ export const typeDefs = gql`
 
   type DemoVideoList {
     configured: Boolean!
+    storage: String!
     videos: [DemoVideo!]!
   }
 
@@ -2012,6 +2019,9 @@ export const typeDefs = gql`
     chatCaveman: String
     chatParallelTurns: String
     ownerReplySession: String
+    storagePlugin: String
+    voicePlugin: String
+    storageLocalDir: String
     notificationPrefs: String
     planningConfluenceParent: String
     planningPlanner: String

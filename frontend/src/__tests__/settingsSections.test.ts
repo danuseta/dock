@@ -65,3 +65,11 @@ test('a rail dot comes from saved data, never from what is still being typed', (
   assert.strictEqual(sectionStatus('calendar', { googleCalendarConnected: true, googleCalendarError: 'revoked' }, extra), 'bad');
   assert.strictEqual(sectionStatus('plugins', {}, { ...extra, demoStorage: true }), 'ok');
 });
+
+test('the Plugins draft starts from the resolved choices and a local folder needs an absolute path', () => {
+  assert.deepStrictEqual(savedValues({ storagePlugin: 'local', voicePlugin: 'elevenlabs', storageLocalDir: '/srv/demo' }).plugins, { storagePlugin: 'local', voicePlugin: 'elevenlabs', storageLocalDir: '/srv/demo' });
+  assert.deepStrictEqual(sectionInput('plugins', { storagePlugin: 'none', voicePlugin: 'none', storageLocalDir: '' }), { storagePlugin: 'none', voicePlugin: 'none', storageLocalDir: '' });
+  assert.deepStrictEqual(sectionErrors('plugins', { storagePlugin: 'local', voicePlugin: 'none', storageLocalDir: 'demo' }), ['The local folder is an absolute path.']);
+  assert.deepStrictEqual(sectionErrors('plugins', { storagePlugin: 'local', voicePlugin: 'none', storageLocalDir: 'C:/demo' }), []);
+  assert.deepStrictEqual(sectionErrors('plugins', { storagePlugin: 's3', voicePlugin: 'none', storageLocalDir: 'demo' }), []);
+});

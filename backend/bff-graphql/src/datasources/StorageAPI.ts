@@ -1,3 +1,4 @@
+import { isAbsolute } from 'node:path';
 import { StorageService } from '../storage/service';
 import { discordTeam, workspaceDiscordSetting } from '../integrations/discord-team';
 import { ARENA_SETTINGS, arenaSetting, isArenaSetting } from '../integrations/auto-review';
@@ -20,6 +21,8 @@ export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto', 'bypa
 export const CHAT_MODES = ['auto', 'plan', 'acceptEdits', 'bypassPermissions'] as const;
 export const RTK_SETTINGS = ['on', 'off'] as const;
 export const CAVEMAN_LEVELS = ['off', 'lite', 'full', 'ultra'] as const;
+export const STORAGE_PLUGINS = ['s3', 'local', 'none'] as const;
+export const VOICE_PLUGINS = ['elevenlabs', 'none'] as const;
 export const MAX_PARALLEL_TURNS = 6;
 /** A saved turn count, or null when it is unset or not a whole number from 1 to MAX_PARALLEL_TURNS. */
 /** Where the owner's answer to an I-n or D-n goes: a new session (default) or the ticket's last Task session. */
@@ -236,6 +239,9 @@ export class StorageAPI {
       if (input.chatCaveman != null && !(CAVEMAN_LEVELS as readonly string[]).includes(String(input.chatCaveman))) throw new Error('Invalid caveman level');
       if (input.chatParallelTurns != null && input.chatParallelTurns !== '' && parallelTurns(input.chatParallelTurns) === null) throw new Error('Invalid turn count');
       if (input.ownerReplySession != null && !(OWNER_REPLY_SESSIONS as readonly string[]).includes(String(input.ownerReplySession))) throw new Error('Invalid owner reply session');
+      if (input.storagePlugin != null && !(STORAGE_PLUGINS as readonly string[]).includes(String(input.storagePlugin))) throw new Error('Invalid storage plugin');
+      if (input.voicePlugin != null && !(VOICE_PLUGINS as readonly string[]).includes(String(input.voicePlugin))) throw new Error('Invalid voice plugin');
+      if (input.storageLocalDir != null && input.storageLocalDir !== '' && (String(input.storageLocalDir).length > 500 || !isAbsolute(String(input.storageLocalDir).trim()))) throw new Error('Invalid local folder');
       if (input.discordMessageTemplate != null) normalizeDiscordMessageTemplate(String(input.discordMessageTemplate));
       for (const key of ['autoReviewOnIt', 'autoLgtm', 'reviewFindingsToTask', 'autoReviewPostDiscord'] as const) {
         if (input[key] != null && input[key] !== 'true' && input[key] !== 'false') throw new Error('Invalid auto review setting');
