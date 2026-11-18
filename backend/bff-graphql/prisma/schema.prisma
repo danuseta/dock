@@ -575,6 +575,20 @@ model SprintDraftTicket {
   tcPosted    String? /// the test cases of the last QONFLO-TC v1 comment posted on the ticket
   carried     Boolean @default(false) /// also in a closed sprint: carried over from an earlier sprint
   position    Int     @default(0)
+  updatedAt   DateTime @default(now()) @updatedAt /// when the planner or the agent last changed the ticket
 
   @@id([draftSprint, key])
+}
+
+/// An HTML visual the planning agent made for a sprint draft; the file sits next to the blackboard, this row says when it was made.
+model SprintDraftVisual {
+  id         String   @id
+  sprint     String
+  title      String
+  sessionId  String?
+  draftStamp DateTime /// when the draft last changed before the visual was made; a later change makes it stale
+  saved      Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([sprint])
 }

@@ -32,7 +32,8 @@ import { PlanningQuestionCards } from '../agents/PlanningQuestions';
 import { usePlanningQuestions, type QuestionTarget } from '../agents/usePlanningQuestions';
 import { planningSprintOf } from '../agents/planning';
 import { useInteractionLog } from './interactions/useInteractionLog';
-import { chatStore } from './store';
+import { chatStore, prefillStore, usePrefill } from './store';
+import { PlanningSuggestions } from './PlanningSuggestions';
 import { stepStage, type Checkpoint } from './checkpoints';
 import { useCheckpoints } from './useCheckpoints';
 import { CheckpointCard } from './CheckpointCard';
@@ -89,6 +90,12 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
   const [sendError, setSendError] = useState('');
   const [stopRequested, setStopRequested] = useState(false);
   const [seed, setSeed] = useState<{ text: string } | null>(null);
+  const prefill = usePrefill(sessionId);
+  useEffect(() => {
+    if (!prefill) return;
+    setSeed({ text: prefill.text });
+    prefillStore.clear(sessionId);
+  }, [prefill, sessionId]);
   const messagesRef = useRef(messages);
   const statusRef = useRef<string | undefined>(undefined);
   const sessionRef = useRef(sessionId);
@@ -423,6 +430,8 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
             </Button>
           </div>
         ) : (
+          <>
+          {loaded && <PlanningSuggestions title={session?.title} messageCount={messages.length} onPick={(text) => setSeed({ text })} />}
           <Composer
             sessionId={sessionId}
             machine={machine}
@@ -437,6 +446,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
             compact={compact ? { modelLabel: ownStatus?.model ?? '' } : null}
             flow={answering ? null : flow}
           />
+          </>
         )}
       </div>
     </div>

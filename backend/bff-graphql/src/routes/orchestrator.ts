@@ -17,7 +17,7 @@ import type { SprintPlanner } from '../integrations/sprint-plan';
 import { sprintPlanner } from '../integrations/sprint-plan-live';
 import { deployGateFor } from '../integrations/deploy-gate-live';
 import { PLANNING_ROUTES, planningIngest, type PlanningIngestDeps } from '../integrations/planning-ingest';
-import { sprintDraftService, storyboardReader, ticketSummaryService } from '../integrations/sprint-draft-live';
+import { planningVisuals, sprintDraftService, storyboardReader, ticketSummaryService } from '../integrations/sprint-draft-live';
 import { doctorReports, type DoctorReports } from '../integrations/doctor';
 import { DiscordReaderError, type DiscordReader } from '../integrations/discord-reader';
 import { discordReader } from '../integrations/discord-reader-live';
@@ -84,7 +84,7 @@ export function createOrchestratorIngestRouter(
   // The sprint plan draft the plan session posts.
   planner: Pick<SprintPlanner, 'ingest'> = sprintPlanner,
   // The planning chat's agent reading and changing the sprint draft Planning shows.
-  planning: PlanningIngestDeps = { drafts: sprintDraftService, storyboards: storyboardReader, summaries: ticketSummaryService },
+  planning: PlanningIngestDeps = { drafts: sprintDraftService, storyboards: storyboardReader, summaries: ticketSummaryService, visuals: planningVisuals },
   // The Sous flow "Kirim checkpoint" switch; off, a checkpoint is answered as not recorded so the lead carries on.
   checkpointOn: () => Promise<boolean> = checkpointsOn,
   // The Judge result of one session; DOCK computes the grade from the findings.
@@ -121,6 +121,8 @@ export function createOrchestratorIngestRouter(
   };
 
   const small = express.json({ limit: '256kb' });
+  // A visual is a whole HTML page, so its route takes a page of up to 2 MB; every other route keeps the small limit.
+  const visualBody = express.json({ limit: '3mb' });
   // A build goes up for review, and out to Discord, only once sous stops working on it: a ledger push mid-turn waits
   // for the turn's end, which the hook events report.
   const settled = (run: Orchestration) => {
@@ -143,7 +145,7 @@ export function createOrchestratorIngestRouter(
     if (!/^[A-Z][A-Z0-9]+-\d+$/.test(key)) throw new OrchestratorInputError('key must be a ticket key such as QRD-1292');
     return deployGateFor(key);
   }));
-  for (const route of PLANNING_ROUTES) router.post(`/${route}`, small, handle((body) => planningIngest(planning, route, body)));
+  for (const route of PLANNING_ROUTES) router.post(`/${route}`, route === 'sprint-draft/visual' ? visualBody : small, handle((body) => planningIngest(planning, route, body)));
   router.post('/ledger/list', small, handle((_body, _signal, machine) => service.ledgerList(machine)));
   router.post('/ledger/get', small, handle((body, _signal, machine) => service.ledgerGet(body, machine)));
   router.post('/event', small, handle(async (body, _signal, machine) => {

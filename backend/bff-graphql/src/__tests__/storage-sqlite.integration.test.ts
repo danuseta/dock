@@ -1093,3 +1093,26 @@ test('SQLite storage keeps the Judge queue, findings, examples and days, the ses
   await storage.replaceRetroDraft('S-J', [], ['ledger']);
   assert.deepStrictEqual((await storage.getRetroItems('S-J')).map((item) => item.source), ['judge'], 'a ledger draft keeps the Judge lines');
 });
+
+test('SQLite storage keeps Planning visuals per sprint and dates the draft by its row and its tickets', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }] = await Promise.all([import('../storage/service'), import('../storage/client')]);
+  const storage = new StorageService(prisma);
+  t.after(() => prisma.$disconnect());
+  assert.strictEqual(await storage.sprintDraftChangedAt('S-V'), null, 'no draft, no date');
+  await storage.replaceSprintDraft({ sprint: 'S-V', sprintId: 9, sprintDays: 10, startDate: null, createdBy: null, refStatuses: '{}' }, [{ key: 'QRD-1', summary: 'One', dev: 'Danu', sp: 3, wave: 1, status: 'To Do', ac: [], jiraAc: [], jiraDev: null, dependsOn: [] }]);
+  const first = (await storage.sprintDraftChangedAt('S-V'))!;
+  assert.ok(first instanceof Date);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await storage.updateSprintDraftTicket('S-V', 'QRD-1', { dev: 'Alvin' });
+  assert.ok((await storage.sprintDraftChangedAt('S-V'))!.getTime() > first.getTime(), 'a ticket change moves the draft date');
+  await storage.putSprintDraftVisual({ id: 'v-a', sprint: 'S-V', title: 'A', sessionId: null, draftStamp: first, createdAt: new Date() });
+  await storage.putSprintDraftVisual({ id: 'v-b', sprint: 'S-V', title: 'B', sessionId: 's1', draftStamp: first, createdAt: new Date() });
+  await storage.setSprintDraftVisualSaved('v-a', true);
+  await storage.putSprintDraftVisual({ id: 'v-a', sprint: 'S-V', title: 'A2', sessionId: null, draftStamp: first, createdAt: new Date() });
+  assert.deepStrictEqual((await storage.listSprintDraftVisuals('S-V')).map((row) => [row.id, row.title, row.saved]), [['v-b', 'B', false], ['v-a', 'A2', true]], 'a replace keeps the saved flag and counts as the newest');
+  await storage.deleteSprintDraftVisual('v-b');
+  await storage.deleteSprintDraftVisual('v-b');
+  assert.deepStrictEqual((await storage.listSprintDraftVisuals('S-V')).map((row) => row.id), ['v-a']);
+});

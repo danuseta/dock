@@ -3,11 +3,12 @@
 // are fixed; the kit is written against them.
 import { OrchestratorInputError } from './orchestrator';
 import { SprintInputError } from './sprint-dashboard';
+import type { PlanningVisualService } from './planning-visual';
 import { openTickets, type DraftView, type SprintDraftService } from './sprint-draft';
 import { StoryboardMissing, type StoryboardReader } from './storyboard';
 import type { TicketSummaryService } from './ticket-summary';
 
-export const PLANNING_ROUTES = ['sprint-draft/get', 'sprint-draft/update', 'sprint-draft/tc', 'sprint-draft/question', 'sprint-draft/summary', 'storyboard'] as const;
+export const PLANNING_ROUTES = ['sprint-draft/get', 'sprint-draft/update', 'sprint-draft/tc', 'sprint-draft/question', 'sprint-draft/summary', 'sprint-draft/visual', 'storyboard'] as const;
 export type PlanningRoute = typeof PLANNING_ROUTES[number];
 
 export interface PlanningIngestDeps {
@@ -15,6 +16,8 @@ export interface PlanningIngestDeps {
   storyboards: Pick<StoryboardReader, 'sync'>;
   /** The ticket summaries; get lists the acHash each stored summary was written for. */
   summaries?: Pick<TicketSummaryService, 'write' | 'hashes'>;
+  /** The visuals the agent puts in Planning; without them the route answers that visuals are not available. */
+  visuals?: Pick<PlanningVisualService, 'put' | 'remove'>;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -58,6 +61,12 @@ export async function planningIngest(deps: PlanningIngestDeps, route: PlanningRo
     if (route === 'sprint-draft/get') {
       const view = await draftOf(deps.drafts, sprint);
       return deps.summaries ? { ...view, summaries: await deps.summaries.hashes(view.tickets.map((ticket) => ticket.key)) } : view;
+    }
+    if (route === 'sprint-draft/visual') {
+      if (!deps.visuals) throw new OrchestratorInputError('Visuals are not available on this DOCK');
+      if (body.action === 'rm') return await deps.visuals.remove(sprint, body.id);
+      if (body.action !== 'put') throw new OrchestratorInputError("action must be 'put' or 'rm'");
+      return await deps.visuals.put(sprint, { id: body.id, title: body.title, html: body.html, sessionId: body.sessionId });
     }
     if (route === 'sprint-draft/summary') {
       if (!deps.summaries) throw new OrchestratorInputError('Ticket summaries are not available on this DOCK');

@@ -12,7 +12,7 @@ export function useOpenPlanningChat(sprint: string) {
   const client = useApolloClient();
   const [create, creating] = useMutation<{ openPlanningChat: string }>(OPEN_PLANNING_CHAT);
 
-  const open = async () => {
+  const open = async (prefill?: string) => {
     setError(null);
     try {
       const sessions = await client.query<{ chatSessions: ChatSession[] }>({ query: GET_CHAT_SESSIONS, variables: { source: 'dock', limit: 300 }, fetchPolicy: 'network-only' });
@@ -20,11 +20,15 @@ export function useOpenPlanningChat(sprint: string) {
       const existing = sessions.data.chatSessions.find((item) => item.title === title);
       if (existing) {
         chatStore.openSession(existing.id);
+        if (prefill) chatStore.prefill(existing.id, prefill);
         return;
       }
       const created = await create({ variables: { sprint } });
       const id = created.data?.openPlanningChat;
-      if (id) chatStore.openSession(id);
+      if (id) {
+        chatStore.openSession(id);
+        if (prefill) chatStore.prefill(id, prefill);
+      }
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'The chat could not be opened');
     }

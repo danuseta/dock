@@ -646,3 +646,13 @@ test('without a split page, or with one that gave nothing, Planning shows the dr
   const view = await broken.service.load(26, 'Alvin');
   assert.deepEqual([view.split?.error, view.split?.diffs, view.tickets.length], ['Split page "Gone" was not found', [], 3]);
 });
+
+test('publish hands the sprint to the after-publish hook once the draft is published', async () => {
+  const store = new MemoryStore();
+  const jira = new FakeJira([issue('QRD-1489', { assignee: 'Aken', sp: 5, acRaw: adf(bullets('The client edits the skill')) })]);
+  const seen: string[] = [];
+  const service = new SprintDraftService(store, async () => jira, predictions({}), () => new Date('2026-10-26T10:00:00Z'), undefined, null, null, null, null, async (sprint) => { seen.push(`${sprint}:${store.draft.status}`); });
+  await service.load(26, 'Alvin');
+  await service.publish('QRD Sprint 26');
+  assert.deepEqual(seen, ['QRD Sprint 26:published']);
+});

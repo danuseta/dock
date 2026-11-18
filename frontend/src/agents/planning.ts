@@ -136,6 +136,17 @@ export function questionsLine(questions: DraftQuestion[]): string | null {
 export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; referenceAdded?: string[]; blockedBy?: string[]; refused: string | null }
 export interface PublishResult { key: string; kind: string; status: string; detail: string | null }
 
+/** An HTML visual the planning agent made; it is a tab in Planning, stale once the draft changed after it was made. */
+export interface DraftVisual { id: string; title: string; createdAt: string; saved: boolean; stale: boolean; url: string; sessionId: string | null }
+export const redoVisualPrompt = (title: string) => `Redo the visual '${title}' with the current draft.`;
+/** When a visual was made: the time today, the day and time before that. */
+export function visualTime(createdAt: string, now: Date = new Date()): string {
+  const at = new Date(createdAt);
+  if (Number.isNaN(at.getTime())) return '';
+  const time = at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return at.toDateString() === now.toDateString() ? time : `${at.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}, ${time}`;
+}
+
 export type PlanningPanel = 'mine' | 'team' | 'scope' | 'ac' | 'qa' | 'tc' | 'storyboard';
 export const UNASSIGNED = 'Unassigned';
 const DEV_COLOR_COUNT = 8;
