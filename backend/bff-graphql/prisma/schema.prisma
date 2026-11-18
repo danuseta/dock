@@ -373,10 +373,19 @@ model AutoReview {
   detail     String?
   startedAt  DateTime  @default(now())
   finishedAt DateTime?
+  /// The round of the arena the owner's "on it" opened: 1 for the first review, one more for each new head commit after it.
+  round         Int       @default(1)
+  /// The verdict post to the thread: pending, sent, cancelled, failed, skipped; null when nothing was scheduled
+  postStatus    String?
+  postAt        DateTime?
+  postText      String?
+  postMessageId String?
+  postDetail    String?
 
   @@unique([prUrl, headSha])
   @@index([ticketKey, startedAt])
   @@index([status])
+  @@index([postStatus, postAt])
 }
 
 /// Review findings DOCK sent back to the Task session: one per pr-review thread and last finding message, so a round reaches the session once.

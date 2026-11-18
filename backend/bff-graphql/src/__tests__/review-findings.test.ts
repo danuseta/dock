@@ -2,6 +2,7 @@ import assert from 'node:assert';
 import test from 'node:test';
 import type { ReviewRound } from '@prisma/client';
 import type { ThreadMessage, ThreadRow } from '../integrations/discord-threads';
+import { ON_IT } from '../integrations/discord-reader';
 import {
   EXPIRED_DETAIL, ROUND_QUIET_MS, ReviewFindings, findingBlock, findingsEnabled, findingsPrompt, isBare, isOwnThread, parseRoundResult, roundSummary, webhookIdOf,
   type PushMessage, type ReviewFindingsDeps,
@@ -40,7 +41,7 @@ const row = (messages: ThreadMessage[], extra: Partial<ThreadRow> = {}): ThreadR
   lastActivity: messages.length ? messages[messages.length - 1].at : at(T0), lastMessageId: null, messageCount: messages.length, tags: [], slots: 2,
   tickets: ['QRD-1292'], prs: ['https://github.com/qonekid/fe/pull/88', 'https://github.com/qonekid/be/pull/41'],
   posterPrs: ['https://github.com/qonekid/fe/pull/88', 'https://github.com/qonekid/be/pull/41'], claim: null, ownClaim: null,
-  onIt: [...new Set(messages.filter((item) => /\bon\s?it\b/i.test(item.text) && item.authorId !== WEBHOOK).map((item) => item.author))],
+  onIt: [...new Set(messages.filter((item) => ON_IT.test(item.text) && item.authorId !== WEBHOOK).map((item) => item.author))],
   claimerRepliedAt: null, mentionedAt: null, repliedAt: messages.filter((item) => item.mine).at(-1)?.at ?? null, messages, ...extra,
 });
 

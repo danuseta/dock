@@ -759,12 +759,28 @@ export class StorageService {
     return this.db.autoReview.findFirst({ where: { ticketKey, status: 'running' }, orderBy: { startedAt: 'desc' } });
   }
 
-  createAutoReview(data: { prUrl: string; headSha: string; ticketKey: string; threadUrl: string; startedAt: Date }) {
+  getAutoReview(id: string) {
+    return this.db.autoReview.findUnique({ where: { id } });
+  }
+
+  getDueAutoReviewPosts(now: Date) {
+    return this.db.autoReview.findMany({ where: { postStatus: 'pending', postAt: { lte: now } }, orderBy: { postAt: 'asc' }, take: 20 });
+  }
+
+  createAutoReview(data: { prUrl: string; headSha: string; ticketKey: string; threadUrl: string; startedAt: Date; round?: number }) {
     return this.db.autoReview.create({ data });
   }
 
-  updateAutoReview(id: string, data: { sessionId?: string | null; status?: string; detail?: string | null; finishedAt?: Date | null }) {
+  updateAutoReview(id: string, data: {
+    sessionId?: string | null; status?: string; detail?: string | null; finishedAt?: Date | null;
+    postStatus?: string | null; postAt?: Date | null; postText?: string | null; postMessageId?: string | null; postDetail?: string | null;
+  }) {
     return this.db.autoReview.update({ where: { id }, data });
+  }
+
+  /** Changes an auto review post only while it is still pending; false when another change got there first. */
+  async updatePendingAutoReview(id: string, data: { postStatus?: string | null; postText?: string | null; postDetail?: string | null }) {
+    return (await this.db.autoReview.updateMany({ where: { id, postStatus: 'pending' }, data })).count > 0;
   }
 
   createReviewRound(data: { threadId: string; ticketKey: string; threadUrl: string; prUrls: string; messageIds: string; findings?: string; lastMessageId: string; lastMessageAt: Date }) {
