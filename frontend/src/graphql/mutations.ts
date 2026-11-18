@@ -39,6 +39,30 @@ export const UPDATE_SETTINGS = gql`
   }
 `;
 
+export const CANCEL_AUTO_REVIEW_POST = gql`
+  mutation CancelAutoReviewPost($id: ID!) {
+    cancelAutoReviewPost(id: $id)
+  }
+`;
+
+export const EDIT_AUTO_REVIEW_POST = gql`
+  mutation EditAutoReviewPost($id: ID!, $text: String!) {
+    editAutoReviewPost(id: $id, text: $text)
+  }
+`;
+
+export const CANCEL_REVIEW_REPLY_POST = gql`
+  mutation CancelReviewReplyPost($id: ID!) {
+    cancelReviewReplyPost(id: $id)
+  }
+`;
+
+export const EDIT_REVIEW_REPLY_POST = gql`
+  mutation EditReviewReplyPost($id: ID!, $text: String!) {
+    editReviewReplyPost(id: $id, text: $text)
+  }
+`;
+
 export const REFRESH_DATA = gql`
   mutation RefreshData {
     refreshData

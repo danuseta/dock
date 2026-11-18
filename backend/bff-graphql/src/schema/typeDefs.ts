@@ -194,6 +194,32 @@ export const typeDefs = gql`
     "Review rounds an on it allows before the arena closes."
     reviewMaxRounds: Int!
     reviewFindingsToTask: Boolean!
+    "Post the DOCK-FIX reply to the thread after a round is fixed or every finding was not valid."
+    reviewFindingsAutoReply: Boolean!
+    "skill or template: how the review post is written."
+    reviewPostFormat: String!
+    reviewPostSkill: String!
+    reviewPostTemplate: String!
+    "builtin, skill or template: how the reply after a fix is written."
+    reviewReplyFormat: String!
+    reviewReplySkill: String!
+    reviewReplyTemplate: String!
+    "Small fixes go through sous-light-runner instead of the full pipeline."
+    lightRunnerOn: Boolean!
+    lightForFindings: Boolean!
+    lightForParty: Boolean!
+    lightForRetro: Boolean!
+    "Production lines and files a light job may change; tests are not counted."
+    lightMaxLines: Int!
+    lightMaxFiles: Int!
+    "sonnet or haiku."
+    lightWorkerModel: String!
+    lightBrowserCheck: Boolean!
+    lightBlastCheck: Boolean!
+    "How many times the blast check sends the work back."
+    lightBlastLoops: Int!
+    "push (to the pull request branch) or draft (a draft pull request)."
+    lightPublish: String!
     hasGoogleClientSecret: Boolean!
     googleCalendarConnected: Boolean!
     googleCalendarError: String
@@ -1768,10 +1794,19 @@ export const typeDefs = gql`
   }
 
   type ReviewRoundInfo {
+    id: ID!
     status: String!
     summary: String!
     threadUrl: String!
     at: String!
+    "light or full: the runner the round prompt asked sous for; null for a round sent before this was kept."
+    mode: String
+    "The DOCK-FIX reply: pending, sending, sent, cancelled, failed; null when nothing was scheduled."
+    replyStatus: String
+    replyAt: String
+    replyText: String
+    replyMessageId: String
+    replyDetail: String
   }
 
   type ChatSessionState {
@@ -2001,6 +2036,24 @@ export const typeDefs = gql`
     reviewReReviewWaitMinutes: Int
     reviewMaxRounds: Int
     reviewFindingsToTask: String
+    reviewFindingsAutoReply: String
+    reviewPostFormat: String
+    reviewPostSkill: String
+    reviewPostTemplate: String
+    reviewReplyFormat: String
+    reviewReplySkill: String
+    reviewReplyTemplate: String
+    lightRunnerOn: String
+    lightForFindings: String
+    lightForParty: String
+    lightForRetro: String
+    lightMaxLines: Int
+    lightMaxFiles: Int
+    lightWorkerModel: String
+    lightBrowserCheck: String
+    lightBlastCheck: String
+    lightBlastLoops: Int
+    lightPublish: String
     googleClientId: String
     googleClientSecret: String
     googleCalendarId: String
@@ -2307,6 +2360,10 @@ export const typeDefs = gql`
     """Lines from..to (1-based, at most 500) of a file at a commit, for Expand."""
     pullFileLines(ticketKey: String!, url: String!, path: String!, ref: String!, from: Int!, to: Int!): [String!]!
     autoReviews: [AutoReview!]!
+    "The names of the Claude skills installed where the sessions read them, for the Discord message format picker."
+    installedSkills: [String!]!
+    "Every review round of a ticket, newest first."
+    reviewRoundsForTicket(key: String!): [ReviewRoundInfo!]!
     claudeAccounts: ClaudeAccounts!
     "The local QA state, and the newest run and QA session of a ticket when one is given."
     qaLocal(ticketKey: String): QaLocal!
@@ -2564,6 +2621,10 @@ export const typeDefs = gql`
     cancelAutoReviewPost(id: ID!): Boolean!
     "Replaces the text of an auto review post that has not gone out yet; the DOCK-REVIEW marker line stays."
     editAutoReviewPost(id: ID!, text: String!): Boolean!
+    "Stops the DOCK-FIX reply of a review round that has not gone out yet."
+    cancelReviewReplyPost(id: ID!): Boolean!
+    "Replaces the text of a DOCK-FIX reply that has not gone out yet; the DOCK-FIX marker line stays."
+    editReviewReplyPost(id: ID!, text: String!): Boolean!
     "Removes merged worktrees through the kit's wt.sh; each one with local changes, a live session, a dev server or no merge is REFUSED and left alone."
     cleanWorktrees(paths: [String!]!): [WorktreeCleanResult!]!
     runOrchestratorCronNow: String!

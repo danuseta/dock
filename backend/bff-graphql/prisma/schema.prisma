@@ -381,6 +381,8 @@ model AutoReview {
   postText      String?
   postMessageId String?
   postDetail    String?
+  /// JSON array of the image names the post uploads from the ticket's screenshots folder
+  postImages    String?
 
   @@unique([prUrl, headSha])
   @@index([ticketKey, startedAt])
@@ -413,8 +415,19 @@ model ReviewRound {
   detail        String?
   createdAt     DateTime  @default(now())
   reportedAt    DateTime?
+  /// light or full: the runner the round prompt asked sous for
+  mode          String?
+  /// The DOCK-FIX reply to the thread: pending, sending, sent, cancelled, failed, skipped; null when nothing was scheduled
+  replyStatus    String?
+  replyAt        DateTime?
+  replyText      String?
+  replyMessageId String?
+  replyDetail    String?
+  /// JSON array of the image names the reply uploads from the ticket's screenshots folder
+  replyImages    String?
 
   @@unique([threadId, lastMessageId])
+  @@index([replyStatus, replyAt])
   @@index([threadId, lastMessageAt])
   @@index([sessionId])
   @@index([status])

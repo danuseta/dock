@@ -39,6 +39,7 @@ export const LOG_ENTRY = '@log';
 /** Generated entries of the Dokumen folder: Tiket → kode and the contract, read from the board, not files on it. */
 export const TRACE_ENTRY = '@trace';
 export const CONTRACT_ENTRY = '@contract';
+export const REVIEW_ENTRY = '@review';
 /** The pronunciation list at the blackboard root. */
 export const KAMUS_ENTRY = '@kamus';
 export const KAMUS_FILE = 'kamus-pengucapan.md';

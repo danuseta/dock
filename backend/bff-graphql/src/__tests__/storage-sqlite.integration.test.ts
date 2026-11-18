@@ -941,6 +941,8 @@ test('SQLite storage keeps one review round per thread and last message', {
   assert.deepStrictEqual((await storage.openReviewRounds(3)).map((row) => row.id), [first.id]);
   const second = await storage.createReviewRound(round('m2', now - 1000));
   assert.strictEqual((await storage.latestRoundsByThread(['thread-1'])).get('thread-1')?.id, second.id);
+  assert.deepStrictEqual((await storage.roundsForTicket('ZED-500')).map((row) => row.id), [second.id, first.id], 'every round of the ticket, newest first');
+  assert.deepStrictEqual(await storage.roundsForTicket('ZED-501'), []);
   assert.deepStrictEqual(await storage.openReviewRounds(3), [], 'a newer round replaces the reported one');
 
   await storage.updateReviewRound(second.id, { status: 'sent', sessionId: 'session-2' });

@@ -17,6 +17,10 @@ export const AutoReviewBadge: React.FC<{ row: AutoReviewRow | undefined; classNa
   return <span className={cn('inline-flex flex-none items-center gap-1 rounded-xs border border-status-merged px-1.5 py-px font-mono text-[0.62rem] font-bold text-status-merged', className)} title={`DOCK sent the LGTM after its review of ${prLabel(row.prUrl)}`}><Bot size={11} aria-hidden="true" />Auto LGTM</span>;
 };
 
+export const LightBadge: React.FC<{ className?: string }> = ({ className }) => (
+  <span className={cn('inline-flex flex-none items-center rounded-xs border border-accent/40 px-1.5 py-px font-mono text-[0.62rem] font-bold text-accent', className)} title="The latest review round of this ticket went to the light runner">LIGHT</span>
+);
+
 /** The reviews DOCK started on its own after the owner said on it, newest first, with what came of each. */
 export const AutoReviewList: React.FC<{ rows: AutoReviewRow[]; now: number; onTicket: (key: string) => void; onNavigate: (path: string) => void; className?: string }> = ({ rows, now, onTicket, onNavigate, className }) => {
   const [open, setOpen] = useState(() => !isPhone());

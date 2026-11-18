@@ -3,6 +3,7 @@ import { normalizeCaveman, normalizeRtk } from '../chat/chatDefaults';
 import { hasPage, type DockMode } from '../lib/dockMode';
 import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, getDiscordTemplateError } from '../lib/discordTemplate';
 import { parseNotificationPrefs, prefsToValues, valuesToPrefs } from '../lib/notificationPrefs';
+import { DEFAULT_REVIEW_POST_TEMPLATE, DEFAULT_REVIEW_REPLY_TEMPLATE, DEFAULT_REVIEW_SKILL, REVIEW_NUMBERS, reviewMessageErrors, reviewNumberErrors } from '../lib/reviewMessages';
 import { isValidServiceHealthRefreshSeconds, normalizeServiceHealthRefreshSeconds } from '../lib/serviceHealthRefresh';
 
 export type SectionId = 'general' | 'chat' | 'notifications' | 'security' | 'jira' | 'github' | 'discord' | 'calendar' | 'machines' | 'claude' | 'review' | 'planflow' | 'sousflow' | 'judge' | 'messages' | 'plugins';
@@ -45,6 +46,28 @@ export interface SavedSettings {
   autoReviewOnIt?: boolean | null;
   autoLgtm?: boolean | null;
   reviewFindingsToTask?: boolean | null;
+  autoReviewPostDiscord?: boolean | null;
+  reviewPostDelayMinutes?: number | null;
+  reviewReReviewWaitMinutes?: number | null;
+  reviewMaxRounds?: number | null;
+  reviewFindingsAutoReply?: boolean | null;
+  reviewPostFormat?: string | null;
+  reviewPostSkill?: string | null;
+  reviewPostTemplate?: string | null;
+  reviewReplyFormat?: string | null;
+  reviewReplySkill?: string | null;
+  reviewReplyTemplate?: string | null;
+  lightRunnerOn?: boolean | null;
+  lightForFindings?: boolean | null;
+  lightForParty?: boolean | null;
+  lightForRetro?: boolean | null;
+  lightMaxLines?: number | null;
+  lightMaxFiles?: number | null;
+  lightWorkerModel?: string | null;
+  lightBrowserCheck?: boolean | null;
+  lightBlastCheck?: boolean | null;
+  lightBlastLoops?: number | null;
+  lightPublish?: string | null;
   hasGoogleClientSecret?: boolean | null;
   googleCalendarConnected?: boolean | null;
   googleCalendarError?: string | null;
@@ -79,7 +102,7 @@ export const SETTINGS_SECTIONS: SectionInfo[] = [
   { id: 'planflow', label: 'Planning flow', title: 'Planning flow', description: 'The planning stages from Jira to Publish: which run, who holds each, and which needs approval. Every action here saves immediately.', icon: Workflow, group: 'Automation' },
   { id: 'sousflow', label: 'Sous flow', title: 'Sous flow', description: 'The sous stages from picking the ticket to the Jira status: which run, and after each one whether sous goes on, asks first or stops. Every action here saves immediately.', icon: Route, group: 'Automation' },
   { id: 'judge', label: 'Judge', title: 'Judge', description: "The agent that reads the sprint's sessions for the retro: on or off (off by default), its Claude account, its windows and when a day's answer is due.", icon: Gavel, group: 'Automation' },
-  { id: 'messages', label: 'Discord messages', title: 'Discord messages', description: 'How the ticket summary DOCK posts to Discord reads.', icon: Mail, group: 'Messages & plugins' },
+  { id: 'messages', label: 'Discord messages', title: 'Discord messages', description: 'How the ticket summary, the review post and the reply after a fix read in Discord.', icon: Mail, group: 'Messages & plugins' },
   { id: 'plugins', label: 'Plugins', title: 'Plugins', description: 'The narration keys and the bucket a demo video goes to, shared by both DOCKs.', icon: Plug, group: 'Messages & plugins' },
 ];
 
@@ -94,11 +117,11 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
   discord: ['Webhook URL', 'Bot token', 'Server id', 'Your Discord user id'],
   calendar: ['Client ID', 'Client secret', 'Calendar ID'],
   machines: ['Ingest tokens', 'Create token', 'Kit setup'],
-  review: ['Review when I say on it', 'LGTM when the review is clean', 'Send review findings to the Task session'],
+  review: ['Review when I say on it', 'LGTM when the review is clean', 'Send review findings to the Task session', 'Post the review to the thread', 'Reply after a fix', 'Post delay', 'Re-review wait', 'Max rounds', 'Stop word'],
   planflow: ['Stages', 'Skip stage', 'Approval'],
-  sousflow: ['Stages', 'Skip stage', 'After each stage'],
+  sousflow: ['Stages', 'Skip stage', 'After each stage', 'Light runner', 'Max production lines', 'Max production files', 'Worker model', 'Browser check', 'Blast check', 'Publish'],
   judge: ['Judge on or off', 'Judge account', 'Idle minutes', 'Answer cutoff'],
-  messages: ['Message template', 'Preview'],
+  messages: ['Message template', 'Preview', 'Review post', 'Review reply', 'Skill', 'Template'],
   plugins: ['ElevenLabs keys', 'Demo storage', 'Bucket'],
 };
 
@@ -152,8 +175,21 @@ export function savedValues(settings: SavedSettings): Record<DraftSectionId, Sec
       autoReviewOnIt: String(Boolean(settings.autoReviewOnIt)),
       autoLgtm: String(Boolean(settings.autoLgtm)),
       reviewFindingsToTask: String(settings.reviewFindingsToTask !== false),
+      autoReviewPostDiscord: String(settings.autoReviewPostDiscord !== false),
+      reviewFindingsAutoReply: String(settings.reviewFindingsAutoReply !== false),
+      reviewPostDelayMinutes: String(settings.reviewPostDelayMinutes ?? REVIEW_NUMBERS.reviewPostDelayMinutes.fallback),
+      reviewReReviewWaitMinutes: String(settings.reviewReReviewWaitMinutes ?? REVIEW_NUMBERS.reviewReReviewWaitMinutes.fallback),
+      reviewMaxRounds: String(settings.reviewMaxRounds ?? REVIEW_NUMBERS.reviewMaxRounds.fallback),
     },
-    messages: { discordMessageTemplate: settings.discordMessageTemplate || DEFAULT_DISCORD_MESSAGE_TEMPLATE },
+    messages: {
+      discordMessageTemplate: settings.discordMessageTemplate || DEFAULT_DISCORD_MESSAGE_TEMPLATE,
+      reviewPostFormat: settings.reviewPostFormat || 'skill',
+      reviewPostSkill: settings.reviewPostSkill || DEFAULT_REVIEW_SKILL,
+      reviewPostTemplate: settings.reviewPostTemplate || DEFAULT_REVIEW_POST_TEMPLATE,
+      reviewReplyFormat: settings.reviewReplyFormat || 'builtin',
+      reviewReplySkill: settings.reviewReplySkill || DEFAULT_REVIEW_SKILL,
+      reviewReplyTemplate: settings.reviewReplyTemplate || DEFAULT_REVIEW_REPLY_TEMPLATE,
+    },
     calendar: { googleClientId: settings.googleClientId || '', googleClientSecret: '', googleCalendarId: settings.googleCalendarId || 'primary' },
   };
 }
@@ -167,8 +203,9 @@ export function sectionErrors(id: DraftSectionId, values: SectionValues): string
   if (id === 'general') return isValidServiceHealthRefreshSeconds(healthSeconds(values)) ? [] : ['Enter a whole-number interval between 5 seconds and 24 hours.'];
   if (id === 'messages') {
     const error = getDiscordTemplateError(values.discordMessageTemplate);
-    return error ? [error] : [];
+    return [...(error ? [error] : []), ...reviewMessageErrors(values)];
   }
+  if (id === 'review') return reviewNumberErrors(values);
   if (id === 'discord') {
     const userId = values.discordUserId.trim();
     return userId && !/^\d{5,25}$/.test(userId) ? ['Your Discord user id is digits only.'] : [];
@@ -180,6 +217,7 @@ export function sectionErrors(id: DraftSectionId, values: SectionValues): string
 export function sectionInput(id: DraftSectionId, values: SectionValues): Record<string, string | number> {
   if (id === 'general') return { serviceHealthRefreshSeconds: healthSeconds(values) };
   if (id === 'notifications') return { notificationPrefs: JSON.stringify(valuesToPrefs(values)) };
+  if (id === 'review') return { ...values, ...Object.fromEntries(Object.keys(REVIEW_NUMBERS).map((key) => [key, Number(values[key])])) };
   return { ...values };
 }
 
