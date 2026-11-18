@@ -1,13 +1,14 @@
 import { StorageService } from '../storage/service';
 import { JiraSprintClient, createJiraHttp } from './jira-sprint';
 import { SprintInputError, sprintDashboardService } from './sprint-dashboard';
-import { SprintDraftService, TC_MARKER, type ContractTarget, type DraftJira } from './sprint-draft';
+import { SprintDraftService, TC_MARKER, type ContractTarget, type DraftJira, type SplitSource } from './sprint-draft';
 import { AcDriftService, type DriftJira } from './ac-drift';
 import { AcInService, MOVE_PENDING_LABEL, type AcMoveJira } from './ac-move';
 import { confluenceFrom, type ConfluenceClient } from './confluence';
 import { StoryboardReader } from './storyboard';
 import { defaultBlackboardRoot } from './blackboard';
 import { CONTRACT_PARENT_KEY } from './sprint-contract';
+import { SPLIT_PAGE_KEY, readSplitPage, splitTestLine } from './split-page';
 import { GitHubAPI } from '../datasources/GitHubAPI';
 import { readMergeStates } from './merge-state';
 import { PlanSignalService } from './plan-signal';
@@ -18,6 +19,7 @@ const storage = new StorageService();
 const github = new GitHubAPI();
 const PLAN_SIGNAL_CACHE = 'plan-signal';
 const CRON_CONFIG_KEY = 'orchestratorCronConfig';
+const SPLIT_CACHE = 'split-page';
 
 async function jiraClient(): Promise<{ client: JiraSprintClient; value: (key: string) => string }> {
   const settings = await storage.getSettings();
@@ -96,7 +98,26 @@ export const planSignalService = new PlanSignalService({
   },
 });
 
-export const sprintDraftService = new SprintDraftService(storage, planningJira, undefined, undefined, planningContract, (epic) => storyboardReader.sync(epic), (keys) => readMergeStates(keys, github), () => planSignalService.editRefusal());
+/** The split page of Settings, read at Load from Jira and kept per sprint; no page set or no credentials leaves Planning as it was. */
+const splitSource: SplitSource = {
+  read: async () => {
+    const { client, value } = await confluence();
+    const page = value(SPLIT_PAGE_KEY);
+    return page && client ? readSplitPage(client, page, value(CONTRACT_PARENT_KEY) || null) : null;
+  },
+  get: (sprint) => storage.getCache(SPLIT_CACHE, sprint),
+  save: (sprint, state) => (state ? storage.upsertCache(SPLIT_CACHE, sprint, state, 0) : storage.deleteCache(SPLIT_CACHE, sprint)),
+};
+
+/** The Test button of Settings: reads the page as typed, saved or not. */
+export async function testSplitPage(page: string): Promise<{ success: boolean; message: string }> {
+  const { client, value } = await confluence();
+  if (!client) return { success: false, message: 'Jira credentials are not configured in Settings' };
+  const state = await readSplitPage(client, page, value(CONTRACT_PARENT_KEY) || null);
+  return { success: !state.error, message: splitTestLine(state) };
+}
+
+export const sprintDraftService = new SprintDraftService(storage, planningJira, undefined, undefined, planningContract, (epic) => storyboardReader.sync(epic), (keys) => readMergeStates(keys, github), () => planSignalService.editRefusal(), splitSource);
 
 /** The owner's side of a published plan, on the same Jira credentials. */
 async function driftJira(): Promise<DriftJira> {

@@ -589,3 +589,60 @@ test('the Jira client reads the carried over tickets as the sprint tickets that 
   assert.deepEqual(await client.fetchCarriedKeys(699), ['QRD-5']);
   assert.equal((bodies[0] as { jql: string }).jql, 'sprint = 699 AND sprint in closedSprints()');
 });
+
+function splitSetup(weeks: Record<string, number>) {
+  const { store, jira } = setup();
+  const cache = new Map<string, any>();
+  const edits: string[] = [];
+  let state: any = { page: 'Sprint 26 split', pageId: '1', version: 3, readAt: 'now', error: null, weeks: Object.fromEntries(Object.entries(weeks).map(([key, week]) => [key, { week, note: null }])), kept: {} };
+  const source = {
+    read: async () => (state ? { ...state, kept: {} } : null),
+    get: async (sprint: string) => cache.get(sprint) ?? null,
+    save: async (sprint: string, value: any) => { if (value) cache.set(sprint, value); else cache.delete(sprint); },
+  };
+  const original = store.updateSprintDraftTicket.bind(store);
+  store.updateSprintDraftTicket = async (sprint, key, data) => { edits.push(key); return original(sprint, key, data); };
+  const service = new SprintDraftService(store, async () => jira, predictions({}), () => new Date('2026-10-26T10:00:00Z'), undefined, null, null, null, source);
+  return { service, edits, setState: (next: any) => { state = next; } };
+}
+
+test('a load reads the split page and lists the tickets in another week without changing the draft', async () => {
+  const { service, edits } = splitSetup({ 'QRD-1489': 1, 'QRD-1490': 1, 'QRD-9999': 2 });
+  const view = await service.load(26, 'Alvin');
+  assert.deepEqual(view.split?.diffs, [{ key: 'QRD-1490', draftWeek: 2, splitWeek: 1, note: null }]);
+  assert.deepEqual([view.split?.page, view.split?.rows], ['Sprint 26 split', 3]);
+  assert.deepEqual(edits, [], 'the draft is only changed when the planner clicks');
+  assert.equal(view.tickets.find((ticket) => ticket.key === 'QRD-1490')!.wave, 2);
+});
+
+test('Use split page sets that ticket week, Keep hides the difference until the page changes', async () => {
+  const { service } = splitSetup({ 'QRD-1490': 1, 'QRD-1511': 2 });
+  await service.load(26, 'Alvin');
+  const used = await service.useSplit('QRD Sprint 26', 'QRD-1490');
+  assert.equal(used.tickets.find((ticket) => ticket.key === 'QRD-1490')!.wave, 1);
+  assert.deepEqual(used.split?.diffs.map((diff) => diff.key), ['QRD-1511']);
+  const kept = await service.keepSplit('QRD Sprint 26', 'QRD-1511');
+  assert.deepEqual(kept.split?.diffs, []);
+  assert.equal(kept.split?.kept, 1);
+  await assert.rejects(() => service.useSplit('QRD Sprint 26', 'QRD-1489'), /gives no week for QRD-1489/);
+  await assert.rejects(() => service.keepSplit('QRD Sprint 26', 'QRD-1489'), /gives no week for QRD-1489/);
+});
+
+test('a kept difference survives a reload while the page still says that week', async () => {
+  const { service, setState } = splitSetup({ 'QRD-1511': 2 });
+  await service.load(26, 'Alvin');
+  await service.keepSplit('QRD Sprint 26', 'QRD-1511');
+  assert.deepEqual((await service.load(26, 'Alvin')).split?.diffs, []);
+  setState({ page: 'Sprint 26 split', pageId: '1', version: 4, readAt: 'now', error: null, weeks: { 'QRD-1511': { week: 3, note: null } }, kept: {} });
+  assert.deepEqual((await service.load(26, 'Alvin')).split?.diffs.map((diff) => diff.splitWeek), [3]);
+});
+
+test('without a split page, or with one that gave nothing, Planning shows the draft as before', async () => {
+  const none = splitSetup({});
+  none.setState(null);
+  assert.equal((await none.service.load(26, 'Alvin')).split ?? null, null);
+  const broken = splitSetup({});
+  broken.setState({ page: 'Gone', pageId: null, version: null, readAt: 'now', error: 'Split page "Gone" was not found', weeks: {}, kept: {} });
+  const view = await broken.service.load(26, 'Alvin');
+  assert.deepEqual([view.split?.error, view.split?.diffs, view.tickets.length], ['Split page "Gone" was not found', [], 3]);
+});

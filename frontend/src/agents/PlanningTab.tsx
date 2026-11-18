@@ -10,7 +10,7 @@ import { StoryboardBoard } from './StoryboardBoard';
 import { MyTicketsPanel } from './MyTicketsPanel';
 import {
   CHECK_SPRINT_STORYBOARDS, DECIDE_SPRINT_DRAFT, MOVE_SPRINT_DRAFT_CARDS, SET_SPRINT_DRAFT_TCS, GET_OWNER_NAME, GET_PLANNING_FLOW, GET_PLANNING_SPRINTS, GET_SPRINT_DRAFT, GET_SPRINT_PLAN_SIGNAL, GET_TICKET_READINESS, LOAD_SPRINT_DRAFT, PREVIEW_SPRINT_DRAFT_PUBLISH, PUBLISH_SPRINT_DRAFT,
-  REFRESH_SPRINT_DRAFT_QA, RUN_SCOUT, UPDATE_SPRINT_DRAFT_TICKET,
+  REFRESH_SPRINT_DRAFT_QA, RUN_SCOUT, UPDATE_SPRINT_DRAFT_TICKET, USE_SPRINT_DRAFT_SPLIT, KEEP_SPRINT_DRAFT_SPLIT,
 } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import {
@@ -23,6 +23,7 @@ import { parseFlow, skippedStages } from './planningFlow';
 import { panelOf } from './plan';
 import { InfoTip } from './InfoTip';
 import { ScoutCell } from './ScoutCell';
+import { SplitBox } from './SplitBox';
 
 const head = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
 const chip = 'rounded-xs border px-1.5 font-mono text-[0.6rem] font-bold uppercase tracking-[0.08em]';
@@ -905,13 +906,15 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
   const [checkStoryboards, checking] = useMutation(CHECK_SPRINT_STORYBOARDS);
   const [saveTcs, savingTcs] = useMutation(SET_SPRINT_DRAFT_TCS);
   const [moveCards, moving] = useMutation(MOVE_SPRINT_DRAFT_CARDS);
+  const [applySplit, usingSplit] = useMutation(USE_SPRINT_DRAFT_SPLIT);
+  const [holdSplit, keepingSplit] = useMutation(KEEP_SPRINT_DRAFT_SPLIT);
   const [runScout] = useMutation(RUN_SCOUT);
   const [publish, publishing] = useMutation(PUBLISH_SPRINT_DRAFT);
   const [preview, previewing] = useLazyQuery<{ previewSprintDraftPublish: DraftChange[] }>(PREVIEW_SPRINT_DRAFT_PUBLISH, { fetchPolicy: 'network-only' });
   const full = draftQuery.data?.sprintDraft ?? null;
   // Merged cards are on the plan only: every panel works on the cards still to build, the schedule draws them all.
   const draft = full && { ...full, tickets: scheduled(full.tickets) };
-  const busy = loading.loading || updating.loading || deciding.loading || refreshing.loading || publishing.loading || checking.loading || savingTcs.loading || moving.loading;
+  const busy = loading.loading || updating.loading || deciding.loading || refreshing.loading || publishing.loading || checking.loading || savingTcs.loading || moving.loading || usingSplit.loading || keepingSplit.loading;
   // The planning agent's Indonesian title and AC lines, for Tiket saya and the QA checklist.
   const ownerQuery = useQuery<{ ownerName: string }>(GET_OWNER_NAME, { fetchPolicy: 'cache-first' });
   const me = signal?.me ?? ownerQuery.data?.ownerName ?? null;
@@ -937,6 +940,8 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
   }, [full?.sprint, full?.status, full?.loadedAt]);
   const onChange = (key: string, change: { dev?: string | null; wave?: number; sp?: number }) => draft && run(updateTicket({ variables: { sprint: draft.sprint, key, ...change } }), 'The ticket could not be changed');
   const onDecide = (id: string, action: string, note?: string) => draft && run(decide({ variables: { sprint: draft.sprint, id, action, note: note ?? null } }), 'The decision could not be saved');
+  const onUseSplit = (key: string) => draft && run(applySplit({ variables: { sprint: draft.sprint, key } }), 'The ticket could not be moved to the split week');
+  const onKeepSplit = (key: string) => draft && run(holdSplit({ variables: { sprint: draft.sprint, key } }), 'The difference could not be kept');
   const onScout = (key: string) => run(runScout({ variables: { key } }), 'The scout could not start');
   const onRefreshQa = () => draft && run(refreshQa({ variables: { sprint: draft.sprint } }), 'The QA check failed');
   const onCheckStoryboards = () => draft && run(checkStoryboards({ variables: { sprint: draft.sprint } }), 'The storyboard could not be read');
@@ -1041,6 +1046,7 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
               Zero counts are not shown.
             </InfoTip>
           </p>
+          {draft.split && <SplitBox split={draft.split} busy={busy} onUse={onUseSplit} onKeep={onKeepSplit} />}
           {ready && <ReadyBlock id={readyId} ready={ready} onFix={showPanel} />}
           <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Planning panel">
             {panels.map(([id, label]) => (

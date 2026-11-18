@@ -16,8 +16,9 @@ import { StorageService } from '../storage/service';
 import { activeSprint } from '../integrations/sprint-plan';
 import { lookupDependencies } from '../integrations/dependency-lookup';
 import { sprintPlanner } from '../integrations/sprint-plan-live';
-import { acDriftService, acInService, planSignalService, sprintDraftService, storyboardReader, ticketSummaryService } from '../integrations/sprint-draft-live';
+import { acDriftService, acInService, planSignalService, sprintDraftService, storyboardReader, testSplitPage, ticketSummaryService } from '../integrations/sprint-draft-live';
 import { StoryboardMissing, StoryboardRefused } from '../integrations/storyboard';
+import { SPLIT_PAGE_KEY, pageRef } from '../integrations/split-page';
 import { PLANNING_FLOW_KEY, PlanningFlowError, parsePlanningFlow, storedPlanningFlow } from '../integrations/planning-flow';
 import { SOUS_FLOW_KEY, SousFlowError, flowLines, parseSousFlow, profileFor, storedSousFlow } from '../integrations/sous-flow';
 import { setTicketProfile, sousFlowSettings, ticketProfile } from '../integrations/sous-flow-live';
@@ -440,6 +441,7 @@ export const resolvers = {
     planningSprints: () => sprintDraftService.sprints().catch(planningError),
     sprintDraft: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.view(sprint).catch(planningError),
     sprintPlanSignal: (_: unknown, { sprint }: { sprint: string }) => planSignalService.view(sprint).catch(planningError),
+    planningSplitPage: async () => (await storageService.getSettingValues([SPLIT_PAGE_KEY]))[0]?.value || null,
     planningFlow: async () => storedPlanningFlow((await storageService.getSettingValues([PLANNING_FLOW_KEY]))[0]?.value),
     judgeDays: (_: unknown, { sprint }: { sprint?: string | null }) => judgeQueue.days(sprint).catch(judgeError),
     judgeDay: (_: unknown, { day }: { day: string }) => judgeQueue.day(day).catch(judgeError),
@@ -825,6 +827,19 @@ export const resolvers = {
       await storageService.upsertSetting(PLANNING_FLOW_KEY, saved);
       return saved;
     },
+    setPlanningSplitPage: async (_: unknown, { page }: { page: string }) => {
+      const value = page.trim();
+      if (!value) {
+        await storageService.deleteSetting(SPLIT_PAGE_KEY);
+        return null;
+      }
+      if (!pageRef(value)) throw new GraphQLError('The split page must be a page id, a page URL or a title', { extensions: { code: 'BAD_USER_INPUT' } });
+      await storageService.upsertSetting(SPLIT_PAGE_KEY, value);
+      return value;
+    },
+    testPlanningSplitPage: (_: unknown, { page }: { page: string }) => testSplitPage(page),
+    useSprintDraftSplit: (_: unknown, { sprint, key }: { sprint: string; key: string }) => sprintDraftService.useSplit(sprint, key).catch(planningError),
+    keepSprintDraftSplit: (_: unknown, { sprint, key }: { sprint: string; key: string }) => sprintDraftService.keepSplit(sprint, key).catch(planningError),
     setSousFlow: async (_: unknown, { flow }: { flow: string }) => {
       if (!flow.trim()) {
         await storageService.deleteSetting(SOUS_FLOW_KEY);
@@ -1315,7 +1330,7 @@ export const protectedQueries = [
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'claudeSessionUsage', 'claudeTicketUsage', 'agentLooks', 'libraryAgents', 'libraryAgent', 'guildMasterLog', 'guildMasterParty',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
   'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro', 'sprintPlan',
-  'planningSprints', 'sprintDraft', 'sprintPlanSignal', 'planningFlow', 'previewSprintDraftPublish', 'sprintDrift', 'acIncoming', 'ticketSummary', 'ticketReadiness',
+  'planningSprints', 'sprintDraft', 'sprintPlanSignal', 'planningFlow', 'planningSplitPage', 'previewSprintDraftPublish', 'sprintDrift', 'acIncoming', 'ticketSummary', 'ticketReadiness',
   'checkpoints', 'sousFlow', 'ticketSousFlow', 'sousFlowPrompt', 'opsRules', 'qaQueue', 'qaQueuePosition', 'worktrees',
   'judgeDays', 'judgeDay', 'judgeWaiting', 'judgeSettings',
 ] as const;
@@ -1328,6 +1343,10 @@ export const protectedMutations = [
   'decideSprintDraft',
   'refreshSprintDraftQa',
   'setPlanningFlow',
+  'setPlanningSplitPage',
+  'testPlanningSplitPage',
+  'useSprintDraftSplit',
+  'keepSprintDraftSplit',
   'setJudgeCall',
   'confirmJudgeDay',
   'judgeNow',

@@ -33,6 +33,16 @@ export class ConfluenceClient {
     }
   }
 
+  async pageBody(id: string): Promise<{ page: ConfluencePage; storage: string } | null> {
+    try {
+      const raw = await this.http.get(`${API}/content/${encodeURIComponent(id)}`, { expand: 'space,version,body.storage' });
+      return { page: pageOf(raw), storage: String(raw?.body?.storage?.value ?? '') };
+    } catch (error: any) {
+      if (error?.response?.status === 404) return null;
+      throw error;
+    }
+  }
+
   async findPage(spaceKey: string, title: string): Promise<ConfluencePage | null> {
     const found = await this.http.get(`${API}/content`, { spaceKey, title, type: 'page', expand: 'space,version', limit: 1 });
     const first = (found?.results || [])[0];

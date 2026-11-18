@@ -54,7 +54,11 @@ export interface SprintDraft {
   developers: SprintDeveloper[]; mergeSource: string; moves: SprintMove[];
   /** The planner's written scope cut; null while none is written. */
   scopeCut?: DraftDecision | null;
+  /** The split page as the last load read it; null or absent when none is set. */
+  split?: DraftSplit | null;
 }
+export interface SplitDiff { key: string; draftWeek: number; splitWeek: number; note: string | null }
+export interface DraftSplit { page: string; version: number | null; readAt: string; error: string | null; rows: number; kept: number; diffs: SplitDiff[] }
 export interface DraftQuestion { id: string; text: string; key: string | null; askedAt: string; answered: boolean; answeredBy: string | null; answeredAt: string | null; answer?: string | null; options?: string[] }
 
 /** A sprint plan as every DOCK reads it from Jira's plan-published-rN labels. */

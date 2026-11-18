@@ -787,6 +787,27 @@ export const typeDefs = gql`
     moves: [SprintMoveSuggestion!]!
     "The planner's written scope cut, decision scope|cut; null while none is written."
     scopeCut: SprintDraftDecision
+    "The weeks the split page gives and the tickets that sit elsewhere; null when no split page is set."
+    split: SprintDraftSplit
+  }
+
+  "A ticket whose wave differs from the week on the split page."
+  type SprintSplitDiff {
+    key: String!
+    draftWeek: Int!
+    splitWeek: Int!
+    note: String
+  }
+
+  "The Confluence split page as the last Load from Jira read it; error says why it gave no weeks."
+  type SprintDraftSplit {
+    page: String!
+    version: Int
+    readAt: String!
+    error: String
+    rows: Int!
+    diffs: [SprintSplitDiff!]!
+    kept: Int!
   }
 
   """What Publish would write to one ticket. refused says why the ticket is skipped."""
@@ -2469,6 +2490,8 @@ export const typeDefs = gql`
     sprintPlanSignal(sprint: String!): SprintPlanSignal
     "The Planning flow as JSON (stages, owner, approve); null when none is saved and every stage runs."
     planningFlow: String
+    "The Confluence page (id, URL or title) holding the ticket to week table; null when none is set."
+    planningSplitPage: String
     "Days of the sprint Judge read, newest first, and the sprint sheet; no name is the active sprint."
     judgeDays(sprint: String): JudgeDays
     "One day's sheet: the findings grouped by session."
@@ -2631,6 +2654,14 @@ export const typeDefs = gql`
     updateOrchestratorCronSettings(config: String!): Boolean!
     "Saves the Planning flow JSON after validation and returns it normalized; an empty string clears it."
     setPlanningFlow(flow: String!): String
+    "Saves the split page (a page id, URL or title); an empty string clears it."
+    setPlanningSplitPage(page: String!): String
+    "Reads the split page as typed and says what it found: version and rows, or the reason it gave none."
+    testPlanningSplitPage(page: String!): ValidationResult!
+    "Moves one ticket to the week the split page gives."
+    useSprintDraftSplit(sprint: String!, key: String!): SprintDraft!
+    "Keeps one ticket in the week the draft has, against the week the split page gives."
+    keepSprintDraftSplit(sprint: String!, key: String!): SprintDraft!
     "The owner's call on a Judge finding, mistake or not, with an optional note."
     setJudgeCall(findingId: ID!, call: String!, note: String): JudgeFinding!
     confirmJudgeDay(day: String!, note: String): JudgeDaySheet!

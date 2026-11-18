@@ -12,6 +12,7 @@ import { writeContract, type ContractClient } from './sprint-contract';
 import { StoryboardMissing, framesIn, type StoryboardResult } from './storyboard';
 import type { StoryboardScenario } from './storyboard-flows';
 import type { SprintDraftInput, SprintDraftTicketInput } from '../storage/service';
+import { splitView, type SplitState, type SplitView } from './split-page';
 import { planLabel, sprintRevision, stalePlanLabels } from './plan-publish';
 
 export const SP_PER_DAY_KEY = 'planningSpPerDay';
@@ -155,11 +156,19 @@ export interface DraftView {
   moves: MoveSuggestion[];
   /** The planner's written scope cut (decision scope|cut): what leaves the sprint when the SP do not fit. */
   scopeCut?: Decision | null;
+  /** The weeks the split page gives, with the tickets that sit elsewhere; null when no split page was read for this draft. */
+  split?: SplitView | null;
 }
 /** referenceAdded: lines Publish appends to the Reference field; blockedBy: tickets Publish links as blocking this one. */
 export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; referenceAdded: string[]; blockedBy: string[]; refused: string | null }
 /** One line of a publish: a ticket's AC and assignee, or the Confluence contract page. */
 export interface PublishResult { key: string; kind: 'ticket' | 'tc' | 'label' | 'contract'; status: 'updated' | 'refused' | 'failed' | 'skipped'; detail: string | null }
+/** Where the split page's weeks are read from and kept per draft; read gives null when no split page is set. */
+export interface SplitSource {
+  read(): Promise<SplitState | null>;
+  get(sprint: string): Promise<SplitState | null>;
+  save(sprint: string, state: SplitState | null): Promise<unknown>;
+}
 export interface ContractTarget { client: ContractClient | null; parentId: string | null }
 
 const parse = <T>(raw: string | null | undefined, fallback: T): T => {
@@ -387,6 +396,7 @@ export class SprintDraftService {
     private readonly mergeStates: ((keys: string[]) => Promise<Map<string, MergeRead> | null>) | null = null,
     /** Why this DOCK may not change the draft (it is not the planner's), or null when it may. */
     private readonly editGuard: (() => Promise<string | null>) | null = null,
+    private readonly split: SplitSource | null = null,
   ) {}
 
   private async mayEdit(): Promise<void> {
@@ -447,13 +457,44 @@ export class SprintDraftService {
       sprintDays: workingDays(start, sprint.endDate) ?? previous?.sprintDays ?? DEFAULT_SPRINT_DAYS,
       startDate: start ? new Date(start) : null, createdBy: previous?.createdBy ?? by, refStatuses: JSON.stringify(refStatuses), merges: JSON.stringify(merges),
     }, tickets);
+    await this.readSplit(sprint.name);
     await this.refreshQa(sprint.name);
     return this.checkStoryboards(sprint.name).catch(async () => (await this.view(sprint.name))!);
   }
 
   async view(sprint: string): Promise<DraftView | null> {
     const row = await this.store.getSprintDraft(sprint);
-    return row ? this.compute(row, await this.spPerDay()) : null;
+    if (!row) return null;
+    const view = this.compute(row, await this.spPerDay());
+    const state = this.split ? await this.split.get(sprint) : null;
+    return state ? { ...view, split: splitView(state, row.status === 'published' ? [] : openTickets(view)) } : view;
+  }
+
+  /** Reads the split page for the draft; the draft itself is never changed by it. A kept difference stays kept while the page still says that week. */
+  private async readSplit(sprint: string): Promise<void> {
+    if (!this.split) return;
+    const before = await this.split.get(sprint).catch(() => null);
+    const fresh = await this.split.read().catch(() => before);
+    if (fresh) fresh.kept = Object.fromEntries(Object.entries(before?.kept ?? {}).filter(([key, week]) => fresh.weeks[key]?.week === week));
+    await this.split.save(sprint, fresh);
+  }
+
+  /** Moves one ticket to the week the split page gives; the only way the split page changes the draft. */
+  async useSplit(sprint: string, key: string): Promise<DraftView> {
+    const entry = (await this.split?.get(sprint))?.weeks[key];
+    if (!entry) throw new SprintInputError(`The split page gives no week for ${key}`);
+    return this.updateTicket(sprint, key, { wave: entry.week });
+  }
+
+  /** Keeps the ticket where the draft has it and stops showing the difference until the split page says another week. */
+  async keepSplit(sprint: string, key: string): Promise<DraftView> {
+    await this.mayEdit();
+    await this.row(sprint);
+    const state = await this.split?.get(sprint);
+    const entry = state?.weeks[key];
+    if (!state || !entry) throw new SprintInputError(`The split page gives no week for ${key}`);
+    await this.split!.save(sprint, { ...state, kept: { ...state.kept, [key]: entry.week } });
+    return (await this.view(sprint))!;
   }
 
   private compute(row: DraftRow, spPerDay: number): DraftView {
