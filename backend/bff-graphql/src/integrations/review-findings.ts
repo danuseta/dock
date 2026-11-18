@@ -13,6 +13,8 @@ export const EXPIRED_DETAIL = 'no result from the session in 3 h';
 const MAX_FINDING_TEXT = 1500;
 const MAX_PROMPT = 7500;
 const MARKER = /^DOCK-REVIEW-ROUND (\S+) valid=(\d+) invalid=(\d+) pushed=(yes|no)\s*$/m;
+const REVIEW_LINE = /^DOCK-REVIEW on it by (.+)$/m;
+const FIX_LINE = /^DOCK-FIX\b/m;
 const WEBHOOK = /\/webhooks\/(\d+)\//;
 const BARE_WORDS = /\b(?:on\s?it|lgtm|approved?|acc|ok|oke|okay|sip|siap|mantap|aman|thanks|thx|makasih|done)\b/gi;
 const EMOJI = /<a?:\w+:\d+>|:\w+:|[\p{Extended_Pictographic}\p{Emoji_Modifier}‍️]/gu;
@@ -77,25 +79,34 @@ export function isBare(message: Pick<ThreadMessage, 'text' | 'mentions' | 'attac
  * The teammates' messages that are findings, oldest first: not the owner's, not the poster's, after the author's first on
  * it, not bare, and newer than `since`. An on it older than the kept messages still counts through `row.onIt`.
  */
-export function findings(row: ThreadRow, since: number): ThreadMessage[] {
+export function findings(row: ThreadRow, since: number, webhookId: string | null = null): ThreadMessage[] {
   const onItAt = new Map<string, number>();
   for (const message of row.messages) {
     if (!onItAt.has(message.authorId) && ON_IT.test(message.text)) onItAt.set(message.authorId, Date.parse(message.at));
   }
-  return row.messages.filter((message) => {
-    if (message.mine || message.authorId === row.createdById) return false;
+  const names = new Map(row.messages.map((message) => [message.authorId, message.author]));
+  const found: ThreadMessage[] = [];
+  for (const raw of row.messages) {
+    if (raw.mine || raw.authorId === row.createdById || (webhookId && raw.webhookId === webhookId) || FIX_LINE.test(raw.text)) continue;
+    const line = raw.webhookId ? REVIEW_LINE.exec(raw.text) : null;
+    const userId = line ? /<@!?(\d+)>/.exec(line[1])?.[1] ?? raw.mentions.find((mention) => !mention.role && line[1].startsWith(`@${mention.name}`))?.id : undefined;
+    const author = userId ? names.get(userId) ?? raw.mentions.find((mention) => mention.id === userId)?.name : undefined;
+    if (line && !author) continue;
+    const message = line && userId && author ? { ...raw, authorId: userId, author, text: raw.text.replace(line[0], '').trim() } : raw;
+    if (message.mine || message.authorId === row.createdById) continue;
     const claimed = onItAt.get(message.authorId) ?? (row.onIt.includes(message.author) ? -Infinity : undefined);
     const at = Date.parse(message.at);
-    return claimed !== undefined && at > claimed && at > since && !isBare(message);
-  });
+    if (claimed !== undefined && at > claimed && at > since && !isBare(message)) found.push(message);
+  }
+  return found;
 }
 
 /**
  * The findings of the next round: the oldest findings after the cursor that follow each other within the quiet window.
  * Due once a later finding or the clock is a quiet window past the last of them; empty otherwise.
  */
-export function dueRound(row: ThreadRow, cursor: number, now: Date): ThreadMessage[] {
-  const found = findings(row, Math.max(cursor, now.getTime() - FINDINGS_WINDOW_MS));
+export function dueRound(row: ThreadRow, cursor: number, now: Date, webhookId: string | null = null): ThreadMessage[] {
+  const found = findings(row, Math.max(cursor, now.getTime() - FINDINGS_WINDOW_MS), webhookId);
   if (!found.length) return [];
   let end = 1;
   while (end < found.length && Date.parse(found[end].at) - Date.parse(found[end - 1].at) < ROUND_QUIET_MS) end += 1;
@@ -201,7 +212,7 @@ export class ReviewFindings {
         }
         const cursor = last ? last.lastMessageAt.getTime() : -Infinity;
         if (Date.parse(row.lastActivity) <= cursor) continue;
-        sent += await this.start(row, dueRound(row, cursor, now));
+        sent += await this.start(row, dueRound(row, cursor, now, webhookId));
       }
       return sent;
     } finally {

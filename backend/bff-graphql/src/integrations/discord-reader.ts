@@ -28,7 +28,7 @@ const JIRA_LINK = /https:\/\/[\w.-]+\.atlassian\.net\/browse\/([A-Z][A-Z0-9_]{1,
 export const NEEDS_YOU = new Set<ThreadState>(['FLOW_2', 'FLOW_4', 'YOUR_TURN', 'FLOW_5', 'REVIEW_ASKED']);
 export const SETTING_KEYS = { token: 'discordBotToken', guild: 'discordGuildId' } as const;
 /** Bumped when ThreadRow gains a field, so the next sync builds every stored row again. */
-export const ROW_VERSION = 8;
+export const ROW_VERSION = 9;
 /** Discord channel types that are threads. */
 const THREAD_TYPES = new Set([10, 11, 12]);
 
@@ -55,6 +55,7 @@ export interface RawMessage {
   content: string;
   timestamp: string;
   author: RawUser;
+  webhook_id?: string;
   mentions: RawUser[];
   mention_roles?: string[];
   attachments: Array<{ filename: string; size: number; content_type?: string | null; url: string; width?: number | null; height?: number | null }>;
@@ -104,6 +105,7 @@ export function toMessage(raw: RawMessage, me: string, server: ServerNames = NO_
     author: nameOf(raw.author),
     avatar: avatarOf(raw.author),
     mine: raw.author.id === me,
+    ...(raw.webhook_id ? { webhookId: raw.webhook_id } : {}),
     at: new Date(raw.timestamp).toISOString(),
     text: raw.content
       .replace(USER_MENTION, (token, id: string) => (names.has(id) ? `@${names.get(id)}` : token))
