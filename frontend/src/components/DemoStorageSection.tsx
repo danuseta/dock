@@ -70,7 +70,7 @@ export const DemoStorageSection: React.FC = () => {
         <label><span className="mb-1 block text-sm font-medium">Access key</span><Input type="password" autoComplete="off" value={accessKey} onChange={(event) => setAccessKey(event.target.value)} placeholder={storage?.accessKeyMasked || 'Access key ID'} required={!storage?.accessKeyMasked} /><span className="mt-1 block text-xs text-muted-foreground">{storage?.accessKeyMasked ? 'Leave empty to keep the saved one.' : 'Not set yet.'}</span></label>
         <label><span className="mb-1 block text-sm font-medium">Secret key</span><Input type="password" autoComplete="off" value={secretKey} onChange={(event) => setSecretKey(event.target.value)} placeholder={storage?.secretSet ? '••••••••' : 'Secret access key'} required={!storage?.secretSet} /><span className="mt-1 block text-xs text-muted-foreground">{storage?.secretSet ? 'Leave empty to keep the saved one.' : 'Not set yet.'}</span></label>
         <div className="col-span-full flex flex-wrap gap-2">
-          <Button type="submit" variant="primary" disabled={saving}>{saving ? 'Saving...' : 'Save storage'}</Button>
+          <Button type="submit" variant="primary" disabled={saving}>{saving ? 'Saving...' : 'Save storage · applies now'}</Button>
           {storage?.configured && <Button type="button" className="text-status-conflict" disabled={clearing} onClick={() => setConfirmClear(true)}><Trash2 size={15} aria-hidden="true" />Remove</Button>}
         </div>
       </form>

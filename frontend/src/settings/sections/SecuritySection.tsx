@@ -68,7 +68,7 @@ export const SecuritySection = ({ hasPin }: { hasPin: boolean }) => {
         <SettingsCard title="Turn on PIN" caption="4 to 6 digits. Stored as a salted hash.">
           <div className="flex flex-wrap items-end gap-2">
             <div className="w-[220px]"><Field label="New PIN"><PinInput label="New PIN" value={newPin} onChange={setNewPin} onEnter={turnOn} /></Field></div>
-            <Button variant="primary" onClick={turnOn} disabled={setting}>{setting ? 'Saving…' : 'Turn on PIN'}</Button>
+            <Button variant="primary" onClick={turnOn} disabled={setting}>{setting ? 'Saving…' : 'Turn on PIN · applies now'}</Button>
           </div>
         </SettingsCard>
       )}
@@ -79,7 +79,7 @@ export const SecuritySection = ({ hasPin }: { hasPin: boolean }) => {
             <Field label="Current PIN"><PinInput label="Current PIN" value={currentPin} onChange={setCurrentPin} /></Field>
             <Field label="New PIN"><PinInput label="New PIN" value={newPin} onChange={setNewPin} onEnter={change} /></Field>
           </div>
-          <div className="mt-4 flex gap-2"><Button variant="ghost" onClick={() => { setChangeOpen(false); setNote(null); }}>Cancel</Button><Button variant="primary" onClick={change} disabled={changing}>{changing ? 'Changing…' : 'Change PIN'}</Button></div>
+          <div className="mt-4 flex gap-2"><Button variant="ghost" onClick={() => { setChangeOpen(false); setNote(null); }}>Cancel</Button><Button variant="primary" onClick={change} disabled={changing}>{changing ? 'Changing…' : 'Change PIN · applies now'}</Button></div>
         </SettingsCard>
       )}
 
@@ -87,7 +87,7 @@ export const SecuritySection = ({ hasPin }: { hasPin: boolean }) => {
         <SettingsCard title="Turn off PIN" caption="Removes the lock for access outside Tailscale." danger>
           <div className="flex flex-wrap items-end gap-2">
             <div className="w-[220px]"><Field label="Current PIN"><PinInput label="Current PIN to turn off" value={removeCurrent} onChange={setRemoveCurrent} /></Field></div>
-            <Button variant="danger" onClick={() => (PIN.test(removeCurrent) ? setConfirmOff(true) : setNote({ ok: false, text: 'Enter the current PIN.' }))} disabled={removing}>{removing ? 'Turning off…' : 'Turn off PIN'}</Button>
+            <Button variant="danger" onClick={() => (PIN.test(removeCurrent) ? setConfirmOff(true) : setNote({ ok: false, text: 'Enter the current PIN.' }))} disabled={removing}>{removing ? 'Turning off…' : 'Turn off PIN · applies now'}</Button>
           </div>
         </SettingsCard>
       )}

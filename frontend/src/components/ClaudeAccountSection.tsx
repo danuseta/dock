@@ -91,12 +91,12 @@ export const ClaudeAccountSection: React.FC = () => {
                   <small className="block text-[0.68rem] text-muted-foreground">{usageSource(account)}</small>
                   {account.status === 'rejected' && <small className="block text-[0.68rem] font-bold text-status-conflict">{blockedUntil(account, now)}</small>}
                   {account.status === 'allowed_warning' && <small className="block text-[0.68rem] font-bold text-status-warn">Near the limit</small>}</span>
-                {!account.active && <Button size="sm" className="ml-auto hidden max-[760px]:inline-flex" disabled={switching} onClick={() => void run(() => switchAccount({ variables: { name: account.name } }))}><ArrowRightLeft size={14} aria-hidden="true" />Use</Button>}
+                {!account.active && <Button size="sm" className="ml-auto hidden max-[760px]:inline-flex" disabled={switching} onClick={() => void run(() => switchAccount({ variables: { name: account.name } }))}><ArrowRightLeft size={14} aria-hidden="true" />Use · applies now</Button>}
               </span>
               <Meter label="5h" window={account.fiveHour} seen={Boolean(account.seenAt || account.sevenDay)} now={now} />
               <Meter label="7d" window={account.sevenDay} seen={Boolean(account.seenAt || account.fiveHour)} now={now} />
               <span className="justify-self-end max-[760px]:hidden">
-                {!account.active && <Button size="sm" disabled={switching} onClick={() => void run(() => switchAccount({ variables: { name: account.name } }))}><ArrowRightLeft size={14} aria-hidden="true" />Use</Button>}
+                {!account.active && <Button size="sm" disabled={switching} onClick={() => void run(() => switchAccount({ variables: { name: account.name } }))}><ArrowRightLeft size={14} aria-hidden="true" />Use · applies now</Button>}
               </span>
             </li>
           ))}

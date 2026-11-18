@@ -80,7 +80,7 @@ export const ElevenLabsKeysSection: React.FC = () => {
       <form className="flex flex-wrap items-end gap-2" onSubmit={handleAdd}>
         <label className="min-w-[140px] flex-1"><span className="mb-1 block text-sm font-medium">Name</span><Input value={name} onChange={(event) => setName(event.target.value)} placeholder="suryo" maxLength={40} pattern="[A-Za-z0-9._\-]+" title="Letters, digits, dot, dash or underscore" required /></label>
         <label className="min-w-[220px] flex-[2]"><span className="mb-1 block text-sm font-medium">Key</span><Input type="password" autoComplete="off" value={key} onChange={(event) => setKey(event.target.value)} placeholder="sk_..." maxLength={200} required /></label>
-        <Button type="submit" variant="primary" disabled={adding || !name.trim() || !key.trim()}>{adding ? 'Adding...' : 'Add key'}</Button>
+        <Button type="submit" variant="primary" disabled={adding || !name.trim() || !key.trim()}>{adding ? 'Adding...' : 'Add key · applies now'}</Button>
       </form>
       {actionError && <p className="mt-3 text-pretty text-sm text-status-conflict" role="alert">{actionError}</p>}
       <ConfirmDialog open={Boolean(removeTarget)} busy={removing} title={`Remove ${removeTarget ?? 'the key'}?`} description="Demo videos stop using this key on both DOCKs." confirmLabel="Remove" busyLabel="Removing…" onConfirm={async () => { if (removeTarget) await run(() => removeKey({ variables: { name: removeTarget } }), 'Failed to remove the key'); setRemoveTarget(null); }} onCancel={() => setRemoveTarget(null)} />

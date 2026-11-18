@@ -6,14 +6,14 @@ import { changedKeys, savedValues, sectionErrors, sectionFromSearch, sectionInpu
 const laptop = visibleSections('laptop');
 const workspace = visibleSections('workspace');
 
-test('the rail has three groups, and a workspace DOCK has no calendar', () => {
-  assert.deepStrictEqual([...new Set(laptop.map((section) => section.group))], ['Preferences', 'Integrations', 'Agents']);
+test('the rail has four groups, and a workspace DOCK has no calendar', () => {
+  assert.deepStrictEqual([...new Set(laptop.map((section) => section.group))], ['You', 'Connections', 'Automation', 'Messages & plugins']);
   assert.ok(laptop.some((section) => section.id === 'calendar'));
   assert.ok(!workspace.some((section) => section.id === 'calendar'));
 });
 
-test('Claude account, Planning flow and Sous flow sit in Agents on a workspace DOCK, which runs the turns and Planning; a laptop DOCK has none of them', () => {
-  assert.deepStrictEqual(workspace.filter((section) => section.group === 'Agents').map((section) => section.id), ['tokens', 'demo', 'claude', 'planflow', 'sousflow', 'judge']);
+test('Planning flow, Sous flow and Judge sit in Automation on a workspace DOCK, which runs the turns and Planning; a laptop DOCK has none of them', () => {
+  assert.deepStrictEqual(workspace.filter((section) => section.group === 'Automation').map((section) => section.id), ['review', 'planflow', 'sousflow', 'judge']);
   assert.ok(!laptop.some((section) => section.id === 'claude' || section.id === 'planflow' || section.id === 'sousflow' || section.id === 'judge'));
   assert.strictEqual(sectionFromSearch('?section=sousflow', workspace), 'sousflow');
   assert.strictEqual(sectionFromSearch('?section=claude', workspace), 'claude');
@@ -33,7 +33,7 @@ test('saved values start secrets blank and show a whole-minute interval in minut
   const saved = savedValues({ serviceHealthRefreshSeconds: 120, hasJiraApiToken: true, jiraUrl: 'x.atlassian.net' });
   assert.deepStrictEqual(saved.general, { healthValue: '2', healthUnit: 'minutes' });
   assert.strictEqual(saved.jira.jiraApiToken, '');
-  assert.strictEqual(saved.discord.discordMessageTemplate, DEFAULT_DISCORD_MESSAGE_TEMPLATE);
+  assert.strictEqual(saved.messages.discordMessageTemplate, DEFAULT_DISCORD_MESSAGE_TEMPLATE);
   assert.deepStrictEqual(savedValues({ serviceHealthRefreshSeconds: 90 }).general, { healthValue: '90', healthUnit: 'seconds' });
 });
 
@@ -45,7 +45,7 @@ test('a section sends only its own keys, and General sends seconds', () => {
 test('errors belong to their own section only', () => {
   const values = savedValues({});
   assert.strictEqual(sectionErrors('general', { healthValue: '3', healthUnit: 'seconds' }).length, 1);
-  assert.strictEqual(sectionErrors('discord', { ...values.discord, discordMessageTemplate: '{{foo}}' }).length, 1);
+  assert.strictEqual(sectionErrors('messages', { ...values.messages, discordMessageTemplate: '{{foo}}' }).length, 1);
   assert.deepStrictEqual(sectionErrors('jira', values.jira), [], 'a bad Discord template does not block Jira');
 });
 
@@ -63,5 +63,5 @@ test('a rail dot comes from saved data, never from what is still being typed', (
   assert.strictEqual(sectionStatus('discord', {}, { ...extra, dirty: true }), 'unsaved');
   assert.strictEqual(sectionStatus('general', {}, extra), null, 'General has nothing to be connected');
   assert.strictEqual(sectionStatus('calendar', { googleCalendarConnected: true, googleCalendarError: 'revoked' }, extra), 'bad');
-  assert.strictEqual(sectionStatus('demo', {}, { ...extra, demoStorage: true }), 'ok');
+  assert.strictEqual(sectionStatus('plugins', {}, { ...extra, demoStorage: true }), 'ok');
 });
