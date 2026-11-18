@@ -240,6 +240,10 @@ export function createOrchestratorIngestRouter(
     if (machine !== CHAT_MACHINE) throw new OrchestratorInputError(`Guild Master runs on ${CHAT_MACHINE} only`);
     return chat.gmNonces.consume(body);
   }));
+  router.post('/chat/gm/verify', small, handle(async (body, _signal, machine) => {
+    if (machine !== CHAT_MACHINE) throw new OrchestratorInputError(`Guild Master runs on ${CHAT_MACHINE} only`);
+    return chat.gmVerify(body);
+  }));
   router.post('/chat/gm/proposal', express.json({ limit: '512kb' }), handle((body, _signal, machine) => chat.gmPropose(body, machine)));
   router.post('/chat/wait', small, handle((body, signal, machine) => chat.wait(body, signal, machine)));
   router.post('/chat/ask', small, handle((body, _signal, machine) => chat.ask(body, machine)));

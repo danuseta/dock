@@ -123,6 +123,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'elevenLabsQuota',
       'githubRepos',
       'guildMasterLog',
+      'guildMasterParty',
       'ingestTokens',
       'jiraProjects',
       'judgeDay',

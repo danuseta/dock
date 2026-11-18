@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { ClaudeTicketUsage } from './claude-usage';
 import { FAILURE_TYPES, OrchestratorInputError, type LedgerFailure, type LedgerRounds } from './orchestrator';
 
@@ -81,6 +81,12 @@ export function parseGmCron(input: unknown): Record<string, string> | null {
   return out;
 }
 
+/** A Guild Master may not clear the labels (the cron would take any ticket); a rollback may put an empty value back. */
+function gmCronAsked(values: Record<string, string> | null, rollback: boolean) {
+  if (!rollback && values && values.labels !== undefined && values.labels.trim() === '') throw new OrchestratorInputError("Clearing the cron labels is the owner's to do");
+  return values;
+}
+
 /** The cron config with the confirmed fields put in, as the cron's own parser reads them; that parser still checks every value. */
 export function withGmCron(current: object, values: Record<string, string>): Record<string, unknown> {
   const next: Record<string, unknown> = { ...current };
@@ -96,6 +102,9 @@ export function withGmCron(current: object, values: Record<string, string>): Rec
   }
   return next;
 }
+
+/** What the owner reads for an empty cron field: no labels takes any ticket, no end date runs on. */
+export const gmCronShow = (key: string, value: string) => (value !== '' ? value : key === 'labels' ? '(any ticket)' : key === 'activeUntil' ? '(no end)' : key === 'activeFrom' ? '(no start)' : '');
 
 export type GmWriteTarget = 'settings' | 'cron';
 
@@ -127,7 +136,7 @@ export function parseGmProposal(input: unknown) {
       sha256: createHash('sha256').update(input.pending).digest('hex'),
       summary: change.summary.slice(0, 300),
       diff: change.diff.slice(0, 20_000),
-      values: parseGmCron({ values: change.type === 'cron' ? change.values : change.cron }),
+      values: gmCronAsked(parseGmCron({ values: change.type === 'cron' ? change.values : change.cron }), change.type === 'rollback'),
       target: 'cron' as GmWriteTarget,
       rollback: change.type === 'rollback',
     };
@@ -195,6 +204,11 @@ export interface GmLogEntry {
   backup: string;
   rollbackOf: number | null;
   rolledBack: boolean;
+  /** The kit could not verify the entry's signature with the log key. */
+  unverified: boolean;
+  /** The ticket and the signed Party lines of a party entry. */
+  ticket: string | null;
+  party: string[] | null;
   /** The settings a rollback of this entry writes back (from its backup); null for an agent entry. Not sent to the page. */
   restoreValues: Record<string, string> | null;
 }
@@ -216,9 +230,25 @@ export function parseGmEntry(input: unknown): GmLogEntry {
     backup: text(input.backup, 100),
     rollbackOf: Number.isInteger(input.rollbackOf) ? Number(input.rollbackOf) : null,
     rolledBack: input.rolledBack === true,
+    unverified: input.unverified !== false,
+    ticket: typeof input.ticket === 'string' && /^[A-Z][A-Z0-9]{0,9}-\d{1,7}$/.test(input.ticket) ? input.ticket : null,
+    party: Array.isArray(input.party) && input.party.length <= 5 && input.party.every((line) => typeof line === 'string' && line.length <= 120) ? input.party as string[] : null,
     restoreValues: isRecord(input.restoreValues) && Object.values(input.restoreValues).every((value) => typeof value === 'string')
       ? input.restoreValues as Record<string, string> : null,
   };
+}
+
+/** The newest signed, not rolled back Party entry for a ticket, as the Contract may show it; null when there is none. */
+export function gmVerifiedParty(entries: GmLogEntry[], key: string) {
+  const newest = entries.filter((entry) => entry.type === 'party' && entry.kind === 'change' && entry.ticket === key).sort((a, b) => b.id - a.id)[0];
+  return newest && !newest.rolledBack && !newest.unverified && newest.party ? { log: newest.id, lines: newest.party } : null;
+}
+
+/** Whether a manager log row carries the signature the kit makes with DOCK's log key; party-check.cjs asks before a runner trusts a Party. */
+export function gmMacValid(key: string, row: unknown) {
+  if (!isRecord(row) || typeof row.mac !== 'string' || !/^[0-9a-f]{64}$/.test(row.mac) || !Number.isInteger(row.id)) return false;
+  const expected = createHmac('sha256', key).update(JSON.stringify({ ...row, mac: undefined })).digest('hex');
+  return timingSafeEqual(Buffer.from(row.mac), Buffer.from(expected));
 }
 
 export function parseGmRollback(input: unknown): GmLogEntry {

@@ -1422,7 +1422,13 @@ export const GET_AGENT_LOOKS = gql`
 
 export const GET_GUILD_MASTER_LOG = gql`
   query GuildMasterLog {
-    guildMasterLog { id at by sessionId kind target summary diff backup rollbackOf rolledBack }
+    guildMasterLog { id at by sessionId kind target summary diff backup rollbackOf rolledBack unverified }
+  }
+`;
+
+export const GET_GUILD_MASTER_PARTY = gql`
+  query GuildMasterParty($key: String!) {
+    guildMasterParty(key: $key) { log lines }
   }
 `;
 

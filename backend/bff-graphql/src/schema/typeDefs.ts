@@ -1389,6 +1389,14 @@ export const typeDefs = gql`
     backup: String!
     rollbackOf: Int
     rolledBack: Boolean!
+    """True when the entry's signature does not hold: it was not written by Guild Master."""
+    unverified: Boolean!
+  }
+
+  """The Party a ticket's Contract may show as written by Guild Master: the newest signed, not rolled back Party entry for it."""
+  type GuildMasterParty {
+    log: Int!
+    lines: [String!]!
   }
 
   type LibraryAgentDetail {
@@ -2333,6 +2341,7 @@ export const typeDefs = gql`
     libraryAgents(machine: String): [LibraryAgent!]!
     libraryAgent(slug: String!, machine: String): LibraryAgentDetail!
     guildMasterLog: [GuildMasterLogEntry!]!
+    guildMasterParty(key: String!): GuildMasterParty
     demoVideos: DemoVideoList!
     demoStorage: DemoStorage!
     devServers: DevServers!
