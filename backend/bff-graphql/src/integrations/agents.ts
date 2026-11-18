@@ -212,9 +212,9 @@ export class AgentBridge {
     return this.ask(machine, 'delete', { slug: agentSlug(slug) }, saveResult);
   }
 
-  /** The manager log every Guild Master session of the machine writes to, newest first. */
-  async gmLog(machine: string) {
-    return this.ask(machine, 'gm-log', {}, (result) => (Array.isArray(result) ? result.map(parseGmEntry) : []));
+  /** The manager log every Guild Master session of the machine writes to, newest first; with the log key the kit marks unsigned entries. */
+  async gmLog(machine: string, key?: string) {
+    return this.ask(machine, 'gm-log', key ? { key } : {}, (result) => (Array.isArray(result) ? result.map(parseGmEntry) : []));
   }
 
   /** Restores the backup of one manager log entry with the nonce DOCK minted for it and the log key; the rollback is logged too. */

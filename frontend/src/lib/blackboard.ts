@@ -34,7 +34,7 @@ export function groupFiles(files: BlackboardFile[]): Array<{ folder: string; fil
 /** The "generated, do not edit" marker status.cjs puts on top is an HTML comment; the page says it in its own note. */
 export const withoutComments = (text: string) => text.replace(/<!--[\s\S]*?-->\s*/g, '');
 
-export interface ContractParty { mode: 'light' | 'full' | null; worker: string | null; verify: string | null; skip: string | null; by: string | null; log: number | null }
+export interface ContractParty { mode: 'light' | 'full' | null; worker: string | null; verify: string | null; skip: string | null; by: string | null; log: number | null; lines: string[] }
 
 /** The "## Party" block Guild Master writes into contract.md: its field lines right under the heading; null when there is none. */
 export function partyOf(text: string): ContractParty | null {
@@ -42,10 +42,12 @@ export function partyOf(text: string): ContractParty | null {
   const start = lines.findIndex((line) => /^## Party\s*$/.test(line));
   if (start < 0) return null;
   const fields: Record<string, string> = {};
+  const block: string[] = [];
   for (const line of lines.slice(start + 1)) {
     const hit = /^(mode|worker|verify|skip|by): (.+)$/.exec(line.trim());
     if (!hit) break;
     fields[hit[1]] = hit[2].trim();
+    block.push(line.trim());
   }
   const log = /log #(\d+)/.exec(fields.by ?? '');
   return {
@@ -55,7 +57,13 @@ export function partyOf(text: string): ContractParty | null {
     skip: fields.skip ?? null,
     by: fields.by ?? null,
     log: log ? Number(log[1]) : null,
+    lines: block,
   };
+}
+
+/** The Contract says "Written by Guild Master" only when DOCK verified the signed log entry and the block is exactly its lines. */
+export function partySigned(party: ContractParty | null, verified: { log: number; lines: string[] } | null | undefined): boolean {
+  return Boolean(party && verified && party.log === verified.log && JSON.stringify(party.lines) === JSON.stringify(verified.lines));
 }
 
 /** The newest "Scout:" line the light runner's scout appended to contract.md. */

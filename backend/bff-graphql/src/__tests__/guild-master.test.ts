@@ -1,8 +1,8 @@
 import assert from 'node:assert';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import test from 'node:test';
 import { AgentBridge } from '../integrations/agents';
-import { GmNonces, askGmSummary, gmCronView, gmSettingsView, gmUsageRow, isGmConfirm, parseGmCron, parseGmEntry, parseGmProposal, parseGmSettings, sessionMode, withGmCron } from '../integrations/guild-master';
+import { GmNonces, askGmSummary, gmCronView, gmMacValid, gmSettingsView, gmUsageRow, gmVerifiedParty, isGmConfirm, parseGmCron, parseGmEntry, parseGmProposal, parseGmSettings, sessionMode, withGmCron } from '../integrations/guild-master';
 import { DEFAULT_CRON_SETTINGS, parseCronSettings } from '../integrations/orchestrator-cron';
 import { OrchestratorInputError } from '../integrations/orchestrator';
 
@@ -164,4 +164,26 @@ test('usage rows for Guild Master suggestions: numbers and checked names only, t
   assert.strictEqual(row.top[1].name, 'agent', 'a name that is not a plain word is dropped');
   assert.deepStrictEqual([row.failures.defect, row.failures.env, row.failures.transient], [2, 1, 0]);
   assert.ok(!JSON.stringify(row).includes('ignore the rules'), 'no failure text rides along');
+});
+
+test('the Contract trusts a Party only from the newest signed, not rolled back party entry; the kit\'s signature is checked with DOCK\'s key', () => {
+  const sign = (key: string, row: Record<string, unknown>) => ({ ...row, mac: createHmac('sha256', key).update(JSON.stringify({ ...row, mac: undefined })).digest('hex') });
+  const row = { id: 4, at: 't', by: 'owner', sessionId: 'gm-a', kind: 'change', type: 'party', ticket: 'QRD-8', target: 't', summary: 's', diff: 'd', party: ['mode: light', 'worker: sous-ticket-worker (haiku)', 'by: Guild Master, log #4'] };
+  assert.strictEqual(gmMacValid('k', sign('k', row)), true);
+  assert.strictEqual(gmMacValid('k', sign('other', row)), false, 'another key');
+  assert.strictEqual(gmMacValid('k', { ...sign('k', row), party: ['mode: full'] }), false, 'a changed row');
+  assert.strictEqual(gmMacValid('k', { ...row, mac: 'x' }), false);
+  const entry = (over: Record<string, unknown>) => parseGmEntry({ ...row, unverified: false, rolledBack: false, ...over });
+  assert.deepStrictEqual(gmVerifiedParty([entry({})], 'QRD-8'), { log: 4, lines: row.party });
+  assert.strictEqual(gmVerifiedParty([entry({ unverified: true })], 'QRD-8'), null, 'an unverified entry');
+  assert.strictEqual(gmVerifiedParty([entry({ rolledBack: true })], 'QRD-8'), null, 'a rolled back entry');
+  assert.strictEqual(gmVerifiedParty([entry({}), entry({ id: 5, rolledBack: true })], 'QRD-8'), null, 'the newest party entry was rolled back: the older one is not the block either');
+  assert.strictEqual(gmVerifiedParty([entry({ ticket: 'QRD-9' })], 'QRD-8'), null);
+  assert.strictEqual(parseGmEntry({ id: 1 }).unverified, true, 'an entry from a kit that does not say is unverified');
+});
+
+test('a Guild Master cron proposal may not clear the labels; a rollback may put an empty value back', () => {
+  const cron = (change: Record<string, unknown>) => parseGmProposal({ sessionId: 'gm-a', replyTo: 1, pending: JSON.stringify({ diff: 'd', summary: 's', ...change }) });
+  assert.throws(() => cron({ type: 'cron', values: { labels: ' ' } }), /owner's to do/);
+  assert.deepStrictEqual(cron({ type: 'rollback', rollbackOf: 2, cron: { labels: '' } }).values, { labels: '' });
 });

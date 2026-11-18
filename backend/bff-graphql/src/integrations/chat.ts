@@ -60,7 +60,7 @@ import {
   type WaitAnswer,
 } from './chat-interactions';
 import { DEFAULT_MACHINE, OrchestratorInputError, normalizeMachine, normalizeTicketKey } from './orchestrator';
-import { GM_TITLE, GmNonces, askGmSummary, isGmConfirm, parseGmProposal, sessionMode, type GmProposal } from './guild-master';
+import { GM_TITLE, GmNonces, askGmSummary, gmCronShow, gmMacValid, isGmConfirm, parseGmProposal, sessionMode, type GmProposal } from './guild-master';
 
 const GM_KEY_SETTING = 'gmLogKey';
 
@@ -1052,11 +1052,18 @@ export class ChatService {
       const view = (target === 'cron' ? (await this.gmData()).cron : await this.gmSettings()) as { values?: Record<string, string> } | null;
       const current = view?.values ?? {};
       const title = target === 'cron' ? 'Cron settings' : 'DOCK settings';
-      diff = `--- ${title}\n+++ ${title}\n${Object.entries(values).map(([key, value]) => `- ${key}: ${current[key] ?? ''}\n+ ${key}: ${value}`).join('\n')}`;
+      const show = (key: string, value: string) => (target === 'cron' ? gmCronShow(key, value) : value);
+      diff = `--- ${title}\n+++ ${title}\n${Object.entries(values).map(([key, value]) => `- ${key}: ${show(key, current[key] ?? '')}\n+ ${key}: ${show(key, value)}`).join('\n')}`;
       summary = `${rollback ? `Rollback of ${target}` : target === 'cron' ? 'Cron' : 'Settings'}: ${Object.keys(values).join(', ')}`;
     }
     this.gmProposals.set(session.id, { sha256, summary, diff, values, target, rollback, afterMessageId: Math.max(newest?.id ?? 0, proposal.replyTo), at: this.now().toISOString() });
     return { accepted: true, sha256 };
+  }
+
+  /** party-check.cjs on the chat machine: is this manager log row signed with DOCK's log key? Only the answer goes back. */
+  async gmVerify(input: unknown) {
+    const entry = isRecord(input) ? input.entry : null;
+    return { valid: gmMacValid(await this.gmKey(), entry) };
   }
 
   /** The change a Guild Master session waits on, as the owner sees it before answering. */

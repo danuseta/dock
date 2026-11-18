@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
+import { useQuery } from '@apollo/client';
 import { Crown, ExternalLink, FileSignature, Figma, Image as ImageIcon } from 'lucide-react';
 import { Markdown } from '../../chat/Markdown';
 import type { AgentRun } from '../../agents/runs';
 import type { SummaryFacts } from '../../components/ticket/useReadiness';
 import { cn } from '../../lib/cn';
 import { NOTHING_YET, hasCode, type AcTrace } from '../../lib/acTrace';
-import { contractFiles, fetchText, partyOf, scoutOf, withoutComments, type BlackboardFile } from '../../lib/blackboard';
+import { contractFiles, fetchText, partyOf, partySigned, scoutOf, withoutComments, type BlackboardFile } from '../../lib/blackboard';
+import { GET_GUILD_MASTER_PARTY } from '../../graphql/queries';
 import { isPlayableVideo } from '../../lib/demoVideos';
 import type { DraftStoryboard } from '../../lib/contractLinks';
 
@@ -27,6 +29,8 @@ export const ContractView: React.FC<{ ticket: string; files: BlackboardFile[]; r
     return () => { gone = true; };
   }, [ticket, saved?.path]);
   const party = text ? partyOf(text) : null;
+  const { data: signedData } = useQuery<{ guildMasterParty: { log: number; lines: string[] } | null }>(GET_GUILD_MASTER_PARTY, { variables: { key: ticket }, skip: !party, fetchPolicy: 'cache-and-network' });
+  const signed = partySigned(party, signedData?.guildMasterParty);
   const scout = text ? scoutOf(text) : null;
   const pulls = run?.pullRequests?.length ? run.pullRequests.map((pr) => `${pr.repo}#${pr.number}`) : trace?.pulls.map((pull) => pull.label) ?? [];
 
@@ -67,7 +71,7 @@ export const ContractView: React.FC<{ ticket: string; files: BlackboardFile[]; r
                 <span key={name} className={cn('rounded-xs border px-1.5 py-px font-mono text-[0.7rem]', name === 'mode' ? 'border-violet-400/40 text-violet-200' : name === 'skip' ? 'border-status-warn/40 text-status-warn' : 'border-border-glow text-foreground')}>{name}: {value}</span>
               ))}
             </div>
-            <p className="flex items-center gap-1 text-xs text-muted-foreground"><Crown size={11} aria-hidden="true" className="text-violet-300" />{party.log !== null ? `Written by Guild Master after the owner's "ya" · log #${party.log}` : `Not from the Guild Master log${party.by ? ` · by: ${party.by}` : ''}`} · the runner reads the mode from here</p>
+            <p className="flex items-center gap-1 text-xs text-muted-foreground"><Crown size={11} aria-hidden="true" className="text-violet-300" />{signed ? `Written by Guild Master after the owner's "ya" · log #${party.log}` : 'Not from the Guild Master log: the runner ignores it and runs full'}{signed ? ' · the runner reads the mode from here' : ''}</p>
           </>
         )
         : <p className="text-xs text-muted-foreground">Empty: every sous-ticket-runner agent is called as usual, checkpoints follow System Settings.</p>}

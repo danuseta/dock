@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import http from 'node:http';
 import fs, { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -1900,4 +1900,40 @@ test('a Guild Master turn carries the cron fields and usage numbers; DOCK draws 
   assert.throws(() => ctx.service.gmNonces.consume({ nonce: confirm.nonce, sessionId: gm.id, sha256: confirm.sha256 }, { workStart: '9' }, 'settings'), /not the settings/);
   const again = ctx.service.gmNonces.mint({ sessionId: gm.id, sha256: confirm.sha256, values: { workStart: '9' }, target: 'cron', rollback: false });
   assert.deepStrictEqual(ctx.service.gmNonces.consume({ nonce: again.nonce, sessionId: gm.id, sha256: confirm.sha256 }, { workStart: '9' }, 'cron'), { ok: true });
+});
+
+test('the Guild Master verify route answers only whether a log row is signed with DOCK\'s key, for the chat machine only; DOCK draws empty cron fields in words', async (t) => {
+  const memory = memoryStorage();
+  const chat = new ChatService(memory.storage, () => new Date(), undefined, attachmentsStub());
+  chat.gmKey = async () => 'log-key';
+  const orchestrator = new OrchestratorService(memory.storage, os.tmpdir());
+  const app = express();
+  app.use('/ingest/orchestrator', createOrchestratorIngestRouter(orchestrator, new PinRateLimiter(10, 60_000), chat));
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }));
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const tokens = { laptop: (await orchestrator.createToken('laptop')).token, workspace: (await orchestrator.createToken('workspace', 'workspace')).token };
+  const post = async (body: unknown, machine: keyof typeof tokens = 'workspace') => {
+    const r = await fetch(`http://127.0.0.1:${address.port}/ingest/orchestrator/chat/gm/verify`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${tokens[machine]}` }, body: JSON.stringify(body) });
+    return { status: r.status, body: await r.json() as { result?: unknown } };
+  };
+  const row = { id: 3, kind: 'change', type: 'party', ticket: 'QRD-8', party: ['mode: full', 'by: Guild Master, log #3'] };
+  const signed = { ...row, mac: createHmac('sha256', 'log-key').update(JSON.stringify({ ...row, mac: undefined })).digest('hex') };
+  assert.deepStrictEqual((await post({ entry: signed })).body.result, { valid: true });
+  assert.deepStrictEqual((await post({ entry: { ...signed, party: ['mode: light', 'by: Guild Master, log #3'] } })).body.result, { valid: false });
+  assert.deepStrictEqual((await post({ entry: 'nope' })).body.result, { valid: false });
+  assert.strictEqual((await post({ entry: signed }, 'laptop')).status, 400, 'only the chat machine');
+  assert.ok(!JSON.stringify((await post({ entry: signed })).body).includes('log-key'), 'the key never leaves DOCK');
+
+  const ctx = setup();
+  const caps = { ...CAPS, features: [...CAPS.features, 'gm'] };
+  ctx.service.gmData = async () => ({ cron: { values: { labels: '', activeUntil: '' } }, usage: [] });
+  const gm = await ctx.service.createSession({ mode: 'gm' });
+  await ctx.service.sendMessage(gm.id, 'cron cuma tiket qrd sampai akhir tahun', MACHINES);
+  const first = (await ctx.service.claim({ wait: 0, caps }, undefined, 'laptop') as { message: Record<string, unknown> }).message;
+  await ctx.service.delta({ sessionId: gm.id, replyTo: first.id, done: true, items: [] }, 'laptop');
+  await ctx.service.gmPropose({ sessionId: gm.id, replyTo: first.id, pending: JSON.stringify({ type: 'cron', values: { labels: 'qrd', activeUntil: '2026-12-31' }, diff: 'x', summary: 'x' }) }, 'laptop');
+  assert.strictEqual(ctx.service.gmProposal(gm.id)?.diff, '--- Cron settings\n+++ Cron settings\n- labels: (any ticket)\n+ labels: qrd\n- activeUntil: (no end)\n+ activeUntil: 2026-12-31');
 });
