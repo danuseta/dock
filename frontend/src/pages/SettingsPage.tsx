@@ -9,12 +9,12 @@ import { DemoStorageSection } from '../components/DemoStorageSection';
 import { ClaudeAccountSection } from '../components/ClaudeAccountSection';
 import { ChatDefaultsSection } from '../components/ChatDefaultsSection';
 import { normalizeCaveman, normalizeRtk } from '../chat/chatDefaults';
-import { Card, Page, Select } from '../components/ui';
+import { Card, Input, Page, Select } from '../components/ui';
 import { cn } from '../lib/cn';
 import { useDockMode } from '../lib/dockMode';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import {
-  SECTION_GROUPS, changedKeys, isDraftSection, savedValues, sectionErrors, sectionFromSearch, sectionInput, sectionStatus, visibleSections,
+  SECTION_GROUPS, changedKeys, isDraftSection, matchSections, savedValues, sectionErrors, sectionFromSearch, sectionInput, sectionStatus, visibleSections,
   type DraftSectionId, type SavedSettings, type SectionId, type SectionStatus, type SectionValues, type TestResult, type TestedSection,
 } from '../settings/sections';
 import { SaveBar, type SaveOutcome } from '../settings/SettingsParts';
@@ -24,6 +24,8 @@ import { SecuritySection } from '../settings/sections/SecuritySection';
 import { JiraSection } from '../settings/sections/JiraSection';
 import { GitHubSection } from '../settings/sections/GitHubSection';
 import { DiscordSection } from '../settings/sections/DiscordSection';
+import { DiscordMessagesSection } from '../settings/sections/DiscordMessagesSection';
+import { ReviewSection } from '../settings/sections/ReviewSection';
 import { CalendarSection, type GoogleReturn } from '../settings/sections/CalendarSection';
 import { PlanningFlowSection } from '../settings/sections/PlanningFlowSection';
 import { JudgeSection } from '../settings/sections/JudgeSection';
@@ -49,6 +51,7 @@ const SettingsPage: React.FC = () => {
   const mode = useDockMode();
   const sections = visibleSections(mode);
   const [active, setActive] = useState<SectionId>(() => sectionFromSearch(window.location.search, sections));
+  const [query, setQuery] = useState('');
   const [googleReturn] = useState(readGoogleReturn);
   const [drafts, setDrafts] = useState<Partial<Record<DraftSectionId, SectionValues>>>({});
   const [saving, setSaving] = useState<DraftSectionId | null>(null);
@@ -131,7 +134,8 @@ const SettingsPage: React.FC = () => {
   const setter = (id: DraftSectionId) => (key: string, value: string) => setFields(id, { [key]: value });
   const tested = (id: TestedSection) => (result: TestResult) => setTests((current) => ({ ...current, [id]: result }));
   const statusOf = (id: SectionId) => sectionStatus(id, settings, { dirty: changesOf(id) > 0, tests, demoStorage: Boolean(storageData?.demoStorage?.configured) });
-  const sideText = (id: SectionId) => (id === 'security' ? (settings.hasMasterPin ? 'PIN on' : 'PIN off') : id === 'tokens' ? String(tokenData?.ingestTokens?.length ?? 0) : null);
+  const sideText = (id: SectionId) => (id === 'security' ? (settings.hasMasterPin ? 'PIN on' : 'PIN off') : id === 'machines' ? String(tokenData?.ingestTokens?.length ?? 0) : null);
+  const matched = matchSections(sections, query);
   const info = sections.find((section) => section.id === active) ?? sections[0];
   const chat = valuesOf('chat');
 
@@ -156,11 +160,13 @@ const SettingsPage: React.FC = () => {
 
       <div className="grid grid-cols-[220px_minmax(0,1fr)] items-start gap-7 max-[760px]:grid-cols-1">
         <div className="hidden max-[760px]:block">
-          <Select aria-label="Settings section" value={active} onValueChange={(value) => setActive(value as SectionId)} options={sections.map((section) => ({ value: section.id, label: `${section.group} · ${section.label}${changesOf(section.id) ? ' · unsaved' : ''}` }))} />
+          <Select aria-label="Settings section" value={active} onValueChange={(value) => setActive(value as SectionId)} options={matched.map((section) => ({ value: section.id, label: `${section.group} · ${section.label}${changesOf(section.id) ? ' · unsaved' : ''}` }))} />
         </div>
         <aside className="sticky top-24 min-w-0 max-[760px]:hidden" aria-label="Settings sections">
+          <Input type="search" aria-label="Search settings" className="mb-4" placeholder="Search settings" value={query} onChange={(event) => setQuery(event.target.value)} />
+          {query.trim() && !matched.length && <p className="px-2 text-xs text-muted-foreground" role="status">No setting matches</p>}
           {SECTION_GROUPS.map((group) => {
-            const items = sections.filter((section) => section.group === group);
+            const items = matched.filter((section) => section.group === group);
             if (!items.length) return null;
             return (
               <div key={group} className="mb-4">
@@ -202,9 +208,11 @@ const SettingsPage: React.FC = () => {
           {active === 'jira' && mode === 'laptop' && <div className="mt-5"><RulesCard scope="merge" /></div>}
           {active === 'github' && <GitHubSection values={valuesOf('github')} set={setter('github')} settings={settings} test={tests.github} onTested={tested('github')} />}
           {active === 'discord' && <DiscordSection values={valuesOf('discord')} set={setter('discord')} settings={settings} test={tests.discord} onTested={tested('discord')} />}
+          {active === 'review' && <ReviewSection values={valuesOf('review')} set={setter('review')} />}
+          {active === 'messages' && <DiscordMessagesSection values={valuesOf('messages')} set={setter('messages')} />}
           {active === 'calendar' && <CalendarSection values={valuesOf('calendar')} set={setter('calendar')} settings={settings} dirty={changesOf('calendar') > 0} googleReturn={googleReturn} />}
-          {active === 'tokens' && <IngestTokensSection />}
-          {active === 'demo' && <div className="flex flex-col gap-5"><ElevenLabsKeysSection /><DemoStorageSection /></div>}
+          {active === 'machines' && <IngestTokensSection />}
+          {active === 'plugins' && <div className="flex flex-col gap-5"><ElevenLabsKeysSection /><DemoStorageSection /></div>}
           {active === 'claude' && <ClaudeAccountSection />}
           {active === 'planflow' && <PlanningFlowSection />}
           {active === 'sousflow' && <SousFlowSection />}

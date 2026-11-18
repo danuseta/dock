@@ -17,12 +17,12 @@ test('the newest auto review of a ticket gives its badge; every status has a lab
   for (const status of ['running', 'deciding', 'lgtm', 'clean', 'blockers', 'failed']) assert.ok(AUTO_REVIEW_LABEL[status], status);
 });
 
-test('both auto review settings are off until turned on, and the Discord save sends them as true or false', () => {
-  const off = savedValues({}).discord;
+test('both auto review settings are off until turned on, and the Review save sends them as true or false', () => {
+  const off = savedValues({}).review;
   assert.deepEqual([off.autoReviewOnIt, off.autoLgtm], ['false', 'false']);
-  const on = sectionInput('discord', { ...savedValues({ autoReviewOnIt: true, autoLgtm: true }).discord });
+  const on = sectionInput('review', { ...savedValues({ autoReviewOnIt: true, autoLgtm: true }).review });
   assert.deepEqual([on.autoReviewOnIt, on.autoLgtm], ['true', 'true']);
-  const section = readFileSync(new URL('../settings/sections/DiscordSection.tsx', import.meta.url), 'utf8');
+  const section = readFileSync(new URL('../settings/sections/ReviewSection.tsx', import.meta.url), 'utf8');
   assert.match(section, /Review when I say on it/);
   assert.match(section, /disabled=\{values\.autoReviewOnIt !== 'true'\}/, 'auto LGTM only with auto review on');
   const agents = readFileSync(new URL('../pages/AgentsPage.tsx', import.meta.url), 'utf8');
@@ -31,9 +31,9 @@ test('both auto review settings are off until turned on, and the Discord save se
 });
 
 test('the review findings toggle is on until saved off, and a reported round marks the session', () => {
-  assert.equal(savedValues({}).discord.reviewFindingsToTask, 'true');
-  assert.equal(savedValues({ reviewFindingsToTask: false }).discord.reviewFindingsToTask, 'false');
-  assert.equal(sectionInput('discord', { ...savedValues({}).discord }).reviewFindingsToTask, 'true');
+  assert.equal(savedValues({}).review.reviewFindingsToTask, 'true');
+  assert.equal(savedValues({ reviewFindingsToTask: false }).review.reviewFindingsToTask, 'false');
+  assert.equal(sectionInput('review', { ...savedValues({}).review }).reviewFindingsToTask, 'true');
   assert.deepEqual([signalOf('REVIEW_REVISED').label, signalOf('REVIEW_REVISED').rank], ['REVISED', 5]);
   assert.deepEqual([signalOf('REVIEW_ROUND_FAILED').label, signalOf('REVIEW_ROUND_FAILED').rank], ['FINDINGS', 3]);
   assert.equal(revisedRound({ reviewRound: { status: 'reported', summary: 'QRD-1: 1 valid, pushed' } })?.summary, 'QRD-1: 1 valid, pushed');

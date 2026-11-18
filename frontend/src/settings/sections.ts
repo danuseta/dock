@@ -1,13 +1,13 @@
-import { Bell, CalendarDays, Film, Gavel, GitBranch, KeyRound, LayoutPanelLeft, Lock, MessageSquare, MessagesSquare, Route, ShieldCheck, Users, Workflow, type LucideIcon } from 'lucide-react';
+import { Bell, CalendarDays, Gavel, GitBranch, LayoutPanelLeft, Lock, MessageSquare, Mail, MessagesSquare, Monitor, Plug, Route, ScanSearch, ShieldCheck, Users, Workflow, type LucideIcon } from 'lucide-react';
 import { normalizeCaveman, normalizeRtk } from '../chat/chatDefaults';
 import { hasPage, type DockMode } from '../lib/dockMode';
 import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, getDiscordTemplateError } from '../lib/discordTemplate';
 import { parseNotificationPrefs, prefsToValues, valuesToPrefs } from '../lib/notificationPrefs';
 import { isValidServiceHealthRefreshSeconds, normalizeServiceHealthRefreshSeconds } from '../lib/serviceHealthRefresh';
 
-export type SectionId = 'general' | 'chat' | 'notifications' | 'security' | 'jira' | 'github' | 'discord' | 'calendar' | 'tokens' | 'demo' | 'claude' | 'planflow' | 'sousflow' | 'judge';
-export type DraftSectionId = 'general' | 'chat' | 'notifications' | 'jira' | 'github' | 'discord' | 'calendar';
-export type SectionGroup = 'Preferences' | 'Integrations' | 'Agents';
+export type SectionId = 'general' | 'chat' | 'notifications' | 'security' | 'jira' | 'github' | 'discord' | 'calendar' | 'machines' | 'claude' | 'review' | 'planflow' | 'sousflow' | 'judge' | 'messages' | 'plugins';
+export type DraftSectionId = 'general' | 'chat' | 'notifications' | 'jira' | 'github' | 'discord' | 'calendar' | 'review' | 'messages';
+export type SectionGroup = 'You' | 'Connections' | 'Automation' | 'Messages & plugins';
 export type SectionValues = Record<string, string>;
 export type SectionStatus = 'ok' | 'bad' | 'off' | 'unsaved' | null;
 export type TestedSection = 'jira' | 'github' | 'discord';
@@ -60,26 +60,54 @@ export interface SavedSettings {
   notificationPrefs?: string | null;
 }
 
-export const SECTION_GROUPS: SectionGroup[] = ['Preferences', 'Integrations', 'Agents'];
+export const SECTION_GROUPS: SectionGroup[] = ['You', 'Connections', 'Automation', 'Messages & plugins'];
+
+const LEGACY_SECTION_IDS: Record<string, SectionId> = { demo: 'plugins', tokens: 'machines' };
 
 export const SETTINGS_SECTIONS: SectionInfo[] = [
-  { id: 'general', label: 'General', title: 'General', description: 'How DOCK looks on this device, and how often live data refreshes.', icon: LayoutPanelLeft, group: 'Preferences' },
-  { id: 'chat', label: 'Chat', title: 'Chat', description: 'Defaults for a chat turn that sets no value of its own.', icon: MessagesSquare, group: 'Preferences' },
-  { id: 'notifications', label: 'Notifications', title: 'Notifications', description: 'Which events make a sound and a notification, how loud, and with which sound. Shared by every device.', icon: Bell, group: 'Preferences' },
-  { id: 'security', label: 'Security', title: 'Security', description: 'A fallback PIN for access that does not come through Tailscale. Every action here saves immediately.', icon: Lock, group: 'Preferences' },
-  { id: 'jira', label: 'Jira', title: 'Jira Cloud', description: 'The account DOCK reads tickets with, and the projects on the board.', icon: ShieldCheck, group: 'Integrations' },
-  { id: 'github', label: 'GitHub', title: 'GitHub', description: 'The token DOCK reads pull requests with, and the repositories it watches.', icon: GitBranch, group: 'Integrations' },
-  { id: 'discord', label: 'Discord', title: 'Discord', description: 'Where ticket summaries are posted, and how they read.', icon: MessageSquare, group: 'Integrations' },
-  { id: 'calendar', label: 'Calendar', title: 'Google Calendar', description: 'Read-only access for the Calendar page.', icon: CalendarDays, group: 'Integrations' },
-  { id: 'tokens', label: 'Ingest tokens', title: 'Ingest tokens', description: "What lets a machine's kit report to DOCK. Every action here saves immediately.", icon: KeyRound, group: 'Agents' },
-  { id: 'demo', label: 'Demo videos', title: 'Demo videos', description: 'The narration keys and the bucket a demo video goes to, shared by both DOCKs. Every action here saves immediately.', icon: Film, group: 'Agents' },
-  { id: 'claude', label: 'Claude account', title: 'Claude account', description: "Which Claude account this workspace's chat and cron turns use, and when to move to the next one. Every action here saves immediately.", icon: Users, group: 'Agents' },
-  { id: 'planflow', label: 'Planning flow', title: 'Planning flow', description: 'The planning stages from Jira to Publish: which run, who holds each, and which needs approval. Every action here saves immediately.', icon: Workflow, group: 'Agents' },
-  { id: 'sousflow', label: 'Sous flow', title: 'Sous flow', description: 'The sous stages from picking the ticket to the Jira status: which run, and after each one whether sous goes on, asks first or stops. Every action here saves immediately.', icon: Route, group: 'Agents' },
-  { id: 'judge', label: 'Judge', title: 'Judge', description: 'The agent that reads the sprint\'s sessions for the retro: on or off (off by default), its Claude account, its windows and when a day\'s answer is due.', icon: Gavel, group: 'Agents' },
+  { id: 'general', label: 'General', title: 'General', description: 'How DOCK looks on this device, and how often live data refreshes.', icon: LayoutPanelLeft, group: 'You' },
+  { id: 'chat', label: 'Chat', title: 'Chat', description: 'Defaults for a chat turn that sets no value of its own.', icon: MessagesSquare, group: 'You' },
+  { id: 'notifications', label: 'Notifications', title: 'Notifications', description: 'Which events make a sound and a notification, how loud, and with which sound. Shared by every device.', icon: Bell, group: 'You' },
+  { id: 'security', label: 'Security', title: 'Security', description: 'A fallback PIN for access that does not come through Tailscale.', icon: Lock, group: 'You' },
+  { id: 'claude', label: 'Claude account', title: 'Claude account', description: "Which Claude account this workspace's chat and cron turns use, and when to move to the next one.", icon: Users, group: 'You' },
+  { id: 'jira', label: 'Jira', title: 'Jira Cloud', description: 'The account DOCK reads tickets with, and the projects on the board.', icon: ShieldCheck, group: 'Connections' },
+  { id: 'github', label: 'GitHub', title: 'GitHub', description: 'The token DOCK reads pull requests with, and the repositories it watches.', icon: GitBranch, group: 'Connections' },
+  { id: 'discord', label: 'Discord', title: 'Discord', description: 'The webhook and the bot DOCK reaches Discord with.', icon: MessageSquare, group: 'Connections' },
+  { id: 'calendar', label: 'Calendar', title: 'Google Calendar', description: 'Read-only access for the Calendar page.', icon: CalendarDays, group: 'Connections' },
+  { id: 'machines', label: 'Machines', title: 'Machines', description: "What lets a machine's kit report to DOCK.", icon: Monitor, group: 'Connections' },
+  { id: 'review', label: 'Review', title: 'Review', description: 'What DOCK does on its own when you say on it in a pr-review thread.', icon: ScanSearch, group: 'Automation' },
+  { id: 'planflow', label: 'Planning flow', title: 'Planning flow', description: 'The planning stages from Jira to Publish: which run, who holds each, and which needs approval. Every action here saves immediately.', icon: Workflow, group: 'Automation' },
+  { id: 'sousflow', label: 'Sous flow', title: 'Sous flow', description: 'The sous stages from picking the ticket to the Jira status: which run, and after each one whether sous goes on, asks first or stops. Every action here saves immediately.', icon: Route, group: 'Automation' },
+  { id: 'judge', label: 'Judge', title: 'Judge', description: "The agent that reads the sprint's sessions for the retro: on or off (off by default), its Claude account, its windows and when a day's answer is due.", icon: Gavel, group: 'Automation' },
+  { id: 'messages', label: 'Discord messages', title: 'Discord messages', description: 'How the ticket summary DOCK posts to Discord reads.', icon: Mail, group: 'Messages & plugins' },
+  { id: 'plugins', label: 'Plugins', title: 'Plugins', description: 'The narration keys and the bucket a demo video goes to, shared by both DOCKs.', icon: Plug, group: 'Messages & plugins' },
 ];
 
-export const DRAFT_SECTIONS: DraftSectionId[] = ['general', 'chat', 'notifications', 'jira', 'github', 'discord', 'calendar'];
+const SECTION_FIELDS: Record<SectionId, string[]> = {
+  general: ['Navigation layout', 'Start with a small sidebar', 'Service health refresh', 'Refresh every'],
+  chat: ['Model', 'Effort', 'Mode', 'RTK', 'Caveman', 'Turns at once', 'Answers to sous'],
+  notifications: ['Events', 'Volume', 'Sound'],
+  security: ['PIN', 'Turn on PIN', 'Change PIN', 'Turn off PIN'],
+  claude: ['Accounts', 'Switch account', 'Refresh usage'],
+  jira: ['Domain URL', 'User email', 'API token', 'Projects on the board', 'Parent page id', 'Planner', 'Sprint contract'],
+  github: ['Personal access token', 'Monitored repositories'],
+  discord: ['Webhook URL', 'Bot token', 'Server id', 'Your Discord user id'],
+  calendar: ['Client ID', 'Client secret', 'Calendar ID'],
+  machines: ['Ingest tokens', 'Create token', 'Kit setup'],
+  review: ['Review when I say on it', 'LGTM when the review is clean', 'Send review findings to the Task session'],
+  planflow: ['Stages', 'Skip stage', 'Approval'],
+  sousflow: ['Stages', 'Skip stage', 'After each stage'],
+  judge: ['Judge on or off', 'Judge account', 'Idle minutes', 'Answer cutoff'],
+  messages: ['Message template', 'Preview'],
+  plugins: ['ElevenLabs keys', 'Demo storage', 'Bucket'],
+};
+
+export const matchSections = (sections: SectionInfo[], query: string) => {
+  const needle = query.trim().toLowerCase();
+  return needle ? sections.filter((section) => [section.label, ...SECTION_FIELDS[section.id]].some((text) => text.toLowerCase().includes(needle))) : sections;
+};
+
+export const DRAFT_SECTIONS: DraftSectionId[] = ['general', 'chat', 'notifications', 'jira', 'github', 'discord', 'calendar', 'review', 'messages'];
 
 export const isDraftSection = (id: SectionId): id is DraftSectionId => (DRAFT_SECTIONS as SectionId[]).includes(id);
 
@@ -91,7 +119,8 @@ export const visibleSections = (mode: DockMode) => SETTINGS_SECTIONS.filter((sec
 /** `?section=` picks the section; the Google OAuth redirect (`?google=`) lands on Calendar. */
 export function sectionFromSearch(search: string, visible: SectionInfo[]): SectionId {
   const params = new URLSearchParams(search);
-  const wanted = params.get('google') ? 'calendar' : params.get('section');
+  const requested = params.get('section') ?? '';
+  const wanted = params.get('google') ? 'calendar' : LEGACY_SECTION_IDS[requested] ?? requested;
   return visible.find((section) => section.id === wanted)?.id ?? 'general';
 }
 
@@ -115,14 +144,16 @@ export function savedValues(settings: SavedSettings): Record<DraftSectionId, Sec
     github: { githubToken: '', githubRepos: settings.githubRepos || '' },
     discord: {
       discordWebhookUrl: '',
-      discordMessageTemplate: settings.discordMessageTemplate || DEFAULT_DISCORD_MESSAGE_TEMPLATE,
       discordBotToken: '',
       discordGuildId: settings.discordGuildId || '',
       discordUserId: settings.discordUserId || '',
+    },
+    review: {
       autoReviewOnIt: String(Boolean(settings.autoReviewOnIt)),
       autoLgtm: String(Boolean(settings.autoLgtm)),
       reviewFindingsToTask: String(settings.reviewFindingsToTask !== false),
     },
+    messages: { discordMessageTemplate: settings.discordMessageTemplate || DEFAULT_DISCORD_MESSAGE_TEMPLATE },
     calendar: { googleClientId: settings.googleClientId || '', googleClientSecret: '', googleCalendarId: settings.googleCalendarId || 'primary' },
   };
 }
@@ -134,10 +165,13 @@ export const healthSeconds = (values: SectionValues) => Number(values.healthValu
 /** Errors that stop this section's save; another section's errors never do. */
 export function sectionErrors(id: DraftSectionId, values: SectionValues): string[] {
   if (id === 'general') return isValidServiceHealthRefreshSeconds(healthSeconds(values)) ? [] : ['Enter a whole-number interval between 5 seconds and 24 hours.'];
-  if (id === 'discord') {
+  if (id === 'messages') {
     const error = getDiscordTemplateError(values.discordMessageTemplate);
+    return error ? [error] : [];
+  }
+  if (id === 'discord') {
     const userId = values.discordUserId.trim();
-    return [...(error ? [error] : []), ...(userId && !/^\d{5,25}$/.test(userId) ? ['Your Discord user id is digits only.'] : [])];
+    return userId && !/^\d{5,25}$/.test(userId) ? ['Your Discord user id is digits only.'] : [];
   }
   return [];
 }
@@ -163,6 +197,6 @@ export function sectionStatus(
   if (id === 'github') return failed ? 'bad' : settings.hasGithubToken ? 'ok' : 'off';
   if (id === 'discord') return failed ? 'bad' : settings.hasDiscordWebhookUrl ? 'ok' : 'off';
   if (id === 'calendar') return settings.googleCalendarConnected ? (settings.googleCalendarError ? 'bad' : 'ok') : 'off';
-  if (id === 'demo') return extra.demoStorage ? 'ok' : 'off';
+  if (id === 'plugins') return extra.demoStorage ? 'ok' : 'off';
   return null;
 }
