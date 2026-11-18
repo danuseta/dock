@@ -1,0 +1,7 @@
+{
+  "name": "judge",
+  "match": { "judge": true, "priority": 60 },
+  "turns": [
+    { "model": "sonnet", "tokens": 5000, "steps": [{ "judge": { "findings": [] } }, { "say": "Judge: session {{judgeSession}} graded, no findings." }] }
+  ]
+}

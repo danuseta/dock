@@ -1,0 +1,169 @@
+{
+  "name": "review",
+  "ledgerPush": "end",
+  "match": {
+    "mode": "work",
+    "text": "^Pakai skill sous\\. review [A-Z][A-Z0-9]+-\\d+",
+    "needsKey": true,
+    "priority": 30
+  },
+  "turns": [
+    {
+      "model": "opus",
+      "tokens": 38000,
+      "costUsd": 0.66,
+      "steps": [
+        {
+          "say": "Skills: review, sous / candidates: review-pr, sous / using: sous"
+        },
+        {
+          "tool": "Bash",
+          "text": "node discord-files.cjs thread"
+        },
+        {
+          "ledger": {
+            "op": "init",
+            "title": "Review {{key}}",
+            "kind": "review"
+          }
+        },
+        {
+          "ledger": {
+            "op": "set",
+            "values": {
+              "kind": "review",
+              "engine": "sous",
+              "stage": "verify",
+              "note": "review: sous-pr-reviewer"
+            }
+          }
+        },
+        {
+          "file": {
+            "path": "findings.md",
+            "text": "# Review {{key}}\n\nPR: {{prUrls}}\n\n1. blocker: the empty state crashes when the list is empty\n2. non-blocking: the button label is not translated\n"
+          }
+        },
+        {
+          "agent": {
+            "type": "sous-pr-reviewer",
+            "model": "opus",
+            "step": "review",
+            "detail": "review {{key}}",
+            "tokens": 21000
+          }
+        },
+        {
+          "ledger": {
+            "op": "finding",
+            "severity": "blocker",
+            "text": "The empty state crashes when the list is empty"
+          }
+        },
+        {
+          "ledger": {
+            "op": "finding",
+            "severity": "non-blocking",
+            "text": "The button label is not translated"
+          }
+        },
+        {
+          "ledger": {
+            "op": "verdict",
+            "value": "request-change",
+            "prs": [
+              "{{prUrl}}"
+            ]
+          }
+        },
+        {
+          "screenshot": "review-empty-state.png"
+        },
+        {
+          "say": "Verdict di ledger: request change, 1 blocker.\n\n<<<DISCORD\nReview {{key}}: request change\n- blocker: empty state crash kalau list kosong\n- non-blocking: label tombol belum diterjemahkan\nGAMBAR: review-empty-state.png\n<<<AKHIR DISCORD>>>"
+        }
+      ],
+      "after": [
+        {
+          "delayMs": 6000,
+          "script": {
+            "action": "pushCommit",
+            "pr": "{{prUrl}}",
+            "message": "fix({{key}}): handle empty state"
+          }
+        },
+        {
+          "delayMs": 1000,
+          "script": {
+            "action": "addMessage",
+            "thread": "{{key}}",
+            "webhookId": "900000000000000002",
+            "username": "Rizky",
+            "text": "empty state crash: fixed di {{shortSha}}\nlabel tombol: fixed di {{shortSha}}\nDOCK-FIX round 1 · head {{shortSha}}"
+          }
+        }
+      ]
+    },
+    {
+      "model": "opus",
+      "tokens": 22000,
+      "costUsd": 0.4,
+      "steps": [
+        {
+          "say": "Skills: review, sous / candidates: review-pr, sous / using: sous"
+        },
+        {
+          "ledger": {
+            "op": "init",
+            "title": "Review {{key}}",
+            "kind": "review"
+          }
+        },
+        {
+          "agent": {
+            "type": "sous-pr-reviewer",
+            "model": "opus",
+            "step": "re-review",
+            "detail": "re-review {{key}}",
+            "tokens": 12000
+          }
+        },
+        {
+          "ledger": {
+            "op": "findingResolve",
+            "n": 1,
+            "why": "fixed in the new head"
+          }
+        },
+        {
+          "ledger": {
+            "op": "findingResolve",
+            "n": 2,
+            "why": "fixed in the new head"
+          }
+        },
+        {
+          "ledger": {
+            "op": "lgtm",
+            "text": "empty state and label fixed"
+          }
+        },
+        {
+          "ledger": {
+            "op": "verdict",
+            "value": "approve",
+            "prs": [
+              "{{prUrl}}"
+            ]
+          }
+        },
+        {
+          "screenshot": "review-fixed.png"
+        },
+        {
+          "say": "Verdict di ledger: approve.\n\n<<<DISCORD\nRe-review {{key}}: approve, semua temuan sudah fixed\nGAMBAR: review-fixed.png\n<<<AKHIR DISCORD>>>"
+        }
+      ]
+    }
+  ]
+}

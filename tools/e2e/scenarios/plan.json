@@ -1,0 +1,7 @@
+{
+  "name": "plan",
+  "match": { "mode": "work", "text": "^Pakai skill sous: plan ", "priority": 50 },
+  "turns": [
+    { "model": "sonnet", "tokens": 8000, "steps": [{ "say": "Sprint plan {{sprint}}: urutan dari DOCK dipakai, tanpa edge baru." }, { "plan": { "edges": [] } }, { "say": "Plan {{sprint}} sudah dipost ke DOCK." }] }
+  ]
+}

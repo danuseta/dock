@@ -1,0 +1,220 @@
+{
+  "name": "task-full",
+  "match": {
+    "mode": "work",
+    "text": "^Pakai skill sous: kerjakan [A-Z][A-Z0-9]+-\\d+",
+    "party": "!light",
+    "needsKey": true,
+    "priority": 10
+  },
+  "byKey": {
+    "QRD-9001": {
+      "prField": "pr.fe",
+      "ticketPr": "https://github.com/qonflo/dashboard/pull/101",
+      "repoName": "dashboard"
+    },
+    "QRD-9002": {
+      "prField": "pr.be",
+      "ticketPr": "https://github.com/qonflo/backend/pull/201",
+      "repoName": "backend"
+    },
+    "*": {
+      "prField": "pr.fe",
+      "ticketPr": "https://github.com/qonflo/dashboard/pull/{{keyNum}}",
+      "repoName": "dashboard"
+    }
+  },
+  "turns": [
+    {
+      "model": "opus",
+      "tokens": 42000,
+      "costUsd": 0.84,
+      "steps": [
+        {
+          "say": "Skills: sous, ticket / candidates: sous / using: sous"
+        },
+        {
+          "ledger": {
+            "op": "init",
+            "title": "E2E ticket {{key}}"
+          }
+        },
+        {
+          "ledger": {
+            "op": "set",
+            "values": {
+              "engine": "sous",
+              "mode": "full",
+              "stage": "plan",
+              "note": "full: plan (sous-planner)"
+            }
+          }
+        },
+        {
+          "ledger": {
+            "op": "acSet",
+            "lines": [
+              "The list shows the new column",
+              "The column value is saved",
+              "Existing rows keep their value"
+            ]
+          }
+        },
+        {
+          "file": {
+            "path": "prompts/S1.md",
+            "text": "S1 {{key}}: add the column end to end.\n"
+          }
+        },
+        {
+          "file": {
+            "path": "tasks.md",
+            "text": "| Task | Files |\n|---|---|\n| T1 | src/list.ts |\n"
+          }
+        },
+        {
+          "agent": {
+            "type": "sous-planner",
+            "model": "opus",
+            "step": "plan",
+            "detail": "plan {{key}}",
+            "tokens": 18000
+          }
+        },
+        {
+          "ledger": {
+            "op": "set",
+            "values": {
+              "stage": "code",
+              "note": "full: T1 (sous-ticket-worker)"
+            }
+          }
+        },
+        {
+          "agent": {
+            "type": "sous-ticket-worker",
+            "model": "sonnet",
+            "step": "T1",
+            "detail": "T1 {{key}}",
+            "tokens": 26000
+          }
+        },
+        {
+          "ledger": {
+            "op": "set",
+            "values": {
+              "stage": "test",
+              "note": "full: verify (sous-verifier)"
+            }
+          }
+        },
+        {
+          "agent": {
+            "type": "sous-verifier",
+            "model": "sonnet",
+            "step": "verify",
+            "detail": "verify T1",
+            "tokens": 9000
+          }
+        },
+        {
+          "ledger": {
+            "op": "handoff",
+            "who": "sous-verifier",
+            "status": "done",
+            "summary": "tests pass",
+            "evidence": "{{board}}/status.md",
+            "unverified": "none"
+          }
+        },
+        {
+          "ledger": {
+            "op": "ac",
+            "n": 1,
+            "state": "PASS",
+            "evidence": "{{board}}/status.md"
+          }
+        },
+        {
+          "ledger": {
+            "op": "ac",
+            "n": 2,
+            "state": "PASS",
+            "evidence": "{{board}}/status.md"
+          }
+        },
+        {
+          "ledger": {
+            "op": "ac",
+            "n": 3,
+            "state": "PASS",
+            "evidence": "{{board}}/status.md"
+          }
+        },
+        {
+          "agent": {
+            "type": "sous-reviewer",
+            "model": "opus",
+            "step": "final-review",
+            "detail": "FINAL review {{key}}",
+            "tokens": 15000
+          }
+        },
+        {
+          "ledger": {
+            "op": "handoff",
+            "who": "video",
+            "status": "done",
+            "summary": "demo video recorded",
+            "evidence": "{{board}}/status.md",
+            "unverified": "none"
+          }
+        },
+        {
+          "ledger": {
+            "op": "set",
+            "values": {
+              "stage": "commit",
+              "note": "full: publish (sous-publisher)"
+            }
+          }
+        },
+        {
+          "agent": {
+            "type": "sous-publisher",
+            "model": "haiku",
+            "step": "publish",
+            "detail": "publish {{key}}",
+            "tokens": 4000
+          }
+        },
+        {
+          "ledger": {
+            "op": "set",
+            "values": {
+              "{{prField}}": "{{ticketPr}}",
+              "stage": "pr",
+              "note": "full: PR open"
+            }
+          }
+        },
+        {
+          "say": "TICKET: {{key}}   MODE: full   RESULT: DONE\nPR: {{ticketPr}}\nDISPATCH: sous-planner (opus), sous-ticket-worker (sonnet), sous-verifier (sonnet), sous-reviewer (opus), sous-publisher (haiku)"
+        }
+      ]
+    },
+    {
+      "steps": [
+        {
+          "ledger": {
+            "op": "init",
+            "title": "E2E ticket {{key}}"
+          }
+        },
+        {
+          "say": "{{key}} continues from the ledger; nothing left to do in this e2e run."
+        }
+      ]
+    }
+  ]
+}

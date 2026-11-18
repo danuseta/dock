@@ -1,0 +1,17 @@
+{
+  "name": "scout",
+  "match": { "mode": "work", "text": "^SCOUT [A-Z][A-Z0-9]+-\\d+, read only", "needsKey": true, "priority": 50 },
+  "turns": [
+    {
+      "model": "sonnet",
+      "tokens": 9000,
+      "costUsd": 0.05,
+      "steps": [
+        { "say": "Skills: scout / candidates: sous / using: none" },
+        { "agent": { "type": "sous-explorer", "model": "sonnet", "step": "scout", "detail": "SCOUT {{key}}", "tokens": 6000 } },
+        { "scout": { "repos": "FE", "files": 1, "contract": "no contract change", "verdict": "light" } },
+        { "say": "REPOS: FE\nFILES: 1\nLINES: ~12\nCONTRACT: no contract change\nSCOUT: {{scoutLine}}" }
+      ]
+    }
+  ]
+}

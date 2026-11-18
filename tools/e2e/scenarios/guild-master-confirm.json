@@ -1,0 +1,15 @@
+{
+  "name": "guild-master-confirm",
+  "match": { "mode": "gm", "gmConfirm": true, "priority": 20 },
+  "turns": [
+    {
+      "model": "sonnet",
+      "tokens": 4000,
+      "costUsd": 0.02,
+      "steps": [
+        { "tool": "Bash", "text": "node gm.cjs log" },
+        { "say": "{{gmNote}}" }
+      ]
+    }
+  ]
+}
