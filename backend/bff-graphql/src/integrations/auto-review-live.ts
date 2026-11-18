@@ -1,4 +1,5 @@
 import { GitHubAPI } from '../datasources/GitHubAPI';
+import { decrypt } from '../storage/crypto';
 import { StorageService } from '../storage/service';
 import { AutoReview, MESSAGE_KEYS, WAITING_SKILL, arenaSetting, currentReviews, messageFormat, type AutoReviewOwner, type PullState } from './auto-review';
 import { defaultBlackboardRoot, ticketScreenshots } from './blackboard';
@@ -40,7 +41,7 @@ export const AUTO_REVIEW_KEYS = ['autoReviewOnIt', 'autoLgtm', 'autoReviewPostDi
 /** Who posts to a thread: the owner's Discord user id, webhook and name. */
 export const reviewOwner = async (): Promise<AutoReviewOwner> => {
   const values = new Map((await storage.getSettingValues(['discordUserId', 'discordWebhookUrl'])).map((row) => [row.key, row.value]));
-  return { discordUserId: values.get('discordUserId')?.trim() || null, webhookUrl: values.get('discordWebhookUrl')?.trim() || null, name: reporterName() };
+  return { discordUserId: values.get('discordUserId')?.trim() || null, webhookUrl: decrypt(values.get('discordWebhookUrl') ?? '').trim() || null, name: reporterName() };
 };
 
 /** Where a ticket's screenshots are: the review runner and browser-verifier save them on the ticket's blackboard. */

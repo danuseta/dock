@@ -17,7 +17,7 @@
     "test:all": "npm test --workspaces --if-present",
     "seed:e2e": "npm run seed:e2e --workspace=backend/bff-graphql --",
     "demo:mock": "node tools/e2e/start.mjs --with-bridge",
-    "e2e:mock": "echo runner not built yet"
+    "e2e:mock": "node tools/e2e/run.mjs"
   },
   "keywords": [
     "dock",
@@ -27,5 +27,8 @@
     "monorepo"
   ],
   "author": "DOCK",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "playwright": "^1.49.1"
+  }
 }

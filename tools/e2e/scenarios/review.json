@@ -85,7 +85,7 @@
       ],
       "after": [
         {
-          "delayMs": 6000,
+          "delayMs": 75000,
           "script": {
             "action": "pushCommit",
             "pr": "{{prUrl}}",

@@ -12,7 +12,7 @@ const WEBHOOK_TOKEN = 'e2e-webhook-token';
 const BOT = { id: '900000000000000099', username: 'dock-bot', global_name: 'DOCK Bot', bot: true };
 const OWNER = { discordId: '111111111111111111', name: 'Danu', jira: 'acc-danu', github: 'danu-dev', email: 'danu@e2e.test' };
 const TEAMMATE = { discordId: '222222222222222222', name: 'Rizky', jira: 'acc-rizky', github: 'rizky-dev', email: 'rizky@e2e.test' };
-const STATUSES = ['To Do', 'In Progress', 'In Review', 'UAT MERGED', 'UAT CHECK', 'Done'];
+const STATUSES = ['To Do', 'In Progress', 'PR Review', 'UAT MERGED', 'UAT CHECK', 'Done'];
 const DAY = 24 * 3600 * 1000;
 
 const adf = (...lines) => ({ type: 'doc', version: 1, content: lines.map((text) => ({ type: 'paragraph', content: [{ type: 'text', text }] })) });
@@ -61,14 +61,14 @@ function initialState(now = Date.now()) {
     issue('QRD-9004', 'Rename "Voucher" to "Promo code" in checkout', 'Task', OWNER, 2, ['Every checkout label reads Promo code']),
     issue('QRD-9005', 'Log payment provider timeouts', 'Task', TEAMMATE, 2, ['A payment timeout is logged with the order id']),
   ];
-  issues.find((item) => item.key === 'QRD-9003').fields.status = { name: 'In Review' };
+  issues.find((item) => item.key === 'QRD-9003').fields.status = { name: 'PR Review' };
   issues.find((item) => item.key === 'QRD-9005').fields.issuelinks = [{ type: { name: 'Blocks', inward: 'is blocked by', outward: 'blocks' }, inwardIssue: { key: 'QRD-9002' } }];
 
   const splitStorage = '<p>Week split for QRD Sprint 30.</p><table><tbody>'
     + '<tr><th>Ticket</th><th>Week</th><th>Note</th></tr>'
     + '<tr><td>QRD-9001</td><td>1</td><td>quick fix</td></tr>'
     + '<tr><td>QRD-9002</td><td>1</td><td>BE first</td></tr>'
-    + '<tr><td>QRD-9003</td><td>1</td><td></td></tr>'
+    + '<tr><td>QRD-9003</td><td>2</td><td>after the API</td></tr>'
     + '<tr><td>QRD-9004</td><td>2</td><td>after 9001</td></tr>'
     + '<tr><td>QRD-9005</td><td>2</td><td>needs 9002</td></tr>'
     + '</tbody></table>';
@@ -288,7 +288,7 @@ export function createMockServer({ port = 4610 } = {}) {
       const thread = state.threads.find((item) => item.id === String(step.thread) || item.name.includes(String(step.thread)));
       if (!thread) return { error: `no thread ${step.thread}` };
       const author = step.webhookId ? { id: String(step.webhookId), username: step.username || OWNER.name, bot: true } : discordUser(String(step.authorId ?? TEAMMATE.discordId));
-      const message = postMessage(thread, { author, text: step.text, webhookId: step.webhookId ? String(step.webhookId) : undefined });
+      const message = postMessage(thread, { author, text: step.text, webhookId: step.webhookId ? String(step.webhookId) : undefined, at: Date.now() - Math.max(0, Number(step.ageMs) || 0) });
       return { messageId: message.id, thread: thread.id };
     }
     if (action === 'addThread') {

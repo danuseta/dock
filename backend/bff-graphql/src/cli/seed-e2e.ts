@@ -53,6 +53,8 @@ export function e2eSettings(mockUrl: string, dir: string, fresh: boolean): Recor
 
 export const e2eRawSettings = (): Record<string, string> => ({
   planningSplitPage: E2E_IDS.splitPage,
+  judgeSettings: JSON.stringify({ on: true, idleMinutes: 5, windows: [] }),
+  sprintDashboardConfig: JSON.stringify({ roster: [{ full: 'Danu', short: 'Danu', token: 'danuPass' }, { full: 'Rizky', short: 'Rizky', token: 'rizkyPass' }] }),
 });
 
 export async function seedE2E(dir: string, mockUrl: string, fresh: boolean): Promise<{ token: string }> {

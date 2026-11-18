@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -97,8 +96,7 @@ export async function startStack({ withBridge = false, fresh = false, seed = tru
     run('backend', ['--import', 'tsx', path.join(backend, 'src', 'index.ts')], { cwd: backend, env: backendEnv(config, token, env) });
     await until('DOCK backend', async () => (await fetch(`${config.urls.backend}/health`)).ok);
 
-    const vite = path.join(path.dirname(createRequire(path.join(frontend, 'package.json')).resolve('vite/package.json')), 'bin', 'vite.js');
-    run('frontend', [vite, '--port', String(config.ports.frontend), '--strictPort'], { cwd: frontend, env: { ...env, VITE_GRAPHQL_URL: config.urls.graphql } });
+    run('frontend', [path.join(here, 'vite-dev.mjs'), '--port', String(config.ports.frontend), '--backend', config.urls.backend], { cwd: frontend, env: { ...env, VITE_GRAPHQL_URL: config.urls.graphql } });
     await until('DOCK frontend', async () => (await fetch(config.urls.frontend)).ok);
 
     const bridge = path.join(here, 'fake-bridge.mjs');
