@@ -29,3 +29,13 @@ test('Home renders the card and leaves the rest as it was', () => {
   const home = readFileSync(new URL('../pages/HomePage.tsx', import.meta.url), 'utf8');
   assert.match(home, /<FinishSetupCard onNavigate=\{onNavigate\} \/>/);
 });
+
+test('the workspace card does not mention Calendar, the laptop card does, and Hide shows only with a handler', () => {
+  const gaps = setupGaps({});
+  const workspace = renderToStaticMarkup(<FinishSetupView gaps={gaps} mode="workspace" onNavigate={() => {}} onHide={() => {}} />);
+  assert.doesNotMatch(workspace, /Calendar/);
+  assert.match(workspace, />Hide</);
+  const laptop = renderToStaticMarkup(<FinishSetupView gaps={gaps} mode="laptop" onNavigate={() => {}} />);
+  assert.match(laptop, /Calendar/);
+  assert.doesNotMatch(laptop, />Hide</);
+});
