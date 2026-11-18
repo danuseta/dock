@@ -194,6 +194,32 @@ export const typeDefs = gql`
     "Review rounds an on it allows before the arena closes."
     reviewMaxRounds: Int!
     reviewFindingsToTask: Boolean!
+    "Post the DOCK-FIX reply to the thread after a round is fixed or every finding was not valid."
+    reviewFindingsAutoReply: Boolean!
+    "skill or template: how the review post is written."
+    reviewPostFormat: String!
+    reviewPostSkill: String!
+    reviewPostTemplate: String!
+    "builtin, skill or template: how the reply after a fix is written."
+    reviewReplyFormat: String!
+    reviewReplySkill: String!
+    reviewReplyTemplate: String!
+    "Small fixes go through sous-light-runner instead of the full pipeline."
+    lightRunnerOn: Boolean!
+    lightForFindings: Boolean!
+    lightForParty: Boolean!
+    lightForRetro: Boolean!
+    "Production lines and files a light job may change; tests are not counted."
+    lightMaxLines: Int!
+    lightMaxFiles: Int!
+    "sonnet or haiku."
+    lightWorkerModel: String!
+    lightBrowserCheck: Boolean!
+    lightBlastCheck: Boolean!
+    "How many times the blast check sends the work back."
+    lightBlastLoops: Int!
+    "push (to the pull request branch) or draft (a draft pull request)."
+    lightPublish: String!
     hasGoogleClientSecret: Boolean!
     googleCalendarConnected: Boolean!
     googleCalendarError: String
@@ -208,6 +234,12 @@ export const typeDefs = gql`
     chatParallelTurns: String
     """Where an answer to an I-n or D-n goes: new (a new session) or last (the ticket's last Task session)."""
     ownerReplySession: String!
+    """Where demo videos go: s3, local or none. An install that never chose gets s3 when the demo storage is set, else none."""
+    storagePlugin: String!
+    """Narration of demo videos: elevenlabs or none. An install that never chose gets elevenlabs when it has keys, else none."""
+    voicePlugin: String!
+    """The folder the local storage plugin copies demo videos to."""
+    storageLocalDir: String!
     """JSON: the volume and, per event, whether it notifies and with which bundled sound."""
     notificationPrefs: String!
     """Confluence page id the sprint contract page of Planning goes under; null skips the page."""
@@ -619,6 +651,16 @@ export const typeDefs = gql`
     fix: String
   }
 
+  """The Scout line of a ticket: what sous-explorer measured, and whether the change runs light or full."""
+  type SprintDraftScout {
+    line: String!
+    mode: String!
+    files: Int!
+    repos: String!
+    contractChange: Boolean!
+    at: String!
+  }
+
   """A draft ticket on its developer's lane. Days count working days from the sprint start; end past sprintDays is backlog."""
   type SprintDraftTicket {
     key: String!
@@ -647,6 +689,10 @@ export const typeDefs = gql`
     frames: [String!]!
     storyboard: SprintDraftStoryboardFlag
     tcs: [SprintDraftTc!]!
+    "The Scout line from the ticket's materials/contract.md; null until a scout ran."
+    scout: SprintDraftScout
+    "A scout session for the ticket is still running."
+    scoutRunning: Boolean!
     "QA approved the test cases as they are now (decision tc|KEY approve)."
     tcApproved: Boolean!
     "The hash of the AC lines; a ticket summary is written for one hash."
@@ -1389,6 +1435,14 @@ export const typeDefs = gql`
     backup: String!
     rollbackOf: Int
     rolledBack: Boolean!
+    """True when the entry's signature does not hold: it was not written by Guild Master."""
+    unverified: Boolean!
+  }
+
+  """The Party a ticket's Contract may show as written by Guild Master: the newest signed, not rolled back Party entry for it."""
+  type GuildMasterParty {
+    log: Int!
+    lines: [String!]!
   }
 
   type LibraryAgentDetail {
@@ -1481,6 +1535,7 @@ export const typeDefs = gql`
 
   type DemoVideoList {
     configured: Boolean!
+    storage: String!
     videos: [DemoVideo!]!
   }
 
@@ -1768,10 +1823,19 @@ export const typeDefs = gql`
   }
 
   type ReviewRoundInfo {
+    id: ID!
     status: String!
     summary: String!
     threadUrl: String!
     at: String!
+    "light or full: the runner the round prompt asked sous for; null for a round sent before this was kept."
+    mode: String
+    "The DOCK-FIX reply: pending, sending, sent, cancelled, failed; null when nothing was scheduled."
+    replyStatus: String
+    replyAt: String
+    replyText: String
+    replyMessageId: String
+    replyDetail: String
   }
 
   type ChatSessionState {
@@ -2001,6 +2065,24 @@ export const typeDefs = gql`
     reviewReReviewWaitMinutes: Int
     reviewMaxRounds: Int
     reviewFindingsToTask: String
+    reviewFindingsAutoReply: String
+    reviewPostFormat: String
+    reviewPostSkill: String
+    reviewPostTemplate: String
+    reviewReplyFormat: String
+    reviewReplySkill: String
+    reviewReplyTemplate: String
+    lightRunnerOn: String
+    lightForFindings: String
+    lightForParty: String
+    lightForRetro: String
+    lightMaxLines: Int
+    lightMaxFiles: Int
+    lightWorkerModel: String
+    lightBrowserCheck: String
+    lightBlastCheck: String
+    lightBlastLoops: Int
+    lightPublish: String
     googleClientId: String
     googleClientSecret: String
     googleCalendarId: String
@@ -2012,6 +2094,9 @@ export const typeDefs = gql`
     chatCaveman: String
     chatParallelTurns: String
     ownerReplySession: String
+    storagePlugin: String
+    voicePlugin: String
+    storageLocalDir: String
     notificationPrefs: String
     planningConfluenceParent: String
     planningPlanner: String
@@ -2307,6 +2392,10 @@ export const typeDefs = gql`
     """Lines from..to (1-based, at most 500) of a file at a commit, for Expand."""
     pullFileLines(ticketKey: String!, url: String!, path: String!, ref: String!, from: Int!, to: Int!): [String!]!
     autoReviews: [AutoReview!]!
+    "The names of the Claude skills installed where the sessions read them, for the Discord message format picker."
+    installedSkills: [String!]!
+    "Every review round of a ticket, newest first."
+    reviewRoundsForTicket(key: String!): [ReviewRoundInfo!]!
     claudeAccounts: ClaudeAccounts!
     "The local QA state, and the newest run and QA session of a ticket when one is given."
     qaLocal(ticketKey: String): QaLocal!
@@ -2333,6 +2422,7 @@ export const typeDefs = gql`
     libraryAgents(machine: String): [LibraryAgent!]!
     libraryAgent(slug: String!, machine: String): LibraryAgentDetail!
     guildMasterLog: [GuildMasterLogEntry!]!
+    guildMasterParty(key: String!): GuildMasterParty
     demoVideos: DemoVideoList!
     demoStorage: DemoStorage!
     devServers: DevServers!
@@ -2429,6 +2519,8 @@ export const typeDefs = gql`
     """Records a decision on a finding, a qa|KEY prediction or the scope|cut note; action clear removes it."""
     decideSprintDraft(sprint: String!, id: ID!, action: String!, note: String): SprintDraft!
     refreshSprintDraftQa(sprint: String!): SprintDraft!
+    """Opens a read-only session that has sous-explorer scout the ticket and write its Scout line; false when one already runs for the ticket."""
+    runScout(key: String!): Boolean!
     "Reads the newest storyboard of each epic of the draft from Confluence and saves it under the blackboard."
     checkSprintStoryboards(sprint: String!): SprintDraft!
     "Save an uploaded storyboard HTML as the newest version for the epic (used until the Confluence page exists)."
@@ -2564,6 +2656,10 @@ export const typeDefs = gql`
     cancelAutoReviewPost(id: ID!): Boolean!
     "Replaces the text of an auto review post that has not gone out yet; the DOCK-REVIEW marker line stays."
     editAutoReviewPost(id: ID!, text: String!): Boolean!
+    "Stops the DOCK-FIX reply of a review round that has not gone out yet."
+    cancelReviewReplyPost(id: ID!): Boolean!
+    "Replaces the text of a DOCK-FIX reply that has not gone out yet; the DOCK-FIX marker line stays."
+    editReviewReplyPost(id: ID!, text: String!): Boolean!
     "Removes merged worktrees through the kit's wt.sh; each one with local changes, a live session, a dev server or no merge is REFUSED and left alone."
     cleanWorktrees(paths: [String!]!): [WorktreeCleanResult!]!
     runOrchestratorCronNow: String!

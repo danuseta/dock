@@ -60,7 +60,7 @@ import {
   type WaitAnswer,
 } from './chat-interactions';
 import { DEFAULT_MACHINE, OrchestratorInputError, normalizeMachine, normalizeTicketKey } from './orchestrator';
-import { GM_TITLE, GmNonces, askGmSummary, isGmConfirm, parseGmProposal, sessionMode, type GmProposal } from './guild-master';
+import { GM_TITLE, GmNonces, askGmSummary, gmCronShow, gmMacValid, isGmConfirm, parseGmProposal, sessionMode, type GmProposal } from './guild-master';
 
 const GM_KEY_SETTING = 'gmLogKey';
 
@@ -474,6 +474,8 @@ export class ChatService {
   agentJobs: (machine: string) => Array<{ id: string; op: string; input: unknown }> = () => [];
   /** What a Guild Master turn sees of the settings (values it may change, secrets as set / not set). Wired by the settings like cronLimit. */
   gmSettings: () => Promise<unknown> = async () => ({ values: {}, secrets: {} });
+  /** The cron fields a Guild Master may change and the per-ticket usage numbers it bases suggestions on. Wired like gmSettings. */
+  gmData: () => Promise<{ cron: { values: Record<string, string> }; usage: unknown[] }> = async () => ({ cron: { values: {} }, usage: [] });
   /** Signs the manager log entries the kit writes; kept in DOCK's settings, handed to the bridge per gm turn and job, never on the workspace disk. */
   gmKey: () => Promise<string> = async () => {
     const [row] = (await this.storage.getSettingValues([GM_KEY_SETTING])).filter((item) => item.key === GM_KEY_SETTING);
@@ -1044,16 +1046,24 @@ export class ChatService {
     const later = newest && newest.id !== proposal.replyTo && !waiting.includes(newest.id);
     if (!done.includes(proposal.replyTo) || taken.length > 0 || later || (this.gmProposedFor.get(session.id) ?? 0) >= proposal.replyTo) return { accepted: false };
     this.gmProposedFor.set(session.id, proposal.replyTo);
-    const { sha256, values, rollback } = proposal;
+    const { sha256, values, target, rollback } = proposal;
     let { summary, diff } = proposal;
     if (values) {
-      const view = await this.gmSettings() as { values?: Record<string, string> } | null;
+      const view = (target === 'cron' ? (await this.gmData()).cron : await this.gmSettings()) as { values?: Record<string, string> } | null;
       const current = view?.values ?? {};
-      diff = `--- DOCK settings\n+++ DOCK settings\n${Object.entries(values).map(([key, value]) => `- ${key}: ${current[key] ?? ''}\n+ ${key}: ${value}`).join('\n')}`;
-      summary = `${rollback ? 'Rollback of settings' : 'Settings'}: ${Object.keys(values).join(', ')}`;
+      const title = target === 'cron' ? 'Cron settings' : 'DOCK settings';
+      const show = (key: string, value: string) => (target === 'cron' ? gmCronShow(key, value) : value);
+      diff = `--- ${title}\n+++ ${title}\n${Object.entries(values).map(([key, value]) => `- ${key}: ${show(key, current[key] ?? '')}\n+ ${key}: ${show(key, value)}`).join('\n')}`;
+      summary = `${rollback ? `Rollback of ${target}` : target === 'cron' ? 'Cron' : 'Settings'}: ${Object.keys(values).join(', ')}`;
     }
-    this.gmProposals.set(session.id, { sha256, summary, diff, values, rollback, afterMessageId: Math.max(newest?.id ?? 0, proposal.replyTo), at: this.now().toISOString() });
+    this.gmProposals.set(session.id, { sha256, summary, diff, values, target, rollback, afterMessageId: Math.max(newest?.id ?? 0, proposal.replyTo), at: this.now().toISOString() });
     return { accepted: true, sha256 };
+  }
+
+  /** party-check.cjs on the chat machine: is this manager log row signed with DOCK's log key? Only the answer goes back. */
+  async gmVerify(input: unknown) {
+    const entry = isRecord(input) ? input.entry : null;
+    return { valid: gmMacValid(await this.gmKey(), entry) };
   }
 
   /** The change a Guild Master session waits on, as the owner sees it before answering. */
@@ -1067,13 +1077,13 @@ export class ChatService {
     const proposal = this.gmProposals.get(sessionId);
     this.gmProposals.delete(sessionId);
     if (!proposal || !isGmConfirm(message.text) || message.id <= proposal.afterMessageId) return {};
-    return { gmConfirm: this.gmNonces.mint({ sessionId, sha256: proposal.sha256, values: proposal.values, rollback: proposal.rollback }) };
+    return { gmConfirm: this.gmNonces.mint({ sessionId, sha256: proposal.sha256, values: proposal.values, target: proposal.target, rollback: proposal.rollback }) };
   }
 
   /** The Guild Master fields of a claim. The log key rides only with a confirmed write, never on an ordinary gm turn. */
   private async gmClaim(sessionId: string, message: { id: number; text: string }) {
     const confirm = this.gmConfirmFor(sessionId, message);
-    return { mode: 'gm', ...confirm, gmSettings: await this.gmSettings(), ...('gmConfirm' in confirm ? { gmKey: await this.gmKey() } : {}) };
+    return { mode: 'gm', ...confirm, gmSettings: await this.gmSettings(), gmData: await this.gmData(), ...('gmConfirm' in confirm ? { gmKey: await this.gmKey() } : {}) };
   }
 
   /** "Ask Guild Master" from a Work session: a summary of its structured state only, sent to the newest Guild Master session. */

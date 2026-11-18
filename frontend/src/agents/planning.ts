@@ -6,6 +6,7 @@ export interface DraftDecision { action: string; note: string | null; by: string
 export interface QaPrediction { prediction: string; reasons: string[]; fix: string | null }
 export interface StoryboardFlag { version: number; frames: string[]; held: boolean; checked: DraftDecision | null }
 export interface DraftTc { id: string; ac: number; title: string; steps: string[]; expected: string }
+export interface DraftScout { line: string; mode: 'light' | 'full'; files: number; repos: string; contractChange: boolean; at: string }
 export interface DraftTicket {
   key: string; summary: string; dev: string | null; jiraDev: string | null; sp: number | null;
   /** SP still to do by status once the sprint is under way; null before day 1 or on a published plan. */
@@ -14,6 +15,7 @@ export interface DraftTicket {
   ac: string[]; dependsOn: string[]; start: number; dur: number; end: number; inSprint: boolean; split: number[] | null;
   prediction: QaPrediction | null; qaDecision: DraftDecision | null; epic: string | null; frames: string[]; storyboard: StoryboardFlag | null;
   tcs: DraftTc[]; tcStale: boolean; tcPending: boolean;
+  scout?: DraftScout | null; scoutRunning?: boolean;
   /** QA approved the test cases as they are now. */
   tcApproved?: boolean;
   acHash?: string;

@@ -1,6 +1,8 @@
+import { isAbsolute } from 'node:path';
 import { StorageService } from '../storage/service';
 import { discordTeam, workspaceDiscordSetting } from '../integrations/discord-team';
-import { ARENA_SETTINGS, arenaSetting, isArenaSetting } from '../integrations/auto-review';
+import { ARENA_SETTINGS, MESSAGE_KEYS, arenaSetting, isArenaSetting, isMessageSetting, messageFormat } from '../integrations/auto-review';
+import { LIGHT_KEYS, isLightSetting, lightSettings } from '../integrations/light-runner';
 import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, normalizeDiscordMessageTemplate } from '../integrations/discord';
 import { forgetNotificationPrefs, parseNotificationPrefs, validateNotificationPrefs } from '../integrations/notification-prefs';
 
@@ -20,6 +22,8 @@ export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto', 'bypa
 export const CHAT_MODES = ['auto', 'plan', 'acceptEdits', 'bypassPermissions'] as const;
 export const RTK_SETTINGS = ['on', 'off'] as const;
 export const CAVEMAN_LEVELS = ['off', 'lite', 'full', 'ultra'] as const;
+export const STORAGE_PLUGINS = ['s3', 'local', 'none'] as const;
+export const VOICE_PLUGINS = ['elevenlabs', 'none'] as const;
 export const MAX_PARALLEL_TURNS = 6;
 /** A saved turn count, or null when it is unset or not a whole number from 1 to MAX_PARALLEL_TURNS. */
 /** Where the owner's answer to an I-n or D-n goes: a new session (default) or the ticket's last Task session. */
@@ -179,6 +183,9 @@ export class StorageAPI {
 
   async getPublicSettings() {
     const settings: any = await this.getSettings();
+    const saved = new Map<string, string>(Object.entries(settings));
+    const post = messageFormat('post', saved);
+    const reply = messageFormat('reply', saved);
     return {
       jiraUrl: settings.jiraUrl || null,
       jiraEmail: settings.jiraEmail || null,
@@ -203,6 +210,14 @@ export class StorageAPI {
       reviewReReviewWaitMinutes: arenaSetting('reviewReReviewWaitMinutes', settings.reviewReReviewWaitMinutes),
       reviewMaxRounds: arenaSetting('reviewMaxRounds', settings.reviewMaxRounds),
       reviewFindingsToTask: settings.reviewFindingsToTask !== 'false',
+      reviewFindingsAutoReply: settings.reviewFindingsAutoReply !== 'false',
+      reviewPostFormat: post.format,
+      reviewPostSkill: post.skill,
+      reviewPostTemplate: post.template,
+      reviewReplyFormat: reply.format,
+      reviewReplySkill: reply.skill,
+      reviewReplyTemplate: reply.template,
+      ...lightSettings(saved),
       hasGoogleClientSecret: Boolean(settings.googleClientSecret),
       googleCalendarConnected: Boolean(settings.googleRefreshToken),
       serviceHealthRefreshSeconds: isValidServiceHealthRefreshSeconds(settings.serviceHealthRefreshSeconds)
@@ -236,9 +251,18 @@ export class StorageAPI {
       if (input.chatCaveman != null && !(CAVEMAN_LEVELS as readonly string[]).includes(String(input.chatCaveman))) throw new Error('Invalid caveman level');
       if (input.chatParallelTurns != null && input.chatParallelTurns !== '' && parallelTurns(input.chatParallelTurns) === null) throw new Error('Invalid turn count');
       if (input.ownerReplySession != null && !(OWNER_REPLY_SESSIONS as readonly string[]).includes(String(input.ownerReplySession))) throw new Error('Invalid owner reply session');
+      if (input.storagePlugin != null && !(STORAGE_PLUGINS as readonly string[]).includes(String(input.storagePlugin))) throw new Error('Invalid storage plugin');
+      if (input.voicePlugin != null && !(VOICE_PLUGINS as readonly string[]).includes(String(input.voicePlugin))) throw new Error('Invalid voice plugin');
+      if (input.storageLocalDir != null && input.storageLocalDir !== '' && (String(input.storageLocalDir).length > 500 || !isAbsolute(String(input.storageLocalDir).trim()))) throw new Error('Invalid local folder');
       if (input.discordMessageTemplate != null) normalizeDiscordMessageTemplate(String(input.discordMessageTemplate));
-      for (const key of ['autoReviewOnIt', 'autoLgtm', 'reviewFindingsToTask', 'autoReviewPostDiscord'] as const) {
+      for (const key of ['autoReviewOnIt', 'autoLgtm', 'reviewFindingsToTask', 'autoReviewPostDiscord', 'reviewFindingsAutoReply'] as const) {
         if (input[key] != null && input[key] !== 'true' && input[key] !== 'false') throw new Error('Invalid auto review setting');
+      }
+      for (const key of [...Object.values(MESSAGE_KEYS.post), ...Object.values(MESSAGE_KEYS.reply)]) {
+        if (input[key] != null && input[key] !== '' && !isMessageSetting(key, input[key])) throw new Error('Invalid Discord message setting');
+      }
+      for (const key of LIGHT_KEYS) {
+        if (input[key] != null && !isLightSetting(key, input[key])) throw new Error('Invalid light runner setting');
       }
       for (const key of Object.keys(ARENA_SETTINGS) as Array<keyof typeof ARENA_SETTINGS>) {
         if (input[key] != null && !isArenaSetting(key, input[key])) throw new Error('Invalid review arena setting');

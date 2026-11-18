@@ -286,6 +286,28 @@ export const GET_SETTINGS = gql`
       autoReviewOnIt
       autoLgtm
       reviewFindingsToTask
+      autoReviewPostDiscord
+      reviewPostDelayMinutes
+      reviewReReviewWaitMinutes
+      reviewMaxRounds
+      reviewFindingsAutoReply
+      reviewPostFormat
+      reviewPostSkill
+      reviewPostTemplate
+      reviewReplyFormat
+      reviewReplySkill
+      reviewReplyTemplate
+      lightRunnerOn
+      lightForFindings
+      lightForParty
+      lightForRetro
+      lightMaxLines
+      lightMaxFiles
+      lightWorkerModel
+      lightBrowserCheck
+      lightBlastCheck
+      lightBlastLoops
+      lightPublish
       discordMessageTemplate
       hasGoogleClientSecret
       googleCalendarConnected
@@ -299,6 +321,9 @@ export const GET_SETTINGS = gql`
       chatCaveman
       chatParallelTurns
       ownerReplySession
+      storagePlugin
+      voicePlugin
+      storageLocalDir
       notificationPrefs
       planningConfluenceParent
       planningPlanner
@@ -866,6 +891,7 @@ export const SPRINT_DRAFT_FIELDS = `
     epic frames
     storyboard { version frames held checked { action note by at } }
     tcs { id ac title steps expected } tcStale tcPending tcApproved acHash
+    scout { line mode files repos contractChange at } scoutRunning
     merge pulls jiraAhead merged carried rank planStart planDur
   }
   findings { id key line text refKey kind refEnd ownEnd linked decision { action note by at } }
@@ -1003,6 +1029,12 @@ export const DECIDE_SPRINT_DRAFT = gql`
   }
 `;
 
+export const RUN_SCOUT = gql`
+  mutation RunScout($key: String!) {
+    runScout(key: $key)
+  }
+`;
+
 export const REFRESH_SPRINT_DRAFT_QA = gql`
   mutation RefreshSprintDraftQa($sprint: String!) {
     refreshSprintDraftQa(sprint: $sprint) { ${SPRINT_DRAFT_FIELDS} }
@@ -1125,7 +1157,7 @@ export const CHAT_SESSION_FIELDS = `
   lastText
   waiting
   workerCount
-  reviewRound { status summary threadUrl at }
+  reviewRound { id status summary threadUrl at mode replyStatus replyAt replyText replyDetail }
   judge { status grade }
 `;
 
@@ -1339,6 +1371,28 @@ export const GET_CHAT_BALLOONS = gql`
   }
 `;
 
+export const GET_TICKET_REVIEW_ROUNDS = gql`
+  query GetTicketReviewRounds {
+    chatSessions(source: "dock", limit: 300) {
+      id
+      ticketKey
+      reviewRound { id status summary threadUrl at mode replyStatus replyAt replyText replyDetail }
+    }
+  }
+`;
+
+export const GET_REVIEW_ROUNDS_FOR_TICKET = gql`
+  query GetReviewRoundsForTicket($key: String!) {
+    reviewRoundsForTicket(key: $key) { id status summary threadUrl at mode replyStatus replyAt replyText replyDetail }
+  }
+`;
+
+export const GET_INSTALLED_SKILLS = gql`
+  query GetInstalledSkills {
+    installedSkills
+  }
+`;
+
 export const GET_ORCHESTRATOR_CRON_SETTINGS = gql`
   query GetOrchestratorCronSettings {
     orchestratorCronSettings {
@@ -1363,6 +1417,7 @@ export const GET_PUSH_PUBLIC_KEY = gql`
 export const GET_DEMO_VIDEOS = gql`
   query GetDemoVideos {
     demoVideos {
+      storage
       videos { ticketKey url size updatedAt title }
     }
   }
@@ -1422,7 +1477,13 @@ export const GET_AGENT_LOOKS = gql`
 
 export const GET_GUILD_MASTER_LOG = gql`
   query GuildMasterLog {
-    guildMasterLog { id at by sessionId kind target summary diff backup rollbackOf rolledBack }
+    guildMasterLog { id at by sessionId kind target summary diff backup rollbackOf rolledBack unverified }
+  }
+`;
+
+export const GET_GUILD_MASTER_PARTY = gql`
+  query GuildMasterParty($key: String!) {
+    guildMasterParty(key: $key) { log lines }
   }
 `;
 
@@ -1576,7 +1637,7 @@ export const GET_CLAUDE_TICKET_USAGE = gql`
 
 export const GET_AUTO_REVIEWS = gql`
   query GetAutoReviews {
-    autoReviews { id ticketKey prUrl headSha threadUrl sessionId status detail startedAt finishedAt }
+    autoReviews { id ticketKey prUrl headSha threadUrl sessionId status detail startedAt finishedAt round postStatus postAt postText postDetail }
   }
 `;
 

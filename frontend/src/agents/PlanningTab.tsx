@@ -10,7 +10,7 @@ import { StoryboardBoard } from './StoryboardBoard';
 import { MyTicketsPanel } from './MyTicketsPanel';
 import {
   CHECK_SPRINT_STORYBOARDS, DECIDE_SPRINT_DRAFT, MOVE_SPRINT_DRAFT_CARDS, SET_SPRINT_DRAFT_TCS, GET_OWNER_NAME, GET_PLANNING_FLOW, GET_PLANNING_SPRINTS, GET_SPRINT_DRAFT, GET_SPRINT_PLAN_SIGNAL, GET_TICKET_READINESS, LOAD_SPRINT_DRAFT, PREVIEW_SPRINT_DRAFT_PUBLISH, PUBLISH_SPRINT_DRAFT,
-  REFRESH_SPRINT_DRAFT_QA, UPDATE_SPRINT_DRAFT_TICKET,
+  REFRESH_SPRINT_DRAFT_QA, RUN_SCOUT, UPDATE_SPRINT_DRAFT_TICKET,
 } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import {
@@ -22,6 +22,7 @@ import {
 import { parseFlow, skippedStages } from './planningFlow';
 import { panelOf } from './plan';
 import { InfoTip } from './InfoTip';
+import { ScoutCell } from './ScoutCell';
 
 const head = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
 const chip = 'rounded-xs border px-1.5 font-mono text-[0.6rem] font-bold uppercase tracking-[0.08em]';
@@ -537,7 +538,7 @@ const TeamPanel: React.FC<{ draft: SprintDraft; plan: DraftTicket[]; busy: boole
   );
 };
 
-const TicketRow: React.FC<{ draft: SprintDraft; ticket: DraftTicket; busy: boolean; onChange: (key: string, change: { dev?: string | null; wave?: number; sp?: number }) => void }> = ({ draft, ticket, busy, onChange }) => {
+const TicketRow: React.FC<{ draft: SprintDraft; ticket: DraftTicket; busy: boolean; onChange: (key: string, change: { dev?: string | null; wave?: number; sp?: number }) => void; onScout: (key: string) => void }> = ({ draft, ticket, busy, onChange, onScout }) => {
   const [wave, setWave] = useState(String(ticket.wave));
   const [sp, setSp] = useState(ticket.sp === null ? '' : String(ticket.sp));
   useEffect(() => setWave(String(ticket.wave)), [ticket.wave]);
@@ -554,7 +555,7 @@ const TicketRow: React.FC<{ draft: SprintDraft; ticket: DraftTicket; busy: boole
     else if (value !== ticket.sp) onChange(ticket.key, { sp: value });
   };
   return (
-    <li className="grid grid-cols-[minmax(0,1fr)_160px_64px_64px_88px] items-center gap-x-3 gap-y-2 border-b border-border px-3 py-2 last:border-b-0 max-[760px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+    <li className="grid grid-cols-[minmax(0,1fr)_160px_64px_64px_88px_minmax(0,1.2fr)] items-center gap-x-3 gap-y-2 border-b border-border px-3 py-2 last:border-b-0 max-[760px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <div className="min-w-0 max-[760px]:col-span-2">
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="font-mono text-[0.8rem] font-semibold">{ticket.key}</span>
@@ -578,21 +579,22 @@ const TicketRow: React.FC<{ draft: SprintDraft; ticket: DraftTicket; busy: boole
       <span className={cn('font-mono text-[0.68rem] max-[760px]:col-span-2', ticket.inSprint ? 'text-muted-foreground' : 'text-status-conflict')}>
         {ticket.inSprint ? `${dayOf(ticket.start + 0.001)} to ${dayOf(ticket.end)}` : `backlog · ${dayOf(ticket.end)}`}
       </span>
+      <span className="max-[760px]:col-span-2"><ScoutCell ticket={ticket} busy={busy} onScout={onScout} /></span>
     </li>
   );
 };
 
-const ScopePanel: React.FC<{ draft: SprintDraft; busy: boolean; onChange: (key: string, change: { dev?: string | null; wave?: number; sp?: number }) => void; onDecide: (id: string, action: string, note?: string) => void }> = ({ draft, busy, onChange, onDecide }) => {
+const ScopePanel: React.FC<{ draft: SprintDraft; busy: boolean; onChange: (key: string, change: { dev?: string | null; wave?: number; sp?: number }) => void; onDecide: (id: string, action: string, note?: string) => void; onScout: (key: string) => void }> = ({ draft, busy, onChange, onDecide, onScout }) => {
   const summary = scopeSummary(draft);
   const [cut, setCut] = useState('');
   const inSprint = draft.tickets.filter((ticket) => ticket.inSprint);
   const backlog = draft.tickets.filter((ticket) => !ticket.inSprint);
   const list = (tickets: DraftTicket[]) => (
     <ul className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
-      <li className="grid grid-cols-[minmax(0,1fr)_160px_64px_64px_88px] gap-3 border-b border-border bg-surface-1 px-3 py-1.5 max-[760px]:hidden">
-        {['Ticket', 'Developer', 'Wave', 'SP', 'Lands'].map((label) => <span key={label} className={head}>{label}</span>)}
+      <li className="grid grid-cols-[minmax(0,1fr)_160px_64px_64px_88px_minmax(0,1.2fr)] gap-3 border-b border-border bg-surface-1 px-3 py-1.5 max-[760px]:hidden">
+        {['Ticket', 'Developer', 'Wave', 'SP', 'Lands', 'Scout'].map((label) => <span key={label} className={head}>{label}</span>)}
       </li>
-      {tickets.map((ticket) => <TicketRow key={ticket.key} draft={draft} ticket={ticket} busy={busy} onChange={onChange} />)}
+      {tickets.map((ticket) => <TicketRow key={ticket.key} draft={draft} ticket={ticket} busy={busy} onChange={onChange} onScout={onScout} />)}
     </ul>
   );
   return (
@@ -903,6 +905,7 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
   const [checkStoryboards, checking] = useMutation(CHECK_SPRINT_STORYBOARDS);
   const [saveTcs, savingTcs] = useMutation(SET_SPRINT_DRAFT_TCS);
   const [moveCards, moving] = useMutation(MOVE_SPRINT_DRAFT_CARDS);
+  const [runScout] = useMutation(RUN_SCOUT);
   const [publish, publishing] = useMutation(PUBLISH_SPRINT_DRAFT);
   const [preview, previewing] = useLazyQuery<{ previewSprintDraftPublish: DraftChange[] }>(PREVIEW_SPRINT_DRAFT_PUBLISH, { fetchPolicy: 'network-only' });
   const full = draftQuery.data?.sprintDraft ?? null;
@@ -934,6 +937,7 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
   }, [full?.sprint, full?.status, full?.loadedAt]);
   const onChange = (key: string, change: { dev?: string | null; wave?: number; sp?: number }) => draft && run(updateTicket({ variables: { sprint: draft.sprint, key, ...change } }), 'The ticket could not be changed');
   const onDecide = (id: string, action: string, note?: string) => draft && run(decide({ variables: { sprint: draft.sprint, id, action, note: note ?? null } }), 'The decision could not be saved');
+  const onScout = (key: string) => run(runScout({ variables: { key } }), 'The scout could not start');
   const onRefreshQa = () => draft && run(refreshQa({ variables: { sprint: draft.sprint } }), 'The QA check failed');
   const onCheckStoryboards = () => draft && run(checkStoryboards({ variables: { sprint: draft.sprint } }), 'The storyboard could not be read');
   const onSaveTcs = async (key: string, tcs: DraftTc[]) => {
@@ -1056,7 +1060,7 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
           {shown === 'mine' && <MyTicketsPanel draft={draft} me={me} summaries={summaries} onOpenTicket={openTicket} />}
           <fieldset disabled={!planner} className="contents">
           {shown === 'team' && <TeamPanel draft={draft} plan={full?.tickets ?? []} busy={busy} onMove={onMove} />}
-          {shown === 'scope' && <ScopePanel draft={draft} busy={busy} onChange={onChange} onDecide={onDecide} />}
+          {shown === 'scope' && <ScopePanel draft={draft} busy={busy} onChange={onChange} onDecide={onDecide} onScout={onScout} />}
           {shown === 'ac' && <AcPanel draft={draft} busy={busy} onDecide={onDecide} />}
           {shown === 'qa' && <QaPanel draft={draft} busy={busy} summaries={summaries} onDecide={onDecide} onRefresh={onRefreshQa} onTestCases={() => showPanel('tc')} />}
           {shown === 'tc' && <TcPanel draft={draft} busy={busy} onSave={onSaveTcs} onDecide={onDecide} />}

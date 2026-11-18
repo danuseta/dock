@@ -1,8 +1,10 @@
+import { gmVerifiedParty } from '../integrations/guild-master';
 import { JiraAPI, JiraTicketLookupError } from '../datasources/JiraAPI';
 import { GitHubAPI } from '../datasources/GitHubAPI';
 import { DiscordAPI } from '../datasources/DiscordAPI';
 import { StorageAPI } from '../datasources/StorageAPI';
 import { GraphQLError } from 'graphql';
+import type { ReviewRound } from '@prisma/client';
 import { shouldRequirePin, type AuthContext } from '../auth/session';
 import { CalendarUnavailableError, googleCalendarService } from '../integrations/google-calendar';
 import { upstreamMonitorService } from '../integrations/upstream-monitor';
@@ -33,7 +35,11 @@ import { qaQueueService } from '../integrations/qa-queue-live';
 import { worktrees } from '../integrations/worktrees-live';
 import { CronInputError, manualRefusal, type OwnerAnswer, type OwnerChange } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
+import { ScoutRunner, readScout } from '../integrations/scout';
+import { blackboard } from '../integrations/blackboard';
 import { autoReview, listedAutoReviews } from '../integrations/auto-review-live';
+import { installedSkills } from '../integrations/installed-skills';
+import { reviewFindings } from '../integrations/review-findings-live';
 import { labelOrder } from '../integrations/orchestrator-cron';
 import { pushService } from '../integrations/push';
 import { demoVideos, withTitles } from '../integrations/demo-videos';
@@ -41,6 +47,7 @@ import { demoStorage, type DemoStorageInput } from '../integrations/demo-storage
 import { DevServerError, devServers } from '../integrations/dev-servers';
 import { WorkspaceFilesError, workspaceFiles } from '../integrations/workspace-files';
 import { elevenLabsKeys } from '../integrations/elevenlabs-keys';
+import { livePlugins } from '../integrations/plugins';
 import { broadcastDeps, sendBroadcast } from '../integrations/broadcast';
 import { ReviewApprovalError, approvalRecords, lgtmReview, ownerPassLabel, resetOwnerPassLabel } from '../integrations/review-approval';
 import { MAX_ROUND_ATTEMPTS, roundSummary } from '../integrations/review-findings';
@@ -69,12 +76,20 @@ const discordAPI = new DiscordAPI();
 const storageAPI = new StorageAPI();
 const storageService = new StorageService();
 
+const roundInfo = (round: ReviewRound) => ({
+  id: round.id, status: round.status, summary: `${round.ticketKey}: ${roundSummary(round)}`, threadUrl: round.threadUrl, at: (round.reportedAt ?? round.lastMessageAt).toISOString(),
+  mode: round.mode, replyStatus: round.replyStatus, replyAt: round.replyAt?.toISOString() ?? null, replyText: round.replyText, replyMessageId: round.replyMessageId, replyDetail: round.replyDetail,
+});
+
 /** The newest review round of each listed session, from one query. */
 async function withReviewRounds<T extends { id: string }>(sessions: T[]) {
   const rounds = await storageService.roundsForSessions(sessions.map((session) => session.id));
   return sessions.map((session) => {
     const round = rounds.get(session.id);
-    return { ...session, reviewRound: round ? { status: round.status, summary: `${round.ticketKey}: ${roundSummary(round)}`, threadUrl: round.threadUrl, at: (round.reportedAt ?? round.lastMessageAt).toISOString() } : null };
+    return {
+      ...session,
+      reviewRound: round ? roundInfo(round) : null,
+    };
   });
 }
 const isPresent = <T>(value: T | null | undefined): value is T => value != null;
@@ -363,6 +378,8 @@ function elevenLabsError(error: unknown): never {
   throw new GraphQLError(error instanceof Error ? error.message : 'ElevenLabs keys failed', { extensions: { code: 'BAD_USER_INPUT' } });
 }
 
+const scoutRunner = new ScoutRunner(blackboard, (key, prompt) => orchestratorCron.openReview(key, prompt, 'Scout'));
+
 function cronError(error: unknown): never {
   if (error instanceof CronInputError || error instanceof OrchestratorInputError) {
     throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
@@ -542,6 +559,8 @@ export const resolvers = {
     pullFileLines: (_: unknown, args: { ticketKey: string; url: string; path: string; ref: string; from: number; to: number }) =>
       pullChangesService.fileLines(args.ticketKey, args.url, args.path, args.ref, args.from, args.to).catch(changesInputError),
     autoReviews: async () => listedAutoReviews(await storageAPI.getAutoReviews()),
+    installedSkills: () => installedSkills(),
+    reviewRoundsForTicket: async (_: unknown, { key }: { key: string }) => (await storageService.roundsForTicket(key.trim().toUpperCase())).map(roundInfo),
     claudeAccounts: () => claudeAccountsState(),
     qaLocal: (_: unknown, { ticketKey }: { ticketKey?: string | null }) => qaLocalState(ticketKey),
     deployGate: (_: unknown, { ticketKey }: { ticketKey: string }) => {
@@ -580,7 +599,8 @@ export const resolvers = {
       return withoutSettledTickets(items, statusOf);
     },
     settings: async () => {
-      return await storageAPI.getPublicSettings();
+      const { storage, voice, storageLocalDir } = await livePlugins();
+      return { ...await storageAPI.getPublicSettings(), storagePlugin: storage, voicePlugin: voice, storageLocalDir };
     },
     jiraProjects: async (_: any, { url, email, token }: { url?: string, email?: string, token?: string }) => {
       return await jiraAPI.listProjects(url, email, token);
@@ -630,7 +650,11 @@ export const resolvers = {
     },
     guildMasterLog: async () => {
       requireAgents();
-      return agentBridge.gmLog(CHAT_MACHINE).catch(orchestratorInputError);
+      return agentBridge.gmLog(CHAT_MACHINE, await chatService.gmKey()).catch(orchestratorInputError);
+    },
+    guildMasterParty: async (_: unknown, { key }: { key: string }) => {
+      requireAgents();
+      return gmVerifiedParty(await agentBridge.gmLog(CHAT_MACHINE, await chatService.gmKey()).catch(() => []), normalizeTicketKey(key));
     },
     demoVideos: async () => {
       requireDemoVideos();
@@ -763,6 +787,11 @@ export const resolvers = {
       sprintDraftService.decide(sprint, id, action, note ?? null, reporterName()).catch(planningError)
     ),
     refreshSprintDraftQa: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.refreshQa(sprint).catch(planningError),
+    runScout: (_: unknown, { key }: { key: string }) => {
+      let ticket: string;
+      try { ticket = normalizeTicketKey(key); } catch { throw new GraphQLError('A valid ticket key is required', { extensions: { code: 'BAD_USER_INPUT' } }); }
+      return scoutRunner.run(ticket).catch(cronError);
+    },
     checkSprintStoryboards: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.checkStoryboards(sprint).catch(planningError),
     uploadSprintStoryboard: (_: unknown, { sprint, epic, html }: { sprint: string; epic: string; html: string }) => uploadStoryboard(sprint, epic, html),
     setSprintDraftTcs: (_: unknown, { sprint, key, tcs }: { sprint: string; key: string; tcs: unknown[] }) => sprintDraftService.setTcs(sprint, key, tcs).catch(planningError),
@@ -813,6 +842,8 @@ export const resolvers = {
     setWorktreeMerged: (_: unknown, { value }: { value: string }) => saveOpsRule(WORKTREE_MERGED_KEY, value, parseWorktreeMerged),
     cancelAutoReviewPost: (_: unknown, { id }: { id: string }) => autoReview.cancelPost(id),
     editAutoReviewPost: (_: unknown, { id, text }: { id: string; text: string }) => autoReview.editPost(id, text),
+    cancelReviewReplyPost: (_: unknown, { id }: { id: string }) => reviewFindings.cancelReply(id),
+    editReviewReplyPost: (_: unknown, { id, text }: { id: string; text: string }) => reviewFindings.editReply(id, text),
     cleanWorktrees: (_: unknown, { paths }: { paths: string[] }) => {
       requireWorktrees();
       return worktrees.clean(paths.slice(0, 50));
@@ -1191,7 +1222,7 @@ export const resolvers = {
       // The owner's click is the confirmation: DOCK mints the nonce the kit's write consumes, bound to the settings the backup restores.
       const grant = async () => {
         const entry = (await agentBridge.gmLog(CHAT_MACHINE)).find((row) => row.id === id);
-        return { nonce: chatService.gmNonces.mint({ sessionId: null, sha256: `rollback:${id}`, values: entry?.restoreValues ?? null, rollback: true }).nonce, key: await chatService.gmKey() };
+        return { nonce: chatService.gmNonces.mint({ sessionId: null, sha256: `rollback:${id}`, values: entry?.restoreValues ?? null, target: entry?.type === 'cron' ? 'cron' : 'settings', rollback: true }).nonce, key: await chatService.gmKey() };
       };
       return agentBridge.gmRollback(CHAT_MACHINE, id, grant).catch(orchestratorInputError);
     },
@@ -1253,6 +1284,10 @@ export const resolvers = {
   DiscordChannel: {
     team: (channel: { team?: boolean }) => Boolean(channel.team),
   },
+  SprintDraftTicket: {
+    scout: (ticket: { key: string }) => readScout(blackboard, ticket.key),
+    scoutRunning: (ticket: { key: string }) => scoutRunner.running(ticket.key),
+  },
   SprintDraftQuestion: {
     options: (question: { options?: string[] }) => question.options ?? [],
   },
@@ -1274,10 +1309,10 @@ export const resolvers = {
 };
 
 export const protectedQueries = [
-  'dashboard', 'ticketPullRequests', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'claudeAccounts', 'qaLocal', 'deployGate', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
+  'dashboard', 'ticketPullRequests', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'installedSkills', 'reviewRoundsForTicket', 'claudeAccounts', 'qaLocal', 'deployGate', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatSessionStates', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
-  'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'claudeSessionUsage', 'claudeTicketUsage', 'agentLooks', 'libraryAgents', 'libraryAgent', 'guildMasterLog',
+  'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'claudeSessionUsage', 'claudeTicketUsage', 'agentLooks', 'libraryAgents', 'libraryAgent', 'guildMasterLog', 'guildMasterParty',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
   'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro', 'sprintPlan',
   'planningSprints', 'sprintDraft', 'sprintPlanSignal', 'planningFlow', 'previewSprintDraftPublish', 'sprintDrift', 'acIncoming', 'ticketSummary', 'ticketReadiness',
@@ -1306,8 +1341,11 @@ export const protectedMutations = [
   'setWorktreeMerged',
   'cancelAutoReviewPost',
   'editAutoReviewPost',
+  'cancelReviewReplyPost',
+  'editReviewReplyPost',
   'cleanWorktrees',
   'checkSprintStoryboards',
+  'runScout',
   'uploadSprintStoryboard',
   'answerSprintDraftQuestion',
   'setSprintDraftTcs',

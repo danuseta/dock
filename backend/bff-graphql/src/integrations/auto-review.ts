@@ -1,4 +1,4 @@
-import { threadIdOf } from './discord-post';
+import { DISCORD_CLOSE, DISCORD_OPEN, parseDiscordBlock, threadIdOf, type DiscordPostFiles, type DiscordPostResult } from './discord-post';
 import type { ThreadMessage, ThreadRow } from './discord-threads';
 import type { Orchestration } from './orchestrator';
 
@@ -17,6 +17,61 @@ const ZERO_WIDTH = /[\u200B-\u200D\u2060\uFEFF]/g;
 const MIN_ANSWERED_CHARS = 15;
 const SEEN_HEADS = 500;
 const NOT_PENDING = 'Only a pending post can be changed';
+/** The detail of a pending post whose body the review session still owes through its skill; the template text waits as the fallback. */
+export const WAITING_SKILL = 'Waiting for the skill message';
+/** How long past its time a post waits for the skill message before the template goes out instead. */
+const SKILL_WAIT_MS = 15 * 60_000;
+/** A post the session writes waits at least a minute, so the owner can read it before it goes out. */
+const skillDelay = (settings: Pick<AutoReviewSettings, 'postDelayMinutes'>) => Math.max(1, settings.postDelayMinutes);
+const PLACEHOLDER =/\{\{\s*(\w+)\s*\}\}/g;
+
+export const REVIEW_POST_FORMATS = ['skill', 'template'] as const;
+export const REVIEW_REPLY_FORMATS = ['builtin', 'skill', 'template'] as const;
+export const SKILL_NAME = /^[a-z0-9][a-z0-9:_-]{0,60}$/;
+export const MAX_TEMPLATE_CHARS = 2_000;
+export const DEFAULT_REVIEW_SKILL = 'review-message';
+export const DEFAULT_REVIEW_POST_TEMPLATE = 'mas {{author}}, {{status}}. {{lgtm}} catatan: {{notes}}';
+export const DEFAULT_REVIEW_REPLY_TEMPLATE = 'mas {{author}}, {{status}} di {{sha}}. {{notes}}';
+/** The Settings keys of the two Discord message formats: the review post and the reply after a fix. */
+export const MESSAGE_KEYS = {
+  post: { format: 'reviewPostFormat', skill: 'reviewPostSkill', template: 'reviewPostTemplate' },
+  reply: { format: 'reviewReplyFormat', skill: 'reviewReplySkill', template: 'reviewReplyTemplate' },
+} as const;
+export interface MessageFormat { format: string; skill: string; template: string }
+
+const isTemplate = (value: unknown) => typeof value === 'string' && value.trim() !== '' && value.length <= MAX_TEMPLATE_CHARS;
+
+/** Whether a value fits a message format Settings key. */
+export function isMessageSetting(key: string, value: unknown): boolean {
+  if (key === 'reviewPostFormat') return (REVIEW_POST_FORMATS as readonly string[]).includes(String(value));
+  if (key === 'reviewReplyFormat') return (REVIEW_REPLY_FORMATS as readonly string[]).includes(String(value));
+  if (key === 'reviewPostSkill' || key === 'reviewReplySkill') return SKILL_NAME.test(String(value));
+  return isTemplate(value);
+}
+
+/** A saved message format with its defaults; a value that no longer fits takes the default. */
+export function messageFormat(kind: 'post' | 'reply', values: { get(key: string): string | null | undefined }): MessageFormat {
+  const keys = MESSAGE_KEYS[kind];
+  const saved = (key: string, fallback: string) => {
+    const value = values.get(key);
+    return value != null && isMessageSetting(key, value) ? value : fallback;
+  };
+  return {
+    format: saved(keys.format, kind === 'post' ? 'skill' : 'builtin'),
+    skill: saved(keys.skill, DEFAULT_REVIEW_SKILL),
+    template: saved(keys.template, kind === 'post' ? DEFAULT_REVIEW_POST_TEMPLATE : DEFAULT_REVIEW_REPLY_TEMPLATE),
+  };
+}
+
+/** A template with its placeholders filled; an unknown placeholder is left empty, and the spaces it leaves are folded. */
+export const fillTemplate = (template: string, values: Record<string, string>) =>
+  template.replace(PLACEHOLDER, (_, name: string) => values[name] ?? '').split('\n').map((line) => line.replace(/[ \t]{2,}/g, ' ').trim()).join('\n').trim();
+
+/** The lines asking a session to write a Discord message for DOCK to post, wrapped in the block DOCK reads. */
+export const discordBlockLines = (key: string) => [
+  `Bungkus pesannya persis di antara baris ${DISCORD_OPEN} dan ${DISCORD_CLOSE}. Di dalam blok, satu baris GAMBAR: <nama file> per gambar, nama file saja dari folder screenshots/ di blackboard ${key}, maksimal 10.`,
+  'DOCK yang mem-post pesan itu ke thread setelah jeda; jangan post sendiri.',
+];
 
 /** The numbers of the review arena, with their defaults and the range Settings accepts. */
 export const ARENA_SETTINGS = {
@@ -34,15 +89,15 @@ export const isArenaSetting = (key: ArenaSettingKey, value: unknown) => {
 /** A saved arena number, or its default when it was never saved or no longer fits. */
 export const arenaSetting = (key: ArenaSettingKey, value: string | null | undefined) => (value != null && isArenaSetting(key, value) ? Number(value) : ARENA_SETTINGS[key].fallback);
 
-export interface AutoReviewSettings { enabled: boolean; autoLgtm: boolean; post: boolean; postDelayMinutes: number; reReviewWaitMinutes: number; maxRounds: number }
+export interface AutoReviewSettings { enabled: boolean; autoLgtm: boolean; post: boolean; postDelayMinutes: number; reReviewWaitMinutes: number; maxRounds: number; message: MessageFormat }
 export interface PullState { open: boolean; headSha: string }
 export interface AutoReviewRecord {
   id: string; prUrl: string; headSha: string; ticketKey: string; threadUrl: string; sessionId: string | null; status: string; detail: string | null; startedAt: Date; finishedAt: Date | null;
-  round: number; postStatus: string | null; postAt: Date | null; postText: string | null; postMessageId: string | null; postDetail: string | null;
+  round: number; postStatus: string | null; postAt: Date | null; postText: string | null; postMessageId: string | null; postDetail: string | null; postImages: string | null;
 }
 export interface AutoReviewUpdate {
   sessionId?: string | null; status?: string; detail?: string | null; finishedAt?: Date | null;
-  postStatus?: string | null; postAt?: Date | null; postText?: string | null; postMessageId?: string | null; postDetail?: string | null;
+  postStatus?: string | null; postAt?: Date | null; postText?: string | null; postMessageId?: string | null; postDetail?: string | null; postImages?: string | null;
 }
 export interface PushMessage { title: string; body: string; url: string; tag: string }
 /** Who posts: the owner's Discord user id for the marker, the owner's webhook and the name the post carries. */
@@ -63,30 +118,45 @@ export interface AutoReviewDeps {
   update(id: string, data: AutoReviewUpdate): Promise<unknown>;
   /** Changes a post only while it is still pending; false when it already went out, was taken for sending or was cancelled. */
   updatePending(id: string, data: AutoReviewUpdate): Promise<boolean>;
+  /** Changes a post only while it is pending and still waiting for the skill message; false after an edit, a cancel or a send. */
+  updateWaitingSkill(id: string, data: AutoReviewUpdate): Promise<boolean>;
   openReview(key: string, prompt: string): Promise<string>;
   /** The same steps as the LGTM button on the Agents page; true when every step went through. */
   approve(key: string): Promise<boolean>;
   push(message: PushMessage): Promise<unknown>;
   owner(): Promise<AutoReviewOwner>;
-  /** Posts to a thread through the owner's webhook and returns the message id. */
-  postDiscord(webhookUrl: string, content: string, options: { threadId: string; username: string }): Promise<string>;
+  /** Posts to a thread through the owner's webhook; the message id and the image names left out. */
+  postDiscord(webhookUrl: string, content: string, options: { threadId: string; username: string; files?: DiscordPostFiles }): Promise<DiscordPostResult>;
+  /** The text of the session's newest assistant message, or null. */
+  newestReply(sessionId: string): Promise<string | null>;
+  /** The names of the skills installed where the sessions read them. */
+  skills(): Promise<string[]>;
+  /** The folder a ticket's review screenshots are uploaded from; null when the key is not one of this DOCK's blackboard tickets. */
+  imageRoot(key: string): Promise<string | null>;
   now(): Date;
 }
 
-/** The prompt of an auto review: one sous review of every pull request of the ticket, with the thread as context. Nothing is posted anywhere. */
-export const reviewPrompt = (key: string, prUrls: string[], threadUrl: string) => [
+/**
+ * The prompt of an auto review: one sous review of every pull request of the ticket, with the thread as context. With a skill,
+ * the session also writes the Discord message with it for DOCK to post; it never posts anything itself.
+ */
+export const reviewPrompt = (key: string, prUrls: string[], threadUrl: string, skill: string | null = null) => [
   `Pakai skill sous. review ${key}: ${prUrls.join(' ')}`,
   `Thread Discord pr-review: ${threadUrl} (baca dulu lewat discord-files.cjs).`,
   'Ini auto review dari DOCK karena owner bilang on it di thread itu. Jangan komentar di PR, Jira, atau Discord; tulis verdict dan temuan ke ledger seperti biasa.',
+  ...(skill ? [`Setelah verdict tertulis di ledger, tulis pesan Discord hasil review pakai skill ${skill} sebagai bagian akhir balasanmu.`, ...discordBlockLines(key)] : []),
 ].join('\n');
 
-/** The line DOCK puts under every review it posts; teammates' DOCKs read the review through it, so no format changes it. */
-export const reviewMarker = (ownerId: string, round: number, sha: string) => `DOCK-REVIEW on it by <@${ownerId}> · round ${round} · @ ${sha.slice(0, 7)}`;
+/**
+ * The line DOCK puts under every review it posts; teammates' DOCKs read the review through it, so no format changes it. The
+ * verdict in it comes from the ledger, so a body a session wrote cannot misstate it.
+ */
+export const reviewMarker = (ownerId: string, round: number, sha: string, verdict = '') => `DOCK-REVIEW on it by <@${ownerId}> · round ${round} · @ ${sha.slice(0, 7)}${verdict ? ` · ${verdict}` : ''}`;
 
 const normalized = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
-/** Finding text as it goes out: a masked link shows as text, and a raw link stays a link without a preview. */
-const plainText = (text: string) => text.trim().replace(/\]\(/g, ']\u200B(').replace(/(?<!<)\bhttps?:\/\/[^\s<>()]+/g, (url) => `<${url}>`);
+/** Text as it goes out: a masked link shows as text, and a raw link stays a link without a preview. */
+export const plainText = (text: string) => text.trim().replace(/\]\(/g, ']\u200B(').replace(/(?<!<)\bhttps?:\/\/[^\s<>()]+/g, (url) => `<${url}>`);
 
 /** A DOCK-FIX reply: posted by a webhook, as a DOCK does, after the arena opened. A person typing the words is not one. */
 const isFixReply = (message: Pick<ThreadMessage, 'text' | 'at' | 'webhookId'>, since: number) =>
@@ -105,20 +175,34 @@ export function answeredFindings(messages: Array<Pick<ThreadMessage, 'text' | 'a
 
 type ReviewLedger = Pick<Orchestration, 'key' | 'verdict' | 'findings'>;
 
-/**
- * The DOCK default text of a review: the verdict, each pull request at its head, the open blockers and non-blocking findings
- * with their text, and only a count of nits. A finding the author already answered "tidak diubah karena" is left out.
- */
-export function reviewBody(run: ReviewLedger, pulls: Array<{ url: string; headSha: string }>, answered: string[] = []): string {
+/** The open findings a post names: a finding the author already answered "tidak diubah karena" is left out. */
+function reviewParts(run: ReviewLedger, answered: string[]) {
   const open = (run.findings ?? []).filter((finding) => !finding.resolvedAt);
   const posted = open.filter((finding) => {
     const text = normalized(finding.text);
     return text.length < MIN_ANSWERED_CHARS || !answered.some((answer) => answer.includes(text) && text.length * 2 >= answer.length);
   });
-  const blockers = posted.filter((finding) => finding.severity === 'blocker');
-  const notes = posted.filter((finding) => finding.severity === 'non-blocking');
-  const nits = open.filter((finding) => finding.severity === 'nit').length;
-  const clean = run.verdict === 'approve' && !open.some((finding) => finding.severity === 'blocker');
+  return {
+    blockers: posted.filter((finding) => finding.severity === 'blocker'),
+    notes: posted.filter((finding) => finding.severity === 'non-blocking'),
+    nits: open.filter((finding) => finding.severity === 'nit').length,
+    clean: run.verdict === 'approve' && !open.some((finding) => finding.severity === 'blocker'),
+  };
+}
+
+/** The verdict of the marker line, from the ledger: the label and every open blocker. */
+export function markerVerdict(run: ReviewLedger): string {
+  const { notes, clean } = reviewParts(run, []);
+  const blockers = (run.findings ?? []).filter((finding) => !finding.resolvedAt && finding.severity === 'blocker').length;
+  return `${clean ? (notes.length ? 'Approve with comments' : 'Approve') : 'Request change'} · ${blockers} blocker`;
+}
+
+/**
+ * The DOCK default text of a review: the verdict, each pull request at its head, the open blockers and non-blocking findings
+ * with their text, and only a count of nits. A finding the author already answered "tidak diubah karena" is left out.
+ */
+export function reviewBody(run: ReviewLedger, pulls: Array<{ url: string; headSha: string }>, answered: string[] = []): string {
+  const { blockers, notes, nits, clean } = reviewParts(run, answered);
   const label = clean ? (notes.length ? 'Approve with comments' : 'Approve') : 'Request change';
   const counts = [blockers.length ? `${blockers.length} blocker` : '', notes.length ? `${notes.length} non-blocking` : ''].filter(Boolean).join(', ');
   return [
@@ -138,10 +222,22 @@ export function withMarker(body: string, marker: string): string {
 
 /** The post of one review round: the DOCK default body, then the fixed marker line. */
 export const reviewPost = (run: ReviewLedger, pulls: Array<{ url: string; headSha: string }>, round: number, ownerId: string, answered: string[] = []) =>
-  withMarker(reviewBody(run, pulls, answered), reviewMarker(ownerId, round, pulls[0]?.headSha ?? ''));
+  withMarker(reviewBody(run, pulls, answered), reviewMarker(ownerId, round, pulls[0]?.headSha ?? '', markerVerdict(run)));
+
+const numbered = (texts: string[]) => texts.map((text, index) => `${index + 1}) ${plainText(text)}`).join(' ');
+
+/** The placeholders of the review template, from the ledger, the pull requests at their heads and the thread poster. */
+export function reviewTemplateValues(run: ReviewLedger, pulls: Array<{ url: string; headSha: string }>, round: number, author: string, answered: string[] = []): Record<string, string> {
+  const { blockers, notes, clean } = reviewParts(run, answered);
+  return {
+    author, ticket: run.key, round: String(round), sha: pulls[0]?.headSha.slice(0, 7) ?? '', pr: pulls.map((pull) => `<${pull.url}>`).join(' '),
+    status: blockers.length ? `ada blocker ${blockers.length}` : 'gak ada blocker', lgtm: clean ? 'lgtm' : '',
+    blockers: numbered(blockers.map((finding) => finding.text)), notes: numbered(notes.map((finding) => finding.text)),
+  };
+}
 
 /** A person asking DOCK to stop in a thread; a DOCK post quoting it does not count. */
-const saysStop = (message: Pick<ThreadMessage, 'text'>) => STOP_DOCK.test(message.text) && !DOCK_POST.test(message.text);
+export const saysStop =(message: Pick<ThreadMessage, 'text'>) => STOP_DOCK.test(message.text) && !DOCK_POST.test(message.text);
 
 /**
  * The auto reviews worth showing: one still running, or one whose pull request is open at the commit it reviewed. A review of a
@@ -229,7 +325,8 @@ export class AutoReview {
     const marker = record.postText?.split('\n').pop() ?? '';
     if (!marker.startsWith('DOCK-REVIEW on it by')) throw new Error('The post has no DOCK marker');
     if (!withMarker(text, '').trim()) throw new Error('The post text is empty');
-    if (!(await this.deps.updatePending(id, { postText: withMarker(text, marker) }))) throw new Error(NOT_PENDING);
+    const detail = record.postDetail === WAITING_SKILL ? { postDetail: null, postImages: null } : {};
+    if (!(await this.deps.updatePending(id, { postText: withMarker(text, marker), ...detail }))) throw new Error(NOT_PENDING);
     return true;
   }
 
@@ -300,7 +397,7 @@ export class AutoReview {
     const records: AutoReviewRecord[] = [];
     for (const pull of due) records.push(await this.deps.create({ prUrl: pull.url, headSha: pull.headSha, ticketKey: key, threadUrl: row.url, startedAt: this.deps.now(), round: pull.round }));
     try {
-      const sessionId = await this.deps.openReview(key, reviewPrompt(key, due.map((pull) => pull.url), row.url));
+      const sessionId = await this.deps.openReview(key, reviewPrompt(key, due.map((pull) => pull.url), row.url, await this.postSkill(settings)));
       for (const record of records) await this.deps.update(record.id, { sessionId });
       return 1;
     } catch (error) {
@@ -372,17 +469,55 @@ export class AutoReview {
       await this.deps.updatePending(record.id, { postStatus: 'failed', postDetail: !owner.webhookUrl ? 'No Discord webhook in Settings' : 'Nothing to post to this thread' });
       return;
     }
+    if (record.postDetail === WAITING_SKILL && !(await this.takeSkillMessage(record, settings))) return;
     if (!(await this.deps.updatePending(record.id, { postStatus: 'sending' }))) return;
     try {
-      const text = (await this.deps.get(record.id))?.postText;
-      if (!text) throw new Error('Nothing to post to this thread');
-      const messageId = await this.deps.postDiscord(owner.webhookUrl, text, { threadId, username: `${owner.name} (DOCK)` });
-      await this.deps.update(record.id, { postStatus: 'sent', postMessageId: messageId, postDetail: null });
+      const current = await this.deps.get(record.id);
+      if (!current?.postText) throw new Error('Nothing to post to this thread');
+      const names = current.postImages ? JSON.parse(current.postImages) as string[] : [];
+      const root = names.length ? await this.deps.imageRoot(record.ticketKey) : null;
+      const posted = await this.deps.postDiscord(owner.webhookUrl, current.postText, { threadId, username: `${owner.name} (DOCK)`, files: root ? { root, names } : undefined });
+      const { id } = posted;
+      const skipped = root ? posted.skipped : names;
+      await this.deps.update(record.id, { postStatus: 'sent', postMessageId: id, postDetail: null });
+      if (skipped.length) await this.deps.push({ title: `${record.ticketKey}: images left out of the review post`, body: skipped.join(', '), url: '/agents', tag: `auto-review-post-${record.id}` });
     } catch (error) {
       const detail = error instanceof Error ? error.message.slice(0, 300) : 'Discord refused the post';
       await this.deps.update(record.id, { postStatus: 'failed', postDetail: detail });
       await this.deps.push({ title: `${record.ticketKey}: review post failed`, body: detail, url: '/agents', tag: `auto-review-post-${record.id}` });
     }
+  }
+
+  /** The skill the review session writes the post with; null for the template, with posting off, or when the skill is not installed. */
+  private async postSkill(settings: AutoReviewSettings): Promise<string | null> {
+    if (!settings.post || settings.message.format !== 'skill') return null;
+    const installed = await this.deps.skills().catch(() => [] as string[]);
+    return installed.includes(settings.message.skill) ? settings.message.skill : null;
+  }
+
+  /**
+   * Swaps the waiting template text for the message the review session wrote with its skill. With no message yet the post waits a
+   * minute more, up to 15 min after the verdict; after that the template goes out and the owner is told. A message that arrives
+   * waits the post delay again, at least a minute, so the owner reads it first. Each change is made only while the post still
+   * waits for the skill, so an owner's edit is never overwritten and goes out as it is. False while it waits.
+   */
+  private async takeSkillMessage(record: AutoReviewRecord, settings: AutoReviewSettings): Promise<boolean> {
+    const block = parseDiscordBlock(record.sessionId ? await this.deps.newestReply(record.sessionId) : null);
+    const marker = record.postText?.split('\n').pop() ?? '';
+    const now = this.deps.now().getTime();
+    if (block) {
+      const minutes = skillDelay(settings);
+      const swapped = await this.deps.updateWaitingSkill(record.id, {
+        postText: withMarker(plainText(block.body), marker), postImages: block.images.length ? JSON.stringify(block.images) : null, postDetail: null, postAt: new Date(now + minutes * 60_000),
+      });
+      if (!swapped) return true;
+      await this.deps.push({ title: `${record.ticketKey}: review post ready, sends in ${minutes} min`, body: 'The review session wrote the Discord message. Cancel or edit it on Agents before then.', url: '/agents', tag: `auto-review-post-${record.id}` });
+      return false;
+    }
+    if (now - (record.finishedAt ?? record.startedAt).getTime() < SKILL_WAIT_MS) return !(await this.deps.updateWaitingSkill(record.id, { postAt: new Date(now + 60_000) }));
+    if (!(await this.deps.updateWaitingSkill(record.id, { postDetail: null }))) return true;
+    await this.deps.push({ title: `${record.ticketKey}: no skill message, DOCK template posted`, body: 'The review session wrote no Discord block; the post uses the DOCK template.', url: '/agents', tag: `auto-review-post-${record.id}` });
+    return true;
   }
 
   /** A review ledger with a verdict, for the auto review running on that ticket. */
@@ -447,8 +582,21 @@ export class AutoReview {
       return;
     }
     const row = (await this.deps.rows()).find((item) => item.url === first.threadUrl);
-    const postText = reviewPost(run, group.map((record) => ({ url: record.prUrl, headSha: record.headSha })), first.round, owner.discordUserId, answeredFindings(row?.messages ?? [], Date.parse(row?.ownClaim?.at ?? '') || 0));
-    await this.deps.update(first.id, { postStatus: 'pending', postAt: new Date(this.deps.now().getTime() + settings.postDelayMinutes * 60_000), postText });
+    const pulls = group.map((record) => ({ url: record.prUrl, headSha: record.headSha }));
+    const answered = answeredFindings(row?.messages ?? [], Date.parse(row?.ownClaim?.at ?? '') || 0);
+    const marker = reviewMarker(owner.discordUserId, first.round, pulls[0]?.headSha ?? '', markerVerdict(run));
+    const template = () => withMarker(plainText(fillTemplate(settings.message.template, reviewTemplateValues(run, pulls, first.round, row?.createdBy ?? '', answered))), marker);
+    const postAt = new Date(this.deps.now().getTime() + settings.postDelayMinutes * 60_000);
+    if (settings.message.format === 'template') {
+      await this.deps.update(first.id, { postStatus: 'pending', postAt, postText: template() });
+      return;
+    }
+    if (!(await this.postSkill(settings))) {
+      await this.deps.update(first.id, { postStatus: 'pending', postAt, postText: template() });
+      await this.deps.push({ title: `${run.key}: skill ${settings.message.skill} not installed`, body: 'The review post uses the DOCK template.', url: '/agents', tag: `auto-review-post-${first.id}` });
+      return;
+    }
+    await this.deps.update(first.id, { postStatus: 'pending', postAt: new Date(this.deps.now().getTime() + skillDelay(settings) * 60_000), postText: template(), postDetail: WAITING_SKILL });
   }
 
   private finish(record: AutoReviewRecord, status: string, detail: string) {

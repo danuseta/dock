@@ -18,6 +18,7 @@ export interface GuildMasterLogEntry {
   backup: string;
   rollbackOf: number | null;
   rolledBack: boolean;
+  unverified?: boolean;
 }
 
 const label = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
@@ -73,6 +74,7 @@ export const GuildMasterPanel: React.FC<{ className?: string; proposal?: { summa
               <div className="flex items-center gap-2">
                 <span className="font-mono text-[0.66rem] text-muted-foreground">#{entry.id} · {when(entry.at)}</span>
                 {entry.kind === 'rollback' ? <Badge>rollback of #{entry.rollbackOf}</Badge> : <Badge variant={entry.rolledBack ? 'neutral' : 'success'}>{entry.rolledBack ? 'rolled back' : 'applied'}</Badge>}
+                {entry.unverified && <Badge variant="warn">unverified</Badge>}
                 {!entry.rolledBack && entry.backup && (
                   <button type="button" className="ml-auto inline-flex items-center gap-1 text-[0.7rem] font-semibold text-accent hover:underline max-[900px]:min-h-11" disabled={rolling} onClick={() => setTarget(entry)}>
                     <Undo2 size={12} aria-hidden="true" />Rollback

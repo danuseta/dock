@@ -1,11 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { GET_DEMO_STORAGE, GET_INGEST_TOKENS, GET_SETTINGS } from '../graphql/queries';
+import { GET_DEMO_STORAGE, GET_INGEST_TOKENS, GET_INSTALLED_SKILLS, GET_SETTINGS } from '../graphql/queries';
 import { UPDATE_SETTINGS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { IngestTokensSection } from '../components/IngestTokensSection';
-import { ElevenLabsKeysSection } from '../components/ElevenLabsKeysSection';
-import { DemoStorageSection } from '../components/DemoStorageSection';
 import { ClaudeAccountSection } from '../components/ClaudeAccountSection';
 import { ChatDefaultsSection } from '../components/ChatDefaultsSection';
 import { normalizeCaveman, normalizeRtk } from '../chat/chatDefaults';
@@ -30,6 +28,9 @@ import { CalendarSection, type GoogleReturn } from '../settings/sections/Calenda
 import { PlanningFlowSection } from '../settings/sections/PlanningFlowSection';
 import { JudgeSection } from '../settings/sections/JudgeSection';
 import { SousFlowSection } from '../settings/sections/SousFlowSection';
+import { ElevenLabsKeysSection } from '../components/ElevenLabsKeysSection';
+import { DemoStorageSection } from '../components/DemoStorageSection';
+import { PluginsSection } from '../settings/sections/PluginsSection';
 import { RulesCard } from '../settings/sections/RulesCard';
 
 const dotClass: Record<Exclude<SectionStatus, null>, string> = {
@@ -60,6 +61,7 @@ const SettingsPage: React.FC = () => {
   const { data, loading, error, refetch } = useQuery(GET_SETTINGS, CACHED_QUERY_OPTIONS);
   const { data: tokenData } = useQuery(GET_INGEST_TOKENS, CACHED_QUERY_OPTIONS);
   const { data: storageData } = useQuery(GET_DEMO_STORAGE, CACHED_QUERY_OPTIONS);
+  const { data: skillData } = useQuery<{ installedSkills: string[] }>(GET_INSTALLED_SKILLS, { ...CACHED_QUERY_OPTIONS, skip: active !== 'messages' });
   const [updateSettings] = useMutation(UPDATE_SETTINGS);
 
   const settings: SavedSettings = data?.settings ?? {};
@@ -209,10 +211,10 @@ const SettingsPage: React.FC = () => {
           {active === 'github' && <GitHubSection values={valuesOf('github')} set={setter('github')} settings={settings} test={tests.github} onTested={tested('github')} />}
           {active === 'discord' && <DiscordSection values={valuesOf('discord')} set={setter('discord')} settings={settings} test={tests.discord} onTested={tested('discord')} />}
           {active === 'review' && <ReviewSection values={valuesOf('review')} set={setter('review')} />}
-          {active === 'messages' && <DiscordMessagesSection values={valuesOf('messages')} set={setter('messages')} />}
+          {active === 'messages' && <DiscordMessagesSection values={valuesOf('messages')} set={setter('messages')} skills={skillData?.installedSkills} />}
           {active === 'calendar' && <CalendarSection values={valuesOf('calendar')} set={setter('calendar')} settings={settings} dirty={changesOf('calendar') > 0} googleReturn={googleReturn} />}
           {active === 'machines' && <IngestTokensSection />}
-          {active === 'plugins' && <div className="flex flex-col gap-5"><ElevenLabsKeysSection /><DemoStorageSection /></div>}
+          {active === 'plugins' && <PluginsSection values={valuesOf('plugins')} set={setter('plugins')} s3Fields={<DemoStorageSection />} voiceKeys={<ElevenLabsKeysSection />} />}
           {active === 'claude' && <ClaudeAccountSection />}
           {active === 'planflow' && <PlanningFlowSection />}
           {active === 'sousflow' && <SousFlowSection />}
