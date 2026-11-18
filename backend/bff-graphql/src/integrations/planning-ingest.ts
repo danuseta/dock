@@ -17,7 +17,7 @@ export interface PlanningIngestDeps {
   /** The ticket summaries; get lists the acHash each stored summary was written for. */
   summaries?: Pick<TicketSummaryService, 'write' | 'hashes'>;
   /** The visuals the agent puts in Planning; without them the route answers that visuals are not available. */
-  visuals?: Pick<PlanningVisualService, 'put' | 'remove'>;
+  visuals?: Pick<PlanningVisualService, 'put' | 'remove' | 'list'>;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -60,7 +60,8 @@ export async function planningIngest(deps: PlanningIngestDeps, route: PlanningRo
     const sprint = textField(body, 'sprint')!;
     if (route === 'sprint-draft/get') {
       const view = await draftOf(deps.drafts, sprint);
-      return deps.summaries ? { ...view, summaries: await deps.summaries.hashes(view.tickets.map((ticket) => ticket.key)) } : view;
+      const withSummaries = deps.summaries ? { ...view, summaries: await deps.summaries.hashes(view.tickets.map((ticket) => ticket.key)) } : view;
+      return deps.visuals ? { ...withSummaries, visuals: (await deps.visuals.list(sprint)).map(({ id, title, saved, stale }) => ({ id, title, saved, stale })) } : withSummaries;
     }
     if (route === 'sprint-draft/visual') {
       if (!deps.visuals) throw new OrchestratorInputError('Visuals are not available on this DOCK');

@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { redoVisualPrompt, visualTime } from '../agents/planning';
-import { CHART_PROMPT, TIMELINE_PROMPT, chatSuggestions } from '../chat/suggestions';
+import { chartPrompt, timelinePrompt, chatSuggestions } from '../chat/suggestions';
 import { prefillStore } from '../chat/store';
 
 const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
@@ -12,10 +12,10 @@ test('a Planning chat shows the three chips on an empty session, and no Run spri
   assert.deepStrictEqual(chatSuggestions('Planning-QRD Sprint 27', 0).map((item) => item.label), ['Run sprint-planner', 'Chart SP per dev', 'Timeline per dev']);
   assert.deepStrictEqual(chatSuggestions('Planning-QRD Sprint 27', 4).map((item) => item.label), ['Chart SP per dev', 'Timeline per dev']);
   assert.strictEqual(chatSuggestions('Planning-QRD Sprint 27', 0)[0].text, null, 'the planner prompt comes from DOCK, with the epics of the draft');
-  assert.strictEqual(chatSuggestions('Planning-QRD Sprint 27', 0)[1].text, CHART_PROMPT);
-  assert.strictEqual(chatSuggestions('Planning-QRD Sprint 27', 0)[2].text, TIMELINE_PROMPT);
-  assert.strictEqual(CHART_PROMPT, 'Make an HTML chart of story points per developer for this sprint, biggest first, and put it in Planning as a visual.');
-  assert.strictEqual(TIMELINE_PROMPT, "Make an HTML timeline of each developer's tickets until the end of the sprint and put it in Planning as a visual.");
+  assert.strictEqual(chatSuggestions('Planning-QRD Sprint 27', 0)[1].text, chartPrompt('QRD Sprint 27'));
+  assert.strictEqual(chatSuggestions('Planning-QRD Sprint 27', 0)[2].text, timelinePrompt('QRD Sprint 27'));
+  assert.match(chartPrompt('QRD Sprint 27'), /sprint "QRD Sprint 27"/, 'the agent knows the sprint without reading the session title');
+  assert.match(timelinePrompt('QRD Sprint 27'), /sprint "QRD Sprint 27"/);
 });
 
 test('any other chat gets no chips', () => {
@@ -52,7 +52,8 @@ test('the chat store hands a prefill to its session once and keeps it out of the
 test('Planning has no Test cases tab, and the backend test case support is still there', () => {
   const tab = source('../agents/PlanningTab.tsx');
   assert.doesNotMatch(tab, /Test cases|TcPanel|TcTicket|onSaveTcs|SET_SPRINT_DRAFT_TCS/);
-  assert.match(tab, /\['qa', 'QA check'\], \['storyboard', 'Storyboard'\]\];/);
+  assert.match(tab, /\['ac', 'AC check'\], \['storyboard', 'Storyboard'\]\];/);
+  assert.doesNotMatch(tab, /QaPanel|QA check|onRefreshQa|ESCALATED/);
   assert.match(source('../agents/planning.ts'), /export type PlanningPanel = 'mine' \| 'team' \| 'scope' \| 'ac' \| 'qa' \| 'tc' \| 'storyboard';/);
   assert.match(source('../graphql/queries.ts'), /setSprintDraftTcs/);
 });

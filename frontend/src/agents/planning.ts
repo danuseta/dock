@@ -348,12 +348,12 @@ export const sortFindings = (findings: DraftFinding[]) => [...findings].sort((a,
 
 export function publishHint(draft: Pick<SprintDraft, 'canPublish' | 'blockers' | 'tickets'>): string {
   if (draft.tickets.length === 0) return 'No tickets in this sprint';
-  if (!draft.blockers.length) return 'Every AC line and QA prediction that needs a call has one';
+  if (!draft.blockers.length) return 'Every AC line that needs a call has one';
   const n = draft.blockers.length;
   return `${n} ${n === 1 ? 'item needs' : 'items need'} a decision before publish`;
 }
 
-export interface ReadyItem { id: 'scope' | 'ac' | 'qa' | 'storyboard'; ok: boolean; text: string; detail: string | null; panel: PlanningPanel; fix: string }
+export interface ReadyItem { id: 'scope' | 'ac' | 'storyboard'; ok: boolean; text: string; detail: string | null; panel: PlanningPanel; fix: string }
 export interface Readiness { items: ReadyItem[]; done: number; total: number; missing: ReadyItem[] }
 
 const SHOWN_KEYS = 3;
@@ -361,7 +361,7 @@ const keysText = (keys: string[]) => `${keys.slice(0, SHOWN_KEYS).join(', ')}${k
 
 /**
  * G1 "Siap publish": the SP fit the team's capacity or a scope cut is written, every AC line naming another ticket has a Blocks link or a decision,
- * every ESCALATED prediction has one, and each storyboard version is recorded with the AC checked against it. Only
+ * and each storyboard version is recorded with the AC checked against it. Only
  * information: Publish stays open. A stage the planning flow skips is not counted.
  */
 export function publishReadiness(
@@ -378,7 +378,6 @@ export function publishReadiness(
   // The same undecided set the AC check lists: every line naming another ticket with no Blocks link and no call.
   const late = draft.findings.filter(undecidedFinding);
   const planned = open.filter((ticket) => !ticket.carried);
-  const escalated = planned.filter((ticket) => ticket.prediction?.prediction === 'ESCALATED' && !ticket.qaDecision);
   const unread = draft.storyboards.filter((board) => board.version === null);
   const unchecked = uncheckedStoryboard({ tickets: planned });
   const recorded = draft.storyboards.length > 0 && unread.length === 0;
@@ -392,11 +391,6 @@ export function publishReadiness(
       id: 'ac', panel: 'ac', fix: 'AC check', ok: late.length === 0,
       text: late.length ? `${late.length} ${late.length === 1 ? 'reference' : 'references'} to other tickets not decided` : 'References to other tickets decided',
       detail: late.length ? keysText([...new Set(late.map((finding) => finding.key))]) : null,
-    },
-    {
-      id: 'qa', panel: 'qa', fix: 'QA check', ok: escalated.length === 0,
-      text: escalated.length ? `${escalated.length} ${escalated.length === 1 ? 'ticket' : 'tickets'} predicted ESCALATED not decided` : 'QA check fully decided',
-      detail: escalated.length ? keysText(escalated.map((ticket) => ticket.key)) : null,
     },
     {
       id: 'storyboard', panel: 'storyboard', fix: 'Storyboard', ok: recorded && unchecked.length === 0,

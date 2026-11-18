@@ -277,36 +277,36 @@ const ready = (over: Partial<SprintDraft> = {}) => ({
   ...over,
 });
 
-test('Siap publish 4 dari 4: SP fit, references and ESCALATED decided, storyboard recorded and checked', () => {
+test('Siap publish 3 dari 3: SP fit, references decided, storyboard recorded and checked', () => {
   const result = publishReadiness(ready(), null);
-  assert.deepEqual([result.done, result.total, result.missing], [4, 4, []]);
-  assert.deepEqual(result.items.map((item) => item.id), ['scope', 'ac', 'qa', 'storyboard']);
+  assert.deepEqual([result.done, result.total, result.missing], [3, 3, []]);
+  assert.deepEqual(result.items.map((item) => item.id), ['scope', 'ac', 'storyboard']);
   assert.equal(result.items[0].text, '20 SP fits the 20 SP capacity');
 });
 
-test('Siap publish 2 dari 4: SP over capacity without a cut and an undecided ESCALATED ticket, each linked to its panel', () => {
+test('Siap publish 2 dari 3: SP over capacity without a cut and an undecided ESCALATED ticket that does not count, each linked to its panel', () => {
   const result = publishReadiness(ready({
     tickets: [ticket({ key: 'QRD-1', sp: 25 }), ticket({ key: 'QRD-2', sp: 5, prediction: { prediction: 'ESCALATED', reasons: [], fix: null } })],
   }), null);
-  assert.deepEqual([result.done, result.total], [2, 4]);
-  assert.deepEqual(result.missing.map((item) => [item.id, item.panel, item.text]), [
-    ['scope', 'scope', '30 SP for a 20 SP capacity'],
-    ['qa', 'qa', '1 ticket predicted ESCALATED not decided'],
-  ]);
+  assert.deepEqual([result.done, result.total], [2, 3]);
+  assert.deepEqual(result.missing.map((item) => [item.id, item.panel, item.text]), [['scope', 'scope', '30 SP for a 20 SP capacity']]);
   assert.equal(result.missing[0].detail, 'No scope cut decided yet');
   const cut = publishReadiness(ready({ tickets: [ticket({ key: 'QRD-1', sp: 25 })], scopeCut: { action: 'cut', note: 'QRD-1 pindah ke Sprint 28', by: 'PO', at: '' } }), null);
   assert.equal(cut.items[0].ok, true, 'a written scope cut counts as fit');
   const open = publishReadiness(ready({ findings: [finding({ id: 'f1', key: 'QRD-7', kind: 'after-it' })], storyboards: [] }), null);
   assert.deepEqual(open.missing.map((item) => [item.id, item.detail]), [['ac', 'QRD-7'], ['storyboard', 'No storyboard read yet']]);
-  const carried = publishReadiness(ready({
-    tickets: [ticket({ key: 'QRD-1', sp: 5 }), ticket({ key: 'QRD-2', sp: 5, carried: true, prediction: { prediction: 'ESCALATED', reasons: [], fix: null } })],
-  }), null);
-  assert.equal(carried.items.find((item) => item.id === 'qa')!.ok, true, 'a carried ticket was decided in its own sprint');
+  assert.equal(result.items.some((item) => item.id === 'qa'), false, 'an undecided QA item is not a Ready-to-publish item');
 });
 
-test('Siap publish leaves out an item whose planning stage is skipped; no flow counts all four', () => {
+test('Siap publish ignores an undecided ESCALATED prediction and the hint does not ask for it', () => {
+  const result = publishReadiness(ready({ tickets: [ticket({ key: 'QRD-1', sp: 5, prediction: { prediction: 'ESCALATED', reasons: [], fix: null }, qaDecision: null })] }), null);
+  assert.deepEqual([result.done, result.total, result.missing], [3, 3, []]);
+  assert.equal(publishHint({ canPublish: true, blockers: [], tickets: [ticket({})] }), 'Every AC line that needs a call has one');
+});
+
+test('Siap publish leaves out an item whose planning stage is skipped; no flow counts all three', () => {
   const draft = ready({ storyboards: [], tickets: [ticket({ key: 'QRD-1', sp: 5, prediction: { prediction: 'ESCALATED', reasons: [], fix: null } })] });
-  assert.deepEqual([publishReadiness(draft, defaultFlow()).done, publishReadiness(draft, defaultFlow()).total], [2, 4]);
+  assert.deepEqual([publishReadiness(draft, defaultFlow()).done, publishReadiness(draft, defaultFlow()).total], [2, 3]);
   const short = publishReadiness(draft, applyTemplate(defaultFlow(), 'Cuma scope + publish'));
   assert.deepEqual([short.done, short.total, short.items.map((item) => item.id)], [1, 1, ['scope']]);
   const noQa = publishReadiness(draft, applyTemplate(defaultFlow(), 'Tanpa QA'));

@@ -161,7 +161,7 @@ test('a load schedules the sprint, finds the after-it line and gives the QA bot 
     ['QRD-1511', 3, 'QRD-1363', 'lands-first'],
   ]);
   assert.equal(byKey['QRD-1511'].prediction?.prediction, 'ESCALATED');
-  assert.deepEqual(view.blockers, ['ac|QRD-1511|QRD-1490|An Edit client sees the cursor (QRD-1490)', 'qa|QRD-1511']);
+  assert.deepEqual(view.blockers, ['ac|QRD-1511|QRD-1490|An Edit client sees the cursor (QRD-1490)'], 'an undecided ESCALATED prediction is not a blocker');
   assert.equal(view.canPublish, true, 'blockers are shown, they do not hold publish');
   assert.deepEqual(seen().find((ticket) => ticket.key === 'QRD-1511')!.waitsOn, [{ key: 'QRD-1490', endDay: 6.5 }, { key: 'QRD-1363', endDay: null }]);
 });
@@ -175,9 +175,9 @@ test('a decision is checked and clears its blocker, and publish goes ahead with 
   const decided = await service.decide('QRD Sprint 26', 'qa|QRD-1511', 'accept', null, 'Alvin');
   assert.deepEqual(decided.blockers, []);
   assert.equal(decided.findings[0].decision?.action, 'move');
-  assert.deepEqual((await service.decide('QRD Sprint 26', 'qa|QRD-1511', 'clear', null, 'Alvin')).blockers, ['qa|QRD-1511']);
+  assert.deepEqual((await service.decide('QRD Sprint 26', 'qa|QRD-1511', 'clear', null, 'Alvin')).blockers, []);
   const results = await service.publish('QRD Sprint 26');
-  assert.ok(results.some((result) => result.kind === 'ticket' && result.status === 'updated'), 'an open QA blocker does not refuse publish');
+  assert.ok(results.some((result) => result.kind === 'ticket' && result.status === 'updated'), 'an undecided QA prediction does not refuse publish');
   assert.equal(store.draft.status, 'published');
 });
 

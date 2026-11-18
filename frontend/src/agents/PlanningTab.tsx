@@ -1,7 +1,7 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLazyQuery, useMutation, useQuery } from '@apollo/client';
-import { AlertCircle, AlertTriangle, ArrowRight, ArrowRightLeft, Ban, BarChart3, CalendarCheck, Check, CheckCircle2, ChevronDown, ChevronUp, Download, FileInput, Link2, Minus, Plus, RefreshCw, Scissors, Send, ShieldAlert, ShieldCheck, Undo2, X } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowRight, ArrowRightLeft, BarChart3, CalendarCheck, CheckCircle2, Download, FileInput, Link2, Minus, Plus, Scissors, Send, Undo2, X } from 'lucide-react';
 import { Button, Card, Dialog, Input, Select } from '../components/ui';
 import { PlanningChat } from './PlanningChat';
 import { useOpenPlanningChat } from './usePlanningChat';
@@ -11,13 +11,13 @@ import { PlanningVisual } from './PlanningVisual';
 import { MyTicketsPanel } from './MyTicketsPanel';
 import {
   CHECK_SPRINT_STORYBOARDS, DECIDE_SPRINT_DRAFT, MOVE_SPRINT_DRAFT_CARDS, GET_OWNER_NAME, GET_PLANNING_FLOW, GET_PLANNING_SPRINTS, GET_SPRINT_DRAFT, GET_SPRINT_DRAFT_VISUALS, GET_SPRINT_PLAN_SIGNAL, GET_TICKET_READINESS, LOAD_SPRINT_DRAFT, PREVIEW_SPRINT_DRAFT_PUBLISH, PUBLISH_SPRINT_DRAFT,
-  REFRESH_SPRINT_DRAFT_QA, RUN_SCOUT, SAVE_SPRINT_DRAFT_VISUAL, DROP_SPRINT_DRAFT_VISUAL, UPDATE_SPRINT_DRAFT_TICKET, USE_SPRINT_DRAFT_SPLIT, KEEP_SPRINT_DRAFT_SPLIT,
+  RUN_SCOUT, SAVE_SPRINT_DRAFT_VISUAL, DROP_SPRINT_DRAFT_VISUAL, UPDATE_SPRINT_DRAFT_TICKET, USE_SPRINT_DRAFT_SPLIT, KEEP_SPRINT_DRAFT_SPLIT,
 } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import {
-  UNASSIGNED, devColors, changeCount, dayOf, decisionLabel, findingKindLabel, forecastOf, handOffs, lateDays, lateText, shortDate, underWay, landingDay, lanes, openQuestionsOf, parseWave, ranks, teamStats, waitersOf, predictionTone, publishReadiness, scopeSummary, sortFindings,
+  UNASSIGNED, devColors, changeCount, dayOf, decisionLabel, findingKindLabel, forecastOf, handOffs, lateDays, lateText, shortDate, underWay, landingDay, lanes, openQuestionsOf, parseWave, ranks, teamStats, waitersOf, publishReadiness, scopeSummary, sortFindings,
   developerLine, freeFrom, githubLine, laneCount, laneOf, moveForecast, moveLine, planRange, scheduleWindow, scheduled, spanOf, uncheckedStoryboard, waveRows, workingDayLabels,
-  qaChecklist, undecidedFinding,
+  undecidedFinding,
   redoVisualPrompt, type DraftChange, type DraftFinding, type DraftVisual, type DraftTicket, type LaneBar, type PlanSignal, type PlanningPanel, type PlanningSprint, type PublishResult, type Readiness, type ReadyItem, type SprintDraft, type TicketSummaryLite,
 } from './planning';
 import { parseFlow, skippedStages } from './planningFlow';
@@ -35,7 +35,7 @@ const warnChip = 'rounded-sm border border-status-warn px-2 py-0.5 text-[var(--c
 const TONE: Record<string, string> = {
   ok: 'border-status-merged text-status-merged', conflict: 'border-status-conflict text-status-conflict', warn: 'border-status-warn text-status-warn', none: 'border-border text-muted-foreground',
 };
-const PANELS: Array<[PlanningPanel, string]> = [['mine', 'My tickets'], ['team', 'Team map'], ['scope', 'Scope'], ['ac', 'AC check'], ['qa', 'QA check'], ['storyboard', 'Storyboard']];
+const PANELS: Array<[PlanningPanel, string]> = [['mine', 'My tickets'], ['team', 'Team map'], ['scope', 'Scope'], ['ac', 'AC check'], ['storyboard', 'Storyboard']];
 
 const errorText = (failure: unknown, fallback: string) => (failure instanceof Error ? failure.message : fallback);
 /** Opens the ticket page the way a link inside DOCK does: the app reads the new path on popstate. */
@@ -44,10 +44,7 @@ const openTicket = (key: string) => {
   window.dispatchEvent(new PopStateEvent('popstate'));
 };
 
-const QaChip: React.FC<{ ticket: DraftTicket; qaReason: string | null }> = ({ ticket, qaReason }) => {
-  if (!ticket.prediction) return <span className={cn(chip, TONE.none)} title={qaReason ?? undefined}>{qaReason ? 'No QA' : 'QA pending'}</span>;
-  return <span className={cn(chip, TONE[predictionTone(ticket.prediction.prediction)])} title={ticket.prediction.reasons.join('\n') || undefined}>{ticket.prediction.prediction}</span>;
-};
+
 
 /** "AC needs a check" on a ticket naming a storyboard frame that changed. */
 const StoryboardChip: React.FC<{ ticket: DraftTicket }> = ({ ticket }) => {
@@ -503,7 +500,6 @@ const TicketRow: React.FC<{ draft: SprintDraft; ticket: DraftTicket; busy: boole
       <div className="min-w-0 max-[760px]:col-span-2">
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="font-mono text-[0.8rem] font-semibold">{ticket.key}</span>
-          <QaChip ticket={ticket} qaReason={draft.qaReason} />
           <StoryboardChip ticket={ticket} />
           {ticket.split && <span className={cn(chip, TONE.warn)} title="Suggested parts in SP"><Scissors size={10} className="mr-1 inline" aria-hidden="true" />Split {ticket.split.join(' + ')}</span>}
           {ticket.dev !== ticket.jiraDev && ticket.dev && <span className={cn(chip, 'border-accent text-accent')}>was {ticket.jiraDev ?? UNASSIGNED}</span>}
@@ -623,102 +619,6 @@ const AcPanel: React.FC<{ draft: SprintDraft; busy: boolean; onDecide: (id: stri
       <p className="mt-1 max-w-[76ch] text-pretty text-[0.76rem] text-sky-200">AC holds only what is tested on this ticket. Waits on the named ticket? Pick Dependency: the Blocks link is added on Publish, and the QA bot holds the ticket until that one is in UAT CHECK. Info only? Move to Reference. Nothing changes in Jira before Publish, and DOCK writes no comments.</p>
       <ul className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
         {findings.map((finding) => <FindingRow key={finding.id} draft={draft} finding={finding} busy={busy} onDecide={onDecide} />)}
-      </ul>
-    </section>
-  );
-};
-
-/** The QA checklist of one ticket from its AC: what is tested here, with the ticket a line waits for, and what is not. */
-const QaChecklistBox: React.FC<{ ticket: DraftTicket; findings: DraftFinding[]; summary: TicketSummaryLite | undefined }> = ({ ticket, findings, summary }) => {
-  const list = qaChecklist(ticket, findings, summary?.acId);
-  const line = (row: (typeof list.here)[number]) => (
-    <>
-      <span className="font-mono text-[0.66rem] text-muted-foreground">AC {row.n}</span> {row.textId ?? row.text}
-    </>
-  );
-  return (
-    <div className="mt-2 rounded-md border border-border bg-surface-1 px-3 py-2.5">
-      <div className="grid grid-cols-2 gap-4 max-[900px]:grid-cols-1">
-        <div>
-          <p className={cn(head, 'mb-1 flex items-center gap-1.5')}><Check size={12} aria-hidden="true" />Tested on this ticket</p>
-          {list.here.length === 0 && <p className="py-1 text-[0.8rem] text-muted-foreground">No AC line is tested here.</p>}
-          {list.here.map((row) => (
-            <p key={row.n} className="py-1 text-pretty text-[0.8rem] text-foreground">
-              {line(row)}
-              {row.waitsOn.map((key) => <span key={key} className={cn(chip, TONE.warn, 'ml-1.5')}>waits for {key}</span>)}
-            </p>
-          ))}
-        </div>
-        <div>
-          <p className={cn(head, 'mb-1 flex items-center gap-1.5')}><Ban size={12} aria-hidden="true" />Not tested here</p>
-          {list.notHere.length === 0 && <p className="py-1 text-[0.8rem] text-muted-foreground">Every AC line is tested on this ticket.</p>}
-          {list.notHere.map((row) => <p key={row.n} className="py-1 text-pretty text-[0.8rem] text-muted-foreground">{line(row)} <span className="font-mono text-[0.66rem]">→ {row.testedIn}</span></p>)}
-          {summary?.testData && <p className="mt-2 text-xs text-muted-foreground">Test data: {summary.testData}</p>}
-        </div>
-      </div>
-      <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        Built from the AC and the AC check decisions. The Reference field does not become a test case.
-      </p>
-    </div>
-  );
-};
-
-const QaPanel: React.FC<{ draft: SprintDraft; busy: boolean; summaries: Map<string, TicketSummaryLite>; onDecide: (id: string, action: string, note?: string) => void; onRefresh: () => void }> = ({ draft, busy, summaries, onDecide, onRefresh }) => {
-  const [fixing, setFixing] = useState<string | null>(null);
-  const [note, setNote] = useState('');
-  const [listOpen, setListOpen] = useState<string | null>(null);
-  const rows = draft.tickets.filter((ticket) => !ticket.carried).sort((a, b) => Number(b.prediction?.prediction === 'ESCALATED') - Number(a.prediction?.prediction === 'ESCALATED') || a.key.localeCompare(b.key, undefined, { numeric: true }));
-  return (
-    <section aria-label="QA check" className="grid grid-cols-[minmax(0,1fr)] gap-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <p className="flex min-w-0 flex-1 items-center gap-1 text-pretty text-[0.8rem] text-muted-foreground">
-          Tickets the QA bot will reject. Fix them before publish.
-          <InfoTip label="About the QA check">The QA bot's triage rules run on the draft AC. What is ESCALATED here will be ESCALATED in UAT too.</InfoTip>
-        </p>
-        <Button size="sm" onClick={onRefresh} disabled={busy}><RefreshCw size={13} aria-hidden="true" />Check again</Button>
-      </div>
-      {draft.qaReason && <p className="text-sm text-status-warn" role="status">{draft.qaReason}</p>}
-      <ul className="overflow-hidden rounded-md border border-border bg-surface-0">
-        {rows.map((ticket) => {
-          const escalated = ticket.prediction?.prediction === 'ESCALATED';
-          const id = `qa|${ticket.key}`;
-          return (
-            <li key={ticket.key} className={cn('grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 border-b border-border px-3 py-2.5 last:border-b-0 max-[760px]:grid-cols-[minmax(0,1fr)]', escalated && !ticket.qaDecision && 'border-l-2 border-l-status-conflict')}>
-              <div className="min-w-0">
-                <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.8rem]">
-                  <span className="font-mono font-semibold">{ticket.key}</span>
-                  <QaChip ticket={ticket} qaReason={draft.qaReason} />
-                  <span className="min-w-0 truncate text-secondary-foreground">{ticket.summary}</span>
-                </p>
-                {ticket.prediction?.reasons.length ? <ul className="mt-1 grid gap-0.5 text-[0.76rem] text-muted-foreground">{ticket.prediction.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul> : null}
-                {ticket.prediction?.fix && <p className="mt-1 text-[0.76rem] text-secondary-foreground">Fix: {ticket.prediction.fix}</p>}
-                <button type="button" aria-expanded={listOpen === ticket.key} onClick={() => setListOpen(listOpen === ticket.key ? null : ticket.key)} className="mt-1.5 inline-flex items-center gap-1 text-[0.74rem] font-semibold text-sky-200 hover:underline max-[760px]:min-h-11">
-                  {listOpen === ticket.key ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}QA checklist{ticket.tcApproved ? ' · test cases approved' : ''}
-                </button>
-                {listOpen === ticket.key && <QaChecklistBox ticket={ticket} findings={draft.findings} summary={summaries.get(ticket.key)} />}
-                {fixing === ticket.key && (
-                  <form className="mt-2 flex gap-2 max-[760px]:flex-col" onSubmit={(event) => { event.preventDefault(); onDecide(id, 'fix', note); setFixing(null); }}>
-                    <Input aria-label={`What was fixed on ${ticket.key}`} className="h-9" value={note} onChange={(event) => setNote(event.target.value)} placeholder="What was fixed" autoFocus />
-                    <Button size="sm" type="submit" variant="primary" disabled={busy || !note.trim()}><Check size={13} aria-hidden="true" />Save</Button>
-                  </form>
-                )}
-              </div>
-              <div className="flex flex-wrap items-start justify-end gap-1.5 max-[760px]:justify-start">
-                {ticket.qaDecision ? (
-                  <>
-                    <span className="self-center font-mono text-[0.64rem] text-muted-foreground">{decisionLabel(ticket.qaDecision)}</span>
-                    <Button size="sm" variant="ghost" onClick={() => onDecide(id, 'clear')} disabled={busy}><Undo2 size={13} aria-hidden="true" />Undo</Button>
-                  </>
-                ) : escalated ? (
-                  <>
-                    <Button size="sm" variant="ghost" onClick={() => onDecide(id, 'accept')} disabled={busy}><ShieldAlert size={13} aria-hidden="true" />Accept risk</Button>
-                    <Button size="sm" onClick={() => { setFixing(ticket.key); setNote(''); }} disabled={busy}><ShieldCheck size={13} aria-hidden="true" />Fixed</Button>
-                  </>
-                ) : null}
-              </div>
-            </li>
-          );
-        })}
       </ul>
     </section>
   );
@@ -849,7 +749,6 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
   const [loadDraft, loading] = useMutation(LOAD_SPRINT_DRAFT);
   const [updateTicket, updating] = useMutation(UPDATE_SPRINT_DRAFT_TICKET);
   const [decide, deciding] = useMutation(DECIDE_SPRINT_DRAFT);
-  const [refreshQa, refreshing] = useMutation(REFRESH_SPRINT_DRAFT_QA);
   const [checkStoryboards, checking] = useMutation(CHECK_SPRINT_STORYBOARDS);
   const [moveCards, moving] = useMutation(MOVE_SPRINT_DRAFT_CARDS);
   const [applySplit, usingSplit] = useMutation(USE_SPRINT_DRAFT_SPLIT);
@@ -862,13 +761,13 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
   const full = draftQuery.data?.sprintDraft ?? null;
   // Merged cards are on the plan only: every panel works on the cards still to build, the schedule draws them all.
   const draft = full && { ...full, tickets: scheduled(full.tickets) };
-  const busy = loading.loading || updating.loading || deciding.loading || refreshing.loading || publishing.loading || checking.loading || moving.loading || usingSplit.loading || keepingSplit.loading || savingVisual.loading || droppingVisual.loading;
-  // The planning agent's Indonesian title and AC lines, for Tiket saya and the QA checklist.
+  const busy = loading.loading || updating.loading || deciding.loading || publishing.loading || checking.loading || moving.loading || usingSplit.loading || keepingSplit.loading || savingVisual.loading || droppingVisual.loading;
+  // The planning agent's Indonesian title and AC lines, for Tiket saya.
   const ownerQuery = useQuery<{ ownerName: string }>(GET_OWNER_NAME, { fetchPolicy: 'cache-first' });
   const me = signal?.me ?? ownerQuery.data?.ownerName ?? null;
   const summaryQuery = useQuery<{ ticketReadiness: { tickets: Array<{ key: string; summary: TicketSummaryLite | null }> } }>(GET_TICKET_READINESS, {
     variables: { keys: draft?.tickets.map((ticket) => ticket.key) ?? [], refs: [] },
-    skip: !draft || !['mine', 'qa'].includes(shown),
+    skip: !draft || shown !== 'mine',
     fetchPolicy: 'cache-and-network',
   });
   const summaries = new Map((summaryQuery.data?.ticketReadiness.tickets ?? []).flatMap((item) => (item.summary ? [[item.key, item.summary] as const] : [])));
@@ -891,7 +790,6 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
   const onUseSplit = (key: string) => draft && run(applySplit({ variables: { sprint: draft.sprint, key } }), 'The ticket could not be moved to the split week');
   const onKeepSplit = (key: string) => draft && run(holdSplit({ variables: { sprint: draft.sprint, key } }), 'The difference could not be kept');
   const onScout = (key: string) => run(runScout({ variables: { key } }), 'The scout could not start');
-  const onRefreshQa = () => draft && run(refreshQa({ variables: { sprint: draft.sprint } }), 'The QA check failed');
   const onCheckStoryboards = () => draft && run(checkStoryboards({ variables: { sprint: draft.sprint } }), 'The storyboard could not be read');
   const onSaveVisual = (id: string) => draft && run(saveVisual({ variables: { sprint: draft.sprint, id } }), 'The visual could not be saved');
   const onDiscardVisual = (id: string) => draft && run(dropVisual({ variables: { sprint: draft.sprint, id } }).then(() => setVisualId(null)), 'The visual could not be discarded');
@@ -930,7 +828,6 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
   if (sprints.error && !sprints.data) return <p className="text-sm text-status-conflict" role="alert">{sprints.error.message}</p>;
   if (!sprints.data && sprints.loading) return <p className="text-sm text-muted-foreground" role="status">Loading the board's sprints...</p>;
   if (!chosen) return <p className="text-sm text-muted-foreground">No active or future sprint on the board. Create the sprint in Jira, then come back.</p>;
-  const escalated = draft?.tickets.filter((ticket) => !ticket.carried && ticket.prediction?.prediction === 'ESCALATED').length ?? 0;
   const late = draft?.findings.filter((finding) => finding.kind === 'after-it').length ?? 0;
   const storyboardChecks = draft ? uncheckedStoryboard(draft).length : 0;
   const ready = draft ? publishReadiness(draft, flow) : null;
@@ -967,7 +864,7 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
 
       {!draft ? (
         <section className="grid gap-3 border-y border-border py-6" aria-label="No draft yet">
-          <p className="text-sm text-muted-foreground">{chosen.name} has no draft yet. Load it from Jira to see the team's lanes, the scope cut, the AC check and the QA check.</p>
+          <p className="text-sm text-muted-foreground">{chosen.name} has no draft yet. Load it from Jira to see the team's lanes, the scope cut, and the AC check.</p>
         </section>
       ) : (
         <>
@@ -976,7 +873,6 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
             <span className={summaryChip}>{draft.sprintDays} working days</span>
             <span className={summaryChip}>{draft.devs.length} dev</span>
             {late > 0 && <span className={warnChip}>{late} AC waiting on other tickets</span>}
-            {escalated > 0 && <span className={warnChip}>{escalated} ESCALATED</span>}
             {storyboardChecks > 0 && <span className={warnChip}>{storyboardChecks} AC to recheck, storyboard changed</span>}
             {draft.blockers.length > 0 && <span className={warnChip}>{draft.blockers.length} need a decision</span>}
             <InfoTip label="About the summary">
@@ -1020,7 +916,6 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
           {!openVisual && shown === 'team' && <TeamPanel draft={draft} plan={full?.tickets ?? []} busy={busy} onMove={onMove} />}
           {!openVisual && shown === 'scope' && <ScopePanel draft={draft} busy={busy} onChange={onChange} onDecide={onDecide} onScout={onScout} />}
           {!openVisual && shown === 'ac' && <AcPanel draft={draft} busy={busy} onDecide={onDecide} />}
-          {!openVisual && shown === 'qa' && <QaPanel draft={draft} busy={busy} summaries={summaries} onDecide={onDecide} onRefresh={onRefreshQa} />}
           {!openVisual && shown === 'storyboard' && <StoryboardBoard draft={draft} busy={busy} onCheck={onCheckStoryboards} onDecide={onDecide} />}
           {openVisual && <PlanningVisual visual={openVisual} sprint={draft.sprint} busy={busy} onSave={() => onSaveVisual(openVisual.id)} onDiscard={() => onDiscardVisual(openVisual.id)} onRedo={() => void chat.open(redoVisualPrompt(openVisual.title))} />}
           </fieldset>
