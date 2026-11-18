@@ -3,7 +3,7 @@ import { useQuery } from '@apollo/client';
 import { ArrowLeft, BookA, ChevronDown, ChevronRight, ClipboardList, Download, Eye, File, FileCheck2, FileSignature, Folder, FolderOpen, GitPullRequest, Image as ImageIcon, Info, List, Lock, MapPin, HelpCircle, Route, Scale, ScrollText, Video } from 'lucide-react';
 import { Button, Checkbox, Input, Page } from '../components/ui';
 import { Markdown } from '../chat/Markdown';
-import { GET_DASHBOARD, GET_ORCHESTRATION, GET_ORCHESTRATIONS, GET_RUN_THINKING, GET_SPRINT_DRAFT, GET_TICKET_DETAIL_CORE, GET_TICKET_READINESS, GET_TICKET_SUMMARY } from '../graphql/queries';
+import { GET_CLAUDE_TICKET_USAGE, GET_DASHBOARD, GET_ORCHESTRATION, GET_ORCHESTRATIONS, GET_RUN_THINKING, GET_SPRINT_DRAFT, GET_TICKET_DETAIL_CORE, GET_TICKET_READINESS, GET_TICKET_SUMMARY } from '../graphql/queries';
 import { usePullPatches } from '../lib/usePullPatches';
 import { draftStoryboard } from '../lib/contractLinks';
 import type { SprintDraft } from '../agents/planning';
@@ -21,6 +21,7 @@ import { CodeChanges } from './blackboard/CodeChanges';
 import { ContractView } from './blackboard/ContractView';
 import { ExecLog } from './blackboard/ExecLog';
 import { execRows } from '../lib/execLog';
+import type { ClaudeTicketUsage } from '../lib/claudeUsage';
 
 interface RunInfo { key: string; title: string | null; stage: string; kind?: string | null }
 
@@ -148,6 +149,7 @@ const LogView: React.FC<{ ticket: string }> = ({ ticket }) => {
 
 const LogTabs: React.FC<{ ticket: string; run: AgentRun | null; timeline: AgentTimeline | null; tab: LogTab; onTab: (tab: LogTab) => void }> = ({ ticket, run, timeline, tab, onTab }) => {
   const { data } = useQuery<{ runThinking: ThinkingRow[] }>(GET_RUN_THINKING, { variables: { key: ticket }, fetchPolicy: 'cache-and-network', pollInterval: 30000 });
+  const { data: usageData } = useQuery<{ claudeTicketUsage: ClaudeTicketUsage }>(GET_CLAUDE_TICKET_USAGE, { variables: { key: ticket }, fetchPolicy: 'cache-and-network', skip: tab !== 'runs' });
   const counts: Record<LogTab, number | null> = { runs: execRows(run, timeline).length, activity: data ? data.runThinking.length : null };
   return (
     <>
@@ -156,7 +158,7 @@ const LogTabs: React.FC<{ ticket: string; run: AgentRun | null; timeline: AgentT
           <button key={id} type="button" role="tab" id={`log-tab-${id}`} aria-selected={tab === id} aria-controls={`log-panel-${id}`} onClick={() => onTab(id)} className={cn('-mb-px h-8 border-0 border-b-2 border-transparent bg-transparent px-3 font-display text-[0.74rem] font-semibold text-secondary-foreground max-[760px]:h-11', tab === id && 'border-accent text-foreground')}>{label}{counts[id] !== null && <span className="ml-1.5 font-mono text-[0.66rem] font-medium opacity-70">{counts[id]}</span>}</button>
         ))}
       </div>
-      <div role="tabpanel" id="log-panel-runs" aria-labelledby="log-tab-runs" hidden={tab !== 'runs'}><ExecLog ticket={ticket} run={run} timeline={timeline} /></div>
+      <div role="tabpanel" id="log-panel-runs" aria-labelledby="log-tab-runs" hidden={tab !== 'runs'}><ExecLog ticket={ticket} run={run} timeline={timeline} usage={usageData?.claudeTicketUsage} /></div>
       <div role="tabpanel" id="log-panel-activity" aria-labelledby="log-tab-activity" hidden={tab !== 'activity'}><LogView ticket={ticket} /></div>
     </>
   );

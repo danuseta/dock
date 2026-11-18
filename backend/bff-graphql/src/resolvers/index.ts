@@ -613,6 +613,12 @@ export const resolvers = {
     ingestTokens: async () => orchestratorService.tokens(),
     doctorReports: async () => doctorReports.list(),
     claudeUsage: async (_: unknown, { from, to }: { from: string; to: string }) => claudeUsage.usage(from, to).catch(orchestratorInputError),
+    claudeSessionUsage: async (_: unknown, { sessionId }: { sessionId: string }) => {
+      const claudeSessionId = (await storageService.getChatSession(sessionId))?.claudeSessionId;
+      if (!claudeSessionId) return { available: true, found: false, totalTokens: 0, totalCost: 0, mainTokens: 0, agents: [], error: null };
+      return claudeUsage.session(claudeSessionId).catch(orchestratorInputError);
+    },
+    claudeTicketUsage: async (_: unknown, { key }: { key: string }) => claudeUsage.ticket(await storageService.getTicketClaudeSessionIds(key.trim().toUpperCase())),
     agentLooks: async () => agentLooks.list(),
     libraryAgents: async (_: unknown, { machine }: { machine?: string | null }) => {
       requireAgents();
@@ -1269,7 +1275,7 @@ export const protectedQueries = [
   'dashboard', 'ticketPullRequests', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'claudeAccounts', 'qaLocal', 'deployGate', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatSessionStates', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
-  'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'agentLooks', 'libraryAgents', 'libraryAgent', 'guildMasterLog',
+  'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'claudeSessionUsage', 'claudeTicketUsage', 'agentLooks', 'libraryAgents', 'libraryAgent', 'guildMasterLog',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
   'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro', 'sprintPlan',
   'planningSprints', 'sprintDraft', 'sprintPlanSignal', 'planningFlow', 'previewSprintDraftPublish', 'sprintDrift', 'acIncoming', 'ticketSummary', 'ticketReadiness',

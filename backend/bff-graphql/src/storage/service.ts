@@ -854,6 +854,11 @@ export class StorageService {
     return this.db.chatSession.findMany({ where: { title: { startsWith: prefix } }, select: { title: true } }).then((rows) => rows.map((row) => row.title));
   }
 
+  getTicketClaudeSessionIds(ticketKey: string) {
+    return this.db.chatSession.findMany({ where: { ticketKey, claudeSessionId: { not: null } }, select: { claudeSessionId: true }, orderBy: { startedAt: 'asc' } })
+      .then((rows) => rows.flatMap((row) => (row.claudeSessionId ? [row.claudeSessionId] : [])));
+  }
+
   getChatSessionsWithTicket(source: string, since: Date) {
     return this.db.chatSession.findMany({ where: { source, ticketKey: { not: null }, lastMessageAt: { gte: since } } });
   }

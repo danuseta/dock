@@ -1546,6 +1546,34 @@ export const GET_CLAUDE_USAGE = gql`
   }
 `;
 
+export const GET_CLAUDE_SESSION_USAGE = gql`
+  query GetClaudeSessionUsage($sessionId: ID!) {
+    claudeSessionUsage(sessionId: $sessionId) {
+      available
+      found
+      error
+      totalTokens
+      totalCost
+      mainTokens
+      agents { agentId name model totalTokens peakContext cost }
+    }
+  }
+`;
+
+export const GET_CLAUDE_TICKET_USAGE = gql`
+  query GetClaudeTicketUsage($key: String!) {
+    claudeTicketUsage(key: $key) {
+      available
+      sessions
+      error
+      totalTokens
+      totalCost
+      mainTokens
+      agents { agentId name model totalTokens peakContext cost }
+    }
+  }
+`;
+
 export const GET_AUTO_REVIEWS = gql`
   query GetAutoReviews {
     autoReviews { id ticketKey prUrl headSha threadUrl sessionId status detail startedAt finishedAt }
