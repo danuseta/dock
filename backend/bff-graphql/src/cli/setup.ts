@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline';
 import { Writable } from 'node:stream';
 import { StorageAPI } from '../datasources/StorageAPI';
 import { atlassianBaseUrl } from '../integrations/jira';
+import { githubApiBase } from '../integrations/mock-base';
 import { prisma } from '../storage/client';
 
 export interface SetupValues {
@@ -72,7 +73,7 @@ export const validateJira = (values: SetupValues, fetchFn: FetchLike) => check(
 
 export const validateGithub = (values: SetupValues, fetchFn: FetchLike) => check(
   fetchFn,
-  'https://api.github.com/user',
+  `${githubApiBase()}/user`,
   { Authorization: `Bearer ${values.githubToken}`, Accept: 'application/vnd.github+json', 'User-Agent': 'dock-setup' },
   'GitHub',
 );

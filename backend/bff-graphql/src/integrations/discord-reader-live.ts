@@ -7,9 +7,10 @@ import { channelStore, threadService } from './discord-threads';
 import { eventPush } from './push';
 import { discordPostNotice } from './push-notices';
 import { workspaceDiscordSetting } from './discord-team';
+import { discordApiBase } from './mock-base';
 
 const storage = new StorageService();
-const API = 'https://discord.com/api/v10';
+const API = discordApiBase();
 const CACHE = 'discord';
 const EMPTY: SyncStatus = { syncedAt: null, error: null, requests: 0 };
 

@@ -5,10 +5,12 @@ import { ARENA_SETTINGS, MESSAGE_KEYS, arenaSetting, isArenaSetting, isMessageSe
 import { LIGHT_KEYS, isLightSetting, lightSettings } from '../integrations/light-runner';
 import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, normalizeDiscordMessageTemplate } from '../integrations/discord';
 import { forgetNotificationPrefs, parseNotificationPrefs, validateNotificationPrefs } from '../integrations/notification-prefs';
+import { isMockDiscordWebhookUrl } from '../integrations/mock-base';
 
 const MIN_SERVICE_HEALTH_REFRESH_SECONDS = 5;
 /** A Discord webhook link: https on discord.com or discordapp.com, /api/webhooks/<id>/<token>. */
 export const isDiscordWebhookUrl = (value: string) => {
+  if (isMockDiscordWebhookUrl(value)) return true;
   try {
     const url = new URL(value);
     return url.protocol === 'https:' && ['discord.com', 'discordapp.com'].includes(url.hostname) && /^\/api\/webhooks\/\d+\/[\w-]+\/?$/.test(url.pathname);

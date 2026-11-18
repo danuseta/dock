@@ -14,7 +14,10 @@
     "setup": "node tools/dock-setup.mjs",
     "build:app": "npm run build --workspace=frontend && npm run build --workspace=backend/bff-graphql",
     "build:all": "npm run build --workspaces --if-present",
-    "test:all": "npm test --workspaces --if-present"
+    "test:all": "npm test --workspaces --if-present",
+    "seed:e2e": "npm run seed:e2e --workspace=backend/bff-graphql --",
+    "demo:mock": "node tools/e2e/start.mjs --with-bridge",
+    "e2e:mock": "echo runner not built yet"
   },
   "keywords": [
     "dock",
