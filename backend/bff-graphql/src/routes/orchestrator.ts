@@ -28,8 +28,9 @@ import { StorageService } from '../storage/service';
 import { checkpointsOn } from '../integrations/sous-flow-live';
 import type { JudgeQueue } from '../integrations/judge-queue';
 import { judgeQueue } from '../integrations/judge-live';
-import { gmSettings as gmSettingsStore } from '../integrations/guild-master-live';
-import { parseGmSettings } from '../integrations/guild-master';
+import { gmCron as gmCronStore, gmSettings as gmSettingsStore } from '../integrations/guild-master-live';
+import { parseGmCron, parseGmSettings } from '../integrations/guild-master';
+import { CronInputError } from '../integrations/orchestrator-cron';
 
 const broadcastFailed = (error: unknown) => console.error('[Broadcast] automatic broadcast failed:', error instanceof Error ? error.message : 'unknown error');
 const gateFailed = (error: unknown) => console.error('[Decision gate] failed:', error instanceof Error ? error.message : 'unknown error');
@@ -89,6 +90,8 @@ export function createOrchestratorIngestRouter(
   judge: Pick<JudgeQueue, 'receive'> = judgeQueue,
   // The settings a Guild Master turn may read and change, for the kit's gm.cjs.
   gmSettings: { view: () => Promise<unknown>; put: (values: Record<string, string>) => Promise<unknown> } = gmSettingsStore,
+  // The orchestrator cron fields a Guild Master turn may read and change.
+  gmCron: { view: () => Promise<unknown>; put: (values: Record<string, string>) => Promise<unknown> } = gmCronStore,
 ): Router {
   const router = Router();
 
@@ -219,7 +222,20 @@ export function createOrchestratorIngestRouter(
     chat.gmNonces.consume(body, values);
     return gmSettings.put(values);
   }));
-  // An agent write or rollback the kit does itself: DOCK consumes the nonce first.
+  // The cron the same way: a write consumes a nonce minted for exactly these cron fields.
+  router.post('/chat/gm/cron', small, handle(async (body, _signal, machine) => {
+    if (machine !== CHAT_MACHINE) throw new OrchestratorInputError(`Guild Master runs on ${CHAT_MACHINE} only`);
+    const values = parseGmCron(body);
+    if (!values) return gmCron.view();
+    chat.gmNonces.consume(body, values, 'cron');
+    try {
+      return await gmCron.put(values);
+    } catch (error) {
+      if (error instanceof CronInputError) throw new OrchestratorInputError(error.message);
+      throw error;
+    }
+  }));
+  // A write the kit does itself (agent, Party, allow-list, guard draft) or its rollback: DOCK consumes the nonce first.
   router.post('/chat/gm/confirm', small, handle(async (body, _signal, machine) => {
     if (machine !== CHAT_MACHINE) throw new OrchestratorInputError(`Guild Master runs on ${CHAT_MACHINE} only`);
     return chat.gmNonces.consume(body);

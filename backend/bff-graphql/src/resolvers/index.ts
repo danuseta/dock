@@ -1191,7 +1191,7 @@ export const resolvers = {
       // The owner's click is the confirmation: DOCK mints the nonce the kit's write consumes, bound to the settings the backup restores.
       const grant = async () => {
         const entry = (await agentBridge.gmLog(CHAT_MACHINE)).find((row) => row.id === id);
-        return { nonce: chatService.gmNonces.mint({ sessionId: null, sha256: `rollback:${id}`, values: entry?.restoreValues ?? null, rollback: true }).nonce, key: await chatService.gmKey() };
+        return { nonce: chatService.gmNonces.mint({ sessionId: null, sha256: `rollback:${id}`, values: entry?.restoreValues ?? null, target: entry?.type === 'cron' ? 'cron' : 'settings', rollback: true }).nonce, key: await chatService.gmKey() };
       };
       return agentBridge.gmRollback(CHAT_MACHINE, id, grant).catch(orchestratorInputError);
     },

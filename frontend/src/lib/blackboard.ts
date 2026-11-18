@@ -34,6 +34,33 @@ export function groupFiles(files: BlackboardFile[]): Array<{ folder: string; fil
 /** The "generated, do not edit" marker status.cjs puts on top is an HTML comment; the page says it in its own note. */
 export const withoutComments = (text: string) => text.replace(/<!--[\s\S]*?-->\s*/g, '');
 
+export interface ContractParty { mode: 'light' | 'full' | null; worker: string | null; verify: string | null; skip: string | null; by: string | null; log: number | null }
+
+/** The "## Party" block Guild Master writes into contract.md: its field lines right under the heading; null when there is none. */
+export function partyOf(text: string): ContractParty | null {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const start = lines.findIndex((line) => /^## Party\s*$/.test(line));
+  if (start < 0) return null;
+  const fields: Record<string, string> = {};
+  for (const line of lines.slice(start + 1)) {
+    const hit = /^(mode|worker|verify|skip|by): (.+)$/.exec(line.trim());
+    if (!hit) break;
+    fields[hit[1]] = hit[2].trim();
+  }
+  const log = /log #(\d+)/.exec(fields.by ?? '');
+  return {
+    mode: fields.mode === 'light' || fields.mode === 'full' ? fields.mode : null,
+    worker: fields.worker ?? null,
+    verify: fields.verify ?? null,
+    skip: fields.skip ?? null,
+    by: fields.by ?? null,
+    log: log ? Number(log[1]) : null,
+  };
+}
+
+/** The newest "Scout:" line the light runner's scout appended to contract.md. */
+export const scoutOf = (text: string) => text.replace(/\r\n/g, '\n').split('\n').reverse().find((line) => /^Scout: /.test(line)) ?? null;
+
 /** The Log entry of the file list: the run's execution log, not a file on the board. */
 export const LOG_ENTRY = '@log';
 /** Generated entries of the Dokumen folder: Tiket → kode and the contract, read from the board, not files on it. */

@@ -1847,3 +1847,57 @@ test('the Guild Master settings route: the ingest token alone reads, a write nee
   const rollback = chat.gmNonces.mint({ sessionId: null, sha256: 'rollback:1', values: null, rollback: true });
   assert.strictEqual((await post('confirm', { nonce: rollback.nonce, sessionId: null, sha256: 'rollback:1' })).status, 200);
 });
+
+test('the Guild Master cron route: reading needs no nonce, a write needs a cron nonce for exactly those fields, once', async (t) => {
+  const memory = memoryStorage();
+  const chat = new ChatService(memory.storage, () => new Date(), undefined, attachmentsStub());
+  const puts: unknown[] = [];
+  const gmSettings = { view: async () => ({ values: { chatCaveman: 'full' }, secrets: {} }), put: async () => ({ ok: true }) };
+  const gmCron = { view: async () => ({ values: { workStart: '8' } }), put: async (values: Record<string, string>) => { puts.push(values); return { ok: true }; } };
+  const orchestrator = new OrchestratorService(memory.storage, os.tmpdir());
+  const app = express();
+  app.use('/ingest/orchestrator', createOrchestratorIngestRouter(orchestrator, new PinRateLimiter(10, 60_000), chat, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, gmSettings, gmCron));
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }));
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const token = (await orchestrator.createToken('workspace', 'workspace')).token;
+  const post = (route: string, body: unknown) => fetch(`http://127.0.0.1:${address.port}/ingest/orchestrator/chat/gm/${route}`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify(body),
+  });
+
+  assert.deepStrictEqual(((await (await post('cron', {})).json()) as { result: unknown }).result, { values: { workStart: '8' } });
+  assert.strictEqual((await post('cron', { values: { workStart: '9' } })).status, 400, 'the ingest token alone writes nothing');
+  assert.strictEqual((await post('cron', { values: { mode: 'auto' } })).status, 400, 'not a field Guild Master may change');
+  const settingsYes = chat.gmNonces.mint({ sessionId: 'gm-a', sha256: 'h', values: { workStart: '9' }, rollback: false });
+  assert.strictEqual((await post('cron', { values: { workStart: '9' }, nonce: settingsYes.nonce, sessionId: 'gm-a', sha256: 'h' })).status, 400, 'a settings nonce does not write the cron');
+  const yes = chat.gmNonces.mint({ sessionId: 'gm-a', sha256: 'h', values: { workStart: '9' }, target: 'cron', rollback: false });
+  assert.strictEqual((await post('cron', { values: { workStart: '9' }, nonce: yes.nonce, sessionId: 'gm-a', sha256: 'h' })).status, 200);
+  assert.strictEqual((await post('cron', { values: { workStart: '9' }, nonce: yes.nonce, sessionId: 'gm-a', sha256: 'h' })).status, 400, 'a nonce works once');
+  const confirmOnly = chat.gmNonces.mint({ sessionId: 'gm-a', sha256: 'h2', values: { workStart: '9' }, target: 'cron', rollback: false });
+  assert.strictEqual((await post('confirm', { nonce: confirmOnly.nonce, sessionId: 'gm-a', sha256: 'h2' })).status, 400, 'a cron yes is no confirmation for a kit write');
+  assert.deepStrictEqual(puts, [{ workStart: '9' }]);
+});
+
+test('a Guild Master turn carries the cron fields and usage numbers; DOCK draws a cron diff itself and binds the "ya" to those fields', async () => {
+  const ctx = setup();
+  const caps = { ...CAPS, features: [...CAPS.features, 'gm'] };
+  ctx.service.gmData = async () => ({ cron: { values: { workStart: '8' } }, usage: [{ key: 'QRD-1536', totalTokens: 1000 }] });
+  ctx.service.gmKey = async () => 'log-key';
+  const gm = await ctx.service.createSession({ mode: 'gm' });
+  const claim = async () => (await ctx.service.claim({ wait: 0, caps }, undefined, 'laptop') as { message: Record<string, unknown> }).message;
+  await ctx.service.sendMessage(gm.id, 'cron mulai jam 9', MACHINES);
+  const first = await claim();
+  assert.deepStrictEqual(first.gmData, { cron: { values: { workStart: '8' } }, usage: [{ key: 'QRD-1536', totalTokens: 1000 }] });
+  await ctx.service.delta({ sessionId: gm.id, replyTo: first.id, done: true, items: [] }, 'laptop');
+  const pending = JSON.stringify({ type: 'cron', values: { workStart: '9' }, diff: 'nothing to see', summary: 'tidy' });
+  assert.strictEqual((await ctx.service.gmPropose({ sessionId: gm.id, replyTo: first.id, pending }, 'laptop')).accepted, true);
+  assert.deepStrictEqual(ctx.service.gmProposal(gm.id) && [ctx.service.gmProposal(gm.id)?.summary, ctx.service.gmProposal(gm.id)?.diff], ['Cron: workStart', '--- Cron settings\n+++ Cron settings\n- workStart: 8\n+ workStart: 9']);
+  await ctx.service.sendMessage(gm.id, 'ya', MACHINES);
+  const yes = await claim();
+  const confirm = yes.gmConfirm as { nonce: string; sha256: string };
+  assert.throws(() => ctx.service.gmNonces.consume({ nonce: confirm.nonce, sessionId: gm.id, sha256: confirm.sha256 }, { workStart: '9' }, 'settings'), /not the settings/);
+  const again = ctx.service.gmNonces.mint({ sessionId: gm.id, sha256: confirm.sha256, values: { workStart: '9' }, target: 'cron', rollback: false });
+  assert.deepStrictEqual(ctx.service.gmNonces.consume({ nonce: again.nonce, sessionId: gm.id, sha256: confirm.sha256 }, { workStart: '9' }, 'cron'), { ok: true });
+});

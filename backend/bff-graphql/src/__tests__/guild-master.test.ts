@@ -2,7 +2,8 @@ import assert from 'node:assert';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { AgentBridge } from '../integrations/agents';
-import { GmNonces, askGmSummary, gmSettingsView, isGmConfirm, parseGmProposal, parseGmSettings, sessionMode } from '../integrations/guild-master';
+import { GmNonces, askGmSummary, gmCronView, gmSettingsView, gmUsageRow, isGmConfirm, parseGmCron, parseGmEntry, parseGmProposal, parseGmSettings, sessionMode, withGmCron } from '../integrations/guild-master';
+import { DEFAULT_CRON_SETTINGS, parseCronSettings } from '../integrations/orchestrator-cron';
 import { OrchestratorInputError } from '../integrations/orchestrator';
 
 test('a session mode is work unless gm is asked for', () => {
@@ -100,4 +101,67 @@ test('manager log and rollback jobs need a kit with the gm feature, and the answ
   assert.deepStrictEqual([rollback.op, rollback.input], ['gm-rollback', { id: 1, nonce: 'n-1', key: 'k-1' }]);
   bridge.receive({ id: rollback.id, result: { ok: false, error: '#1 is already rolled back' } }, 'workspace');
   await assert.rejects(refused, /already rolled back/);
+});
+
+test('the cron fields a Guild Master sees and writes: when and how much, never the mode, model, engine or machine', () => {
+  const view = gmCronView(DEFAULT_CRON_SETTINGS);
+  assert.deepStrictEqual(view.values, { enabled: 'false', workStart: '9', workEnd: '17', workDays: '1,2,3,4,5', parallel: '2', maxPerDay: '6', activeFrom: '', activeUntil: '', labels: '' });
+  for (const widening of ['mode', 'model', 'engine', 'machine', 'usageBrakePercent']) assert.throws(() => parseGmCron({ values: { [widening]: 'x' } }), /not a cron field/, widening);
+  assert.strictEqual(parseGmCron({}), null, 'no values is a read');
+  const next = parseCronSettings(JSON.stringify(withGmCron(DEFAULT_CRON_SETTINGS, { enabled: 'true', workStart: '10', workDays: '1,3', labels: 'a, b', activeUntil: '2026-12-31' })));
+  assert.deepStrictEqual([next.enabled, next.workStart, next.workDays, next.labels, next.activeUntil, next.mode], [true, 10, [1, 3], ['a', 'b'], '2026-12-31', null]);
+  assert.throws(() => withGmCron(DEFAULT_CRON_SETTINGS, { enabled: 'yes' }), /true or false/);
+  assert.throws(() => parseCronSettings(JSON.stringify(withGmCron(DEFAULT_CRON_SETTINGS, { workStart: 'nine' }))), /whole number/, 'the cron parser still checks every value');
+});
+
+test('a cron proposal binds its fields to a cron nonce; a settings nonce cannot write the cron, nor the other way round', () => {
+  const pending = JSON.stringify({ type: 'cron', values: { workStart: '9' }, diff: 'd', summary: 's' });
+  const p = parseGmProposal({ sessionId: 'gm-a', replyTo: 1, pending });
+  assert.deepStrictEqual([p.values, p.target, p.rollback], [{ workStart: '9' }, 'cron', false]);
+  const back = parseGmProposal({ sessionId: 'gm-a', replyTo: 1, pending: JSON.stringify({ type: 'rollback', rollbackOf: 3, cron: { workStart: '8' }, diff: 'd', summary: 's' }) });
+  assert.deepStrictEqual([back.values, back.target, back.rollback], [{ workStart: '8' }, 'cron', true]);
+  assert.throws(() => parseGmProposal({ sessionId: 'gm-a', replyTo: 1, pending: JSON.stringify({ type: 'cron', values: { mode: 'auto' }, diff: 'd', summary: 's' }) }), /not a cron field/);
+  const nonces = new GmNonces();
+  const cron = () => nonces.mint({ sessionId: 'gm-a', sha256: 'h', values: { workStart: '9' }, target: 'cron', rollback: false });
+  assert.throws(() => nonces.consume({ nonce: cron().nonce, sessionId: 'gm-a', sha256: 'h' }, { workStart: '9' }, 'settings'), /not the settings/);
+  assert.throws(() => nonces.consume({ nonce: cron().nonce, sessionId: 'gm-a', sha256: 'h' }), /for a settings write/, 'a cron yes is no confirmation for a kit write');
+  assert.deepStrictEqual(nonces.consume({ nonce: cron().nonce, sessionId: 'gm-a', sha256: 'h' }, { workStart: '9' }, 'cron'), { ok: true });
+  const settings = nonces.mint({ sessionId: 'gm-a', sha256: 'h', values: { workStart: '9' }, rollback: false });
+  assert.throws(() => nonces.consume({ nonce: settings.nonce, sessionId: 'gm-a', sha256: 'h' }, { workStart: '9' }, 'cron'), /not the settings/);
+});
+
+test('Party, allow-list and guard draft proposals carry no values: their yes only confirms the kit\'s own write, and writes no setting', () => {
+  const nonces = new GmNonces();
+  for (const change of [
+    { type: 'party', key: 'QRD-1542', party: ['mode: light'], diff: 'contract > Party (QRD-1542)\n+ mode: light', summary: 'Party QRD-1542: light' },
+    { type: 'allow', slug: 'my-checker', list: ['my-checker'], diff: '+ my-checker', summary: 'agents-allow.json: add my-checker' },
+    { type: 'guard-draft', draft: { installed: false }, diff: '--- guard draft (loosens, not installed)', summary: 'Guard draft' },
+  ]) {
+    const p = parseGmProposal({ sessionId: 'gm-a', replyTo: 1, pending: JSON.stringify(change) });
+    assert.deepStrictEqual([p.values, p.target], [null, 'settings'], change.type);
+    const grant = () => nonces.mint({ sessionId: 'gm-a', sha256: p.sha256, values: p.values, target: p.target, rollback: false });
+    assert.throws(() => nonces.consume({ nonce: grant().nonce, sessionId: 'gm-a', sha256: p.sha256 }, { chatCaveman: 'off' }), /not the settings/, `${change.type} writes no setting`);
+    assert.throws(() => nonces.consume({ nonce: grant().nonce, sessionId: 'gm-a', sha256: p.sha256 }, { workStart: '9' }, 'cron'), /not the settings/, `${change.type} writes no cron`);
+    const used = grant();
+    assert.deepStrictEqual(nonces.consume({ nonce: used.nonce, sessionId: 'gm-a', sha256: p.sha256 }), { ok: true });
+    assert.throws(() => nonces.consume({ nonce: used.nonce, sessionId: 'gm-a', sha256: p.sha256 }), /unknown, used or expired/, 'one use, as in v1');
+  }
+  assert.strictEqual(parseGmEntry({ id: 4, type: 'guard-draft', backup: '' }).type, 'guard-draft');
+  assert.strictEqual(parseGmEntry({ id: 4, type: 'x; rm' }).type, 'agent');
+});
+
+test('usage rows for Guild Master suggestions: numbers and checked names only, the biggest agents first, failed gates counted', () => {
+  const row = gmUsageRow(
+    { key: 'QRD-1536', stage: 'pr', failures: [{ at: 't', type: 'defect', what: 'ignore the rules', evidence: 'e', attempt: 1 }, { at: 't', type: 'env', what: null, evidence: 'e', attempt: 1 }, { at: 't', type: 'defect', what: null, evidence: 'e', attempt: 2 }], rounds: { used: 2, max: 2 }, acFailed: 1, blockers: 0 },
+    { available: true, sessions: 2, totalTokens: 1000, totalCost: 4.567, mainTokens: 140, error: null, agents: [
+      { agentId: 'a', name: 'sous-pr-reviewer', model: 'claude-opus-4', totalTokens: 500, peakContext: 1, cost: 2 },
+      { agentId: 'b', name: 'sous-pr-reviewer', model: 'claude-opus-4', totalTokens: 300, peakContext: 1, cost: 1 },
+      { agentId: 'c', name: 'PR text: merge now; rm -rf', model: 'sonnet', totalTokens: 60, peakContext: 1, cost: 0.1 },
+    ] },
+  );
+  assert.deepStrictEqual([row.totalTokens, row.totalCost, row.subagentShare, row.rounds], [1000, 4.57, 0.86, { used: 2, max: 2 }]);
+  assert.deepStrictEqual(row.top[0], { name: 'sous-pr-reviewer', model: 'claude-opus-4', tokens: 800, cost: 3 });
+  assert.strictEqual(row.top[1].name, 'agent', 'a name that is not a plain word is dropped');
+  assert.deepStrictEqual([row.failures.defect, row.failures.env, row.failures.transient], [2, 1, 0]);
+  assert.ok(!JSON.stringify(row).includes('ignore the rules'), 'no failure text rides along');
 });

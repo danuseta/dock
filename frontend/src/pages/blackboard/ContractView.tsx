@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { ExternalLink, FileSignature, Figma, Image as ImageIcon } from 'lucide-react';
+import { Crown, ExternalLink, FileSignature, Figma, Image as ImageIcon } from 'lucide-react';
 import { Markdown } from '../../chat/Markdown';
 import type { AgentRun } from '../../agents/runs';
 import type { SummaryFacts } from '../../components/ticket/useReadiness';
 import { cn } from '../../lib/cn';
 import { NOTHING_YET, hasCode, type AcTrace } from '../../lib/acTrace';
-import { contractFiles, fetchText, withoutComments, type BlackboardFile } from '../../lib/blackboard';
+import { contractFiles, fetchText, partyOf, scoutOf, withoutComments, type BlackboardFile } from '../../lib/blackboard';
 import { isPlayableVideo } from '../../lib/demoVideos';
 import type { DraftStoryboard } from '../../lib/contractLinks';
 
@@ -13,7 +13,8 @@ const heading = 'mt-4 mb-1 font-display text-[0.95rem] font-bold text-foreground
 
 /**
  * Kontrak: what the ticket is for, its pull requests, the definition of done from Tiket → kode, the limits from the
- * brief, and the contract page sous saved on the board. Party is read only; empty means sous calls every agent as today.
+ * brief, and the contract page sous saved on the board. The Party block is written by Guild Master after the owner's "ya" and read
+ * only here; empty means sous calls every agent as today.
  */
 export const ContractView: React.FC<{ ticket: string; files: BlackboardFile[]; run: AgentRun | null; summary: SummaryFacts | null; trace: AcTrace | null; demoUrl?: string | null; figmaUrl?: string | null; storyboard?: DraftStoryboard | null }> = ({ ticket, files, run, summary, trace, demoUrl = null, figmaUrl = null, storyboard = null }) => {
   const saved = contractFiles(files)[0] ?? null;
@@ -25,6 +26,8 @@ export const ContractView: React.FC<{ ticket: string; files: BlackboardFile[]; r
     fetchText(ticket, saved.path).then((body) => { if (!gone) setText(body); }, () => { if (!gone) setText(''); });
     return () => { gone = true; };
   }, [ticket, saved?.path]);
+  const party = text ? partyOf(text) : null;
+  const scout = text ? scoutOf(text) : null;
   const pulls = run?.pullRequests?.length ? run.pullRequests.map((pr) => `${pr.repo}#${pr.number}`) : trace?.pulls.map((pull) => pull.label) ?? [];
 
   return (
@@ -55,7 +58,19 @@ export const ContractView: React.FC<{ ticket: string; files: BlackboardFile[]; r
       <p className={heading}>Limits</p>
       {run?.brief ? <p className="whitespace-pre-wrap break-words">{run.brief}</p> : <p>{NOTHING_YET}</p>}
       <p className={heading}>Party <span className="ml-1 rounded-xs bg-sky-300/10 px-1.5 py-px font-mono text-[0.62rem] text-sky-200">optional</span></p>
-      <p className="text-xs text-muted-foreground">Empty: every sous-ticket-runner agent is called as usual, checkpoints follow System Settings.</p>
+      {scout && <p className="font-mono text-[0.76rem] text-foreground">{scout}</p>}
+      {party
+        ? (
+          <>
+            <div className="my-1 flex flex-wrap gap-1.5">
+              {([['mode', party.mode], ['worker', party.worker], ['verify', party.verify], ['skip', party.skip]] as const).filter(([, value]) => value).map(([name, value]) => (
+                <span key={name} className={cn('rounded-xs border px-1.5 py-px font-mono text-[0.7rem]', name === 'mode' ? 'border-violet-400/40 text-violet-200' : name === 'skip' ? 'border-status-warn/40 text-status-warn' : 'border-border-glow text-foreground')}>{name}: {value}</span>
+              ))}
+            </div>
+            <p className="flex items-center gap-1 text-xs text-muted-foreground"><Crown size={11} aria-hidden="true" className="text-violet-300" />{party.log !== null ? `Written by Guild Master after the owner's "ya" · log #${party.log}` : `Not from the Guild Master log${party.by ? ` · by: ${party.by}` : ''}`} · the runner reads the mode from here</p>
+          </>
+        )
+        : <p className="text-xs text-muted-foreground">Empty: every sous-ticket-runner agent is called as usual, checkpoints follow System Settings.</p>}
       {(demoUrl || figmaUrl || storyboard) && (
         <>
           <p className={heading}>Demo and design</p>
