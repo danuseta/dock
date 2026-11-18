@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { RotateCcw, Workflow } from 'lucide-react';
-import { GET_PLANNING_FLOW, SET_PLANNING_FLOW } from '../../graphql/queries';
-import { Badge, Button, Checkbox, Select } from '../../components/ui';
+import { RotateCcw, Workflow, Zap } from 'lucide-react';
+import { GET_PLANNING_FLOW, GET_PLANNING_SPLIT_PAGE, SET_PLANNING_FLOW, SET_PLANNING_SPLIT_PAGE, TEST_PLANNING_SPLIT_PAGE } from '../../graphql/queries';
+import { Badge, Button, Checkbox, Input, Select } from '../../components/ui';
 import { cn } from '../../lib/cn';
 import { FLOW_TEMPLATES, PLAN_STAGES, PLAN_STAGE_ROLES, REQUIRED_STAGES, applyTemplate, parseFlow, updateStage, type PlanStageId, type PlanningFlow } from '../../agents/planningFlow';
-import { SettingsCard } from '../SettingsParts';
+import { Field, SettingsCard, TestResultText } from '../SettingsParts';
 
 const errorText = (failure: unknown) => (failure instanceof Error ? failure.message : 'The planning flow could not be saved');
 
@@ -20,6 +20,28 @@ export const PlanningFlowSection = () => {
   const info = PLAN_STAGES.find((item) => item.id === selected)!;
   const required = REQUIRED_STAGES.includes(selected);
   const busy = loading || saving.loading;
+
+  const splitQuery = useQuery<{ planningSplitPage: string | null }>(GET_PLANNING_SPLIT_PAGE, { fetchPolicy: 'cache-and-network' });
+  const [saveSplit, savingSplit] = useMutation(SET_PLANNING_SPLIT_PAGE, { refetchQueries: [GET_PLANNING_SPLIT_PAGE], awaitRefetchQueries: true });
+  const [testSplit, testingSplit] = useMutation(TEST_PLANNING_SPLIT_PAGE);
+  const [splitPage, setSplitPage] = useState<string | null>(null);
+  const [splitResult, setSplitResult] = useState<{ ok: boolean; message: string } | undefined>();
+  const splitSaved = splitQuery.data?.planningSplitPage ?? '';
+  const splitValue = splitPage ?? splitSaved;
+
+  const changeSplit = (value: string) => {
+    setSplitPage(value);
+    setSplitResult(undefined);
+  };
+  const storeSplit = () => {
+    setError(null);
+    saveSplit({ variables: { page: splitValue } }).then(() => setSplitPage(null)).catch((failure: unknown) => setError(errorText(failure)));
+  };
+  const runSplitTest = () => {
+    testSplit({ variables: { page: splitValue } })
+      .then((answer) => setSplitResult({ ok: Boolean(answer.data?.testPlanningSplitPage.success), message: answer.data?.testPlanningSplitPage.message ?? 'No answer' }))
+      .catch((failure: unknown) => setSplitResult({ ok: false, message: errorText(failure) }));
+  };
 
   const store = (next: PlanningFlow | null) => {
     setError(null);
@@ -89,6 +111,17 @@ export const PlanningFlowSection = () => {
           </div>
         </div>
         {error && <p className="mt-3 text-sm text-status-conflict" role="alert">{error}</p>}
+      </SettingsCard>
+
+      <SettingsCard title="Split page" caption="A Confluence page whose table has the columns Ticket, Week and Note, read at Load from Jira. Planning lists the tickets that sit in another week; nothing changes until you click. A page id, a URL, or a title searched under the sprint contract parent page. Empty reads no page.">
+        <Field label="Split page">
+          <Input className="font-mono" placeholder="Sprint 28 split" value={splitValue} onChange={(event) => changeSplit(event.target.value)} />
+        </Field>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <Button onClick={runSplitTest} disabled={testingSplit.loading || !splitValue.trim()}><Zap size={16} aria-hidden="true" />Test</Button>
+          <Button variant="primary" onClick={storeSplit} disabled={savingSplit.loading || splitValue.trim() === splitSaved}>Save</Button>
+          <TestResultText busy={testingSplit.loading} result={splitResult} />
+        </div>
       </SettingsCard>
     </div>
   );

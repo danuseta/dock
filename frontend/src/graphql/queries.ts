@@ -904,6 +904,7 @@ export const SPRINT_DRAFT_FIELDS = `
   mergeSource
   moves { keys from to sp forecastBefore forecastAfter improves }
   scopeCut { action note by at }
+  split { page version readAt error rows kept diffs { key draftWeek splitWeek note } }
 `;
 
 export const TICKET_SUMMARY_FIELDS = `key acHash made checked notHere waitsOn before after line testData ui acId titleId writtenAt current`;
@@ -954,6 +955,36 @@ export const GET_PLANNING_FLOW = gql`
 export const SET_PLANNING_FLOW = gql`
   mutation SetPlanningFlow($flow: String!) {
     setPlanningFlow(flow: $flow)
+  }
+`;
+
+export const GET_PLANNING_SPLIT_PAGE = gql`
+  query GetPlanningSplitPage {
+    planningSplitPage
+  }
+`;
+
+export const SET_PLANNING_SPLIT_PAGE = gql`
+  mutation SetPlanningSplitPage($page: String!) {
+    setPlanningSplitPage(page: $page)
+  }
+`;
+
+export const TEST_PLANNING_SPLIT_PAGE = gql`
+  mutation TestPlanningSplitPage($page: String!) {
+    testPlanningSplitPage(page: $page) { success message }
+  }
+`;
+
+export const USE_SPRINT_DRAFT_SPLIT = gql`
+  mutation UseSprintDraftSplit($sprint: String!, $key: String!) {
+    useSprintDraftSplit(sprint: $sprint, key: $key) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const KEEP_SPRINT_DRAFT_SPLIT = gql`
+  mutation KeepSprintDraftSplit($sprint: String!, $key: String!) {
+    keepSprintDraftSplit(sprint: $sprint, key: $key) { ${SPRINT_DRAFT_FIELDS} }
   }
 `;
 
