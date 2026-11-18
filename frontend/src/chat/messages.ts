@@ -20,6 +20,8 @@ export interface ChatSession {
   title: string;
   ticketKey?: string | null;
   forkFrom?: string | null;
+  mode?: 'work' | 'gm' | string | null;
+  gmProposal?: { summary: string; diff: string; at: string } | null;
   machine?: string | null;
   status: 'idle' | 'queued' | 'running' | 'error' | string;
   statusDetail?: string | null;

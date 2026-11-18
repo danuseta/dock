@@ -102,7 +102,7 @@ interface SessionSidebarProps {
   onFilter: (filter: SessionFilter) => void;
 }
 
-const FILTERS: { value: SessionFilter; label: string }[] = [{ value: 'all', label: 'All' }, { value: 'task', label: 'Task' }, { value: 'review', label: 'Review' }];
+const FILTERS: { value: SessionFilter; label: string }[] = [{ value: 'all', label: 'All' }, { value: 'task', label: 'Task' }, { value: 'review', label: 'Review' }, { value: 'work', label: 'Work' }, { value: 'gm', label: 'Guild Master' }];
 
 export const SessionSidebar: React.FC<SessionSidebarProps> = ({ sessions, machines, activeId, activeThreadId, onSelect, onOpenThread, onNew, onRename, onDelete, collapsed, onToggleCollapsed, searchOpen, onToggleSearch, search, limits, results, filter, onFilter }) => {
   const [openOverride, setOpenOverride] = useState<ReadonlyMap<string, boolean>>(new Map());
@@ -169,7 +169,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({ sessions, machin
         </span>
       )}
       <div className={cn('min-h-0 flex-1 overflow-y-auto px-2 pb-2', collapsed && 'min-[901px]:px-1')}>
-        {results ?? (sessions.length === 0 && filter !== 'all' ? <div className={full}><EmptyState size="panel" scene={<SearchScene />} description={`No ${filter === 'task' ? 'Task' : 'Review'} sessions.`} /></div> : null) ?? groupSessions(sessions, now).map((group) => (
+        {results ?? (sessions.length === 0 && filter !== 'all' ? <div className={full}><EmptyState size="panel" scene={<SearchScene />} description={`No ${FILTERS.find((option) => option.value === filter)?.label ?? ''} sessions.`} /></div> : null) ?? groupSessions(sessions, now).map((group) => (
           <section key={group.key} aria-label={group.label} className={cn(collapsed && 'min-[901px]:mt-2 min-[901px]:border-t min-[901px]:border-border min-[901px]:pt-2 min-[901px]:first:mt-0 min-[901px]:first:border-t-0')}>
             <h3 className={cn('flex items-center justify-between px-2 pb-1 pt-3 font-mono text-[0.62rem] max-[760px]:text-xs font-bold uppercase tracking-wider', group.key === 'needs-you' ? 'text-amber-300' : 'text-muted-foreground', full)}>{group.label} <span className="tabular-nums text-muted-foreground">{group.sessions.length}</span></h3>
             {group.sessions.map((session) => {

@@ -31,6 +31,7 @@ const SENSITIVE_KEYS = new Set([
   'googleClientSecret',
   'googleRefreshToken',
   'demoStorage',
+  'gmLogKey',
 ]);
 
 export interface ChatActivityInput {
@@ -863,7 +864,7 @@ export class StorageService {
 
   createChatSession(data: {
     id: string; source: string; machine?: string; title: string; ticketKey: string | null; forkFrom?: string | null;
-    messageCount?: number; startedAt: Date; lastMessageAt: Date; origin?: 'cron' | 'manual'; options?: string | null; account?: string | null;
+    messageCount?: number; startedAt: Date; lastMessageAt: Date; origin?: 'cron' | 'manual'; options?: string | null; account?: string | null; mode?: string;
   }) {
     return this.db.chatSession.create({ data });
   }

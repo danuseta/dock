@@ -120,6 +120,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'elevenLabsKeys',
       'elevenLabsQuota',
       'githubRepos',
+      'guildMasterLog',
       'ingestTokens',
       'jiraProjects',
       'judgeDay',
@@ -182,6 +183,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'answerSprintDraftQuestion',
       'answerTicket',
       'approveReview',
+      'askGuildMaster',
       'backfillSprintDashboards',
       'changeMasterPin',
       'checkConflicts',
@@ -202,6 +204,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'disconnectGoogleCalendar',
       'dismissDiscordThread',
       'dismissOrchestration',
+      'guildMasterRollback',
       'judgeAgain',
       'judgeNow',
       'judgeSprint',
@@ -341,7 +344,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
     assert.deepStrictEqual(mutation.createIngestToken.args.map((arg) => [arg.name, String(arg.type)]), [['name', 'String!'], ['machine', 'String']]);
     assert.deepStrictEqual(
       mutation.createChatSession.args.map((arg) => [arg.name, String(arg.type)]),
-      [['title', 'String'], ['ticketKey', 'String'], ['forkFrom', 'ID'], ['machine', 'String']],
+      [['title', 'String'], ['ticketKey', 'String'], ['forkFrom', 'ID'], ['machine', 'String'], ['mode', 'String'], ['pin', 'String']],
     );
     assert.deepStrictEqual(query.chatCommands.args.map((arg) => [arg.name, String(arg.type)]), [['machine', 'String!'], ['query', 'String'], ['limit', 'Int']]);
     assert.strictEqual(String(query.chatCommands.type), '[ChatCommand!]!');

@@ -208,6 +208,8 @@ model ChatSession {
   origin          String    @default("manual")
   /// The Claude account the bridge runs this session with; null runs it on the machine's active account.
   account         String?
+  /// "work" or "gm" (Guild Master), set when the session is created and never changed.
+  mode            String    @default("work")
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 

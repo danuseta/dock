@@ -622,6 +622,10 @@ export const resolvers = {
       requireAgents();
       return agentBridge.get(machine || CHAT_MACHINE, slug).catch(orchestratorInputError);
     },
+    guildMasterLog: async () => {
+      requireAgents();
+      return agentBridge.gmLog(CHAT_MACHINE).catch(orchestratorInputError);
+    },
     demoVideos: async () => {
       requireDemoVideos();
       const [result, tickets] = await Promise.all([
@@ -1032,7 +1036,18 @@ export const resolvers = {
       requireAgentControls();
       return orchestratorService.dismiss(key, dockMode()).catch(orchestratorInputError);
     },
-    createChatSession: async (_: unknown, args: { title?: string; ticketKey?: string; forkFrom?: string; machine?: string | null }) => {
+    createChatSession: async (_: unknown, { pin, ...args }: { title?: string; ticketKey?: string; forkFrom?: string; machine?: string | null; mode?: string | null; pin?: string | null }, context: AuthContext) => {
+      if (args.mode === 'gm') {
+        requireAgents();
+        if (!(await hasMasterPin())) throw new GraphQLError('Set a master PIN in Settings before opening Guild Master', { extensions: { code: 'BAD_USER_INPUT' } });
+        const retryAfter = context.pinRateLimiter.retryAfterSeconds(context.clientKey);
+        if (retryAfter > 0) throw new GraphQLError('Too many PIN attempts. Try again later.', { extensions: { code: 'RATE_LIMITED', retryAfter } });
+        if (!(await storageAPI.verifyMasterPin(pin ?? ''))) {
+          context.pinRateLimiter.recordFailure(context.clientKey);
+          throw new GraphQLError('Wrong PIN', { extensions: { code: 'BAD_USER_INPUT' } });
+        }
+        context.pinRateLimiter.reset(context.clientKey);
+      }
       if (args.machine && args.machine !== CHAT_MACHINE) {
         throw new GraphQLError(`Chat sessions run on ${CHAT_MACHINE} only`, { extensions: { code: 'BAD_USER_INPUT' } });
       }
@@ -1157,6 +1172,21 @@ export const resolvers = {
       if (result.ok) await agentLooks.remove(slug);
       return result;
     },
+    askGuildMaster: async (_: unknown, { sessionId }: { sessionId: string }) => {
+      requireAgents();
+      const session = await chatService.session(sessionId).catch(orchestratorInputError);
+      const run = session?.ticketKey ? await orchestratorService.get(normalizeTicketKey(session.ticketKey)).catch(() => null) : null;
+      return chatService.askGuildMaster(sessionId, await orchestratorService.machines(), run ? { stage: run.stage, verdict: run.verdict ?? null } : null).catch(orchestratorInputError);
+    },
+    guildMasterRollback: async (_: unknown, { id }: { id: number }) => {
+      requireAgents();
+      // The owner's click is the confirmation: DOCK mints the nonce the kit's write consumes, bound to the settings the backup restores.
+      const grant = async () => {
+        const entry = (await agentBridge.gmLog(CHAT_MACHINE)).find((row) => row.id === id);
+        return { nonce: chatService.gmNonces.mint({ sessionId: null, sha256: `rollback:${id}`, values: entry?.restoreValues ?? null, rollback: true }).nonce, key: await chatService.gmKey() };
+      };
+      return agentBridge.gmRollback(CHAT_MACHINE, id, grant).catch(orchestratorInputError);
+    },
     renameChatSession: async (_: unknown, { id, title }: { id: string; title: string }) => {
       return chatService.renameSession(id, title).catch(orchestratorInputError);
     },
@@ -1208,6 +1238,7 @@ export const resolvers = {
   },
   ChatSession: {
     judge: (session: { id: string }) => sessionJudge(session.id),
+    gmProposal: (session: { id: string; mode?: string }) => (session.mode === 'gm' ? chatService.gmProposal(session.id) : null),
     pending: async (session: { id: string; status: string; machine: string }) => chatService.pending(session.id, session.status, session.machine),
     settled: async (session: { id: string; status: string; machine: string }) => chatService.settled(session.id, session.status, session.machine),
   },
@@ -1238,7 +1269,7 @@ export const protectedQueries = [
   'dashboard', 'ticketPullRequests', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'claudeAccounts', 'qaLocal', 'deployGate', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatSessionStates', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
-  'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'agentLooks', 'libraryAgents', 'libraryAgent',
+  'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'agentLooks', 'libraryAgents', 'libraryAgent', 'guildMasterLog',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
   'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro', 'sprintPlan',
   'planningSprints', 'sprintDraft', 'sprintPlanSignal', 'planningFlow', 'previewSprintDraftPublish', 'sprintDrift', 'acIncoming', 'ticketSummary', 'ticketReadiness',
@@ -1328,6 +1359,8 @@ export const protectedMutations = [
   'unparkElevenLabsKey',
   'dismissOrchestration',
   'createChatSession',
+  'askGuildMaster',
+  'guildMasterRollback',
   'sendChatMessage',
   'answerTicket',
   'submitDecisions',

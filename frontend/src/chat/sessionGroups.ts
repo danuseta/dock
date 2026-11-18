@@ -32,7 +32,9 @@ export function sidebarDot(session: Pick<ChatSession, 'waiting' | 'status'>, fac
   return dotState({ bridgeUp: facts.bridgeUp, waiting: Boolean(session.waiting), busy });
 }
 
-export type SessionFilter = 'all' | 'task' | 'review';
+export type SessionFilter = 'all' | 'task' | 'review' | 'work' | 'gm';
+
+export const isGuildMaster = (session: Pick<ChatSession, 'mode'>) => session.mode === 'gm';
 
 export function sessionKind(title: string): 'task' | 'review' | null {
   if (/^Task-/.test(title)) return 'task';
@@ -41,6 +43,7 @@ export function sessionKind(title: string): 'task' | 'review' | null {
 
 export function filterSessions(sessions: ChatSession[], filter: SessionFilter): ChatSession[] {
   if (filter === 'all') return sessions;
+  if (filter === 'work' || filter === 'gm') return sessions.filter((s) => isGuildMaster(s) === (filter === 'gm'));
   return sessions.filter((s) => sessionKind(s.title) === filter);
 }
 

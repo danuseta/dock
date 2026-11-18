@@ -5,7 +5,7 @@ const FILTER_KEY = 'jidis.sessions-filter';
 export function readSessionFilter(): SessionFilter {
   try {
     const value = window.localStorage.getItem(FILTER_KEY);
-    return value === 'task' || value === 'review' ? value : 'all';
+    return value === 'task' || value === 'review' || value === 'work' || value === 'gm' ? value : 'all';
   } catch {
     return 'all';
   }
