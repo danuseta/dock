@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 import { StorageService } from '../storage/service';
+import { atlassianMockBase } from './mock-base';
 
 export interface JiraCredentials {
   domain: string;
@@ -22,7 +23,7 @@ function cleanDomain(domain: string): string {
  * Staging sets it to the local fake Atlassian server so a test DOCK never reaches the real site.
  */
 export function atlassianBaseUrl(domain: string, env: NodeJS.ProcessEnv = process.env): string {
-  const override = env.DOCK_ATLASSIAN_BASE_URL?.trim().replace(/\/+$/, '');
+  const override = env.DOCK_ATLASSIAN_BASE_URL?.trim().replace(/\/+$/, '') || atlassianMockBase(env);
   return override || `https://${cleanDomain(domain)}`;
 }
 

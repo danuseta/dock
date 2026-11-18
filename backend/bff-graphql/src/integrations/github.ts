@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { StorageService } from '../storage/service';
 import { checkRunsState, combineChecks, commitStatusState, reviewDecisionOf, type PullRequestSignal } from './pr-signals';
 import { pullRequestProblems } from './attention';
+import { githubApiBase } from './mock-base';
 
 function credentialCacheId(token: string): string {
   return createHash('sha256').update(token).digest('hex').slice(0, 16);
@@ -49,7 +50,7 @@ export class GitHubClient {
 
   constructor(pat: string) {
     this.client = axios.create({
-      baseURL: 'https://api.github.com',
+      baseURL: githubApiBase(),
       headers: {
         Authorization: `Bearer ${pat.trim()}`,
         Accept: 'application/vnd.github.v3+json',
@@ -95,7 +96,7 @@ export class GitHubClient {
         });
         for (const pr of response.data || []) {
           if (hasCanonicalTicketReference(pr, ticketKey)) {
-            pr.repository_url ||= `https://api.github.com/repos/${fullName}`;
+            pr.repository_url ||= `${githubApiBase()}/repos/${fullName}`;
             results.set(pr.html_url, pr);
           }
         }

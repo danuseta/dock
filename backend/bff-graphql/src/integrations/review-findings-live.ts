@@ -1,5 +1,6 @@
 import { GitHubAPI } from '../datasources/GitHubAPI';
 import { JiraAPI } from '../datasources/JiraAPI';
+import { decrypt } from '../storage/crypto';
 import { StorageService } from '../storage/service';
 import { MESSAGE_KEYS, arenaSetting, messageFormat } from './auto-review';
 import { reviewOwner, screenshotsOf } from './auto-review-live';
@@ -25,7 +26,7 @@ export const REVIEW_FINDINGS_KEYS = ['reviewFindingsAutoReply', 'reviewPostDelay
 export const reviewFindings = new ReviewFindings({
   enabled: async () => findingsEnabled(await setting('reviewFindingsToTask')),
   rows: async () => [...(await threadService.stored()).values()],
-  webhookId: async () => webhookIdOf(await setting('discordWebhookUrl')),
+  webhookId: async () => webhookIdOf(decrypt(await setting('discordWebhookUrl') ?? '')),
   ownTickets: async () => new Set((await jira.getTickets()).map((ticket: { key: string }) => ticket.key)),
   latestRounds: (threadIds) => storage.latestRoundsByThread(threadIds),
   create: (data) => storage.createReviewRound(data),

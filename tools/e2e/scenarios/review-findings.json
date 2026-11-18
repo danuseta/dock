@@ -1,0 +1,107 @@
+{
+  "name": "review-findings",
+  "match": {
+    "mode": "work",
+    "text": "Temuan review baru dari thread Discord pr-review",
+    "needsKey": true,
+    "priority": 40
+  },
+  "turns": [
+    {
+      "model": "sonnet",
+      "tokens": 20000,
+      "costUsd": 0.22,
+      "steps": [
+        {
+          "say": "Skills: sous, light, findings / candidates: sous / using: sous"
+        },
+        {
+          "ledger": {
+            "op": "init",
+            "title": "E2E ticket {{key}}"
+          }
+        },
+        {
+          "ledger": {
+            "op": "set",
+            "values": {
+              "engine": "sous",
+              "mode": "light",
+              "note": "light: scout (sous-explorer)"
+            }
+          }
+        },
+        {
+          "agent": {
+            "type": "sous-explorer",
+            "model": "sonnet",
+            "step": "light-scout",
+            "detail": "findings scout {{key}}",
+            "tokens": 5000
+          }
+        },
+        {
+          "ledger": {
+            "op": "set",
+            "values": {
+              "stage": "code",
+              "note": "light: work loop 1 (sous-ticket-worker)"
+            }
+          }
+        },
+        {
+          "agent": {
+            "type": "sous-ticket-worker",
+            "model": "sonnet",
+            "step": "light-work",
+            "detail": "fix review findings {{key}}",
+            "tokens": 11000
+          }
+        },
+        {
+          "ledger": {
+            "op": "set",
+            "values": {
+              "stage": "test",
+              "note": "light: verify (sous-verifier)"
+            }
+          }
+        },
+        {
+          "agent": {
+            "type": "sous-verifier",
+            "model": "sonnet",
+            "step": "light-verify",
+            "detail": "verify findings fix",
+            "tokens": 4000
+          }
+        },
+        {
+          "script": {
+            "action": "pushCommit",
+            "pr": "{{prUrl}}",
+            "message": "fix({{key}}): review findings round {{roundId}}"
+          }
+        },
+        {
+          "ledger": {
+            "op": "set",
+            "values": {
+              "stage": "pr",
+              "note": "light: findings fixed and pushed"
+            }
+          }
+        },
+        {
+          "file": {
+            "path": "light.md",
+            "text": "# Light run {{key}} (findings round {{roundId}})\n\nLight settings: {{lightSettings}}\n\nWorker: 1 finding fixed\nVerifier: pass\nCommit: {{shortSha}}\nPR: {{prUrls}}\n"
+          }
+        },
+        {
+          "say": "Round {{roundId}} selesai: 1 temuan valid difix dan dipush.\n\n<<<DISCORD\nmas reviewer, temuan sudah dicek:\n- validasi input kosong: fixed di {{shortSha}}\n<<<AKHIR DISCORD>>>\nDOCK-REVIEW-ROUND {{roundId}} valid=1 invalid=0 pushed=yes"
+        }
+      ]
+    }
+  ]
+}

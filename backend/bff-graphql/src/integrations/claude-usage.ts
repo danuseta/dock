@@ -172,7 +172,9 @@ export class ClaudeUsageService {
 
   constructor(
     private readonly bin: () => string = () => process.env.CCUSAGE_BIN?.trim() || 'ccusage',
-    private readonly run: Run = (file, args) => runFile(file, args, { timeout: TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, windowsHide: true }),
+    private readonly run: Run = (file, args) => (/\.[cm]?js$/i.test(file)
+      ? runFile(process.execPath, [file, ...args], { timeout: TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, windowsHide: true })
+      : runFile(file, args, { timeout: TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, windowsHide: true })),
     private readonly now: () => number = Date.now,
     private readonly projects: () => string = () => path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'projects'),
   ) {}
