@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { OrchestratorInputError } from './orchestrator';
+import type { ClaudeTicketUsage } from './claude-usage';
+import { FAILURE_TYPES, OrchestratorInputError, type LedgerFailure, type LedgerRounds } from './orchestrator';
 
 export const SESSION_MODES = ['work', 'gm'] as const;
 export type SessionMode = typeof SESSION_MODES[number];
@@ -53,12 +54,58 @@ export function parseGmSettings(input: unknown): Record<string, string> | null {
   return out;
 }
 
+/** The orchestrator cron fields a Guild Master may change: when and how much it takes, never the permission mode, model, engine or machine. */
+export const GM_CRON_KEYS = ['enabled', 'workStart', 'workEnd', 'workDays', 'parallel', 'maxPerDay', 'activeFrom', 'activeUntil', 'labels'] as const;
+const MAX_CRON_VALUE = 200;
+
+export function gmCronView(settings: object) {
+  const source = settings as Record<string, unknown>;
+  const values: Record<string, string> = {};
+  for (const key of GM_CRON_KEYS) {
+    const value = source[key];
+    values[key] = Array.isArray(value) ? value.join(',') : value === null || value === undefined ? '' : String(value);
+  }
+  return { values };
+}
+
+export function parseGmCron(input: unknown): Record<string, string> | null {
+  if (!isRecord(input) || input.values === undefined) return null;
+  if (!isRecord(input.values)) throw new OrchestratorInputError('values must be an object');
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(input.values)) {
+    if (!(GM_CRON_KEYS as readonly string[]).includes(key)) throw new OrchestratorInputError(`${key.slice(0, 60)} is not a cron field Guild Master can change`);
+    if (typeof value !== 'string' || value.length > MAX_CRON_VALUE) throw new OrchestratorInputError(`${key} must be text of at most ${MAX_CRON_VALUE} characters`);
+    out[key] = value;
+  }
+  if (Object.keys(out).length === 0) throw new OrchestratorInputError('No cron field to change');
+  return out;
+}
+
+/** The cron config with the confirmed fields put in, as the cron's own parser reads them; that parser still checks every value. */
+export function withGmCron(current: object, values: Record<string, string>): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...current };
+  const list = (value: string) => value.split(',').map((item) => item.trim()).filter(Boolean);
+  for (const [key, value] of Object.entries(values)) {
+    if (key === 'enabled') {
+      if (value !== 'true' && value !== 'false') throw new OrchestratorInputError('enabled must be true or false');
+      next.enabled = value === 'true';
+    } else if (key === 'workDays') next.workDays = list(value).map((day) => (/^\d+$/.test(day) ? Number(day) : day));
+    else if (key === 'labels') next.labels = list(value);
+    else if (key === 'activeFrom' || key === 'activeUntil') next[key] = value.trim() || null;
+    else next[key] = /^\d+$/.test(value.trim()) ? Number(value) : value;
+  }
+  return next;
+}
+
+export type GmWriteTarget = 'settings' | 'cron';
+
 export interface GmProposal {
   sha256: string;
   summary: string;
   diff: string;
-  /** The settings a settings proposal writes; null for an agent change or a rollback. */
+  /** The settings or cron fields a proposal writes; null for an agent, Party, allow-list or guard draft change, or their rollback. */
   values: Record<string, string> | null;
+  target: GmWriteTarget;
   rollback: boolean;
   /** The newest owner message when the proposal came in: only a later "ya" can confirm it. */
   afterMessageId: number;
@@ -72,6 +119,19 @@ export function parseGmProposal(input: unknown) {
   let change: unknown;
   try { change = JSON.parse(input.pending); } catch { throw new OrchestratorInputError('The pending change is not JSON'); }
   if (!isRecord(change) || typeof change.diff !== 'string' || typeof change.summary !== 'string') throw new OrchestratorInputError('The pending change has no diff');
+  const cron = change.type === 'cron' || (change.type === 'rollback' && change.cron !== undefined);
+  if (cron) {
+    return {
+      sessionId: input.sessionId,
+      replyTo: Number(input.replyTo),
+      sha256: createHash('sha256').update(input.pending).digest('hex'),
+      summary: change.summary.slice(0, 300),
+      diff: change.diff.slice(0, 20_000),
+      values: parseGmCron({ values: change.type === 'cron' ? change.values : change.cron }),
+      target: 'cron' as GmWriteTarget,
+      rollback: change.type === 'rollback',
+    };
+  }
   return {
     sessionId: input.sessionId,
     replyTo: Number(input.replyTo),
@@ -80,11 +140,12 @@ export function parseGmProposal(input: unknown) {
     diff: change.diff.slice(0, 20_000),
     // A rollback of settings carries the backup values it restores, so the owner's "ya" binds them like any settings change.
     values: change.type === 'settings' || (change.type === 'rollback' && change.values !== undefined) ? parseGmSettings({ values: change.values }) : null,
+    target: 'settings' as GmWriteTarget,
     rollback: change.type === 'rollback',
   };
 }
 
-interface GmNonce { sessionId: string | null; sha256: string; values: Record<string, string> | null; rollback: boolean; exp: number }
+interface GmNonce { sessionId: string | null; sha256: string; values: Record<string, string> | null; target?: GmWriteTarget; rollback: boolean; exp: number }
 
 /** One-use nonces DOCK mints for the owner's "ya" or a panel rollback. Every Guild Master write consumes one before it happens. */
 export class GmNonces {
@@ -100,8 +161,11 @@ export class GmNonces {
     return { nonce, sha256: record.sha256, exp };
   }
 
-  /** Consumes the nonce. A settings write, a rollback included, must carry exactly the values the owner confirmed. */
-  consume(input: unknown, values: Record<string, string> | null = null) {
+  /**
+   * Consumes the nonce. A settings or cron write, a rollback included, must carry exactly the values the owner confirmed, for that
+   * target; a write the kit does itself (agent, Party, allow-list, guard draft) takes only a nonce minted without values.
+   */
+  consume(input: unknown, values: Record<string, string> | null = null, target: GmWriteTarget = 'settings') {
     if (!isRecord(input) || typeof input.nonce !== 'string') throw new OrchestratorInputError('This write needs DOCK\'s confirmation');
     const record = this.nonces.get(input.nonce);
     this.nonces.delete(input.nonce);
@@ -111,8 +175,8 @@ export class GmNonces {
     }
     if (values) {
       const same = (a: Record<string, string>, b: Record<string, string>) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
-      if (!record.values || !same(values, record.values)) throw new OrchestratorInputError('These are not the settings the owner confirmed');
-    }
+      if (!record.values || !same(values, record.values) || (record.target ?? 'settings') !== target) throw new OrchestratorInputError('These are not the settings the owner confirmed');
+    } else if (record.values) throw new OrchestratorInputError('This confirmation is for a settings write');
     return { ok: true };
   }
 }
@@ -123,6 +187,8 @@ export interface GmLogEntry {
   by: string;
   sessionId: string | null;
   kind: string;
+  /** What the entry changed: agent, settings, cron, party, allow or guard-draft. */
+  type: string;
   target: string;
   summary: string;
   diff: string;
@@ -143,6 +209,7 @@ export function parseGmEntry(input: unknown): GmLogEntry {
     by: text(input.by, 80),
     sessionId: text(input.sessionId, 64) || null,
     kind: input.kind === 'rollback' ? 'rollback' : 'change',
+    type: typeof input.type === 'string' && /^[a-z-]{1,20}$/.test(input.type) ? input.type : 'agent',
     target: text(input.target, 200),
     summary: text(input.summary, 300),
     diff: text(input.diff, 20_000),
@@ -157,6 +224,41 @@ export function parseGmEntry(input: unknown): GmLogEntry {
 export function parseGmRollback(input: unknown): GmLogEntry {
   if (!isRecord(input) || input.ok !== true) throw new OrchestratorInputError((isRecord(input) && text(input.error, 300)) || 'The kit did not roll back');
   return parseGmEntry(input.entry);
+}
+
+export interface GmUsageRun { key: string; stage: string; failures: LedgerFailure[]; rounds: LedgerRounds | null; acFailed: number; blockers: number }
+
+/**
+ * One ticket's numbers for a Guild Master suggestion: tokens, cost, how much went to subagents, the agents that used the most, and the
+ * gates that failed. Numbers and checked names only; no title, note or finding text.
+ */
+export function gmUsageRow(run: GmUsageRun, usage: ClaudeTicketUsage) {
+  const agents = new Map<string, { name: string; model: string | null; tokens: number; cost: number }>();
+  for (const agent of usage.agents) {
+    const name = word(agent.name) ?? 'agent';
+    const model = word(agent.model);
+    const at = `${name}|${model}`;
+    const row = agents.get(at) ?? { name, model, tokens: 0, cost: 0 };
+    row.tokens += count(agent.totalTokens) ?? 0;
+    row.cost += count(agent.cost) ?? 0;
+    agents.set(at, row);
+  }
+  const total = count(usage.totalTokens) ?? 0;
+  const failures = Object.fromEntries(FAILURE_TYPES.map((type) => [type, run.failures.filter((failure) => failure.type === type).length]));
+  return {
+    key: run.key,
+    stage: word(run.stage),
+    available: usage.available,
+    sessions: usage.sessions,
+    totalTokens: total,
+    totalCost: Math.round((count(usage.totalCost) ?? 0) * 100) / 100,
+    subagentShare: total > 0 ? Math.round(((total - (count(usage.mainTokens) ?? 0)) / total) * 100) / 100 : 0,
+    top: [...agents.values()].sort((a, b) => b.tokens - a.tokens).slice(0, 3).map((row) => ({ ...row, cost: Math.round(row.cost * 100) / 100 })),
+    failures,
+    rounds: run.rounds && Number.isInteger(run.rounds.used) ? { used: run.rounds.used, max: run.rounds.max } : null,
+    acFailed: run.acFailed,
+    blockers: run.blockers,
+  };
 }
 
 export interface AskGmFacts {
