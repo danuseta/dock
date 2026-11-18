@@ -375,12 +375,9 @@ export function acSideEffects(tickets: Array<{ key: string; ac: string[] }>, dec
   return result;
 }
 
-/** What still holds Publish: an after-it AC line with neither a Blocks link nor a decision, or an ESCALATED prediction with no decision. */
-export function publishBlockers(findings: Array<AcFinding & { linked?: boolean }>, tickets: Array<{ key: string; prediction: QaPrediction | null }>, decisions: Decisions): string[] {
-  return [
-    ...findings.filter((finding) => finding.kind === 'after-it' && !finding.linked && !decisions[finding.id]).map((finding) => finding.id),
-    ...tickets.filter((ticket) => ticket.prediction?.prediction === 'ESCALATED' && !decisions[qaId(ticket.key)]).map((ticket) => qaId(ticket.key)),
-  ];
+/** What still holds Publish: an after-it AC line with neither a Blocks link nor a decision. */
+export function publishBlockers(findings: Array<AcFinding & { linked?: boolean }>, decisions: Decisions): string[] {
+  return findings.filter((finding) => finding.kind === 'after-it' && !finding.linked && !decisions[finding.id]).map((finding) => finding.id);
 }
 
 // ---- The service --------------------------------------------------------------------------------------------------
@@ -538,7 +535,7 @@ export class SprintDraftService {
       const decision = decisions[finding.id] ?? null;
       return { ...finding, decision: decision && { ...decision, action: acAction(decision.action) }, linked: (blockedBy.get(finding.key) ?? []).includes(finding.refKey) };
     });
-    const blockers = publishBlockers(findings, planned, decisions);
+    const blockers = publishBlockers(findings, decisions);
     const epics = new Set(all.filter((ticket) => !ticket.carried).map((ticket) => ticket.epic));
     const storyboards = Object.values(parse<Record<string, StoryboardState>>(row.storyboards, {})).filter((board) => epics.has(board.epic)).sort((a, b) => a.epic.localeCompare(b.epic));
     const boardOf = new Map(storyboards.map((board) => [board.epic, board]));

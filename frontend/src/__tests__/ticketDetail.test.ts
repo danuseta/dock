@@ -89,7 +89,7 @@ test('each missing readiness item says what is missing and links to where it get
     ['open', 'Open to confirm is not empty', 'https://jira/browse/QRD-1510'],
     ['alone', 'Tickets the AC waits on, not in UAT yet: 2', '#acceptance-criteria'],
     ['data', 'Test data not named', 'https://jira/browse/QRD-1510'],
-    ['tc', 'Test cases not approved by QA', '/planning?tab=draft&panel=qa'],
+    ['tc', 'Test cases not approved by QA', '/planning?tab=draft&panel=team'],
     ['design', 'UI ticket without a design link', 'https://jira/browse/QRD-1510'],
   ]);
   assert.strictEqual(ready.missing[2].detail, 'QRD-1307 (In Progress), QRD-1312 (status not read yet)');
