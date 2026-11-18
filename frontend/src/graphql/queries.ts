@@ -299,6 +299,9 @@ export const GET_SETTINGS = gql`
       chatCaveman
       chatParallelTurns
       ownerReplySession
+      storagePlugin
+      voicePlugin
+      storageLocalDir
       notificationPrefs
       planningConfluenceParent
       planningPlanner
@@ -1370,6 +1373,7 @@ export const GET_PUSH_PUBLIC_KEY = gql`
 export const GET_DEMO_VIDEOS = gql`
   query GetDemoVideos {
     demoVideos {
+      storage
       videos { ticketKey url size updatedAt title }
     }
   }

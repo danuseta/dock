@@ -1,9 +1,14 @@
-import type { Readable } from 'node:stream';
+import { createWriteStream } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { DeleteObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { StorageService } from '../storage/service';
 import { FOLDER, demoStorage, type DemoStorage, type DemoStorageConfig } from './demo-storage';
 import { ledgerPeer } from './ledger-peer';
 import { OrchestratorInputError, normalizeTicketKey } from './orchestrator';
+import { livePlugins, type PluginChoices } from './plugins';
 
 export const MAX_DEMO_BYTES = 500 * 1024 * 1024;
 const VIDEO_TYPES = new Set(['video/mp4']);
@@ -77,6 +82,7 @@ export class DemoVideos {
     private readonly settings: DemoStorage,
     private readonly links: DemoLinks,
     private readonly makeStore: (config: DemoStorageConfig) => DemoStore = s3Store,
+    private readonly plugins: () => Promise<Pick<PluginChoices, 'storage' | 'storageLocalDir'>> = async () => ({ storage: 's3', storageLocalDir: '' }),
   ) {}
 
   private bucket(config: DemoStorageConfig | null) {
@@ -99,7 +105,8 @@ export class DemoVideos {
   }
 
   async list(rows: DemoLinkRow[]) {
-    const config = await this.settings.full().catch(() => null);
+    const plugin = await this.plugins();
+    const config = plugin.storage === 's3' ? await this.settings.full().catch(() => null) : null;
     const sizes = new Map<string, number>();
     if (config) {
       const folders = new Set(rows.map((row) => this.objectKeyOf(config, row)?.split('/')[0]).filter((folder): folder is string => Boolean(folder)));
@@ -114,7 +121,8 @@ export class DemoVideos {
       const key = config ? this.objectKeyOf(config, row) : null;
       return { ticketKey: row.ticketKey, url: row.url, size: key ? sizes.get(key) ?? null : null, updatedAt: row.updatedAt.toISOString() };
     });
-    return { configured: config != null, videos };
+    const configured = plugin.storage === 's3' ? config != null : plugin.storage === 'local' && plugin.storageLocalDir !== '';
+    return { configured, storage: plugin.storage, videos };
   }
 
   async upload(ticketKeyInput: string, body: Readable | Buffer, contentType: string, length: number | null): Promise<DemoVideo> {
@@ -122,6 +130,16 @@ export class DemoVideos {
     if (!VIDEO_TYPES.has(contentType.split(';')[0].trim().toLowerCase())) throw new OrchestratorInputError('A demo video is an MP4 file (video/mp4)');
     if (!length || length <= 0) throw new OrchestratorInputError('The upload needs a content length');
     if (length > MAX_DEMO_BYTES) throw new OrchestratorInputError(`A demo video is at most ${MAX_DEMO_BYTES / 1024 / 1024} MB`);
+    const plugin = await this.plugins();
+    if (plugin.storage === 'none') throw new OrchestratorInputError('Demo video storage is off: pick S3 or Local folder in Settings > Plugins');
+    if (plugin.storage === 'local') {
+      if (!plugin.storageLocalDir) throw new OrchestratorInputError('Local folder is not set: set it in Settings > Plugins');
+      await mkdir(plugin.storageLocalDir, { recursive: true });
+      const file = join(plugin.storageLocalDir, `${ticketKey}.mp4`);
+      await pipeline(Buffer.isBuffer(body) ? Readable.from(body) : body, createWriteStream(file));
+      await this.links.save(ticketKey, file);
+      return { ticketKey, url: file, size: length, updatedAt: new Date().toISOString() };
+    }
     const { config, store, prefix } = this.bucket(await this.settings.full());
     await store.put(`${prefix}${ticketKey}.mp4`, body, 'video/mp4', length);
     const url = this.urlOf(config, ticketKey);
@@ -141,7 +159,7 @@ export class DemoVideos {
   }
 }
 
-export const demoVideos = new DemoVideos(demoStorage, demoLinks());
+export const demoVideos = new DemoVideos(demoStorage, demoLinks(), s3Store, livePlugins);
 
 /** On the laptop DOCK: a demo link the workspace DOCK set or removed. A removal only clears the link it set. */
 export async function ingestDemoLink(input: unknown, storage = new StorageService()) {

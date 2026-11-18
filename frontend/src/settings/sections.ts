@@ -6,7 +6,7 @@ import { parseNotificationPrefs, prefsToValues, valuesToPrefs } from '../lib/not
 import { isValidServiceHealthRefreshSeconds, normalizeServiceHealthRefreshSeconds } from '../lib/serviceHealthRefresh';
 
 export type SectionId = 'general' | 'chat' | 'notifications' | 'security' | 'jira' | 'github' | 'discord' | 'calendar' | 'machines' | 'claude' | 'review' | 'planflow' | 'sousflow' | 'judge' | 'messages' | 'plugins';
-export type DraftSectionId = 'general' | 'chat' | 'notifications' | 'jira' | 'github' | 'discord' | 'calendar' | 'review' | 'messages';
+export type DraftSectionId = 'general' | 'chat' | 'notifications' | 'jira' | 'github' | 'discord' | 'calendar' | 'review' | 'messages' | 'plugins';
 export type SectionGroup = 'You' | 'Connections' | 'Automation' | 'Messages & plugins';
 export type SectionValues = Record<string, string>;
 export type SectionStatus = 'ok' | 'bad' | 'off' | 'unsaved' | null;
@@ -58,6 +58,9 @@ export interface SavedSettings {
   chatParallelTurns?: string | null;
   ownerReplySession?: string | null;
   notificationPrefs?: string | null;
+  storagePlugin?: string | null;
+  voicePlugin?: string | null;
+  storageLocalDir?: string | null;
 }
 
 export const SECTION_GROUPS: SectionGroup[] = ['You', 'Connections', 'Automation', 'Messages & plugins'];
@@ -80,7 +83,7 @@ export const SETTINGS_SECTIONS: SectionInfo[] = [
   { id: 'sousflow', label: 'Sous flow', title: 'Sous flow', description: 'The sous stages from picking the ticket to the Jira status: which run, and after each one whether sous goes on, asks first or stops. Every action here saves immediately.', icon: Route, group: 'Automation' },
   { id: 'judge', label: 'Judge', title: 'Judge', description: "The agent that reads the sprint's sessions for the retro: on or off (off by default), its Claude account, its windows and when a day's answer is due.", icon: Gavel, group: 'Automation' },
   { id: 'messages', label: 'Discord messages', title: 'Discord messages', description: 'How the ticket summary DOCK posts to Discord reads.', icon: Mail, group: 'Messages & plugins' },
-  { id: 'plugins', label: 'Plugins', title: 'Plugins', description: 'The narration keys and the bucket a demo video goes to, shared by both DOCKs.', icon: Plug, group: 'Messages & plugins' },
+  { id: 'plugins', label: 'Plugins', title: 'Plugins', description: 'One choice per kind. An empty choice hides the feature that needs it instead of failing.', icon: Plug, group: 'Messages & plugins' },
 ];
 
 const SECTION_FIELDS: Record<SectionId, string[]> = {
@@ -99,7 +102,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
   sousflow: ['Stages', 'Skip stage', 'After each stage'],
   judge: ['Judge on or off', 'Judge account', 'Idle minutes', 'Answer cutoff'],
   messages: ['Message template', 'Preview'],
-  plugins: ['ElevenLabs keys', 'Demo storage', 'Bucket'],
+  plugins: ['Storage', 'Voice', 'Harness', 'ElevenLabs keys', 'Demo storage', 'Bucket', 'Local folder'],
 };
 
 export const matchSections = (sections: SectionInfo[], query: string) => {
@@ -107,7 +110,7 @@ export const matchSections = (sections: SectionInfo[], query: string) => {
   return needle ? sections.filter((section) => [section.label, ...SECTION_FIELDS[section.id]].some((text) => text.toLowerCase().includes(needle))) : sections;
 };
 
-export const DRAFT_SECTIONS: DraftSectionId[] = ['general', 'chat', 'notifications', 'jira', 'github', 'discord', 'calendar', 'review', 'messages'];
+export const DRAFT_SECTIONS: DraftSectionId[] = ['general', 'chat', 'notifications', 'jira', 'github', 'discord', 'calendar', 'review', 'messages', 'plugins'];
 
 export const isDraftSection = (id: SectionId): id is DraftSectionId => (DRAFT_SECTIONS as SectionId[]).includes(id);
 
@@ -154,6 +157,7 @@ export function savedValues(settings: SavedSettings): Record<DraftSectionId, Sec
       reviewFindingsToTask: String(settings.reviewFindingsToTask !== false),
     },
     messages: { discordMessageTemplate: settings.discordMessageTemplate || DEFAULT_DISCORD_MESSAGE_TEMPLATE },
+    plugins: { storagePlugin: settings.storagePlugin || 'none', voicePlugin: settings.voicePlugin || 'none', storageLocalDir: settings.storageLocalDir || '' },
     calendar: { googleClientId: settings.googleClientId || '', googleClientSecret: '', googleCalendarId: settings.googleCalendarId || 'primary' },
   };
 }
@@ -173,6 +177,7 @@ export function sectionErrors(id: DraftSectionId, values: SectionValues): string
     const userId = values.discordUserId.trim();
     return userId && !/^\d{5,25}$/.test(userId) ? ['Your Discord user id is digits only.'] : [];
   }
+  if (id === 'plugins') return values.storagePlugin === 'local' && !/^([a-zA-Z]:[\\/]|\/)/.test(values.storageLocalDir.trim()) ? ['The local folder is an absolute path.'] : [];
   return [];
 }
 

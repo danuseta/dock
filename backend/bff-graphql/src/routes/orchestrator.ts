@@ -24,6 +24,7 @@ import { discordReader } from '../integrations/discord-reader-live';
 import { dockMode } from '../mode';
 import { ELEVENLABS_ROUTES, elevenLabsKeys, elevenLabsRoute, type ElevenLabsKeys } from '../integrations/elevenlabs-keys';
 import { MAX_TRANSCRIPT_BYTES, OrchestratorInputError, OrchestratorService, orchestratorService, type Orchestration } from '../integrations/orchestrator';
+import { livePlugins } from '../integrations/plugins';
 import { StorageService } from '../storage/service';
 import { checkpointsOn } from '../integrations/sous-flow-live';
 import type { JudgeQueue } from '../integrations/judge-queue';
@@ -193,6 +194,7 @@ export function createOrchestratorIngestRouter(
     }
   }));
   router.post('/doctor', small, handle((body, _signal, machine) => doctor.ingest(body, machine)));
+  router.post('/plugins', small, handle(() => livePlugins()));
   for (const route of ELEVENLABS_ROUTES) router.post(`/elevenlabs/${route}`, small, handle((body) => elevenLabsRoute(keys, route, (body ?? {}) as Record<string, unknown>)));
   router.post('/dismiss', small,handle((body, _signal, machine) => service.dismiss(String((body as { key?: unknown })?.key ?? ''), machine)));
   router.post('/transcript', express.json({ limit: MAX_TRANSCRIPT_BYTES + 1024 * 1024 }), handle((body, _signal, machine) => service.saveTranscript(body, new Date(), machine)));
