@@ -32,6 +32,8 @@ export interface ThreadMessage {
   /** The author's Discord avatar, or Discord's default one. */
   avatar: string;
   mine: boolean;
+  /** The id of the webhook that posted the message, when one did. */
+  webhookId?: string;
   at: string;
   text: string;
   mentions: ThreadMention[];

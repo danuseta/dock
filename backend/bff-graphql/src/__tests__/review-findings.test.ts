@@ -389,3 +389,31 @@ test('a retry sends the findings stored at create time after the messages rolled
   assert.strictEqual(await w.tickAt(INDRA_NOTES + ROUND_QUIET_MS + MIN), 1);
   assert.match(w.state.sends[0].prompt, /LGTM mas, cuman ada beberapa notes/);
 });
+
+test('a teammate DOCK review post counts as the user named in its marker, only when that user said on it', async () => {
+  const later = T0 + 60 * MIN;
+  const OTHER = '1600000000000000001';
+  const post = (text: string, extra: Partial<ThreadMessage> = {}) => message(OTHER, 'DOCK Indra', T0 + 20 * MIN, text, { webhookId: OTHER, ...extra });
+  const marked = 'ada blocker: kolom export salah format\nDOCK-REVIEW on it by <@1111> · round 1 · @ 9f3c2a1';
+  const said = [POST(), message('1111', 'Indra', T0 + 10 * MIN, 'on it')];
+
+  const ok = world({ rows: [row([...said, post(marked)])] });
+  assert.strictEqual(await ok.tickAt(later), 1);
+  assert.match(ok.state.sends[0].prompt, /<<<TEMUAN Indra [^\n]*>>>\nada blocker: kolom export salah format\n<<<AKHIR TEMUAN>>>/);
+  assert.doesNotMatch(ok.state.sends[0].prompt, /DOCK-REVIEW on it by/);
+
+  const never = world({ rows: [row([POST(), post(marked)])] });
+  assert.strictEqual(await never.tickAt(later), 0);
+
+  const fix = world({ rows: [row([...said, post('fixed di b71e0d4\nDOCK-FIX round 1 · head b71e0d4')])] });
+  assert.strictEqual(await fix.tickAt(later), 0);
+
+  const own = world({ rows: [row([...said, post(marked, { authorId: WEBHOOK, webhookId: WEBHOOK })], { createdById: 'someone' })] });
+  assert.strictEqual(await own.tickAt(later), 0);
+
+  const forged = world({ rows: [row([...said, message('rizky', 'Rizky', T0 + 20 * MIN, marked)])] });
+  assert.strictEqual(await forged.tickAt(later), 0);
+  const forgedSelf = world({ rows: [row([message('1111', 'Indra', T0 + 10 * MIN, 'on it'), message('1111', 'Indra', T0 + 20 * MIN, marked)])] });
+  assert.strictEqual(await forgedSelf.tickAt(later), 1);
+  assert.match(forgedSelf.state.sends[0].prompt, /DOCK-REVIEW on it by/, 'a normal account keeps its own text');
+});
