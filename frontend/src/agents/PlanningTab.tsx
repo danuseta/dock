@@ -214,7 +214,7 @@ const TeamPanel: React.FC<{ draft: SprintDraft; plan: DraftTicket[]; busy: boole
       {draft.moves.length > 0 && (
         <section aria-label="Suggested moves" className="min-w-0">
           <h3 className={head}>Suggested card moves <InfoTip label="About suggested card moves">Cards waiting on that card move with it. A move only changes the draft; the Jira assignee changes on Publish.</InfoTip></h3>
-          <p className="mt-1 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">To Do cards that can move to someone who frees up sooner.</p>
+          <p className="mt-1 text-pretty text-[0.8rem] text-muted-foreground">To Do cards that can move to someone who frees up sooner.</p>
           <ul className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
             {draft.moves.map((move) => (
               <li key={move.keys.join('|')} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-border px-3 py-2.5 last:border-b-0 max-[760px]:grid-cols-[minmax(0,1fr)]">
@@ -232,7 +232,7 @@ const TeamPanel: React.FC<{ draft: SprintDraft; plan: DraftTicket[]; busy: boole
 
       <section aria-label="Wave progress" className="min-w-0">
         <h3 className={head}>Work waves <InfoTip label="About work waves">Each piece of a bar = one card on its scheduled days, in the card owner's colour.</InfoTip></h3>
-        <p className="mt-1 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Wave 1 waits on no one, wave 2 waits on wave 1, and so on.</p>
+        <p className="mt-1 text-pretty text-[0.8rem] text-muted-foreground">Wave 1 waits on no one, wave 2 waits on wave 1, and so on.</p>
         <ul className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
           {waves.map((row) => (
             <li key={row.wave} className="grid grid-cols-[90px_minmax(0,1fr)_150px] items-center gap-x-3 gap-y-1 border-b border-border px-3 py-2.5 last:border-b-0 max-[760px]:grid-cols-[76px_minmax(0,1fr)]">
@@ -259,7 +259,7 @@ const TeamPanel: React.FC<{ draft: SprintDraft; plan: DraftTicket[]; busy: boole
 
       <section aria-label="Schedule" className="min-w-0">
         <h3 className={head}>Schedule per person <InfoTip label="About the schedule">Card length = SP, {fmt(draft.spPerDay)} SP = 1 day. Order follows the #N label in Jira. The forecast counts only the work left on unmerged cards, from today.</InfoTip></h3>
-        <p className="mt-1 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Each person's order of work by day. Click a card to see what it waits on.</p>
+        <p className="mt-1 text-pretty text-[0.8rem] text-muted-foreground">Each person's order of work by day. Click a card to see what it waits on.</p>
         {draft.mergeSource === 'jira' && <p className="mt-2 font-mono text-[0.7rem] text-muted-foreground" role="status">Merge state from Jira status: GitHub unavailable</p>}
         <div className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
           <div className="overflow-x-auto">
@@ -408,7 +408,7 @@ const TeamPanel: React.FC<{ draft: SprintDraft; plan: DraftTicket[]; busy: boole
 
       <section aria-label="Order of work, per person" className="min-w-0">
         <h3 className={head}>Order of work <InfoTip label="About the order of work">Start days already follow blockers and wave order. The grey line on each card = who waits on that card. <b>after sprint</b> = finishes after day {draft.sprintDays}.</InfoTip></h3>
-        <p className="mt-1 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Work from top to bottom.</p>
+        <p className="mt-1 text-pretty text-[0.8rem] text-muted-foreground">Work from top to bottom.</p>
         <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(min(260px,100%),1fr))] gap-3">
           {rows.map((lane) => (
             <div key={lane.dev} className="min-w-0 rounded-md border border-border bg-surface-0 px-3.5 py-3">
@@ -447,7 +447,7 @@ const TeamPanel: React.FC<{ draft: SprintDraft; plan: DraftTicket[]; busy: boole
 
       <section aria-label="Hand-offs" className="min-w-0">
         <h3 className={head}>Hand-offs <InfoTip label="About hand-offs">Float = how many days a card can slip before the next person's card slips too. No float = one day late makes someone else late.</InfoTip></h3>
-        <p className="mt-1 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">Tickets someone else waits on. <b className="text-foreground">{hand.length} hand-offs · {zeroFloat} with no float.</b></p>
+        <p className="mt-1 text-pretty text-[0.8rem] text-muted-foreground">Tickets someone else waits on. <b className="text-foreground">{hand.length} hand-offs · {zeroFloat} with no float.</b></p>
         {hand.length === 0 ? (
           <p className="mt-2 text-sm text-muted-foreground">No card waits on another developer's card.</p>
         ) : (
@@ -616,7 +616,7 @@ const AcPanel: React.FC<{ draft: SprintDraft; busy: boolean; onDecide: (id: stri
       <p className="text-[0.84rem] text-secondary-foreground">
         <b className="text-foreground">{unlinked.length}</b> AC lines name another ticket without a Blocks link; {findings.filter(undecidedFinding).length} not decided.
       </p>
-      <p className="mt-1 max-w-[76ch] text-pretty text-[0.76rem] text-sky-200">AC holds only what is tested on this ticket. Waits on the named ticket? Pick Dependency: the Blocks link is added on Publish, and the QA bot holds the ticket until that one is in UAT CHECK. Info only? Move to Reference. Nothing changes in Jira before Publish, and DOCK writes no comments.</p>
+      <p className="mt-1 flex items-center gap-1 text-[0.76rem] text-sky-200">Waits on the named ticket? Dependency. Info only? Move to Reference. <InfoTip label="About the AC check">AC holds only what is tested on this ticket. Dependency adds the Blocks link on Publish, and the QA bot holds the ticket until that one is in UAT CHECK. Nothing changes in Jira before Publish, and DOCK writes no comments.</InfoTip></p>
       <ul className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
         {findings.map((finding) => <FindingRow key={finding.id} draft={draft} finding={finding} busy={busy} onDecide={onDecide} />)}
       </ul>
