@@ -6,7 +6,7 @@ import { JudgeDays } from '../agents/JudgeDays';
 import { JudgeDaySheetView } from '../agents/JudgeDaySheetView';
 import { SprintSheet } from '../agents/SprintSheet';
 import {
-  callOf, dayLabel, flagText, dayStatusText, discordFindingHref, findingHref, flaggedMessages, gradeOf, judgeHref, judgeOnlySprint, judgeRoute, mergeRetroItems, retroSprintOptions,
+  callOf, dayLabel, flagText, dayStatusText, discordFindingHref, findingHref, flaggedMessages, gradeOf, judgeHref, judgeOnlySprint, judgeRoute, sessionJudgeDay, mergeRetroItems, retroSprintOptions,
   type JudgeDaySheet, type JudgeDays as JudgeDaysData, type JudgeFinding,
 } from '../agents/judge';
 import { planningRedirect } from '../agents/plan';
@@ -133,10 +133,16 @@ test('routes: ?day opens a sheet, the old Agents link keeps its day, and the lis
 });
 
 test('the session\'s Judge block and Home\'s Needs you line', () => {
-  const block = renderToStaticMarkup(<SessionJudgeView judge={{ status: 'judged', grade: 'C', judgedAt: '2026-11-13T14:12:00.000Z', ownerWaitMinutes: 90, error: null, findings: [finding('f1', 'stopped-with-way-out', { causeLabel: 'Stopped with a way out' }), finding('f2', 'self-inflicted-rework', { causeLabel: 'Self-inflicted rework' })] }} canAct busy={false} notice={null} onAgain={noop} />);
-  assert.match(block, /Judge · 13 Nov 21:12/);
+  const judged = { status: 'judged', grade: 'C', judgedAt: '2026-11-13T14:12:00.000Z', ownerWaitMinutes: 90, error: null, findings: [finding('f1', 'stopped-with-way-out', { causeLabel: 'Stopped with a way out' }), finding('f2', 'self-inflicted-rework', { causeLabel: 'Self-inflicted rework' })] };
+  const day = sessionJudgeDay(judged, '2026-11-14T03:00:00.000Z');
+  assert.strictEqual(day, '2026-11-13', 'the findings carry the Judge day');
+  assert.strictEqual(sessionJudgeDay({ findings: [] }, '2026-11-13T18:30:00.000Z'), '2026-11-14', 'without findings the last message decides, in WIB');
+  assert.strictEqual(sessionJudgeDay({ findings: [] }, null), null);
+  const block = renderToStaticMarkup(<SessionJudgeView judge={judged} day={day} canAct busy={false} notice={null} onAgain={noop} />);
+  assert.match(block, /href="\/planning\?tab=retro&amp;day=2026-11-13"/);
   assert.match(block, /aria-label="Grade C"/);
-  assert.match(block, /2 findings · owner waited about 1.5 h/);
+  assert.match(block, /13 Nov 21:12/);
+  assert.doesNotMatch(block, /findings|Stopped with a way out|owner waited/);
   assert.match(block, /Judge again/);
   const items = judgeAttention([{ day: '2026-11-13', findings: 5 }], dayLabel);
   assert.strictEqual(items[0].message, 'Judge: Fri 13 Nov waiting (5 findings)');

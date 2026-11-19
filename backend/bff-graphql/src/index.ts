@@ -17,7 +17,7 @@ import { reviewFindings } from './integrations/review-findings-live';
 import { uatMerged } from './integrations/uat-merged';
 import { worktrees } from './integrations/worktrees-live';
 import { autoBroadcast } from './integrations/broadcast';
-import { decisionGate, sweepReleases } from './integrations/decision-gate';
+import { decisionGate, keepFinishedGuesses, sweepReleases } from './integrations/decision-gate';
 import { claudeAccounts, cycleAvailable } from './integrations/claude-accounts-live';
 import { judgeQueue } from './integrations/judge-live';
 import { dockMode } from './mode';
@@ -95,7 +95,9 @@ export async function startServer(): Promise<void> {
         .catch((error) => console.warn('[ClaudeAccounts] usage probe failed:', error instanceof Error ? error.message : 'unknown error'));
       setInterval(probeClaude, CLAUDE_PROBE_MS).unref();
       // A build that went quiet with nothing waiting on the owner still goes up for review and out to Discord.
+      // A guess on a ticket that is done or merged is kept as built, so it does not wait on the owner.
       const releaseQuiet = () => sweepReleases({ list: () => orchestratorService.list(), gate: decisionGate, broadcast: (run) => autoBroadcast.afterLedger(run) })
+        .then(() => keepFinishedGuesses({ list: () => orchestratorService.list(), gate: decisionGate }))
         .catch((error) => console.warn('[DecisionGate] sweep failed:', error instanceof Error ? error.message : 'unknown error'));
       setInterval(releaseQuiet, RELEASE_SWEEP_MS).unref();
       const cleanWorktrees = () => worktrees.autoTick()

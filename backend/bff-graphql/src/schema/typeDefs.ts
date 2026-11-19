@@ -1844,6 +1844,8 @@ export const typeDefs = gql`
     approved: Boolean!
     """The guessed decisions (GUESS, USULAN) the owner confirmed in DOCK."""
     confirmedDecisions: [Int!]!
+    """The confirmed guesses DOCK kept on its own because the ticket was done or merged; the owner did not answer them."""
+    autoConfirmedDecisions: [Int!]!
     blockers: Int!
     activity: String!
     activityDetail: String

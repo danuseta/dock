@@ -255,6 +255,7 @@ export const GET_OWNER_QUESTIONS = gql`
       issues { n at type text level status resolvedBy resolvedAt options effects textId optionsId }
       decisions { n at text status by issue cancelNote effect alts { label effect } replaces supersededBy textId optionsId }
       confirmedDecisions
+      autoConfirmedDecisions
     }
   }
 `;
@@ -665,6 +666,7 @@ export const ORCHESTRATION_FIELDS = `
   brief
   decisions { n at text status by issue cancelNote effect alts { label effect } replaces supersededBy textId optionsId }
   confirmedDecisions
+  autoConfirmedDecisions
   assumptions { n text falsifier state evidence }
   failures { at type what evidence attempt }
   closing { hours fixRounds replans }

@@ -12,10 +12,13 @@ export const statusScript = () => path.join(process.env.CLAUDE_CONFIG_DIR || pat
 
 export interface ConfirmedDecision { n: number; text: string }
 
-/** `status.cjs decide` for one confirmed guess: a DECIDED decision by the owner with the same text, which marks D-n SUPERSEDED. */
-export const confirmArgs = (key: string, decision: ConfirmedDecision) => [
-  'decide', key, `Owner confirmed D-${decision.n} in DOCK: ${decision.text}`, '--status', 'DECIDED', '--by', 'owner', '--replaces', String(decision.n),
-];
+/**
+ * `status.cjs decide` for one confirmed guess: a DECIDED decision by the owner with the same text, which marks D-n SUPERSEDED.
+ * A guess DOCK kept on its own (`auto` says why) is decided by the agent and says so.
+ */
+export const confirmArgs = (key: string, decision: ConfirmedDecision, auto: string | null = null) => (auto
+  ? ['decide', key, `DOCK (${auto}) kept D-${decision.n}: ${decision.text}`, '--status', 'DECIDED', '--by', 'agent', '--replaces', String(decision.n)]
+  : ['decide', key, `Owner confirmed D-${decision.n} in DOCK: ${decision.text}`, '--status', 'DECIDED', '--by', 'owner', '--replaces', String(decision.n)]);
 
 export interface LedgerConfirmDeps {
   available(): boolean;
@@ -28,7 +31,7 @@ export interface LedgerConfirmDeps {
  * same thing, then hands DOCK the new ledger. Only where the ledger lives: a ticket whose ledger is on another machine is
  * skipped and keeps the confirmation in DOCK only.
  */
-export async function writeConfirmations(deps: LedgerConfirmDeps, key: string, machine: string, decisions: ConfirmedDecision[]): Promise<'written' | 'skipped'> {
+export async function writeConfirmations(deps: LedgerConfirmDeps, key: string, machine: string, decisions: ConfirmedDecision[], auto: string | null = null): Promise<'written' | 'skipped'> {
   if (!decisions.length || !deps.available()) return 'skipped';
   let ledger: { decisions?: Array<{ n: number; status: string }> };
   try {
@@ -38,7 +41,7 @@ export async function writeConfirmations(deps: LedgerConfirmDeps, key: string, m
   }
   const guessed = new Set((ledger.decisions ?? []).filter((item) => item.status === 'GUESS' || item.status === 'USULAN').map((item) => item.n));
   const due = decisions.filter((decision) => guessed.has(decision.n));
-  for (const decision of due) await deps.status(confirmArgs(key, decision));
+  for (const decision of due) await deps.status(confirmArgs(key, decision, auto));
   if (!due.length) return 'skipped';
   await deps.ingest(JSON.parse(await deps.status(['show', key])), machine);
   return 'written';

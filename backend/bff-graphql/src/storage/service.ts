@@ -561,11 +561,9 @@ export class StorageService {
 
   /** A new draft replaces the lines still open from the same sources; lines the owner accepted or closed stay. */
   async replaceRetroDraft(sprint: string, items: Array<{ kind: string; text: string; evidence: string[]; dest: string; source?: string }>, sources: string[] = ['ledger']) {
-    await this.db.$transaction([
-      this.db.retroItem.deleteMany({ where: { sprint, status: 'open', source: { in: sources } } }),
-      ...items.map((item) => this.db.retroItem.create({ data: { sprint, kind: item.kind, text: item.text, evidence: JSON.stringify(item.evidence), dest: item.dest, source: item.source ?? 'ledger' } })),
-    ]);
-    return items.length;
+    const creates = items.map((item) => this.db.retroItem.create({ data: { sprint, kind: item.kind, text: item.text, evidence: JSON.stringify(item.evidence), dest: item.dest, source: item.source ?? 'ledger' } }));
+    const [, ...created] = await this.db.$transaction([this.db.retroItem.deleteMany({ where: { sprint, status: 'open', source: { in: sources } } }), ...creates]);
+    return created as Array<Awaited<typeof creates[number]>>;
   }
 
   /** A line DOCK proposes itself: added once by its text, its evidence refreshed while it is still open. */

@@ -138,7 +138,7 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, cos
           )}
         </div>
       </section>
-      <SessionJudgeBlock sessionId={session.id} canAct={!monitorsOnly(mode)} />
+      <SessionJudgeBlock sessionId={session.id} lastMessageAt={sessionData?.chatSession?.lastMessageAt} canAct={!monitorsOnly(mode)} onNavigate={onNavigate} />
       {ticketKey && <QaPanel ticketKey={ticketKey} />}
       <div className="mt-auto flex flex-col gap-4">
         {run?.kind === 'review' && !monitorsOnly(mode) && <LgtmButton run={run} busy={approving} onLgtm={setLgtmTarget} className="w-full max-[900px]:h-11" />}

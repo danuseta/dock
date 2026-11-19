@@ -40,6 +40,18 @@ export const OWN_EFFECT: Record<Question['kind'], string> = {
 
 type QuestionFacts = Pick<AgentRun, 'kind' | 'issues' | 'decisions' | 'confirmedDecisions'>;
 
+/** A guess DOCK answered with Keep what sous built on its own, because its ticket was done or merged. */
+export interface AutoKept { key: string; n: number; text: string }
+
+/** The guesses DOCK kept on its own, ticket by ticket in the runs' order, each with the text sous wrote. */
+export function autoKeptGuesses(runs: Array<Pick<AgentRun, 'key' | 'decisions' | 'autoConfirmedDecisions'>>): AutoKept[] {
+  return runs.flatMap((run) => (run.autoConfirmedDecisions ?? []).map((n) => ({
+    key: run.key,
+    n,
+    text: run.decisions?.find((decision) => decision.n === n)?.text ?? '',
+  })));
+}
+
 /**
  * The ticket's questions in the order sous raised them: open owner issues first, then the guessed decisions not confirmed yet.
  * A review gives feedback only, so its guesses are not asked.

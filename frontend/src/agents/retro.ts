@@ -26,6 +26,18 @@ export interface Retro {
   escalations: RetroEscalations;
 }
 
+/**
+ * Where a Keep / Problem / Try line stands, after "goes to": a ledger line is applied from the ledger without the owner,
+ * a Judge line waits for the owner's Accept. Null for a closed line.
+ */
+export function retroLineState(item: Pick<RetroItem, 'status' | 'source' | 'sessionId' | 'dest'>): string | null {
+  const ledger = (item.source || 'ledger') === 'ledger';
+  if (item.status === 'closed') return null;
+  if (item.status !== 'accepted') return ledger ? 'from the ledger, not applied yet: waits for you' : 'from Judge: waits for you';
+  const how = item.sessionId ? ', sous is applying it' : item.dest === 'qa-agent' ? ', open a PR to the QA bot repo' : '';
+  return `${ledger ? 'Applied from the ledger' : 'accepted'}${how}`;
+}
+
 /** The numbers shown, in order, with their label and unit. */
 export const RETRO_NUMBERS: Array<[keyof RetroNumbers, string, string]> = [
   ['tickets', 'tickets built by agents', ''],

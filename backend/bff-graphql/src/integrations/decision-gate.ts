@@ -16,7 +16,11 @@ type GateRun = Pick<Orchestration, 'key' | 'kind' | 'prBe' | 'prFe' | 'issues' |
 export const stillWorking = (run: Partial<Pick<Orchestration, 'activity' | 'activityDetail' | 'eventIdleSeconds'>>) =>
   (run.activity === 'ACTIVE' || (run.activity === 'WAITING' && run.activityDetail !== 'gate'))
   && (run.eventIdleSeconds == null || run.eventIdleSeconds < STALE_ACTIVE_MS / 1000);
-interface GateRecord { confirmed: number[]; ready: string[] }
+/** `auto` holds the confirmed guesses DOCK kept on its own, not the owner. */
+interface GateRecord { confirmed: number[]; ready: string[]; auto: number[] }
+
+/** Why DOCK keeps a guess on its own: the ticket is done or merged, so there is nothing left to change. */
+export const AUTO_KEEP_REASON = 'ticket done';
 
 export interface OwnerPending { issues: number[]; decisions: number[] }
 
@@ -36,7 +40,7 @@ export interface GateDeps {
   /** Runs once a pull request went up for review, so the automatic broadcast sees it. */
   afterReady(run: GateRun): Promise<unknown>;
   /** Writes confirmations into the ticket's ledger where it lives; 'skipped' when the ledger is on another machine. */
-  writeLedger?(key: string, machine: string, decisions: ConfirmedDecision[]): Promise<'written' | 'skipped'>;
+  writeLedger?(key: string, machine: string, decisions: ConfirmedDecision[], auto?: string | null): Promise<'written' | 'skipped'>;
 }
 
 const numbers = (value: unknown) => (Array.isArray(value) ? value.filter((item): item is number => Number.isInteger(item) && item > 0) : []);
@@ -58,25 +62,35 @@ export class DecisionGate {
   private async record(key: string): Promise<GateRecord> {
     const saved = await this.deps.getCache(GATE_CACHE, key);
     const value = typeof saved === 'object' && saved !== null ? saved as Record<string, unknown> : {};
-    return { confirmed: numbers(value.confirmed), ready: strings(value.ready) };
+    return { confirmed: numbers(value.confirmed), ready: strings(value.ready), auto: numbers(value.auto) };
   }
 
   async confirmed(key: string): Promise<number[]> {
     return (await this.record(key)).confirmed;
   }
 
-  /** Records the owner's confirmation of guessed decisions; refuses a number that is not a guessed decision in force. */
-  async confirm(run: GateRun, ns: number[]): Promise<number[]> {
+  /** The confirmed guesses DOCK kept on its own because the ticket was done. */
+  async autoConfirmed(key: string): Promise<number[]> {
+    return (await this.record(key)).auto;
+  }
+
+  /**
+   * Records the owner's confirmation of guessed decisions; refuses a number that is not a guessed decision in force.
+   * With `auto`, DOCK keeps them on its own for that reason, through the same record and ledger write.
+   */
+  async confirm(run: GateRun, ns: number[], auto: string | null = null): Promise<number[]> {
     const guessed = new Set(run.decisions.filter((decision) => GUESSED.has(decision.status)).map((decision) => decision.n));
     const wrong = ns.filter((n) => !guessed.has(n));
     if (wrong.length) throw new Error(`${wrong.map((n) => `D-${n}`).join(', ')} is not a decision sous took on your behalf`);
     const record = await this.record(run.key);
     const confirmed = [...new Set([...record.confirmed, ...ns])].sort((a, b) => a - b);
-    await this.deps.upsertCache(GATE_CACHE, run.key, { ...record, confirmed }, 0);
-    await this.deps.event(run.key, 'OWNER_CONFIRMED', ns.map((n) => `D-${n}`).join(', ')).catch(() => undefined);
+    const kept = auto ? [...new Set([...record.auto, ...ns])].sort((a, b) => a - b) : record.auto;
+    await this.deps.upsertCache(GATE_CACHE, run.key, { ...record, confirmed, auto: kept }, 0);
+    const listed = ns.map((n) => `D-${n}`).join(', ');
+    await this.deps.event(run.key, auto ? 'AUTO_CONFIRMED' : 'OWNER_CONFIRMED', auto ? `${listed} (${auto})` : listed).catch(() => undefined);
     if (this.deps.writeLedger) {
       const decisions = run.decisions.filter((decision) => ns.includes(decision.n)).map((decision) => ({ n: decision.n, text: decision.text }));
-      await this.deps.writeLedger(run.key, run.machine ?? DEFAULT_MACHINE, decisions)
+      await this.deps.writeLedger(run.key, run.machine ?? DEFAULT_MACHINE, decisions, auto)
         .catch((error) => this.deps.event(run.key, 'LEDGER_WRITE_FAILED', `${decisions.map((decision) => `D-${decision.n}`).join(', ')}: ${reason(error)}`).catch(() => undefined));
     }
     return confirmed;
@@ -125,6 +139,24 @@ export async function sweepReleases(deps: { list: () => Promise<SweepRun[]>; gat
   }
 }
 
+type KeepRun = GateRun & Pick<Orchestration, 'finished'>;
+
+/**
+ * Sous's guesses on a build that is done or merged are kept as built, on a timer, the way the owner's "Keep what sous
+ * built" would: there is nothing left to change. Open issues, which sous asked rather than guessed, still wait on the
+ * owner. Answers the guesses it kept, per ticket.
+ */
+export async function keepFinishedGuesses(deps: { list: () => Promise<KeepRun[]>; gate: Pick<DecisionGate, 'confirmed' | 'confirm'> }) {
+  const kept: Array<{ key: string; decisions: number[] }> = [];
+  for (const run of await deps.list()) {
+    if (run.kind !== 'build' || !run.finished) continue;
+    const pending = ownerPending(run, await deps.gate.confirmed(run.key).catch(() => [])).decisions;
+    if (!pending.length) continue;
+    await deps.gate.confirm(run, pending, AUTO_KEEP_REASON).then(() => kept.push({ key: run.key, decisions: pending })).catch(() => undefined);
+  }
+  return kept;
+}
+
 const storage = new StorageService();
 const githubAPI = new GitHubAPI();
 
@@ -134,5 +166,5 @@ export const decisionGate = new DecisionGate({
   markReady: (owner, repo, pullNumber) => githubAPI.markReadyForReview(owner, repo, pullNumber),
   event: (key, kind, detail) => orchestratorService.recordEvent(key, kind, detail),
   afterReady: (run) => (dockMode() === 'workspace' ? autoBroadcast.afterLedger(run) : Promise.resolve()),
-  writeLedger: (key, machine, decisions) => writeConfirmations(liveLedgerConfirm((ledger, from) => orchestratorService.ingestLedger(ledger, new Date(), from)), key, machine, decisions),
+  writeLedger: (key, machine, decisions, auto) => writeConfirmations(liveLedgerConfirm((ledger, from) => orchestratorService.ingestLedger(ledger, new Date(), from)), key, machine, decisions, auto ?? null),
 });

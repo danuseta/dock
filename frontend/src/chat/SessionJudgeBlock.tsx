@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { GET_SESSION_JUDGE, JUDGE_AGAIN } from '../graphql/queries';
 import { SessionJudgeView } from './SessionJudgeView';
-import type { SessionJudge } from '../agents/judge';
+import { sessionJudgeDay, type SessionJudge } from '../agents/judge';
 
-export const SessionJudgeBlock: React.FC<{ sessionId: string; canAct: boolean }> = ({ sessionId, canAct }) => {
+export const SessionJudgeBlock: React.FC<{ sessionId: string; lastMessageAt?: string | null; canAct: boolean; onNavigate?: (path: string) => void }> = ({ sessionId, lastMessageAt, canAct, onNavigate }) => {
   const { data, refetch } = useQuery<{ chatSession: { id: string; judge: SessionJudge | null } | null }>(GET_SESSION_JUDGE, { variables: { id: sessionId }, fetchPolicy: 'cache-and-network', pollInterval: 30000 });
   const [again, { loading }] = useMutation(JUDGE_AGAIN);
   const [notice, setNotice] = useState<string | null>(null);
@@ -20,5 +20,5 @@ export const SessionJudgeBlock: React.FC<{ sessionId: string; canAct: boolean }>
       })
       .catch((failure: unknown) => setNotice(failure instanceof Error ? failure.message : 'Judge could not start'));
   };
-  return <SessionJudgeView judge={judge} canAct={canAct} busy={loading} notice={notice} onAgain={onAgain} />;
+  return <SessionJudgeView judge={judge} day={sessionJudgeDay(judge, lastMessageAt)} canAct={canAct} busy={loading} notice={notice} onAgain={onAgain} onNavigate={onNavigate} />;
 };
