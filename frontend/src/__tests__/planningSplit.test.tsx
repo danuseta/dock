@@ -3,7 +3,7 @@ import test from 'node:test';
 import React from 'react';
 import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { SplitBox } from '../agents/SplitBox';
+import { SplitBox, SplitRow } from '../agents/SplitBox';
 import type { DraftSplit } from '../agents/planning';
 
 const noop = () => undefined;
@@ -31,11 +31,20 @@ test('a missing page or a page in another format shows an info line and no butto
   assert.doesNotMatch(html, /Use split page|Keep/);
 });
 
-test('Settings › Planning flow has the Split page field with Test, and Planning shows the box from the draft', () => {
+test('the Team map split row shows only while a ticket sits in another week, and names the tickets', () => {
+  const html = renderToStaticMarkup(<SplitRow split={split()} busy={false} onUse={noop} onKeep={noop} />);
+  assert.match(html, /Split page &quot;Sprint 28 split&quot; v3: <b[^>]*>QRD-1550 and QRD-1552<\/b> sit in a different week than the draft\./);
+  assert.match(html, /Use split page[\s\S]*Keep[\s\S]*Details/);
+  assert.doesNotMatch(html, /waits on BE/, 'the per-ticket rows open with Details');
+  assert.equal(renderToStaticMarkup(<SplitRow split={split({ diffs: [] })} busy={false} onUse={noop} onKeep={noop} />), '');
+  assert.equal(renderToStaticMarkup(<SplitRow split={split({ error: 'Split page "Gone" was not found', diffs: [] })} busy={false} onUse={noop} onKeep={noop} />), '');
+});
+
+test('Settings › Planning flow has the Split page field with Test, and Planning shows the row from the draft in Team map', () => {
   const section = readFileSync(new URL('../settings/sections/PlanningFlowSection.tsx', import.meta.url), 'utf8');
   assert.match(section, /title="Split page"/);
   assert.match(section, /TEST_PLANNING_SPLIT_PAGE/);
   assert.match(section, /<Zap size=\{16\} aria-hidden="true" \/>Test</);
   const tab = readFileSync(new URL('../agents/PlanningTab.tsx', import.meta.url), 'utf8');
-  assert.match(tab, /\{draft\.split && <SplitBox split=\{draft\.split\}/);
+  assert.match(tab, /\{draft\.split && <SplitRow split=\{draft\.split\}/);
 });

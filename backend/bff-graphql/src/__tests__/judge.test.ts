@@ -186,6 +186,7 @@ function harness(options: { settings?: Partial<JudgeSettings>; now?: Date; sprin
   const gate = { busy: 0, reviews: 0, slots: { busy: 0, waiting: 0 }, online: true };
   const statuses = new Map<string, string>();
   const opened: Array<{ title: string; prompt: string; account: string; model: string }> = [];
+  const sent: Array<{ chatId: string; prompt: string }> = [];
   const inputs: Array<{ sessionId: string; judgedUntilMessageId: number | null }> = [];
   const turn = new Map<string, TurnState>();
   let settings: JudgeSettings = { ...DEFAULT_JUDGE_SETTINGS, on: true, ...options.settings };
@@ -250,12 +251,13 @@ function harness(options: { settings?: Partial<JudgeSettings>; now?: Date; sprin
       turn.set(id, 'running');
       return id;
     },
+    send: async (chatId, prompt) => { sent.push({ chatId, prompt }); turn.set(chatId, 'running'); },
     turnState: async (chatId) => ({ state: turn.get(chatId) ?? 'gone', detail: null }),
     sprints: async () => options.sprints ?? [SPRINT_26],
   };
   const chat = (id: string, title: string, lastMessageAt: Date, extra: Partial<Chat> = {}) => chats.set(id, { id, title, ticketKey: null, status: 'idle', origin: 'cron', startedAt: lastMessageAt, lastMessageAt, firstText: null, lastMessageId: 10, ...extra });
   return {
-    queue: new JudgeQueue(deps), chats, rows, findings, days, gate, statuses, opened, inputs, turn, chat,
+    queue: new JudgeQueue(deps), sent, cache, chats, rows, findings, days, gate, statuses, opened, inputs, turn, chat,
     setNow: (next: Date) => { now = next; },
     setSettings: (next: Partial<JudgeSettings>) => { settings = { ...settings, ...next }; },
   };
@@ -283,7 +285,7 @@ test('a finished Task session goes pending after 30 idle minutes and is judged a
   h.setNow(wib('2026-11-13', '21:00'));
   const started = await h.queue.tick();
   assert.strictEqual(started.started, 'judge-1');
-  assert.deepStrictEqual(h.opened[0], { title: 'Judge-s1', prompt: 'Pakai skill judge: session s1 input /data/judge-input/s1-10.md until 10', account: '', model: 'sonnet' });
+  assert.deepStrictEqual(h.opened[0], { title: 'Judge-2026-11-13', prompt: 'Pakai skill judge: session s1 input /data/judge-input/s1-10.md until 10', account: '', model: 'sonnet' });
   assert.strictEqual(h.rows.get('s1').status, 'running');
 });
 
@@ -331,13 +333,15 @@ test('a run cut off by the shutdown stays pending and is judged again from the s
   assert.strictEqual(again.started, 'judge-2', 'judged at 08:00');
   assert.strictEqual(h.rows.get('s1').attempts, 0, 'a cut-off is not a failure');
   assert.deepStrictEqual(h.inputs.map((input) => input.judgedUntilMessageId), [null, null], 'from the start again');
-  for (const id of ['judge-2', 'judge-3']) {
-    h.turn.set(id, 'done');
+  for (let turn = 0; turn < 2; turn += 1) {
+    h.turn.set('judge-2', 'done');
     await h.queue.tick();
   }
   assert.strictEqual(h.rows.get('s1').status, 'running');
   assert.strictEqual(h.rows.get('s1').attempts, 2);
-  h.turn.set('judge-4', 'failed');
+  assert.strictEqual(h.opened.length, 2, 'a turn that ended without a result is asked again in the same Judge chat');
+  assert.strictEqual(h.sent.length, 2);
+  h.turn.set('judge-2', 'failed');
   await h.queue.tick();
   assert.strictEqual(h.rows.get('s1').status, 'failed');
   assert.match(h.rows.get('s1').error, /failed/);
@@ -394,7 +398,7 @@ test('the sprint summary waits for an empty queue until 23:30, then runs on Opus
   await h.queue.requestSprint('QRD Sprint 26');
   h.setNow(wib('2026-11-13', '16:05'));
   await h.queue.tick({ force: true });
-  assert.strictEqual(h.opened[0].title, 'Judge-s1', 'the queue goes first');
+  assert.match(h.opened[0].prompt, /session s1 /, 'the queue goes first');
   h.setNow(wib('2026-11-13', '23:31'));
   const summary = await h.queue.tick();
   assert.deepStrictEqual(summary, { started: null, skipped: 'a Judge session is running' });
@@ -465,15 +469,16 @@ test('Judge queues only sessions last active in the active sprint; older pending
 
   const asked = await h.queue.judgeAgain('history');
   assert.strictEqual(asked.started, 'judge-1');
-  assert.strictEqual(h.opened[0].title, 'Judge-current', 'the queue keeps its order');
+  assert.match(h.opened[0].prompt, /session current /, 'the queue keeps its order');
   assert.strictEqual(h.rows.get('history').status, 'pending');
   await h.queue.days(null);
   await h.queue.tick();
   assert.strictEqual(h.rows.get('history')?.status, 'pending', 'a Judge again request survives the tidy');
   await h.queue.receive({ sessionId: 'current', untilMessageId: 10, findings: [] });
   h.turn.set('judge-1', 'done');
-  assert.strictEqual((await h.queue.judgeNow()).started, 'judge-2');
-  assert.strictEqual(h.opened[1].title, 'Judge-history');
+  assert.strictEqual((await h.queue.judgeNow()).started, 'judge-1', 'the next session is a new turn in the same Judge chat');
+  assert.strictEqual(h.opened.length, 1);
+  assert.match(h.sent[0].prompt, /session history /);
 });
 
 test('no active sprint queues nothing', async () => {
@@ -508,4 +513,29 @@ test('POST /ingest/orchestrator/judge takes the ingest token and answers the gra
   assert.deepStrictEqual(await ok.json(), { ok: true, sessionId: 's1', grade: 'C', result: { sessionId: 's1', grade: 'C' } });
   assert.strictEqual((await post({ sessionId: 's1' }, 'dock_ing_bad')).status, 401);
   assert.strictEqual((await post({ sessionId: 'missing' })).status, 400);
+});
+
+test('one Judge chat per WIB day: a session is its next turn, a full chat or a new day opens the next one', async () => {
+  const h = harness();
+  h.chat('s1', 'Task-QRD-1', wib('2026-11-13', '15:00'));
+  h.chat('s2', 'Task-QRD-2', wib('2026-11-13', '15:00'));
+  h.setNow(wib('2026-11-13', '21:00'));
+  assert.strictEqual((await h.queue.tick()).started, 'judge-1');
+  const first = [...h.rows.entries()].find(([, row]) => row.status === 'running')![0];
+  await h.queue.receive({ sessionId: first, untilMessageId: 10, findings: [] });
+  h.turn.set('judge-1', 'done');
+  assert.strictEqual((await h.queue.tick()).started, 'judge-1', 'the second session is a new turn');
+  assert.deepStrictEqual([h.opened.length, h.sent.length], [1, 1]);
+  h.cache.set('day-chat', { day: '2026-11-13', chatId: 'judge-1', turns: 8, part: 1 });
+  h.turn.set('judge-1', 'done');
+  h.chat('s3', 'Task-QRD-3', wib('2026-11-13', '15:00'));
+  for (const row of h.rows.values()) if (row.status === 'running') row.status = 'judged';
+  await h.queue.tick();
+  assert.strictEqual(h.opened.at(-1)?.title, 'Judge-2026-11-13 (2)', 'eight turns fill a chat');
+  h.turn.set('judge-2', 'done');
+  for (const row of h.rows.values()) if (row.status === 'running') row.status = 'judged';
+  h.chat('s4', 'Task-QRD-4', wib('2026-11-14', '07:00'));
+  h.setNow(wib('2026-11-14', '08:15'));
+  await h.queue.tick();
+  assert.strictEqual(h.opened.at(-1)?.title, 'Judge-2026-11-14', 'a new WIB day opens a new chat');
 });

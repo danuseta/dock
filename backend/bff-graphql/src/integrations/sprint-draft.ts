@@ -11,7 +11,7 @@ import { SprintInputError } from './sprint-dashboard';
 import { writeContract, type ContractClient } from './sprint-contract';
 import { StoryboardMissing, framesIn, type StoryboardResult } from './storyboard';
 import type { StoryboardScenario } from './storyboard-flows';
-import type { SprintDraftInput, SprintDraftTicketInput } from '../storage/service';
+import type { SprintDraftInput, SprintDraftNewTicketData, SprintDraftTicketInput } from '../storage/service';
 import { splitView, type SplitState, type SplitView } from './split-page';
 import { planLabel, sprintRevision, stalePlanLabels } from './plan-publish';
 
@@ -57,6 +57,10 @@ export interface DraftJira {
   removeLabel?(key: string, label: string): Promise<void>;
   /** A plain comment, one paragraph per line: an answered planning question on its ticket. */
   comment?(key: string, lines: string[]): Promise<void>;
+  /** Creates an issue from its fields; returns the new key. */
+  createIssue?(fields: Record<string, unknown>): Promise<string>;
+  /** The account ids of users assignable in the project whose display name is exactly name. */
+  projectAccounts?(project: string, name: string): Promise<string[]>;
 }
 
 /** A draft test case: the AC line it checks (1-based), the steps and what is expected. */
@@ -74,7 +78,10 @@ interface DraftRow {
     dependsOn: string; status: string; prediction: string | null; position: number; epic?: string | null; frames?: string;
     tcs?: string; tcAt?: Date | null; tcPosted?: string | null; carried?: boolean;
   }>;
+  newTickets?: NewTicketRow[];
 }
+
+interface NewTicketRow extends SprintDraftNewTicketData { id: string; position: number }
 
 export interface DraftStore {
   getSettings(): Promise<Array<{ key: string; value: string }>>;
@@ -84,6 +91,9 @@ export interface DraftStore {
   updateSprintDraft(sprint: string, data: { decisions?: string; qaReason?: string | null; status?: string; publishedAt?: Date | null; storyboards?: string; questions?: string }): Promise<unknown>;
   saveSprintDraftPredictions(sprint: string, predictions: Map<string, string> | null, qaReason: string | null): Promise<unknown>;
   sprintDraftsWithEpic(epic: string): Promise<string[]>;
+  addSprintDraftNewTicket(sprint: string, data: SprintDraftNewTicketData): Promise<string>;
+  updateSprintDraftNewTicket(sprint: string, id: string, data: Partial<SprintDraftNewTicketData>): Promise<unknown>;
+  removeSprintDraftNewTicket(sprint: string, id: string): Promise<unknown>;
 }
 
 /** The newest storyboard version of an epic as the draft last saw it; error says why there is none. */
@@ -93,6 +103,15 @@ export interface StoryboardState {
   scenarios?: StoryboardScenario[];
   /** The tickets each changed flow lists; a changed flow without tickets falls back to the flow ids a ticket names. */
   tickets?: Record<string, string[]>;
+  /** The planner said the epic has no storyboard (decision sbnone|EPIC); it counts as recorded. */
+  none?: boolean;
+}
+
+/** A ticket the planner drafts for the sprint; Publish creates it in Jira. id is NEW-n, never reused in the sprint. */
+export interface DraftNewTicket {
+  id: string; summary: string; type: string; epic: string | null; dev: string | null; sp: number | null; priority: string | null;
+  userStory: string; problem: string; ac: string[]; reference: string | null; source: string;
+  createdKey: string | null; error: string | null;
 }
 /**
  * A question the planning chat could not settle from the storyboard. The planner answers it in the chat: the answer is
@@ -158,11 +177,12 @@ export interface DraftView {
   scopeCut?: Decision | null;
   /** The weeks the split page gives, with the tickets that sit elsewhere; null when no split page was read for this draft. */
   split?: SplitView | null;
+  newTickets: DraftNewTicket[];
 }
-/** referenceAdded: lines Publish appends to the Reference field; blockedBy: tickets Publish links as blocking this one. */
-export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; referenceAdded: string[]; blockedBy: string[]; refused: string | null }
-/** One line of a publish: a ticket's AC and assignee, or the Confluence contract page. */
-export interface PublishResult { key: string; kind: 'ticket' | 'tc' | 'label' | 'contract'; status: 'updated' | 'refused' | 'failed' | 'skipped'; detail: string | null }
+/** referenceAdded: lines Publish appends to the Reference field; blockedBy: tickets Publish links as blocking this one; create: the new ticket Publish creates. */
+export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; referenceAdded: string[]; blockedBy: string[]; refused: string | null; create?: DraftNewTicket | null }
+/** One line of a publish: a ticket's AC and assignee, a new ticket, or the Confluence contract page. */
+export interface PublishResult { key: string; kind: 'ticket' | 'tc' | 'label' | 'contract' | 'create'; status: 'updated' | 'created' | 'refused' | 'failed' | 'skipped'; detail: string | null }
 /** Where the split page's weeks are read from and kept per draft; read gives null when no split page is set. */
 export interface SplitSource {
   read(): Promise<SplitState | null>;
@@ -208,6 +228,132 @@ export function parseTcs(input: unknown, acCount: number): DraftTc[] {
     if (!expected) throw new SprintInputError(`${id}: expected is required`);
     return { id, ac, title, steps, expected };
   });
+}
+
+// ---- New tickets ----------------------------------------------------------------------------------------------------
+
+export const NEW_TICKET_LABEL = 'dock-plan';
+export const MAX_NEW_TICKETS = 30;
+const NEW_TICKET_ID = /^NEW-\d+$/;
+const NEW_TICKET_TYPES = ['Task', 'Story', 'Bug'];
+const PRIORITIES = ['Highest', 'High', 'Medium', 'Low', 'Lowest'];
+const DEFAULT_PRIORITY = 'Medium';
+const DEFAULT_PROJECT = 'QRD';
+const sbNoneId = (epic: string) => `sbnone|${epic}`;
+
+function newTicketText(input: Record<string, unknown>, name: string, label: string, max: number): string | null | undefined {
+  const value = input[name];
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== 'string') throw new SprintInputError(`${label} must be text`);
+  const text = value.trim();
+  if (text.length > max) throw new SprintInputError(`${label} is at most ${max} characters`);
+  return text;
+}
+
+/** The fields of a new ticket the input sets; a field left out stays as it is, null clears it. Anything out of range is refused. */
+export function parseNewTicket(raw: unknown): Partial<SprintDraftNewTicketData> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new SprintInputError('ticket must be an object');
+  const input = raw as Record<string, unknown>;
+  const data: Partial<SprintDraftNewTicketData> = {};
+  const summary = newTicketText(input, 'summary', 'Summary', 200);
+  if (summary !== undefined) data.summary = summary ?? '';
+  const type = newTicketText(input, 'type', 'Type', 20);
+  if (type !== undefined) {
+    const known = type ? NEW_TICKET_TYPES.find((item) => item.toLowerCase() === type.toLowerCase()) : 'Task';
+    if (!known) throw new SprintInputError('Type is Task, Story or Bug');
+    data.type = known;
+  }
+  const epic = newTicketText(input, 'epic', 'Epic', 40);
+  if (epic !== undefined) {
+    const key = epic ? epic.toUpperCase() : null;
+    if (key && !TICKET_KEY.test(key)) throw new SprintInputError('Epic must be an epic key such as QRD-1200');
+    data.epic = key;
+  }
+  const dev = newTicketText(input, 'dev', 'Developer', 120);
+  if (dev !== undefined) data.dev = dev || null;
+  if (input.sp !== undefined) {
+    const sp = input.sp;
+    if (sp !== null && (typeof sp !== 'number' || !Number.isFinite(sp) || sp < 0 || sp > 100)) throw new SprintInputError('SP must be from 0 to 100');
+    data.sp = sp as number | null;
+  }
+  const priority = newTicketText(input, 'priority', 'Priority', 20);
+  if (priority !== undefined) {
+    const known = priority ? PRIORITIES.find((item) => item.toLowerCase() === priority.toLowerCase()) : null;
+    if (priority && !known) throw new SprintInputError(`Priority is ${PRIORITIES.join(', ')}`);
+    data.priority = known ?? null;
+  }
+  const userStory = newTicketText(input, 'userStory', 'User Story', 4000);
+  if (userStory !== undefined) data.userStory = userStory ?? '';
+  const problem = newTicketText(input, 'problem', 'Problem Definition', 4000);
+  if (problem !== undefined) data.problem = problem ?? '';
+  if (input.ac !== undefined) {
+    if (input.ac !== null && (!Array.isArray(input.ac) || input.ac.some((line) => typeof line !== 'string'))) throw new SprintInputError('ac must be a list of lines');
+    const lines = ((input.ac ?? []) as string[]).map(normalizeAcLine).filter(Boolean);
+    if (lines.length > 40) throw new SprintInputError('A new ticket holds at most 40 AC lines');
+    const long = lines.findIndex((line) => line.length > 1000);
+    if (long >= 0) throw new SprintInputError(`AC line ${long + 1} is at most 1000 characters`);
+    data.ac = JSON.stringify(lines);
+  }
+  const reference = newTicketText(input, 'reference', 'Reference', 2000);
+  if (reference !== undefined) data.reference = reference || null;
+  const source = newTicketText(input, 'source', 'Source', 200);
+  if (source !== undefined) data.source = source || 'manual';
+  return data;
+}
+
+const newTicketView = (row: NewTicketRow): DraftNewTicket => ({
+  id: row.id, summary: row.summary, type: row.type, epic: row.epic ?? null, dev: row.dev ?? null, sp: row.sp ?? null, priority: row.priority ?? null,
+  userStory: row.userStory, problem: row.problem, ac: parse<string[]>(row.ac, []), reference: row.reference ?? null, source: row.source,
+  createdKey: row.createdKey ?? null, error: row.error ?? null,
+});
+
+/** Why Publish cannot create the ticket yet: the required fields still empty; null when it can. */
+export function newTicketRefusal(ticket: DraftNewTicket): string | null {
+  const missing = [
+    !ticket.summary.trim() && 'summary', !ticket.userStory.trim() && 'User Story', !ticket.problem.trim() && 'Problem Definition', !ticket.ac.length && 'at least one AC line',
+  ].filter((item): item is string => !!item);
+  return missing.length ? `Missing ${missing.join(', ')}` : null;
+}
+
+/** The project the sprint's tickets are in, by their keys; QRD when the draft has none. */
+export function sprintProject(keys: string[]): string {
+  const counts = new Map<string, number>();
+  for (const key of keys) {
+    const project = key.match(/^([A-Z][A-Z0-9_]*)-\d+$/)?.[1];
+    if (project) counts.set(project, (counts.get(project) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? DEFAULT_PROJECT;
+}
+
+/** The error's message with what Jira said about each field, so a refused create names the field. */
+function jiraErrorText(error: any): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const data = error?.response?.data;
+  const said = [...(Array.isArray(data?.errorMessages) ? data.errorMessages : []), ...Object.entries(data?.errors && typeof data.errors === 'object' ? data.errors : {}).map(([field, text]) => `${field}: ${text}`)];
+  return said.length ? `${message} (${said.join('; ')})` : message;
+}
+
+const paragraphs = (text: string) => ({ type: 'doc', version: 1, content: text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => ({ type: 'paragraph', content: [{ type: 'text', text: line }] })) });
+
+/** The Jira create fields of a new ticket; AC and Reference in the format Publish writes them to an empty field. */
+export function newTicketFields(ticket: DraftNewTicket, project: string, sprintId: number, accountId: string | null): Record<string, unknown> {
+  const reference = (ticket.reference ?? '').split(/\r?\n/).map(normalizeAcLine).filter(Boolean);
+  return {
+    project: { key: project },
+    issuetype: { name: ticket.type },
+    summary: ticket.summary,
+    customfield_10341: paragraphs(ticket.userStory),
+    customfield_10331: paragraphs(ticket.problem),
+    customfield_10332: rewriteAcValue(null, [], ticket.ac),
+    ...(reference.length ? { customfield_10333: rewriteAcValue(null, [], reference) } : {}),
+    ...(ticket.sp !== null ? { customfield_10016: ticket.sp } : {}),
+    customfield_10020: sprintId,
+    ...(ticket.epic ? { parent: { key: ticket.epic } } : {}),
+    labels: [NEW_TICKET_LABEL],
+    priority: { name: ticket.priority ?? DEFAULT_PRIORITY },
+    ...(accountId ? { assignee: { accountId } } : {}),
+  };
 }
 
 /** Every text line of a Jira rich-text or plain field. */
@@ -537,7 +683,9 @@ export class SprintDraftService {
     });
     const blockers = publishBlockers(findings, decisions);
     const epics = new Set(all.filter((ticket) => !ticket.carried).map((ticket) => ticket.epic));
-    const storyboards = Object.values(parse<Record<string, StoryboardState>>(row.storyboards, {})).filter((board) => epics.has(board.epic)).sort((a, b) => a.epic.localeCompare(b.epic));
+    const storyboards = Object.values(parse<Record<string, StoryboardState>>(row.storyboards, {})).filter((board) => epics.has(board.epic)).sort((a, b) => a.epic.localeCompare(b.epic))
+      .map((board) => ({ ...board, none: !!decisions[sbNoneId(board.epic)] }));
+    const newTickets = (row.newTickets ?? []).map(newTicketView);
     const boardOf = new Map(storyboards.map((board) => [board.epic, board]));
     const flagOf = (ticket: { key: string; epic: string | null; frames: string[]; ac: string[]; status: string; carried?: boolean }): StoryboardFlag | null => {
       if (ticket.carried) return null;
@@ -593,8 +741,9 @@ export class SprintDraftService {
       ],
       findings,
       blockers,
-      canPublish: tickets.length > 0,
+      canPublish: tickets.length > 0 || newTickets.some((ticket) => !ticket.createdKey),
       scopeCut: decisions[SCOPE_CUT_ID] ?? null,
+      newTickets,
     };
   }
 
@@ -652,6 +801,35 @@ export class SprintDraftService {
     return (await this.view(sprint))!;
   }
 
+  /** Drafts a new ticket (no id) or changes one; Publish creates it in Jira. Fields left out of the input stay as they are. */
+  async saveNewTicket(sprint: string, id: string | null, input: unknown): Promise<{ id: string; view: DraftView }> {
+    await this.mayEdit();
+    const row = await this.row(sprint);
+    if (row.status === 'published') throw new SprintInputError('This draft is published; load it from Jira again to change it');
+    const data = parseNewTicket(input);
+    const existing = row.newTickets ?? [];
+    if (!id) {
+      if (existing.length >= MAX_NEW_TICKETS) throw new SprintInputError(`A sprint holds at most ${MAX_NEW_TICKETS} new tickets`);
+      const created = await this.store.addSprintDraftNewTicket(sprint, {
+        summary: '', type: 'Task', epic: null, dev: null, sp: null, priority: null, userStory: '', problem: '', ac: '[]', reference: null, source: 'manual', ...data,
+      });
+      return { id: created, view: (await this.view(sprint))! };
+    }
+    const ticket = existing.find((item) => item.id === id);
+    if (!ticket) throw new SprintInputError(`${id} is not a new ticket of the ${sprint} draft`);
+    if (ticket.createdKey) throw new SprintInputError(`${id} is already created in Jira as ${ticket.createdKey}`);
+    await this.store.updateSprintDraftNewTicket(sprint, id, data);
+    return { id, view: (await this.view(sprint))! };
+  }
+
+  async removeNewTicket(sprint: string, id: string): Promise<DraftView> {
+    await this.mayEdit();
+    const row = await this.row(sprint);
+    if (!NEW_TICKET_ID.test(id) || !(row.newTickets ?? []).some((item) => item.id === id)) throw new SprintInputError(`${id} is not a new ticket of the ${sprint} draft`);
+    await this.store.removeSprintDraftNewTicket(sprint, id);
+    return (await this.view(sprint))!;
+  }
+
   /** Records, changes or clears (action "clear") the planner's call on an AC finding, an ESCALATED prediction or the scope cut. */
   async decide(sprint: string, id: string, action: string, note: string | null, by: string | null): Promise<DraftView> {
     await this.mayEdit();
@@ -676,6 +854,10 @@ export class SprintDraftService {
       } else if (id.startsWith('sb|')) {
         if (!openTickets(view).some((ticket) => ticket.storyboard && storyboardId(ticket.key, ticket.storyboard.version) === id)) throw new SprintInputError('No storyboard change on that ticket');
         if (action !== 'checked') throw new SprintInputError('A storyboard change is marked checked');
+      } else if (id.startsWith('sbnone|')) {
+        const epic = id.slice('sbnone|'.length);
+        if (!epic || !(view.tickets.some((ticket) => ticket.epic === epic) || view.storyboards.some((board) => board.epic === epic))) throw new SprintInputError(`No ticket of ${sprint} belongs to ${epic || 'that epic'}`);
+        if (action !== 'none') throw new SprintInputError('An epic without a storyboard is marked with action none');
       } else if (id === SCOPE_CUT_ID) {
         if (action !== 'cut') throw new SprintInputError('A scope cut is written with action cut');
         if (!text) throw new SprintInputError('Write what leaves the sprint');
@@ -787,7 +969,50 @@ export class SprintDraftService {
 
   /** The changes Publish would write, each ticket read from Jira again; nothing is written. */
   async preview(sprint: string): Promise<DraftChange[]> {
-    return (await this.plannedChanges(sprint)).map(({ change }) => change);
+    const changes = (await this.plannedChanges(sprint)).map(({ change }) => change);
+    return [...changes, ...this.plannedCreates(await this.row(sprint))];
+  }
+
+  /** One change per new ticket not created yet; refused while a required field is empty. */
+  private plannedCreates(row: DraftRow): DraftChange[] {
+    return (row.newTickets ?? []).map(newTicketView).filter((ticket) => !ticket.createdKey).map((ticket) => ({
+      key: ticket.id, assigneeFrom: null, assigneeTo: null, acRemoved: [], acAdded: [], referenceAdded: [], blockedBy: [], refused: newTicketRefusal(ticket), create: ticket,
+    }));
+  }
+
+  /** Creates each new ticket in the sprint's project; one failure never stops the others. */
+  private async createNewTickets(sprint: string, jira: DraftJira): Promise<PublishResult[]> {
+    const row = await this.row(sprint);
+    const project = sprintProject(row.tickets.map((ticket) => ticket.key));
+    const results: PublishResult[] = [];
+    for (const change of this.plannedCreates(row)) {
+      const ticket = change.create!;
+      if (change.refused) {
+        await this.store.updateSprintDraftNewTicket(sprint, ticket.id, { error: change.refused });
+        results.push({ key: ticket.id, kind: 'create', status: 'refused', detail: change.refused });
+        continue;
+      }
+      try {
+        if (!jira.createIssue) throw new Error('This Jira connection cannot create tickets');
+        let accountId: string | null = null;
+        let note: string | null = null;
+        if (ticket.dev) {
+          const accounts = jira.projectAccounts ? await jira.projectAccounts(project, ticket.dev).catch(() => [] as string[]) : [];
+          if (accounts.length === 1) accountId = accounts[0];
+          else note = accounts.length ? `created unassigned: more than one Jira user is named ${ticket.dev}` : `created unassigned: no assignable Jira user is named ${ticket.dev}`;
+        }
+        const key = await jira.createIssue(newTicketFields(ticket, project, row.sprintId, accountId));
+        await this.store.updateSprintDraftNewTicket(sprint, ticket.id, { createdKey: key, error: null });
+        results.push({ key: ticket.id, kind: 'create', status: 'created', detail: note ? `${key}; ${note}` : key });
+      } catch (error: any) {
+        const status = error?.response?.status;
+        const message = jiraErrorText(error);
+        const detail = status ? `Jira responded ${status}: ${message}` : message;
+        await this.store.updateSprintDraftNewTicket(sprint, ticket.id, { error: detail.slice(0, MAX_LINE) });
+        results.push({ key: ticket.id, kind: 'create', status: 'failed', detail });
+      }
+    }
+    return results;
   }
 
   private async plannedChanges(sprint: string): Promise<Array<{ change: DraftChange; final: string[]; dev: string | null; now: PlanningIssue | null }>> {
@@ -862,6 +1087,9 @@ export class SprintDraftService {
       }
     }
     const tickets = results.filter((result) => result.kind === 'ticket');
+    const creates = await this.createNewTickets(sprint, jira);
+    results.push(...creates);
+    const written = tickets.every((result) => result.status === 'updated') && creates.every((result) => result.status === 'created');
     // A newer set of test cases is a new comment; the QA bot reads the latest one.
     for (const ticket of openTickets((await this.view(sprint))!).filter((item) => item.tcPending)) {
       try {
@@ -875,13 +1103,15 @@ export class SprintDraftService {
       }
     }
     // Every ticket of the draft carries the label, merged ones too: a ticket without it joined the sprint after publish.
-    const labelled = await this.publishLabels(jira, view.sprintId, (await this.view(sprint))!.tickets.map((ticket) => ticket.key), tickets.every((result) => result.status === 'updated'));
+    const current = (await this.view(sprint))!;
+    const keys = [...new Set([...current.tickets.map((ticket) => ticket.key), ...current.newTickets.map((ticket) => ticket.createdKey).filter((key): key is string => !!key)])];
+    const labelled = await this.publishLabels(jira, view.sprintId, keys, written);
     if (labelled) results.push(labelled);
     const target = await this.contract().catch((): ContractTarget => ({ client: null, parentId: null }));
     const published = (await this.view(sprint))!;
     const contract = await writeContract(target.client, target.parentId, { ...published, tickets: openTickets(published) }, by, this.now());
     results.push({ key: 'Confluence', kind: 'contract', status: contract.status, detail: contract.detail });
-    if (tickets.every((result) => result.status === 'updated') && labelled?.status !== 'failed') {
+    if (written && labelled?.status !== 'failed') {
       await this.store.updateSprintDraft(sprint, { status: 'published', publishedAt: this.now() });
       if (this.afterPublish) await this.afterPublish(sprint).catch(() => null);
     }

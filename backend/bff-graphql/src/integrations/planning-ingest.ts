@@ -8,11 +8,11 @@ import { openTickets, type DraftView, type SprintDraftService } from './sprint-d
 import { StoryboardMissing, type StoryboardReader } from './storyboard';
 import type { TicketSummaryService } from './ticket-summary';
 
-export const PLANNING_ROUTES = ['sprint-draft/get', 'sprint-draft/update', 'sprint-draft/tc', 'sprint-draft/question', 'sprint-draft/summary', 'sprint-draft/visual', 'storyboard'] as const;
+export const PLANNING_ROUTES = ['sprint-draft/get', 'sprint-draft/update', 'sprint-draft/tc', 'sprint-draft/question', 'sprint-draft/summary', 'sprint-draft/visual', 'sprint-draft/new', 'storyboard'] as const;
 export type PlanningRoute = typeof PLANNING_ROUTES[number];
 
 export interface PlanningIngestDeps {
-  drafts: Pick<SprintDraftService, 'view' | 'updateTicket' | 'ask' | 'applyStoryboard' | 'setTcs'>;
+  drafts: Pick<SprintDraftService, 'view' | 'updateTicket' | 'ask' | 'applyStoryboard' | 'setTcs' | 'saveNewTicket' | 'removeNewTicket'>;
   storyboards: Pick<StoryboardReader, 'sync'>;
   /** The ticket summaries; get lists the acHash each stored summary was written for. */
   summaries?: Pick<TicketSummaryService, 'write' | 'hashes'>;
@@ -68,6 +68,17 @@ export async function planningIngest(deps: PlanningIngestDeps, route: PlanningRo
       if (body.action === 'rm') return await deps.visuals.remove(sprint, body.id);
       if (body.action !== 'put') throw new OrchestratorInputError("action must be 'put' or 'rm'");
       return await deps.visuals.put(sprint, { id: body.id, title: body.title, html: body.html, sessionId: body.sessionId });
+    }
+    if (route === 'sprint-draft/new') {
+      const id = textField(body, 'id', false)?.toUpperCase() ?? null;
+      if (body.remove === true) {
+        if (!id) throw new OrchestratorInputError('id is required');
+        await deps.drafts.removeNewTicket(sprint, id);
+        return { removed: id };
+      }
+      if (!isRecord(body.ticket)) throw new OrchestratorInputError('ticket must be an object');
+      const saved = await deps.drafts.saveNewTicket(sprint, id, body.ticket);
+      return { id: saved.id, ticket: saved.view.newTickets.find((ticket) => ticket.id === saved.id) ?? null };
     }
     if (route === 'sprint-draft/summary') {
       if (!deps.summaries) throw new OrchestratorInputError('Ticket summaries are not available on this DOCK');

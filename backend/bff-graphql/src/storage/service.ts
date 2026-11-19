@@ -19,6 +19,11 @@ export interface SprintDraftTicketInput {
   /** The ticket is also in a closed sprint: carried over from an earlier one. */
   carried?: boolean;
 }
+/** A drafted new ticket as stored; ac is the JSON of its lines. */
+export interface SprintDraftNewTicketData {
+  summary: string; type: string; epic: string | null; dev: string | null; sp: number | null; priority: string | null;
+  userStory: string; problem: string; ac: string; reference: string | null; source: string; createdKey?: string | null; error?: string | null;
+}
 export interface SprintPlanData { status?: string; mappingKeys?: string[]; sessionId?: string | null; mappedKeys?: string[]; groups?: string[][]; error?: string | null; startedAt?: Date | null; mappedAt?: Date | null }
 
 const SENSITIVE_KEYS = new Set([
@@ -439,7 +444,29 @@ export class StorageService {
   async getSprintDraft(sprint: string) {
     const draft = await this.db.sprintDraft.findUnique({ where: { sprint } });
     if (!draft) return null;
-    return { ...draft, tickets: await this.db.sprintDraftTicket.findMany({ where: { draftSprint: sprint }, orderBy: { position: 'asc' } }) };
+    return {
+      ...draft,
+      tickets: await this.db.sprintDraftTicket.findMany({ where: { draftSprint: sprint }, orderBy: { position: 'asc' } }),
+      newTickets: await this.db.sprintDraftNewTicket.findMany({ where: { draftSprint: sprint }, orderBy: { position: 'asc' } }),
+    };
+  }
+
+  /** A new ticket gets the next NEW-n of the draft; the counter only grows, so a removed id is never given out again. */
+  async addSprintDraftNewTicket(sprint: string, data: SprintDraftNewTicketData): Promise<string> {
+    return this.db.$transaction(async (tx) => {
+      const { newTicketSeq } = await tx.sprintDraft.update({ where: { sprint }, data: { newTicketSeq: { increment: 1 } }, select: { newTicketSeq: true } });
+      const id = `NEW-${newTicketSeq}`;
+      await tx.sprintDraftNewTicket.create({ data: { ...data, draftSprint: sprint, id, position: newTicketSeq } });
+      return id;
+    });
+  }
+
+  updateSprintDraftNewTicket(sprint: string, id: string, data: Partial<SprintDraftNewTicketData>) {
+    return this.db.sprintDraftNewTicket.update({ where: { draftSprint_id: { draftSprint: sprint, id } }, data });
+  }
+
+  removeSprintDraftNewTicket(sprint: string, id: string) {
+    return this.db.sprintDraftNewTicket.deleteMany({ where: { draftSprint: sprint, id } });
   }
 
   /** A load from Jira replaces the tickets and leaves the draft unpublished; decisions stay and apply to the lines that still match. */

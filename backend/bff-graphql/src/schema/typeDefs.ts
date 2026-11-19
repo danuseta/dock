@@ -789,6 +789,48 @@ export const typeDefs = gql`
     scopeCut: SprintDraftDecision
     "The weeks the split page gives and the tickets that sit elsewhere; null when no split page is set."
     split: SprintDraftSplit
+    "Tickets the planner drafts for the sprint; Publish creates them in Jira."
+    newTickets: [SprintDraftNewTicket!]!
+  }
+
+  "A ticket the planner drafts for the sprint. Publish creates it in Jira with the label dock-plan."
+  type SprintDraftNewTicket {
+    "NEW-1, NEW-2 … assigned by the server, per sprint, never reused"
+    id: ID!
+    summary: String!
+    "Task, Story or Bug"
+    type: String!
+    "An existing epic key, or null"
+    epic: String
+    "The developer's display name as in SprintDraft.devs, or null"
+    dev: String
+    sp: Float
+    "Highest, High, Medium, Low or Lowest; null is Medium"
+    priority: String
+    userStory: String!
+    problem: String!
+    ac: [String!]!
+    reference: String
+    "Where the ticket came from: sheet row 2, chat, manual"
+    source: String!
+    "The Jira key once Publish created it"
+    createdKey: String
+    "The last Publish failure for this ticket, null otherwise"
+    error: String
+  }
+
+  input SprintDraftNewTicketInput {
+    summary: String
+    type: String
+    epic: String
+    dev: String
+    sp: Float
+    priority: String
+    userStory: String
+    problem: String
+    ac: [String!]
+    reference: String
+    source: String
   }
 
   "A ticket whose wave differs from the week on the split page."
@@ -822,6 +864,8 @@ export const typeDefs = gql`
     """Tickets Publish links as blocking this one."""
     blockedBy: [String!]!
     refused: String
+    "Set, with key the NEW-n id, when Publish would create this ticket."
+    create: SprintDraftNewTicket
   }
 
   """The planning agent's summary of a ticket, in Indonesian. Never written to Jira."""
@@ -1036,6 +1080,8 @@ export const typeDefs = gql`
     htmlUrl: String
     "Same for the previous version, for the side-by-side compare"
     previousHtmlUrl: String
+    "The planner said this epic has no storyboard (decision sbnone|EPIC); it counts as recorded."
+    none: Boolean!
   }
 
   type StoryboardFrame {
@@ -1067,9 +1113,9 @@ export const typeDefs = gql`
 
   type SprintDraftPublishResult {
     key: String!
-    "ticket, tc for a QONFLO-TC comment, or contract for the Confluence page"
+    "ticket, tc for a QONFLO-TC comment, create for a new ticket (key NEW-n, detail the new key), or contract for the Confluence page"
     kind: String!
-    "updated, refused, failed or skipped"
+    "updated, created, refused, failed or skipped"
     status: String!
     detail: String
   }
@@ -2574,6 +2620,10 @@ export const typeDefs = gql`
     dropSprintDraftVisual(sprint: String!, id: ID!): [SprintDraftVisual!]!
     "Assign cards to another developer in the draft only; Jira changes on Publish."
     moveSprintDraftCards(sprint: String!, keys: [String!]!, to: String!): SprintDraft!
+    "Drafts a new ticket (no id) or changes one; Publish creates it in Jira."
+    saveSprintDraftNewTicket(sprint: String!, id: ID, input: SprintDraftNewTicketInput!): SprintDraft!
+    "Removes a drafted new ticket; its NEW-n id is not given out again."
+    removeSprintDraftNewTicket(sprint: String!, id: ID!): SprintDraft!
     """Writes AC lines and assignees that differ from Jira. Refused while a blocker has no decision."""
     publishSprintDraft(sprint: String!): [SprintDraftPublishResult!]!
     "move, not-tested, wait, needs-po or clear on a held AC line of the owner's ticket."

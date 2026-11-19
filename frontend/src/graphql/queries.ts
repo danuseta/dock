@@ -882,6 +882,8 @@ export const SET_JUDGE_SETTINGS = gql`
   }
 `;
 
+export const SPRINT_DRAFT_NEW_TICKET_FIELDS = `id summary type epic dev sp priority userStory problem ac reference source createdKey error`;
+
 export const SPRINT_DRAFT_FIELDS = `
   sprint sprintId status sprintDays startDate spPerDay createdBy loadedAt publishedAt qaReason devs blockers canPublish landed carriedPast today
   tickets {
@@ -896,7 +898,7 @@ export const SPRINT_DRAFT_FIELDS = `
   }
   findings { id key line text refKey kind refEnd ownEnd linked decision { action note by at } }
   storyboards {
-    epic version previous path page frames changed changedAt checkedAt error htmlUrl previousHtmlUrl
+    epic version previous path page frames changed changedAt checkedAt error htmlUrl previousHtmlUrl none
     scenarios { n title groups { title flows { id title tickets info changed frames { index title step changed } } } }
   }
   questions { id text key askedAt answered answeredBy answeredAt answer options }
@@ -905,6 +907,7 @@ export const SPRINT_DRAFT_FIELDS = `
   moves { keys from to sp forecastBefore forecastAfter improves }
   scopeCut { action note by at }
   split { page version readAt error rows kept diffs { key draftWeek splitWeek note } }
+  newTickets { ${SPRINT_DRAFT_NEW_TICKET_FIELDS} }
 `;
 
 export const TICKET_SUMMARY_FIELDS = `key acHash made checked notHere waitsOn before after line testData ui acId titleId writtenAt current`;
@@ -1032,7 +1035,7 @@ export const WRITE_QA_GUIDE = gql`
 
 export const PREVIEW_SPRINT_DRAFT_PUBLISH = gql`
   query PreviewSprintDraftPublish($sprint: String!) {
-    previewSprintDraftPublish(sprint: $sprint) { key assigneeFrom assigneeTo acRemoved acAdded referenceAdded blockedBy refused }
+    previewSprintDraftPublish(sprint: $sprint) { key assigneeFrom assigneeTo acRemoved acAdded referenceAdded blockedBy refused create { ${SPRINT_DRAFT_NEW_TICKET_FIELDS} } }
   }
 `;
 
@@ -1057,6 +1060,18 @@ export const MOVE_SPRINT_DRAFT_CARDS = gql`
 export const DECIDE_SPRINT_DRAFT = gql`
   mutation DecideSprintDraft($sprint: String!, $id: ID!, $action: String!, $note: String) {
     decideSprintDraft(sprint: $sprint, id: $id, action: $action, note: $note) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const SAVE_SPRINT_DRAFT_NEW_TICKET = gql`
+  mutation SaveSprintDraftNewTicket($sprint: String!, $id: ID, $input: SprintDraftNewTicketInput!) {
+    saveSprintDraftNewTicket(sprint: $sprint, id: $id, input: $input) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const REMOVE_SPRINT_DRAFT_NEW_TICKET = gql`
+  mutation RemoveSprintDraftNewTicket($sprint: String!, $id: ID!) {
+    removeSprintDraftNewTicket(sprint: $sprint, id: $id) { ${SPRINT_DRAFT_FIELDS} }
   }
 `;
 

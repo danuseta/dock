@@ -36,6 +36,8 @@ export interface StoryboardState {
   epic: string; version: number | null; previous: number | null; path: string | null; page: string | null; frames: number; changed: string[];
   changedAt: string | null; checkedAt: string; error: string | null;
   scenarios?: StoryboardScenario[]; htmlUrl?: string | null; previousHtmlUrl?: string | null;
+  /** The planner said this epic has no storyboard: it counts as recorded. */
+  none?: boolean;
 }
 export interface StoryboardFrame { index: number; title: string; step: string | null; changed: boolean }
 export interface StoryboardFlow { id: string; title: string; tickets: string[]; info: string[]; frames: StoryboardFrame[]; changed: boolean }
@@ -56,7 +58,18 @@ export interface SprintDraft {
   scopeCut?: DraftDecision | null;
   /** The split page as the last load read it; null or absent when none is set. */
   split?: DraftSplit | null;
+  /** Tickets not in Jira yet, created on Publish. */
+  newTickets?: DraftNewTicket[];
 }
+export interface DraftNewTicket {
+  id: string; summary: string; type: string; epic: string | null; dev: string | null; sp: number | null; priority: string | null;
+  userStory: string; problem: string; ac: string[]; reference: string | null; source: string;
+  /** The QRD key Publish created it as. */
+  createdKey: string | null;
+  /** The last Publish failure for this ticket. */
+  error: string | null;
+}
+export type NewTicketInput = Partial<Pick<DraftNewTicket, 'summary' | 'type' | 'epic' | 'dev' | 'sp' | 'priority' | 'userStory' | 'problem' | 'ac' | 'reference' | 'source'>>;
 export interface SplitDiff { key: string; draftWeek: number; splitWeek: number; note: string | null }
 export interface DraftSplit { page: string; version: number | null; readAt: string; error: string | null; rows: number; kept: number; diffs: SplitDiff[] }
 export interface DraftQuestion { id: string; text: string; key: string | null; askedAt: string; answered: boolean; answeredBy: string | null; answeredAt: string | null; answer?: string | null; options?: string[] }
@@ -133,7 +146,7 @@ export function questionsLine(questions: DraftQuestion[]): string | null {
   if (!questions.length) return null;
   return `${questions.filter((question) => question.answered).length}/${questions.length} answered`;
 }
-export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; referenceAdded?: string[]; blockedBy?: string[]; refused: string | null }
+export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; referenceAdded?: string[]; blockedBy?: string[]; refused: string | null; create?: DraftNewTicket | null }
 export interface PublishResult { key: string; kind: string; status: string; detail: string | null }
 
 /** An HTML visual the planning agent made; it is a tab in Planning, stale once the draft changed after it was made. */
@@ -147,7 +160,7 @@ export function visualTime(createdAt: string, now: Date = new Date()): string {
   return at.toDateString() === now.toDateString() ? time : `${at.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}, ${time}`;
 }
 
-export type PlanningPanel = 'mine' | 'team' | 'scope' | 'ac' | 'qa' | 'tc' | 'storyboard';
+export type PlanningPanel = 'mine' | 'team' | 'scope' | 'ac' | 'qa' | 'tc' | 'storyboard' | 'order' | 'new';
 export const UNASSIGNED = 'Unassigned';
 const DEV_COLOR_COUNT = 8;
 const UNASSIGNED_COLOR = 'var(--color-muted-foreground)';
@@ -353,11 +366,56 @@ export function publishHint(draft: Pick<SprintDraft, 'canPublish' | 'blockers' |
   return `${n} ${n === 1 ? 'item needs' : 'items need'} a decision before publish`;
 }
 
-export interface ReadyItem { id: 'scope' | 'ac' | 'storyboard'; ok: boolean; text: string; detail: string | null; panel: PlanningPanel; fix: string }
-export interface Readiness { items: ReadyItem[]; done: number; total: number; missing: ReadyItem[] }
+export interface ReadyItem { id: 'scope' | 'ac' | 'storyboard' | 'new'; ok: boolean; text: string; detail: string | null; panel: PlanningPanel; fix: string }
+export interface Readiness {
+  items: ReadyItem[]; done: number; total: number; missing: ReadyItem[];
+  /** SP still to build, new tickets included, against the team's capacity for the days left. */
+  sp: number; capacity: number; cut: string | null;
+}
 
 const SHOWN_KEYS = 3;
 const keysText = (keys: string[]) => `${keys.slice(0, SHOWN_KEYS).join(', ')}${keys.length > SHOWN_KEYS ? ` +${keys.length - SHOWN_KEYS} more` : ''}`;
+
+/** New tickets whose SP still count: a created one already loaded into the draft is counted as that ticket. */
+export const countedNewTickets = (draft: Pick<SprintDraft, 'tickets' | 'newTickets'>) => (draft.newTickets ?? []).filter((item) => !item.createdKey || !draft.tickets.some((ticket) => ticket.key === item.createdKey));
+
+/** New tickets Publish still has to create. */
+export const pendingNewTickets = (draft: Pick<SprintDraft, 'newTickets'>) => (draft.newTickets ?? []).filter((item) => !item.createdKey);
+
+/** The fields Jira requires that a new ticket still lacks. */
+export function newTicketMissing(item: Pick<DraftNewTicket, 'summary' | 'userStory' | 'problem' | 'ac'>): string[] {
+  return [
+    ...(item.summary.trim() ? [] : ['summary']),
+    ...(item.userStory.trim() ? [] : ['user story']),
+    ...(item.problem.trim() ? [] : ['problem definition']),
+    ...(item.ac.some((line) => line.trim()) ? [] : ['AC']),
+  ];
+}
+
+/** A new ticket that needs the planner before Publish: a required field, a developer, or a failed create. */
+export const newTicketNeedsWork = (item: DraftNewTicket) => newTicketMissing(item).length > 0 || !item.dev || !!item.error;
+
+/** SP to build and the team's capacity for the sprint days left; perDev is one developer's share. */
+export function capacityOf(draft: Pick<SprintDraft, 'tickets' | 'newTickets' | 'developers' | 'sprintDays' | 'spPerDay' | 'today'>) {
+  const open = draft.tickets.filter((ticket) => !ticket.merged);
+  const sp = Math.round((sum(open.map((ticket) => ticket.left ?? ticket.sp)) + sum(countedNewTickets(draft).map((item) => item.sp))) * 10) / 10;
+  const days = Math.max(0, draft.sprintDays - (draft.today ? draft.today - 1 : 0));
+  const perDev = Math.round(days * draft.spPerDay * 10) / 10;
+  const capacity = Math.round(draft.developers.length * days * draft.spPerDay * 10) / 10;
+  return { sp, capacity, perDev, days };
+}
+
+/** The id a "no storyboard" call on an epic is recorded under. */
+export const storyboardNoneId = (epic: string) => `sbnone|${epic}`;
+
+/** A storyboard counts as recorded once its version is read or the planner said the epic has none. */
+export const storyboardRecorded = (board: Pick<StoryboardState, 'version' | 'none'> | undefined) => !!board && (board.version !== null || !!board.none);
+
+/** The epics of the sprint: those with a storyboard entry and those of its tickets. */
+export const sprintEpics = (draft: Pick<SprintDraft, 'storyboards' | 'tickets'>) => [...new Set([...draft.storyboards.map((board) => board.epic), ...draft.tickets.map((ticket) => ticket.epic).filter((epic): epic is string => !!epic)])].sort();
+
+/** Epics of the sprint with no storyboard version recorded and no "no storyboard" call. */
+export const unrecordedEpics = (draft: Pick<SprintDraft, 'storyboards' | 'tickets'>) => sprintEpics(draft).filter((epic) => !storyboardRecorded(draft.storyboards.find((board) => board.epic === epic)));
 
 /**
  * G1 "Siap publish": the SP fit the team's capacity or a scope cut is written, every AC line naming another ticket has a Blocks link or a decision,
@@ -365,22 +423,22 @@ const keysText = (keys: string[]) => `${keys.slice(0, SHOWN_KEYS).join(', ')}${k
  * information: Publish stays open. A stage the planning flow skips is not counted.
  */
 export function publishReadiness(
-  draft: Pick<SprintDraft, 'tickets' | 'developers' | 'sprintDays' | 'spPerDay' | 'today' | 'findings' | 'storyboards' | 'scopeCut'>,
+  draft: Pick<SprintDraft, 'tickets' | 'newTickets' | 'developers' | 'sprintDays' | 'spPerDay' | 'today' | 'findings' | 'storyboards' | 'scopeCut'>,
   flow: PlanningFlow | null,
 ): Readiness {
   const skipped = skippedStages(flow);
   const open = draft.tickets.filter((ticket) => !ticket.merged);
-  const sp = Math.round(sum(open.map((ticket) => ticket.left ?? ticket.sp)) * 10) / 10;
-  const days = Math.max(0, draft.sprintDays - (draft.today ? draft.today - 1 : 0));
-  const capacity = Math.round(draft.developers.length * days * draft.spPerDay * 10) / 10;
+  const { sp, capacity } = capacityOf(draft);
   const fits = sp <= capacity;
   const cut = draft.scopeCut?.note ?? null;
   // The same undecided set the AC check lists: every line naming another ticket with no Blocks link and no call.
   const late = draft.findings.filter(undecidedFinding);
   const planned = open.filter((ticket) => !ticket.carried);
-  const unread = draft.storyboards.filter((board) => board.version === null);
+  const unread = draft.storyboards.filter((board) => !storyboardRecorded(board));
   const unchecked = uncheckedStoryboard({ tickets: planned });
   const recorded = draft.storyboards.length > 0 && unread.length === 0;
+  const fresh = pendingNewTickets(draft);
+  const needWork = fresh.filter(newTicketNeedsWork);
   const items: ReadyItem[] = [
     {
       id: 'scope', panel: 'scope', fix: 'Scope', ok: fits || !!cut,
@@ -397,12 +455,17 @@ export function publishReadiness(
       text: !recorded ? 'Storyboard version not recorded' : unchecked.length ? `${unchecked.length} AC not checked against the latest storyboard` : 'Storyboard version recorded, AC checked',
       detail: !recorded
         ? (unread.length ? unread.map((board) => board.epic).join(', ') : 'No storyboard read yet')
-        : unchecked.length ? keysText(unchecked.map((ticket) => ticket.key)) : draft.storyboards.map((board) => `${board.epic} v${board.version}`).join(', '),
+        : unchecked.length ? keysText(unchecked.map((ticket) => ticket.key)) : draft.storyboards.map((board) => (board.version === null ? `${board.epic} none` : `${board.epic} v${board.version}`)).join(', '),
     },
+    ...(fresh.length ? [{
+      id: 'new' as const, panel: 'new' as const, fix: 'New tickets', ok: needWork.length === 0,
+      text: needWork.length ? `${needWork.length} of ${fresh.length} new ${fresh.length === 1 ? 'ticket needs' : 'tickets need'} a field or a developer` : `${fresh.length} new ${fresh.length === 1 ? 'ticket' : 'tickets'} ready to create`,
+      detail: needWork.length ? keysText(needWork.map((item) => item.id)) : null,
+    }] : []),
   ];
-  const counted = items.filter((item) => !skipped.has(item.id));
+  const counted = items.filter((item) => item.id === 'new' || !skipped.has(item.id));
   const missing = counted.filter((item) => !item.ok);
-  return { items: counted, done: counted.length - missing.length, total: counted.length, missing };
+  return { items: counted, done: counted.length - missing.length, total: counted.length, missing, sp, capacity, cut };
 }
 
 export const changeCount = (changes: DraftChange[]) => changes.filter((change) => !change.refused).length;

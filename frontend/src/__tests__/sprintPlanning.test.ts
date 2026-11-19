@@ -28,6 +28,9 @@ test('/planning opens Now by default, Draft when a panel is named, and every old
   assert.equal(planningRedirect('/agents?tab=sprint&sub=plan'), '/planning?tab=plan');
   assert.equal(planningRedirect('/agents?tab=sprint'), '/planning?tab=plan');
   assert.equal(planningRedirect('/agents?tab=sprint&sub=retro'), '/planning?tab=retro');
+  assert.deepEqual(planningRoute('?tab=plan'), { tab: 'draft', panel: 'order' }, 'the Plan page is the Order panel of Draft');
+  assert.deepEqual(planningRoute('?tab=plan&panel=ac'), { tab: 'draft', panel: 'order' });
+  assert.deepEqual(planningRoute('?tab=draft&panel=new'), { tab: 'draft', panel: 'new' });
   assert.equal(planningRedirect('/agents?tab=retro'), '/planning?tab=retro');
   assert.equal(planningRedirect('/agents?run=QRD-1'), '/agents?run=QRD-1', 'an Office link stays');
   assert.equal(planningRedirect('/agents?tab=library'), '/agents?tab=library');
@@ -99,20 +102,21 @@ test('a storyboard line names its version and changed frames, or why there is no
   assert.equal(storyboardDecisionId('QRD-1312', 8), 'sb|QRD-1312|v8');
 });
 
-test('Planning opens a Planning-<sprint> chat in the floating ChatDock, which polls the draft, and lists the open questions', () => {
+test('Planning shows the Planning-<sprint> chat in the right column of Draft, which polls the draft, and lists the open questions', () => {
   assert.equal(planningChatTitle('QRD Sprint 27'), 'Planning-QRD Sprint 27');
   assert.equal(questionsLine([]), null);
   const question = { id: 'q1', text: 'Both tabs?', key: null, askedAt: 'a', answered: true, answeredBy: 'Alvin', answeredAt: 'b' };
   assert.equal(questionsLine([question, { ...question, id: 'q2', answered: false }]), '1/2 answered');
   const tab = readFileSync(fileURLToPath(new URL('../agents/PlanningTab.tsx', import.meta.url)), 'utf8');
-  assert.match(tab, /<PlanningChat sprint=\{chosen\.name\} \/>/);
+  assert.match(tab, /<PlanningChat session=\{session\} folded=\{folded\} onFold=\{fold\}/);
   assert.match(tab, /pollInterval: 10000/);
   assert.doesNotMatch(tab, /xl:grid-cols-\[420px/);
-  // The button and the hook that opens the chat live in two files, for fast refresh.
+  // The column and the hook that finds the session live in two files, for fast refresh.
   const chat = ['../agents/PlanningChat.tsx', '../agents/usePlanningChat.ts'].map((file) => readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8')).join('\n');
-  assert.doesNotMatch(chat, /ChatThread/);
-  assert.ok(chat.includes('chatStore.openSession('));
-  assert.ok(chat.includes('Open planning chat'));
+  assert.match(chat, /<ChatThread key=\{session\.id\} sessionId=\{session\.id\}/);
+  assert.doesNotMatch(chat, /chatStore\.openSession\(/, 'the chat no longer opens in the floating ChatDock');
+  assert.doesNotMatch(tab, /Open planning chat/);
+  assert.ok(chat.includes('item.title === title'));
   assert.match(chat, /OPEN_PLANNING_CHAT/);
   assert.ok(chat.includes('create({ variables: { sprint } })'));
 });

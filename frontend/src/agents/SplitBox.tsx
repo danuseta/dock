@@ -1,7 +1,28 @@
-import React from 'react';
-import { SplitSquareHorizontal } from 'lucide-react';
+import React, { useState } from 'react';
+import { ChevronDown, ChevronUp, SplitSquareHorizontal } from 'lucide-react';
 import { Button } from '../components/ui';
 import type { DraftSplit } from './planning';
+
+const keysText = (keys: string[]) => (keys.length <= 2 ? keys.join(' and ') : `${keys.slice(0, -1).join(', ')} and ${keys[keys.length - 1]}`);
+
+/** Team map's one-line version of the split box, only while a ticket sits in another week; Details opens the call per ticket. */
+export const SplitRow: React.FC<{ split: DraftSplit; busy: boolean; onUse: (keys: string[]) => void; onKeep: (keys: string[]) => void }> = ({ split, busy, onUse, onKeep }) => {
+  const [open, setOpen] = useState(false);
+  if (split.error || !split.diffs.length) return null;
+  const keys = split.diffs.map((diff) => diff.key);
+  return (
+    <div className="grid min-w-0 gap-2">
+      <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface-0 px-3 py-2 text-[0.78rem] text-secondary-foreground">
+        <SplitSquareHorizontal size={14} className="flex-none text-sky-300" aria-hidden="true" />
+        <span className="min-w-0 flex-1 text-pretty">Split page "{split.page}" v{split.version}: <b className="font-mono text-foreground">{keysText(keys)}</b> {keys.length === 1 ? 'sits' : 'sit'} in a different week than the draft.</span>
+        <Button size="sm" onClick={() => onUse(keys)} disabled={busy}>Use split page</Button>
+        <Button size="sm" variant="ghost" onClick={() => onKeep(keys)} disabled={busy}>Keep</Button>
+        <Button size="sm" variant="ghost" onClick={() => setOpen((value) => !value)} aria-expanded={open}>{open ? <ChevronUp size={13} aria-hidden="true" /> : <ChevronDown size={13} aria-hidden="true" />}Details</Button>
+      </div>
+      {open && <SplitBox split={split} busy={busy} onUse={(key) => onUse([key])} onKeep={(key) => onKeep([key])} />}
+    </div>
+  );
+};
 
 /** Planning: the weeks the Confluence split page gives, the tickets that sit elsewhere, and the planner's call on each. */
 export const SplitBox: React.FC<{ split: DraftSplit; busy: boolean; onUse: (key: string) => void; onKeep: (key: string) => void }> = ({ split, busy, onUse, onKeep }) => {

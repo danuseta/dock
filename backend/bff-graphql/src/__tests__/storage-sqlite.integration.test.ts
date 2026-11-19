@@ -1121,3 +1121,23 @@ test('SQLite storage keeps Planning visuals per sprint and dates the draft by it
   await storage.deleteSprintDraftVisual('v-b');
   assert.deepStrictEqual((await storage.listSprintDraftVisuals('S-V')).map((row) => row.id), ['v-a']);
 });
+
+test('SQLite storage numbers a draft\'s new tickets NEW-n without reuse and keeps them across a load from Jira', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }] = await Promise.all([import('../storage/service'), import('../storage/client')]);
+  const storage = new StorageService(prisma);
+  t.after(() => prisma.$disconnect());
+  const draft = { sprint: 'S-N', sprintId: 12, sprintDays: 10, startDate: null, createdBy: null, refStatuses: '{}' };
+  await storage.replaceSprintDraft(draft, []);
+  const fields = { summary: '[BE] Export', type: 'Task', epic: null, dev: null, sp: null, priority: null, userStory: 'As a planner', problem: 'No export', ac: '["One"]', reference: null, source: 'chat' };
+  assert.strictEqual(await storage.addSprintDraftNewTicket('S-N', fields), 'NEW-1');
+  assert.strictEqual(await storage.addSprintDraftNewTicket('S-N', { ...fields, summary: 'Second' }), 'NEW-2');
+  await storage.removeSprintDraftNewTicket('S-N', 'NEW-2');
+  assert.strictEqual(await storage.addSprintDraftNewTicket('S-N', fields), 'NEW-3', 'a removed id is not given out again');
+  await storage.updateSprintDraftNewTicket('S-N', 'NEW-1', { createdKey: 'QRD-1601', error: null, sp: 3 });
+  await storage.replaceSprintDraft(draft, [{ key: 'QRD-1', summary: 'One', dev: null, sp: 1, wave: null, status: 'To Do', ac: [], jiraAc: [], jiraDev: null, dependsOn: [] }]);
+  const row = (await storage.getSprintDraft('S-N'))!;
+  assert.deepStrictEqual(row.newTickets.map((ticket) => [ticket.id, ticket.createdKey, ticket.sp]), [['NEW-1', 'QRD-1601', 3], ['NEW-3', null, null]], 'a load keeps the new tickets');
+  assert.strictEqual(await storage.addSprintDraftNewTicket('S-N', fields), 'NEW-4', 'the counter survives a load');
+});

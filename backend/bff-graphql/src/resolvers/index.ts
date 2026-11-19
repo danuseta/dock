@@ -813,6 +813,10 @@ export const resolvers = {
     uploadSprintStoryboard: (_: unknown, { sprint, epic, html }: { sprint: string; epic: string; html: string }) => uploadStoryboard(sprint, epic, html),
     setSprintDraftTcs: (_: unknown, { sprint, key, tcs }: { sprint: string; key: string; tcs: unknown[] }) => sprintDraftService.setTcs(sprint, key, tcs).catch(planningError),
     moveSprintDraftCards: (_: unknown, { sprint, keys, to }: { sprint: string; keys: string[]; to: string }) => sprintDraftService.moveCards(sprint, keys, to).catch(planningError),
+    saveSprintDraftNewTicket: (_: unknown, { sprint, id, input }: { sprint: string; id?: string | null; input: Record<string, unknown> }) => (
+      sprintDraftService.saveNewTicket(sprint, id ?? null, { ...input }).then((saved) => saved.view).catch(planningError)
+    ),
+    removeSprintDraftNewTicket: (_: unknown, { sprint, id }: { sprint: string; id: string }) => sprintDraftService.removeNewTicket(sprint, id).catch(planningError),
     answerSprintDraftQuestion: (_: unknown, { sprint, id, answered, text }: { sprint: string; id: string; answered: boolean; text?: string | null }) => (
       sprintDraftService.answer(sprint, id, answered, reporterName(), text ?? null).catch(planningError)
     ),
@@ -1325,6 +1329,7 @@ export const resolvers = {
     scenarios: (board: { scenarios?: unknown[] }) => board.scenarios ?? [],
     htmlUrl: (board: { epic: string; version: number | null; error: string | null }) => storyboardUrl(board.epic, board.version),
     previousHtmlUrl: (board: { epic: string; previous: number | null }) => storyboardUrl(board.epic, board.previous),
+    none: (board: { none?: boolean }) => !!board.none,
   },
   ChatMessage: {
     attachments: (message: { attachments?: unknown[] }) => message.attachments ?? [],
@@ -1356,6 +1361,8 @@ export const protectedMutations = [
   'loadSprintDraft',
   'updateSprintDraftTicket',
   'decideSprintDraft',
+  'saveSprintDraftNewTicket',
+  'removeSprintDraftNewTicket',
   'saveSprintDraftVisual',
   'dropSprintDraftVisual',
   'refreshSprintDraftQa',

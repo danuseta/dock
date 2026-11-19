@@ -347,6 +347,25 @@ export function createMockServer({ port = 4610 } = {}) {
   route('GET', /^\/jira\/rest\/api\/3\/search$/, (_m, query) => { const list = jql(query.get('jql')); return [200, { issues: list.map((issue) => issueJson(issue, query.get('expand'))), total: list.length, startAt: 0, maxResults: list.length }]; });
   route('GET', /^\/jira\/rest\/api\/3\/user\/assignable\/search$/, (_m, query) => [200, [OWNER, TEAMMATE].filter((user) => !query.get('query') || user.name.toLowerCase().includes(String(query.get('query')).toLowerCase())).map(jiraUser)]);
   route('POST', /^\/jira\/rest\/api\/3\/issueLink$/, (_m, _q, body) => { state.received.jiraLinks.push(body); return [201, null]; });
+  route('POST', /^\/jira\/rest\/api\/3\/issue$/, (_m, _q, body) => {
+    const fields = body?.fields ?? {};
+    if (!fields.summary) return [400, { errorMessages: [], errors: { summary: 'You must specify a summary of the issue.' } }];
+    const base = state.issues.find((item) => item.fields.issuetype.name !== 'Epic');
+    const number = Math.max(...state.issues.map((item) => Number(item.key.split('-')[1]))) + 1;
+    const key = `QRD-${number}`;
+    const user = [OWNER, TEAMMATE].find((item) => item.jira === fields.assignee?.accountId);
+    const sprint = state.sprints.find((item) => item.id === Number(fields.customfield_10020));
+    const issue = structuredClone(base);
+    Object.assign(issue, { id: String(10000 + number), key });
+    Object.assign(issue.fields, {
+      summary: fields.summary, issuetype: { name: fields.issuetype?.name ?? 'Task' }, status: { name: 'To Do' }, assignee: user ? jiraUser(user) : null,
+      labels: fields.labels ?? [], customfield_10332: fields.customfield_10332 ?? null, customfield_10016: fields.customfield_10016 ?? null,
+      customfield_10020: sprint ? [sprint] : null, parent: fields.parent?.key ? { key: fields.parent.key, fields: { summary: fields.parent.key } } : undefined, issuelinks: [],
+    });
+    state.issues.push(issue);
+    (state.received.jiraCreates ??= []).push({ key, fields });
+    return [201, { id: issue.id, key, self: `/rest/api/3/issue/${issue.id}` }];
+  });
   route('GET', /^\/jira\/rest\/api\/3\/issue\/([^/]+)\/transitions$/, (m) => {
     const issue = issueByKey(m[1]);
     if (!issue) return [404, { errorMessages: ['Issue does not exist'] }];

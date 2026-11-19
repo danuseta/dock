@@ -1,9 +1,9 @@
 import { ago } from '../lib/discordThreads';
 
 export type AgentsTab = 'office' | 'library';
-export type PlanningPageTab = 'now' | 'draft' | 'plan' | 'retro';
-const PLANNING_TABS: PlanningPageTab[] = ['now', 'draft', 'plan', 'retro'];
-const PLANNING_PANELS = ['mine', 'team', 'scope', 'ac', 'qa', 'tc', 'storyboard'] as const;
+export type PlanningPageTab = 'now' | 'draft' | 'retro';
+const PLANNING_TABS: PlanningPageTab[] = ['now', 'draft', 'retro'];
+const PLANNING_PANELS = ['mine', 'team', 'scope', 'ac', 'qa', 'tc', 'storyboard', 'order', 'new'] as const;
 export type PlanningPanelId = (typeof PLANNING_PANELS)[number];
 
 export interface PlanEdge {
@@ -30,10 +30,11 @@ export interface SprintPlan {
 
 export const agentsRoute = (search: string): AgentsTab => (new URLSearchParams(search).get('tab') === 'library' ? 'library' : 'office');
 
-/** The tab and Draft panel of /planning: `?tab=now|draft|plan|retro` and `?panel=`. With no tab it is Now, or Draft when a panel is named. */
+/** The tab and Draft panel of /planning: `?tab=now|draft|retro` and `?panel=`. With no tab it is Now, or Draft when a panel is named. The old Plan tab is Draft's Order panel. */
 export function planningRoute(search: string): { tab: PlanningPageTab; panel: PlanningPanelId | null } {
   const params = new URLSearchParams(search);
   const tab = params.get('tab') as PlanningPageTab;
+  if (params.get('tab') === 'plan') return { tab: 'draft', panel: 'order' };
   const panel = PLANNING_PANELS.includes(params.get('panel') as PlanningPanelId) ? params.get('panel') as PlanningPanelId : null;
   return { tab: PLANNING_TABS.includes(tab) ? tab : panel ? 'draft' : 'now', panel };
 }

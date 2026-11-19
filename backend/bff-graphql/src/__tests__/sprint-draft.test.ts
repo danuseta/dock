@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JiraSprintClient, type PlanningIssue, type PlanningSprint } from '../integrations/jira-sprint';
 import type { QaInputTicket, QaRun } from '../integrations/qa-predict';
-import { SprintDraftService, TC_MARKER, acSideEffects, acValueLines, diffLines, finalAc, rewriteAcValue, type DraftJira, type DraftStore } from '../integrations/sprint-draft';
-import type { SprintDraftInput, SprintDraftTicketInput } from '../storage/service';
+import { SprintDraftService, TC_MARKER, acSideEffects, acValueLines, diffLines, finalAc, rewriteAcValue, sprintProject, type DraftJira, type DraftStore } from '../integrations/sprint-draft';
+import type { SprintDraftInput, SprintDraftNewTicketData, SprintDraftTicketInput } from '../storage/service';
 import { StoryboardMissing } from '../integrations/storyboard';
 
 const adf = (...blocks: any[]) => ({ type: 'doc', version: 1, content: blocks });
@@ -15,10 +15,11 @@ class MemoryStore implements DraftStore {
   draft: any = null;
   settings: Array<{ key: string; value: string }> = [];
   async getSettings() { return this.settings; }
-  async getSprintDraft(sprint: string) { return this.draft?.sprint === sprint ? { ...this.draft, tickets: this.draft.tickets.map((ticket: any) => ({ ...ticket })) } : null; }
+  async getSprintDraft(sprint: string) { return this.draft?.sprint === sprint ? { ...this.draft, tickets: this.draft.tickets.map((ticket: any) => ({ ...ticket })), newTickets: this.draft.newTickets.map((ticket: any) => ({ ...ticket })) } : null; }
   async replaceSprintDraft(draft: SprintDraftInput, tickets: SprintDraftTicketInput[]) {
     this.draft = {
       ...draft, status: 'draft', decisions: this.draft?.decisions ?? '{}', qaReason: null, loadedAt: new Date('2026-11-09T00:00:00Z'), publishedAt: null,
+      newTickets: this.draft?.newTickets ?? [], newTicketSeq: this.draft?.newTicketSeq ?? 0,
       tickets: tickets.map((ticket, position) => ({ ...ticket, ac: JSON.stringify(ticket.ac), jiraAc: JSON.stringify(ticket.jiraAc), dependsOn: JSON.stringify(ticket.dependsOn), frames: JSON.stringify(ticket.frames ?? []), prediction: null, position })),
     };
   }
@@ -32,6 +33,14 @@ class MemoryStore implements DraftStore {
     this.draft.qaReason = qaReason;
     for (const ticket of this.draft.tickets) ticket.prediction = predictions?.get(ticket.key) ?? null;
   }
+  async addSprintDraftNewTicket(_sprint: string, data: SprintDraftNewTicketData) {
+    this.draft.newTicketSeq += 1;
+    const id = `NEW-${this.draft.newTicketSeq}`;
+    this.draft.newTickets.push({ createdKey: null, error: null, ...data, id, position: this.draft.newTicketSeq });
+    return id;
+  }
+  async updateSprintDraftNewTicket(_sprint: string, id: string, data: Partial<SprintDraftNewTicketData>) { Object.assign(this.draft.newTickets.find((ticket: any) => ticket.id === id), data); }
+  async removeSprintDraftNewTicket(_sprint: string, id: string) { this.draft.newTickets = this.draft.newTickets.filter((ticket: any) => ticket.id !== id); }
 }
 
 const SPRINT: PlanningSprint = { id: 26, name: 'QRD Sprint 26', state: 'future', startDate: '2026-10-27T01:00:00.000Z', endDate: '2026-11-09T10:00:00.000Z' };
@@ -57,6 +66,15 @@ class FakeJira implements DraftJira {
   async postTcs(key: string, body: unknown) { this.writes.push(['tc', key, body]); }
   async setReference(key: string, value: unknown) { this.writes.push(['reference', key, value]); }
   async addBlockedBy(key: string, blocker: string) { this.writes.push(['link', key, blocker]); }
+  created: Array<Record<string, any>> = [];
+  failSummary: string | null = null;
+  accountLookups: Array<[string, string]> = [];
+  async createIssue(fields: Record<string, any>) {
+    if (fields.summary === this.failSummary) throw Object.assign(new Error('Request failed with status code 400'), { response: { status: 400, data: { errorMessages: [], errors: { customfield_10341: 'User Story is required' } } } });
+    this.created.push(fields);
+    return `QRD-${1600 + this.created.length}`;
+  }
+  async projectAccounts(project: string, name: string) { this.accountLookups.push([project, name]); return name === 'Budi' ? ['acc-b1', 'acc-b2'] : this.users[name] ?? []; }
 }
 
 const predictions = (verdicts: Record<string, string>) => async (tickets: QaInputTicket[]): Promise<QaRun> => ({
@@ -655,4 +673,150 @@ test('publish hands the sprint to the after-publish hook once the draft is publi
   await service.load(26, 'Alvin');
   await service.publish('QRD Sprint 26');
   assert.deepEqual(seen, ['QRD Sprint 26:published']);
+});
+
+const NEW_TICKET = { summary: '[BE] Export the sprint plan', type: 'Task', userStory: 'As a planner I want an export so I can share the plan', problem: 'The plan cannot leave DOCK', ac: ['- The export holds every ticket'], source: 'sheet row 2' };
+
+test('new tickets get NEW-n ids that are never reused, keep the fields an update leaves out, and refuse what is out of range', async () => {
+  const { service } = setup();
+  await service.load(26, 'Alvin');
+  const first = await service.saveNewTicket('QRD Sprint 26', null, NEW_TICKET);
+  assert.equal(first.id, 'NEW-1');
+  assert.deepEqual(first.view.newTickets, [{
+    id: 'NEW-1', summary: '[BE] Export the sprint plan', type: 'Task', epic: null, dev: null, sp: null, priority: null,
+    userStory: 'As a planner I want an export so I can share the plan', problem: 'The plan cannot leave DOCK', ac: ['The export holds every ticket'], reference: null, source: 'sheet row 2',
+    createdKey: null, error: null,
+  }]);
+  assert.equal((await service.saveNewTicket('QRD Sprint 26', null, {})).id, 'NEW-2');
+  const blank = (await service.view('QRD Sprint 26'))!.newTickets[1];
+  assert.deepEqual([blank.summary, blank.type, blank.source, blank.ac], ['', 'Task', 'manual', []], 'an empty ticket starts as a Task from manual');
+  const updated = await service.saveNewTicket('QRD Sprint 26', 'NEW-1', { type: 'story', epic: 'qrd-1233', dev: 'Aken', sp: 3, priority: 'high', reference: 'Discord: https://discord.com/x' });
+  assert.deepEqual(updated.view.newTickets[0], { ...first.view.newTickets[0], type: 'Story', epic: 'QRD-1233', dev: 'Aken', sp: 3, priority: 'High', reference: 'Discord: https://discord.com/x' });
+  await service.saveNewTicket('QRD Sprint 26', 'NEW-1', { priority: null, sp: null, epic: null });
+  assert.equal((await service.view('QRD Sprint 26'))!.newTickets[0].priority, null);
+  await service.removeNewTicket('QRD Sprint 26', 'NEW-2');
+  assert.equal((await service.saveNewTicket('QRD Sprint 26', null, {})).id, 'NEW-3', 'a removed id is not given out again');
+  assert.deepEqual((await service.view('QRD Sprint 26'))!.newTickets.map((ticket) => ticket.id), ['NEW-1', 'NEW-3']);
+
+  const refused: Array<[unknown, RegExp]> = [
+    [{ summary: 'x'.repeat(201) }, /Summary is at most 200 characters/],
+    [{ type: 'Epic' }, /Type is Task, Story or Bug/],
+    [{ priority: 'Urgent' }, /Priority is Highest, High, Medium, Low, Lowest/],
+    [{ sp: 101 }, /SP must be from 0 to 100/],
+    [{ sp: -1 }, /SP must be from 0 to 100/],
+    [{ ac: Array.from({ length: 41 }, (_, index) => `Line ${index}`) }, /at most 40 AC lines/],
+    [{ ac: ['ok', 'x'.repeat(1001)] }, /AC line 2 is at most 1000 characters/],
+    [{ ac: 'one line' }, /ac must be a list of lines/],
+    [{ userStory: 'x'.repeat(4001) }, /User Story is at most 4000 characters/],
+    [{ problem: 'x'.repeat(4001) }, /Problem Definition is at most 4000 characters/],
+    [{ reference: 'x'.repeat(2001) }, /Reference is at most 2000 characters/],
+    [{ epic: 'not an epic' }, /Epic must be an epic key/],
+    [{ summary: 5 }, /Summary must be text/],
+  ];
+  for (const [input, message] of refused) await assert.rejects(service.saveNewTicket('QRD Sprint 26', 'NEW-1', input), message);
+  await assert.rejects(service.saveNewTicket('QRD Sprint 26', 'NEW-7', {}), /NEW-7 is not a new ticket of the QRD Sprint 26 draft/);
+  await assert.rejects(service.removeNewTicket('QRD Sprint 26', 'NEW-2'), /NEW-2 is not a new ticket/);
+  await assert.rejects(service.saveNewTicket('QRD Sprint 9', null, {}), /No draft for QRD Sprint 9/);
+  for (let count = 2; count < 30; count++) await service.saveNewTicket('QRD Sprint 26', null, {});
+  await assert.rejects(service.saveNewTicket('QRD Sprint 26', null, {}), /at most 30 new tickets/);
+});
+
+test('preview lists one create per new ticket not created yet, refused while a required field is empty', async () => {
+  const { service } = setup();
+  await service.load(26, 'Alvin');
+  await service.saveNewTicket('QRD Sprint 26', null, NEW_TICKET);
+  await service.saveNewTicket('QRD Sprint 26', null, { summary: '[FE] Half drafted', userStory: 'As a dev' });
+  const creates = (await service.preview('QRD Sprint 26')).filter((change) => change.create);
+  assert.deepEqual(creates.map((change) => [change.key, change.refused, change.create!.id, change.acAdded, change.blockedBy, change.assigneeTo]), [
+    ['NEW-1', null, 'NEW-1', [], [], null],
+    ['NEW-2', 'Missing Problem Definition, at least one AC line', 'NEW-2', [], [], null],
+  ]);
+  await service.saveNewTicket('QRD Sprint 26', null, {});
+  assert.equal((await service.preview('QRD Sprint 26')).find((change) => change.key === 'NEW-3')!.refused, 'Missing summary, User Story, Problem Definition, at least one AC line');
+});
+
+test('publish creates each new ticket in the sprint, records the key or the error, and one failure never stops the others', async () => {
+  const { service, store, jira } = setup();
+  await service.load(26, 'Alvin');
+  await service.saveNewTicket('QRD Sprint 26', null, { ...NEW_TICKET, type: 'Story', epic: 'QRD-1233', dev: 'Aken', sp: 3, priority: 'High', reference: 'Discord: https://discord.com/x' });
+  await service.saveNewTicket('QRD Sprint 26', null, { ...NEW_TICKET, summary: 'Boom' });
+  await service.saveNewTicket('QRD Sprint 26', null, { ...NEW_TICKET, summary: '[FE] No problem yet', problem: '' });
+  await service.saveNewTicket('QRD Sprint 26', null, { ...NEW_TICKET, summary: '[FE] Two Budis', dev: 'Budi' });
+  jira.failSummary = 'Boom';
+  const results = (await service.publish('QRD Sprint 26')).filter((result) => result.kind === 'create');
+  assert.deepEqual(results, [
+    { key: 'NEW-1', kind: 'create', status: 'created', detail: 'QRD-1601' },
+    { key: 'NEW-2', kind: 'create', status: 'failed', detail: 'Jira responded 400: Request failed with status code 400 (customfield_10341: User Story is required)' },
+    { key: 'NEW-3', kind: 'create', status: 'refused', detail: 'Missing Problem Definition' },
+    { key: 'NEW-4', kind: 'create', status: 'created', detail: 'QRD-1602; created unassigned: more than one Jira user is named Budi' },
+  ]);
+  assert.deepEqual(jira.created[0], {
+    project: { key: 'QRD' },
+    issuetype: { name: 'Story' },
+    summary: '[BE] Export the sprint plan',
+    customfield_10341: adf(para(text('As a planner I want an export so I can share the plan'))),
+    customfield_10331: adf(para(text('The plan cannot leave DOCK'))),
+    customfield_10332: adf(bullets('The export holds every ticket')),
+    customfield_10333: adf(bullets('Discord: https://discord.com/x')),
+    customfield_10016: 3,
+    customfield_10020: 26,
+    parent: { key: 'QRD-1233' },
+    labels: ['dock-plan'],
+    priority: { name: 'High' },
+    assignee: { accountId: 'acc-aken' },
+  });
+  assert.equal(jira.created[1].assignee, undefined, 'no single match leaves the ticket unassigned');
+  assert.deepEqual(jira.created[1].priority, { name: 'Medium' });
+  assert.equal('parent' in jira.created[1] || 'customfield_10016' in jira.created[1] || 'customfield_10333' in jira.created[1], false);
+  assert.deepEqual(jira.accountLookups, [['QRD', 'Aken'], ['QRD', 'Budi']]);
+  const after = (await service.view('QRD Sprint 26'))!.newTickets;
+  assert.deepEqual(after.map((ticket) => [ticket.id, ticket.createdKey, ticket.error]), [
+    ['NEW-1', 'QRD-1601', null],
+    ['NEW-2', null, 'Jira responded 400: Request failed with status code 400 (customfield_10341: User Story is required)'],
+    ['NEW-3', null, 'Missing Problem Definition'],
+    ['NEW-4', 'QRD-1602', null],
+  ]);
+  assert.equal(store.draft.status, 'draft', 'a ticket that was not created keeps the draft unpublished');
+  await assert.rejects(service.saveNewTicket('QRD Sprint 26', 'NEW-1', { sp: 5 }), /NEW-1 is already created in Jira as QRD-1601/);
+
+  await service.saveNewTicket('QRD Sprint 26', 'NEW-2', { summary: '[BE] Fixed' });
+  await service.saveNewTicket('QRD Sprint 26', 'NEW-3', { problem: 'Now written' });
+  assert.deepEqual((await service.preview('QRD Sprint 26')).filter((change) => change.create).map((change) => change.key), ['NEW-2', 'NEW-3'], 'a created ticket is not created again');
+  const second = (await service.publish('QRD Sprint 26')).filter((result) => result.kind === 'create');
+  assert.deepEqual(second.map((result) => [result.key, result.status, result.detail]), [['NEW-2', 'created', 'QRD-1603'], ['NEW-3', 'created', 'QRD-1604']]);
+  assert.equal(jira.created.length, 4);
+  assert.equal((await service.view('QRD Sprint 26'))!.newTickets[1].error, null);
+  assert.equal(store.draft.status, 'published');
+});
+
+test('the Jira client creates an issue and finds assignable users of a project by exact name', async () => {
+  const calls: Array<[string, string, unknown]> = [];
+  const client = new JiraSprintClient({
+    get: async (url, params) => { calls.push(['get', url, params]); return [{ displayName: 'Aken', accountId: 'acc-1' }, { displayName: 'Aken Putra', accountId: 'acc-2' }]; },
+    post: async (url, body) => { calls.push(['post', url, body]); return { id: '1', key: 'QRD-1601' }; },
+  });
+  assert.deepEqual(await client.projectAssignableAccounts('QRD', 'aken'), ['acc-1']);
+  assert.deepEqual(calls[0], ['get', '/rest/api/3/user/assignable/search', { project: 'QRD', query: 'aken', maxResults: 50 }]);
+  assert.equal(await client.createIssue({ summary: 'x' }), 'QRD-1601');
+  assert.deepEqual(calls[1], ['post', '/rest/api/3/issue', { fields: { summary: 'x' } }]);
+});
+
+test('the project of the new tickets comes from the sprint keys, QRD without any', () => {
+  assert.equal(sprintProject(['ABC-1', 'ABC-2', 'QRD-3']), 'ABC');
+  assert.equal(sprintProject([]), 'QRD');
+});
+
+test('an epic marked as having no storyboard says none until the mark is cleared', async () => {
+  const store = new MemoryStore();
+  const jira = new FakeJira([issue('QRD-1500', { epic: 'QRD-1300' })]);
+  const storyboard = async (): Promise<never> => { throw new StoryboardMissing('No Confluence page titled "Storyboard" for QRD-1300.'); };
+  const service = new SprintDraftService(store, async () => jira, predictions({}), () => new Date('2026-10-26T10:00:00Z'), undefined, storyboard);
+  const view = await service.load(26, 'Alvin');
+  assert.deepEqual(view.storyboards.map((board) => [board.epic, board.none]), [['QRD-1300', false]]);
+  const marked = await service.decide('QRD Sprint 26', 'sbnone|QRD-1300', 'none', null, 'Alvin');
+  assert.deepEqual(marked.storyboards.map((board) => [board.epic, board.none]), [['QRD-1300', true]]);
+  await assert.rejects(service.decide('QRD Sprint 26', 'sbnone|QRD-1300', 'checked', null, 'Alvin'), /marked with action none/);
+  await assert.rejects(service.decide('QRD Sprint 26', 'sbnone|QRD-9999', 'none', null, 'Alvin'), /No ticket of QRD Sprint 26 belongs to QRD-9999/);
+  const cleared = await service.decide('QRD Sprint 26', 'sbnone|QRD-1300', 'clear', null, 'Alvin');
+  assert.equal(cleared.storyboards[0].none, false);
 });

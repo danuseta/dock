@@ -150,6 +150,7 @@ export const judgeQueue = new JudgeQueue({
   writeInput: (name, text) => writeJudgeInput(judgeInputDir(), name, text),
   cleanInputs: (before) => cleanJudgeInputs(judgeInputDir(), before),
   open: async ({ title, prompt, account, model }) => orchestratorCron.openJudge(title, prompt, account, await modelOf(model)),
+  send: async (chatId, prompt, model) => orchestratorCron.sendJudge(chatId, prompt, await modelOf(model)),
   turnState: async (chatId) => {
     const session = await storage.getChatSession(chatId);
     if (!session) return { state: 'gone', detail: null };

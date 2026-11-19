@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useMutation } from '@apollo/client';
-import { Check, ExternalLink, FileSearch, Undo2, Upload } from 'lucide-react';
+import { Ban, Check, ExternalLink, FileSearch, Undo2, Upload } from 'lucide-react';
 import { Button, Checkbox, Select } from '../components/ui';
 import { UPLOAD_SPRINT_STORYBOARD } from '../graphql/queries';
 import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
-import { storyboardDecisionId, type SprintDraft, type StoryboardFlow } from './planning';
+import { sprintEpics, storyboardDecisionId, storyboardNoneId, type SprintDraft, type StoryboardFlow } from './planning';
 import { changedFlowCount, flowTickets, versionLabel, visibleGroups } from './storyboardLogic';
 
 const head = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
@@ -81,7 +81,7 @@ const TicketRows: React.FC<{ keys: string[]; flow: StoryboardFlow; draft: Sprint
 
 /** The storyboard as a board: scenario, flows by group with their tickets, and the flow's frames from the saved HTML. */
 export const StoryboardBoard: React.FC<{ draft: SprintDraft; busy: boolean; onCheck: () => void; onDecide: (id: string, action: string, note?: string) => void }> = ({ draft, busy, onCheck, onDecide }) => {
-  const epics = [...new Set([...draft.storyboards.map((board) => board.epic), ...draft.tickets.map((ticket) => ticket.epic).filter((epic): epic is string => !!epic)])].sort();
+  const epics = sprintEpics(draft);
   const [epic, setEpic] = useState<string>('');
   const [scenarioN, setScenarioN] = useState<number | null>(null);
   const [flowId, setFlowId] = useState<string | null>(null);
@@ -132,6 +132,32 @@ export const StoryboardBoard: React.FC<{ draft: SprintDraft; busy: boolean; onCh
         <input ref={fileInput} type="file" accept=".html,.htm,text/html" className="hidden" onChange={onFile} aria-label="Storyboard HTML file" />
         {openUrl && <a className="inline-flex h-8 items-center gap-2 rounded-sm border border-border bg-surface-2 px-3 font-display text-xs font-semibold text-foreground hover:border-border-glow max-[760px]:h-11" href={openUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={13} aria-hidden="true" />Open storyboard</a>}
       </div>
+      {epics.length > 0 && (
+        <ul aria-label="Storyboard per epic" className="overflow-hidden rounded-md border border-border bg-surface-0">
+          {epics.map((value) => {
+            const item = draft.storyboards.find((entry) => entry.epic === value);
+            const keys = draft.tickets.filter((ticket) => ticket.epic === value).map((ticket) => ticket.key);
+            return (
+              <li key={value} className="grid grid-cols-[7rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-border px-3 py-1.5 last:border-b-0 max-[760px]:grid-cols-[minmax(0,1fr)_auto]">
+                <button type="button" onClick={() => { setEpic(value); setScenarioN(null); setFlowId(null); setCompare(null); }} aria-current={value === currentEpic ? 'true' : undefined} className={cn('justify-self-start font-mono text-[0.74rem] font-semibold hover:underline', value === currentEpic ? 'text-accent' : 'text-foreground')}>{value}</button>
+                <span className="min-w-0 truncate text-[0.74rem] text-muted-foreground max-[760px]:col-span-2 max-[760px]:row-start-2">{keys.join(', ') || 'no open card'}</span>
+                <span className="flex flex-wrap items-center justify-end gap-1.5">
+                  {item?.none ? (
+                    <>
+                      <span className={cn(chip, TONE.none)}>No storyboard</span>
+                      <Button size="sm" variant="ghost" onClick={() => onDecide(storyboardNoneId(value), 'clear')} disabled={working}><Undo2 size={13} aria-hidden="true" />Undo</Button>
+                    </>
+                  ) : item?.version ? (
+                    <span className={cn(chip, TONE.ok)}>{versionLabel(item.version)} recorded</span>
+                  ) : (
+                    <Button size="sm" onClick={() => onDecide(storyboardNoneId(value), 'none')} disabled={working}><Ban size={13} aria-hidden="true" />No storyboard</Button>
+                  )}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
       {notice && <p className="text-pretty text-[0.78rem] text-status-conflict" role="alert">{notice}</p>}
       {board?.error && <p className="text-pretty text-[0.78rem] text-status-warn">{currentEpic}: {board.error}</p>}
       {!epics.length && <p className="text-sm text-muted-foreground">No ticket of this sprint has an epic, so there is no storyboard to read.</p>}
