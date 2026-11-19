@@ -41,10 +41,17 @@ export function sessionKind(title: string): 'task' | 'review' | null {
   return /^Review-/.test(title) ? 'review' : null;
 }
 
+/** A local QA session (`QA-QRD-1565`): it shows as the QA local card of its ticket's session, not in the list. */
+export const isQaSession = (session: Pick<ChatSession, 'title'>) => /^QA-/.test(session.title || '');
+
+/** The sessions the list shows: every one but local QA. */
+export const listedSessions = (sessions: ChatSession[]) => sessions.filter((session) => !isQaSession(session));
+
 export function filterSessions(sessions: ChatSession[], filter: SessionFilter): ChatSession[] {
-  if (filter === 'all') return sessions;
-  if (filter === 'gm') return sessions.filter(isGuildMaster);
-  return sessions.filter((s) => sessionKind(s.title) === filter);
+  const listed = listedSessions(sessions);
+  if (filter === 'all') return listed;
+  if (filter === 'gm') return listed.filter(isGuildMaster);
+  return listed.filter((s) => sessionKind(s.title) === filter);
 }
 
 export function groupSessions(sessions: ChatSession[], now: number): SessionGroup[] {
