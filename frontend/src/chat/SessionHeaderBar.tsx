@@ -56,9 +56,7 @@ export const SessionHeaderBar: React.FC<SessionHeaderBarProps> = ({ session, dot
         </p>
       </div>
       {readOnly && <ReadOnlyChip />}
-      {gm
-        ? <span className="inline-flex h-7 flex-none items-center gap-1.5 rounded-pill border border-violet-400/40 bg-violet-400/10 px-2.5 font-mono text-[0.68rem] font-semibold text-violet-300" title="Guild Master: sonnet, no shell, writes only after your ya"><Crown size={11} aria-hidden="true" />Guild Master<span className="max-[760px]:hidden"> · no shell · owner only</span></span>
-        : !readOnly && <span className="inline-flex h-7 flex-none items-center rounded-pill border border-border-glow px-2.5 font-mono text-[0.68rem] text-secondary-foreground max-[760px]:hidden">Work</span>}
+      {gm && <span className="inline-flex h-7 flex-none items-center gap-1.5 rounded-pill border border-violet-400/40 bg-violet-400/10 px-2.5 font-mono text-[0.68rem] font-semibold text-violet-300" title="Guild Master: sonnet, no shell, writes only after your ya"><Crown size={11} aria-hidden="true" />Guild Master<span className="max-[760px]:hidden"> · no shell · owner only</span></span>}
       <div className="contents max-[760px]:hidden">
       {onAskGuildMaster && !gm && !readOnly && <Button size="sm" variant="ghost" className="h-8 flex-none border-violet-400/40 px-2 text-violet-200 hover:bg-violet-400/10" disabled={asking} onClick={onAskGuildMaster}><Crown size={13} aria-hidden="true" />{asking ? 'Sending...' : 'Ask Guild Master'}</Button>}
       <ModelPopover control={control} machine={machineOf(session)} fallbackLabel={gm ? 'sonnet' : status?.model || 'Model'} disabled={readOnly || gm} />
