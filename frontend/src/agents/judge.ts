@@ -109,6 +109,15 @@ export function judgeHref(search: string, target: { day?: string | null; sprintS
 
 export const dayHref = (day: string) => `/planning?tab=retro&day=${day}`;
 
+const wibDate = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+
+/** The Judge day a session belongs to: the day its findings carry, else the WIB day of its last message. */
+export function sessionJudgeDay(judge: Pick<SessionJudge, 'findings'>, lastMessageAt: string | null | undefined): string | null {
+  const day = judge.findings.find((finding) => finding.day)?.day;
+  if (day) return day;
+  return lastMessageAt && !Number.isNaN(Date.parse(lastMessageAt)) ? wibDate(lastMessageAt) : null;
+}
+
 /** A finding in a session opens the session at its message; one from a Discord thread opens the thread at the reviewer's message. */
 export function findingHref(finding: Pick<JudgeFinding, 'sessionId' | 'messageId' | 'threadUrl'>): string {
   const discord = finding.threadUrl ? discordFindingHref(finding.threadUrl) : null;

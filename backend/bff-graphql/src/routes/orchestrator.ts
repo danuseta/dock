@@ -13,6 +13,8 @@ import { receiveDemoVideo } from './demo-videos';
 import { autoBroadcast, type AutoBroadcast } from '../integrations/broadcast';
 import { decisionGate, stillWorking, type DecisionGate } from '../integrations/decision-gate';
 import { parseRetroDraft } from '../integrations/retro';
+import type { RetroLine } from '../integrations/retro-apply';
+import { autoAcceptRetroDraft } from '../integrations/retro-apply-live';
 import type { SprintPlanner } from '../integrations/sprint-plan';
 import { sprintPlanner } from '../integrations/sprint-plan-live';
 import { deployGateFor } from '../integrations/deploy-gate-live';
@@ -93,6 +95,8 @@ export function createOrchestratorIngestRouter(
   gmSettings: { view: () => Promise<unknown>; put: (values: Record<string, string>) => Promise<unknown> } = gmSettingsStore,
   // The orchestrator cron fields a Guild Master turn may read and change.
   gmCron: { view: () => Promise<unknown>; put: (values: Record<string, string>) => Promise<unknown> } = gmCronStore,
+  // The ledger lines of a stored retro draft, accepted without the owner; Judge lines wait.
+  retroAuto: (sprint: string, created: RetroLine[]) => Promise<unknown> = autoAcceptRetroDraft,
 ): Router {
   const router = Router();
 
@@ -137,7 +141,9 @@ export function createOrchestratorIngestRouter(
   }));
   router.post('/retro', small, handle(async (body) => {
     const draft = parseRetroDraft(body);
-    return { sprint: draft.sprint, items: await retroStore.replaceRetroDraft(draft.sprint, draft.items, draft.sources) };
+    const created = await retroStore.replaceRetroDraft(draft.sprint, draft.items, draft.sources);
+    await retroAuto(draft.sprint, created).catch((error) => console.warn('[Retro] automatic accept failed:', error instanceof Error ? error.message : 'unknown error'));
+    return { sprint: draft.sprint, items: created.length };
   }));
   router.post('/plan', small, handle((body) => planner.ingest(body)));
   router.post('/deploy-gate', small, handle(async (body) => {

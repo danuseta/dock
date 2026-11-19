@@ -338,7 +338,7 @@ export function scopeSummary(draft: Pick<SprintDraft, 'tickets'>) {
   return { inSprint: inSprint.length, inSprintSp: sum(inSprint.map((ticket) => ticket.sp)), backlog: backlog.length, backlogSp: sum(backlog.map((ticket) => ticket.sp)) };
 }
 
-export const findingKindLabel = (kind: string) => (kind === 'after-it' ? 'after it' : kind === 'lands-first' ? 'lands first' : 'outside plan');
+export const findingKindLabel = (kind: string) => (kind === 'after-it' ? 'lands after it' : kind === 'lands-first' ? 'lands first' : 'outside the sprint');
 
 export function decisionLabel(decision: DraftDecision | null, refKey?: string): string | null {
   if (!decision) return null;
@@ -592,7 +592,31 @@ export function moveForecast(move: Pick<SprintMove, 'forecastBefore' | 'forecast
 export const undecidedFinding = (finding: Pick<DraftFinding, 'decision' | 'linked'>) => !finding.decision && !finding.linked;
 
 /** The planning agent's summary of a ticket as Planning reads it: Indonesian title and AC lines. */
-export interface TicketSummaryLite { key: string; titleId: string | null; acId: string[]; current: boolean; testData: string | null }
+export interface TicketSummaryLite { key: string; titleId: string | null; acId: string[]; current: boolean; testData: string | null; acHash?: string }
+
+/** The summary's Indonesian AC lines, only when they were written for the AC the ticket holds now, one per line. */
+export function freshAcId(ticket: Pick<DraftTicket, 'ac' | 'acHash'> | null | undefined, summary: Pick<TicketSummaryLite, 'acId' | 'current' | 'acHash'> | null | undefined): string[] | null {
+  if (!ticket || !summary?.current || summary.acId.length !== ticket.ac.length) return null;
+  if (ticket.acHash && summary.acHash && ticket.acHash !== summary.acHash) return null;
+  return summary.acId;
+}
+
+/** The Indonesian line of AC line n (1-based), or null while the summary is missing or written for other AC. */
+export const acLineId = (ticket: Pick<DraftTicket, 'ac' | 'acHash'> | null | undefined, summary: Pick<TicketSummaryLite, 'acId' | 'current' | 'acHash'> | null | undefined, n: number) =>
+  freshAcId(ticket, summary)?.[n - 1]?.trim() || null;
+
+/** The tickets among keys with no fresh Indonesian summary, in the order given. */
+export function untranslatedKeys(draft: Pick<SprintDraft, 'tickets'>, keys: string[], summaries: Map<string, TicketSummaryLite>): string[] {
+  return keys.filter((key) => !freshAcId(draft.tickets.find((ticket) => ticket.key === key), summaries.get(key)));
+}
+
+/** The planning chat prompt that asks for the Indonesian ticket summaries of the keys. */
+export const translatePrompt = (sprint: string, keys: string[]) =>
+  `Write the Indonesian ticket summaries (sprint-draft summary) for ${keys.join(', ')} in sprint "${sprint}": the Indonesian title and one Indonesian line per AC line.`;
+
+/** The Draft summary line: open tickets, working days and developers. */
+export const draftSummaryText = (draft: Pick<SprintDraft, 'tickets' | 'sprintDays' | 'devs'>) =>
+  `${draft.tickets.length} ${draft.tickets.length === 1 ? 'ticket' : 'tickets'} · ${draft.sprintDays} ${draft.sprintDays === 1 ? 'day' : 'days'} · ${draft.devs.length} dev`;
 
 /** Tiket saya: the open tickets of the draft whose developer is the DOCK owner's Jira user, by name. */
 export function myTickets(draft: Pick<SprintDraft, 'tickets'>, me: string | null | undefined): DraftTicket[] {

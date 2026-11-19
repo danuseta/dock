@@ -4,10 +4,10 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { panelOf, planningRoute } from '../agents/plan';
 import {
-  UNASSIGNED, capacityOf, countedNewTickets, newTicketMissing, publishReadiness, storyboardNoneId, unrecordedEpics,
-  type DraftFinding, type DraftNewTicket, type DraftTicket, type SprintDraft, type StoryboardState,
+  UNASSIGNED, acLineId, capacityOf, countedNewTickets, draftSummaryText, freshAcId, newTicketMissing, publishReadiness, storyboardNoneId, translatePrompt, unrecordedEpics, untranslatedKeys,
+  type DraftFinding, type TicketSummaryLite, type DraftNewTicket, type DraftTicket, type SprintDraft, type StoryboardState,
 } from '../agents/planning';
-import { barIssues, boardCards, boardLanes, cardShown, chatFoldedOf, chatFoldedValue, filterCounts, findingGroups, newTicketForm, newTicketInput, outsidePlanOpen, panelBadge, teamViewOf } from '../agents/boardLogic';
+import { barIssues, boardCards, boardLanes, cardShown, chatFoldedOf, chatFoldedValue, filterCounts, findingGroups, keyParts, newTicketForm, newTicketInput, outsidePlanOpen, panelBadge, teamViewOf } from '../agents/boardLogic';
 
 const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 const ticket = (over: Partial<DraftTicket>): DraftTicket => ({
@@ -180,4 +180,32 @@ test('the publish dialog lists the tickets it will create and shows the keys Jir
   assert.match(queries, /saveSprintDraftNewTicket\(sprint: \$sprint, id: \$id, input: \$input\)/);
   assert.match(queries, /removeSprintDraftNewTicket\(sprint: \$sprint, id: \$id\)/);
   assert.match(queries, /previousHtmlUrl none/);
+});
+
+test('the Draft summary is one plain line of tickets, days and developers, singular when one', () => {
+  assert.equal(draftSummaryText(draft({ tickets: [ticket({ key: 'QRD-1' }), ticket({ key: 'QRD-2' })], sprintDays: 7, devs: ['A', 'B'] })), '2 tickets · 7 days · 2 dev');
+  assert.equal(draftSummaryText(draft({ tickets: [ticket({ key: 'QRD-1' })], sprintDays: 1, devs: ['A'] })), '1 ticket · 1 day · 1 dev');
+  const tab = source('../agents/PlanningTab.tsx');
+  assert.doesNotMatch(tab, /AC waiting on other tickets|\} need a decision|storyboard changed/);
+});
+
+test('AC check takes the Indonesian line only from a summary written for the AC the ticket holds now', () => {
+  const own = ticket({ key: 'QRD-1', ac: ['Line one', 'Line two'], acHash: 'h1' });
+  const summary = (over: Partial<TicketSummaryLite>): TicketSummaryLite => ({ key: 'QRD-1', titleId: null, acId: ['Baris satu', 'Baris dua'], current: true, testData: null, acHash: 'h1', ...over });
+  assert.equal(acLineId(own, summary({}), 2), 'Baris dua', 'finding.ac is 1-based');
+  assert.equal(acLineId(own, summary({ current: false }), 1), null, 'a summary of older AC is hidden');
+  assert.equal(acLineId(own, summary({ acHash: 'h0' }), 1), null, 'another hash is hidden');
+  assert.equal(acLineId(own, summary({ acId: ['Baris satu'] }), 1), null, 'a count that differs is hidden');
+  assert.equal(acLineId(own, summary({ acId: ['Baris satu', ' '] }), 2), null, 'an empty line shows nothing');
+  assert.equal(acLineId(own, undefined, 1), null);
+  assert.deepEqual(freshAcId(ticket({ ac: ['a', 'b'] }), summary({ acHash: undefined })), ['Baris satu', 'Baris dua'], 'without hashes the server flag decides');
+  const plan = draft({ tickets: [own, ticket({ key: 'QRD-2', ac: ['x'] }), ticket({ key: 'QRD-3', ac: ['y'] })] });
+  const summaries = new Map([['QRD-1', summary({})], ['QRD-3', summary({ key: 'QRD-3', acId: ['y id'], current: false })]]);
+  assert.deepEqual(untranslatedKeys(plan, ['QRD-1', 'QRD-2', 'QRD-3'], summaries), ['QRD-2', 'QRD-3']);
+  assert.equal(translatePrompt('QRD Sprint 27', ['QRD-2', 'QRD-3']), 'Write the Indonesian ticket summaries (sprint-draft summary) for QRD-2, QRD-3 in sprint "QRD Sprint 27": the Indonesian title and one Indonesian line per AC line.');
+});
+
+test('an AC line is cut around the ticket it names, not around a longer key', () => {
+  assert.deepEqual(keyParts('Wait for qrd-12 and QRD-123', 'QRD-12'), [{ text: 'Wait for ', hit: false }, { text: 'qrd-12', hit: true }, { text: ' and QRD-123', hit: false }]);
+  assert.deepEqual(keyParts('No key', 'QRD-9'), [{ text: 'No key', hit: false }]);
 });

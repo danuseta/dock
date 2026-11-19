@@ -1,7 +1,7 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLazyQuery, useMutation, useQuery } from '@apollo/client';
-import { AlertCircle, AlertTriangle, ArrowRightLeft, BarChart3, CalendarRange, CheckCircle2, Download, FileInput, FilePlus2, LayoutGrid, Link2, Minus, Plus, Scissors, Send, Undo2, X } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowRightLeft, BarChart3, CalendarRange, CheckCircle2, Download, FileInput, FilePlus2, Languages, LayoutGrid, Link2, Minus, Plus, Scissors, Send, Undo2, X } from 'lucide-react';
 import { Button, Card, Dialog, Input, Select } from '../components/ui';
 import { PlanningChat } from './PlanningChat';
 import { usePlanningSession } from './usePlanningChat';
@@ -15,28 +15,26 @@ import { PlanningVisual } from './PlanningVisual';
 import { MyTicketsPanel } from './MyTicketsPanel';
 import {
   CHECK_SPRINT_STORYBOARDS, DECIDE_SPRINT_DRAFT, MOVE_SPRINT_DRAFT_CARDS, GET_OWNER_NAME, GET_PLANNING_FLOW, GET_PLANNING_SPRINTS, GET_SPRINT_DRAFT, GET_SPRINT_DRAFT_VISUALS, GET_SPRINT_PLAN_SIGNAL, GET_TICKET_READINESS, LOAD_SPRINT_DRAFT, PREVIEW_SPRINT_DRAFT_PUBLISH, PUBLISH_SPRINT_DRAFT,
-  RUN_SCOUT, SAVE_SPRINT_DRAFT_VISUAL, DROP_SPRINT_DRAFT_VISUAL, UPDATE_SPRINT_DRAFT_TICKET, USE_SPRINT_DRAFT_SPLIT, KEEP_SPRINT_DRAFT_SPLIT, SAVE_SPRINT_DRAFT_NEW_TICKET, REMOVE_SPRINT_DRAFT_NEW_TICKET,
+  RUN_SCOUT, SAVE_SPRINT_DRAFT_VISUAL, DROP_SPRINT_DRAFT_VISUAL, UPDATE_SPRINT_DRAFT_TICKET, USE_SPRINT_DRAFT_SPLIT, KEEP_SPRINT_DRAFT_SPLIT, SAVE_SPRINT_DRAFT_NEW_TICKET, CREATE_SPRINT_DRAFT_NEW_TICKETS, REMOVE_SPRINT_DRAFT_NEW_TICKET,
 } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import {
   UNASSIGNED, devColors, changeCount, dayOf, decisionLabel, findingKindLabel, forecastOf, handOffs, lateDays, lateText, shortDate, underWay, landingDay, lanes, openQuestionsOf, parseWave, ranks, teamStats, waitersOf, publishReadiness, scopeSummary, sortFindings,
-  developerLine, freeFrom, githubLine, laneCount, laneOf, moveForecast, moveLine, planRange, scheduleWindow, scheduled, spanOf, uncheckedStoryboard, waveRows, workingDayLabels,
+  developerLine, freeFrom, githubLine, laneCount, laneOf, moveForecast, moveLine, planRange, scheduleWindow, scheduled, spanOf, waveRows, workingDayLabels,
   undecidedFinding, capacityOf,
-  redoVisualPrompt, type DraftChange, type DraftFinding, type DraftVisual, type DraftTicket, type LaneBar, type NewTicketInput, type PlanSignal, type PlanningPanel, type PlanningSprint, type PublishResult, type ReadyItem, type SprintDraft, type TicketSummaryLite,
+  redoVisualPrompt, translatePrompt, acLineId, untranslatedKeys, draftSummaryText, type DraftChange, type DraftFinding, type DraftVisual, type DraftTicket, type LaneBar, type NewTicketInput, type PlanSignal, type PlanningPanel, type PlanningSprint, type PublishResult, type ReadyItem, type SprintDraft, type TicketSummaryLite,
 } from './planning';
 import { parseFlow, skippedStages } from './planningFlow';
 import { panelOf } from './plan';
 import { InfoTip } from './InfoTip';
 import { ScoutCell } from './ScoutCell';
 import { SplitRow } from './SplitBox';
-import { CHAT_FOLDED_KEY, TEAM_VIEW_KEY, chatFoldedOf, chatFoldedValue, findingGroups, outsidePlanOpen, panelBadge, remember, remembered, teamViewOf, type TeamView } from './boardLogic';
+import { CHAT_FOLDED_KEY, TEAM_VIEW_KEY, chatFoldedOf, chatFoldedValue, findingGroups, keyParts, outsidePlanOpen, panelBadge, remember, remembered, teamViewOf, type TeamView } from './boardLogic';
 
 const head = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
 const chip = 'rounded-xs border px-1.5 font-mono text-[0.6rem] font-bold uppercase tracking-[0.08em]';
 const NO_DEV = '__none';
 const DRAFT_STALE_MS = 10 * 60 * 1000;
-const summaryChip = 'rounded-sm border border-border bg-surface-1 px-2 py-0.5 text-secondary-foreground';
-const warnChip = 'rounded-sm border border-status-warn px-2 py-0.5 text-[var(--color-status-warn-ink)]';
 const TONE: Record<string, string> = {
   ok: 'border-status-merged text-status-merged', conflict: 'border-status-conflict text-status-conflict', warn: 'border-status-warn text-status-warn', none: 'border-border text-muted-foreground',
 };
@@ -568,31 +566,29 @@ const ScopePanel: React.FC<{ draft: SprintDraft; busy: boolean; onChange: (key: 
   );
 };
 
-/** An AC line longer than this many characters starts clamped to two lines in AC check. */
-const AC_LINE_CLAMP = 160;
-
-const FindingRow: React.FC<{ draft: SprintDraft; finding: DraftFinding; busy: boolean; onDecide: (id: string, action: string, note?: string) => void }> = ({ draft, finding, busy, onDecide }) => {
+const FindingRow: React.FC<{ draft: SprintDraft; finding: DraftFinding; summaries: Map<string, TicketSummaryLite>; busy: boolean; onDecide: (id: string, action: string, note?: string) => void }> = ({ draft, finding, summaries, busy, onDecide }) => {
   const late = finding.kind === 'after-it';
   const owner = draft.tickets.find((ticket) => ticket.key === finding.refKey)?.dev;
   const inPlan = draft.tickets.some((ticket) => ticket.key === finding.refKey);
   const when = finding.refEnd !== null && finding.ownEnd !== null ? `lands ${dayOf(finding.refEnd)}, ${finding.key} lands ${dayOf(finding.ownEnd)}` : null;
   const decided = decisionLabel(finding.decision, finding.refKey);
   const open = undecidedFinding(finding);
-  const [full, setFull] = useState(false);
-  const long = finding.text.length > AC_LINE_CLAMP;
+  const textId = acLineId(draft.tickets.find((ticket) => ticket.key === finding.key), summaries.get(finding.key), finding.line);
   return (
-    <li className={cn('grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-0.5 border-b border-border px-3 py-1.5 last:border-b-0 max-[760px]:grid-cols-[minmax(0,1fr)]', open ? 'border-l-2 border-l-status-warn' : 'opacity-70')}>
+    <li className={cn('grid grid-cols-[minmax(0,1fr)] gap-1.5 border-b border-border px-3 py-2 last:border-b-0', open ? 'border-l-2 border-l-status-warn' : 'opacity-70')}>
       <div className="min-w-0">
-        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.8rem] text-secondary-foreground">
-          <span className="font-mono font-semibold text-foreground">{finding.key}</span>
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.78rem] text-secondary-foreground">
           <span className={cn(chip, late ? TONE.warn : TONE.none)}>AC {finding.line}</span>
           <span className="font-mono font-semibold text-foreground" title={[owner, when].filter(Boolean).join(' · ') || undefined}>{finding.refKey}</span>
           <span className={cn(chip, late ? TONE.conflict : finding.kind === 'lands-first' ? TONE.ok : TONE.none)}>{findingKindLabel(finding.kind)}</span>
+          {owner && <span className="font-mono text-[0.66rem] text-muted-foreground">{owner}{when ? ` · ${when}` : ''}</span>}
         </p>
-        <p className={cn('mt-0.5 text-pretty text-[0.76rem] text-muted-foreground', long && !full && 'line-clamp-2')}>{finding.text}</p>
-        {long && <button type="button" className="text-[0.7rem] font-semibold text-accent hover:underline max-[760px]:min-h-11" aria-expanded={full} onClick={() => setFull((value) => !value)}>{full ? 'Show less' : 'Show all'}</button>}
+        <p className="mt-1 text-pretty break-words text-[0.8rem] text-foreground">
+          {keyParts(finding.text, finding.refKey).map((part, index) => (part.hit ? <mark key={index} className="rounded-xs bg-accent/20 px-0.5 font-mono font-semibold text-accent">{part.text}</mark> : <React.Fragment key={index}>{part.text}</React.Fragment>))}
+        </p>
+        {textId && <p className="mt-0.5 text-pretty break-words text-[0.76rem] text-muted-foreground">{textId}</p>}
       </div>
-      <div className="flex flex-wrap items-start justify-end gap-1.5 max-[760px]:justify-start">
+      <div className="flex flex-wrap items-center gap-1.5">
         {decided ? (
           <>
             <span className="self-center font-mono text-[0.64rem] text-muted-foreground">{decided}{finding.decision?.by ? ` · ${finding.decision.by}` : ''}</span>
@@ -612,29 +608,39 @@ const FindingRow: React.FC<{ draft: SprintDraft; finding: DraftFinding; busy: bo
   );
 };
 
-const AcPanel: React.FC<{ draft: SprintDraft; busy: boolean; onDecide: (id: string, action: string, note?: string) => void; onReferenceAll: (ids: string[]) => void }> = ({ draft, busy, onDecide, onReferenceAll }) => {
+const AcPanel: React.FC<{
+  draft: SprintDraft; summaries: Map<string, TicketSummaryLite>; busy: boolean; onDecide: (id: string, action: string, note?: string) => void; onReferenceAll: (ids: string[]) => void; onTranslate: (keys: string[]) => void;
+}> = ({ draft, summaries, busy, onDecide, onReferenceAll, onTranslate }) => {
   const findings = sortFindings(draft.findings);
   const unlinked = findings.filter((finding) => !finding.linked);
   if (!findings.length) return <p className="text-sm text-muted-foreground">No AC line names another ticket.</p>;
+  const groups = findingGroups(findings);
+  const untranslated = untranslatedKeys(draft, groups.map((group) => group.key), summaries);
   return (
     <section aria-label="AC check">
       <p className="text-[0.84rem] text-secondary-foreground">
         <b className="text-foreground">{unlinked.length}</b> AC lines name another ticket without a Blocks link; {findings.filter(undecidedFinding).length} not decided.
       </p>
       <p className="mt-1 flex items-center gap-1 text-[0.76rem] text-sky-200">Waits on the named ticket? Dependency. Info only? Move to Reference. <InfoTip label="About the AC check">AC holds only what is tested on this ticket. Dependency adds the Blocks link on Publish, and the QA bot holds the ticket until that one is in UAT CHECK. Nothing changes in Jira before Publish, and DOCK writes no comments.</InfoTip></p>
+      {untranslated.length > 0 && (
+        <p className="mt-1 flex flex-wrap items-center gap-2 text-[0.76rem] text-muted-foreground">
+          {untranslated.length} {untranslated.length === 1 ? 'ticket has' : 'tickets have'} no Indonesian lines yet.
+          <Button size="sm" variant="ghost" onClick={() => onTranslate(untranslated)}><Languages size={13} aria-hidden="true" />Translate with the agent</Button>
+        </p>
+      )}
       <div className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
-        {findingGroups(findings).map((group) => {
+        {groups.map((group) => {
           const outside = outsidePlanOpen(group.findings, group.key);
           const left = group.findings.filter(undecidedFinding).length;
           return (
             <section key={group.key} aria-label={group.key} className="border-b border-border last:border-b-0">
-              <div className="flex flex-wrap items-center gap-2 bg-surface-1 px-3 py-1.5 text-[0.78rem]">
+              <div className="flex flex-wrap items-start gap-x-2 gap-y-1 bg-surface-1 px-3 py-2 text-[0.8rem]">
                 <b className="font-mono">{group.key}</b>
-                <span className="min-w-0 flex-1 truncate text-secondary-foreground">{draft.tickets.find((ticket) => ticket.key === group.key)?.summary ?? ''}</span>
+                <span className="min-w-0 flex-1 text-pretty text-foreground">{draft.tickets.find((ticket) => ticket.key === group.key)?.summary ?? ''}</span>
                 <span className="font-mono text-[0.66rem] text-muted-foreground">{left} left</span>
                 {outside.length > 1 && <Button size="sm" onClick={() => onReferenceAll(outside.map((finding) => finding.id))} disabled={busy}><FileInput size={13} aria-hidden="true" />All {outside.length} outside plan → Reference</Button>}
               </div>
-              <ul>{group.findings.map((finding) => <FindingRow key={finding.id} draft={draft} finding={finding} busy={busy} onDecide={onDecide} />)}</ul>
+              <ul>{group.findings.map((finding) => <FindingRow key={finding.id} draft={draft} finding={finding} summaries={summaries} busy={busy} onDecide={onDecide} />)}</ul>
             </section>
           );
         })}
@@ -647,10 +653,10 @@ const VIEW_TABS: Array<[TeamView, string, typeof LayoutGrid]> = [['board', 'Boar
 
 /** Team map: Board (lanes and cards with what to decide) or Schedule (load, waves, days, order of work and hand-offs), and the split page row. */
 const TeamMap: React.FC<{
-  draft: SprintDraft; plan: DraftTicket[]; view: TeamView; perDev: number; busy: boolean; readOnly: boolean; onView: (view: TeamView) => void;
+  draft: SprintDraft; plan: DraftTicket[]; summaries: Map<string, TicketSummaryLite>; view: TeamView; perDev: number; busy: boolean; readOnly: boolean; onView: (view: TeamView) => void;
   onMove: (keys: string[], to: string) => void; onDecide: (id: string, action: string, note?: string) => void; onCheckStoryboards: () => void; onShowPanel: (panel: PlanningPanel) => void;
   onUseSplit: (keys: string[]) => void; onKeepSplit: (keys: string[]) => void;
-}> = ({ draft, plan, view, perDev, busy, readOnly, onView, onMove, onDecide, onCheckStoryboards, onShowPanel, onUseSplit, onKeepSplit }) => (
+}> = ({ draft, plan, summaries, view, perDev, busy, readOnly, onView, onMove, onDecide, onCheckStoryboards, onShowPanel, onUseSplit, onKeepSplit }) => (
   <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
     <div role="group" aria-label="Team map view" className="inline-flex w-max overflow-hidden rounded-xs border border-border">
       {VIEW_TABS.map(([id, label, Icon]) => (
@@ -662,7 +668,7 @@ const TeamMap: React.FC<{
     </div>
     {draft.split && <SplitRow split={draft.split} busy={busy || readOnly} onUse={onUseSplit} onKeep={onKeepSplit} />}
     {view === 'board'
-      ? <PlanningBoard draft={draft} perDev={perDev} busy={busy} readOnly={readOnly} onDecide={onDecide} onCheckStoryboards={onCheckStoryboards} onShowPanel={onShowPanel} renderFinding={(finding) => <FindingRow key={finding.id} draft={draft} finding={finding} busy={busy} onDecide={onDecide} />} />
+      ? <PlanningBoard draft={draft} perDev={perDev} busy={busy} readOnly={readOnly} onDecide={onDecide} onCheckStoryboards={onCheckStoryboards} onShowPanel={onShowPanel} renderFinding={(finding) => <FindingRow key={finding.id} draft={draft} finding={finding} summaries={summaries} busy={busy} onDecide={onDecide} />} />
       : <fieldset disabled={readOnly} className="contents"><TeamPanel draft={draft} plan={plan} busy={busy} onMove={onMove} /></fieldset>}
   </div>
 );
@@ -803,18 +809,20 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
   const [publish, publishing] = useMutation(PUBLISH_SPRINT_DRAFT);
   const [saveNewTicket, savingNew] = useMutation(SAVE_SPRINT_DRAFT_NEW_TICKET);
   const [removeNewTicket, removingNew] = useMutation(REMOVE_SPRINT_DRAFT_NEW_TICKET);
+  const [createNewTickets, creatingNew] = useMutation<{ createSprintDraftNewTickets: PublishResult[] }>(CREATE_SPRINT_DRAFT_NEW_TICKETS);
   const [preview, previewing] = useLazyQuery<{ previewSprintDraftPublish: DraftChange[] }>(PREVIEW_SPRINT_DRAFT_PUBLISH, { fetchPolicy: 'network-only' });
   const full = draftQuery.data?.sprintDraft ?? null;
   // Merged cards are on the plan only: every panel works on the cards still to build, the schedule draws them all.
   const draft = full && { ...full, tickets: scheduled(full.tickets) };
-  const busy = loading.loading || updating.loading || deciding.loading || publishing.loading || checking.loading || moving.loading || usingSplit.loading || keepingSplit.loading || savingVisual.loading || droppingVisual.loading || savingNew.loading || removingNew.loading;
-  // The planning agent's Indonesian title and AC lines, for Tiket saya.
+  const busy = loading.loading || updating.loading || deciding.loading || publishing.loading || checking.loading || moving.loading || usingSplit.loading || keepingSplit.loading || savingVisual.loading || droppingVisual.loading || savingNew.loading || removingNew.loading || creatingNew.loading;
+  // The planning agent's Indonesian title and AC lines, for Tiket saya, AC check and the Board's card details.
   const ownerQuery = useQuery<{ ownerName: string }>(GET_OWNER_NAME, { fetchPolicy: 'cache-first' });
   const me = signal?.me ?? ownerQuery.data?.ownerName ?? null;
   const summaryQuery = useQuery<{ ticketReadiness: { tickets: Array<{ key: string; summary: TicketSummaryLite | null }> } }>(GET_TICKET_READINESS, {
     variables: { keys: draft?.tickets.map((ticket) => ticket.key) ?? [], refs: [] },
-    skip: !draft || shown !== 'mine',
+    skip: !draft || (shown !== 'mine' && shown !== 'ac' && shown !== 'team'),
     fetchPolicy: 'cache-and-network',
+    pollInterval: shown === 'ac' ? 30000 : 0,
   });
   const summaries = new Map((summaryQuery.data?.ticketReadiness.tickets ?? []).flatMap((item) => (item.summary ? [[item.key, item.summary] as const] : [])));
 
@@ -851,6 +859,18 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
     }
   };
   const onRemoveNewTicket = (id: string) => draft && run(removeNewTicket({ variables: { sprint: draft.sprint, id } }), 'The new ticket could not be removed');
+  const onCreateNewTickets = async (ids: string[]) => {
+    if (!draft) return [];
+    setNotice(null);
+    try {
+      const res = await createNewTickets({ variables: { sprint: draft.sprint, ids } });
+      await draftQuery.refetch();
+      return res.data?.createSprintDraftNewTickets ?? [];
+    } catch (failure) {
+      setNotice(errorText(failure, 'The new tickets could not be created'));
+      return [];
+    }
+  };
   const onScout = (key: string) => run(runScout({ variables: { key } }), 'The scout could not start');
   const onCheckStoryboards = () => draft && run(checkStoryboards({ variables: { sprint: draft.sprint } }), 'The storyboard could not be read');
   const onSaveVisual = (id: string) => draft && run(saveVisual({ variables: { sprint: draft.sprint, id } }), 'The visual could not be saved');
@@ -890,8 +910,6 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
   if (sprints.error && !sprints.data) return <p className="text-sm text-status-conflict" role="alert">{sprints.error.message}</p>;
   if (!sprints.data && sprints.loading) return <p className="text-sm text-muted-foreground" role="status">Loading the board's sprints...</p>;
   if (!chosen) return <p className="text-sm text-muted-foreground">No active or future sprint on the board. Create the sprint in Jira, then come back.</p>;
-  const late = draft?.findings.filter((finding) => finding.kind === 'after-it').length ?? 0;
-  const storyboardChecks = draft ? uncheckedStoryboard(draft).length : 0;
   const ready = draft ? publishReadiness(draft, flow) : null;
   const showPanel = (next: PlanningPanel) => {
     setVisualId(null);
@@ -911,17 +929,12 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
           <Select aria-label="Sprint to plan" className="w-[260px] max-[760px]:w-full" value={String(chosen.id)} onValueChange={(value) => setSprintId(Number(value))} options={options.map((sprint) => ({ value: String(sprint.id), label: `${sprint.name}${sprint.state === 'active' ? ' (active)' : ''}` }))} />
           <PlanningStatus signal={signal} />
           {draft && (
-            <p aria-label="Draft summary" className="flex flex-wrap items-center gap-1.5 font-mono text-[0.72rem] font-semibold">
-              <span className={summaryChip}>{draft.tickets.length} open tickets</span>
-              <span className={summaryChip}>{draft.sprintDays} working days</span>
-              <span className={summaryChip}>{draft.devs.length} dev</span>
-              {late > 0 && <span className={warnChip}>{late} AC waiting on other tickets</span>}
-              {storyboardChecks > 0 && <span className={warnChip}>{storyboardChecks} AC to recheck, storyboard changed</span>}
-              {draft.blockers.length > 0 && <span className={warnChip}>{draft.blockers.length} need a decision</span>}
+            <p aria-label="Draft summary" className="flex items-center gap-1.5 text-[0.78rem] text-muted-foreground">
+              {draftSummaryText(draft)}
               <InfoTip label="About the summary">
                 {draft.landed > 0 ? `${draft.landed} tickets of this sprint are merged and not counted. ` : ''}
                 {draft.carriedPast ? `${draft.carriedPast} merged tickets carried from the last sprint are not shown. ` : ''}
-                Zero counts are not shown.
+                AC lines waiting on other tickets and open decisions are in the bar below and on the AC check tab.
               </InfoTip>
             </p>
           )}
@@ -972,15 +985,15 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
             {!openVisual && shown === 'order' && <PlanTab />}
             {!openVisual && shown === 'team' && (
               <TeamMap
-                draft={draft} plan={full?.tickets ?? []} view={view} perDev={capacity?.perDev ?? 0} busy={busy} readOnly={!planner} onView={chooseView}
+                draft={draft} plan={full?.tickets ?? []} summaries={summaries} view={view} perDev={capacity?.perDev ?? 0} busy={busy} readOnly={!planner} onView={chooseView}
                 onMove={onMove} onDecide={onDecide} onCheckStoryboards={onCheckStoryboards} onShowPanel={showPanel} onUseSplit={onUseSplit} onKeepSplit={onKeepSplit}
               />
             )}
             <fieldset disabled={!planner} className="contents">
             {!openVisual && shown === 'scope' && <ScopePanel draft={draft} busy={busy} onChange={onChange} onDecide={onDecide} onScout={onScout} />}
-            {!openVisual && shown === 'ac' && <AcPanel draft={draft} busy={busy} onDecide={onDecide} onReferenceAll={onReferenceAll} />}
+            {!openVisual && shown === 'ac' && <AcPanel draft={draft} summaries={summaries} busy={busy} onDecide={onDecide} onReferenceAll={onReferenceAll} onTranslate={(keys) => openChat(translatePrompt(draft.sprint, keys))} />}
             {!openVisual && shown === 'storyboard' && <StoryboardBoard draft={draft} busy={busy} onCheck={onCheckStoryboards} onDecide={onDecide} />}
-            {!openVisual && shown === 'new' && <NewTicketsPanel draft={draft} busy={busy} onSave={onSaveNewTicket} onRemove={onRemoveNewTicket} />}
+            {!openVisual && shown === 'new' && <NewTicketsPanel draft={draft} busy={busy} onSave={onSaveNewTicket} onRemove={onRemoveNewTicket} onCreate={onCreateNewTickets} />}
             {openVisual && <PlanningVisual visual={openVisual} sprint={draft.sprint} busy={busy} onSave={() => onSaveVisual(openVisual.id)} onDiscard={() => onDiscardVisual(openVisual.id)} onRedo={() => openChat(redoVisualPrompt(openVisual.title))} />}
             </fieldset>
             {ready && <PlanningBar draft={draft} ready={ready} signal={signal} busy={busy} onShow={showPanel} onPublish={() => void onPublish()} onRepublish={() => void onRepublish()} />}

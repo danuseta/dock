@@ -64,6 +64,13 @@ export function findingGroups(findings: DraftFinding[]): Array<{ key: string; fi
   return [...groups].map(([key, rows]) => ({ key, findings: rows }));
 }
 
+/** An AC line cut around every mention of the named ticket, so the row can highlight it. */
+export function keyParts(text: string, key: string): Array<{ text: string; hit: boolean }> {
+  if (!key) return [{ text, hit: false }];
+  const pattern = new RegExp(`(${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})(?!\\d)`, 'gi');
+  return text.split(pattern).filter(Boolean).map((part) => ({ text: part, hit: part.toLowerCase() === key.toLowerCase() }));
+}
+
 /** The count badge of a panel tab; 0 shows no badge. */
 export function panelBadge(panel: PlanningPanel, draft: Pick<SprintDraft, 'tickets' | 'newTickets' | 'findings' | 'storyboards'>): number {
   if (panel === 'ac') return draft.findings.filter(undecidedFinding).length;

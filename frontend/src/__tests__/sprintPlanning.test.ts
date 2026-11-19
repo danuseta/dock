@@ -70,7 +70,7 @@ test('waves close on their last ticket and are late past the sprint; scope sums 
 test('findings sort after-it first and decisions read as words', () => {
   const sorted = sortFindings([finding({ key: 'QRD-3' }), finding({ key: 'QRD-9', kind: 'after-it' }), finding({ key: 'QRD-1', line: 2 })]);
   assert.deepEqual(sorted.map((item) => item.key), ['QRD-9', 'QRD-1', 'QRD-3']);
-  assert.deepEqual(['after-it', 'lands-first', 'outside-plan'].map(findingKindLabel), ['after it', 'lands first', 'outside plan']);
+  assert.deepEqual(['after-it', 'lands-first', 'outside-plan'].map(findingKindLabel), ['lands after it', 'lands first', 'outside the sprint']);
   const decision = (action: string, note: string | null = null) => ({ action, note, by: 'Alvin', at: '' });
   assert.equal(decisionLabel(decision('move'), 'QRD-2'), 'Moved to QRD-2');
   assert.equal(decisionLabel(decision('dependency')), 'Dependency · Blocks link added on Publish');

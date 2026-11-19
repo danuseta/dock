@@ -76,6 +76,8 @@ export interface AgentRun {
   approved?: boolean;
   /** The guessed decisions (GUESS, USULAN) the owner confirmed in DOCK. */
   confirmedDecisions?: number[];
+  /** The confirmed guesses DOCK kept on its own because the ticket was done or merged. */
+  autoConfirmedDecisions?: number[];
   blockers?: number;
   activity: string;
   activityDetail?: string | null;

@@ -4,7 +4,7 @@ import { Check, ChevronDown, ChevronUp, Gavel, Pencil, RotateCcw, Sparkles, X } 
 import { Button, Select, Textarea } from '../components/ui';
 import { GET_JUDGE_DAYS, GET_RETRO, GET_SPRINT_LIST, JUDGE_NOW, JUDGE_SPRINT, RETRO_BUILD, RETRO_ITEM_ACTION } from '../graphql/queries';
 import { cn } from '../lib/cn';
-import { CAUSE_LABEL, SHOWN_PROBLEMS, beforeText, buildResult, causeShare, idNumber, keyList, problemLabel, reviewSummary, shownNumbers, type Retro, type RetroEscalations, type RetroItem } from './retro';
+import { CAUSE_LABEL, SHOWN_PROBLEMS, beforeText, buildResult, causeShare, idNumber, keyList, problemLabel, retroLineState, reviewSummary, shownNumbers, type Retro, type RetroEscalations, type RetroItem } from './retro';
 import { InfoTip } from './InfoTip';
 import { JudgeDays } from './JudgeDays';
 import { SourceChips, SprintSheet } from './SprintSheet';
@@ -39,8 +39,7 @@ const Line: React.FC<{ item: RetroItem; onAction: (id: string, action: string, t
         {more > 0 && <button type="button" className={fold} onClick={() => setAllEvidence(!allEvidence)}>{allEvidence ? <ChevronUp size={12} aria-hidden="true" /> : <ChevronDown size={12} aria-hidden="true" />}{allEvidence ? 'Hide evidence' : `${more} more evidence`}</button>}
         <p className="mt-1 font-mono text-[0.64rem] text-muted-foreground">
           goes to {DEST_LABEL[item.dest] ?? item.dest}
-          {item.status === 'accepted' && <span className="text-status-merged"> · accepted{item.sessionId ? ', sous is applying it' : item.dest === 'qa-agent' ? ', open a PR to the QA bot repo' : ''}</span>}
-          {item.status === 'closed' && <span> · closed</span>}
+          {item.status === 'closed' ? <span> · closed</span> : <span className={cn(item.status === 'accepted' && 'text-status-merged')}> · {retroLineState(item)}</span>}
         </p>
       </div>
       <div className="flex flex-wrap items-start justify-end gap-1.5 max-[760px]:justify-start">
@@ -333,6 +332,7 @@ export const RetroTab: React.FC<{ onNavigate?: (path: string) => void }> = ({ on
 
       <section aria-label="Keep, Problem, Try">
         <h3 className={head}>Keep · Problem · Try {merged.length > 0 && <span className="font-medium normal-case tracking-normal">· {open} waiting on you</span>}</h3>
+        {merged.length > 0 && <p className="mt-1 text-[0.76rem] text-muted-foreground">Ledger lines are applied automatically when sous posts the draft. Judge lines wait for you to accept them.</p>}
         {merged.length === 0
           ? <p className="mt-2 text-sm text-muted-foreground">No draft yet. Draft asks sous to write one from this sprint's runs, with evidence on every line.</p>
           : <ol className="mt-1">{merged.map((entry) => <Line key={entry.item.id} item={entry.item} sources={view === 'both' ? entry.sources : undefined} onAction={(_id, action, text) => onMerged(entry, action, text)} busy={acting.loading} />)}</ol>}

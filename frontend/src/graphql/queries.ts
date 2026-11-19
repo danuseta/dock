@@ -255,6 +255,7 @@ export const GET_OWNER_QUESTIONS = gql`
       issues { n at type text level status resolvedBy resolvedAt options effects textId optionsId }
       decisions { n at text status by issue cancelNote effect alts { label effect } replaces supersededBy textId optionsId }
       confirmedDecisions
+      autoConfirmedDecisions
     }
   }
 `;
@@ -665,6 +666,7 @@ export const ORCHESTRATION_FIELDS = `
   brief
   decisions { n at text status by issue cancelNote effect alts { label effect } replaces supersededBy textId optionsId }
   confirmedDecisions
+  autoConfirmedDecisions
   assumptions { n text falsifier state evidence }
   failures { at type what evidence attempt }
   closing { hours fixRounds replans }
@@ -1066,6 +1068,12 @@ export const DECIDE_SPRINT_DRAFT = gql`
 export const SAVE_SPRINT_DRAFT_NEW_TICKET = gql`
   mutation SaveSprintDraftNewTicket($sprint: String!, $id: ID, $input: SprintDraftNewTicketInput!) {
     saveSprintDraftNewTicket(sprint: $sprint, id: $id, input: $input) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const CREATE_SPRINT_DRAFT_NEW_TICKETS = gql`
+  mutation CreateSprintDraftNewTickets($sprint: String!, $ids: [ID!]) {
+    createSprintDraftNewTickets(sprint: $sprint, ids: $ids) { key kind status detail }
   }
 `;
 

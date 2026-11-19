@@ -33,6 +33,9 @@ test('a confirmation becomes an owner decision with the same text that supersede
   assert.deepStrictEqual(confirmArgs('QRD-1511', { n: 2, text: 'Tooltip shows name and version' }), [
     'decide', 'QRD-1511', 'Owner confirmed D-2 in DOCK: Tooltip shows name and version', '--status', 'DECIDED', '--by', 'owner', '--replaces', '2',
   ]);
+  assert.deepStrictEqual(confirmArgs('QRD-1511', { n: 2, text: 'Tooltip shows name and version' }, 'ticket done'), [
+    'decide', 'QRD-1511', 'DOCK (ticket done) kept D-2: Tooltip shows name and version', '--status', 'DECIDED', '--by', 'agent', '--replaces', '2',
+  ], 'a guess DOCK kept on its own says so and is decided by the agent');
 });
 
 test('confirmed guesses are written to the ledger and DOCK gets the new ledger', async () => {

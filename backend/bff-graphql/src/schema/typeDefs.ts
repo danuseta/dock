@@ -1844,6 +1844,8 @@ export const typeDefs = gql`
     approved: Boolean!
     """The guessed decisions (GUESS, USULAN) the owner confirmed in DOCK."""
     confirmedDecisions: [Int!]!
+    """The confirmed guesses DOCK kept on its own because the ticket was done or merged; the owner did not answer them."""
+    autoConfirmedDecisions: [Int!]!
     blockers: Int!
     activity: String!
     activityDetail: String
@@ -2624,6 +2626,8 @@ export const typeDefs = gql`
     saveSprintDraftNewTicket(sprint: String!, id: ID, input: SprintDraftNewTicketInput!): SprintDraft!
     "Removes a drafted new ticket; its NEW-n id is not given out again."
     removeSprintDraftNewTicket(sprint: String!, id: ID!): SprintDraft!
+    "Creates drafted new tickets in Jira in the draft's sprint without publishing the plan; no ids takes every one not created yet."
+    createSprintDraftNewTickets(sprint: String!, ids: [ID!]): [SprintDraftPublishResult!]!
     """Writes AC lines and assignees that differ from Jira. Refused while a blocker has no decision."""
     publishSprintDraft(sprint: String!): [SprintDraftPublishResult!]!
     "move, not-tested, wait, needs-po or clear on a held AC line of the owner's ticket."

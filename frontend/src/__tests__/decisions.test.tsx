@@ -6,7 +6,7 @@ import type { AgentRun } from '../agents/runs';
 import { AnswerSheet } from '../decisions/AnswerSheet';
 import { QuestionView } from '../decisions/QuestionView';
 import { TicketList } from '../decisions/TicketList';
-import { KEEP, KEEP_EFFECT, OWN, answerText, liveDrafts, questionCount, readyToSubmit, questionsOf, staleSent, submissionOf, unansweredGuesses, type Draft } from '../decisions/questions';
+import { KEEP, KEEP_EFFECT, OWN, answerText, autoKeptGuesses, liveDrafts, questionCount, readyToSubmit, questionsOf, staleSent, submissionOf, unansweredGuesses, type Draft } from '../decisions/questions';
 import { homeAttention, ticketAttention, ticketQuestions } from '../lib/attention';
 
 const issue = (n: number, level: string, status = 'open', options: string[] = [], effects?: Array<string | null>) => ({ n, at: '', type: 'QUESTION', text: `Issue ${n}`, level, status, options, effects });
@@ -193,4 +193,10 @@ test('QRD-1534: every question and option has its Indonesian line in grey under 
 
   const plain = renderToStaticMarkup(<QuestionView run={run} question={questionsOf(run)[0]} number={1} total={3} sentCount={0} readOnly={null} guessesLeft={0} onKeepAll={() => undefined} onChange={() => undefined} onPrevious={() => undefined} onNext={() => undefined} />);
   assert.doesNotMatch(plain, /<\/h2><p[^>]*lang="id"/, 'no translation, no grey line under the question');
+});
+
+test('the guesses DOCK kept on a done ticket are listed with their text and are no longer asked', () => {
+  const done = { ...run, key: 'QRD-10', confirmedDecisions: [4, 5, 6], autoConfirmedDecisions: [4, 6], issues: [] } as AgentRun;
+  assert.deepStrictEqual(autoKeptGuesses([run, done]), [{ key: 'QRD-10', n: 4, text: 'Backoff 1s to 30s' }, { key: 'QRD-10', n: 6, text: 'Keep the last state in sessionStorage' }]);
+  assert.deepStrictEqual(questionsOf(done), [], 'a kept guess is not asked again');
 });

@@ -981,11 +981,21 @@ export class SprintDraftService {
   }
 
   /** Creates each new ticket in the sprint's project; one failure never stops the others. */
-  private async createNewTickets(sprint: string, jira: DraftJira): Promise<PublishResult[]> {
+  /** Creates new tickets in Jira on their own, without publishing the plan; ids null takes every one not created yet. */
+  async createNewTicketsOnly(sprint: string, ids: string[] | null): Promise<PublishResult[]> {
+    await this.mayEdit();
+    const open = this.plannedCreates(await this.row(sprint)).map((change) => change.create!.id);
+    const unknown = (ids ?? []).filter((id) => !open.includes(id));
+    if (unknown.length) throw new SprintInputError(`${unknown.join(', ')} is not a new ticket of the ${sprint} draft waiting to be created`);
+    if (!open.length) throw new SprintInputError(`The ${sprint} draft has no new ticket waiting to be created`);
+    return this.createNewTickets(sprint, await this.jira(), ids);
+  }
+
+  private async createNewTickets(sprint: string, jira: DraftJira, ids: string[] | null = null): Promise<PublishResult[]> {
     const row = await this.row(sprint);
     const project = sprintProject(row.tickets.map((ticket) => ticket.key));
     const results: PublishResult[] = [];
-    for (const change of this.plannedCreates(row)) {
+    for (const change of this.plannedCreates(row).filter((item) => !ids || ids.includes(item.create!.id))) {
       const ticket = change.create!;
       if (change.refused) {
         await this.store.updateSprintDraftNewTicket(sprint, ticket.id, { error: change.refused });

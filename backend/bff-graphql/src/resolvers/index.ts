@@ -11,7 +11,8 @@ import { upstreamMonitorService } from '../integrations/upstream-monitor';
 import { dockerRuntimeService } from '../integrations/docker-runtime';
 import { OrchestratorInputError, attentionItems, normalizeTicketKey, orchestratorService, type Orchestration } from '../integrations/orchestrator';
 import { CHAT_MACHINE, chatService } from '../integrations/chat';
-import { MANUAL_DESTS, qaEscalations, retroApplyPrompt, retroNumbers, retroProblems, retroTickets, runsInWindow, triageSuggestions } from '../integrations/retro';
+import { qaEscalations, retroNumbers, retroProblems, retroTickets, runsInWindow, triageSuggestions } from '../integrations/retro';
+import { acceptRetroLine } from '../integrations/retro-apply';
 import { StorageService } from '../storage/service';
 import { activeSprint } from '../integrations/sprint-plan';
 import { lookupDependencies } from '../integrations/dependency-lookup';
@@ -758,6 +759,7 @@ export const resolvers = {
   Orchestration: {
     approved: async (parent: { key: string }) => approvalRecords.approved(parent.key).catch(() => false),
     confirmedDecisions: async (parent: { key: string }) => decisionGate.confirmed(parent.key).catch(() => []),
+    autoConfirmedDecisions: async (parent: { key: string }) => decisionGate.autoConfirmed(parent.key).catch(() => []),
     events: async (parent: { key: string }) => orchestratorService.events(parent.key),
     timeline: async (parent: { key: string }) => orchestratorService.timeline(parent.key),
     members: async (parent: { key: string }) => orchestratorService.members(parent.key).catch(() => []),
@@ -817,6 +819,7 @@ export const resolvers = {
       sprintDraftService.saveNewTicket(sprint, id ?? null, { ...input }).then((saved) => saved.view).catch(planningError)
     ),
     removeSprintDraftNewTicket: (_: unknown, { sprint, id }: { sprint: string; id: string }) => sprintDraftService.removeNewTicket(sprint, id).catch(planningError),
+    createSprintDraftNewTickets: (_: unknown, { sprint, ids }: { sprint: string; ids?: string[] | null }) => sprintDraftService.createNewTicketsOnly(sprint, ids ?? null).catch(planningError),
     answerSprintDraftQuestion: (_: unknown, { sprint, id, answered, text }: { sprint: string; id: string; answered: boolean; text?: string | null }) => (
       sprintDraftService.answer(sprint, id, answered, reporterName(), text ?? null).catch(planningError)
     ),
@@ -924,9 +927,7 @@ export const resolvers = {
       }
       if (action === 'close' || action === 'reopen') return retroItemView(await storageService.updateRetroItem(id, { status: action === 'close' ? 'closed' : 'open' }));
       if (action !== 'accept') throw new GraphQLError('action must be accept, close, reopen or edit', { extensions: { code: 'BAD_USER_INPUT' } });
-      const view = retroItemView(item);
-      const sessionId = MANUAL_DESTS.includes(item.dest) ? null : await runSousPrompt(`Retro-apply-${item.sprint}`, retroApplyPrompt(view));
-      return retroItemView(await storageService.updateRetroItem(id, { status: 'accepted', sessionId }));
+      return retroItemView(await acceptRetroLine(item, { update: (lineId, data) => storageService.updateRetroItem(lineId, data), run: (title, prompt) => runSousPrompt(title, prompt) }));
     },
     workspaceMkdir: async (_: unknown, { path }: { path: string }) => {
       requireWorkspaceFiles();
@@ -1363,6 +1364,7 @@ export const protectedMutations = [
   'decideSprintDraft',
   'saveSprintDraftNewTicket',
   'removeSprintDraftNewTicket',
+  'createSprintDraftNewTickets',
   'saveSprintDraftVisual',
   'dropSprintDraftVisual',
   'refreshSprintDraftQa',

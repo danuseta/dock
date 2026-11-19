@@ -801,6 +801,24 @@ test('the Jira client creates an issue and finds assignable users of a project b
   assert.deepEqual(calls[1], ['post', '/rest/api/3/issue', { fields: { summary: 'x' } }]);
 });
 
+test('Create in Jira makes the chosen new tickets only: no AC, assignee or link is written and the draft stays unpublished', async () => {
+  const { service, store, jira } = setup();
+  await service.load(26, 'Alvin');
+  await service.moveCards('QRD Sprint 26', ['QRD-1'], 'Aken').catch(() => undefined);
+  await service.saveNewTicket('QRD Sprint 26', null, NEW_TICKET);
+  await service.saveNewTicket('QRD Sprint 26', null, { ...NEW_TICKET, summary: '[FE] Second one' });
+  const status = store.draft.status;
+  const one = await service.createNewTicketsOnly('QRD Sprint 26', ['NEW-2']);
+  assert.deepEqual(one.map((result) => [result.key, result.status, result.detail]), [['NEW-2', 'created', 'QRD-1601']]);
+  assert.deepEqual(jira.writes, [], 'nothing but the new ticket reaches Jira');
+  assert.equal(store.draft.status, status);
+  assert.equal(store.draft.newTickets.find((ticket: any) => ticket.id === 'NEW-1').createdKey ?? null, null, 'a ticket not chosen waits');
+  const rest = await service.createNewTicketsOnly('QRD Sprint 26', null);
+  assert.deepEqual(rest.map((result) => [result.key, result.status]), [['NEW-1', 'created']]);
+  await assert.rejects(service.createNewTicketsOnly('QRD Sprint 26', null), /no new ticket waiting to be created/);
+  await assert.rejects(service.createNewTicketsOnly('QRD Sprint 26', ['NEW-9']), /NEW-9 is not a new ticket/);
+});
+
 test('the project of the new tickets comes from the sprint keys, QRD without any', () => {
   assert.equal(sprintProject(['ABC-1', 'ABC-2', 'QRD-3']), 'ABC');
   assert.equal(sprintProject([]), 'QRD');
