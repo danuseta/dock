@@ -167,7 +167,7 @@ const TeamPanel: React.FC<{ draft: SprintDraft; plan: DraftTicket[]; busy: boole
         <p className="mt-2 text-pretty font-mono text-[0.78rem] text-secondary-foreground">
           Due <b className="text-foreground">{dayDate(forecast.due)}</b> · forecast <b className="text-foreground">{dayDate(forecast.day)}</b> · <b className={lateTone}>{lateText(forecast.late)}</b>
         </p>
-        <p className="mt-2 max-w-[76ch] text-pretty text-[0.8rem] text-muted-foreground">
+        <p className="mt-2 text-pretty text-[0.8rem] text-muted-foreground">
           <b className="text-foreground">{stats.cards} cards, {stats.sp} SP</b> across <b className="text-foreground">{stats.devs} {stats.devs === 1 ? 'developer' : 'developers'}</b>, a target of <b className="text-foreground">{fmt(stats.target)} SP</b> each.{' '}
           <b className="text-foreground">{stats.landCards} {stats.landCards === 1 ? 'card' : 'cards'} ({stats.landSp} SP)</b> land by day {draft.sprintDays}{dateOf(draft.sprintDays) ? ` (${dateOf(draft.sprintDays)})` : ''}. The heaviest and the lightest lane are <b className="text-foreground">{stats.spread} SP</b> apart.
         </p>
