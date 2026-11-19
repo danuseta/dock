@@ -595,8 +595,13 @@ export class StorageService {
     return Number(row?.total ?? 0);
   }
 
-  countRunningAutoReviews() {
-    return this.db.autoReview.count({ where: { status: { in: ['running', 'deciding'] } } });
+  /** Auto reviews still at work: deciding, starting, or running with a turn taken or queued. A run whose session went quiet without a verdict does not count. */
+  async countRunningAutoReviews() {
+    const [row] = await this.db.$queryRaw<Array<{ total: number | bigint }>>(Prisma.sql`
+      SELECT COUNT(*) AS "total" FROM "AutoReview" a
+      WHERE a."status" = 'deciding' OR (a."status" = 'running' AND (a."sessionId" IS NULL OR EXISTS (
+        SELECT 1 FROM "ChatMessage" m WHERE m."sessionId" = a."sessionId" AND m."state" IN ('taken', 'queued'))))`);
+    return Number(row?.total ?? 0);
   }
 
   getJudgeSession(sessionId: string) {

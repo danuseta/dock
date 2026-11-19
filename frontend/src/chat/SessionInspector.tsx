@@ -81,8 +81,8 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, cos
   const changesRepo = run?.pullRequests?.[0]?.repo ?? run?.prBe ?? run?.prFe ?? null;
   return (
     <aside className={cn('flex min-h-0 flex-col gap-4 overflow-y-auto bg-surface-0 p-3.5', className)} aria-label="Session details">
-      <section className={cn('flex flex-col gap-1.5', sessionRows.length === 0 && (costUsd != null ? 'min-[761px]:hidden' : 'hidden'))} aria-label="Session">
-        <h3 className={label}>Session</h3>
+      <div className="flex flex-col gap-1">
+      <section className={cn('flex flex-col', sessionRows.length === 0 && (costUsd != null ? 'min-[761px]:hidden' : 'hidden'))} aria-label="Session">
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-[0.72rem]">
           {sessionRows.map((row) => (
             <React.Fragment key={row.field}><dt className="text-muted-foreground">{row.label}</dt><dd className="min-w-0 truncate text-right text-secondary-foreground">{row.value}</dd></React.Fragment>
@@ -91,6 +91,7 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, cos
         </dl>
       </section>
       <SessionUsage usage={usageData?.claudeSessionUsage} />
+      </div>
       <section className="flex flex-col gap-2.5" aria-label="Ticket">
         <div className="flex items-center justify-between gap-2">
           <h3 className={label}>Ticket</h3>

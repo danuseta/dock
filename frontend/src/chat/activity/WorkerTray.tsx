@@ -14,12 +14,14 @@ interface WorkerTrayProps {
   activeId?: string | null;
   /** Filters the thread to one worker; picking the active one again clears the filter. Without it the rows only show. */
   onSelect?: (workerId: string | null) => void;
+  /** Folded to its count line until the owner opens it. */
+  defaultOpen?: boolean;
 }
 
 /** The subagents of the session, kept above the composer so they stay in view while the lead goes on talking. */
-export const WorkerTray: React.FC<WorkerTrayProps> = ({ events, activeId, onSelect }) => {
+export const WorkerTray: React.FC<WorkerTrayProps> = ({ events, activeId, onSelect, defaultOpen = false }) => {
   const workers = useMemo(() => byRecency(trayWorkers(events)), [events]);
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(defaultOpen);
   const [all, setAll] = useState(false);
   const running = workers.filter((worker) => worker.agent.status === 'running').length;
   const now = useNow(running > 0);
@@ -62,7 +64,7 @@ export const WorkerTray: React.FC<WorkerTrayProps> = ({ events, activeId, onSele
           })}
         </ul>
       )}
-      {hidden > 0 && (
+      {open && hidden > 0 && (
         <ul className="m-0 flex list-none flex-wrap gap-1 p-0">
           {chips.map((worker) => {
             const chipClass = cn('inline-flex items-center gap-1 rounded-pill border border-border bg-surface-1 px-2 py-0.5 font-mono text-[0.64rem] text-secondary-foreground', worker.agent.status !== 'running' && 'opacity-60');

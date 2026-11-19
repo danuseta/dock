@@ -1060,8 +1060,13 @@ test('SQLite storage keeps the Judge queue, findings, examples and days, the ses
   assert.strictEqual(await storage.countBusyChatSessions('workspace', 'Judge-'), busy + 1);
   await storage.deleteChatMessage(queued.id);
   const reviews = await storage.countRunningAutoReviews();
-  await storage.createAutoReview({ prUrl: 'https://github.com/o/r/pull/9001', headSha: 'judge', ticketKey: 'QRD-1516', threadUrl: 'https://discord.com/channels/1/2', startedAt: new Date() });
+  const review = await storage.createAutoReview({ prUrl: 'https://github.com/o/r/pull/9001', headSha: 'judge', ticketKey: 'QRD-1516', threadUrl: 'https://discord.com/channels/1/2', startedAt: new Date() });
   assert.strictEqual(await storage.countRunningAutoReviews(), reviews + 1, 'a running auto review keeps Judge waiting');
+  await storage.updateAutoReview(review.id, { sessionId: 'judge-a' });
+  assert.strictEqual(await storage.countRunningAutoReviews(), reviews, 'a review whose session went quiet without a verdict does not hold Judge');
+  const turn = await storage.createChatMessage({ sessionId: 'judge-a', role: 'user', text: 'review', state: 'taken', at: hoursAgo(0) });
+  assert.strictEqual(await storage.countRunningAutoReviews(), reviews + 1, 'a review with a turn running keeps Judge waiting');
+  await storage.deleteChatMessage(turn.id);
 
   await storage.upsertJudgeSession('judge-a', { day: '2026-11-13', status: 'pending' });
   assert.strictEqual((await storage.getJudgeSessions({ statuses: ['pending'], days: ['2026-11-13'] })).length, 1);

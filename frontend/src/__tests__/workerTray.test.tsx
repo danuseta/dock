@@ -19,9 +19,16 @@ test('the tray renders nothing while the session has no subagent', () => {
   assert.strictEqual(renderToStaticMarkup(<WorkerTray events={[]} />), '');
 });
 
+test('the tray starts folded: only the count line shows until it is opened', () => {
+  const html = renderToStaticMarkup(<WorkerTray events={[agent('executor'), agent('explore', { status: 'ok', endedAt: at(90) })]} onSelect={() => undefined} />);
+  assert.match(html, /1 running · 1 finished/);
+  assert.match(html, /aria-expanded="false"/);
+  assert.doesNotMatch(html, /rounded-xs border|rounded-pill/, 'no rows and no chips');
+});
+
 test('the tray shows three workers as rows and the rest as chips', () => {
   const events = ['executor', 'verifier', 'explore', 'designer', 'writer'].map((name) => agent(name));
-  const html = renderToStaticMarkup(<WorkerTray events={events} activeId={events[1].eventId} onSelect={() => undefined} />);
+  const html = renderToStaticMarkup(<WorkerTray events={events} activeId={events[1].eventId} onSelect={() => undefined} defaultOpen />);
   assert.match(html, /5 running/);
   assert.strictEqual((html.match(/rounded-xs border/g) ?? []).length, 3);
   assert.strictEqual((html.match(/rounded-pill/g) ?? []).length, 2);
@@ -29,7 +36,7 @@ test('the tray shows three workers as rows and the rest as chips', () => {
 });
 
 test('without onSelect the tray only shows the workers, a finished one reads as done', () => {
-  const html = renderToStaticMarkup(<WorkerTray events={[agent('executor'), agent('explore', { status: 'ok', endedAt: at(90) })]} />);
+  const html = renderToStaticMarkup(<WorkerTray events={[agent('executor'), agent('explore', { status: 'ok', endedAt: at(90) })]} defaultOpen />);
   assert.match(html, /1 running · 1 finished/);
   assert.match(html, /done · 0 steps/);
   assert.doesNotMatch(html, /aria-pressed/);
@@ -38,7 +45,7 @@ test('without onSelect the tray only shows the workers, a finished one reads as 
 test('the tray shows ten workers at most, running and newest first, and folds the rest into one chip', () => {
   const done = Array.from({ length: 30 }, (_, index) => agent(`done-${index}`, { status: 'ok', endedAt: at(500 + index) }));
   const live = ['sous-video', 'browser-verifier', 'sous-reviewer'].map((name) => agent(name));
-  const html = renderToStaticMarkup(<WorkerTray events={[...done, ...live]} onSelect={() => undefined} />);
+  const html = renderToStaticMarkup(<WorkerTray events={[...done, ...live]} onSelect={() => undefined} defaultOpen />);
   assert.match(html, /3 running · 30 finished/);
   assert.strictEqual((html.match(/rounded-xs border/g) ?? []).length, 3, 'three rows');
   assert.strictEqual((html.match(/rounded-pill border border-border/g) ?? []).length, 7, 'seven chips');

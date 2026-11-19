@@ -11,7 +11,6 @@ export const SessionUsage: React.FC<{ usage: ClaudeSessionUsage | null | undefin
   const peak = shown ? Math.max(0, ...shown.agents.map((agent) => agent.peakContext)) : 0;
   return (
     <section className="flex flex-col gap-1.5" aria-label="Usage">
-      <h3 className={label}>Usage</h3>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-[0.72rem]">
         <dt className="text-muted-foreground">Tokens</dt>
         <dd className="min-w-0 text-right tabular-nums text-secondary-foreground">{shown ? `main ${formatTokens(shown.mainTokens)} · subagents ${formatTokens(shown.totalTokens - shown.mainTokens)}` : '-'}</dd>
