@@ -547,10 +547,35 @@ model SprintDraft {
   storyboards String    @default("{}") /// {epic: {version, previous, path, page, frames, changed, changedAt, checkedAt, error}}
   questions   String    @default("[]") /// [{id, text, key, askedAt, answered, answeredBy, answeredAt}]: open questions the planning chat raised
   merges      String    @default("{}") /// {source: github|jira, tickets: {key: {merge, pulls}}}: GitHub merge state read on the last load
+  newTicketSeq Int      @default(0) /// the n of the last NEW-n id given out; ids are never reused
   createdBy   String?
   loadedAt    DateTime  @default(now())
   publishedAt DateTime?
   updatedAt   DateTime  @updatedAt
+}
+
+/// A ticket the planner drafts for the sprint; Publish creates it in Jira and keeps the new key.
+model SprintDraftNewTicket {
+  draftSprint String
+  id          String /// NEW-n
+  position    Int /// the n of NEW-n
+  summary     String  @default("")
+  type        String  @default("Task")
+  epic        String?
+  dev         String?
+  sp          Float?
+  priority    String?
+  userStory   String  @default("")
+  problem     String  @default("")
+  ac          String  @default("[]")
+  reference   String?
+  source      String  @default("manual")
+  createdKey  String?
+  error       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  @@id([draftSprint, id])
 }
 
 /// One ticket of a SprintDraft: the planner's values next to what Jira held when it was loaded.

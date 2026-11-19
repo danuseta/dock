@@ -3,17 +3,19 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { redoVisualPrompt, visualTime } from '../agents/planning';
-import { chartPrompt, timelinePrompt, chatSuggestions } from '../chat/suggestions';
+import { chartPrompt, sheetPrompt, timelinePrompt, chatSuggestions } from '../chat/suggestions';
 import { prefillStore } from '../chat/store';
 
 const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 
-test('a Planning chat shows the three chips on an empty session, and no Run sprint-planner once it has messages', () => {
-  assert.deepStrictEqual(chatSuggestions('Planning-QRD Sprint 27', 0).map((item) => item.label), ['Run sprint-planner', 'Chart SP per dev', 'Timeline per dev']);
-  assert.deepStrictEqual(chatSuggestions('Planning-QRD Sprint 27', 4).map((item) => item.label), ['Chart SP per dev', 'Timeline per dev']);
+test('a Planning chat shows the four chips on an empty session, and no Run sprint-planner once it has messages', () => {
+  assert.deepStrictEqual(chatSuggestions('Planning-QRD Sprint 27', 0).map((item) => item.label), ['Run sprint-planner', 'Draft tickets from a sheet', 'Chart SP per dev', 'Timeline per dev']);
+  assert.deepStrictEqual(chatSuggestions('Planning-QRD Sprint 27', 4).map((item) => item.label), ['Draft tickets from a sheet', 'Chart SP per dev', 'Timeline per dev']);
+  assert.strictEqual(chatSuggestions('Planning-QRD Sprint 27', 4)[0].text, sheetPrompt('QRD Sprint 27'));
+  assert.strictEqual(sheetPrompt('QRD Sprint 27'), 'Draft tickets for sprint "QRD Sprint 27" from this sheet: <paste the sheet link>', 'the chip only fills the prompt; the planner pastes the link');
   assert.strictEqual(chatSuggestions('Planning-QRD Sprint 27', 0)[0].text, null, 'the planner prompt comes from DOCK, with the epics of the draft');
-  assert.strictEqual(chatSuggestions('Planning-QRD Sprint 27', 0)[1].text, chartPrompt('QRD Sprint 27'));
-  assert.strictEqual(chatSuggestions('Planning-QRD Sprint 27', 0)[2].text, timelinePrompt('QRD Sprint 27'));
+  assert.strictEqual(chatSuggestions('Planning-QRD Sprint 27', 0)[2].text, chartPrompt('QRD Sprint 27'));
+  assert.strictEqual(chatSuggestions('Planning-QRD Sprint 27', 0)[3].text, timelinePrompt('QRD Sprint 27'));
   assert.match(chartPrompt('QRD Sprint 27'), /sprint "QRD Sprint 27"/, 'the agent knows the sprint without reading the session title');
   assert.match(timelinePrompt('QRD Sprint 27'), /sprint "QRD Sprint 27"/);
 });
@@ -52,9 +54,9 @@ test('the chat store hands a prefill to its session once and keeps it out of the
 test('Planning has no Test cases tab, and the backend test case support is still there', () => {
   const tab = source('../agents/PlanningTab.tsx');
   assert.doesNotMatch(tab, /Test cases|TcPanel|TcTicket|onSaveTcs|SET_SPRINT_DRAFT_TCS/);
-  assert.match(tab, /\['ac', 'AC check'\], \['storyboard', 'Storyboard'\]\];/);
+  assert.match(tab, /\['ac', 'AC check'\], \['storyboard', 'Storyboard'\], \['order', 'Order'\], \['new', 'New tickets'\]\];/);
   assert.doesNotMatch(tab, /QaPanel|QA check|onRefreshQa|ESCALATED/);
-  assert.match(source('../agents/planning.ts'), /export type PlanningPanel = 'mine' \| 'team' \| 'scope' \| 'ac' \| 'qa' \| 'tc' \| 'storyboard';/);
+  assert.match(source('../agents/planning.ts'), /export type PlanningPanel = 'mine' \| 'team' \| 'scope' \| 'ac' \| 'qa' \| 'tc' \| 'storyboard' \| 'order' \| 'new';/);
   assert.match(source('../graphql/queries.ts'), /setSprintDraftTcs/);
 });
 
@@ -63,7 +65,7 @@ test('each visual is a tab after Storyboard, polled with the draft, in a sandbox
   assert.match(tab, /GET_SPRINT_DRAFT_VISUALS[\s\S]{0,200}pollInterval: 10000/);
   assert.ok(tab.indexOf("['storyboard', 'Storyboard']") < tab.indexOf('{visuals.map((visual) => ('), 'visual tabs come after the fixed tabs');
   assert.match(tab, /\{visual\.title\}/);
-  assert.match(tab, /chat\.open\(redoVisualPrompt\(openVisual\.title\)\)/);
+  assert.match(tab, /openChat\(redoVisualPrompt\(openVisual\.title\)\)/);
   const frame = source('../agents/PlanningVisual.tsx');
   assert.match(frame, /sandbox="allow-scripts"/);
   assert.doesNotMatch(frame, /allow-same-origin/);
@@ -83,9 +85,9 @@ test('the redo prompt names the visual, and the snapshot time reads as a clock t
   assert.strictEqual(visualTime('nope', now), '');
 });
 
-test('opening the Planning chat from a button only opens it, and the redo button fills the box through the store', () => {
+test('the Planning chat only fills its message box: the redo button and the chips go through the store and never send', () => {
   const hook = source('../agents/usePlanningChat.ts');
   assert.match(hook, /open = async \(prefill\?: string\)/);
-  assert.match(hook, /chatStore\.prefill\(id, prefill\)/);
+  assert.match(hook, /chatStore\.prefill\(target, prefill\)/);
   assert.doesNotMatch(hook, /sendMessage/);
 });

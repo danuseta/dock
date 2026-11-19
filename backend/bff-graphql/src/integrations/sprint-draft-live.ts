@@ -57,6 +57,8 @@ async function planningJira(): Promise<DraftJira> {
     addLabel: (key, label) => client.addLabel(key, label),
     removeLabel: (key, label) => client.removeLabel(key, label),
     comment: (key, lines) => client.addComment(key, lines),
+    createIssue: (fields) => client.createIssue(fields),
+    projectAccounts: (project, name) => client.projectAssignableAccounts(project, name),
   };
 }
 

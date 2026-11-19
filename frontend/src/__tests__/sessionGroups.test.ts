@@ -2,7 +2,7 @@ import assert from 'node:assert';
 import test from 'node:test';
 import type { ChatSession } from '../chat/messages';
 import { readSessionFilter, writeSessionFilter } from '../chat/sessionFilter';
-import { filterSessions, groupSessions, sessionGroupKey, sessionKind, sidebarDot } from '../chat/sessionGroups';
+import { filterSessions, groupSessions, listedSessions, sessionGroupKey, sessionKind, sidebarDot } from '../chat/sessionGroups';
 
 const make = (id: string, status: string, waiting = false, lastMessageAt = ''): ChatSession =>
   ({ id, source: 'dock', title: id, status, waiting, messageCount: 0, startedAt: '', lastMessageAt });
@@ -57,6 +57,13 @@ test('filterSessions keeps all, only Task, or only Review', () => {
   assert.deepStrictEqual(filterSessions(list, 'all').map((s) => s.id), ['Task-QRD-1', 'Review-QRD-7', 'Fix login']);
   assert.deepStrictEqual(filterSessions(list, 'task').map((s) => s.id), ['Task-QRD-1']);
   assert.deepStrictEqual(filterSessions(list, 'review').map((s) => s.id), ['Review-QRD-7']);
+});
+
+test('a local QA session is never listed: its ticket session shows it as the QA local card', () => {
+  const list = [make('Task-QRD-1565', 'idle'), make('QA-QRD-1565', 'running'), make('Review-QRD-7', 'idle'), make('QA notes', 'idle')];
+  assert.deepStrictEqual(filterSessions(list, 'all').map((s) => s.id), ['Task-QRD-1565', 'Review-QRD-7', 'QA notes']);
+  assert.deepStrictEqual(filterSessions(list, 'task').map((s) => s.id), ['Task-QRD-1565']);
+  assert.deepStrictEqual(listedSessions(list).map((s) => s.id), ['Task-QRD-1565', 'Review-QRD-7', 'QA notes']);
 });
 
 test('filterSessions: Guild Master shows only gm sessions, Task and Review never show a gm session', () => {

@@ -38,6 +38,6 @@ test('three templates; a template keeps the owners, a change by hand leaves the 
 });
 
 test('Planning Draft hides the panel of a skipped stage and the settings page renders Planning flow', () => {
-  assert.match(source('../agents/PlanningTab.tsx'), /const panels = PANELS\.filter\(\(\[id\]\) => id === 'team' \|\| id === 'mine' \|\| !skipped\.has\(id\)\);/);
+  assert.match(source('../agents/PlanningTab.tsx'), /const panels = PANELS\.filter\(\(\[id\]\) => id === 'team' \|\| id === 'mine' \|\| id === 'order' \|\| id === 'new' \|\| !skipped\.has\(id\)\);/);
   assert.match(source('../pages/SettingsPage.tsx'), /\{active === 'planflow' && <PlanningFlowSection \/>\}/);
 });

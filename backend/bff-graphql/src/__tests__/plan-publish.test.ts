@@ -207,6 +207,9 @@ class Store implements DraftStore {
   async updateSprintDraft(_sprint: string, data: any) { Object.assign(this.draft, data); }
   async sprintDraftsWithEpic() { return []; }
   async saveSprintDraftPredictions() { return undefined; }
+  async addSprintDraftNewTicket(): Promise<string> { throw new Error('not used'); }
+  async updateSprintDraftNewTicket() { return undefined; }
+  async removeSprintDraftNewTicket() { return undefined; }
 }
 
 class Jira implements DraftJira {

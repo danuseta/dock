@@ -1,15 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { Page, PageHeader } from '../components/ui';
 import { PlanningTab } from '../agents/PlanningTab';
-import { PlanTab } from '../agents/PlanTab';
 import { RetroTab } from '../agents/RetroTab';
 import { SprintTab } from '../sprint/SprintTab';
 import { planningRoute, type PlanningPageTab } from '../agents/plan';
 import { cn } from '../lib/cn';
 
-const TABS: Array<[PlanningPageTab, string]> = [['now', 'Now'], ['draft', 'Draft'], ['plan', 'Plan'], ['retro', 'Retro']];
+const TABS: Array<[PlanningPageTab, string]> = [['now', 'Now'], ['draft', 'Draft'], ['retro', 'Retro']];
 
-/** Planning: the sprint as it runs Now, the Draft the planner publishes, the published Plan, and the Retro. */
+/** Planning: the sprint as it runs Now, the Draft the planner publishes with the work order inside it, and the Retro. */
 const PlanningPage: React.FC<{ onNavigate?: (path: string) => void }> = ({ onNavigate }) => {
   const [route] = useState(() => planningRoute(window.location.search));
   const [tab, setTab] = useState<PlanningPageTab>(route.tab);
@@ -17,6 +16,13 @@ const PlanningPage: React.FC<{ onNavigate?: (path: string) => void }> = ({ onNav
     const follow = () => setTab(planningRoute(window.location.search).tab);
     window.addEventListener('popstate', follow);
     return () => window.removeEventListener('popstate', follow);
+  }, []);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('tab') !== 'plan') return;
+    params.set('tab', 'draft');
+    params.set('panel', 'order');
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}?${params.toString()}`);
   }, []);
   const choose = (next: PlanningPageTab) => {
     setTab(next);
@@ -51,7 +57,7 @@ const PlanningPage: React.FC<{ onNavigate?: (path: string) => void }> = ({ onNav
           </button>
         ))}
       </div>
-      {tab === 'now' ? <SprintTab /> : tab === 'draft' ? <PlanningTab initialPanel={route.panel ?? undefined} /> : tab === 'plan' ? <PlanTab /> : <RetroTab onNavigate={onNavigate} />}
+      {tab === 'now' ? <SprintTab /> : tab === 'draft' ? <PlanningTab initialPanel={route.panel ?? undefined} /> : <RetroTab onNavigate={onNavigate} />}
     </Page>
   );
 };

@@ -1,30 +1,35 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLazyQuery, useMutation, useQuery } from '@apollo/client';
-import { AlertCircle, AlertTriangle, ArrowRight, ArrowRightLeft, BarChart3, CalendarCheck, CheckCircle2, Download, FileInput, Link2, Minus, Plus, Scissors, Send, Undo2, X } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ArrowRightLeft, BarChart3, CalendarRange, CheckCircle2, Download, FileInput, FilePlus2, LayoutGrid, Link2, Minus, Plus, Scissors, Send, Undo2, X } from 'lucide-react';
 import { Button, Card, Dialog, Input, Select } from '../components/ui';
 import { PlanningChat } from './PlanningChat';
-import { useOpenPlanningChat } from './usePlanningChat';
-import { DeveloperOrder, PlanningStatus } from './PlanningStatus';
+import { usePlanningSession } from './usePlanningChat';
+import { DeveloperOrder, PlanningStatus, PlanningStatusNote } from './PlanningStatus';
+import { PlanningBoard } from './PlanningBoard';
+import { PlanningBar } from './PlanningBar';
+import { NewTicketsPanel } from './NewTicketsPanel';
+import { PlanTab } from './PlanTab';
 import { StoryboardBoard } from './StoryboardBoard';
 import { PlanningVisual } from './PlanningVisual';
 import { MyTicketsPanel } from './MyTicketsPanel';
 import {
   CHECK_SPRINT_STORYBOARDS, DECIDE_SPRINT_DRAFT, MOVE_SPRINT_DRAFT_CARDS, GET_OWNER_NAME, GET_PLANNING_FLOW, GET_PLANNING_SPRINTS, GET_SPRINT_DRAFT, GET_SPRINT_DRAFT_VISUALS, GET_SPRINT_PLAN_SIGNAL, GET_TICKET_READINESS, LOAD_SPRINT_DRAFT, PREVIEW_SPRINT_DRAFT_PUBLISH, PUBLISH_SPRINT_DRAFT,
-  RUN_SCOUT, SAVE_SPRINT_DRAFT_VISUAL, DROP_SPRINT_DRAFT_VISUAL, UPDATE_SPRINT_DRAFT_TICKET, USE_SPRINT_DRAFT_SPLIT, KEEP_SPRINT_DRAFT_SPLIT,
+  RUN_SCOUT, SAVE_SPRINT_DRAFT_VISUAL, DROP_SPRINT_DRAFT_VISUAL, UPDATE_SPRINT_DRAFT_TICKET, USE_SPRINT_DRAFT_SPLIT, KEEP_SPRINT_DRAFT_SPLIT, SAVE_SPRINT_DRAFT_NEW_TICKET, REMOVE_SPRINT_DRAFT_NEW_TICKET,
 } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import {
   UNASSIGNED, devColors, changeCount, dayOf, decisionLabel, findingKindLabel, forecastOf, handOffs, lateDays, lateText, shortDate, underWay, landingDay, lanes, openQuestionsOf, parseWave, ranks, teamStats, waitersOf, publishReadiness, scopeSummary, sortFindings,
   developerLine, freeFrom, githubLine, laneCount, laneOf, moveForecast, moveLine, planRange, scheduleWindow, scheduled, spanOf, uncheckedStoryboard, waveRows, workingDayLabels,
-  undecidedFinding,
-  redoVisualPrompt, type DraftChange, type DraftFinding, type DraftVisual, type DraftTicket, type LaneBar, type PlanSignal, type PlanningPanel, type PlanningSprint, type PublishResult, type Readiness, type ReadyItem, type SprintDraft, type TicketSummaryLite,
+  undecidedFinding, capacityOf,
+  redoVisualPrompt, type DraftChange, type DraftFinding, type DraftVisual, type DraftTicket, type LaneBar, type NewTicketInput, type PlanSignal, type PlanningPanel, type PlanningSprint, type PublishResult, type ReadyItem, type SprintDraft, type TicketSummaryLite,
 } from './planning';
 import { parseFlow, skippedStages } from './planningFlow';
 import { panelOf } from './plan';
 import { InfoTip } from './InfoTip';
 import { ScoutCell } from './ScoutCell';
-import { SplitBox } from './SplitBox';
+import { SplitRow } from './SplitBox';
+import { CHAT_FOLDED_KEY, TEAM_VIEW_KEY, chatFoldedOf, chatFoldedValue, findingGroups, outsidePlanOpen, panelBadge, remember, remembered, teamViewOf, type TeamView } from './boardLogic';
 
 const head = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
 const chip = 'rounded-xs border px-1.5 font-mono text-[0.6rem] font-bold uppercase tracking-[0.08em]';
@@ -35,7 +40,7 @@ const warnChip = 'rounded-sm border border-status-warn px-2 py-0.5 text-[var(--c
 const TONE: Record<string, string> = {
   ok: 'border-status-merged text-status-merged', conflict: 'border-status-conflict text-status-conflict', warn: 'border-status-warn text-status-warn', none: 'border-border text-muted-foreground',
 };
-const PANELS: Array<[PlanningPanel, string]> = [['mine', 'My tickets'], ['team', 'Team map'], ['scope', 'Scope'], ['ac', 'AC check'], ['storyboard', 'Storyboard']];
+const PANELS: Array<[PlanningPanel, string]> = [['mine', 'My tickets'], ['team', 'Team map'], ['scope', 'Scope'], ['ac', 'AC check'], ['storyboard', 'Storyboard'], ['order', 'Order'], ['new', 'New tickets']];
 
 const errorText = (failure: unknown, fallback: string) => (failure instanceof Error ? failure.message : fallback);
 /** Opens the ticket page the way a link inside DOCK does: the app reads the new path on popstate. */
@@ -607,7 +612,7 @@ const FindingRow: React.FC<{ draft: SprintDraft; finding: DraftFinding; busy: bo
   );
 };
 
-const AcPanel: React.FC<{ draft: SprintDraft; busy: boolean; onDecide: (id: string, action: string, note?: string) => void }> = ({ draft, busy, onDecide }) => {
+const AcPanel: React.FC<{ draft: SprintDraft; busy: boolean; onDecide: (id: string, action: string, note?: string) => void; onReferenceAll: (ids: string[]) => void }> = ({ draft, busy, onDecide, onReferenceAll }) => {
   const findings = sortFindings(draft.findings);
   const unlinked = findings.filter((finding) => !finding.linked);
   if (!findings.length) return <p className="text-sm text-muted-foreground">No AC line names another ticket.</p>;
@@ -617,44 +622,58 @@ const AcPanel: React.FC<{ draft: SprintDraft; busy: boolean; onDecide: (id: stri
         <b className="text-foreground">{unlinked.length}</b> AC lines name another ticket without a Blocks link; {findings.filter(undecidedFinding).length} not decided.
       </p>
       <p className="mt-1 flex items-center gap-1 text-[0.76rem] text-sky-200">Waits on the named ticket? Dependency. Info only? Move to Reference. <InfoTip label="About the AC check">AC holds only what is tested on this ticket. Dependency adds the Blocks link on Publish, and the QA bot holds the ticket until that one is in UAT CHECK. Nothing changes in Jira before Publish, and DOCK writes no comments.</InfoTip></p>
-      <ul className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
-        {findings.map((finding) => <FindingRow key={finding.id} draft={draft} finding={finding} busy={busy} onDecide={onDecide} />)}
-      </ul>
+      <div className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">
+        {findingGroups(findings).map((group) => {
+          const outside = outsidePlanOpen(group.findings, group.key);
+          const left = group.findings.filter(undecidedFinding).length;
+          return (
+            <section key={group.key} aria-label={group.key} className="border-b border-border last:border-b-0">
+              <div className="flex flex-wrap items-center gap-2 bg-surface-1 px-3 py-1.5 text-[0.78rem]">
+                <b className="font-mono">{group.key}</b>
+                <span className="min-w-0 flex-1 truncate text-secondary-foreground">{draft.tickets.find((ticket) => ticket.key === group.key)?.summary ?? ''}</span>
+                <span className="font-mono text-[0.66rem] text-muted-foreground">{left} left</span>
+                {outside.length > 1 && <Button size="sm" onClick={() => onReferenceAll(outside.map((finding) => finding.id))} disabled={busy}><FileInput size={13} aria-hidden="true" />All {outside.length} outside plan → Reference</Button>}
+              </div>
+              <ul>{group.findings.map((finding) => <FindingRow key={finding.id} draft={draft} finding={finding} busy={busy} onDecide={onDecide} />)}</ul>
+            </section>
+          );
+        })}
+      </div>
     </section>
   );
 };
 
-/** G1 above the panel tabs: what is ready for publish, each missing item with a link to the panel that fixes it. */
-const ReadyBlock: React.FC<{ id: string; ready: Readiness; onFix: (panel: PlanningPanel) => void }> = ({ id, ready, onFix }) => {
-  if (!ready.total) return null;
-  return (
-    <section id={id} aria-label="Ready to publish" className="rounded-md border border-border bg-surface-1 px-3.5 py-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="flex items-center gap-1.5 font-display text-sm font-bold"><CalendarCheck size={14} aria-hidden="true" />Ready to publish</h3>
-        <span className={cn(chip, ready.done === ready.total ? TONE.ok : TONE.warn)}>{ready.done} of {ready.total}</span>
-        <span className="text-xs text-muted-foreground">info only, Publish stays on</span>
-      </div>
-      <ul className="mt-2">
-        {ready.items.map((item) => (
-          <li key={item.id} className="flex items-start gap-2.5 border-t border-border py-2 first:border-t-0">
-            {item.ok ? <CheckCircle2 size={15} className="mt-0.5 flex-none text-status-merged" aria-hidden="true" /> : <AlertCircle size={15} className="mt-0.5 flex-none text-status-warn" aria-hidden="true" />}
-            <div className="min-w-0 flex-1">
-              <p className={cn('text-sm', item.ok ? 'text-secondary-foreground' : 'text-foreground')}>{item.text}</p>
-              {item.detail && <p className="text-xs text-muted-foreground">{item.detail}</p>}
-            </div>
-            {!item.ok && <Button size="sm" variant="ghost" onClick={() => onFix(item.panel)}>{item.fix}<ArrowRight size={13} aria-hidden="true" /></Button>}
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-};
+const VIEW_TABS: Array<[TeamView, string, typeof LayoutGrid]> = [['board', 'Board', LayoutGrid], ['schedule', 'Schedule', CalendarRange]];
+
+/** Team map: Board (lanes and cards with what to decide) or Schedule (load, waves, days, order of work and hand-offs), and the split page row. */
+const TeamMap: React.FC<{
+  draft: SprintDraft; plan: DraftTicket[]; view: TeamView; perDev: number; busy: boolean; readOnly: boolean; onView: (view: TeamView) => void;
+  onMove: (keys: string[], to: string) => void; onDecide: (id: string, action: string, note?: string) => void; onCheckStoryboards: () => void; onShowPanel: (panel: PlanningPanel) => void;
+  onUseSplit: (keys: string[]) => void; onKeepSplit: (keys: string[]) => void;
+}> = ({ draft, plan, view, perDev, busy, readOnly, onView, onMove, onDecide, onCheckStoryboards, onShowPanel, onUseSplit, onKeepSplit }) => (
+  <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
+    <div role="group" aria-label="Team map view" className="inline-flex w-max overflow-hidden rounded-xs border border-border">
+      {VIEW_TABS.map(([id, label, Icon]) => (
+        <button key={id} type="button" aria-pressed={view === id} onClick={() => onView(id)}
+          className={cn('inline-flex h-7 items-center gap-1.5 border-r border-border px-3 font-display text-xs font-semibold text-secondary-foreground last:border-r-0 max-[760px]:h-11', view === id && 'bg-surface-2 text-foreground')}>
+          <Icon size={12} aria-hidden="true" />{label}
+        </button>
+      ))}
+    </div>
+    {draft.split && <SplitRow split={draft.split} busy={busy || readOnly} onUse={onUseSplit} onKeep={onKeepSplit} />}
+    {view === 'board'
+      ? <PlanningBoard draft={draft} perDev={perDev} busy={busy} readOnly={readOnly} onDecide={onDecide} onCheckStoryboards={onCheckStoryboards} onShowPanel={onShowPanel} renderFinding={(finding) => <FindingRow key={finding.id} draft={draft} finding={finding} busy={busy} onDecide={onDecide} />} />
+      : <fieldset disabled={readOnly} className="contents"><TeamPanel draft={draft} plan={plan} busy={busy} onMove={onMove} /></fieldset>}
+  </div>
+);
 
 const PublishDialog: React.FC<{
   open: boolean; sprint: string; changes: DraftChange[] | null; results: PublishResult[] | null; loading: boolean; publishing: boolean; error: string | null; missing: ReadyItem[]; onConfirm: () => void; onClose: () => void; onFix: () => void;
 }> = ({ open, sprint, changes, results, loading, publishing, error, missing, onConfirm, onClose, onFix }) => {
   const id = useId();
   const count = changes ? changeCount(changes) : 0;
+  const creates = changes?.filter((change) => change.create) ?? [];
+  const updates = changes?.filter((change) => !change.create) ?? [];
   return (
     <Dialog open={open} onClose={() => !publishing && onClose()} dismissible={!publishing} labelledBy={`${id}-title`}>
       <Card className="w-[min(640px,calc(100vw-2rem))] shadow-card">
@@ -666,11 +685,13 @@ const PublishDialog: React.FC<{
             {results.map((result) => (
               <li key={`${result.kind}|${result.key}`} className="flex flex-wrap items-baseline gap-2 border-b border-border py-2 text-[0.8rem] last:border-b-0">
                 <span className="font-mono font-semibold">{result.key}</span>
-                <span className={cn(chip, result.status === 'updated' ? TONE.ok : result.status === 'skipped' ? TONE.none : TONE.conflict)}>{result.status}</span>
-                {result.detail && <span className="text-muted-foreground">{result.detail}</span>}
+                <span className={cn(chip, result.status === 'updated' || result.status === 'created' ? TONE.ok : result.status === 'skipped' ? TONE.none : TONE.conflict)}>{result.status}</span>
+                {result.kind === 'create' && result.status === 'created' && result.detail
+                  ? <span className="inline-flex items-center gap-1 font-mono font-semibold text-status-merged">→ {result.detail}</span>
+                  : result.detail && <span className="text-muted-foreground">{result.detail}</span>}
               </li>
             ))}
-            {!results.some((result) => result.kind === 'ticket') && <li className="py-2 text-sm text-muted-foreground">Jira already matched the plan; no ticket field was written.</li>}
+            {!results.some((result) => result.kind === 'ticket' || result.kind === 'create') && <li className="py-2 text-sm text-muted-foreground">Jira already matched the plan; no ticket field was written.</li>}
           </ul>
         ) : changes && (
           <>
@@ -684,8 +705,27 @@ const PublishDialog: React.FC<{
               Jira gets only the AC and assignees that differ.
               <InfoTip label="What Publish writes">A ticket whose AC changed in Jira after the load is skipped. Also written: the Confluence page "Sprint contract {sprint}", comments for changed test cases, and the plan-published-rN label that every developer's DOCK and the cron wait for.</InfoTip>
             </p>
+            {creates.length > 0 && (
+              <section aria-label="Create in Jira" className="mt-3">
+                <h3 className={head}>Create in Jira · {creates.length}</h3>
+                <ul className="mt-1">
+                  {creates.map((change) => (
+                    <li key={change.key} className="border-b border-border py-2 text-[0.8rem] last:border-b-0">
+                      <p className="flex flex-wrap items-baseline gap-2">
+                        <FilePlus2 size={13} className="flex-none self-center text-sky-300" aria-hidden="true" />
+                        <span className="font-mono font-semibold text-sky-300">{change.key}</span>
+                        <span className="min-w-0 flex-1 text-pretty">{change.create!.summary}</span>
+                        <span className="font-mono text-[0.68rem] text-muted-foreground">{change.create!.type} · {change.create!.dev ?? 'no developer'} · {change.create!.sp ?? '?'} SP</span>
+                        {change.refused && <span className={cn(chip, TONE.conflict)}>skipped</span>}
+                      </p>
+                      {change.refused && <p className="mt-1 text-status-conflict">{change.refused}</p>}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
             <ul className="mt-3 max-h-[50vh] overflow-y-auto">
-              {changes.map((change) => (
+              {updates.map((change) => (
                 <li key={change.key} className="border-b border-border py-2 text-[0.8rem] last:border-b-0">
                   <p className="flex flex-wrap items-baseline gap-2">
                     <span className="font-mono font-semibold">{change.key}</span>
@@ -697,7 +737,7 @@ const PublishDialog: React.FC<{
                   {change.acAdded.map((line) => <p key={`+${line}`} className="mt-1 flex gap-1.5 text-pretty text-status-merged"><Plus size={13} className="mt-0.5 flex-none" aria-hidden="true" />{line}</p>)}
                 </li>
               ))}
-              {changes.length === 0 && <li className="py-2 text-sm text-muted-foreground">Jira tickets already match the plan.</li>}
+              {updates.length === 0 && <li className="py-2 text-sm text-muted-foreground">Existing tickets already match the plan.</li>}
             </ul>
           </>
         )}
@@ -720,7 +760,10 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
     window.addEventListener('popstate', follow);
     return () => window.removeEventListener('popstate', follow);
   }, [initialPanel]);
-  const readyId = useId();
+  const [view, setView] = useState<TeamView>(() => teamViewOf(remembered(TEAM_VIEW_KEY)));
+  const [folded, setFolded] = useState(() => chatFoldedOf(remembered(CHAT_FOLDED_KEY)));
+  const chooseView = (next: TeamView) => { setView(next); remember(TEAM_VIEW_KEY, next); };
+  const fold = (next: boolean) => { setFolded(next); remember(CHAT_FOLDED_KEY, chatFoldedValue(next)); };
   const [notice, setNotice] = useState<string | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [results, setResults] = useState<PublishResult[] | null>(null);
@@ -739,12 +782,13 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
   const signalQuery = useQuery<{ sprintPlanSignal: PlanSignal | null }>(GET_SPRINT_PLAN_SIGNAL, { variables: { sprint: chosen?.name ?? '' }, skip: !chosen, fetchPolicy: 'cache-and-network', pollInterval: 15000 });
   const signal = signalQuery.data?.sprintPlanSignal ?? null;
   const planner = signal ? signal.isPlanner : true;
-  const chat = useOpenPlanningChat(chosen?.name ?? '');
+  const session = usePlanningSession(chosen?.name ?? '');
+  const openChat = (prefill?: string) => { fold(false); void session.open(prefill); };
   const flowQuery = useQuery<{ planningFlow: string | null }>(GET_PLANNING_FLOW, { fetchPolicy: 'cache-and-network' });
   const flow = parseFlow(flowQuery.data?.planningFlow);
   const skipped = skippedStages(flow);
-  // Tiket saya is not a stage of the flow: it is always shown.
-  const panels = PANELS.filter(([id]) => id === 'team' || id === 'mine' || !skipped.has(id));
+  // Tiket saya, Order and New tickets are not stages of the flow: they are always shown.
+  const panels = PANELS.filter(([id]) => id === 'team' || id === 'mine' || id === 'order' || id === 'new' || !skipped.has(id));
   const shown = panels.some(([id]) => id === panel) ? panel : 'team';
   const [loadDraft, loading] = useMutation(LOAD_SPRINT_DRAFT);
   const [updateTicket, updating] = useMutation(UPDATE_SPRINT_DRAFT_TICKET);
@@ -757,11 +801,13 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
   const [dropVisual, droppingVisual] = useMutation(DROP_SPRINT_DRAFT_VISUAL);
   const [runScout] = useMutation(RUN_SCOUT);
   const [publish, publishing] = useMutation(PUBLISH_SPRINT_DRAFT);
+  const [saveNewTicket, savingNew] = useMutation(SAVE_SPRINT_DRAFT_NEW_TICKET);
+  const [removeNewTicket, removingNew] = useMutation(REMOVE_SPRINT_DRAFT_NEW_TICKET);
   const [preview, previewing] = useLazyQuery<{ previewSprintDraftPublish: DraftChange[] }>(PREVIEW_SPRINT_DRAFT_PUBLISH, { fetchPolicy: 'network-only' });
   const full = draftQuery.data?.sprintDraft ?? null;
   // Merged cards are on the plan only: every panel works on the cards still to build, the schedule draws them all.
   const draft = full && { ...full, tickets: scheduled(full.tickets) };
-  const busy = loading.loading || updating.loading || deciding.loading || publishing.loading || checking.loading || moving.loading || usingSplit.loading || keepingSplit.loading || savingVisual.loading || droppingVisual.loading;
+  const busy = loading.loading || updating.loading || deciding.loading || publishing.loading || checking.loading || moving.loading || usingSplit.loading || keepingSplit.loading || savingVisual.loading || droppingVisual.loading || savingNew.loading || removingNew.loading;
   // The planning agent's Indonesian title and AC lines, for Tiket saya.
   const ownerQuery = useQuery<{ ownerName: string }>(GET_OWNER_NAME, { fetchPolicy: 'cache-first' });
   const me = signal?.me ?? ownerQuery.data?.ownerName ?? null;
@@ -787,8 +833,24 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
   }, [full?.sprint, full?.status, full?.loadedAt]);
   const onChange = (key: string, change: { dev?: string | null; wave?: number; sp?: number }) => draft && run(updateTicket({ variables: { sprint: draft.sprint, key, ...change } }), 'The ticket could not be changed');
   const onDecide = (id: string, action: string, note?: string) => draft && run(decide({ variables: { sprint: draft.sprint, id, action, note: note ?? null } }), 'The decision could not be saved');
-  const onUseSplit = (key: string) => draft && run(applySplit({ variables: { sprint: draft.sprint, key } }), 'The ticket could not be moved to the split week');
-  const onKeepSplit = (key: string) => draft && run(holdSplit({ variables: { sprint: draft.sprint, key } }), 'The difference could not be kept');
+  // One call after the other: each answer is the whole draft, so parallel calls could drop each other's change.
+  const inTurn = (keys: string[], call: (key: string) => Promise<unknown>) => keys.reduce<Promise<unknown>>((chain, key) => chain.then(() => call(key)), Promise.resolve());
+  const onUseSplit = (keys: string[]) => draft && run(inTurn(keys, (key) => applySplit({ variables: { sprint: draft.sprint, key } })), 'The ticket could not be moved to the split week');
+  const onKeepSplit = (keys: string[]) => draft && run(inTurn(keys, (key) => holdSplit({ variables: { sprint: draft.sprint, key } })), 'The difference could not be kept');
+  const onReferenceAll = (ids: string[]) => draft && run(inTurn(ids, (id) => decide({ variables: { sprint: draft.sprint, id, action: 'reference', note: null } })), 'The decisions could not be saved');
+  const onSaveNewTicket = async (id: string | null, input: NewTicketInput) => {
+    if (!draft) return false;
+    setNotice(null);
+    try {
+      await saveNewTicket({ variables: { sprint: draft.sprint, id, input } });
+      await draftQuery.refetch();
+      return true;
+    } catch (failure) {
+      setNotice(errorText(failure, 'The new ticket could not be saved'));
+      return false;
+    }
+  };
+  const onRemoveNewTicket = (id: string) => draft && run(removeNewTicket({ variables: { sprint: draft.sprint, id } }), 'The new ticket could not be removed');
   const onScout = (key: string) => run(runScout({ variables: { key } }), 'The scout could not start');
   const onCheckStoryboards = () => draft && run(checkStoryboards({ variables: { sprint: draft.sprint } }), 'The storyboard could not be read');
   const onSaveVisual = (id: string) => draft && run(saveVisual({ variables: { sprint: draft.sprint, id } }), 'The visual could not be saved');
@@ -839,104 +901,109 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
     window.history.replaceState(window.history.state, '', `${window.location.pathname}?${params.toString()}`);
   };
 
-  return (
-    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-5">
-      <div className="flex flex-wrap items-center gap-3">
-        <Select aria-label="Sprint to plan" className="w-[260px] max-[760px]:w-full" value={String(chosen.id)} onValueChange={(value) => setSprintId(Number(value))} options={options.map((sprint) => ({ value: String(sprint.id), label: `${sprint.name}${sprint.state === 'active' ? ' (active)' : ''}` }))} />
-        <Button onClick={onLoad} disabled={busy}><Download size={14} aria-hidden="true" />{loading.loading ? 'Loading...' : draft ? 'Load again from Jira' : 'Load from Jira'}</Button>
-        <PlanningChat sprint={chosen.name} />
-      </div>
-      <PlanningStatus
-        sprint={chosen.name}
-        signal={signal}
-        draft={draft}
-        ready={ready}
-        busy={busy}
-        onPublish={() => void onPublish()}
-        onRepublish={() => void onRepublish()}
-        onOpenChat={() => void chat.open()}
-        onShowReady={() => document.getElementById(readyId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-      />
-      {chat.error && <p className="text-sm text-status-conflict" role="alert">{chat.error}</p>}
-      {signal && !planner && <DeveloperOrder signal={signal} />}
-      {notice && <p className="text-sm text-status-conflict" role="alert">{notice}</p>}
-      {draftQuery.error && !draft && <p className="text-sm text-status-conflict" role="alert">{draftQuery.error.message}</p>}
+  const capacity = draft ? capacityOf(draft) : null;
+  const badge = (id: PlanningPanel) => (draft ? panelBadge(id, draft) : 0);
 
-      {!draft ? (
-        <section className="grid gap-3 border-y border-border py-6" aria-label="No draft yet">
-          <p className="text-sm text-muted-foreground">{chosen.name} has no draft yet. Load it from Jira to see the team's lanes, the scope cut, and the AC check.</p>
-        </section>
-      ) : (
-        <>
-          <p aria-label="Draft summary" className="flex flex-wrap items-center gap-1.5 font-mono text-[0.72rem] font-semibold">
-            <span className={summaryChip}>{draft.tickets.length} open tickets</span>
-            <span className={summaryChip}>{draft.sprintDays} working days</span>
-            <span className={summaryChip}>{draft.devs.length} dev</span>
-            {late > 0 && <span className={warnChip}>{late} AC waiting on other tickets</span>}
-            {storyboardChecks > 0 && <span className={warnChip}>{storyboardChecks} AC to recheck, storyboard changed</span>}
-            {draft.blockers.length > 0 && <span className={warnChip}>{draft.blockers.length} need a decision</span>}
-            <InfoTip label="About the summary">
-              {draft.landed > 0 ? `${draft.landed} tickets of this sprint are merged and not counted. ` : ''}
-              {draft.carriedPast ? `${draft.carriedPast} merged tickets carried from the last sprint are not shown. ` : ''}
-              Zero counts are not shown.
-            </InfoTip>
-          </p>
-          {draft.split && <SplitBox split={draft.split} busy={busy} onUse={onUseSplit} onKeep={onKeepSplit} />}
-          {ready && <ReadyBlock id={readyId} ready={ready} onFix={showPanel} />}
-          <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Planning panel">
-            {panels.map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                role="tab"
-                aria-selected={!openVisual && shown === id}
-                onClick={() => showPanel(id)}
-                className={cn('h-7 rounded-xs border border-border bg-surface-1 px-3 font-display text-xs font-semibold text-secondary-foreground max-[760px]:h-11', !openVisual && shown === id && 'border-accent bg-accent text-black')}
-              >
-                {label}
-              </button>
-            ))}
-            {visuals.map((visual) => (
-              <button
-                key={visual.id}
-                type="button"
-                role="tab"
-                aria-selected={openVisual?.id === visual.id}
-                onClick={() => setVisualId(visual.id)}
-                className={cn('inline-flex h-7 max-w-[14rem] items-center gap-1.5 rounded-xs border border-border bg-surface-1 px-3 font-display text-xs font-semibold text-secondary-foreground max-[760px]:h-11', openVisual?.id === visual.id && 'border-accent bg-accent text-black')}
-              >
-                <BarChart3 size={12} className="flex-none" aria-hidden="true" /><span className="min-w-0 truncate">{visual.title}</span>
-                {visual.stale && <span className="size-1.5 flex-none rounded-full bg-status-warn" title="The draft changed after this was made" aria-label="out of date" />}
-              </button>
-            ))}
-          </div>
-          {/* A developer's DOCK reads the planner's draft: every control in the panels is disabled. */}
-          {!openVisual && shown === 'mine' && <MyTicketsPanel draft={draft} me={me} summaries={summaries} onOpenTicket={openTicket} />}
-          <fieldset disabled={!planner} className="contents">
-          {!openVisual && shown === 'team' && <TeamPanel draft={draft} plan={full?.tickets ?? []} busy={busy} onMove={onMove} />}
-          {!openVisual && shown === 'scope' && <ScopePanel draft={draft} busy={busy} onChange={onChange} onDecide={onDecide} onScout={onScout} />}
-          {!openVisual && shown === 'ac' && <AcPanel draft={draft} busy={busy} onDecide={onDecide} />}
-          {!openVisual && shown === 'storyboard' && <StoryboardBoard draft={draft} busy={busy} onCheck={onCheckStoryboards} onDecide={onDecide} />}
-          {openVisual && <PlanningVisual visual={openVisual} sprint={draft.sprint} busy={busy} onSave={() => onSaveVisual(openVisual.id)} onDiscard={() => onDiscardVisual(openVisual.id)} onRedo={() => void chat.open(redoVisualPrompt(openVisual.title))} />}
-          </fieldset>
-        </>
-      )}
-      <PublishDialog
-        open={publishOpen}
-        sprint={draft?.sprint ?? ''}
-        changes={previewing.loading ? null : previewing.data?.previewSprintDraftPublish ?? null}
-        results={results}
-        loading={previewing.loading}
-        publishing={publishing.loading}
-        error={publishError}
-        missing={ready?.missing ?? []}
-        onConfirm={() => void onConfirm()}
-        onClose={() => setPublishOpen(false)}
-        onFix={() => {
-          setPublishOpen(false);
-          if (ready?.missing[0]) showPanel(ready.missing[0].panel);
-        }}
-      />
+  return (
+    <div className={cn('grid min-w-0 grid-cols-[minmax(0,1fr)] items-start gap-4', folded ? 'min-[1100px]:grid-cols-[minmax(0,1fr)_44px]' : 'min-[1100px]:grid-cols-[minmax(0,1fr)_340px]')}>
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-4">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <Select aria-label="Sprint to plan" className="w-[260px] max-[760px]:w-full" value={String(chosen.id)} onValueChange={(value) => setSprintId(Number(value))} options={options.map((sprint) => ({ value: String(sprint.id), label: `${sprint.name}${sprint.state === 'active' ? ' (active)' : ''}` }))} />
+          <PlanningStatus signal={signal} />
+          {draft && (
+            <p aria-label="Draft summary" className="flex flex-wrap items-center gap-1.5 font-mono text-[0.72rem] font-semibold">
+              <span className={summaryChip}>{draft.tickets.length} open tickets</span>
+              <span className={summaryChip}>{draft.sprintDays} working days</span>
+              <span className={summaryChip}>{draft.devs.length} dev</span>
+              {late > 0 && <span className={warnChip}>{late} AC waiting on other tickets</span>}
+              {storyboardChecks > 0 && <span className={warnChip}>{storyboardChecks} AC to recheck, storyboard changed</span>}
+              {draft.blockers.length > 0 && <span className={warnChip}>{draft.blockers.length} need a decision</span>}
+              <InfoTip label="About the summary">
+                {draft.landed > 0 ? `${draft.landed} tickets of this sprint are merged and not counted. ` : ''}
+                {draft.carriedPast ? `${draft.carriedPast} merged tickets carried from the last sprint are not shown. ` : ''}
+                Zero counts are not shown.
+              </InfoTip>
+            </p>
+          )}
+          <span className="flex-1" />
+          <Button onClick={onLoad} disabled={busy}><Download size={14} aria-hidden="true" />{loading.loading ? 'Loading...' : draft ? 'Load again from Jira' : 'Load from Jira'}</Button>
+        </div>
+        <PlanningStatusNote signal={signal} draft={draft} onOpenChat={() => openChat()} onRepublish={() => void onRepublish()} />
+        {signal && !planner && <DeveloperOrder signal={signal} />}
+        {notice && <p className="text-sm text-status-conflict" role="alert">{notice}</p>}
+        {draftQuery.error && !draft && <p className="text-sm text-status-conflict" role="alert">{draftQuery.error.message}</p>}
+
+        {!draft ? (
+          <section className="grid gap-3 border-y border-border py-6" aria-label="No draft yet">
+            <p className="text-sm text-muted-foreground">{chosen.name} has no draft yet. Load it from Jira to see the team's lanes, the scope cut, and the AC check.</p>
+          </section>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Planning panel">
+              {panels.map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={!openVisual && shown === id}
+                  onClick={() => showPanel(id)}
+                  className={cn('inline-flex h-7 items-center gap-1.5 rounded-xs border border-border bg-surface-1 px-3 font-display text-xs font-semibold text-secondary-foreground max-[760px]:h-11', !openVisual && shown === id && 'border-accent bg-accent text-black')}
+                >
+                  {label}
+                  {badge(id) > 0 && <span className={cn('min-w-[1.15rem] rounded-pill px-1 text-center font-mono text-[0.6rem] font-bold text-black', id === 'new' ? 'bg-sky-300' : 'bg-status-warn')}>{badge(id)}</span>}
+                </button>
+              ))}
+              {visuals.map((visual) => (
+                <button
+                  key={visual.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={openVisual?.id === visual.id}
+                  onClick={() => setVisualId(visual.id)}
+                  className={cn('inline-flex h-7 max-w-[14rem] items-center gap-1.5 rounded-xs border border-dashed border-border bg-surface-1 px-3 font-display text-xs font-semibold text-secondary-foreground max-[760px]:h-11', openVisual?.id === visual.id && 'border-accent bg-accent text-black')}
+                >
+                  <BarChart3 size={12} className="flex-none" aria-hidden="true" /><span className="min-w-0 truncate">{visual.title}</span>
+                  {visual.stale && <span className="size-1.5 flex-none rounded-full bg-status-warn" title="The draft changed after this was made" aria-label="out of date" />}
+                </button>
+              ))}
+            </div>
+            {/* A developer's DOCK reads the planner's draft: every control in the panels is disabled. */}
+            {!openVisual && shown === 'mine' && <MyTicketsPanel draft={draft} me={me} summaries={summaries} onOpenTicket={openTicket} />}
+            {!openVisual && shown === 'order' && <PlanTab />}
+            {!openVisual && shown === 'team' && (
+              <TeamMap
+                draft={draft} plan={full?.tickets ?? []} view={view} perDev={capacity?.perDev ?? 0} busy={busy} readOnly={!planner} onView={chooseView}
+                onMove={onMove} onDecide={onDecide} onCheckStoryboards={onCheckStoryboards} onShowPanel={showPanel} onUseSplit={onUseSplit} onKeepSplit={onKeepSplit}
+              />
+            )}
+            <fieldset disabled={!planner} className="contents">
+            {!openVisual && shown === 'scope' && <ScopePanel draft={draft} busy={busy} onChange={onChange} onDecide={onDecide} onScout={onScout} />}
+            {!openVisual && shown === 'ac' && <AcPanel draft={draft} busy={busy} onDecide={onDecide} onReferenceAll={onReferenceAll} />}
+            {!openVisual && shown === 'storyboard' && <StoryboardBoard draft={draft} busy={busy} onCheck={onCheckStoryboards} onDecide={onDecide} />}
+            {!openVisual && shown === 'new' && <NewTicketsPanel draft={draft} busy={busy} onSave={onSaveNewTicket} onRemove={onRemoveNewTicket} />}
+            {openVisual && <PlanningVisual visual={openVisual} sprint={draft.sprint} busy={busy} onSave={() => onSaveVisual(openVisual.id)} onDiscard={() => onDiscardVisual(openVisual.id)} onRedo={() => openChat(redoVisualPrompt(openVisual.title))} />}
+            </fieldset>
+            {ready && <PlanningBar draft={draft} ready={ready} signal={signal} busy={busy} onShow={showPanel} onPublish={() => void onPublish()} onRepublish={() => void onRepublish()} />}
+          </>
+        )}
+        <PublishDialog
+          open={publishOpen}
+          sprint={draft?.sprint ?? ''}
+          changes={previewing.loading ? null : previewing.data?.previewSprintDraftPublish ?? null}
+          results={results}
+          loading={previewing.loading}
+          publishing={publishing.loading}
+          error={publishError}
+          missing={ready?.missing ?? []}
+          onConfirm={() => void onConfirm()}
+          onClose={() => setPublishOpen(false)}
+          onFix={() => {
+            setPublishOpen(false);
+            if (ready?.missing[0]) showPanel(ready.missing[0].panel);
+          }}
+        />
+      </div>
+      <PlanningChat session={session} folded={folded} onFold={fold} className={folded ? 'min-[1100px]:sticky min-[1100px]:top-4' : 'h-[520px] min-[1100px]:sticky min-[1100px]:top-4 min-[1100px]:h-[calc(100dvh-2rem)]'} />
     </div>
   );
 };

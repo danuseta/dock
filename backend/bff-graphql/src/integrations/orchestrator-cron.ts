@@ -817,14 +817,24 @@ export class OrchestratorCron {
    * A `Judge-…` session on the cron's machine like openReview, with no ticket (an empty key), the Judge model and the Judge account
    * (empty runs on the machine's active account). Removed again when its first message is refused.
    */
-  async openJudge(title: string, prompt: string, account: string, model: string | null): Promise<string> {
+  private async judgeOptions(model: string | null) {
     const settings = await this.settings();
     const base = this.turnOptions(settings);
     if (model) {
       delete base.effort;
       base.model = model;
     }
-    const options = await this.deps.machineOptions(settings.machine, base);
+    return { settings, options: await this.deps.machineOptions(settings.machine, base) };
+  }
+
+  /** The next turn of a Judge chat that is already open. */
+  async sendJudge(chatId: string, prompt: string, model: string | null): Promise<void> {
+    const { options } = await this.judgeOptions(model);
+    await this.deps.send(chatId, prompt, options, { cronSlot: false });
+  }
+
+  async openJudge(title: string, prompt: string, account: string, model: string | null): Promise<string> {
+    const { settings, options } = await this.judgeOptions(model);
     const session = await this.deps.openSession({ ticketKey: '', machine: settings.machine, title, origin: 'cron', options, ...(account ? { account } : {}) });
     try {
       await this.deps.send(session.id, prompt, options, { cronSlot: false });

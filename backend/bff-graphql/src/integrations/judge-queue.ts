@@ -3,8 +3,8 @@
 import type { StorageService } from '../storage/service';
 import { OrchestratorInputError } from './orchestrator';
 import {
-  CAUSE_LABELS, EXAMPLES_TAKEN, JUDGE_CAUSES, JUDGE_TITLE_PREFIX, MAX_JUDGE_ATTEMPTS, activeWindow, dayCutoff, dayStatus, effectiveCall, gradeOf, gradedFindings,
-  inJudgeScope, judgeSessionPrompt, judgeSprintPrompt, judgeSprintTitle, judgeTitle, nextDay, parseJudgeResult, sprintDays, sprintGrade, wibAt, wibDay, worstGrade,
+  CAUSE_LABELS, EXAMPLES_TAKEN, JUDGE_CAUSES, JUDGE_TITLE_PREFIX, JUDGE_TURNS_PER_CHAT, MAX_JUDGE_ATTEMPTS, judgeDayTitle, activeWindow, dayCutoff, dayStatus, effectiveCall, gradeOf, gradedFindings,
+  inJudgeScope, judgeSessionPrompt, judgeSprintPrompt, judgeSprintTitle, nextDay, parseJudgeResult, sprintDays, sprintGrade, wibAt, wibDay, worstGrade,
   type JudgeCall, type JudgeSettings,
 } from './judge';
 import { INPUT_KEEP_MS } from './judge-input';
@@ -12,6 +12,8 @@ import { INPUT_KEEP_MS } from './judge-input';
 export const JUDGE_CACHE = 'judge';
 /** Sessions asked for with Judge again: the queue tidy leaves their pending row alone even outside the active sprint. */
 const ASKED_KEY = 'asked';
+const DAY_CHAT_KEY = 'day-chat';
+interface DayChat { day: string; chatId: string; turns: number; part: number }
 const ASKED_KEEP = 200;
 const CLEAN_EVERY_MS = 3600 * 1000;
 const SPRINT_START_CLOCK = '16:00';
@@ -77,6 +79,8 @@ export interface JudgeDeps {
   cleanInputs(before: Date): Promise<unknown>;
   /** Opens a Judge session (origin cron) with its first message; resolves to the session id. */
   open(input: { title: string; prompt: string; account: string; model: 'sonnet' | 'opus' }): Promise<string>;
+  /** The next message in a Judge chat whose last turn is done. */
+  send(chatId: string, prompt: string, model: 'sonnet' | 'opus'): Promise<void>;
   turnState(chatId: string): Promise<{ state: TurnState; detail: string | null }>;
   sprints(): Promise<JudgeSprintRef[]>;
 }
@@ -219,6 +223,22 @@ export class JudgeQueue {
     return this.run(next, settings);
   }
 
+  /** The day's Judge chat gets the prompt as its next turn; a new chat opens on a new WIB day, after JUDGE_TURNS_PER_CHAT turns, or when the last one did not end cleanly. */
+  private async dayChat(prompt: string, settings: JudgeSettings): Promise<string> {
+    const day = wibDay(this.deps.now());
+    const saved = (await this.deps.store.getCache(JUDGE_CACHE, DAY_CHAT_KEY)) as DayChat | null;
+    const today = saved?.day === day ? saved : null;
+    if (today && today.turns < JUDGE_TURNS_PER_CHAT && (await this.deps.turnState(today.chatId)).state === 'done') {
+      await this.deps.send(today.chatId, prompt, 'sonnet');
+      await this.deps.store.upsertCache(JUDGE_CACHE, DAY_CHAT_KEY, { ...today, turns: today.turns + 1 } satisfies DayChat, 0);
+      return today.chatId;
+    }
+    const part = today ? today.part + 1 : 1;
+    const chatId = await this.deps.open({ title: judgeDayTitle(day, part), prompt, account: settings.account, model: 'sonnet' });
+    await this.deps.store.upsertCache(JUDGE_CACHE, DAY_CHAT_KEY, { day, chatId, turns: 1, part } satisfies DayChat, 0);
+    return chatId;
+  }
+
   private async run(row: Row, settings: JudgeSettings): Promise<TickResult> {
     const { store } = this.deps;
     let input: { text: string; untilMessageId: number | null };
@@ -234,7 +254,7 @@ export class JudgeQueue {
     }
     try {
       const file = await this.deps.writeInput(`${row.sessionId}-${input.untilMessageId}`, input.text);
-      const chatId = await this.deps.open({ title: judgeTitle(row.sessionId), prompt: judgeSessionPrompt(row.sessionId, file, input.untilMessageId), account: settings.account, model: 'sonnet' });
+      const chatId = await this.dayChat(judgeSessionPrompt(row.sessionId, file, input.untilMessageId), settings);
       await store.updateJudgeSession(row.sessionId, { status: 'running', judgeChatId: chatId, runUntilMessageId: input.untilMessageId, startedAt: this.deps.now(), error: null });
       return { started: chatId, skipped: null };
     } catch (error) {

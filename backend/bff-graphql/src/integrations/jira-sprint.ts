@@ -249,6 +249,22 @@ export class JiraSprintClient {
       .map((user: any) => user.accountId as string);
   }
 
+  /** The account ids of users assignable in the project whose display name is exactly `name`. */
+  async projectAssignableAccounts(project: string, name: string): Promise<string[]> {
+    const users = await this.http.get('/rest/api/3/user/assignable/search', { project, query: name, maxResults: 50 });
+    const wanted = name.trim().toLowerCase();
+    return (Array.isArray(users) ? users : [])
+      .filter((user: any) => String(user?.displayName ?? '').trim().toLowerCase() === wanted && typeof user?.accountId === 'string')
+      .map((user: any) => user.accountId as string);
+  }
+
+  /** Creates an issue from its fields and returns the new key. */
+  async createIssue(fields: Record<string, unknown>): Promise<string> {
+    const created = await this.http.post('/rest/api/3/issue', { fields });
+    if (typeof created?.key !== 'string') throw new Error('Jira created the issue without returning its key');
+    return created.key;
+  }
+
   async setAcField(key: string, value: unknown): Promise<void> {
     if (!this.http.put) throw new Error('This Jira connection cannot write');
     await this.http.put(`/rest/api/3/issue/${encodeURIComponent(key)}`, { fields: { [AC_FIELD]: value } });

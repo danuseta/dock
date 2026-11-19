@@ -14,7 +14,7 @@ import { createOrchestratorIngestRouter } from '../routes/orchestrator';
 
 function fakes() {
   const calls: unknown[][] = [];
-  const view = { sprint: 'QRD Sprint 27', tickets: [{ key: 'QRD-1312', merged: false }, { key: 'QRD-1300', merged: true }], questions: [] } as unknown as DraftView;
+  const view = { sprint: 'QRD Sprint 27', tickets: [{ key: 'QRD-1312', merged: false }, { key: 'QRD-1300', merged: true }], questions: [], newTickets: [{ id: 'NEW-1', summary: '[BE] Export' }] } as unknown as DraftView;
   const deps: PlanningIngestDeps = {
     drafts: {
       view: async (sprint) => (sprint === 'QRD Sprint 27' ? view : null),
@@ -26,6 +26,12 @@ function fakes() {
       ask: async (sprint, text, key) => { calls.push(['ask', sprint, text, key]); return view; },
       setTcs: async (sprint, key, tcs) => { calls.push(['tc', sprint, key, tcs]); return view; },
       applyStoryboard: async (result) => { calls.push(['apply', result.epic, result.version]); return ['QRD Sprint 27']; },
+      saveNewTicket: async (sprint, id, input) => {
+        calls.push(['new', sprint, id, input]);
+        if (id === 'NEW-9') throw new SprintInputError('NEW-9 is not a new ticket of the QRD Sprint 27 draft');
+        return { id: id ?? 'NEW-1', view };
+      },
+      removeNewTicket: async (sprint, id) => { calls.push(['rm', sprint, id]); return view; },
     },
     storyboards: {
       sync: async (epic) => {
@@ -68,6 +74,21 @@ test('the planning routes read and change the draft and turn the planner errors 
   await assert.rejects(planningIngest(deps, 'storyboard', { epic: 'QRD-1' }), /No Confluence page titled "Storyboard"/);
 });
 
+test('sprint-draft/new creates, updates and removes a drafted ticket, and get lists the new tickets', async () => {
+  const { deps, calls } = fakes();
+  const got = await planningIngest(deps, 'sprint-draft/get', { sprint: 'QRD Sprint 27' }) as DraftView;
+  assert.deepEqual(got.newTickets, [{ id: 'NEW-1', summary: '[BE] Export' }]);
+  assert.deepEqual(await planningIngest(deps, 'sprint-draft/new', { sprint: 'QRD Sprint 27', ticket: { summary: '[BE] Export', source: 'sheet row 2' } }), { id: 'NEW-1', ticket: { id: 'NEW-1', summary: '[BE] Export' } });
+  assert.deepEqual(calls.at(-1), ['new', 'QRD Sprint 27', null, { summary: '[BE] Export', source: 'sheet row 2' }]);
+  await planningIngest(deps, 'sprint-draft/new', { sprint: 'QRD Sprint 27', id: 'new-1', ticket: { sp: 3 } });
+  assert.deepEqual(calls.at(-1), ['new', 'QRD Sprint 27', 'NEW-1', { sp: 3 }]);
+  assert.deepEqual(await planningIngest(deps, 'sprint-draft/new', { sprint: 'QRD Sprint 27', id: 'NEW-1', remove: true }), { removed: 'NEW-1' });
+  assert.deepEqual(calls.at(-1), ['rm', 'QRD Sprint 27', 'NEW-1']);
+  await assert.rejects(planningIngest(deps, 'sprint-draft/new', { sprint: 'QRD Sprint 27', remove: true }), /id is required/);
+  await assert.rejects(planningIngest(deps, 'sprint-draft/new', { sprint: 'QRD Sprint 27', ticket: 'x' }), /ticket must be an object/);
+  await assert.rejects(planningIngest(deps, 'sprint-draft/new', { sprint: 'QRD Sprint 27', id: 'NEW-9', ticket: {} }), (error: unknown) => error instanceof OrchestratorInputError && /NEW-9 is not a new ticket/.test(error.message));
+});
+
 test('the routes sit behind the ingest token and answer {result}', async () => {
   const { deps } = fakes();
   const service = { authenticateMachine: async (token: string) => (token === 'dock_ing_token' ? 'workspace' : null) };
@@ -82,6 +103,9 @@ test('the routes sit behind the ingest token and answer {result}', async () => {
     const ok = await post('sprint-draft/get', { sprint: 'QRD Sprint 27' });
     assert.equal(ok.status, 200);
     assert.equal((await ok.json()).result.sprint, 'QRD Sprint 27');
+    const created = await post('sprint-draft/new', { sprint: 'QRD Sprint 27', ticket: { summary: '[BE] Export' } });
+    assert.equal(created.status, 200);
+    assert.equal((await created.json()).result.id, 'NEW-1');
     const missing = await post('storyboard', { epic: 'QRD-1' });
     assert.equal(missing.status, 400);
     assert.match((await missing.json()).error, /Storyboard/);

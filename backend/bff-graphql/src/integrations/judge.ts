@@ -222,4 +222,7 @@ export function sprintDays(startDate: string, endDate: string, now: Date): strin
 export const judgeSessionPrompt = (sessionId: string, inputPath: string, untilMessageId: number | null) => `Pakai skill judge: session ${sessionId} input ${inputPath} until ${untilMessageId ?? '-'}`;
 export const judgeSprintPrompt = (sprint: string, inputPath: string) => `Pakai skill judge: sprint "${sprint.replace(/"/g, "'")}" input ${inputPath}`;
 export const judgeTitle = (sessionId: string) => `${JUDGE_TITLE_PREFIX}${sessionId.slice(0, 8)}`;
+/** One Judge chat per WIB day judges the sessions one turn each; after this many turns the next one opens a new chat. */
+export const JUDGE_TURNS_PER_CHAT = 8;
+export const judgeDayTitle = (day: string, part: number) => `${JUDGE_TITLE_PREFIX}${day}${part > 1 ? ` (${part})` : ''}`;
 export const judgeSprintTitle = (sprint: string) => `${JUDGE_TITLE_PREFIX}${sprint}`.slice(0, 120);
