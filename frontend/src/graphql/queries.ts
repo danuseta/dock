@@ -1069,6 +1069,12 @@ export const SAVE_SPRINT_DRAFT_NEW_TICKET = gql`
   }
 `;
 
+export const CREATE_SPRINT_DRAFT_NEW_TICKETS = gql`
+  mutation CreateSprintDraftNewTickets($sprint: String!, $ids: [ID!]) {
+    createSprintDraftNewTickets(sprint: $sprint, ids: $ids) { key kind status detail }
+  }
+`;
+
 export const REMOVE_SPRINT_DRAFT_NEW_TICKET = gql`
   mutation RemoveSprintDraftNewTicket($sprint: String!, $id: ID!) {
     removeSprintDraftNewTicket(sprint: $sprint, id: $id) { ${SPRINT_DRAFT_FIELDS} }

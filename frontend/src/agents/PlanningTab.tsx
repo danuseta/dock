@@ -15,7 +15,7 @@ import { PlanningVisual } from './PlanningVisual';
 import { MyTicketsPanel } from './MyTicketsPanel';
 import {
   CHECK_SPRINT_STORYBOARDS, DECIDE_SPRINT_DRAFT, MOVE_SPRINT_DRAFT_CARDS, GET_OWNER_NAME, GET_PLANNING_FLOW, GET_PLANNING_SPRINTS, GET_SPRINT_DRAFT, GET_SPRINT_DRAFT_VISUALS, GET_SPRINT_PLAN_SIGNAL, GET_TICKET_READINESS, LOAD_SPRINT_DRAFT, PREVIEW_SPRINT_DRAFT_PUBLISH, PUBLISH_SPRINT_DRAFT,
-  RUN_SCOUT, SAVE_SPRINT_DRAFT_VISUAL, DROP_SPRINT_DRAFT_VISUAL, UPDATE_SPRINT_DRAFT_TICKET, USE_SPRINT_DRAFT_SPLIT, KEEP_SPRINT_DRAFT_SPLIT, SAVE_SPRINT_DRAFT_NEW_TICKET, REMOVE_SPRINT_DRAFT_NEW_TICKET,
+  RUN_SCOUT, SAVE_SPRINT_DRAFT_VISUAL, DROP_SPRINT_DRAFT_VISUAL, UPDATE_SPRINT_DRAFT_TICKET, USE_SPRINT_DRAFT_SPLIT, KEEP_SPRINT_DRAFT_SPLIT, SAVE_SPRINT_DRAFT_NEW_TICKET, CREATE_SPRINT_DRAFT_NEW_TICKETS, REMOVE_SPRINT_DRAFT_NEW_TICKET,
 } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import {
@@ -803,11 +803,12 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
   const [publish, publishing] = useMutation(PUBLISH_SPRINT_DRAFT);
   const [saveNewTicket, savingNew] = useMutation(SAVE_SPRINT_DRAFT_NEW_TICKET);
   const [removeNewTicket, removingNew] = useMutation(REMOVE_SPRINT_DRAFT_NEW_TICKET);
+  const [createNewTickets, creatingNew] = useMutation<{ createSprintDraftNewTickets: PublishResult[] }>(CREATE_SPRINT_DRAFT_NEW_TICKETS);
   const [preview, previewing] = useLazyQuery<{ previewSprintDraftPublish: DraftChange[] }>(PREVIEW_SPRINT_DRAFT_PUBLISH, { fetchPolicy: 'network-only' });
   const full = draftQuery.data?.sprintDraft ?? null;
   // Merged cards are on the plan only: every panel works on the cards still to build, the schedule draws them all.
   const draft = full && { ...full, tickets: scheduled(full.tickets) };
-  const busy = loading.loading || updating.loading || deciding.loading || publishing.loading || checking.loading || moving.loading || usingSplit.loading || keepingSplit.loading || savingVisual.loading || droppingVisual.loading || savingNew.loading || removingNew.loading;
+  const busy = loading.loading || updating.loading || deciding.loading || publishing.loading || checking.loading || moving.loading || usingSplit.loading || keepingSplit.loading || savingVisual.loading || droppingVisual.loading || savingNew.loading || removingNew.loading || creatingNew.loading;
   // The planning agent's Indonesian title and AC lines, for Tiket saya.
   const ownerQuery = useQuery<{ ownerName: string }>(GET_OWNER_NAME, { fetchPolicy: 'cache-first' });
   const me = signal?.me ?? ownerQuery.data?.ownerName ?? null;
@@ -851,6 +852,18 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
     }
   };
   const onRemoveNewTicket = (id: string) => draft && run(removeNewTicket({ variables: { sprint: draft.sprint, id } }), 'The new ticket could not be removed');
+  const onCreateNewTickets = async (ids: string[]) => {
+    if (!draft) return [];
+    setNotice(null);
+    try {
+      const res = await createNewTickets({ variables: { sprint: draft.sprint, ids } });
+      await draftQuery.refetch();
+      return res.data?.createSprintDraftNewTickets ?? [];
+    } catch (failure) {
+      setNotice(errorText(failure, 'The new tickets could not be created'));
+      return [];
+    }
+  };
   const onScout = (key: string) => run(runScout({ variables: { key } }), 'The scout could not start');
   const onCheckStoryboards = () => draft && run(checkStoryboards({ variables: { sprint: draft.sprint } }), 'The storyboard could not be read');
   const onSaveVisual = (id: string) => draft && run(saveVisual({ variables: { sprint: draft.sprint, id } }), 'The visual could not be saved');
@@ -980,7 +993,7 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
             {!openVisual && shown === 'scope' && <ScopePanel draft={draft} busy={busy} onChange={onChange} onDecide={onDecide} onScout={onScout} />}
             {!openVisual && shown === 'ac' && <AcPanel draft={draft} busy={busy} onDecide={onDecide} onReferenceAll={onReferenceAll} />}
             {!openVisual && shown === 'storyboard' && <StoryboardBoard draft={draft} busy={busy} onCheck={onCheckStoryboards} onDecide={onDecide} />}
-            {!openVisual && shown === 'new' && <NewTicketsPanel draft={draft} busy={busy} onSave={onSaveNewTicket} onRemove={onRemoveNewTicket} />}
+            {!openVisual && shown === 'new' && <NewTicketsPanel draft={draft} busy={busy} onSave={onSaveNewTicket} onRemove={onRemoveNewTicket} onCreate={onCreateNewTickets} />}
             {openVisual && <PlanningVisual visual={openVisual} sprint={draft.sprint} busy={busy} onSave={() => onSaveVisual(openVisual.id)} onDiscard={() => onDiscardVisual(openVisual.id)} onRedo={() => openChat(redoVisualPrompt(openVisual.title))} />}
             </fieldset>
             {ready && <PlanningBar draft={draft} ready={ready} signal={signal} busy={busy} onShow={showPanel} onPublish={() => void onPublish()} onRepublish={() => void onRepublish()} />}

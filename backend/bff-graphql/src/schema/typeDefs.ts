@@ -2624,6 +2624,8 @@ export const typeDefs = gql`
     saveSprintDraftNewTicket(sprint: String!, id: ID, input: SprintDraftNewTicketInput!): SprintDraft!
     "Removes a drafted new ticket; its NEW-n id is not given out again."
     removeSprintDraftNewTicket(sprint: String!, id: ID!): SprintDraft!
+    "Creates drafted new tickets in Jira in the draft's sprint without publishing the plan; no ids takes every one not created yet."
+    createSprintDraftNewTickets(sprint: String!, ids: [ID!]): [SprintDraftPublishResult!]!
     """Writes AC lines and assignees that differ from Jira. Refused while a blocker has no decision."""
     publishSprintDraft(sprint: String!): [SprintDraftPublishResult!]!
     "move, not-tested, wait, needs-po or clear on a held AC line of the owner's ticket."

@@ -817,6 +817,7 @@ export const resolvers = {
       sprintDraftService.saveNewTicket(sprint, id ?? null, { ...input }).then((saved) => saved.view).catch(planningError)
     ),
     removeSprintDraftNewTicket: (_: unknown, { sprint, id }: { sprint: string; id: string }) => sprintDraftService.removeNewTicket(sprint, id).catch(planningError),
+    createSprintDraftNewTickets: (_: unknown, { sprint, ids }: { sprint: string; ids?: string[] | null }) => sprintDraftService.createNewTicketsOnly(sprint, ids ?? null).catch(planningError),
     answerSprintDraftQuestion: (_: unknown, { sprint, id, answered, text }: { sprint: string; id: string; answered: boolean; text?: string | null }) => (
       sprintDraftService.answer(sprint, id, answered, reporterName(), text ?? null).catch(planningError)
     ),
@@ -1363,6 +1364,7 @@ export const protectedMutations = [
   'decideSprintDraft',
   'saveSprintDraftNewTicket',
   'removeSprintDraftNewTicket',
+  'createSprintDraftNewTickets',
   'saveSprintDraftVisual',
   'dropSprintDraftVisual',
   'refreshSprintDraftQa',

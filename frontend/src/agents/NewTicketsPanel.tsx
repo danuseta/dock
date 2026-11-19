@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2, Info, Plus, Save, Trash2, X } from 'lucide-react';
+import { CheckCircle2, Info, Plus, Save, Send, Trash2, X } from 'lucide-react';
 import { Button, Input, Select, Textarea } from '../components/ui';
 import { cn } from '../lib/cn';
-import { newTicketMissing, type DraftNewTicket, type NewTicketInput, type SprintDraft } from './planning';
-import { NEW_TICKET_LIMIT, PRIORITIES, TICKET_TYPES, newTicketForm, newTicketInput, type NewTicketForm } from './boardLogic';
+import { newTicketMissing, type DraftNewTicket, type NewTicketInput, type PublishResult, type SprintDraft } from './planning';
+import { PRIORITIES, TICKET_TYPES, newTicketForm, newTicketInput, type NewTicketForm } from './boardLogic';
 
 const label = 'block font-mono text-[0.6rem] uppercase tracking-[0.08em] text-muted-foreground';
 const NO_DEV = '__none';
@@ -60,30 +60,49 @@ const TicketForm: React.FC<{
   );
 };
 
-/** Draft > New tickets: tickets not in Jira yet, written here or by the planning agent; Publish creates them in this sprint. */
+/** Draft > New tickets: tickets not in Jira yet, drafted by the planning agent and edited here; Create in Jira makes them without publishing the plan. */
 export const NewTicketsPanel: React.FC<{
   draft: SprintDraft; busy: boolean;
   onSave: (id: string | null, input: NewTicketInput) => Promise<boolean>; onRemove: (id: string) => void;
-}> = ({ draft, busy, onSave, onRemove }) => {
-  const [adding, setAdding] = useState(false);
+  onCreate: (ids: string[]) => Promise<PublishResult[]>;
+}> = ({ draft, busy, onSave, onRemove, onCreate }) => {
   const items = draft.newTickets ?? [];
-  const full = items.length >= NEW_TICKET_LIMIT;
+  const ready = items.filter((item) => !item.createdKey && !newTicketMissing(item).length);
+  const [asking, setAsking] = useState<string[] | null>(null);
+  const [results, setResults] = useState<PublishResult[] | null>(null);
+  const create = async () => {
+    if (!asking) return;
+    setResults(await onCreate(asking));
+    setAsking(null);
+  };
+  const names = (ids: string[]) => ids.map((id) => items.find((item) => item.id === id)).filter((item): item is DraftNewTicket => !!item);
   return (
     <section aria-label="New tickets" className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        <p className="flex min-w-0 flex-1 items-center gap-1.5 text-pretty text-[0.8rem] text-sky-200"><Info size={13} className="flex-none" aria-hidden="true" />Tickets that are not in Jira yet. Publish creates them in this sprint, labelled dock-plan.</p>
-        {items.length > 0 && !adding && <Button size="sm" onClick={() => setAdding(true)} disabled={busy || full} title={full ? `At most ${NEW_TICKET_LIMIT} new tickets per sprint` : undefined}><Plus size={13} aria-hidden="true" />New ticket</Button>}
+        <p className="flex min-w-0 flex-1 items-center gap-1.5 text-pretty text-[0.8rem] text-sky-200"><Info size={13} className="flex-none" aria-hidden="true" />Tickets that are not in Jira yet. Ask for them in the planning chat. Create in Jira makes them in this sprint, labelled dock-plan, without publishing the plan.</p>
+        {ready.length > 1 && !asking && <Button size="sm" variant="primary" onClick={() => { setResults(null); setAsking(ready.map((item) => item.id)); }} disabled={busy}><Send size={13} aria-hidden="true" />Create {ready.length} in Jira</Button>}
       </div>
-      {adding && (
-        <div className="rounded-md border border-l-[3px] border-dashed border-sky-400 bg-surface-1 px-3 py-3">
-          <p className="mb-2 font-display text-sm font-semibold">New ticket</p>
-          <TicketForm draft={draft} item={null} busy={busy} onSave={async (id, input) => { const ok = await onSave(id, input); if (ok) setAdding(false); return ok; }} onCancel={() => setAdding(false)} />
+      {asking && (
+        <div role="alertdialog" aria-label="Create in Jira" className="rounded-md border border-sky-400 bg-surface-1 px-3 py-3 text-[0.8rem]">
+          <p className="font-display text-sm font-semibold">Create {asking.length} {asking.length === 1 ? 'ticket' : 'tickets'} in {draft.sprint}?</p>
+          <ul className="mt-1.5 grid gap-1">
+            {names(asking).map((item) => <li key={item.id} className="flex min-w-0 gap-2"><span className="flex-none font-mono text-[0.72rem] font-bold text-sky-300">{item.id}</span><span className="min-w-0 truncate">{item.summary}</span><span className="ml-auto flex-none font-mono text-[0.7rem] text-muted-foreground">{item.type} · {item.dev ?? 'no developer'} · {item.sp ?? '?'} SP</span></li>)}
+          </ul>
+          <p className="mt-2 text-pretty text-secondary-foreground">Only these tickets are written. The sprint plan is not published: other tickets' AC, assignees and links stay as they are.{names(asking).some((item) => !item.dev) ? ' A ticket without a developer is created unassigned.' : ''}</p>
+          <div className="mt-2.5 flex justify-end gap-2">
+            <Button size="sm" variant="ghost" onClick={() => setAsking(null)} disabled={busy}><X size={13} aria-hidden="true" />Cancel</Button>
+            <Button size="sm" variant="primary" onClick={() => void create()} disabled={busy}><Send size={13} aria-hidden="true" />{busy ? 'Creating...' : 'Create in Jira'}</Button>
+          </div>
         </div>
       )}
-      {!items.length && !adding && (
+      {results && results.length > 0 && (
+        <ul aria-label="Created" className="grid gap-1 rounded-md border border-border bg-surface-1 px-3 py-2 font-mono text-[0.74rem]">
+          {results.map((result) => <li key={result.key} className={result.status === 'created' ? 'text-status-merged' : 'text-status-conflict'}>{result.key} {result.status}{result.detail ? ` → ${result.detail}` : ''}</li>)}
+        </ul>
+      )}
+      {!items.length && (
         <div className="grid justify-items-center gap-3 rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-          <p className="text-pretty">No new ticket yet. Describe one in the chat, or use the chip <b className="text-secondary-foreground">Draft tickets from a sheet</b>.</p>
-          <Button onClick={() => setAdding(true)} disabled={busy}><Plus size={14} aria-hidden="true" />New ticket</Button>
+          <p className="text-pretty">No new ticket yet. Describe them in the planning chat, or use the chip <b className="text-secondary-foreground">Draft tickets from a sheet</b> and paste the sheet link.</p>
         </div>
       )}
       {items.map((item) => {
@@ -94,11 +113,12 @@ export const NewTicketsPanel: React.FC<{
               <span className="rounded-xs border border-sky-400 px-1.5 font-mono text-[0.66rem] font-bold text-sky-300">{item.id}</span>
               {item.createdKey && <span className="inline-flex items-center gap-1 font-mono text-[0.72rem] font-bold text-status-merged"><CheckCircle2 size={12} aria-hidden="true" />{item.createdKey}</span>}
               <b className="min-w-0 flex-1 text-pretty text-[0.84rem]">{item.summary || 'Untitled ticket'}</b>
+              {!item.createdKey && <Button size="sm" onClick={() => { setResults(null); setAsking([item.id]); }} disabled={busy || missing.length > 0} title={missing.length ? `Missing ${missing.join(', ')}` : undefined}><Send size={13} aria-hidden="true" />Create in Jira</Button>}
             </p>
             <p className="mt-0.5 font-mono text-[0.66rem] text-muted-foreground">
               from {item.source} · {item.ac.length} AC {item.ac.length === 1 ? 'line' : 'lines'}{missing.length ? ` · missing ${missing.join(', ')}` : ''}
             </p>
-            {item.error && <p className="mt-1 text-pretty text-[0.78rem] text-status-conflict" role="alert">Publish failed: {item.error}</p>}
+            {item.error && <p className="mt-1 text-pretty text-[0.78rem] text-status-conflict" role="alert">Create failed: {item.error}</p>}
             {item.createdKey
               ? <p className="mt-2 text-[0.78rem] text-secondary-foreground">Created in Jira as {item.createdKey}{item.dev ? ` · ${item.dev}` : ''}{item.sp !== null ? ` · ${item.sp} SP` : ''}. Change it in Jira from here on.</p>
               : <div className="mt-2"><TicketForm draft={draft} item={item} busy={busy} onSave={onSave} onRemove={() => onRemove(item.id)} /></div>}

@@ -207,6 +207,7 @@ test('🛡️ [BFF GraphQL] Schema & Resolver Integrity Verification', async (t)
       'confirmOrchestration',
       'createChatSession',
       'createIngestToken',
+      'createSprintDraftNewTickets',
       'decideSprintDraft',
       'deleteChatSession',
       'deleteDemoVideo',
