@@ -1,10 +1,10 @@
 import React from 'react';
-import { Database, Flag, Play, TestTube2 } from 'lucide-react';
+import { XCircle, Database, Flag, Play, TestTube2 } from 'lucide-react';
 import { Button } from '../components/ui';
 import { cn } from '../lib/cn';
 import { AgentAvatar, MessageTime } from './activity/TranscriptParts';
 import { shortAgent } from './activity/transcript';
-import { hasNotes, stepLabel, type Checkpoint } from './checkpoints';
+import { hasNotes, stepLabel, stepRound, type Checkpoint } from './checkpoints';
 
 interface CheckpointCardProps {
   checkpoint: Checkpoint;
@@ -52,3 +52,20 @@ export const CheckpointCard: React.FC<CheckpointCardProps> = ({ checkpoint, comp
     </Tag>
   );
 };
+
+/** A failed verify round (`T<n>-round-<k>`): one thin line under its verifier, not a card. */
+export const CheckpointRoundRow: React.FC<{ checkpoint: Checkpoint; as?: 'li' | 'div' }> = ({ checkpoint, as = 'li' }) => {
+  const Tag = as;
+  const round = stepRound(checkpoint.step);
+  return (
+    <Tag className="flex min-w-0 items-baseline gap-2 rounded-r-xs border-l-[3px] border-status-conflict bg-status-conflict-bg px-2 py-1 text-[0.76rem] text-secondary-foreground" aria-label={`Checkpoint ${stepLabel(checkpoint.step)}`}>
+      <XCircle size={12} aria-hidden="true" className="flex-none self-center text-status-conflict" />
+      <b className="flex-none font-mono text-[0.66rem] font-semibold text-foreground">{round ? `Round ${round.round}` : stepLabel(checkpoint.step)}</b>
+      <span className="min-w-0 flex-1 text-pretty [overflow-wrap:anywhere]">{checkpoint.text}</span>
+      <span className="flex-none"><MessageTime at={checkpoint.at} /></span>
+    </Tag>
+  );
+};
+
+/** A checkpoint as the thread shows it: a round as its thin line, anything else as the card. */
+export const CheckpointEntry: React.FC<CheckpointCardProps> = (props) => (stepRound(props.checkpoint.step) ? <CheckpointRoundRow checkpoint={props.checkpoint} as={props.as} /> : <CheckpointCard {...props} />);

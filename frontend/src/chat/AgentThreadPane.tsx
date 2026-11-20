@@ -14,7 +14,7 @@ import { SLOW_POLL_MS } from './messages';
 import type { SidebarWorker } from './SessionSidebar';
 import { checkpointForAgent } from './checkpoints';
 import { useCheckpoints } from './useCheckpoints';
-import { CheckpointCard } from './CheckpointCard';
+import { CheckpointEntry } from './CheckpointCard';
 
 type Tab = 'thread' | 'detail' | 'files';
 
@@ -78,7 +78,7 @@ export const AgentThreadPane: React.FC<PaneProps> = ({ sessionId, ticketKey, thr
   if (!worker && !loading) body = <p className="p-4 text-sm text-muted-foreground">This worker is no longer in this session.</p>;
   else if (state === 'failed') body = <p className="p-4 text-sm text-status-conflict" role="alert">The thread could not be loaded.</p>;
   else if (!agent) body = <p className="p-4 text-sm text-muted-foreground" role="status">Loading the thread...</p>;
-  else if (tab === 'thread') body = <ul className="flex min-w-0 flex-col gap-3.5 p-3"><AgentThreadBody agent={agent} rows={rows} parentName={parentName} store={store} now={now} onOpenChild={onOpen} />{report && <CheckpointCard checkpoint={report} compact />}</ul>;
+  else if (tab === 'thread') body = <ul className="flex min-w-0 flex-col gap-3.5 p-3"><AgentThreadBody agent={agent} rows={rows} parentName={parentName} store={store} now={now} onOpenChild={onOpen} checkpoints={checkpoints} />{report && <CheckpointEntry checkpoint={report} compact />}</ul>;
   else if (tab === 'detail') body = <ThreadDetail agent={agent} rows={own} parentName={parentName} store={store} now={now} />;
   else body = files.length === 0 ? <p className="p-4 text-sm text-muted-foreground">No file read or changed yet.</p> : (
     <ul className="flex flex-col gap-1 p-3 font-mono text-[0.72rem] text-secondary-foreground">

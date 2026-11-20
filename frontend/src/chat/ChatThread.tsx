@@ -36,7 +36,7 @@ import { chatStore, prefillStore, usePrefill } from './store';
 import { PlanningSuggestions } from './PlanningSuggestions';
 import { stepStage, type Checkpoint } from './checkpoints';
 import { useCheckpoints } from './useCheckpoints';
-import { CheckpointCard } from './CheckpointCard';
+import { CheckpointEntry } from './CheckpointCard';
 import { useSessionFlow } from './composer/useSessionFlow';
 import { flaggedMessages, type SessionJudge } from '../agents/judge';
 import { continueText, stageAfterStop } from '../lib/sousFlow';
@@ -381,7 +381,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({ sessionId, className, re
             ))}
           />
         ))}
-        <TranscriptList items={activity.items} store={activity.store} flags={flags} focusId={focusMessageId} threadId={threadId} onOpenThread={onOpenThread ? (eventId) => onOpenThread(eventId) : undefined} checkpoints={checkpoints} renderCheckpoint={(checkpoint) => <CheckpointCard checkpoint={checkpoint} onContinue={resumeText && canContinue(checkpoint) ? { label: resumeText, run: () => continueRef.current(resumeText) } : null} />} />
+        <TranscriptList items={activity.items} store={activity.store} flags={flags} focusId={focusMessageId} threadId={threadId} onOpenThread={onOpenThread ? (eventId) => onOpenThread(eventId) : undefined} checkpoints={checkpoints} renderCheckpoint={(checkpoint) => <CheckpointEntry checkpoint={checkpoint} onContinue={resumeText && canContinue(checkpoint) ? { label: resumeText, run: () => continueRef.current(resumeText) } : null} />} />
         <PlanningQuestionCards questions={planning.questions} canAnswer={planning.canAnswer} busy={planning.answering} target={answering} planner={planning.planner} onAnswer={answerQuestion} onTarget={setAnswering} />
       </div>
 

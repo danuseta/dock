@@ -8,21 +8,47 @@ export interface CheckpointWorker { id: string; name: string; startedAt: string 
 const NAMED_STEPS: Record<string, SousStageId> = { planner: 'plan', 'final-review': 'final', video: 'video', publish: 'publish' };
 const TASK_STEPS: Record<string, SousStageId> = { work: 'code', review: 'loop', verify: 'verify' };
 
+/** A failed verify round the kit reports as `T<n>-round-<k>`; null for any other step. */
+export function stepRound(step: string): { task: string; round: number } | null {
+  const match = /^(T\d+)-round-(\d+)$/i.exec(step.trim());
+  return match ? { task: match[1].toUpperCase(), round: Number(match[2]) } : null;
+}
+
+export const isRoundCheckpoint = (checkpoint: Pick<Checkpoint, 'step'>) => stepRound(checkpoint.step) !== null;
+
 /** The Sous flow stage a kit step belongs to, with its task on task steps; null stage for a step the flow does not name. */
 export function stepStage(step: string): { stage: SousStageId | null; task: string | null } {
   const value = step.trim();
+  const round = stepRound(value);
+  if (round) return { stage: 'verify', task: round.task };
   const task = /^(T\d+)-(work|review|verify)$/i.exec(value);
   if (task) return { stage: TASK_STEPS[task[2].toLowerCase()], task: task[1].toUpperCase() };
   const named = NAMED_STEPS[value.toLowerCase()] ?? (stageOf(value) ? value as SousStageId : null);
   return { stage: named, task: null };
 }
 
-/** The step as the Sous flow names it ("Ngoding · T2"), or as the lead wrote it. */
+/** The step as the Sous flow names it ("Ngoding · T2", "Verify · T1 · round 2"), or as the lead wrote it. */
 export function stepLabel(step: string): string {
   const { stage, task } = stepStage(step);
   const title = stage ? stageOf(stage)?.title : null;
   if (!title) return step;
+  const round = stepRound(step);
+  if (round) return `${title} · ${task} · round ${round.round}`;
   return task ? `${title} · ${task}` : title;
+}
+
+/** The newest checkpoint as the session panel names it; a round checkpoint only ever reports a failed round. */
+export const lastCheckpointLabel = (checkpoint: Pick<Checkpoint, 'step'>) => (isRoundCheckpoint(checkpoint) ? `${stepLabel(checkpoint.step)} failed` : stepLabel(checkpoint.step));
+
+export function latestCheckpoint(checkpoints: readonly Checkpoint[]): Checkpoint | null {
+  return [...checkpoints].sort((a, b) => Date.parse(a.at) - Date.parse(b.at)).pop() ?? null;
+}
+
+/** "fix loop, 3 rounds" while the newest checkpoint is a failed round: that round and the one now running after it. */
+export function fixLoopText(checkpoints: readonly Checkpoint[]): string | null {
+  const latest = latestCheckpoint(checkpoints);
+  const round = latest ? stepRound(latest.step) : null;
+  return round ? `fix loop, ${round.round + 1} rounds` : null;
 }
 
 export const hasNotes = (checkpoint: Pick<Checkpoint, 'untestable' | 'missingData'>) => checkpoint.untestable.length > 0 || checkpoint.missingData.length > 0;
