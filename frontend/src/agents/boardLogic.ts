@@ -1,5 +1,6 @@
 // The pure side of Planning > Draft > Team map > Board: a lane per developer with the cards still to build and the new tickets.
 import { UNASSIGNED, countedNewTickets, newTicketNeedsWork, pendingNewTickets, uncheckedStoryboard, undecidedFinding, unrecordedEpics, type DraftFinding, type DraftNewTicket, type NewTicketInput, type PlanningPanel, type SprintDraft } from './planning';
+import { ticketsToReview } from './revisions';
 
 export type BoardFilter = 'all' | 'ac' | 'sb' | 'new';
 export type TeamView = 'board' | 'schedule';
@@ -72,20 +73,20 @@ export function keyParts(text: string, key: string): Array<{ text: string; hit: 
 }
 
 /** The count badge of a panel tab; 0 shows no badge. */
-export function panelBadge(panel: PlanningPanel, draft: Pick<SprintDraft, 'tickets' | 'newTickets' | 'findings' | 'storyboards'>): number {
+export function panelBadge(panel: PlanningPanel, draft: Pick<SprintDraft, 'tickets' | 'newTickets' | 'findings' | 'storyboards' | 'revisions'>): number {
   if (panel === 'ac') return draft.findings.filter(undecidedFinding).length;
   if (panel === 'storyboard') return unrecordedEpics(draft).length + draft.tickets.filter((ticket) => !ticket.carried && ticket.storyboard && !ticket.storyboard.checked).length;
-  if (panel === 'new') return (draft.newTickets ?? []).filter((item) => !item.createdKey).length;
+  if (panel === 'new') return ticketsToReview(draft).total;
   return 0;
 }
 
 /** The chips of the bottom bar: what is still open per panel, from the same counts as the readiness. */
-export function barIssues(draft: Pick<SprintDraft, 'tickets' | 'newTickets' | 'findings' | 'storyboards'>) {
+export function barIssues(draft: Pick<SprintDraft, 'tickets' | 'newTickets' | 'findings' | 'storyboards' | 'revisions'>) {
   const ac = draft.findings.filter(undecidedFinding).length;
   const epics = unrecordedEpics(draft).length;
   const checks = uncheckedStoryboard({ tickets: draft.tickets.filter((ticket) => !ticket.carried) }).length;
   const fresh = pendingNewTickets(draft);
-  return { ac, epics, checks, fresh: fresh.length, needWork: fresh.filter(newTicketNeedsWork).length };
+  return { ac, epics, checks, fresh: fresh.length, needWork: fresh.filter(newTicketNeedsWork).length, revisions: ticketsToReview(draft).revisions };
 }
 
 export const NEW_TICKET_LIMIT = 30;

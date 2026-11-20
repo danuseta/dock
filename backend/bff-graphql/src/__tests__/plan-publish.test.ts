@@ -210,6 +210,8 @@ class Store implements DraftStore {
   async addSprintDraftNewTicket(): Promise<string> { throw new Error('not used'); }
   async updateSprintDraftNewTicket() { return undefined; }
   async removeSprintDraftNewTicket() { return undefined; }
+  async saveSprintDraftRevision() { return undefined; }
+  async updateSprintDraftRevision() { return undefined; }
 }
 
 class Jira implements DraftJira {

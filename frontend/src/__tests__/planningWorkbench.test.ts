@@ -133,7 +133,7 @@ test('the tabs carry counts for AC check, Storyboard and New tickets, and the bo
     newTickets: [fresh({}), fresh({ id: 'NEW-2', dev: null }), fresh({ id: 'NEW-3', createdKey: 'QRD-1600' })],
   });
   assert.deepEqual(['ac', 'storyboard', 'new', 'team'].map((panel) => panelBadge(panel as never, sample)), [1, 2, 2, 0]);
-  assert.deepEqual(barIssues(sample), { ac: 1, epics: 1, checks: 1, fresh: 2, needWork: 1 });
+  assert.deepEqual(barIssues(sample), { ac: 1, epics: 1, checks: 1, fresh: 2, needWork: 1, revisions: 0 });
 });
 
 test('the new ticket form reads back into the save input, and says which field does not read', () => {

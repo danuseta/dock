@@ -578,6 +578,27 @@ model SprintDraftNewTicket {
   @@id([draftSprint, id])
 }
 
+/// A change the planning agent proposes to a ticket that exists in Jira; the planner applies it from Planning. One pending per sprint and key.
+model SprintDraftRevision {
+  id          String    @id @default(cuid())
+  draftSprint String
+  key         String
+  summary     String /// the Jira summary when the revision was written or applied
+  status      String    @default("pending") /// pending | applied | discarded
+  note        String?
+  source      String    @default("chat") /// chat | manual
+  after       String    @default("{}") /// {field: value}: only the fields the revision changes
+  before      String    @default("{}") /// {field: lines}: Jira's value of those fields when the revision was written
+  jiraUpdated String /// Jira's updated timestamp read with the before snapshot
+  error       String?
+  appliedAt   DateTime?
+  appliedBy   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @default(now()) @updatedAt
+
+  @@index([draftSprint, key])
+}
+
 /// One ticket of a SprintDraft: the planner's values next to what Jira held when it was loaded.
 model SprintDraftTicket {
   draftSprint String

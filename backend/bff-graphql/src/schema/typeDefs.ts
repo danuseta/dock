@@ -791,6 +791,50 @@ export const typeDefs = gql`
     split: SprintDraftSplit
     "Tickets the planner drafts for the sprint; Publish creates them in Jira."
     newTickets: [SprintDraftNewTicket!]!
+    "Changes to tickets that exist in Jira: pending first, then applied, newest first; discarded ones left out."
+    revisions: [SprintDraftRevision!]!
+  }
+
+  "One field a revision changes: Jira's value when the revision was written and the value Apply writes, as lines."
+  type SprintDraftRevisionField {
+    "summary, type, userStory, problem, ac, reference or openToConfirm"
+    name: String!
+    label: String!
+    before: [String!]!
+    after: [String!]!
+  }
+
+  "A change the planning agent proposes to a ticket that exists in Jira; the planner applies it to Jira."
+  type SprintDraftRevision {
+    key: ID!
+    "The current Jira summary"
+    summary: String!
+    "pending, applied or discarded"
+    status: String!
+    "The agent's one-line reason"
+    note: String
+    "chat or manual"
+    source: String!
+    "Only the fields the revision changes"
+    fields: [SprintDraftRevisionField!]!
+    "The key is a ticket of this draft"
+    inSprint: Boolean!
+    "The last Apply failure or refusal, null otherwise"
+    error: String
+    createdAt: String!
+    appliedAt: String
+  }
+
+  input SprintDraftRevisionInput {
+    summary: String
+    type: String
+    userStory: String
+    problem: String
+    ac: [String!]
+    reference: String
+    openToConfirm: String
+    note: String
+    source: String
   }
 
   "A ticket the planner drafts for the sprint. Publish creates it in Jira with the label dock-plan."
@@ -1113,7 +1157,7 @@ export const typeDefs = gql`
 
   type SprintDraftPublishResult {
     key: String!
-    "ticket, tc for a QONFLO-TC comment, create for a new ticket (key NEW-n, detail the new key), or contract for the Confluence page"
+    "ticket, tc for a QONFLO-TC comment, create for a new ticket (key NEW-n, detail the new key), revision for an applied revision, or contract for the Confluence page"
     kind: String!
     "updated, created, refused, failed or skipped"
     status: String!
@@ -2628,6 +2672,12 @@ export const typeDefs = gql`
     removeSprintDraftNewTicket(sprint: String!, id: ID!): SprintDraft!
     "Creates drafted new tickets in Jira in the draft's sprint without publishing the plan; no ids takes every one not created yet."
     createSprintDraftNewTickets(sprint: String!, ids: [ID!]): [SprintDraftPublishResult!]!
+    "Creates or replaces the pending revision of a ticket; a field left out is not part of it, null removes it from the revision."
+    saveSprintDraftRevision(sprint: String!, key: ID!, input: SprintDraftRevisionInput!): SprintDraft!
+    "Writes the pending revision's fields that differ from Jira; refused when the ticket changed in Jira after the revision was written."
+    applySprintDraftRevision(sprint: String!, key: ID!): SprintDraftPublishResult!
+    "Discards the pending revision; it is kept as history and left out of the draft."
+    discardSprintDraftRevision(sprint: String!, key: ID!): SprintDraft!
     """Writes AC lines and assignees that differ from Jira. Refused while a blocker has no decision."""
     publishSprintDraft(sprint: String!): [SprintDraftPublishResult!]!
     "move, not-tested, wait, needs-po or clear on a held AC line of the owner's ticket."

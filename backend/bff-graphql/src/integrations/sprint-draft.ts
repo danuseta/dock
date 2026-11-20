@@ -3,7 +3,7 @@
 // the planner made. Publish writes back only what differs from Jira, and refuses a ticket whose AC moved in Jira since
 // it was loaded, so a teammate's edit is never overwritten.
 import { acFindings, acHash, isDoneStatus, normalizeAcLine, splitAc, type AcFinding } from './ac-scope';
-import type { PlanningIssue, PlanningSprint } from './jira-sprint';
+import { AC_FIELD, OLD_USER_STORY_FIELD, OPEN_TO_CONFIRM_FIELD, PROBLEM_FIELD, REFERENCE_FIELD, USER_STORY_FIELD, type PlanningIssue, type PlanningSprint, type RevisionIssue } from './jira-sprint';
 import { predictQa, type QaInputTicket, type QaPrediction, type QaRun } from './qa-predict';
 import { DEFAULT_SP_PER_DAY, DEFAULT_SPRINT_DAYS, endDay, planLayout, planStart, rankOf, remainingSp, scheduleSprint, suggestMoves, workingDayOf, workingDays, type MoveSuggestion, type ScheduledTicket } from './scope-cut';
 import type { MergeRead, TicketMerge } from './merge-state';
@@ -11,7 +11,7 @@ import { SprintInputError } from './sprint-dashboard';
 import { writeContract, type ContractClient } from './sprint-contract';
 import { StoryboardMissing, framesIn, type StoryboardResult } from './storyboard';
 import type { StoryboardScenario } from './storyboard-flows';
-import type { SprintDraftInput, SprintDraftNewTicketData, SprintDraftTicketInput } from '../storage/service';
+import type { SprintDraftInput, SprintDraftNewTicketData, SprintDraftRevisionData, SprintDraftRevisionUpdate, SprintDraftTicketInput } from '../storage/service';
 import { splitView, type SplitState, type SplitView } from './split-page';
 import { planLabel, sprintRevision, stalePlanLabels } from './plan-publish';
 
@@ -61,6 +61,10 @@ export interface DraftJira {
   createIssue?(fields: Record<string, unknown>): Promise<string>;
   /** The account ids of users assignable in the project whose display name is exactly name. */
   projectAccounts?(project: string, name: string): Promise<string[]>;
+  /** The fields a revision may change and Jira's updated timestamp; null when the ticket is not in Jira. */
+  revisionIssue?(key: string): Promise<RevisionIssue | null>;
+  /** Writes the given fields of an existing ticket in one edit. */
+  editIssue?(key: string, fields: Record<string, unknown>): Promise<void>;
 }
 
 /** A draft test case: the AC line it checks (1-based), the steps and what is expected. */
@@ -79,6 +83,7 @@ interface DraftRow {
     tcs?: string; tcAt?: Date | null; tcPosted?: string | null; carried?: boolean;
   }>;
   newTickets?: NewTicketRow[];
+  revisions?: RevisionRow[];
 }
 
 interface NewTicketRow extends SprintDraftNewTicketData { id: string; position: number }
@@ -94,6 +99,8 @@ export interface DraftStore {
   addSprintDraftNewTicket(sprint: string, data: SprintDraftNewTicketData): Promise<string>;
   updateSprintDraftNewTicket(sprint: string, id: string, data: Partial<SprintDraftNewTicketData>): Promise<unknown>;
   removeSprintDraftNewTicket(sprint: string, id: string): Promise<unknown>;
+  saveSprintDraftRevision(sprint: string, key: string, data: SprintDraftRevisionData): Promise<unknown>;
+  updateSprintDraftRevision(id: string, data: SprintDraftRevisionUpdate): Promise<unknown>;
 }
 
 /** The newest storyboard version of an epic as the draft last saw it; error says why there is none. */
@@ -178,11 +185,13 @@ export interface DraftView {
   /** The weeks the split page gives, with the tickets that sit elsewhere; null when no split page was read for this draft. */
   split?: SplitView | null;
   newTickets: DraftNewTicket[];
+  /** Changes the planning agent proposes to tickets that exist in Jira: pending first, then applied, newest first; discarded ones left out. */
+  revisions: DraftRevision[];
 }
 /** referenceAdded: lines Publish appends to the Reference field; blockedBy: tickets Publish links as blocking this one; create: the new ticket Publish creates. */
 export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; referenceAdded: string[]; blockedBy: string[]; refused: string | null; create?: DraftNewTicket | null }
 /** One line of a publish: a ticket's AC and assignee, a new ticket, or the Confluence contract page. */
-export interface PublishResult { key: string; kind: 'ticket' | 'tc' | 'label' | 'contract' | 'create'; status: 'updated' | 'created' | 'refused' | 'failed' | 'skipped'; detail: string | null }
+export interface PublishResult { key: string; kind: 'ticket' | 'tc' | 'label' | 'contract' | 'create' | 'revision'; status: 'updated' | 'created' | 'refused' | 'failed' | 'skipped'; detail: string | null }
 /** Where the split page's weeks are read from and kept per draft; read gives null when no split page is set. */
 export interface SplitSource {
   read(): Promise<SplitState | null>;
@@ -251,6 +260,16 @@ function newTicketText(input: Record<string, unknown>, name: string, label: stri
   return text;
 }
 
+/** AC lines as the route or the panel sends them: at most 40 lines of at most 1000 characters. */
+function acInputLines(value: unknown, holder: string): string[] {
+  if (!Array.isArray(value) || value.some((line) => typeof line !== 'string')) throw new SprintInputError('ac must be a list of lines');
+  const lines = (value as string[]).map(normalizeAcLine).filter(Boolean);
+  if (lines.length > 40) throw new SprintInputError(`${holder} holds at most 40 AC lines`);
+  const long = lines.findIndex((line) => line.length > 1000);
+  if (long >= 0) throw new SprintInputError(`AC line ${long + 1} is at most 1000 characters`);
+  return lines;
+}
+
 /** The fields of a new ticket the input sets; a field left out stays as it is, null clears it. Anything out of range is refused. */
 export function parseNewTicket(raw: unknown): Partial<SprintDraftNewTicketData> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new SprintInputError('ticket must be an object');
@@ -287,14 +306,7 @@ export function parseNewTicket(raw: unknown): Partial<SprintDraftNewTicketData> 
   if (userStory !== undefined) data.userStory = userStory ?? '';
   const problem = newTicketText(input, 'problem', 'Problem Definition', 4000);
   if (problem !== undefined) data.problem = problem ?? '';
-  if (input.ac !== undefined) {
-    if (input.ac !== null && (!Array.isArray(input.ac) || input.ac.some((line) => typeof line !== 'string'))) throw new SprintInputError('ac must be a list of lines');
-    const lines = ((input.ac ?? []) as string[]).map(normalizeAcLine).filter(Boolean);
-    if (lines.length > 40) throw new SprintInputError('A new ticket holds at most 40 AC lines');
-    const long = lines.findIndex((line) => line.length > 1000);
-    if (long >= 0) throw new SprintInputError(`AC line ${long + 1} is at most 1000 characters`);
-    data.ac = JSON.stringify(lines);
-  }
+  if (input.ac !== undefined) data.ac = JSON.stringify(acInputLines(input.ac ?? [], 'A new ticket'));
   const reference = newTicketText(input, 'reference', 'Reference', 2000);
   if (reference !== undefined) data.reference = reference || null;
   const source = newTicketText(input, 'source', 'Source', 200);
@@ -360,6 +372,135 @@ export function newTicketFields(ticket: DraftNewTicket, project: string, sprintI
 function fieldLines(raw: unknown): string[] {
   if (typeof raw === 'string') return raw.split(/\r?\n/);
   return isAdf(raw) ? adfLines(raw) : [];
+}
+
+// ---- Revisions of tickets that exist in Jira ------------------------------------------------------------------------
+
+export const MAX_PENDING_REVISIONS = 30;
+const REVISION_SOURCES = ['chat', 'manual'];
+/** The fields a revision may change, in the order it lists them; nothing else of a ticket is ever written. */
+const REVISION_FIELDS = [
+  { name: 'summary', label: 'Summary', field: 'summary' },
+  { name: 'type', label: 'Type', field: 'issuetype' },
+  { name: 'userStory', label: 'User Story', field: USER_STORY_FIELD },
+  { name: 'problem', label: 'Problem Definition', field: PROBLEM_FIELD },
+  { name: 'ac', label: 'Acceptance Criteria', field: AC_FIELD },
+  { name: 'reference', label: 'Reference', field: REFERENCE_FIELD },
+  { name: 'openToConfirm', label: 'Open to confirm', field: OPEN_TO_CONFIRM_FIELD },
+] as const;
+type RevisionFieldName = typeof REVISION_FIELDS[number]['name'];
+const REVISION_TEXT: Array<[RevisionFieldName, string, number]> = [['userStory', 'User Story', 4000], ['problem', 'Problem Definition', 4000], ['reference', 'Reference', 2000], ['openToConfirm', 'Open to confirm', 4000]];
+const REVISION_INPUTS = new Set<string>([...REVISION_FIELDS.map((field) => field.name), 'note', 'source']);
+/** The values a revision writes: ac is a list of lines, every other field text. */
+export type RevisionAfter = Partial<Record<RevisionFieldName, string | string[]>>;
+
+interface RevisionRow {
+  id: string; key: string; summary: string; status: string; note: string | null; source: string; after: string; before: string; jiraUpdated: string;
+  error: string | null; appliedAt: Date | null; createdAt: Date;
+}
+export interface DraftRevisionField { name: string; label: string; before: string[]; after: string[] }
+export interface DraftRevision {
+  key: string; summary: string; status: string; note: string | null; source: string; fields: DraftRevisionField[];
+  /** The key is a ticket of this draft; otherwise it sits in the backlog or another sprint. */
+  inSprint: boolean;
+  error: string | null; createdAt: string; appliedAt: string | null;
+}
+
+/** The fields a revision sets and its note and source; a field left out or null is not part of it. Anything out of range is refused. */
+export function parseRevision(raw: unknown): { after: RevisionAfter; note?: string | null; source?: string } {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new SprintInputError('revision must be an object');
+  const input = raw as Record<string, unknown>;
+  const other = Object.keys(input).find((name) => !REVISION_INPUTS.has(name));
+  if (other) throw new SprintInputError(`${other} is not a field a revision may change`);
+  const after: RevisionAfter = {};
+  const summary = newTicketText(input, 'summary', 'Summary', 200);
+  if (summary === '') throw new SprintInputError('Summary cannot be empty');
+  if (summary) after.summary = summary;
+  const type = newTicketText(input, 'type', 'Type', 20);
+  if (typeof type === 'string') {
+    const known = NEW_TICKET_TYPES.find((item) => item.toLowerCase() === type.toLowerCase());
+    if (!known) throw new SprintInputError('Type is Task, Story or Bug');
+    after.type = known;
+  }
+  for (const [name, label, max] of REVISION_TEXT) {
+    const value = newTicketText(input, name, label, max);
+    if (typeof value === 'string') after[name] = value;
+  }
+  if (input.ac !== undefined && input.ac !== null) after.ac = acInputLines(input.ac, 'A revision');
+  const note = newTicketText(input, 'note', 'Note', 500);
+  const source = newTicketText(input, 'source', 'Source', 20);
+  if (source && !REVISION_SOURCES.includes(source)) throw new SprintInputError('Source is chat or manual');
+  return { after, ...(note !== undefined ? { note: note || null } : {}), ...(source ? { source } : {}) };
+}
+
+const textLines = (lines: string[]) => lines.map((line) => line.trim()).filter(Boolean);
+
+/** A revision value as lines, the way the field is compared with Jira and shown next to it. */
+function revisionLines(name: RevisionFieldName, value: string | string[]): string[] {
+  if (Array.isArray(value)) return value;
+  if (name === 'summary' || name === 'type') return value ? [value] : [];
+  const lines = value.split(/\r?\n/);
+  return name === 'reference' ? lines.map(normalizeAcLine).filter(Boolean) : textLines(lines);
+}
+
+/** Jira's value of a revision field as lines: AC and Reference as Publish reads them, the other text as the ticket detail does. */
+function jiraLines(issue: RevisionIssue, name: RevisionFieldName): string[] {
+  if (name === 'summary') return issue.summary ? [issue.summary] : [];
+  if (name === 'type') return issue.type ? [issue.type] : [];
+  if (name === 'ac') return acValueLines(issue.fields[AC_FIELD]);
+  if (name === 'reference') return fieldLines(issue.fields[REFERENCE_FIELD]).map(normalizeAcLine).filter(Boolean);
+  if (name === 'userStory') {
+    const story = textLines(fieldLines(issue.fields[USER_STORY_FIELD]));
+    return story.length ? story : textLines(fieldLines(issue.fields[OLD_USER_STORY_FIELD]));
+  }
+  return textLines(fieldLines(issue.fields[name === 'problem' ? PROBLEM_FIELD : OPEN_TO_CONFIRM_FIELD]));
+}
+
+/**
+ * The Jira edit of a revision: only the fields that differ from Jira now. AC and Reference are rewritten line by line
+ * in Jira's format as Publish does; the other text fields are written as Create in Jira writes them, or as text when
+ * Jira holds the field as text.
+ */
+export function revisionEdit(issue: RevisionIssue, after: RevisionAfter): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  for (const { name, field } of REVISION_FIELDS) {
+    const value = after[name];
+    if (value === undefined) continue;
+    const now = jiraLines(issue, name);
+    const lines = revisionLines(name, value);
+    if (name === 'ac' || name === 'reference') {
+      const { removed, added } = diffLines(now, lines);
+      if (removed.length || added.length) fields[field] = rewriteAcValue(issue.fields[field] ?? null, removed, added);
+    } else if (!sameLines(now, lines)) {
+      if (name === 'summary') fields[field] = value;
+      else if (name === 'type') fields[field] = { name: value };
+      else if (!lines.length) fields[field] = null;
+      else fields[field] = typeof issue.fields[field] === 'string' ? lines.join('\n') : paragraphs(lines.join('\n'));
+    }
+  }
+  return fields;
+}
+
+function revisionView(row: RevisionRow, inSprint: boolean): DraftRevision {
+  const after = parse<RevisionAfter>(row.after, {});
+  const before = parse<Record<string, string[]>>(row.before, {});
+  return {
+    key: row.key, summary: row.summary, status: row.status, note: row.note ?? null, source: row.source,
+    fields: REVISION_FIELDS.filter(({ name }) => after[name] !== undefined).map(({ name, label }) => ({ name, label, before: before[name] ?? [], after: revisionLines(name, after[name]!) })),
+    inSprint, error: row.error ?? null, createdAt: row.createdAt.toISOString(), appliedAt: row.appliedAt?.toISOString() ?? null,
+  };
+}
+
+function revisionKey(key: string): string {
+  const ticket = key.trim().toUpperCase();
+  if (!TICKET_KEY.test(ticket)) throw new SprintInputError('key must be a ticket key such as QRD-1602');
+  return ticket;
+}
+
+/** The error's message with what Jira said, prefixed with the status Jira responded with. */
+function jiraFailure(error: any): string {
+  const status = error?.response?.status;
+  return status ? `Jira responded ${status}: ${jiraErrorText(error)}` : jiraErrorText(error);
 }
 
 async function mapLimit<T, R>(items: T[], limit: number, worker: (item: T) => Promise<R>): Promise<R[]> {
@@ -686,6 +827,9 @@ export class SprintDraftService {
     const storyboards = Object.values(parse<Record<string, StoryboardState>>(row.storyboards, {})).filter((board) => epics.has(board.epic)).sort((a, b) => a.epic.localeCompare(b.epic))
       .map((board) => ({ ...board, none: !!decisions[sbNoneId(board.epic)] }));
     const newTickets = (row.newTickets ?? []).map(newTicketView);
+    const draftKeys = new Set(row.tickets.map((ticket) => ticket.key));
+    const revisions = (row.revisions ?? []).filter((item) => item.status !== 'discarded').map((item) => revisionView(item, draftKeys.has(item.key)))
+      .sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending') || (b.appliedAt ?? b.createdAt).localeCompare(a.appliedAt ?? a.createdAt));
     const boardOf = new Map(storyboards.map((board) => [board.epic, board]));
     const flagOf = (ticket: { key: string; epic: string | null; frames: string[]; ac: string[]; status: string; carried?: boolean }): StoryboardFlag | null => {
       if (ticket.carried) return null;
@@ -744,6 +888,7 @@ export class SprintDraftService {
       canPublish: tickets.length > 0 || newTickets.some((ticket) => !ticket.createdKey),
       scopeCut: decisions[SCOPE_CUT_ID] ?? null,
       newTickets,
+      revisions,
     };
   }
 
@@ -828,6 +973,103 @@ export class SprintDraftService {
     if (!NEW_TICKET_ID.test(id) || !(row.newTickets ?? []).some((item) => item.id === id)) throw new SprintInputError(`${id} is not a new ticket of the ${sprint} draft`);
     await this.store.removeSprintDraftNewTicket(sprint, id);
     return (await this.view(sprint))!;
+  }
+
+  /**
+   * Saves the pending revision of a ticket that exists in Jira, replacing the one before. The before snapshot and Jira's
+   * updated timestamp are read now; an edit from the panel (origin manual) keeps the snapshot of the revision it edits.
+   */
+  async saveRevision(sprint: string, key: string, input: unknown, origin: 'chat' | 'manual'): Promise<{ revision: DraftRevision; view: DraftView }> {
+    await this.mayEdit();
+    const row = await this.row(sprint);
+    const ticket = revisionKey(key);
+    const { after, note, source } = parseRevision(input);
+    const names = REVISION_FIELDS.map((field) => field.name).filter((name) => after[name] !== undefined);
+    if (!names.length) throw new SprintInputError('A revision changes at least one field');
+    const revisions = row.revisions ?? [];
+    const pending = revisions.find((item) => item.key === ticket && item.status === 'pending');
+    if (!pending && revisions.filter((item) => item.status === 'pending').length >= MAX_PENDING_REVISIONS) throw new SprintInputError(`A sprint holds at most ${MAX_PENDING_REVISIONS} pending revisions`);
+    const issue = await this.revisionIssue(await this.jira(), ticket);
+    const edit = origin === 'manual' && !!pending;
+    const kept = edit ? parse<Record<string, string[]>>(pending!.before, {}) : {};
+    await this.store.saveSprintDraftRevision(sprint, ticket, {
+      summary: issue.summary || ticket,
+      note: note !== undefined ? note : edit ? pending!.note ?? null : null,
+      source: source ?? (edit ? pending!.source : origin),
+      after: JSON.stringify(Object.fromEntries(names.map((name) => [name, after[name]]))),
+      before: JSON.stringify(Object.fromEntries(names.map((name) => [name, kept[name] ?? jiraLines(issue, name)]))),
+      jiraUpdated: edit ? pending!.jiraUpdated : issue.updated,
+      error: null,
+      ...(edit ? {} : { createdAt: this.now() }),
+    });
+    const view = (await this.view(sprint))!;
+    return { revision: view.revisions.find((item) => item.key === ticket && item.status === 'pending')!, view };
+  }
+
+  /**
+   * Writes the pending revision to Jira: refused when the ticket changed in Jira after the revision was written, and only
+   * the fields that still differ are sent. A failure stays on the revision, which stays pending.
+   */
+  async applyRevision(sprint: string, key: string, by: string | null): Promise<PublishResult> {
+    await this.mayEdit();
+    const row = await this.row(sprint);
+    const ticket = revisionKey(key);
+    const pending = this.pendingRevision(row, ticket, sprint);
+    const after = parse<RevisionAfter>(pending.after, {});
+    const jira = await this.jira();
+    let issue: RevisionIssue;
+    let fields: Record<string, unknown> = {};
+    let refused: string | null = null;
+    try {
+      issue = await this.revisionIssue(jira, ticket);
+      if (issue.updated !== pending.jiraUpdated) refused = `${ticket} changed in Jira after this revision was written; ask the agent to write it again`;
+      else {
+        fields = revisionEdit(issue, after);
+        if (Object.keys(fields).length) {
+          if (!jira.editIssue) throw new Error('This Jira connection cannot edit tickets');
+          await jira.editIssue(ticket, fields);
+        }
+      }
+    } catch (error) {
+      const detail = error instanceof SprintInputError ? error.message : jiraFailure(error);
+      await this.store.updateSprintDraftRevision(pending.id, { error: detail.slice(0, MAX_LINE) });
+      return { key: ticket, kind: 'revision', status: 'failed', detail };
+    }
+    if (refused) {
+      await this.store.updateSprintDraftRevision(pending.id, { error: refused });
+      return { key: ticket, kind: 'revision', status: 'refused', detail: refused };
+    }
+    await this.store.updateSprintDraftRevision(pending.id, {
+      status: 'applied', appliedAt: this.now(), appliedBy: by, error: null, summary: typeof after.summary === 'string' ? after.summary : issue.summary || ticket,
+    });
+    if (fields[AC_FIELD] !== undefined && row.tickets.some((item) => item.key === ticket)) {
+      const ac = acValueLines(fields[AC_FIELD]);
+      await this.store.updateSprintDraftTicket(sprint, ticket, { ac, jiraAc: ac });
+    }
+    const written = REVISION_FIELDS.filter(({ field }) => field in fields).map(({ label }) => label);
+    return { key: ticket, kind: 'revision', status: 'updated', detail: written.length ? `${written.join(', ')} written to Jira` : 'Jira already holds these values' };
+  }
+
+  /** Discards the pending revision; it is kept as history and left out of the draft. */
+  async discardRevision(sprint: string, key: string): Promise<DraftView> {
+    await this.mayEdit();
+    const row = await this.row(sprint);
+    const pending = this.pendingRevision(row, revisionKey(key), sprint);
+    await this.store.updateSprintDraftRevision(pending.id, { status: 'discarded' });
+    return (await this.view(sprint))!;
+  }
+
+  private pendingRevision(row: DraftRow, key: string, sprint: string): RevisionRow {
+    const pending = (row.revisions ?? []).find((item) => item.key === key && item.status === 'pending');
+    if (!pending) throw new SprintInputError(`${key} has no pending revision in the ${sprint} draft`);
+    return pending;
+  }
+
+  private async revisionIssue(jira: DraftJira, key: string): Promise<RevisionIssue> {
+    if (!jira.revisionIssue) throw new SprintInputError('This Jira connection cannot read ticket fields');
+    const issue = await jira.revisionIssue(key);
+    if (!issue) throw new SprintInputError(`${key} is not in Jira`);
+    return issue;
   }
 
   /** Records, changes or clears (action "clear") the planner's call on an AC finding, an ESCALATED prediction or the scope cut. */

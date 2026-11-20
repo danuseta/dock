@@ -59,6 +59,8 @@ async function planningJira(): Promise<DraftJira> {
     comment: (key, lines) => client.addComment(key, lines),
     createIssue: (fields) => client.createIssue(fields),
     projectAccounts: (project, name) => client.projectAssignableAccounts(project, name),
+    revisionIssue: (key) => client.revisionIssueNow(key),
+    editIssue: (key, fields) => client.editIssue(key, fields),
   };
 }
 

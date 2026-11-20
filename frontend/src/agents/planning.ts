@@ -60,6 +60,8 @@ export interface SprintDraft {
   split?: DraftSplit | null;
   /** Tickets not in Jira yet, created on Publish. */
   newTickets?: DraftNewTicket[];
+  /** Changes to tickets already in Jira, written by the planning agent: pending first, then applied; discarded ones are left out. */
+  revisions?: DraftRevision[];
 }
 export interface DraftNewTicket {
   id: string; summary: string; type: string; epic: string | null; dev: string | null; sp: number | null; priority: string | null;
@@ -68,6 +70,13 @@ export interface DraftNewTicket {
   createdKey: string | null;
   /** The last Publish failure for this ticket. */
   error: string | null;
+}
+export interface DraftRevisionField { name: string; label: string; before: string[]; after: string[] }
+export interface DraftRevision {
+  key: string; summary: string; status: string; note: string | null; source: string; fields: DraftRevisionField[]; inSprint: boolean; error: string | null; createdAt: string; appliedAt: string | null;
+}
+export interface RevisionInput {
+  summary?: string | null; type?: string | null; userStory?: string | null; problem?: string | null; ac?: string[] | null; reference?: string | null; openToConfirm?: string | null; note?: string | null; source?: string | null;
 }
 export type NewTicketInput = Partial<Pick<DraftNewTicket, 'summary' | 'type' | 'epic' | 'dev' | 'sp' | 'priority' | 'userStory' | 'problem' | 'ac' | 'reference' | 'source'>>;
 export interface SplitDiff { key: string; draftWeek: number; splitWeek: number; note: string | null }
@@ -458,7 +467,7 @@ export function publishReadiness(
         : unchecked.length ? keysText(unchecked.map((ticket) => ticket.key)) : draft.storyboards.map((board) => (board.version === null ? `${board.epic} none` : `${board.epic} v${board.version}`)).join(', '),
     },
     ...(fresh.length ? [{
-      id: 'new' as const, panel: 'new' as const, fix: 'New tickets', ok: needWork.length === 0,
+      id: 'new' as const, panel: 'new' as const, fix: 'Tickets', ok: needWork.length === 0,
       text: needWork.length ? `${needWork.length} of ${fresh.length} new ${fresh.length === 1 ? 'ticket needs' : 'tickets need'} a field or a developer` : `${fresh.length} new ${fresh.length === 1 ? 'ticket' : 'tickets'} ready to create`,
       detail: needWork.length ? keysText(needWork.map((item) => item.id)) : null,
     }] : []),

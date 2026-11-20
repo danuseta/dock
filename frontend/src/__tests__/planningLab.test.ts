@@ -3,19 +3,21 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { redoVisualPrompt, visualTime } from '../agents/planning';
-import { chartPrompt, sheetPrompt, timelinePrompt, chatSuggestions } from '../chat/suggestions';
+import { chartPrompt, rewritePrompt, sheetPrompt, timelinePrompt, chatSuggestions } from '../chat/suggestions';
 import { prefillStore } from '../chat/store';
 
 const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 
-test('a Planning chat shows the four chips on an empty session, and no Run sprint-planner once it has messages', () => {
-  assert.deepStrictEqual(chatSuggestions('Planning-QRD Sprint 27', 0).map((item) => item.label), ['Run sprint-planner', 'Draft tickets from a sheet', 'Chart SP per dev', 'Timeline per dev']);
-  assert.deepStrictEqual(chatSuggestions('Planning-QRD Sprint 27', 4).map((item) => item.label), ['Draft tickets from a sheet', 'Chart SP per dev', 'Timeline per dev']);
+test('a Planning chat shows the five chips on an empty session, and no Run sprint-planner once it has messages', () => {
+  assert.deepStrictEqual(chatSuggestions('Planning-QRD Sprint 27', 0).map((item) => item.label), ['Run sprint-planner', 'Draft tickets from a sheet', 'Rewrite a ticket', 'Chart SP per dev', 'Timeline per dev']);
+  assert.deepStrictEqual(chatSuggestions('Planning-QRD Sprint 27', 4).map((item) => item.label), ['Draft tickets from a sheet', 'Rewrite a ticket', 'Chart SP per dev', 'Timeline per dev']);
   assert.strictEqual(chatSuggestions('Planning-QRD Sprint 27', 4)[0].text, sheetPrompt('QRD Sprint 27'));
   assert.strictEqual(sheetPrompt('QRD Sprint 27'), 'Draft tickets for sprint "QRD Sprint 27" from this sheet: <paste the sheet link>', 'the chip only fills the prompt; the planner pastes the link');
   assert.strictEqual(chatSuggestions('Planning-QRD Sprint 27', 0)[0].text, null, 'the planner prompt comes from DOCK, with the epics of the draft');
-  assert.strictEqual(chatSuggestions('Planning-QRD Sprint 27', 0)[2].text, chartPrompt('QRD Sprint 27'));
-  assert.strictEqual(chatSuggestions('Planning-QRD Sprint 27', 0)[3].text, timelinePrompt('QRD Sprint 27'));
+  assert.strictEqual(chatSuggestions('Planning-QRD Sprint 27', 0)[2].text, rewritePrompt('QRD Sprint 27'));
+  assert.strictEqual(rewritePrompt('QRD Sprint 27'), 'Rewrite <paste ticket keys> for sprint "QRD Sprint 27": read the ticket, its Discord thread and the code, and save a revision for me to review.', 'the chip only fills the prompt; the planner pastes the keys');
+  assert.strictEqual(chatSuggestions('Planning-QRD Sprint 27', 0)[3].text, chartPrompt('QRD Sprint 27'));
+  assert.strictEqual(chatSuggestions('Planning-QRD Sprint 27', 0)[4].text, timelinePrompt('QRD Sprint 27'));
   assert.match(chartPrompt('QRD Sprint 27'), /sprint "QRD Sprint 27"/, 'the agent knows the sprint without reading the session title');
   assert.match(timelinePrompt('QRD Sprint 27'), /sprint "QRD Sprint 27"/);
 });
@@ -54,7 +56,7 @@ test('the chat store hands a prefill to its session once and keeps it out of the
 test('Planning has no Test cases tab, and the backend test case support is still there', () => {
   const tab = source('../agents/PlanningTab.tsx');
   assert.doesNotMatch(tab, /Test cases|TcPanel|TcTicket|onSaveTcs|SET_SPRINT_DRAFT_TCS/);
-  assert.match(tab, /\['ac', 'AC check'\], \['storyboard', 'Storyboard'\], \['order', 'Order'\], \['new', 'New tickets'\]\];/);
+  assert.match(tab, /\['ac', 'AC check'\], \['storyboard', 'Storyboard'\], \['order', 'Order'\], \['new', 'Tickets'\]\];/);
   assert.doesNotMatch(tab, /QaPanel|QA check|onRefreshQa|ESCALATED/);
   assert.match(source('../agents/planning.ts'), /export type PlanningPanel = 'mine' \| 'team' \| 'scope' \| 'ac' \| 'qa' \| 'tc' \| 'storyboard' \| 'order' \| 'new';/);
   assert.match(source('../graphql/queries.ts'), /setSprintDraftTcs/);

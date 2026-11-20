@@ -1141,3 +1141,25 @@ test('SQLite storage numbers a draft\'s new tickets NEW-n without reuse and keep
   assert.deepStrictEqual(row.newTickets.map((ticket) => [ticket.id, ticket.createdKey, ticket.sp]), [['NEW-1', 'QRD-1601', 3], ['NEW-3', null, null]], 'a load keeps the new tickets');
   assert.strictEqual(await storage.addSprintDraftNewTicket('S-N', fields), 'NEW-4', 'the counter survives a load');
 });
+
+test('SQLite storage keeps one pending revision per sprint and key, and applied or discarded ones as history', {
+  skip: process.env.JIDIS_SQLITE_INTEGRATION !== '1',
+}, async (t) => {
+  const [{ StorageService }, { prisma }] = await Promise.all([import('../storage/service'), import('../storage/client')]);
+  const storage = new StorageService(prisma);
+  t.after(() => prisma.$disconnect());
+  await storage.replaceSprintDraft({ sprint: 'S-R', sprintId: 13, sprintDays: 10, startDate: null, createdBy: null, refStatuses: '{}' }, []);
+  const data = { summary: 'Export', note: 'why', source: 'chat', after: '{"summary":"New"}', before: '{"summary":["Export"]}', jiraUpdated: '2026-11-19T08:00:00.000+0700', error: null };
+  await storage.saveSprintDraftRevision('S-R', 'QRD-1602', { ...data, createdAt: new Date('2026-11-19T00:00:00Z') });
+  await storage.saveSprintDraftRevision('S-R', 'QRD-1602', { ...data, after: '{"summary":"Newer"}', note: null });
+  let rows = (await storage.getSprintDraft('S-R'))!.revisions;
+  assert.deepStrictEqual(rows.map((row) => [row.key, row.status, row.after, row.note]), [['QRD-1602', 'pending', '{"summary":"Newer"}', null]], 'a save replaces the pending revision');
+  await storage.updateSprintDraftRevision(rows[0].id, { status: 'applied', appliedAt: new Date('2026-11-20T00:00:00Z'), appliedBy: 'Danu', error: null });
+  await storage.saveSprintDraftRevision('S-R', 'QRD-1602', { ...data, createdAt: new Date('2026-11-20T01:00:00Z') });
+  await storage.saveSprintDraftRevision('S-R', 'QRD-1489', { ...data, createdAt: new Date('2026-11-20T02:00:00Z') });
+  rows = (await storage.getSprintDraft('S-R'))!.revisions;
+  assert.deepStrictEqual(rows.map((row) => [row.key, row.status, row.appliedBy]), [['QRD-1602', 'applied', 'Danu'], ['QRD-1602', 'pending', null], ['QRD-1489', 'pending', null]]);
+  await storage.updateSprintDraftRevision(rows[2].id, { status: 'discarded' });
+  await storage.replaceSprintDraft({ sprint: 'S-R', sprintId: 13, sprintDays: 10, startDate: null, createdBy: null, refStatuses: '{}' }, []);
+  assert.deepStrictEqual((await storage.getSprintDraft('S-R'))!.revisions.map((row) => row.status), ['applied', 'pending', 'discarded'], 'a load from Jira keeps the revisions');
+});
