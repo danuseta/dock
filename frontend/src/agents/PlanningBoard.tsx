@@ -106,7 +106,7 @@ export const PlanningBoard: React.FC<{
               <span className="min-w-0 flex-1 text-secondary-foreground">
                 {fresh.error ? <span className="text-status-conflict">{fresh.error}</span> : missing.length ? `Still missing: ${missing.join(', ')}.` : fresh.dev ? 'Ready to create on Publish.' : 'No developer yet.'}
               </span>
-              <Button size="sm" onClick={() => onShowPanel('new')}><FilePlus2 size={13} aria-hidden="true" />Open in New tickets</Button>
+              <Button size="sm" onClick={() => onShowPanel('new')}><FilePlus2 size={13} aria-hidden="true" />Open in Tickets</Button>
             </div>
           )}
           {ticket && !findings.length && !epicOpen && !flag && <p className="mt-2 border-t border-border pt-2 text-muted-foreground">Nothing to decide on this card.</p>}

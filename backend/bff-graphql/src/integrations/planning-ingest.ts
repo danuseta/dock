@@ -8,11 +8,11 @@ import { openTickets, type DraftView, type SprintDraftService } from './sprint-d
 import { StoryboardMissing, type StoryboardReader } from './storyboard';
 import type { TicketSummaryService } from './ticket-summary';
 
-export const PLANNING_ROUTES = ['sprint-draft/get', 'sprint-draft/update', 'sprint-draft/tc', 'sprint-draft/question', 'sprint-draft/summary', 'sprint-draft/visual', 'sprint-draft/new', 'storyboard'] as const;
+export const PLANNING_ROUTES = ['sprint-draft/get', 'sprint-draft/update', 'sprint-draft/tc', 'sprint-draft/question', 'sprint-draft/summary', 'sprint-draft/visual', 'sprint-draft/new', 'sprint-draft/revise', 'storyboard'] as const;
 export type PlanningRoute = typeof PLANNING_ROUTES[number];
 
 export interface PlanningIngestDeps {
-  drafts: Pick<SprintDraftService, 'view' | 'updateTicket' | 'ask' | 'applyStoryboard' | 'setTcs' | 'saveNewTicket' | 'removeNewTicket'>;
+  drafts: Pick<SprintDraftService, 'view' | 'updateTicket' | 'ask' | 'applyStoryboard' | 'setTcs' | 'saveNewTicket' | 'removeNewTicket' | 'saveRevision' | 'discardRevision'>;
   storyboards: Pick<StoryboardReader, 'sync'>;
   /** The ticket summaries; get lists the acHash each stored summary was written for. */
   summaries?: Pick<TicketSummaryService, 'write' | 'hashes'>;
@@ -79,6 +79,16 @@ export async function planningIngest(deps: PlanningIngestDeps, route: PlanningRo
       if (!isRecord(body.ticket)) throw new OrchestratorInputError('ticket must be an object');
       const saved = await deps.drafts.saveNewTicket(sprint, id, body.ticket);
       return { id: saved.id, ticket: saved.view.newTickets.find((ticket) => ticket.id === saved.id) ?? null };
+    }
+    if (route === 'sprint-draft/revise') {
+      const key = textField(body, 'key')!.toUpperCase();
+      if (body.remove === true) {
+        await deps.drafts.discardRevision(sprint, key);
+        return { discarded: key };
+      }
+      if (!isRecord(body.revision)) throw new OrchestratorInputError('revision must be an object');
+      const saved = await deps.drafts.saveRevision(sprint, key, body.revision, 'chat');
+      return { key: saved.revision.key, revision: saved.revision };
     }
     if (route === 'sprint-draft/summary') {
       if (!deps.summaries) throw new OrchestratorInputError('Ticket summaries are not available on this DOCK');

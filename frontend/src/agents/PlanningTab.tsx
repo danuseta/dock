@@ -8,7 +8,7 @@ import { usePlanningSession } from './usePlanningChat';
 import { DeveloperOrder, PlanningStatus, PlanningStatusNote } from './PlanningStatus';
 import { PlanningBoard } from './PlanningBoard';
 import { PlanningBar } from './PlanningBar';
-import { NewTicketsPanel } from './NewTicketsPanel';
+import { TicketsPanel } from './RevisionsPanel';
 import { PlanTab } from './PlanTab';
 import { StoryboardBoard } from './StoryboardBoard';
 import { PlanningVisual } from './PlanningVisual';
@@ -16,13 +16,14 @@ import { MyTicketsPanel } from './MyTicketsPanel';
 import {
   CHECK_SPRINT_STORYBOARDS, DECIDE_SPRINT_DRAFT, MOVE_SPRINT_DRAFT_CARDS, GET_OWNER_NAME, GET_PLANNING_FLOW, GET_PLANNING_SPRINTS, GET_SPRINT_DRAFT, GET_SPRINT_DRAFT_VISUALS, GET_SPRINT_PLAN_SIGNAL, GET_TICKET_READINESS, LOAD_SPRINT_DRAFT, PREVIEW_SPRINT_DRAFT_PUBLISH, PUBLISH_SPRINT_DRAFT,
   RUN_SCOUT, SAVE_SPRINT_DRAFT_VISUAL, DROP_SPRINT_DRAFT_VISUAL, UPDATE_SPRINT_DRAFT_TICKET, USE_SPRINT_DRAFT_SPLIT, KEEP_SPRINT_DRAFT_SPLIT, SAVE_SPRINT_DRAFT_NEW_TICKET, CREATE_SPRINT_DRAFT_NEW_TICKETS, REMOVE_SPRINT_DRAFT_NEW_TICKET,
+  SAVE_SPRINT_DRAFT_REVISION, APPLY_SPRINT_DRAFT_REVISION, DISCARD_SPRINT_DRAFT_REVISION,
 } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import {
   UNASSIGNED, devColors, changeCount, dayOf, decisionLabel, findingKindLabel, forecastOf, handOffs, lateDays, lateText, shortDate, underWay, landingDay, lanes, openQuestionsOf, parseWave, ranks, teamStats, waitersOf, publishReadiness, scopeSummary, sortFindings,
   developerLine, freeFrom, githubLine, laneCount, laneOf, moveForecast, moveLine, planRange, scheduleWindow, scheduled, spanOf, waveRows, workingDayLabels,
   undecidedFinding, capacityOf,
-  redoVisualPrompt, translatePrompt, acLineId, untranslatedKeys, draftSummaryText, type DraftChange, type DraftFinding, type DraftVisual, type DraftTicket, type LaneBar, type NewTicketInput, type PlanSignal, type PlanningPanel, type PlanningSprint, type PublishResult, type ReadyItem, type SprintDraft, type TicketSummaryLite,
+  redoVisualPrompt, translatePrompt, acLineId, untranslatedKeys, draftSummaryText, type DraftChange, type DraftFinding, type DraftVisual, type DraftTicket, type LaneBar, type NewTicketInput, type PlanSignal, type PlanningPanel, type PlanningSprint, type PublishResult, type ReadyItem, type RevisionInput, type SprintDraft, type TicketSummaryLite,
 } from './planning';
 import { parseFlow, skippedStages } from './planningFlow';
 import { panelOf } from './plan';
@@ -38,7 +39,7 @@ const DRAFT_STALE_MS = 10 * 60 * 1000;
 const TONE: Record<string, string> = {
   ok: 'border-status-merged text-status-merged', conflict: 'border-status-conflict text-status-conflict', warn: 'border-status-warn text-status-warn', none: 'border-border text-muted-foreground',
 };
-const PANELS: Array<[PlanningPanel, string]> = [['mine', 'My tickets'], ['team', 'Team map'], ['scope', 'Scope'], ['ac', 'AC check'], ['storyboard', 'Storyboard'], ['order', 'Order'], ['new', 'New tickets']];
+const PANELS: Array<[PlanningPanel, string]> = [['mine', 'My tickets'], ['team', 'Team map'], ['scope', 'Scope'], ['ac', 'AC check'], ['storyboard', 'Storyboard'], ['order', 'Order'], ['new', 'Tickets']];
 
 const errorText = (failure: unknown, fallback: string) => (failure instanceof Error ? failure.message : fallback);
 /** Opens the ticket page the way a link inside DOCK does: the app reads the new path on popstate. */
@@ -793,7 +794,7 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
   const flowQuery = useQuery<{ planningFlow: string | null }>(GET_PLANNING_FLOW, { fetchPolicy: 'cache-and-network' });
   const flow = parseFlow(flowQuery.data?.planningFlow);
   const skipped = skippedStages(flow);
-  // Tiket saya, Order and New tickets are not stages of the flow: they are always shown.
+  // Tiket saya, Order and Tickets are not stages of the flow: they are always shown.
   const panels = PANELS.filter(([id]) => id === 'team' || id === 'mine' || id === 'order' || id === 'new' || !skipped.has(id));
   const shown = panels.some(([id]) => id === panel) ? panel : 'team';
   const [loadDraft, loading] = useMutation(LOAD_SPRINT_DRAFT);
@@ -810,11 +811,14 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
   const [saveNewTicket, savingNew] = useMutation(SAVE_SPRINT_DRAFT_NEW_TICKET);
   const [removeNewTicket, removingNew] = useMutation(REMOVE_SPRINT_DRAFT_NEW_TICKET);
   const [createNewTickets, creatingNew] = useMutation<{ createSprintDraftNewTickets: PublishResult[] }>(CREATE_SPRINT_DRAFT_NEW_TICKETS);
+  const [saveRevision, savingRevision] = useMutation(SAVE_SPRINT_DRAFT_REVISION);
+  const [applyRevision, applyingRevision] = useMutation<{ applySprintDraftRevision: PublishResult }>(APPLY_SPRINT_DRAFT_REVISION);
+  const [discardRevision, discardingRevision] = useMutation(DISCARD_SPRINT_DRAFT_REVISION);
   const [preview, previewing] = useLazyQuery<{ previewSprintDraftPublish: DraftChange[] }>(PREVIEW_SPRINT_DRAFT_PUBLISH, { fetchPolicy: 'network-only' });
   const full = draftQuery.data?.sprintDraft ?? null;
   // Merged cards are on the plan only: every panel works on the cards still to build, the schedule draws them all.
   const draft = full && { ...full, tickets: scheduled(full.tickets) };
-  const busy = loading.loading || updating.loading || deciding.loading || publishing.loading || checking.loading || moving.loading || usingSplit.loading || keepingSplit.loading || savingVisual.loading || droppingVisual.loading || savingNew.loading || removingNew.loading || creatingNew.loading;
+  const busy = loading.loading || updating.loading || deciding.loading || publishing.loading || checking.loading || moving.loading || usingSplit.loading || keepingSplit.loading || savingVisual.loading || droppingVisual.loading || savingNew.loading || removingNew.loading || creatingNew.loading || savingRevision.loading || applyingRevision.loading || discardingRevision.loading;
   // The planning agent's Indonesian title and AC lines, for Tiket saya, AC check and the Board's card details.
   const ownerQuery = useQuery<{ ownerName: string }>(GET_OWNER_NAME, { fetchPolicy: 'cache-first' });
   const me = signal?.me ?? ownerQuery.data?.ownerName ?? null;
@@ -871,6 +875,31 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
       return [];
     }
   };
+  const onSaveRevision = async (key: string, input: RevisionInput) => {
+    if (!draft) return false;
+    setNotice(null);
+    try {
+      await saveRevision({ variables: { sprint: draft.sprint, key, input } });
+      await draftQuery.refetch();
+      return true;
+    } catch (failure) {
+      setNotice(errorText(failure, 'The revision could not be saved'));
+      return false;
+    }
+  };
+  const onApplyRevision = async (key: string) => {
+    if (!draft) return null;
+    setNotice(null);
+    try {
+      const res = await applyRevision({ variables: { sprint: draft.sprint, key } });
+      await draftQuery.refetch();
+      return res.data?.applySprintDraftRevision ?? null;
+    } catch (failure) {
+      setNotice(errorText(failure, 'The revision could not be applied'));
+      return null;
+    }
+  };
+  const onDiscardRevision = (key: string) => draft && run(discardRevision({ variables: { sprint: draft.sprint, key } }), 'The revision could not be discarded');
   const onScout = (key: string) => run(runScout({ variables: { key } }), 'The scout could not start');
   const onCheckStoryboards = () => draft && run(checkStoryboards({ variables: { sprint: draft.sprint } }), 'The storyboard could not be read');
   const onSaveVisual = (id: string) => draft && run(saveVisual({ variables: { sprint: draft.sprint, id } }), 'The visual could not be saved');
@@ -993,7 +1022,12 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
             {!openVisual && shown === 'scope' && <ScopePanel draft={draft} busy={busy} onChange={onChange} onDecide={onDecide} onScout={onScout} />}
             {!openVisual && shown === 'ac' && <AcPanel draft={draft} summaries={summaries} busy={busy} onDecide={onDecide} onReferenceAll={onReferenceAll} onTranslate={(keys) => openChat(translatePrompt(draft.sprint, keys))} />}
             {!openVisual && shown === 'storyboard' && <StoryboardBoard draft={draft} busy={busy} onCheck={onCheckStoryboards} onDecide={onDecide} />}
-            {!openVisual && shown === 'new' && <NewTicketsPanel draft={draft} busy={busy} onSave={onSaveNewTicket} onRemove={onRemoveNewTicket} onCreate={onCreateNewTickets} />}
+            {!openVisual && shown === 'new' && (
+              <TicketsPanel
+                draft={draft} busy={busy} onSaveNew={onSaveNewTicket} onRemoveNew={onRemoveNewTicket} onCreateNew={onCreateNewTickets}
+                onSaveRevision={onSaveRevision} onApplyRevision={onApplyRevision} onDiscardRevision={onDiscardRevision} onOpenTicket={openTicket}
+              />
+            )}
             {openVisual && <PlanningVisual visual={openVisual} sprint={draft.sprint} busy={busy} onSave={() => onSaveVisual(openVisual.id)} onDiscard={() => onDiscardVisual(openVisual.id)} onRedo={() => openChat(redoVisualPrompt(openVisual.title))} />}
             </fieldset>
             {ready && <PlanningBar draft={draft} ready={ready} signal={signal} busy={busy} onShow={showPanel} onPublish={() => void onPublish()} onRepublish={() => void onRepublish()} />}

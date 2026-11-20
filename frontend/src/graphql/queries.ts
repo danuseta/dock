@@ -886,6 +886,8 @@ export const SET_JUDGE_SETTINGS = gql`
 
 export const SPRINT_DRAFT_NEW_TICKET_FIELDS = `id summary type epic dev sp priority userStory problem ac reference source createdKey error`;
 
+export const SPRINT_DRAFT_REVISION_FIELDS = `key summary status note source fields { name label before after } inSprint error createdAt appliedAt`;
+
 export const SPRINT_DRAFT_FIELDS = `
   sprint sprintId status sprintDays startDate spPerDay createdBy loadedAt publishedAt qaReason devs blockers canPublish landed carriedPast today
   tickets {
@@ -910,6 +912,7 @@ export const SPRINT_DRAFT_FIELDS = `
   scopeCut { action note by at }
   split { page version readAt error rows kept diffs { key draftWeek splitWeek note } }
   newTickets { ${SPRINT_DRAFT_NEW_TICKET_FIELDS} }
+  revisions { ${SPRINT_DRAFT_REVISION_FIELDS} }
 `;
 
 export const TICKET_SUMMARY_FIELDS = `key acHash made checked notHere waitsOn before after line testData ui acId titleId writtenAt current`;
@@ -1080,6 +1083,24 @@ export const CREATE_SPRINT_DRAFT_NEW_TICKETS = gql`
 export const REMOVE_SPRINT_DRAFT_NEW_TICKET = gql`
   mutation RemoveSprintDraftNewTicket($sprint: String!, $id: ID!) {
     removeSprintDraftNewTicket(sprint: $sprint, id: $id) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const SAVE_SPRINT_DRAFT_REVISION = gql`
+  mutation SaveSprintDraftRevision($sprint: String!, $key: ID!, $input: SprintDraftRevisionInput!) {
+    saveSprintDraftRevision(sprint: $sprint, key: $key, input: $input) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const APPLY_SPRINT_DRAFT_REVISION = gql`
+  mutation ApplySprintDraftRevision($sprint: String!, $key: ID!) {
+    applySprintDraftRevision(sprint: $sprint, key: $key) { key kind status detail }
+  }
+`;
+
+export const DISCARD_SPRINT_DRAFT_REVISION = gql`
+  mutation DiscardSprintDraftRevision($sprint: String!, $key: ID!) {
+    discardSprintDraftRevision(sprint: $sprint, key: $key) { ${SPRINT_DRAFT_FIELDS} }
   }
 `;
 

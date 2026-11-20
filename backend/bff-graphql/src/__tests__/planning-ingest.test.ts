@@ -14,7 +14,11 @@ import { createOrchestratorIngestRouter } from '../routes/orchestrator';
 
 function fakes() {
   const calls: unknown[][] = [];
-  const view = { sprint: 'QRD Sprint 27', tickets: [{ key: 'QRD-1312', merged: false }, { key: 'QRD-1300', merged: true }], questions: [], newTickets: [{ id: 'NEW-1', summary: '[BE] Export' }] } as unknown as DraftView;
+  const revision = {
+    key: 'QRD-1602', summary: 'Export', status: 'pending', note: null, source: 'chat', inSprint: false, error: null, createdAt: '2026-11-20T00:00:00.000Z', appliedAt: null,
+    fields: [{ name: 'summary', label: 'Summary', before: ['Export'], after: ['[BE] Export the plan'] }],
+  };
+  const view = { sprint: 'QRD Sprint 27', tickets: [{ key: 'QRD-1312', merged: false }, { key: 'QRD-1300', merged: true }], questions: [], newTickets: [{ id: 'NEW-1', summary: '[BE] Export' }], revisions: [revision] } as unknown as DraftView;
   const deps: PlanningIngestDeps = {
     drafts: {
       view: async (sprint) => (sprint === 'QRD Sprint 27' ? view : null),
@@ -32,6 +36,12 @@ function fakes() {
         return { id: id ?? 'NEW-1', view };
       },
       removeNewTicket: async (sprint, id) => { calls.push(['rm', sprint, id]); return view; },
+      saveRevision: async (sprint, key, input, origin) => {
+        calls.push(['revise', sprint, key, input, origin]);
+        if (key === 'QRD-9999') throw new SprintInputError('QRD-9999 is not in Jira');
+        return { revision: { ...revision, key }, view };
+      },
+      discardRevision: async (sprint, key) => { calls.push(['discard', sprint, key]); return view; },
     },
     storyboards: {
       sync: async (epic) => {
@@ -89,6 +99,21 @@ test('sprint-draft/new creates, updates and removes a drafted ticket, and get li
   await assert.rejects(planningIngest(deps, 'sprint-draft/new', { sprint: 'QRD Sprint 27', id: 'NEW-9', ticket: {} }), (error: unknown) => error instanceof OrchestratorInputError && /NEW-9 is not a new ticket/.test(error.message));
 });
 
+test('sprint-draft/revise saves a revision with the snapshot the server took, discards one, and get lists the revisions', async () => {
+  const { deps, calls } = fakes();
+  const got = await planningIngest(deps, 'sprint-draft/get', { sprint: 'QRD Sprint 27' }) as DraftView;
+  assert.deepEqual(got.revisions.map((item) => [item.key, item.status]), [['QRD-1602', 'pending']]);
+  const saved = await planningIngest(deps, 'sprint-draft/revise', { sprint: 'QRD Sprint 27', key: 'qrd-1602', revision: { summary: '[BE] Export the plan', note: 'Split out the export' } }) as { key: string; revision: { fields: unknown[] } };
+  assert.equal(saved.key, 'QRD-1602');
+  assert.deepEqual(saved.revision.fields, [{ name: 'summary', label: 'Summary', before: ['Export'], after: ['[BE] Export the plan'] }], 'the answer carries before and after');
+  assert.deepEqual(calls.at(-1), ['revise', 'QRD Sprint 27', 'QRD-1602', { summary: '[BE] Export the plan', note: 'Split out the export' }, 'chat']);
+  assert.deepEqual(await planningIngest(deps, 'sprint-draft/revise', { sprint: 'QRD Sprint 27', key: 'QRD-1602', remove: true }), { discarded: 'QRD-1602' });
+  assert.deepEqual(calls.at(-1), ['discard', 'QRD Sprint 27', 'QRD-1602']);
+  await assert.rejects(planningIngest(deps, 'sprint-draft/revise', { sprint: 'QRD Sprint 27', revision: {} }), /key is required/);
+  await assert.rejects(planningIngest(deps, 'sprint-draft/revise', { sprint: 'QRD Sprint 27', key: 'QRD-1602', revision: 'x' }), /revision must be an object/);
+  await assert.rejects(planningIngest(deps, 'sprint-draft/revise', { sprint: 'QRD Sprint 27', key: 'QRD-9999', revision: { summary: 'x' } }), (error: unknown) => error instanceof OrchestratorInputError && /QRD-9999 is not in Jira/.test(error.message));
+});
+
 test('the routes sit behind the ingest token and answer {result}', async () => {
   const { deps } = fakes();
   const service = { authenticateMachine: async (token: string) => (token === 'dock_ing_token' ? 'workspace' : null) };
@@ -106,6 +131,9 @@ test('the routes sit behind the ingest token and answer {result}', async () => {
     const created = await post('sprint-draft/new', { sprint: 'QRD Sprint 27', ticket: { summary: '[BE] Export' } });
     assert.equal(created.status, 200);
     assert.equal((await created.json()).result.id, 'NEW-1');
+    const revised = await post('sprint-draft/revise', { sprint: 'QRD Sprint 27', key: 'QRD-1602', revision: { summary: '[BE] Export the plan' } });
+    assert.equal(revised.status, 200);
+    assert.equal((await revised.json()).result.key, 'QRD-1602');
     const missing = await post('storyboard', { epic: 'QRD-1' });
     assert.equal(missing.status, 400);
     assert.match((await missing.json()).error, /Storyboard/);

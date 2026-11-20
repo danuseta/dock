@@ -24,6 +24,9 @@ export interface SprintDraftNewTicketData {
   summary: string; type: string; epic: string | null; dev: string | null; sp: number | null; priority: string | null;
   userStory: string; problem: string; ac: string; reference: string | null; source: string; createdKey?: string | null; error?: string | null;
 }
+/** A revision as stored; after and before are JSON objects keyed by field name. */
+export interface SprintDraftRevisionData { summary: string; note: string | null; source: string; after: string; before: string; jiraUpdated: string; error: string | null; createdAt?: Date }
+export interface SprintDraftRevisionUpdate { summary?: string; status?: string; error?: string | null; appliedAt?: Date | null; appliedBy?: string | null }
 export interface SprintPlanData { status?: string; mappingKeys?: string[]; sessionId?: string | null; mappedKeys?: string[]; groups?: string[][]; error?: string | null; startedAt?: Date | null; mappedAt?: Date | null }
 
 const SENSITIVE_KEYS = new Set([
@@ -448,7 +451,21 @@ export class StorageService {
       ...draft,
       tickets: await this.db.sprintDraftTicket.findMany({ where: { draftSprint: sprint }, orderBy: { position: 'asc' } }),
       newTickets: await this.db.sprintDraftNewTicket.findMany({ where: { draftSprint: sprint }, orderBy: { position: 'asc' } }),
+      revisions: await this.db.sprintDraftRevision.findMany({ where: { draftSprint: sprint }, orderBy: { createdAt: 'asc' } }),
     };
+  }
+
+  /** Replaces the pending revision of the key, or adds one when there is none; applied and discarded ones stay as history. */
+  saveSprintDraftRevision(sprint: string, key: string, data: SprintDraftRevisionData) {
+    return this.db.$transaction(async (tx) => {
+      const pending = await tx.sprintDraftRevision.findFirst({ where: { draftSprint: sprint, key, status: 'pending' }, select: { id: true } });
+      if (pending) return tx.sprintDraftRevision.update({ where: { id: pending.id }, data });
+      return tx.sprintDraftRevision.create({ data: { ...data, draftSprint: sprint, key } });
+    });
+  }
+
+  updateSprintDraftRevision(id: string, data: SprintDraftRevisionUpdate) {
+    return this.db.sprintDraftRevision.update({ where: { id }, data });
   }
 
   /** A new ticket gets the next NEW-n of the draft; the counter only grows, so a removed id is never given out again. */

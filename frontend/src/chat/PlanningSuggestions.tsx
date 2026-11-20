@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { useApolloClient } from '@apollo/client';
-import { BarChart3, CalendarRange, FileSpreadsheet, Play } from 'lucide-react';
+import { BarChart3, CalendarRange, FileEdit, FileSpreadsheet, Play } from 'lucide-react';
 import { planningSprintOf } from '../agents/planning';
 import { GET_PLANNING_CHAT_PROMPT } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import { chatSuggestions, type ChatSuggestion } from './suggestions';
 
-const ICONS = { planner: Play, sheet: FileSpreadsheet, chart: BarChart3, timeline: CalendarRange } as const;
+const ICONS = { planner: Play, sheet: FileSpreadsheet, rewrite: FileEdit, chart: BarChart3, timeline: CalendarRange } as const;
 
 /** Suggestion chips above the message box of a Planning chat. A click fills the box and never sends. */
 export const PlanningSuggestions: React.FC<{ title: string | null | undefined; messageCount: number; onPick: (text: string) => void }> = ({ title, messageCount, onPick }) => {

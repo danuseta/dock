@@ -40,9 +40,9 @@ export const PlanningBar: React.FC<{
           {counts.epics ? `${counts.epics} ${counts.epics === 1 ? 'storyboard' : 'storyboards'}` : counts.checks ? `${counts.checks} AC to check` : ready.items.find((item) => item.id === 'storyboard')?.ok ? 'Storyboards recorded' : 'No storyboard read yet'}
         </button>
       )}
-      {counts.fresh > 0 && (
+      {counts.fresh + counts.revisions > 0 && (
         <button type="button" className={cn(issue, counts.needWork ? TONE.warn : TONE.sky)} onClick={() => onShow('new')} title={detail('new')}>
-          <FilePlus2 size={13} aria-hidden="true" />{counts.fresh} new{counts.needWork ? ` · ${counts.needWork} ${counts.needWork === 1 ? 'needs' : 'need'} a field or developer` : ''}
+          <FilePlus2 size={13} aria-hidden="true" />{counts.fresh + counts.revisions} to review{counts.needWork ? ` · ${counts.needWork} ${counts.needWork === 1 ? 'needs' : 'need'} a field or developer` : ''}
         </button>
       )}
       <span className="flex-1" />
