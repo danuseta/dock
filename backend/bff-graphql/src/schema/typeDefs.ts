@@ -25,6 +25,34 @@ export const typeDefs = gql`
     reason: String!
   }
 
+  type KamusRow {
+    written: String!
+    spoken: String!
+  }
+
+  "One ## title of the pronunciation list with its table; a file without sections is one section with an empty title."
+  type KamusSection {
+    title: String!
+    rows: [KamusRow!]!
+  }
+
+  "kamus-pengucapan.md at the blackboard root, parsed the way the demo-video skill reads it."
+  type Kamus {
+    exists: Boolean!
+    intro: String!
+    sections: [KamusSection!]!
+  }
+
+  input KamusRowInput {
+    written: String!
+    spoken: String!
+  }
+
+  input KamusSectionInput {
+    title: String!
+    rows: [KamusRowInput!]!
+  }
+
   type Ticket {
     key: ID!
     title: String!
@@ -2540,6 +2568,7 @@ export const typeDefs = gql`
   }
 
   type Query {
+    kamus: Kamus!
     authStatus: AuthStatus!
     dockMode: String!
     ownerName: String!
@@ -2680,6 +2709,8 @@ export const typeDefs = gql`
   }
 
   type Mutation {
+    "Rewrites kamus-pengucapan.md at the blackboard root; refused when a cell holds | or a newline, is empty or over 80 characters, repeats a written form, or the list passes 500 rows. Workspace DOCK only."
+    saveKamus(sections: [KamusSectionInput!]!, intro: String!): Kamus!
     lockSession: Boolean!
     """Asks sous for a new Keep / Problem / Try draft of the sprint, in a new session. Returns the session id."""
     retroBuild(sprintId: Int!): String!
