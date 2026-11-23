@@ -700,7 +700,7 @@ test('new tickets get NEW-n ids that are never reused, keep the fields an update
   assert.deepEqual(first.view.newTickets, [{
     id: 'NEW-1', summary: '[BE] Export the sprint plan', type: 'Task', epic: null, dev: null, sp: null, priority: null,
     userStory: 'As a planner I want an export so I can share the plan', problem: 'The plan cannot leave DOCK', ac: ['The export holds every ticket'], reference: null, source: 'sheet row 2',
-    createdKey: null, error: null,
+    createdKey: null, error: null, flagReason: null, lint: { ok: true, findings: [] },
   }]);
   assert.equal((await service.saveNewTicket('QRD Sprint 26', null, {})).id, 'NEW-2');
   const blank = (await service.view('QRD Sprint 26'))!.newTickets[1];
@@ -890,7 +890,7 @@ test('a revision snapshots Jira when it is saved, replaces the pending one, and 
       { name: 'summary', label: 'Summary', before: ['Ticket QRD-1489'], after: ['[BE] Edit the skill'] },
       { name: 'ac', label: 'Acceptance Criteria', before: ['The client edits the skill', 'Changes wait for Publish'], after: ['The client edits the skill', 'Changes wait for the owner'] },
     ],
-    inSprint: true, error: null, createdAt: saved.revision.createdAt, appliedAt: null,
+    inSprint: true, error: null, createdAt: saved.revision.createdAt, appliedAt: null, flagReason: null, lint: { ok: true, findings: [] },
   });
   assert.equal(store.revisions[0].jiraUpdated, UPDATED);
 
@@ -1026,4 +1026,84 @@ test('the Jira client reads the revision fields with updated and writes an edit 
   assert.equal(await client.revisionIssueNow('QRD-404'), null);
   await client.editIssue('QRD-1602', { summary: 'New' });
   assert.deepEqual(calls.at(-1), ['put', '/rest/api/3/issue/QRD-1602', { fields: { summary: 'New' } }]);
+});
+
+const BLOCKED_NEW = { ...NEW_TICKET, ac: ['The export works correctly.'] };
+
+test('Create in Jira refuses a new ticket below the writing standard, and lets it in with a reason and the WRITING-FLAG label', async () => {
+  const { service, jira, store } = setup();
+  await service.load(26, 'Alvin');
+  await service.saveNewTicket('QRD Sprint 26', null, BLOCKED_NEW);
+  const view = (await service.view('QRD Sprint 26'))!;
+  assert.equal(view.newTickets[0].lint.ok, false);
+  assert.deepEqual(view.newTickets[0].lint.findings.map((item) => item.rule), ['W2']);
+  assert.match((await service.preview('QRD Sprint 26')).find((change) => change.key === 'NEW-1')!.refused ?? '', /^Below the writing standard: AC 1 says "works correctly"/);
+  const refused = await service.createNewTicketsOnly('QRD Sprint 26', ['NEW-1']);
+  assert.deepEqual(refused.map((result) => [result.key, result.status]), [['NEW-1', 'refused']]);
+  assert.match(refused[0].detail ?? '', /Create or apply it with a flag and a reason/);
+  assert.equal(jira.created.length, 0, 'nothing reaches Jira');
+  await assert.rejects(service.createNewTicketsOnly('QRD Sprint 26', ['NEW-1'], { reason: 'ok' }), /flag reason is 5 to 300 characters/);
+  await assert.rejects(service.createNewTicketsOnly('QRD Sprint 26', ['NEW-1'], { reason: 'x'.repeat(301) }), /flag reason is 5 to 300 characters/);
+  const flagged = await service.createNewTicketsOnly('QRD Sprint 26', ['NEW-1'], { reason: 'The PO agreed to write the AC later' });
+  assert.deepEqual(flagged.map((result) => [result.key, result.status]), [['NEW-1', 'created']]);
+  assert.deepEqual(jira.created[0].labels, ['dock-plan', 'WRITING-FLAG']);
+  assert.equal(store.draft.newTickets[0].flagReason, 'The PO agreed to write the AC later');
+  assert.equal((await service.view('QRD Sprint 26'))!.newTickets[0].flagReason, 'The PO agreed to write the AC later');
+});
+
+test('a new ticket that meets the standard is created without the flag label and a reason is not stored', async () => {
+  const { service, jira, store } = setup();
+  await service.load(26, 'Alvin');
+  await service.saveNewTicket('QRD Sprint 26', null, NEW_TICKET);
+  await service.createNewTicketsOnly('QRD Sprint 26', ['NEW-1'], { reason: 'not needed here' });
+  assert.deepEqual(jira.created[0].labels, ['dock-plan']);
+  assert.equal(store.draft.newTickets[0].flagReason ?? null, null);
+});
+
+test('Apply refuses a revision below the writing standard, and applies it with a reason and the WRITING-FLAG label', async () => {
+  const { service, jira, store } = revisionSetup();
+  const labels: Array<[string, string]> = [];
+  (jira as unknown as { addLabel: (key: string, label: string) => Promise<void> }).addLabel = async (key, label) => { labels.push([key, label]); };
+  await service.load(26, 'Alvin');
+  const saved = await service.saveRevision('QRD Sprint 26', 'QRD-1489', { ac: ['The client edits the skill', 'It behaves as expected.'] }, 'chat');
+  assert.equal(saved.revision.lint.ok, false);
+  assert.deepEqual(saved.revision.lint.findings.map((item) => [item.rule, item.line]), [['W2', 2]]);
+  const refused = await service.applyRevision('QRD Sprint 26', 'QRD-1489', 'Danu');
+  assert.equal(refused.status, 'refused');
+  assert.match(refused.detail ?? '', /^Below the writing standard/);
+  assert.deepEqual([jira.edits, labels], [[], []], 'nothing reaches Jira');
+  assert.match(store.revisions[0].error, /Below the writing standard/);
+  await assert.rejects(service.applyRevision('QRD Sprint 26', 'QRD-1489', 'Danu', { reason: 'no' }), /flag reason is 5 to 300 characters/);
+  const result = await service.applyRevision('QRD Sprint 26', 'QRD-1489', 'Danu', { reason: 'Owner accepted the wording' });
+  assert.equal(result.status, 'updated');
+  assert.equal(jira.edits.length, 1);
+  assert.deepEqual(labels, [['QRD-1489', 'WRITING-FLAG']]);
+  assert.equal(store.revisions[0].flagReason, 'Owner accepted the wording');
+  assert.equal((await service.view('QRD Sprint 26'))!.revisions[0].flagReason, 'Owner accepted the wording');
+});
+
+test('a revision that meets the standard applies without a reason and without the label', async () => {
+  const { service, jira } = revisionSetup();
+  const labels: Array<[string, string]> = [];
+  (jira as unknown as { addLabel: (key: string, label: string) => Promise<void> }).addLabel = async (key, label) => { labels.push([key, label]); };
+  await service.load(26, 'Alvin');
+  await service.saveRevision('QRD Sprint 26', 'QRD-1489', { ac: ['The client edits the skill', 'Changes wait for the owner'] }, 'chat');
+  assert.equal((await service.applyRevision('QRD Sprint 26', 'QRD-1489', 'Danu')).status, 'updated');
+  assert.deepEqual(labels, []);
+});
+
+test('Publish adds WRITING-FLAG to sprint tickets with a block finding and leaves the others and the flagged ones alone', async () => {
+  const { service, jira } = setup();
+  const labels: Array<[string, string]> = [];
+  (jira as unknown as { addLabel: (key: string, label: string) => Promise<void> }).addLabel = async (key, label) => { labels.push([key, label]); };
+  const view = await service.load(26, 'Alvin');
+  assert.deepEqual(view.tickets.filter((ticket) => !ticket.lint.ok).map((ticket) => ticket.key), ['QRD-1511'], 'W3: its AC names tickets it has no link to');
+  const results = await service.publish('QRD Sprint 26', 'Danu');
+  assert.deepEqual(labels.filter(([, label]) => label === 'WRITING-FLAG'), [['QRD-1511', 'WRITING-FLAG']]);
+  const line = results.find((result) => result.key === 'Writing flag');
+  assert.deepEqual([line?.kind, line?.status], ['label', 'updated']);
+  jira.issues = jira.issues.map((item) => (item.key === 'QRD-1511' ? { ...item, labels: ['WRITING-FLAG'] } : item));
+  labels.length = 0;
+  await service.publish('QRD Sprint 26', 'Danu');
+  assert.deepEqual(labels.filter(([, label]) => label === 'WRITING-FLAG'), [], 'a ticket that already carries it is not labelled again');
 });

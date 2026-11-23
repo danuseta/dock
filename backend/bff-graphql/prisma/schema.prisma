@@ -572,6 +572,7 @@ model SprintDraftNewTicket {
   source      String  @default("manual")
   createdKey  String?
   error       String?
+  flagReason  String? /// why the ticket was let in with a WRITING-FLAG despite a block finding
   createdAt   DateTime @default(now())
   updatedAt   DateTime @default(now()) @updatedAt
 
@@ -591,6 +592,7 @@ model SprintDraftRevision {
   before      String    @default("{}") /// {field: lines}: Jira's value of those fields when the revision was written
   jiraUpdated String /// Jira's updated timestamp read with the before snapshot
   error       String?
+  flagReason  String? /// why the revision was applied with a WRITING-FLAG despite a block finding
   appliedAt   DateTime?
   appliedBy   String?
   createdAt   DateTime  @default(now())

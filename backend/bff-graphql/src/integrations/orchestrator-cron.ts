@@ -441,6 +441,8 @@ export interface CronDeps {
   saveRun(ledger: Record<string, unknown>, machine: string): Promise<unknown>;
   /** The Sous flow lines of the ticket's profile for the sous prompt; left out, the prompt has none. */
   sousFlowLines?(key: string): Promise<string[]>;
+  /** The `Readiness <done>/<total>: ...` line of the ticket; null when it misses nothing. Information for the agent, never a reason to hold the ticket. */
+  readinessLine?(key: string): Promise<string | null>;
   /** Sets the run's waiting text and keeps the rest of its ledger. */
   park(key: string, waiting: string): Promise<unknown>;
   /** The newest cron session of each ticket; `stopped` when the owner stopped its last turn, `otherActive` when another session of the ticket works or spoke after it. */
@@ -692,9 +694,11 @@ export class OrchestratorCron {
     return settings.engine === 'sous' ? sousStartPrompt(key, stackOn, await this.flowLines(key)) : startPrompt(key);
   }
 
-  /** The ticket's Sous flow lines; none when no flow is wired or it cannot be read, so the prompt stays as before. */
+  /** The ticket's Sous flow lines and its Readiness line; none when they are not wired or cannot be read, so the prompt stays as before. */
   private async flowLines(key: string): Promise<string[]> {
-    return this.deps.sousFlowLines ? this.deps.sousFlowLines(key).catch(() => []) : [];
+    const flow = this.deps.sousFlowLines ? await this.deps.sousFlowLines(key).catch(() => []) : [];
+    const readiness = this.deps.readinessLine ? await this.deps.readinessLine(key).catch(() => null) : null;
+    return readiness ? [...flow, readiness] : flow;
   }
 
   /**

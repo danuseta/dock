@@ -7,11 +7,11 @@ export interface SummaryFacts {
   testData: string | null; ui: boolean; acId: string[]; titleId: string | null; writtenAt: string; current: boolean; acChangedAt?: string | null;
 }
 export interface ReadinessFacts {
-  tickets: Array<{ key: string; sprint: string | null; tcApproved: boolean; decisions: Array<{ refKey: string; action: string }>; summary: SummaryFacts | null }>;
+  tickets: Array<{ key: string; sprint: string | null; tcApproved: boolean; prediction: string | null; decisions: Array<{ refKey: string; action: string }>; summary: SummaryFacts | null }>;
   statuses: Array<{ key: string; status: string }>;
 }
 
-type ReadinessTicket = Omit<ReadinessInput, 'summary' | 'decisions' | 'tcApproved' | 'statuses'>;
+type ReadinessTicket = Omit<ReadinessInput, 'summary' | 'decisions' | 'tcApproved' | 'statuses' | 'prediction'>;
 
 /** The readiness of every ticket from one query: the board's TODO cards, or the one ticket of the detail page. */
 export function useReadiness(tickets: ReadinessTicket[], enabled = true): { readiness: Map<string, TicketReadiness>; facts: ReadinessFacts | null } {
@@ -26,7 +26,7 @@ export function useReadiness(tickets: ReadinessTicket[], enabled = true): { read
   const byKey = new Map((facts?.tickets ?? []).map((item) => [item.key, item]));
   const readiness = new Map(facts ? tickets.map((ticket) => {
     const fact = byKey.get(ticket.key);
-    return [ticket.key, ticketReadiness({ ...ticket, summary: fact?.summary ?? null, decisions: fact?.decisions ?? [], tcApproved: fact?.tcApproved ?? false, statuses })];
+    return [ticket.key, ticketReadiness({ ...ticket, summary: fact?.summary ?? null, decisions: fact?.decisions ?? [], tcApproved: fact?.tcApproved ?? false, prediction: fact?.prediction ?? null, statuses })];
   }) : []);
   return { readiness, facts };
 }

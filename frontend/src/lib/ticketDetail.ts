@@ -1,5 +1,6 @@
 import type { AgentRun } from '../agents/runs';
 import { hasPage, type DockMode } from './dockMode';
+import { blocksOf, type TicketLint } from './writing';
 
 /**
  * The slim ticket detail and run panel: on the workspace the brief, decisions, review, log and AC evidence live in
@@ -162,12 +163,16 @@ export interface ReadinessSummary { current: boolean; testData: string | null; u
 export interface ReadinessInput {
   key: string; title: string; url?: string | null; acceptanceCriteria?: string | null; blockedBy?: string[] | null;
   openToConfirm?: string | null; figmaUrl?: string | null;
+  /** The writing standard on the ticket as Jira holds it. */
+  lint?: TicketLint | null;
+  /** The QA bot's prediction in the newest draft; null before it ran, which leaves the qa item out. */
+  prediction?: string | null;
   summary?: ReadinessSummary | null; decisions?: RefDecision[] | null; tcApproved?: boolean | null;
   statuses?: Record<string, string> | null;
 }
-export type ReadinessId = 'refs' | 'open' | 'summary' | 'alone' | 'data' | 'tc' | 'design';
+export type ReadinessId = 'refs' | 'open' | 'summary' | 'alone' | 'data' | 'tc' | 'design' | 'writing' | 'qa';
 export interface ReadinessItem { id: ReadinessId; ok: boolean; text: string; detail: string | null; fix: string | null; href: string | null }
-export interface TicketReadiness { items: ReadinessItem[]; done: number; total: number; missing: ReadinessItem[] }
+export interface TicketReadiness { items: ReadinessItem[]; done: number; total: number; missing: ReadinessItem[]; notReady: boolean }
 
 const keyList = (keys: string[]) => `${keys.slice(0, 3).join(', ')}${keys.length > 3 ? ` +${keys.length - 3} more` : ''}`;
 const MOVED = ['reference', 'move'];
@@ -193,6 +198,7 @@ export function ticketReadiness(input: ReadinessInput): TicketReadiness {
   const open = (input.openToConfirm ?? '').trim();
   const ui = hasUi(input.title, summary);
   const jira = input.url ?? null;
+  const blocks = blocksOf(input.lint).length;
   const items: ReadinessItem[] = [
     undecided.length
       ? { id: 'refs', ok: false, text: `Undecided references to other tickets: ${undecided.length}`, detail: `${keyList(undecided)}: add a Blocks link if it waits on them, or move the line to Reference`, fix: 'Planning › AC check', href: '/planning?tab=draft&panel=ac' }
@@ -223,9 +229,17 @@ export function ticketReadiness(input: ReadinessInput): TicketReadiness {
         : input.figmaUrl
           ? { id: 'design', ok: true, text: 'Design link in Figma Link', detail: null, fix: null, href: null }
           : { id: 'design', ok: false, text: 'UI ticket without a design link', detail: 'Fill in the Figma Link field', fix: 'Open in Jira', href: jira },
+    blocks
+      ? { id: 'writing', ok: false, text: `Below the writing standard: ${blocks} ${blocks === 1 ? 'finding' : 'findings'} to fix`, detail: blocksOf(input.lint).map((item) => item.text).join(' '), fix: null, href: null }
+      : { id: 'writing', ok: true, text: 'Meets the writing standard', detail: null, fix: null, href: null },
+    ...(input.prediction
+      ? [input.prediction === 'ESCALATED'
+        ? { id: 'qa' as const, ok: false, text: 'QA predicts ESCALATED: the AC may not be testable', detail: 'The QA bot may not be able to test the AC as written', fix: 'Planning › Draft', href: '/planning?tab=draft' }
+        : { id: 'qa' as const, ok: true, text: 'QA prediction is not ESCALATED', detail: null, fix: null, href: null }]
+      : []),
   ];
   const missing = items.filter((item) => !item.ok);
-  return { items, done: items.length - missing.length, total: items.length, missing };
+  return { items, done: items.length - missing.length, total: items.length, missing, notReady: missing.length > 0 };
 }
 
 /** The board shows the chip only on cards in the TODO column. */

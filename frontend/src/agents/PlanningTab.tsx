@@ -30,7 +30,8 @@ import { panelOf } from './plan';
 import { InfoTip } from './InfoTip';
 import { ScoutCell } from './ScoutCell';
 import { SplitRow } from './SplitBox';
-import { CHAT_FOLDED_KEY, TEAM_VIEW_KEY, chatFoldedOf, chatFoldedValue, findingGroups, keyParts, outsidePlanOpen, panelBadge, remember, remembered, teamViewOf, type TeamView } from './boardLogic';
+import { CHAT_FOLDED_KEY, TEAM_VIEW_KEY, chatFoldedOf, chatFoldedValue, findingGroups, keyParts, outsidePlanOpen, panelBadge, remember, remembered, teamViewOf, type BoardFilter, type TeamView } from './boardLogic';
+import { humanizePrompt } from '../lib/writing';
 
 const head = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
 const chip = 'rounded-xs border px-1.5 font-mono text-[0.6rem] font-bold uppercase tracking-[0.08em]';
@@ -655,9 +656,10 @@ const VIEW_TABS: Array<[TeamView, string, typeof LayoutGrid]> = [['board', 'Boar
 /** Team map: Board (lanes and cards with what to decide) or Schedule (load, waves, days, order of work and hand-offs), and the split page row. */
 const TeamMap: React.FC<{
   draft: SprintDraft; plan: DraftTicket[]; summaries: Map<string, TicketSummaryLite>; view: TeamView; perDev: number; busy: boolean; readOnly: boolean; onView: (view: TeamView) => void;
+  filter: BoardFilter; onFilter: (filter: BoardFilter) => void;
   onMove: (keys: string[], to: string) => void; onDecide: (id: string, action: string, note?: string) => void; onCheckStoryboards: () => void; onShowPanel: (panel: PlanningPanel) => void;
   onUseSplit: (keys: string[]) => void; onKeepSplit: (keys: string[]) => void;
-}> = ({ draft, plan, summaries, view, perDev, busy, readOnly, onView, onMove, onDecide, onCheckStoryboards, onShowPanel, onUseSplit, onKeepSplit }) => (
+}> = ({ draft, plan, summaries, view, perDev, busy, readOnly, onView, filter, onFilter, onMove, onDecide, onCheckStoryboards, onShowPanel, onUseSplit, onKeepSplit }) => (
   <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
     <div role="group" aria-label="Team map view" className="inline-flex w-max overflow-hidden rounded-xs border border-border">
       {VIEW_TABS.map(([id, label, Icon]) => (
@@ -669,7 +671,7 @@ const TeamMap: React.FC<{
     </div>
     {draft.split && <SplitRow split={draft.split} busy={busy || readOnly} onUse={onUseSplit} onKeep={onKeepSplit} />}
     {view === 'board'
-      ? <PlanningBoard draft={draft} perDev={perDev} busy={busy} readOnly={readOnly} onDecide={onDecide} onCheckStoryboards={onCheckStoryboards} onShowPanel={onShowPanel} renderFinding={(finding) => <FindingRow key={finding.id} draft={draft} finding={finding} summaries={summaries} busy={busy} onDecide={onDecide} />} />
+      ? <PlanningBoard draft={draft} perDev={perDev} busy={busy} readOnly={readOnly} filter={filter} onFilter={onFilter} onDecide={onDecide} onCheckStoryboards={onCheckStoryboards} onShowPanel={onShowPanel} renderFinding={(finding) => <FindingRow key={finding.id} draft={draft} finding={finding} summaries={summaries} busy={busy} onDecide={onDecide} />} />
       : <fieldset disabled={readOnly} className="contents"><TeamPanel draft={draft} plan={plan} busy={busy} onMove={onMove} /></fieldset>}
   </div>
 );
@@ -769,6 +771,7 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
   }, [initialPanel]);
   const [view, setView] = useState<TeamView>(() => teamViewOf(remembered(TEAM_VIEW_KEY)));
   const [folded, setFolded] = useState(() => chatFoldedOf(remembered(CHAT_FOLDED_KEY)));
+  const [boardFilter, setBoardFilter] = useState<BoardFilter>('all');
   const chooseView = (next: TeamView) => { setView(next); remember(TEAM_VIEW_KEY, next); };
   const fold = (next: boolean) => { setFolded(next); remember(CHAT_FOLDED_KEY, chatFoldedValue(next)); };
   const [notice, setNotice] = useState<string | null>(null);
@@ -863,11 +866,11 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
     }
   };
   const onRemoveNewTicket = (id: string) => draft && run(removeNewTicket({ variables: { sprint: draft.sprint, id } }), 'The new ticket could not be removed');
-  const onCreateNewTickets = async (ids: string[]) => {
+  const onCreateNewTickets = async (ids: string[], flag?: { reason: string }) => {
     if (!draft) return [];
     setNotice(null);
     try {
-      const res = await createNewTickets({ variables: { sprint: draft.sprint, ids } });
+      const res = await createNewTickets({ variables: { sprint: draft.sprint, ids, flag } });
       await draftQuery.refetch();
       return res.data?.createSprintDraftNewTickets ?? [];
     } catch (failure) {
@@ -887,11 +890,11 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
       return false;
     }
   };
-  const onApplyRevision = async (key: string) => {
+  const onApplyRevision = async (key: string, flag?: { reason: string }) => {
     if (!draft) return null;
     setNotice(null);
     try {
-      const res = await applyRevision({ variables: { sprint: draft.sprint, key } });
+      const res = await applyRevision({ variables: { sprint: draft.sprint, key, flag } });
       await draftQuery.refetch();
       return res.data?.applySprintDraftRevision ?? null;
     } catch (failure) {
@@ -1014,7 +1017,7 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
             {!openVisual && shown === 'order' && <PlanTab />}
             {!openVisual && shown === 'team' && (
               <TeamMap
-                draft={draft} plan={full?.tickets ?? []} summaries={summaries} view={view} perDev={capacity?.perDev ?? 0} busy={busy} readOnly={!planner} onView={chooseView}
+                draft={draft} plan={full?.tickets ?? []} summaries={summaries} view={view} perDev={capacity?.perDev ?? 0} busy={busy} readOnly={!planner} onView={chooseView} filter={boardFilter} onFilter={setBoardFilter}
                 onMove={onMove} onDecide={onDecide} onCheckStoryboards={onCheckStoryboards} onShowPanel={showPanel} onUseSplit={onUseSplit} onKeepSplit={onKeepSplit}
               />
             )}
@@ -1026,11 +1029,12 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
               <TicketsPanel
                 draft={draft} busy={busy} onSaveNew={onSaveNewTicket} onRemoveNew={onRemoveNewTicket} onCreateNew={onCreateNewTickets}
                 onSaveRevision={onSaveRevision} onApplyRevision={onApplyRevision} onDiscardRevision={onDiscardRevision} onOpenTicket={openTicket}
+                onHumanize={(key) => openChat(humanizePrompt(key, draft.sprint))}
               />
             )}
             {openVisual && <PlanningVisual visual={openVisual} sprint={draft.sprint} busy={busy} onSave={() => onSaveVisual(openVisual.id)} onDiscard={() => onDiscardVisual(openVisual.id)} onRedo={() => openChat(redoVisualPrompt(openVisual.title))} />}
             </fieldset>
-            {ready && <PlanningBar draft={draft} ready={ready} signal={signal} busy={busy} onShow={showPanel} onPublish={() => void onPublish()} onRepublish={() => void onRepublish()} />}
+            {ready && <PlanningBar draft={draft} ready={ready} signal={signal} busy={busy} onShow={showPanel} onPublish={() => void onPublish()} onRepublish={() => void onRepublish()} onWriting={() => { setBoardFilter('writing'); chooseView('board'); showPanel('team'); }} />}
           </>
         )}
         <PublishDialog

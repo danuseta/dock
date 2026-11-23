@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Check, FileSearch, FilePlus2, Info, Undo2, X } from 'lucide-react';
+import { Check, FileSearch, FilePlus2, Info, PenLine, Undo2, X } from 'lucide-react';
 import { Button } from '../components/ui';
 import { cn } from '../lib/cn';
 import { UNASSIGNED, devColors, newTicketMissing, storyboardDecisionId, storyboardNoneId, unrecordedEpics, type DraftFinding, type PlanningPanel, type SprintDraft } from './planning';
-import { boardCards, boardLanes, cardShown, filterCounts, type BoardCard, type BoardFilter } from './boardLogic';
+import { boardCards, boardLanes, cardMark, cardShown, filterCounts, type BoardCard, type BoardFilter } from './boardLogic';
+import { lintTip } from '../lib/writing';
 
 const fmt = (value: number) => String(Math.round(value * 10) / 10);
 const dot = 'inline-block size-2 flex-none rounded-full';
@@ -23,6 +24,7 @@ const Card: React.FC<{ card: BoardCard; picked: boolean; dim: boolean; onPick: (
     )}
   >
     <span className="absolute right-1.5 top-1.5 flex gap-1">
+      {cardMark(card) && <span title={lintTip(card.lint)} className={cardMark(card) === 'block' ? 'text-status-conflict' : 'text-status-warn'}><PenLine size={11} aria-hidden="true" /><span className="sr-only">{cardMark(card) === 'block' ? 'Below the writing standard' : 'Writing notes'}</span></span>}
       {card.flags.ac && <span className={cn(dot, AC_DOT)} title="An AC line names another ticket, not decided" />}
       {card.flags.sb && <span className={cn(dot, SB_DOT)} title="Storyboard not recorded" />}
     </span>
@@ -37,8 +39,12 @@ export const PlanningBoard: React.FC<{
   draft: SprintDraft; perDev: number; busy: boolean; readOnly: boolean;
   renderFinding: (finding: DraftFinding) => React.ReactNode;
   onDecide: (id: string, action: string, note?: string) => void; onCheckStoryboards: () => void; onShowPanel: (panel: PlanningPanel) => void;
-}> = ({ draft, perDev, busy, readOnly, renderFinding, onDecide, onCheckStoryboards, onShowPanel }) => {
-  const [filter, setFilter] = useState<BoardFilter>('all');
+  /** The filter, when the page holds it (the bottom bar jumps to Writing); the board keeps its own otherwise. */
+  filter?: BoardFilter; onFilter?: (filter: BoardFilter) => void;
+}> = ({ draft, perDev, busy, readOnly, renderFinding, onDecide, onCheckStoryboards, onShowPanel, filter: shownFilter, onFilter }) => {
+  const [own, setOwn] = useState<BoardFilter>('all');
+  const filter = shownFilter ?? own;
+  const setFilter = onFilter ?? setOwn;
   const [picked, setPicked] = useState<string | null>(null);
   const cards = boardCards(draft);
   const lanes = boardLanes(draft, perDev);
@@ -56,6 +62,7 @@ export const PlanningBoard: React.FC<{
     ['ac', <><span className={cn(dot, AC_DOT)} aria-hidden="true" />AC to decide · {counts.ac}</>],
     ['sb', <><span className={cn(dot, SB_DOT)} aria-hidden="true" />Storyboard · {counts.sb}</>],
     ['new', <>New · {counts.new}</>],
+    ['writing', <><PenLine size={11} aria-hidden="true" />Writing · {counts.writing}</>],
   ];
 
   return (
@@ -81,6 +88,15 @@ export const PlanningBoard: React.FC<{
           <p className="mt-0.5 font-mono text-[0.68rem] text-muted-foreground">
             {card.dev ?? UNASSIGNED} · {card.sp ?? '?'} SP · {card.isNew ? (card.createdKey ? `created as ${card.createdKey}` : 'created on Publish') : card.status}{card.epic ? ` · epic ${card.epic}` : ''}
           </p>
+          {card.lint && card.lint.findings.length > 0 && (
+            <ul aria-label={`Writing findings of ${card.key}`} className="mt-2 grid gap-1">
+              {card.lint.findings.map((item, index) => (
+                <li key={`${item.rule}-${item.field}-${item.line ?? 0}-${index}`} className={cn('rounded-xs border px-2 py-1 text-pretty text-[0.76rem] [overflow-wrap:anywhere]', item.level === 'block' ? 'border-status-conflict/50 bg-status-conflict-bg text-status-conflict' : 'border-status-warn/50 bg-status-warn-bg text-[var(--color-status-warn-ink)]')}>
+                  <b className="mr-1.5 font-mono text-[0.68rem]">{item.rule}</b>{item.text}
+                </li>
+              ))}
+            </ul>
+          )}
           <fieldset disabled={readOnly} className="contents">
             {findings.length > 0 && <ul className="mt-2 overflow-hidden rounded-md border border-border bg-surface-0">{findings.map((finding) => renderFinding(finding))}</ul>}
             {epicOpen && (

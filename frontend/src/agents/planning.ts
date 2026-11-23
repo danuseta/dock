@@ -1,5 +1,6 @@
 // The pure side of Planning > Draft: shapes of the draft the BFF returns and what the panel derives from it.
 import { skippedStages, type PlanningFlow } from './planningFlow';
+import type { TicketLint } from '../lib/writing';
 
 export interface PlanningSprint { id: number; name: string; state: string; startDate: string | null; endDate: string | null }
 export interface DraftDecision { action: string; note: string | null; by: string | null; at: string }
@@ -15,6 +16,8 @@ export interface DraftTicket {
   ac: string[]; dependsOn: string[]; start: number; dur: number; end: number; inSprint: boolean; split: number[] | null;
   prediction: QaPrediction | null; qaDecision: DraftDecision | null; epic: string | null; frames: string[]; storyboard: StoryboardFlag | null;
   tcs: DraftTc[]; tcStale: boolean; tcPending: boolean;
+  /** The writing standard on the fields the draft holds (summary, AC, SP, Blocks links). */
+  lint?: TicketLint;
   scout?: DraftScout | null; scoutRunning?: boolean;
   /** QA approved the test cases as they are now. */
   tcApproved?: boolean;
@@ -70,10 +73,16 @@ export interface DraftNewTicket {
   createdKey: string | null;
   /** The last Publish failure for this ticket. */
   error: string | null;
+  lint?: TicketLint;
+  /** Why it was created with a WRITING-FLAG despite a block finding. */
+  flagReason?: string | null;
 }
 export interface DraftRevisionField { name: string; label: string; before: string[]; after: string[] }
 export interface DraftRevision {
   key: string; summary: string; status: string; note: string | null; source: string; fields: DraftRevisionField[]; inSprint: boolean; error: string | null; createdAt: string; appliedAt: string | null;
+  /** The writing standard on the values the revision writes. */
+  lint?: TicketLint;
+  flagReason?: string | null;
 }
 export interface RevisionInput {
   summary?: string | null; type?: string | null; userStory?: string | null; problem?: string | null; ac?: string[] | null; reference?: string | null; openToConfirm?: string | null; note?: string | null; source?: string | null;

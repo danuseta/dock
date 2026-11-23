@@ -4,14 +4,17 @@ import { Button, Input, Select, Textarea } from '../components/ui';
 import { cn } from '../lib/cn';
 import { newTicketMissing, type DraftNewTicket, type NewTicketInput, type PublishResult, type SprintDraft } from './planning';
 import { PRIORITIES, TICKET_TYPES, newTicketForm, newTicketInput, type NewTicketForm } from './boardLogic';
+import { Findings, FindingsChip, FlagBox } from './WritingFindings';
+import type { TicketLint } from '../lib/writing';
 
 const label = 'block font-mono text-[0.6rem] uppercase tracking-[0.08em] text-muted-foreground';
 const NO_DEV = '__none';
 
-const Field: React.FC<{ name: string; wide?: boolean; warn?: boolean; children: React.ReactNode }> = ({ name, wide, warn, children }) => (
+const Field: React.FC<{ name: string; wide?: boolean; warn?: boolean; lint?: TicketLint | null; field?: string; children: React.ReactNode }> = ({ name, wide, warn, lint, field, children }) => (
   <label className={cn('grid min-w-0 gap-1', wide && 'col-span-full')}>
     <span className={cn(label, warn && 'text-[var(--color-status-warn-ink)]')}>{name}</span>
     {children}
+    {field && <Findings lint={lint} field={field} />}
   </label>
 );
 
@@ -40,14 +43,14 @@ const TicketForm: React.FC<{
       <div className="grid grid-cols-[repeat(4,minmax(0,1fr))] gap-2.5 max-[1100px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[600px]:grid-cols-[minmax(0,1fr)]">
         <Field name="Type"><Select aria-label={`Type of ${name}`} className="h-9" value={form.type} onValueChange={set('type')} options={TICKET_TYPES.map((value) => ({ value, label: value }))} disabled={busy} /></Field>
         <Field name="Developer" warn={!form.dev}><Select aria-label={`Developer of ${name}`} className="h-9" value={form.dev || NO_DEV} onValueChange={(value) => set('dev')(value === NO_DEV ? '' : value)} options={[{ value: NO_DEV, label: 'Pick a developer' }, ...devs.map((value) => ({ value, label: value }))]} disabled={busy} /></Field>
-        <Field name="SP"><Input aria-label={`SP of ${name}`} inputMode="decimal" className="h-9 px-2" value={form.sp} onChange={text('sp')} disabled={busy} /></Field>
+        <Field name="SP" lint={item?.lint} field="sp"><Input aria-label={`SP of ${name}`} inputMode="decimal" className="h-9 px-2" value={form.sp} onChange={text('sp')} disabled={busy} /></Field>
         <Field name="Priority"><Select aria-label={`Priority of ${name}`} className="h-9" value={form.priority} onValueChange={set('priority')} options={PRIORITIES.map((value) => ({ value, label: value }))} disabled={busy} /></Field>
         <Field name="Epic"><Input aria-label={`Epic of ${name}`} className="h-9 px-2 font-mono" placeholder="No epic" value={form.epic} onChange={text('epic')} disabled={busy} /></Field>
-        <Field name="Summary" wide warn={!form.summary.trim()}><Input aria-label={`Summary of ${name}`} className="h-9" maxLength={200} placeholder="[BE][Workflow] What changes" value={form.summary} onChange={text('summary')} disabled={busy} /></Field>
-        <Field name="User story" wide warn={!form.userStory.trim()}><Textarea aria-label={`User story of ${name}`} className="min-h-16" maxLength={4000} placeholder="As a … I want … so …" value={form.userStory} onChange={text('userStory')} disabled={busy} /></Field>
-        <Field name="Problem definition" wide warn={!form.problem.trim()}><Textarea aria-label={`Problem definition of ${name}`} className="min-h-16" maxLength={4000} value={form.problem} onChange={text('problem')} disabled={busy} /></Field>
-        <Field name="Acceptance criteria · one line each" wide warn={!form.ac.trim()}><Textarea aria-label={`Acceptance criteria of ${name}`} className="min-h-24 font-mono text-[0.78rem]" value={form.ac} onChange={text('ac')} disabled={busy} /></Field>
-        <Field name="Reference" wide><Textarea aria-label={`Reference of ${name}`} className="min-h-12" maxLength={2000} value={form.reference} onChange={text('reference')} disabled={busy} /></Field>
+        <Field name="Summary" wide warn={!form.summary.trim()} lint={item?.lint} field="summary"><Input aria-label={`Summary of ${name}`} className="h-9" maxLength={200} placeholder="[BE][Workflow] What changes" value={form.summary} onChange={text('summary')} disabled={busy} /></Field>
+        <Field name="User story" wide warn={!form.userStory.trim()} lint={item?.lint} field="userStory"><Textarea aria-label={`User story of ${name}`} className="min-h-16" maxLength={4000} placeholder="As a … I want … so …" value={form.userStory} onChange={text('userStory')} disabled={busy} /></Field>
+        <Field name="Problem definition" wide warn={!form.problem.trim()} lint={item?.lint} field="problem"><Textarea aria-label={`Problem definition of ${name}`} className="min-h-16" maxLength={4000} value={form.problem} onChange={text('problem')} disabled={busy} /></Field>
+        <Field name="Acceptance criteria · one line each" wide warn={!form.ac.trim()} lint={item?.lint} field="ac"><Textarea aria-label={`Acceptance criteria of ${name}`} className="min-h-24 font-mono text-[0.78rem]" value={form.ac} onChange={text('ac')} disabled={busy} /></Field>
+        <Field name="Reference" wide lint={item?.lint} field="reference"><Textarea aria-label={`Reference of ${name}`} className="min-h-12" maxLength={2000} value={form.reference} onChange={text('reference')} disabled={busy} /></Field>
       </div>
       {error && <p className="text-sm text-status-conflict" role="alert">{error}</p>}
       <div className="flex flex-wrap justify-end gap-2">
@@ -64,18 +67,20 @@ const TicketForm: React.FC<{
 export const NewTicketsPanel: React.FC<{
   draft: SprintDraft; busy: boolean;
   onSave: (id: string | null, input: NewTicketInput) => Promise<boolean>; onRemove: (id: string) => void;
-  onCreate: (ids: string[]) => Promise<PublishResult[]>;
+  onCreate: (ids: string[], flag?: { reason: string }) => Promise<PublishResult[]>;
 }> = ({ draft, busy, onSave, onRemove, onCreate }) => {
   const items = draft.newTickets ?? [];
   const ready = items.filter((item) => !item.createdKey && !newTicketMissing(item).length);
   const [asking, setAsking] = useState<string[] | null>(null);
   const [results, setResults] = useState<PublishResult[] | null>(null);
-  const create = async () => {
+  const create = async (reason?: string) => {
     if (!asking) return;
-    setResults(await onCreate(asking));
+    setResults(await onCreate(asking, reason ? { reason } : undefined));
     setAsking(null);
   };
   const names = (ids: string[]) => ids.map((id) => items.find((item) => item.id === id)).filter((item): item is DraftNewTicket => !!item);
+  const belowStandard = (item: DraftNewTicket) => !!item.lint && !item.lint.ok;
+  const askedBelow = asking ? names(asking).filter(belowStandard) : [];
   return (
     <section aria-label="New tickets" className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -89,10 +94,14 @@ export const NewTicketsPanel: React.FC<{
             {names(asking).map((item) => <li key={item.id} className="flex min-w-0 gap-2"><span className="flex-none font-mono text-[0.72rem] font-bold text-sky-300">{item.id}</span><span className="min-w-0 truncate">{item.summary}</span><span className="ml-auto flex-none font-mono text-[0.7rem] text-muted-foreground">{item.type} · {item.dev ?? 'no developer'} · {item.sp ?? '?'} SP</span></li>)}
           </ul>
           <p className="mt-2 text-pretty text-secondary-foreground">Only these tickets are written. The sprint plan is not published: other tickets' AC, assignees and links stay as they are.{names(asking).some((item) => !item.dev) ? ' A ticket without a developer is created unassigned.' : ''}</p>
-          <div className="mt-2.5 flex justify-end gap-2">
-            <Button size="sm" variant="ghost" onClick={() => setAsking(null)} disabled={busy}><X size={13} aria-hidden="true" />Cancel</Button>
-            <Button size="sm" variant="primary" onClick={() => void create()} disabled={busy}><Send size={13} aria-hidden="true" />{busy ? 'Creating...' : 'Create in Jira'}</Button>
-          </div>
+          {askedBelow.length > 0
+            ? <div className="mt-2.5"><FlagBox title={`Create ${askedBelow.length === 1 ? askedBelow[0].id : `${askedBelow.length} tickets`} with a flag`} lint={askedBelow.map((item) => item.lint!)} action="Create with flag" busy={busy} onConfirm={(reason) => void create(reason)} onCancel={() => setAsking(null)} /></div>
+            : (
+              <div className="mt-2.5 flex justify-end gap-2">
+                <Button size="sm" variant="ghost" onClick={() => setAsking(null)} disabled={busy}><X size={13} aria-hidden="true" />Cancel</Button>
+                <Button size="sm" variant="primary" onClick={() => void create()} disabled={busy}><Send size={13} aria-hidden="true" />{busy ? 'Creating...' : 'Create in Jira'}</Button>
+              </div>
+            )}
         </div>
       )}
       {results && results.length > 0 && (
@@ -113,12 +122,14 @@ export const NewTicketsPanel: React.FC<{
               <span className="rounded-xs border border-sky-400 px-1.5 font-mono text-[0.66rem] font-bold text-sky-300">{item.id}</span>
               {item.createdKey && <span className="inline-flex items-center gap-1 font-mono text-[0.72rem] font-bold text-status-merged"><CheckCircle2 size={12} aria-hidden="true" />{item.createdKey}</span>}
               <b className="min-w-0 flex-1 text-pretty text-[0.84rem]">{item.summary || 'Untitled ticket'}</b>
-              {!item.createdKey && <Button size="sm" onClick={() => { setResults(null); setAsking([item.id]); }} disabled={busy || missing.length > 0} title={missing.length ? `Missing ${missing.join(', ')}` : undefined}><Send size={13} aria-hidden="true" />Create in Jira</Button>}
+              <FindingsChip lint={item.lint} />
+              {!item.createdKey && <Button size="sm" variant={belowStandard(item) ? 'ghost' : 'default'} onClick={() => { setResults(null); setAsking([item.id]); }} disabled={busy || missing.length > 0} title={missing.length ? `Missing ${missing.join(', ')}` : undefined}><Send size={13} aria-hidden="true" />{belowStandard(item) ? 'Create with flag' : 'Create in Jira'}</Button>}
             </p>
             <p className="mt-0.5 font-mono text-[0.66rem] text-muted-foreground">
               from {item.source} · {item.ac.length} AC {item.ac.length === 1 ? 'line' : 'lines'}{missing.length ? ` · missing ${missing.join(', ')}` : ''}
             </p>
             {item.error && <p className="mt-1 text-pretty text-[0.78rem] text-status-conflict" role="alert">Create failed: {item.error}</p>}
+            {item.flagReason && <p className="mt-1 text-pretty text-[0.78rem] text-[var(--color-status-warn-ink)]">Flagged: {item.flagReason}</p>}
             {item.createdKey
               ? <p className="mt-2 text-[0.78rem] text-secondary-foreground">Created in Jira as {item.createdKey}{item.dev ? ` · ${item.dev}` : ''}{item.sp !== null ? ` · ${item.sp} SP` : ''}. Change it in Jira from here on.</p>
               : <div className="mt-2"><TicketForm draft={draft} item={item} busy={busy} onSave={onSave} onRemove={() => onRemove(item.id)} /></div>}

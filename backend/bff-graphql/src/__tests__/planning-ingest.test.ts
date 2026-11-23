@@ -12,13 +12,16 @@ import type { DraftView } from '../integrations/sprint-draft';
 import { StoryboardMissing } from '../integrations/storyboard';
 import { createOrchestratorIngestRouter } from '../routes/orchestrator';
 
+const LINT = { ok: false, findings: [{ rule: 'W2', field: 'ac', line: 1, level: 'block' as const, text: 'AC 1 says "works correctly" and shows nothing a tester can observe.', fix: 'Write what the tester sees.' }] };
+
 function fakes() {
   const calls: unknown[][] = [];
   const revision = {
+    lint: LINT, flagReason: null,
     key: 'QRD-1602', summary: 'Export', status: 'pending', note: null, source: 'chat', inSprint: false, error: null, createdAt: '2026-11-20T00:00:00.000Z', appliedAt: null,
     fields: [{ name: 'summary', label: 'Summary', before: ['Export'], after: ['[BE] Export the plan'] }],
   };
-  const view = { sprint: 'QRD Sprint 27', tickets: [{ key: 'QRD-1312', merged: false }, { key: 'QRD-1300', merged: true }], questions: [], newTickets: [{ id: 'NEW-1', summary: '[BE] Export' }], revisions: [revision] } as unknown as DraftView;
+  const view = { sprint: 'QRD Sprint 27', tickets: [{ key: 'QRD-1312', merged: false }, { key: 'QRD-1300', merged: true }], questions: [], newTickets: [{ id: 'NEW-1', summary: '[BE] Export', lint: LINT }], revisions: [revision] } as unknown as DraftView;
   const deps: PlanningIngestDeps = {
     drafts: {
       view: async (sprint) => (sprint === 'QRD Sprint 27' ? view : null),
@@ -87,8 +90,8 @@ test('the planning routes read and change the draft and turn the planner errors 
 test('sprint-draft/new creates, updates and removes a drafted ticket, and get lists the new tickets', async () => {
   const { deps, calls } = fakes();
   const got = await planningIngest(deps, 'sprint-draft/get', { sprint: 'QRD Sprint 27' }) as DraftView;
-  assert.deepEqual(got.newTickets, [{ id: 'NEW-1', summary: '[BE] Export' }]);
-  assert.deepEqual(await planningIngest(deps, 'sprint-draft/new', { sprint: 'QRD Sprint 27', ticket: { summary: '[BE] Export', source: 'sheet row 2' } }), { id: 'NEW-1', ticket: { id: 'NEW-1', summary: '[BE] Export' } });
+  assert.deepEqual(got.newTickets, [{ id: 'NEW-1', summary: '[BE] Export', lint: LINT }]);
+  assert.deepEqual(await planningIngest(deps, 'sprint-draft/new', { sprint: 'QRD Sprint 27', ticket: { summary: '[BE] Export', source: 'sheet row 2' } }), { id: 'NEW-1', ticket: { id: 'NEW-1', summary: '[BE] Export', lint: LINT }, lint: LINT });
   assert.deepEqual(calls.at(-1), ['new', 'QRD Sprint 27', null, { summary: '[BE] Export', source: 'sheet row 2' }]);
   await planningIngest(deps, 'sprint-draft/new', { sprint: 'QRD Sprint 27', id: 'new-1', ticket: { sp: 3 } });
   assert.deepEqual(calls.at(-1), ['new', 'QRD Sprint 27', 'NEW-1', { sp: 3 }]);
@@ -105,6 +108,7 @@ test('sprint-draft/revise saves a revision with the snapshot the server took, di
   assert.deepEqual(got.revisions.map((item) => [item.key, item.status]), [['QRD-1602', 'pending']]);
   const saved = await planningIngest(deps, 'sprint-draft/revise', { sprint: 'QRD Sprint 27', key: 'qrd-1602', revision: { summary: '[BE] Export the plan', note: 'Split out the export' } }) as { key: string; revision: { fields: unknown[] } };
   assert.equal(saved.key, 'QRD-1602');
+  assert.deepEqual((saved as unknown as { lint: unknown }).lint, LINT, 'the answer carries the writing findings for the agent');
   assert.deepEqual(saved.revision.fields, [{ name: 'summary', label: 'Summary', before: ['Export'], after: ['[BE] Export the plan'] }], 'the answer carries before and after');
   assert.deepEqual(calls.at(-1), ['revise', 'QRD Sprint 27', 'QRD-1602', { summary: '[BE] Export the plan', note: 'Split out the export' }, 'chat']);
   assert.deepEqual(await planningIngest(deps, 'sprint-draft/revise', { sprint: 'QRD Sprint 27', key: 'QRD-1602', remove: true }), { discarded: 'QRD-1602' });
@@ -112,6 +116,18 @@ test('sprint-draft/revise saves a revision with the snapshot the server took, di
   await assert.rejects(planningIngest(deps, 'sprint-draft/revise', { sprint: 'QRD Sprint 27', revision: {} }), /key is required/);
   await assert.rejects(planningIngest(deps, 'sprint-draft/revise', { sprint: 'QRD Sprint 27', key: 'QRD-1602', revision: 'x' }), /revision must be an object/);
   await assert.rejects(planningIngest(deps, 'sprint-draft/revise', { sprint: 'QRD Sprint 27', key: 'QRD-9999', revision: { summary: 'x' } }), (error: unknown) => error instanceof OrchestratorInputError && /QRD-9999 is not in Jira/.test(error.message));
+});
+
+test('ticket/lint checks free text without a sprint and answers {ok, findings}', async () => {
+  const { deps, calls } = fakes();
+  const bad = await planningIngest(deps, 'ticket/lint', { summary: 'Show phone', ac: ['It works correctly.', 'TBD'], sp: 5 }) as { ok: boolean; findings: Array<{ rule: string; field: string; line: number | null; level: string; text: string; fix: string }> };
+  assert.equal(bad.ok, false);
+  assert.deepEqual([...new Set(bad.findings.map((item) => item.rule))].sort(), ['W1', 'W2', 'W5', 'W8']);
+  assert.deepEqual(Object.keys(bad.findings[0]).sort(), ['field', 'fix', 'level', 'line', 'rule', 'text']);
+  assert.deepEqual(await planningIngest(deps, 'ticket/lint', { summary: '[FE] Show the phone number', ac: ['The header shows the number.'] }), { ok: true, findings: [] });
+  await assert.rejects(planningIngest(deps, 'ticket/lint', { ac: 'x' }), /ac must be an array of strings/);
+  await assert.rejects(planningIngest(deps, 'ticket/lint', { sp: 'x' }), /sp must be a number/);
+  assert.equal(calls.length, 0);
 });
 
 test('the routes sit behind the ingest token and answer {result}', async () => {
@@ -134,6 +150,9 @@ test('the routes sit behind the ingest token and answer {result}', async () => {
     const revised = await post('sprint-draft/revise', { sprint: 'QRD Sprint 27', key: 'QRD-1602', revision: { summary: '[BE] Export the plan' } });
     assert.equal(revised.status, 200);
     assert.equal((await revised.json()).result.key, 'QRD-1602');
+    const linted = await post('ticket/lint', { ac: ['TBD'] });
+    assert.equal(linted.status, 200);
+    assert.equal((await linted.json()).result.ok, false);
     const missing = await post('storyboard', { epic: 'QRD-1' });
     assert.equal(missing.status, 400);
     assert.match((await missing.json()).error, /Storyboard/);

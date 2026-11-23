@@ -73,10 +73,10 @@ const base = {
   decisions: [{ refKey: 'QRD-1312', action: 'reference' }], tcApproved: true, statuses: { 'QRD-1307': 'UAT CHECK' },
 };
 
-test('Siap dikerjain is 7 of 7 when every ticket the AC names is decided, nothing is open, and summary, data, TC and design are there', () => {
+test('Siap dikerjain is 8 of 8 when every ticket the AC names is decided, nothing is open, and summary, data, TC and design are there', () => {
   const ready = ticketReadiness(base);
-  assert.deepStrictEqual([ready.done, ready.total, ready.missing], [7, 7, []]);
-  assert.deepStrictEqual(ready.items.map((item) => item.id), ['refs', 'open', 'summary', 'alone', 'data', 'tc', 'design']);
+  assert.deepStrictEqual([ready.done, ready.total, ready.missing, ready.notReady], [8, 8, [], false]);
+  assert.deepStrictEqual(ready.items.map((item) => item.id), ['refs', 'open', 'summary', 'alone', 'data', 'tc', 'design', 'writing']);
 });
 
 test('each missing readiness item says what is missing and links to where it gets fixed', () => {
@@ -93,7 +93,8 @@ test('each missing readiness item says what is missing and links to where it get
     ['design', 'UI ticket without a design link', 'https://jira/browse/QRD-1510'],
   ]);
   assert.strictEqual(ready.missing[2].detail, 'QRD-1307 (In Progress), QRD-1312 (status not read yet)');
-  assert.strictEqual(ready.done, 1);
+  assert.strictEqual(ready.done, 2);
+  assert.strictEqual(ready.notReady, true);
 });
 
 test('without a summary the summary item is missing and test data and UI say there is no summary yet; [FE] still means UI', () => {

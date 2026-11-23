@@ -1,16 +1,21 @@
 import React, { useState } from 'react';
-import { AlertCircle, ArrowRight, ArrowRightLeft, CheckCheck, CheckCircle2, ChevronDown, ChevronUp, ClipboardCheck, ExternalLink, GitFork, Hammer, History, Hourglass, Sparkles } from 'lucide-react';
+import { AlertCircle, ArrowRight, PenLine, ArrowRightLeft, CheckCheck, CheckCircle2, ChevronDown, ChevronUp, ClipboardCheck, ExternalLink, GitFork, Hammer, History, Hourglass, Sparkles } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import type { ReadinessItem, TicketLinkRow, TicketReadiness } from '../../lib/ticketDetail';
 import type { SummaryFacts } from './useReadiness';
+
+const NOT_READY = 'inline-flex w-fit items-center rounded-xs bg-status-conflict-bg px-1.5 py-0.5 font-mono text-[0.68rem] font-bold text-status-conflict';
 
 const tone = (ready: TicketReadiness) => (ready.done === ready.total ? 'bg-status-merged-bg text-status-merged' : 'bg-status-warn-bg text-status-warn');
 
 /** "Siap dikerjain n/7" on a TODO card; hovering it lists what is missing. */
 export const ReadinessChip: React.FC<{ ready: TicketReadiness }> = ({ ready }) => (
   <span className="group/ready relative flex flex-col gap-1">
-    <span className={cn('inline-flex w-fit items-center gap-1 rounded-xs px-1.5 py-0.5 font-mono text-[0.68rem] font-bold', tone(ready))} title={ready.missing.map((item) => item.text).join('\n') || undefined}>
-      <ClipboardCheck size={11} aria-hidden="true" />Ready to start {ready.done}/{ready.total}
+    <span className="flex flex-wrap items-center gap-1">
+      <span className={cn('inline-flex w-fit items-center gap-1 rounded-xs px-1.5 py-0.5 font-mono text-[0.68rem] font-bold', tone(ready))} title={ready.missing.map((item) => item.text).join('\n') || undefined}>
+        <ClipboardCheck size={11} aria-hidden="true" />Ready to start {ready.done}/{ready.total}
+      </span>
+      {ready.notReady && <span className={NOT_READY}>Not ready</span>}
     </span>
     {ready.missing.length > 0 && (
       <span className="hidden flex-col gap-0.5 rounded-xs border border-border bg-surface-0 px-2 py-1.5 text-[0.72rem] text-muted-foreground group-hover/ready:flex" role="list" aria-label="Still missing">
@@ -29,19 +34,27 @@ const FixButton: React.FC<{ item: ReadinessItem; onNavigate: (path: string) => v
 };
 
 /** G2 under the ticket title: the seven items, each missing one with a link to where it gets fixed. */
-export const ReadinessCard: React.FC<{ ready: TicketReadiness; startOpen: boolean; onNavigate: (path: string) => void }> = ({ ready, startOpen, onNavigate }) => {
+export const ReadinessCard: React.FC<{ ready: TicketReadiness; startOpen: boolean; onNavigate: (path: string) => void; onHumanize?: () => void }> = ({ ready, startOpen, onNavigate, onHumanize }) => {
   const [open, setOpen] = useState(startOpen);
   return (
     <section aria-label="Ready to start" className="rounded-md border border-border bg-surface-1 px-3.5 py-3">
       <button type="button" className="flex w-full flex-wrap items-center gap-2 text-left" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         <h2 className="flex items-center gap-1.5 font-display text-sm font-bold"><ClipboardCheck size={14} className="text-sky-200" aria-hidden="true" />Ready to start</h2>
         <span className={cn('rounded-xs px-1.5 py-0.5 font-mono text-[0.68rem] font-bold', tone(ready))}>{ready.done} of {ready.total}</span>
+        {ready.notReady && <span className={NOT_READY}>Not ready</span>}
         <span className="text-xs text-muted-foreground">info only, the status can still move</span>
         <span className="ml-auto text-muted-foreground">{open ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}</span>
       </button>
       <div className="mt-2 grid gap-[3px]" style={{ gridTemplateColumns: `repeat(${ready.total}, minmax(0, 1fr))` }} aria-hidden="true">
         {ready.items.map((item) => <i key={item.id} className={cn('h-1.5 rounded-pill', item.ok ? 'bg-status-merged' : 'bg-status-warn-bg')} />)}
       </div>
+      {onHumanize && (
+        <div className="mt-2">
+          <button type="button" onClick={onHumanize} className="inline-flex h-7 items-center gap-1 rounded-sm border border-border px-2.5 text-xs font-semibold text-accent hover:bg-surface-2 max-[760px]:h-11" title="Opens the Planning chat with a request to rewrite this ticket for a human reader">
+            <PenLine size={12} aria-hidden="true" />Humanize
+          </button>
+        </div>
+      )}
       {open && (
         <ul className="mt-1">
           {ready.items.map((item) => (

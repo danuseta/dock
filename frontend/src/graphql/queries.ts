@@ -31,6 +31,7 @@ export const GET_DASHBOARD = gql`
         openToConfirm
         figmaUrl
         blockedBy
+        lint { ok findings { rule field line level text fix } }
         orchestration {
           key
           machine
@@ -152,6 +153,7 @@ export const GET_TICKET_DETAIL_CORE = gql`
       workOrder
       workOrderSource
       workManual
+      lint { ok findings { rule field line level text fix } }
     }
     ticketRelationGroup(ticketKey: $key) {
       primaryKey
@@ -884,9 +886,11 @@ export const SET_JUDGE_SETTINGS = gql`
   }
 `;
 
-export const SPRINT_DRAFT_NEW_TICKET_FIELDS = `id summary type epic dev sp priority userStory problem ac reference source createdKey error`;
+export const LINT_FIELDS = `lint { ok findings { rule field line level text fix } }`;
 
-export const SPRINT_DRAFT_REVISION_FIELDS = `key summary status note source fields { name label before after } inSprint error createdAt appliedAt`;
+export const SPRINT_DRAFT_NEW_TICKET_FIELDS = `id summary type epic dev sp priority userStory problem ac reference source createdKey error flagReason ${LINT_FIELDS}`;
+
+export const SPRINT_DRAFT_REVISION_FIELDS = `key summary status note source fields { name label before after } inSprint error createdAt appliedAt flagReason ${LINT_FIELDS}`;
 
 export const SPRINT_DRAFT_FIELDS = `
   sprint sprintId status sprintDays startDate spPerDay createdBy loadedAt publishedAt qaReason devs blockers canPublish landed carriedPast today
@@ -896,7 +900,7 @@ export const SPRINT_DRAFT_FIELDS = `
     qaDecision { action note by at }
     epic frames
     storyboard { version frames held checked { action note by at } }
-    tcs { id ac title steps expected } tcStale tcPending tcApproved acHash
+    tcs { id ac title steps expected } tcStale tcPending tcApproved acHash ${LINT_FIELDS}
     scout { line mode files repos contractChange at } scoutRunning
     merge pulls jiraAhead merged carried rank planStart planDur
   }
@@ -926,7 +930,7 @@ export const GET_TICKET_SUMMARY = gql`
 export const GET_TICKET_READINESS = gql`
   query GetTicketReadiness($keys: [String!]!, $refs: [String!]) {
     ticketReadiness(keys: $keys, refs: $refs) {
-      tickets { key sprint tcApproved decisions { refKey action } summary { ${TICKET_SUMMARY_FIELDS} } }
+      tickets { key sprint tcApproved prediction decisions { refKey action } summary { ${TICKET_SUMMARY_FIELDS} } }
       statuses { key status }
     }
   }
@@ -1075,8 +1079,8 @@ export const SAVE_SPRINT_DRAFT_NEW_TICKET = gql`
 `;
 
 export const CREATE_SPRINT_DRAFT_NEW_TICKETS = gql`
-  mutation CreateSprintDraftNewTickets($sprint: String!, $ids: [ID!]) {
-    createSprintDraftNewTickets(sprint: $sprint, ids: $ids) { key kind status detail }
+  mutation CreateSprintDraftNewTickets($sprint: String!, $ids: [ID!], $flag: WritingFlagInput) {
+    createSprintDraftNewTickets(sprint: $sprint, ids: $ids, flag: $flag) { key kind status detail }
   }
 `;
 
@@ -1093,8 +1097,8 @@ export const SAVE_SPRINT_DRAFT_REVISION = gql`
 `;
 
 export const APPLY_SPRINT_DRAFT_REVISION = gql`
-  mutation ApplySprintDraftRevision($sprint: String!, $key: ID!) {
-    applySprintDraftRevision(sprint: $sprint, key: $key) { key kind status detail }
+  mutation ApplySprintDraftRevision($sprint: String!, $key: ID!, $flag: WritingFlagInput) {
+    applySprintDraftRevision(sprint: $sprint, key: $key, flag: $flag) { key kind status detail }
   }
 `;
 

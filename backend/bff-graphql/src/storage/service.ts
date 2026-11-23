@@ -22,11 +22,11 @@ export interface SprintDraftTicketInput {
 /** A drafted new ticket as stored; ac is the JSON of its lines. */
 export interface SprintDraftNewTicketData {
   summary: string; type: string; epic: string | null; dev: string | null; sp: number | null; priority: string | null;
-  userStory: string; problem: string; ac: string; reference: string | null; source: string; createdKey?: string | null; error?: string | null;
+  userStory: string; problem: string; ac: string; reference: string | null; source: string; createdKey?: string | null; error?: string | null; flagReason?: string | null;
 }
 /** A revision as stored; after and before are JSON objects keyed by field name. */
 export interface SprintDraftRevisionData { summary: string; note: string | null; source: string; after: string; before: string; jiraUpdated: string; error: string | null; createdAt?: Date }
-export interface SprintDraftRevisionUpdate { summary?: string; status?: string; error?: string | null; appliedAt?: Date | null; appliedBy?: string | null }
+export interface SprintDraftRevisionUpdate { summary?: string; status?: string; error?: string | null; flagReason?: string | null; appliedAt?: Date | null; appliedBy?: string | null }
 export interface SprintPlanData { status?: string; mappingKeys?: string[]; sessionId?: string | null; mappedKeys?: string[]; groups?: string[][]; error?: string | null; startedAt?: Date | null; mappedAt?: Date | null }
 
 const SENSITIVE_KEYS = new Set([

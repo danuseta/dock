@@ -1,8 +1,9 @@
 // The pure side of Planning > Draft > Team map > Board: a lane per developer with the cards still to build and the new tickets.
 import { UNASSIGNED, countedNewTickets, newTicketNeedsWork, pendingNewTickets, uncheckedStoryboard, undecidedFinding, unrecordedEpics, type DraftFinding, type DraftNewTicket, type NewTicketInput, type PlanningPanel, type SprintDraft } from './planning';
 import { ticketsToReview } from './revisions';
+import { belowStandard, lintMark, type LintMark, type TicketLint } from '../lib/writing';
 
-export type BoardFilter = 'all' | 'ac' | 'sb' | 'new';
+export type BoardFilter = 'all' | 'ac' | 'sb' | 'new' | 'writing';
 export type TeamView = 'board' | 'schedule';
 
 export interface BoardCard {
@@ -10,6 +11,8 @@ export interface BoardCard {
   isNew: boolean; type: string | null; createdKey: string | null;
   /** ac: an AC line names another ticket and is not decided. sb: the epic's storyboard is not recorded, or the AC waits on a storyboard check. */
   flags: { ac: boolean; sb: boolean };
+  /** The writing standard on the card's ticket; null when the draft carries none. */
+  lint: TicketLint | null;
 }
 export interface BoardLane { dev: string; load: number; share: number; over: boolean; cards: BoardCard[] }
 
@@ -26,10 +29,11 @@ export function boardCards(draft: Omit<BoardDraft, 'devs'>): BoardCard[] {
     .map((ticket): BoardCard => ({
       key: ticket.key, summary: ticket.summary, dev: ticket.dev, sp: ticket.left ?? ticket.sp, status: ticket.status, epic: ticket.epic, isNew: false, type: null, createdKey: null,
       flags: { ac: undecided.has(ticket.key), sb: (!!ticket.epic && unrecorded.has(ticket.epic)) || (!!ticket.storyboard && !ticket.storyboard.checked) },
+      lint: ticket.lint ?? null,
     }));
   const fresh = countedNewTickets(draft).map((item): BoardCard => ({
     key: item.id, summary: item.summary, dev: item.dev, sp: item.sp, status: item.createdKey ? `created ${item.createdKey}` : 'new', epic: item.epic, isNew: true, type: item.type, createdKey: item.createdKey,
-    flags: { ac: false, sb: false },
+    flags: { ac: false, sb: false }, lint: item.lint ?? null,
   }));
   return [...tickets, ...fresh];
 }
@@ -48,10 +52,13 @@ export function boardLanes(draft: BoardDraft, perDev: number): BoardLane[] {
 }
 
 /** A card the filter keeps bright; the others are dimmed, never hidden. */
-export const cardShown = (card: Pick<BoardCard, 'flags' | 'isNew'>, filter: BoardFilter) => (filter === 'ac' ? card.flags.ac : filter === 'sb' ? card.flags.sb : filter === 'new' ? card.isNew : true);
+export const cardShown = (card: Pick<BoardCard, 'flags' | 'isNew' | 'lint'>, filter: BoardFilter) => (filter === 'ac' ? card.flags.ac : filter === 'sb' ? card.flags.sb : filter === 'new' ? card.isNew : filter === 'writing' ? lintMark(card.lint) === 'block' : true);
+
+/** The mark of a card: block when its ticket is below the writing standard, warn when only notes are left. */
+export const cardMark = (card: Pick<BoardCard, 'lint'>): LintMark | null => lintMark(card.lint);
 
 /** How many cards each filter keeps. */
-export const filterCounts = (cards: BoardCard[]) => ({ ac: cards.filter((card) => card.flags.ac).length, sb: cards.filter((card) => card.flags.sb).length, new: cards.filter((card) => card.isNew).length });
+export const filterCounts = (cards: BoardCard[]) => ({ ac: cards.filter((card) => card.flags.ac).length, sb: cards.filter((card) => card.flags.sb).length, new: cards.filter((card) => card.isNew).length, writing: cards.filter((card) => lintMark(card.lint) === 'block').length });
 
 const outsideKind = (kind: string) => kind !== 'after-it' && kind !== 'lands-first';
 
@@ -86,7 +93,8 @@ export function barIssues(draft: Pick<SprintDraft, 'tickets' | 'newTickets' | 'f
   const epics = unrecordedEpics(draft).length;
   const checks = uncheckedStoryboard({ tickets: draft.tickets.filter((ticket) => !ticket.carried) }).length;
   const fresh = pendingNewTickets(draft);
-  return { ac, epics, checks, fresh: fresh.length, needWork: fresh.filter(newTicketNeedsWork).length, revisions: ticketsToReview(draft).revisions };
+  const writing = belowStandard([...draft.tickets.filter((ticket) => !ticket.merged).map((ticket) => ({ key: ticket.key, lint: ticket.lint })), ...fresh.map((item) => ({ key: item.id, lint: item.lint }))]).length;
+  return { ac, epics, checks, fresh: fresh.length, needWork: fresh.filter(newTicketNeedsWork).length, revisions: ticketsToReview(draft).revisions, writing };
 }
 
 export const NEW_TICKET_LIMIT = 30;

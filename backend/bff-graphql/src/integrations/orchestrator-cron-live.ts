@@ -12,6 +12,7 @@ import { isTaskTitle } from './session-titles';
 import { eventPush, pushService } from './push';
 import { askNotice, runDoneNotice, turnDoneNotice } from './push-notices';
 import { ticketFlowLines } from './sous-flow-live';
+import { ticketReadinessLine } from './ticket-readiness-live';
 
 const storage = new StorageService();
 const jira = new JiraAPI();
@@ -58,6 +59,7 @@ export const orchestratorCron = new OrchestratorCron({
   runs: () => orchestratorService.list(),
   saveRun: (ledger, machine) => orchestratorService.ingestLedger(ledger, new Date(), machine),
   sousFlowLines: (key) => ticketFlowLines(key),
+  readinessLine: (key) => ticketReadinessLine(key),
   park: async (key, waiting) => {
     const row = await storage.getOrchestratorRunWithLedger(key);
     if (!row) return;

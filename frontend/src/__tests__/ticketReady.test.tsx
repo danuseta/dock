@@ -14,8 +14,9 @@ const ready = ticketReadiness({ key: 'QRD-1498', title: '[FE] Agent Playbook tab
 test('a TODO card shows "Siap dikerjain n/7" with the missing items on hover; a card in another column shows none', () => {
   const card = (column: string) => { const board = readinessOnBoard(column, ready); return board ? renderToStaticMarkup(<ReadinessChip ready={board} />) : ''; };
   const todo = card('TODO');
-  assert.match(todo, new RegExp(`Ready to start ${ready.done}/7`));
+  assert.match(todo, new RegExp(`Ready to start ${ready.done}/8`));
   assert.match(todo, /group-hover\/ready:flex/);
+  assert.match(todo, />Not ready</, 'a ticket that misses an item says Not ready');
   assert.match(todo, /Undecided references to other tickets: 1/);
   assert.doesNotMatch(card('IN PROGRESS'), /Ready to start/);
   const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
@@ -23,9 +24,9 @@ test('a TODO card shows "Siap dikerjain n/7" with the missing items on hover; a 
   assert.ok(read('../components/TicketCard.tsx').includes('{readiness && <ReadinessChip ready={readiness} />}'));
 });
 
-test('the ticket detail lists the seven items, a missing one with the place it is fixed', () => {
+test('the ticket detail lists the eight items, a missing one with the place it is fixed', () => {
   const html = renderToStaticMarkup(<ReadinessCard ready={ready} startOpen onNavigate={() => undefined} />);
-  assert.match(html, new RegExp(`${ready.done} of 7`));
+  assert.match(html, new RegExp(`${ready.done} of 8`));
   assert.match(html, /Planning › AC check/);
   assert.match(html, /info only, the status can still move/);
 });
