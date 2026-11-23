@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertCircle, Check, CheckCircle2, Clapperboard, FilePlus2, Link2 } from 'lucide-react';
+import { AlertCircle, Check, CheckCircle2, Clapperboard, FilePlus2, Link2, PenLine } from 'lucide-react';
 import { cn } from '../lib/cn';
 import { PublishButton } from './PlanningStatus';
 import type { PlanSignal, PlanningPanel, Readiness, SprintDraft } from './planning';
@@ -12,7 +12,9 @@ const TONE = { warn: 'border-status-warn/60 text-[var(--color-status-warn-ink)]'
 export const PlanningBar: React.FC<{
   draft: SprintDraft; ready: Readiness; signal: PlanSignal | null; busy: boolean;
   onShow: (panel: PlanningPanel) => void; onPublish: () => void; onRepublish: () => void;
-}> = ({ draft, ready, signal, busy, onShow, onPublish, onRepublish }) => {
+  /** Opens the Team map Board filtered to the tickets below the writing standard. */
+  onWriting?: () => void;
+}> = ({ draft, ready, signal, busy, onShow, onPublish, onRepublish, onWriting }) => {
   const over = ready.sp > ready.capacity;
   const fine = !over || !!ready.cut;
   const counts = barIssues(draft);
@@ -43,6 +45,11 @@ export const PlanningBar: React.FC<{
       {counts.fresh + counts.revisions > 0 && (
         <button type="button" className={cn(issue, counts.needWork ? TONE.warn : TONE.sky)} onClick={() => onShow('new')} title={detail('new')}>
           <FilePlus2 size={13} aria-hidden="true" />{counts.fresh + counts.revisions} to review{counts.needWork ? ` · ${counts.needWork} ${counts.needWork === 1 ? 'needs' : 'need'} a field or developer` : ''}
+        </button>
+      )}
+      {counts.writing > 0 && onWriting && (
+        <button type="button" className={cn(issue, 'border-status-conflict/60 text-status-conflict')} onClick={onWriting} title="Show the tickets below the writing standard on the Board">
+          <PenLine size={13} aria-hidden="true" />{counts.writing} {counts.writing === 1 ? 'ticket' : 'tickets'} below the writing standard
         </button>
       )}
       <span className="flex-1" />

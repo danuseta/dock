@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { NOT_INSTALLED, predictQa, type QaInputTicket, type QaRunner } from '../integrations/qa-predict';
+import { NOT_INSTALLED, kitPredictPath, predictQa, predictScriptPath, skillPredictPath, type QaInputTicket, type QaRunner } from '../integrations/qa-predict';
 
 const tickets: QaInputTicket[] = [{ key: 'QRD-1511', summary: 'Live cursors', ac: ['needs QRD-1489'], waitsOn: [{ key: 'QRD-1489', endDay: 10.5 }], endDay: 15 }];
 const answer = (stdout: string, code = 0): QaRunner => async () => ({ code, stdout, stderr: code ? 'boom\nTypeError: bad input' : '' });
@@ -38,4 +38,12 @@ test('bad JSON, a missing results list, a failing exit and a timeout give no pre
   assert.deepEqual(await predictQa(tickets, opts(answer('', 1))), { predictions: null, reason: 'QA prediction failed: TypeError: bad input' });
   const slow: QaRunner = async () => { throw new Error('predict.mjs gave no answer in 60s'); };
   assert.deepEqual(await predictQa(tickets, opts(slow)), { predictions: null, reason: 'QA prediction failed: predict.mjs gave no answer in 60s' });
+});
+
+test('the kit script is tried first, then the old skill script', () => {
+  const kit = kitPredictPath();
+  assert.match(kit.replace(/\\/g, '/'),/\.claude\/kit\/qa-predict\.mjs$/);
+  assert.equal(predictScriptPath(() => true), kit);
+  assert.equal(predictScriptPath((path) => path !== kit), skillPredictPath());
+  assert.match(skillPredictPath().replace(/\\/g, '/'),/\.claude\/skills\/skill-qonflo-qa\/scripts\/predict\.mjs$/);
 });

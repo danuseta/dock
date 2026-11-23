@@ -194,6 +194,8 @@ class Store implements DraftStore {
   settings: Array<{ key: string; value: string }> = [];
   async getSettings() { return this.settings; }
   async getSprintDraft(sprint: string) { return this.draft?.sprint === sprint ? { ...this.draft, tickets: this.draft.tickets.map((ticket: any) => ({ ...ticket })) } : null; }
+  async addSprintDraftTickets() { /* the publish tests do not refresh the draft */ }
+  async listSprintDrafts() { return []; }
   async replaceSprintDraft(draft: SprintDraftInput, tickets: SprintDraftTicketInput[]) {
     this.draft = {
       ...draft, status: 'draft', decisions: '{}', qaReason: null, loadedAt: new Date('2026-11-12T00:00:00Z'), publishedAt: null, questions: '[]',

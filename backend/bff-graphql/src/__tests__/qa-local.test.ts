@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { QaAuto, isRunVideo, newestRun, parseProgress, parseResults, qaPrompt, runPullRequests, type QaAutoDeps, type QaTrigger } from '../integrations/qa-local';
+import { QaAuto, isRunVideo, newestRun, parseProgress, parseResults, qaPrompt, readTrigger, revisionPrompt, runPullRequests, type QaAutoDeps, type QaRun, type QaTrigger } from '../integrations/qa-local';
 import type { RunPullRequest } from '../integrations/orchestrator';
 
 const NOW = new Date('2026-11-04T08:00:00.000Z');
@@ -93,15 +93,19 @@ test('the pull requests of a run are deduplicated and sorted', () => {
 test('the QA prompt names the ticket, the command and what it must not touch', () => {
   const prompt = qaPrompt('QRD-1286', [BE]);
   assert.match(prompt, /QRD-1286 setelah PR https:/);
+  assert.match(prompt, /Agent step" v2 di ~\/\.claude\/kit\/qa-local\/README\.md/);
   assert.match(prompt, /qonflo-qa-local QRD-1286/);
   assert.match(prompt, /Dilarang: menulis ke ~\/qa, UAT, Jira/);
   assert.match(prompt, /deploy-gate\.cjs QRD-1286/);
   assert.match(prompt, /UAT CHECK setelah QA lokal lolos DAN deploy-gate menjawab ready/);
 });
 
-function world(options: { available?: boolean; enabled?: boolean; machine?: string; last?: QaTrigger | null; failOpen?: boolean } = {}) {
+const trig = (extra: Partial<QaTrigger> = {}): QaTrigger => ({ prs: [BE, FE], sessionId: 'old', at: '2026-11-04T07:00:00.000Z', error: null, round: 0, fixFor: null, heads: {}, ...extra });
+
+function world(options: { available?: boolean; enabled?: boolean; machine?: string; last?: QaTrigger | null; failOpen?: boolean; run?: QaRun | null; heads?: Record<string, string | null>; failMessage?: boolean } = {}) {
   const saved: Array<{ key: string; trigger: QaTrigger }> = [];
   const opened: Array<{ key: string; prompt: string }> = [];
+  const messages: Array<{ key: string; prompt: string }> = [];
   const deps: QaAutoDeps = {
     available: () => options.available ?? true,
     enabled: async () => options.enabled ?? true,
@@ -114,8 +118,16 @@ function world(options: { available?: boolean; enabled?: boolean; machine?: stri
       return 'session-1';
     },
     now: () => NOW,
+    latest: () => options.run ?? null,
+    runDir: (key, runId) => `/home/dock/qa-local/runs/${key}/${runId}`,
+    head: async (url) => (options.heads ?? {})[url] ?? null,
+    message: async (key, prompt) => {
+      if (options.failMessage) throw new Error('No session');
+      messages.push({ key, prompt });
+    },
+    tickets: async () => ['QRD-1286'],
   };
-  return { auto: new QaAuto(deps), saved, opened };
+  return { auto: new QaAuto(deps), saved, opened, messages };
 }
 
 type BuildRun = Parameters<QaAuto['ledger']>[0];
@@ -126,17 +138,17 @@ test('a build that gets its pull requests starts one QA session and remembers th
   assert.strictEqual(await auto.ledger(build()), true);
   assert.strictEqual(opened.length, 1);
   assert.strictEqual(opened[0].key, 'QRD-1286');
-  assert.deepStrictEqual(saved[0].trigger, { prs: [BE, FE], sessionId: 'session-1', at: NOW.toISOString(), error: null });
+  assert.deepStrictEqual(saved[0].trigger, { prs: [BE, FE], sessionId: 'session-1', at: NOW.toISOString(), error: null, round: 0, fixFor: null, heads: {} });
 });
 
 test('the same pull requests do not start QA twice', async () => {
-  const { auto, opened } = world({ last: { prs: [BE, FE], sessionId: 'old', at: NOW.toISOString(), error: null } });
+  const { auto, opened } = world({ last: trig({ prs: [BE, FE] }) });
   assert.strictEqual(await auto.ledger(build()), false);
   assert.strictEqual(opened.length, 0);
 });
 
 test('a new pull request starts QA again', async () => {
-  const { auto, opened } = world({ last: { prs: [BE], sessionId: 'old', at: NOW.toISOString(), error: null } });
+  const { auto, opened } = world({ last: trig({ prs: [BE] }) });
   assert.strictEqual(await auto.ledger(build()), true);
   assert.strictEqual(opened.length, 1);
 });
@@ -162,4 +174,88 @@ test('a session that does not start is remembered with its error', async () => {
   assert.strictEqual(await auto.start('QRD-1286', [BE]), false);
   assert.strictEqual(saved[0].trigger.sessionId, null);
   assert.strictEqual(saved[0].trigger.error, 'Turns are full');
+});
+
+const RUN_ID = '20261104T073000Z';
+const finished = (verdict: string): QaRun => {
+  const base = parseProgress(progress({ state: 'done', verdict, startedAt: '2026-11-04T07:30:00.000Z', tcs: [
+    { id: 'QRD-1286-TC001', title: 'own avatar', ac: [1, 2], state: 'failed', video: 'videos/QRD-1286-TC001.webm', note: 'avatar missing' },
+    { id: 'QRD-1286-TC002', title: 'rename', ac: [3], state: 'passed', video: null, note: null },
+  ] }), () => true)!;
+  return { ...base, runId: RUN_ID };
+};
+const HEADS = { [BE]: 'aaa111', [FE]: 'bbb222' };
+const DIR = `/home/dock/qa-local/runs/QRD-1286/${RUN_ID}`;
+
+test('a finished REVISION run sends its failed test cases to the Task session once per run', async () => {
+  const { auto, saved, messages } = world({ last: trig(), run: finished('REVISION'), heads: HEADS });
+  assert.strictEqual(await auto.revision('QRD-1286'), true);
+  assert.strictEqual(messages.length, 1);
+  const lines = messages[0].prompt.split('\n');
+  assert.strictEqual(lines[0], 'QA lokal REVISION QRD-1286 round 1');
+  assert.ok(lines.includes(`Folder run: ${DIR}`));
+  assert.ok(lines.includes(`summary.md: ${DIR}/summary.md`));
+  assert.ok(lines.includes(`- QRD-1286-TC001 | AC 1, 2 | own avatar | catatan: avatar missing | video: ${DIR}/videos/QRD-1286-TC001.webm`));
+  assert.ok(!messages[0].prompt.includes('TC002'));
+  assert.strictEqual(lines[lines.length - 1], 'Pakai skill sous: perbaiki temuan QA lokal ini lewat light runner di PR yang sama, push ke branch PR, lalu selesai. Jangan buka PR baru.');
+  assert.deepStrictEqual(saved[0].trigger, { ...trig(), fixFor: RUN_ID, heads: HEADS });
+  const again = world({ last: saved[0].trigger, run: finished('REVISION'), heads: HEADS });
+  assert.strictEqual(await again.auto.revision('QRD-1286'), false);
+  assert.strictEqual(again.messages.length, 0);
+});
+
+test('LOLOS, AC-GAP, ESCALATED, a running run and a run from before the trigger send nothing', async () => {
+  for (const run of [finished('LOLOS'), finished('AC-GAP'), finished('ESCALATED'), { ...finished('REVISION'), state: 'running' as const }, { ...finished('REVISION'), startedAt: '2026-11-04T06:00:00.000Z' }, null]) {
+    const { auto, messages } = world({ last: trig(), run, heads: HEADS });
+    assert.strictEqual(await auto.revision('QRD-1286'), false);
+    assert.strictEqual(messages.length, 0);
+  }
+});
+
+test('a REVISION at round 2 sends nothing', async () => {
+  const { auto, messages } = world({ last: trig({ round: 2 }), run: finished('REVISION'), heads: HEADS });
+  assert.strictEqual(await auto.revision('QRD-1286'), false);
+  assert.strictEqual(messages.length, 0);
+});
+
+test('a head SHA GitHub cannot give or a message that fails is not recorded', async () => {
+  const noHead = world({ last: trig(), run: finished('REVISION'), heads: { [BE]: 'aaa111' } });
+  assert.strictEqual(await noHead.auto.revision('QRD-1286'), false);
+  assert.strictEqual(noHead.messages.length, 0);
+  const failing = world({ last: trig(), run: finished('REVISION'), heads: HEADS, failMessage: true });
+  await assert.rejects(failing.auto.revision('QRD-1286'), /No session/);
+  assert.strictEqual(failing.saved.length, 0);
+});
+
+test('the tick looks at each ticket for a REVISION run, and only while QA is on', async () => {
+  const { auto, messages } = world({ last: trig(), run: finished('REVISION'), heads: HEADS });
+  await auto.tick();
+  assert.strictEqual(messages.length, 1);
+  const off = world({ enabled: false, last: trig(), run: finished('REVISION'), heads: HEADS });
+  await off.auto.tick();
+  assert.strictEqual(off.messages.length, 0);
+});
+
+test('QA runs again, one round on, only after a pull request head changed since the fix message', async () => {
+  const waiting = trig({ fixFor: RUN_ID, heads: HEADS });
+  const same = world({ last: waiting, heads: HEADS });
+  assert.strictEqual(await same.auto.ledger(build()), false);
+  assert.strictEqual(same.opened.length, 0);
+  const moved = world({ last: waiting, heads: { [BE]: 'aaa111', [FE]: 'ccc333' } });
+  assert.strictEqual(await moved.auto.ledger(build()), true);
+  assert.strictEqual(moved.opened.length, 1);
+  assert.deepStrictEqual(moved.saved[0].trigger, { prs: [BE, FE], sessionId: 'session-1', at: NOW.toISOString(), error: null, round: 1, fixFor: null, heads: {} });
+  const unknown = world({ last: waiting, heads: {} });
+  assert.strictEqual(await unknown.auto.ledger(build()), false);
+  assert.strictEqual(unknown.opened.length, 0);
+});
+
+test('a trigger cached before fix rounds existed reads with the defaults', async () => {
+  const old = { prs: [BE], sessionId: 's1', at: '2026-11-04T07:00:00.000Z', error: null };
+  assert.deepStrictEqual(readTrigger(old), { ...old, round: 0, fixFor: null, heads: {} });
+  assert.strictEqual(readTrigger(null), null);
+  const { auto, opened } = world({ last: old as unknown as QaTrigger });
+  assert.strictEqual(await auto.ledger(build({ pullRequests: [pr(BE)] })), false);
+  assert.strictEqual(opened.length, 0);
+  assert.match(revisionPrompt('QRD-1', 2, finished('REVISION'), '/d'), /^QA lokal REVISION QRD-1 round 2\n/);
 });

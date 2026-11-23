@@ -1,20 +1,25 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { GitHubAPI } from '../datasources/GitHubAPI';
 import { dockMode } from '../mode';
 import { StorageService } from '../storage/service';
 import { orchestratorService } from './orchestrator';
 import { orchestratorCron } from './orchestrator-cron-live';
-import { QaAuto, isRunVideo, isTicketKey, newestRun, parseProgress, parseResults, type QaRun, type QaTrigger } from './qa-local';
+import { QaAuto, isRunVideo, isTicketKey, newestRun, parseProgress, parseResults, readTrigger, runPullRequests, type QaRun } from './qa-local';
 
 const storage = new StorageService();
+const github = new GitHubAPI();
 const CACHE = 'qa-local';
+const PULL = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/;
 export const QA_SETTING = 'qaAutoRun';
 
 /** `~/qa-local`, where `qonflo-qa-local` keeps its tests and run folders. */
 export const qaDir = () => process.env.QA_LOCAL_DIR || path.join(os.homedir(), 'qa-local');
+/** Where the command may be: the kit's copy first, then the older one inside the data folder. */
+export const qaBinPaths = () => [path.join(os.homedir(), '.claude', 'kit', 'qa-local', 'bin', 'qonflo-qa-local'), path.join(qaDir(), 'bin', 'qonflo-qa-local')];
 /** QA runs only on a workspace DOCK where the owner installed `qonflo-qa-local`; elsewhere the panel and setting stay hidden. */
-export const qaAvailable = () => dockMode() === 'workspace' && fs.existsSync(path.join(qaDir(), 'bin', 'qonflo-qa-local'));
+export const qaAvailable = () => dockMode() === 'workspace' && qaBinPaths().some((file) => fs.existsSync(file));
 
 const alive = (pid: number) => {
   try {
@@ -59,7 +64,7 @@ export function qaVideoPath(key: string, runId: string, file: string): string | 
 }
 
 export const qaEnabled = async () => (await storage.getSettingValues([QA_SETTING])).some((row) => row.key === QA_SETTING && row.value === 'true');
-export const qaTrigger = async (key: string) => (await storage.getCache(CACHE, key)) as QaTrigger | null;
+export const qaTrigger = async (key: string) => readTrigger(await storage.getCache(CACHE, key));
 
 export const qaAuto = new QaAuto({
   available: qaAvailable,
@@ -69,6 +74,15 @@ export const qaAuto = new QaAuto({
   save: async (key, trigger) => { await storage.upsertCache(CACHE, key, trigger, 0); },
   open: (key, prompt) => orchestratorCron.openReview(key, prompt, 'QA'),
   now: () => new Date(),
+  latest: latestQaRun,
+  runDir: (key, runId) => path.join(qaDir(), 'runs', key, runId).replace(/\\/g, '/'),
+  head: async (prUrl) => {
+    const match = PULL.exec(prUrl);
+    const client = match ? await github.client() : null;
+    return match && client ? ((await client.getPRStatus(match[1], match[2], Number(match[3])))?.head?.sha ?? null) : null;
+  },
+  message: (key, prompt) => orchestratorCron.taskMessage(key, prompt),
+  tickets: async () => (await orchestratorService.list()).filter((run) => run.kind === 'build' && runPullRequests(run).length > 0).map((run) => run.key),
 });
 
 const previous = orchestratorService.onLedger;

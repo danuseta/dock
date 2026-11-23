@@ -1,6 +1,30 @@
 import { gql } from 'graphql-tag';
 
 export const typeDefs = gql`
+  "One finding of the writing standard (W1 to W8). block keeps a ticket out of Jira unless it is let in with a flag; warn is a note."
+  type LintFinding {
+    rule: String!
+    "summary, userStory, problem, ac, reference, openToConfirm, description or sp"
+    field: String!
+    "1-based AC line, or null for the whole field"
+    line: Int
+    "block or warn"
+    level: String!
+    text: String!
+    fix: String!
+  }
+
+  "The writing standard checked on a ticket; ok is true when no finding blocks."
+  type TicketLint {
+    ok: Boolean!
+    findings: [LintFinding!]!
+  }
+
+  "Why a ticket below the writing standard is let in: 5 to 300 characters. The ticket gets the WRITING-FLAG label."
+  input WritingFlagInput {
+    reason: String!
+  }
+
   type Ticket {
     key: ID!
     title: String!
@@ -32,6 +56,8 @@ export const typeDefs = gql`
     workOrderSource: String
     """True when the owner works the ticket by hand: the cron never takes or resumes it."""
     workManual: Boolean!
+    "The writing standard on the ticket as Jira holds it."
+    lint: TicketLint!
     pullRequests: [PullRequest!]
     demoLink: DemoLink
     orchestration: Orchestration
@@ -695,6 +721,8 @@ export const typeDefs = gql`
     scoutRunning: Boolean!
     "QA approved the test cases as they are now (decision tc|KEY approve)."
     tcApproved: Boolean!
+    "The writing standard on the fields the draft holds: summary, AC, SP and Blocks links."
+    lint: TicketLint!
     "The hash of the AC lines; a ticket summary is written for one hash."
     acHash: String!
     "A frame of the ticket changed in the storyboard after the test cases were written."
@@ -756,6 +784,8 @@ export const typeDefs = gql`
 
   """A sprint being planned. blockers (finding or qa|KEY ids) are shown before publish; they never hold it."""
   type SprintDraft {
+    "Tickets that joined the sprint in Jira after the last load; the hourly refresh added them to the draft."
+    addedSince: [String!]!
     sprint: String!
     sprintId: Int!
     """draft or published."""
@@ -823,6 +853,10 @@ export const typeDefs = gql`
     error: String
     createdAt: String!
     appliedAt: String
+    "The writing standard on the values the revision writes"
+    lint: TicketLint!
+    "Why it was applied with a WRITING-FLAG despite a block finding"
+    flagReason: String
   }
 
   input SprintDraftRevisionInput {
@@ -861,6 +895,10 @@ export const typeDefs = gql`
     createdKey: String
     "The last Publish failure for this ticket, null otherwise"
     error: String
+    "The writing standard on the ticket as drafted"
+    lint: TicketLint!
+    "Why it was created with a WRITING-FLAG despite a block finding"
+    flagReason: String
   }
 
   input SprintDraftNewTicketInput {
@@ -947,6 +985,8 @@ export const typeDefs = gql`
     sprint: String
     summary: TicketSummary
     tcApproved: Boolean!
+    "The QA bot's prediction of the ticket in the newest draft: LOLOS, ESCALATED or REVISION-RISK; null before it ran."
+    prediction: String
     decisions: [TicketRefDecision!]!
   }
 
@@ -2426,6 +2466,8 @@ export const typeDefs = gql`
     sessionId: String
     pullRequests: [String!]!
     error: String
+    "Fix rounds already used after a REVISION; 0 at the first run."
+    fixRound: Int!
   }
 
   "One merged pull request of a ticket and whether its repo's deploy workflow has shipped it."
@@ -2671,11 +2713,11 @@ export const typeDefs = gql`
     "Removes a drafted new ticket; its NEW-n id is not given out again."
     removeSprintDraftNewTicket(sprint: String!, id: ID!): SprintDraft!
     "Creates drafted new tickets in Jira in the draft's sprint without publishing the plan; no ids takes every one not created yet."
-    createSprintDraftNewTickets(sprint: String!, ids: [ID!]): [SprintDraftPublishResult!]!
+    createSprintDraftNewTickets(sprint: String!, ids: [ID!], flag: WritingFlagInput): [SprintDraftPublishResult!]!
     "Creates or replaces the pending revision of a ticket; a field left out is not part of it, null removes it from the revision."
     saveSprintDraftRevision(sprint: String!, key: ID!, input: SprintDraftRevisionInput!): SprintDraft!
     "Writes the pending revision's fields that differ from Jira; refused when the ticket changed in Jira after the revision was written."
-    applySprintDraftRevision(sprint: String!, key: ID!): SprintDraftPublishResult!
+    applySprintDraftRevision(sprint: String!, key: ID!, flag: WritingFlagInput): SprintDraftPublishResult!
     "Discards the pending revision; it is kept as history and left out of the draft."
     discardSprintDraftRevision(sprint: String!, key: ID!): SprintDraft!
     """Writes AC lines and assignees that differ from Jira. Refused while a blocker has no decision."""

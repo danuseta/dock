@@ -82,9 +82,9 @@ test('Planning names the tab Tickets with a New and a Revisions section, and the
   assert.match(panel, /draft new tickets or to rewrite tickets that already exist/);
   const queries = source('../graphql/queries.ts');
   assert.match(queries, /revisions \{ \$\{SPRINT_DRAFT_REVISION_FIELDS\} \}/);
-  assert.match(queries, /key summary status note source fields \{ name label before after \} inSprint error createdAt appliedAt/);
+  assert.match(queries, /key summary status note source fields \{ name label before after \} inSprint error createdAt appliedAt flagReason/);
   assert.match(queries, /saveSprintDraftRevision\(sprint: \$sprint, key: \$key, input: \$input\) \{ \$\{SPRINT_DRAFT_FIELDS\} \}/);
-  assert.match(queries, /applySprintDraftRevision\(sprint: \$sprint, key: \$key\) \{ key kind status detail \}/);
+  assert.match(queries, /applySprintDraftRevision\(sprint: \$sprint, key: \$key, flag: \$flag\) \{ key kind status detail \}/);
   assert.match(queries, /discardSprintDraftRevision\(sprint: \$sprint, key: \$key\) \{ \$\{SPRINT_DRAFT_FIELDS\} \}/);
   assert.match(queries, /\$input: SprintDraftRevisionInput!/);
 });

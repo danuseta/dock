@@ -52,7 +52,7 @@ test('a card shows an orange dot for an undecided AC reference and a violet dot 
     storyboards: [board({ epic: 'QRD-1531' }), board({ epic: 'QRD-1547', version: 3 }), board({ epic: 'QRD-913', none: true })],
   }));
   assert.deepEqual(cards.map((card) => [card.key, card.flags.ac, card.flags.sb]), [['QRD-1', true, true], ['QRD-2', false, false], ['QRD-3', false, false], ['QRD-4', false, true]]);
-  assert.deepEqual(filterCounts(cards), { ac: 1, sb: 2, new: 0 });
+  assert.deepEqual(filterCounts(cards), { ac: 1, sb: 2, new: 0, writing: 0 });
 });
 
 test('a filter dims the cards it does not keep; All keeps every card', () => {
@@ -133,7 +133,7 @@ test('the tabs carry counts for AC check, Storyboard and New tickets, and the bo
     newTickets: [fresh({}), fresh({ id: 'NEW-2', dev: null }), fresh({ id: 'NEW-3', createdKey: 'QRD-1600' })],
   });
   assert.deepEqual(['ac', 'storyboard', 'new', 'team'].map((panel) => panelBadge(panel as never, sample)), [1, 2, 2, 0]);
-  assert.deepEqual(barIssues(sample), { ac: 1, epics: 1, checks: 1, fresh: 2, needWork: 1, revisions: 0 });
+  assert.deepEqual(barIssues(sample), { ac: 1, epics: 1, checks: 1, fresh: 2, needWork: 1, revisions: 0, writing: 0 });
 });
 
 test('the new ticket form reads back into the save input, and says which field does not read', () => {

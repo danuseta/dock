@@ -25,6 +25,8 @@ import {
 import { GET_DASHBOARD, GET_ORCHESTRATION, GET_QA_QUEUE_POSITION, GET_TICKET_DETAIL_CORE, GET_TICKET_DETAIL_ENRICHMENT, GET_TICKET_SUMMARY } from '../graphql/queries';
 import { LinksMap, ReadinessCard, SummaryBlock } from '../components/ticket/TicketReady';
 import { useReadiness, type SummaryFacts } from '../components/ticket/useReadiness';
+import { usePlanningSession } from '../agents/usePlanningChat';
+import { humanizePrompt, lintMark } from '../lib/writing';
 import { stageLabel, type AgentRun } from '../agents/runs';
 import { machineOf } from '../chat/messages';
 import { useAnswerTicket } from '../chat/useAnswerTicket';
@@ -159,6 +161,11 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
   const { data: summaryData } = useQuery<{ ticketSummary: SummaryFacts | null }>(GET_TICKET_SUMMARY, { ...CACHED_QUERY_OPTIONS, variables: { key: ticketKey }, skip: /^card-/i.test(ticketKey) });
   const jiraTicket = coreTicketFromResponse ?? null;
   const { readiness, facts: readinessFacts } = useReadiness(jiraTicket ? [jiraTicket] : [], !!jiraTicket);
+  // Humanize asks the Planning chat of the ticket's sprint; the chat list is only read for a ticket with a finding.
+  const flagged = !!lintMark(jiraTicket?.lint);
+  const humanizeSprint = flagged ? readinessFacts?.tickets.find((item) => item.key === ticketKey)?.sprint ?? (jiraTicket?.sprintName && jiraTicket.sprintName !== 'No Sprint' ? jiraTicket.sprintName : '') : '';
+  const planningChat = usePlanningSession(humanizeSprint);
+  const humanize = humanizeSprint ? async () => { await planningChat.open(humanizePrompt(ticketKey, humanizeSprint)); onNavigate('/planning?tab=draft'); } : undefined;
 
   const renderBackButton = () => onBack ? (
     <button onClick={onBack} className="inline-flex min-h-6 max-[760px]:min-h-11 items-center gap-2 font-mono text-[0.82rem] font-semibold text-muted-foreground transition-colors duration-150 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
@@ -408,7 +415,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
             <h1 className="mt-2 text-balance font-display text-[1.6rem] leading-snug font-bold">{ticket.title}</h1>
           </div>
 
-          {ready && <ReadinessCard ready={ready} startOpen={/^to ?do$/i.test(ticket.status ?? '')} onNavigate={onNavigate} />}
+          {ready && <ReadinessCard ready={ready} startOpen={/^to ?do$/i.test(ticket.status ?? '')} onNavigate={onNavigate} onHumanize={humanize} />}
 
           <NeedsYouCard
             items={needs}

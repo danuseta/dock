@@ -6,9 +6,10 @@ import { SprintInputError } from './sprint-dashboard';
 import type { PlanningVisualService } from './planning-visual';
 import { openTickets, type DraftView, type SprintDraftService } from './sprint-draft';
 import { StoryboardMissing, type StoryboardReader } from './storyboard';
+import { lintTicket, type LintInput } from './ticket-lint';
 import type { TicketSummaryService } from './ticket-summary';
 
-export const PLANNING_ROUTES = ['sprint-draft/get', 'sprint-draft/update', 'sprint-draft/tc', 'sprint-draft/question', 'sprint-draft/summary', 'sprint-draft/visual', 'sprint-draft/new', 'sprint-draft/revise', 'storyboard'] as const;
+export const PLANNING_ROUTES = ['sprint-draft/get', 'sprint-draft/update', 'sprint-draft/tc', 'sprint-draft/question', 'sprint-draft/summary', 'sprint-draft/visual', 'sprint-draft/new', 'sprint-draft/revise', 'ticket/lint', 'storyboard'] as const;
 export type PlanningRoute = typeof PLANNING_ROUTES[number];
 
 export interface PlanningIngestDeps {
@@ -40,6 +41,31 @@ function numberField(body: Record<string, unknown>, name: string): number | null
   return value;
 }
 
+const LINT_TEXT = ['type', 'summary', 'userStory', 'problem', 'reference', 'openToConfirm', 'description', 'key'] as const;
+const LINT_LISTS = ['ac', 'blockedBy', 'decidedRefs'] as const;
+
+/** The body of ticket/lint: the writing standard's input; a field left out is not checked. */
+export function lintInput(body: Record<string, unknown>): LintInput {
+  const input: Record<string, unknown> = {};
+  for (const name of LINT_TEXT) {
+    const value = body[name];
+    if (value === undefined) continue;
+    if (value !== null && typeof value !== 'string') throw new OrchestratorInputError(`${name} must be a string`);
+    input[name] = value;
+  }
+  for (const name of LINT_LISTS) {
+    const value = body[name];
+    if (value === undefined) continue;
+    if (!Array.isArray(value) || value.some((line) => typeof line !== 'string')) throw new OrchestratorInputError(`${name} must be an array of strings`);
+    input[name] = value;
+  }
+  if (body.sp !== undefined) {
+    if (body.sp !== null && (typeof body.sp !== 'number' || !Number.isFinite(body.sp))) throw new OrchestratorInputError('sp must be a number');
+    input.sp = body.sp;
+  }
+  return input as LintInput;
+}
+
 /** The agent plans the cards still to build, as before merged cards joined the draft. */
 const open = (view: DraftView): DraftView => ({ ...view, tickets: openTickets(view) });
 
@@ -57,6 +83,7 @@ export async function planningIngest(deps: PlanningIngestDeps, route: PlanningRo
       await deps.drafts.applyStoryboard(result);
       return { version: result.version, path: result.path, frames: result.frames, changed: result.changed };
     }
+    if (route === 'ticket/lint') return lintTicket(lintInput(body));
     const sprint = textField(body, 'sprint')!;
     if (route === 'sprint-draft/get') {
       const view = await draftOf(deps.drafts, sprint);
@@ -78,7 +105,8 @@ export async function planningIngest(deps: PlanningIngestDeps, route: PlanningRo
       }
       if (!isRecord(body.ticket)) throw new OrchestratorInputError('ticket must be an object');
       const saved = await deps.drafts.saveNewTicket(sprint, id, body.ticket);
-      return { id: saved.id, ticket: saved.view.newTickets.find((ticket) => ticket.id === saved.id) ?? null };
+      const ticket = saved.view.newTickets.find((item) => item.id === saved.id) ?? null;
+      return { id: saved.id, ticket, lint: ticket?.lint ?? null };
     }
     if (route === 'sprint-draft/revise') {
       const key = textField(body, 'key')!.toUpperCase();
@@ -88,7 +116,7 @@ export async function planningIngest(deps: PlanningIngestDeps, route: PlanningRo
       }
       if (!isRecord(body.revision)) throw new OrchestratorInputError('revision must be an object');
       const saved = await deps.drafts.saveRevision(sprint, key, body.revision, 'chat');
-      return { key: saved.revision.key, revision: saved.revision };
+      return { key: saved.revision.key, revision: saved.revision, lint: saved.revision.lint };
     }
     if (route === 'sprint-draft/summary') {
       if (!deps.summaries) throw new OrchestratorInputError('Ticket summaries are not available on this DOCK');

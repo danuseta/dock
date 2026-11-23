@@ -35,7 +35,7 @@ export interface TicketSummary {
 /** current: written for the AC the draft holds now. acChangedAt: when the AC field last changed in Jira, if known. */
 export interface SummaryView extends TicketSummary { current: boolean; acChangedAt: string | null }
 
-export interface ReadinessTicket { key: string; sprint: string | null; summary: SummaryView | null; tcApproved: boolean; decisions: Array<{ refKey: string; action: string }> }
+export interface ReadinessTicket { key: string; sprint: string | null; summary: SummaryView | null; tcApproved: boolean; prediction: string | null; decisions: Array<{ refKey: string; action: string }> }
 export interface ReadinessFacts { tickets: ReadinessTicket[]; statuses: Array<{ key: string; status: string }> }
 
 export interface SummaryStore {
@@ -191,7 +191,7 @@ export class TicketSummaryService {
       const ticket = draft ? ticketOf(draft, key) : null;
       const decisions = (draft?.findings ?? []).filter((finding) => finding.key === key && finding.decision)
         .map((finding) => ({ refKey: finding.refKey, action: acAction(finding.decision!.action) }));
-      return { key, sprint: draft?.sprint ?? null, summary: this.viewOf(await this.stored(key), draft, null), tcApproved: !!ticket?.tcApproved, decisions };
+      return { key, sprint: draft?.sprint ?? null, summary: this.viewOf(await this.stored(key), draft, null), tcApproved: !!ticket?.tcApproved, prediction: ticket?.prediction?.prediction ?? null, decisions };
     }));
     return { tickets, statuses: [...statuses].map(([key, status]) => ({ key, status })) };
   }
