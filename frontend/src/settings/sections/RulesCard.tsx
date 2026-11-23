@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { AlertTriangle, Lock } from 'lucide-react';
-import { GET_OPS_RULES, GET_ORCHESTRATOR_CRON_SETTINGS, SET_STATUS_AFTER_MERGE, SET_WORKTREE_MERGED } from '../../graphql/queries';
+import { GET_OPS_RULES, GET_ORCHESTRATOR_CRON_SETTINGS, SET_HOLD_NEW_SPRINT, SET_STATUS_AFTER_MERGE, SET_WORKTREE_MERGED } from '../../graphql/queries';
 import { UPDATE_ORCHESTRATOR_CRON_SETTINGS } from '../../graphql/mutations';
 import { Button, Checkbox, Input, Select } from '../../components/ui';
 import { cn } from '../../lib/cn';
 import {
-  NEXT_STATUSES, readCronRules, readStatusAfterMerge, readWorktreeMerged, withCronRules,
+  NEXT_STATUSES, readCronRules, readHoldNewSprint, readStatusAfterMerge, readWorktreeMerged, withCronRules,
   type BlockedManualMode, type CronRules, type StatusAfterMerge, type WorktreeMerged, type WorktreeMode,
 } from '../../lib/opsRules';
 import { SettingRow, SettingsCard } from '../SettingsParts';
@@ -24,22 +24,24 @@ const WORKTREE_HELP: Record<WorktreeMode, string> = {
 };
 
 /**
- * Settings › Sous flow › Aturan: blocked-by for manual sessions, stacked PR, the Jira move after merge, merged worktrees.
+ * Settings › Sous flow › Aturan: the hold on a new sprint, blocked-by for manual sessions, stacked PR, the Jira move after merge, merged worktrees.
  * Saves on each change. `merge` is the laptop DOCK's part: only the Jira move, which each DOCK keeps in its own settings.
  */
 export const RulesCard = ({ scope = 'all', onOpenWorktrees }: { scope?: 'all' | 'merge'; onOpenWorktrees?: () => void }) => {
   const all = scope === 'all';
-  const { data: opsData, loading: opsLoading } = useQuery<{ opsRules: { statusAfterMerge: string; worktreeMerged: string } }>(GET_OPS_RULES, { fetchPolicy: 'cache-and-network' });
+  const { data: opsData, loading: opsLoading } = useQuery<{ opsRules: { statusAfterMerge: string; worktreeMerged: string; holdNewSprint: string } }>(GET_OPS_RULES, { fetchPolicy: 'cache-and-network' });
   const { data: cronData, loading: cronLoading } = useQuery<{ orchestratorCronSettings: { config: string } }>(GET_ORCHESTRATOR_CRON_SETTINGS, { fetchPolicy: 'cache-and-network', skip: !all });
   const [saveStatus, statusSaving] = useMutation(SET_STATUS_AFTER_MERGE, { refetchQueries: [GET_OPS_RULES], awaitRefetchQueries: true });
   const [saveWorktree, worktreeSaving] = useMutation(SET_WORKTREE_MERGED, { refetchQueries: [GET_OPS_RULES], awaitRefetchQueries: true });
+  const [saveHold, holdSaving] = useMutation(SET_HOLD_NEW_SPRINT, { refetchQueries: [GET_OPS_RULES], awaitRefetchQueries: true });
   const [saveCron, cronSaving] = useMutation(UPDATE_ORCHESTRATOR_CRON_SETTINGS, { refetchQueries: [GET_ORCHESTRATOR_CRON_SETTINGS], awaitRefetchQueries: true });
   const [error, setError] = useState<string | null>(null);
   const status = readStatusAfterMerge(opsData?.opsRules.statusAfterMerge);
   const worktree = readWorktreeMerged(opsData?.opsRules.worktreeMerged);
+  const hold = readHoldNewSprint(opsData?.opsRules.holdNewSprint);
   const config = cronData?.orchestratorCronSettings.config ?? null;
   const cron = readCronRules(config);
-  const busy = opsLoading || (all && cronLoading) || statusSaving.loading || worktreeSaving.loading || cronSaving.loading;
+  const busy = opsLoading || (all && cronLoading) || statusSaving.loading || worktreeSaving.loading || holdSaving.loading || cronSaving.loading;
 
   const store = (work: () => Promise<unknown>) => {
     setError(null);
@@ -52,6 +54,9 @@ export const RulesCard = ({ scope = 'all', onOpenWorktrees }: { scope?: 'all' | 
 
   return (
     <SettingsCard title="Rules" caption="When sous may start a ticket, what happens in Jira after a PR merges, and merged worktrees. Each rule saves at once.">
+      {all && <SettingRow label="Hold a new sprint until I start it" help="The cron takes no ticket of a new sprint until you press Start sprint work on Planning or Home. Runs already going are not held.">
+        <label className="flex items-center gap-2 text-sm"><Checkbox checked={hold.enabled} disabled={busy} onChange={(event) => store(() => saveHold({ variables: { value: JSON.stringify({ enabled: event.target.checked }) } }))} />Hold</label>
+      </SettingRow>}
       {all && <SettingRow label="When a ticket is blocked" help="For sessions you open yourself from a ticket. Cron always waits for its dependencies to finish.">
         <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="When a ticket is blocked">
           {BLOCKED_MODES.map(([mode, label]) => <button key={mode} type="button" role="radio" aria-checked={cron.blockedManual === mode} className={seg(cron.blockedManual === mode)} disabled={busy || !config} onClick={() => setCron({ blockedManual: mode })}>{label}</button>)}

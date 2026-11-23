@@ -10,6 +10,8 @@ import { PlanningBoard } from './PlanningBoard';
 import { PlanningBar } from './PlanningBar';
 import { TicketsPanel } from './RevisionsPanel';
 import { PlanTab } from './PlanTab';
+import { SprintHoldBar } from '../components/SprintStart';
+import { useSprintStart } from '../lib/useSprintStart';
 import { StoryboardBoard } from './StoryboardBoard';
 import { PlanningVisual } from './PlanningVisual';
 import { MyTicketsPanel } from './MyTicketsPanel';
@@ -811,6 +813,7 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
   // The publish signal comes from Jira's plan labels, so a developer's DOCK sees the planner's publish too.
   const signalQuery = useQuery<{ sprintPlanSignal: PlanSignal | null }>(GET_SPRINT_PLAN_SIGNAL, { variables: { sprint: chosen?.name ?? '' }, skip: !chosen, fetchPolicy: 'cache-and-network', pollInterval: 15000 });
   const signal = signalQuery.data?.sprintPlanSignal ?? null;
+  const sprintStart = useSprintStart(chosen?.name ?? '', !chosen);
   const planner = signal ? signal.isPlanner : true;
   const session = usePlanningSession(chosen?.name ?? '');
   const openChat = (prefill?: string) => { fold(false); void session.open(prefill); };
@@ -979,7 +982,7 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-4">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <Select aria-label="Sprint to plan" className="w-[260px] max-[760px]:w-full" value={String(chosen.id)} onValueChange={(value) => setSprintId(Number(value))} options={options.map((sprint) => ({ value: String(sprint.id), label: `${sprint.name}${sprint.state === 'active' ? ' (active)' : ''}` }))} />
-          <PlanningStatus signal={signal} />
+          <PlanningStatus signal={signal} hold={sprintStart.view} />
           {draft && (
             <p aria-label="Draft summary" className="flex items-center gap-1.5 text-[0.78rem] text-muted-foreground">
               {draftSummaryText(draft)}
@@ -994,6 +997,7 @@ export const PlanningTab: React.FC<{ initialPanel?: PlanningPanel }> = ({ initia
           <Button onClick={onLoad} disabled={busy}><Download size={14} aria-hidden="true" />{loading.loading ? 'Loading...' : draft ? 'Load again from Jira' : 'Load from Jira'}</Button>
         </div>
         <PlanningStatusNote signal={signal} draft={draft} onOpenChat={() => openChat()} onRepublish={() => void onRepublish()} />
+        <SprintHoldBar view={sprintStart.view} onStarted={() => void sprintStart.refetch()} />
         {signal && !planner && <DeveloperOrder signal={signal} />}
         {notice && <p className="text-sm text-status-conflict" role="alert">{notice}</p>}
         {draftQuery.error && !draft && <p className="text-sm text-status-conflict" role="alert">{draftQuery.error.message}</p>}

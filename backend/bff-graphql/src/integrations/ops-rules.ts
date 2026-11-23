@@ -5,6 +5,7 @@ export class OpsRulesInputError extends Error {}
 
 export const STATUS_AFTER_MERGE_KEY = 'statusAfterMerge';
 export const WORKTREE_MERGED_KEY = 'worktreeMerged';
+export const HOLD_NEW_SPRINT_KEY = 'holdNewSprint';
 
 export interface StatusAfterMerge {
   /** Move the Jira status once every pull request of a ticket in PR Review merged. */
@@ -26,8 +27,14 @@ export interface WorktreeMerged {
   days: number;
 }
 
+export interface HoldNewSprint {
+  /** The cron takes no new ticket of a sprint until the owner starts its work. */
+  enabled: boolean;
+}
+
 export const DEFAULT_STATUS_AFTER_MERGE: StatusAfterMerge = { enabled: true, next: 'UAT MERGED', ignoreDocsSync: true, laptop: false };
 export const DEFAULT_WORKTREE_MERGED: WorktreeMerged = { mode: 'notify', days: 3 };
+export const DEFAULT_HOLD_NEW_SPRINT: HoldNewSprint = { enabled: true };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -59,6 +66,11 @@ export function parseWorktreeMerged(raw: string | null | undefined): WorktreeMer
   return { mode: merged.mode as WorktreeMode, days: Number(merged.days) };
 }
 
+export function parseHoldNewSprint(raw: string | null | undefined): HoldNewSprint {
+  const merged = { ...DEFAULT_HOLD_NEW_SPRINT, ...objectOf(raw) };
+  return { enabled: flag(merged.enabled, 'enabled') };
+}
+
 /** A saved value that no longer parses falls back to the defaults, so a broken row never stops a tick. */
 export function readStatusAfterMerge(raw: string | null | undefined): StatusAfterMerge {
   try { return parseStatusAfterMerge(raw); } catch { return DEFAULT_STATUS_AFTER_MERGE; }
@@ -66,4 +78,8 @@ export function readStatusAfterMerge(raw: string | null | undefined): StatusAfte
 
 export function readWorktreeMerged(raw: string | null | undefined): WorktreeMerged {
   try { return parseWorktreeMerged(raw); } catch { return DEFAULT_WORKTREE_MERGED; }
+}
+
+export function readHoldNewSprint(raw: string | null | undefined): HoldNewSprint {
+  try { return parseHoldNewSprint(raw); } catch { return DEFAULT_HOLD_NEW_SPRINT; }
 }

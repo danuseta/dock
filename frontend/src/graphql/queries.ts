@@ -754,8 +754,9 @@ export const GET_SPRINT_PLAN = gql`
       sessionId
       mappedAt
       groups
+      suggestedOrder
       tickets {
-        key title status position held
+        key title status position order orderSource suggestedPosition held
         edges { id ticketKey dependsOnKey dependsOnTitle dependsOnAssignee dependsOnStatus source reason state }
       }
     }
@@ -1897,7 +1898,63 @@ export const WORKSPACE_DELETE = gql`
 
 export const GET_OPS_RULES = gql`
   query GetOpsRules {
-    opsRules { statusAfterMerge worktreeMerged }
+    opsRules { statusAfterMerge worktreeMerged holdNewSprint }
+  }
+`;
+
+export const SET_HOLD_NEW_SPRINT = gql`
+  mutation SetHoldNewSprint($value: String!) {
+    setHoldNewSprint(value: $value)
+  }
+`;
+
+export const GET_SPRINT_START = gql`
+  query GetSprintStart($sprint: String) {
+    sprintStart(sprint: $sprint) {
+      sprint holdOn held startedAt
+      preview {
+        slots parallel parked
+        first { key title order orderSource waitsOn }
+        blocked { key title order orderSource waitsOn }
+        next { key title order orderSource waitsOn }
+      }
+    }
+  }
+`;
+
+export const START_SPRINT_WORK = gql`
+  mutation StartSprintWork($sprint: String!) {
+    startSprintWork(sprint: $sprint) {
+      sprint holdOn held startedAt
+      preview {
+        slots parallel parked
+        first { key title order orderSource waitsOn }
+        blocked { key title order orderSource waitsOn }
+        next { key title order orderSource waitsOn }
+      }
+    }
+  }
+`;
+
+export const GET_WORKSPACE_RESOURCES = gql`
+  query GetWorkspaceResources {
+    workspaceResources {
+      at
+      memory { current max anon samples { at bytes } }
+      cpu { percent limit load1 }
+      disk { total used }
+      oom { total today }
+      worktrees
+      tickets { key bytes count worktrees kinds { kind bytes count } }
+      base { key bytes count worktrees kinds { kind bytes count } }
+      leftovers { ticketKey status bytes count worktrees }
+    }
+  }
+`;
+
+export const STOP_WORKTREE_SERVERS = gql`
+  mutation StopWorktreeServers($ticketKey: String!) {
+    stopWorktreeServers(ticketKey: $ticketKey)
   }
 `;
 

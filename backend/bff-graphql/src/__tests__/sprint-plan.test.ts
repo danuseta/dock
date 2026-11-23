@@ -22,6 +22,7 @@ function fakeStore() {
   const manual = new Set<string>();
   const events: Array<[string, string, string | null]> = [];
   const retro: Array<{ sprint: string; kind: string; status: string; text: string }> = [];
+  const settings = new Map<string, string>();
   let id = 0;
   const same = (a: { ticketKey: string; dependsOnKey: string }, b: { ticketKey: string; dependsOnKey: string }) => a.ticketKey === b.ticketKey && a.dependsOnKey === b.dependsOnKey;
   const store = {
@@ -56,8 +57,10 @@ function fakeStore() {
     setTicketOrder: async (key: string, position: number) => { orders.set(key, position); return {} as never; },
     getRetroItems: async (sprint: string) => retro.filter((item) => item.sprint === sprint) as never,
     getTicketDependencies: async () => [] as never,
+    getSettingValues: async (keys: string[]) => keys.filter((key) => settings.has(key)).map((key) => ({ key, value: settings.get(key)! })) as never,
+    upsertSetting: async (key: string, value: string) => { settings.set(key, value); return {} as never; },
   };
-  return { store, edges, plans, orders, manual, events, retro };
+  return { store, edges, plans, orders, manual, events, retro, settings };
 }
 
 function planner(tickets: PlanTicket[], overrides: Partial<PlanDeps> = {}) {
@@ -110,19 +113,23 @@ test('a Jira link applies at once as an accepted edge of the owner ticket, witho
   assert.strictEqual(writes, 1);
 });
 
-test('triggers: no plan runs full, a joined owner key runs ticket mode, an Epic is skipped, a stale run fails', () => {
+test('triggers: no plan and a joined owner key start nothing; only a stale run expires', () => {
   const tickets = [ticket('QRD-1'), ticket('QRD-2'), ticket('QRD-5', { issueType: 'Epic' })];
-  assert.deepStrictEqual(planTriggers(tickets, null, NOW), { kind: 'full', sprint: 'S27', keys: ['QRD-1', 'QRD-2'] });
-  assert.deepStrictEqual(planTriggers(tickets, row({ mappedKeys: '["QRD-1"]' }), NOW), { kind: 'ticket', sprint: 'S27', keys: ['QRD-2'] });
+  assert.strictEqual(planTriggers(tickets, null, NOW), null);
+  assert.strictEqual(planTriggers(tickets, row({ mappedKeys: '["QRD-1"]' }), NOW), null);
+  assert.strictEqual(planTriggers(tickets, row({ status: 'failed', mappingKeys: '["QRD-1"]' }), NOW), null);
   assert.strictEqual(planTriggers(tickets, row({ mappedKeys: '["QRD-1","QRD-2"]' }), NOW), null);
   assert.strictEqual(planTriggers(tickets, row({ status: 'mapping', startedAt: new Date(NOW.getTime() - 3600_000) }), NOW), null);
   assert.deepStrictEqual(planTriggers(tickets, row({ status: 'mapping', startedAt: new Date(NOW.getTime() - 3 * 3600_000) }), NOW), { kind: 'expire', sprint: 'S27' });
   assert.strictEqual(planTriggers([ticket('QRD-1', { status: 'In Progress' })], null, NOW), null);
 });
 
-test('sprint start runs one full plan session; a later tick does not start another', async () => {
+test('a tick never starts a plan session; Map dependencies runs one full session', async () => {
   const world = planner([ticket('QRD-1'), ticket('QRD-2')]);
   await world.planner.watch([ticket('QRD-1'), ticket('QRD-2')]);
+  await world.planner.watch([ticket('QRD-1'), ticket('QRD-2'), ticket('QRD-3')]);
+  assert.strictEqual(world.sessions.length, 0);
+  await world.planner.map();
   await world.planner.watch([ticket('QRD-1'), ticket('QRD-2')]);
   assert.strictEqual(world.sessions.length, 1);
   assert.strictEqual(world.sessions[0].title, 'Plan-S27');
@@ -131,24 +138,18 @@ test('sprint start runs one full plan session; a later tick does not start anoth
   assert.deepStrictEqual([world.plans.get('S27')?.status, world.plans.get('S27')?.mappingKeys, world.plans.get('S27')?.sessionId], ['mapping', '["QRD-1","QRD-2"]', 'session-1']);
 });
 
-test('a send that fails deletes the new session, marks the plan failed, and holds off new starts for 30 minutes', async () => {
-  let now = NOW;
+test('a send that fails deletes the new session and marks the plan failed; the next tick does not retry it', async () => {
   const deleted: string[] = [];
   let sends = 0;
-  const world = planner([], {
-    now: () => now,
+  const world = planner([ticket('QRD-1')], {
     send: async () => { sends += 1; throw new Error('bridge went away'); },
     deleteSession: async (sessionId) => { deleted.push(sessionId); },
   });
-  await assert.rejects(world.planner.watch([ticket('QRD-1')]), /bridge went away/);
+  await assert.rejects(world.planner.map(), /bridge went away/);
   assert.deepStrictEqual(deleted, ['session-1']);
   assert.deepStrictEqual([world.plans.get('S27')?.status, world.plans.get('S27')?.error], ['failed', 'bridge went away']);
-  now = new Date(NOW.getTime() + 29 * 60_000);
   await world.planner.watch([ticket('QRD-1')]);
   assert.strictEqual(sends, 1);
-  now = new Date(NOW.getTime() + 30 * 60_000);
-  await assert.rejects(world.planner.watch([ticket('QRD-1')]), /bridge went away/);
-  assert.strictEqual(sends, 2);
 });
 
 test('a ticket-mode draft only replaces the pending edges of its own tickets', async () => {
@@ -162,55 +163,47 @@ test('a ticket-mode draft only replaces the pending edges of its own tickets', a
   assert.deepStrictEqual(await world.planner.heldKeys(), new Set(['QRD-3']));
 });
 
-test('an expired run is not retried; only a newly joined owner ticket starts a run, and its own expiry is not retried either', async () => {
+test('an expired run fails once and is not retried by a tick; Map dependencies starts a new one', async () => {
   let now = NOW;
-  const world = planner([ticket('QRD-1'), ticket('QRD-2'), ticket('QRD-3')], { now: () => now });
+  const world = planner([ticket('QRD-1'), ticket('QRD-2')], { now: () => now });
   const hours = (n: number) => { now = new Date(NOW.getTime() + n * 3600_000); };
-  await world.planner.watch([ticket('QRD-1'), ticket('QRD-2')]);
+  await world.planner.map();
+  hours(1);
+  assert.strictEqual(await world.planner.watch([ticket('QRD-1'), ticket('QRD-2')]), null);
   hours(3);
   assert.deepStrictEqual(await world.planner.watch([ticket('QRD-1'), ticket('QRD-2')]), { kind: 'expire', sprint: 'S27' });
   assert.strictEqual(world.plans.get('S27')?.status, 'failed');
   hours(4);
-  await world.planner.watch([ticket('QRD-1'), ticket('QRD-2')]);
+  await world.planner.watch([ticket('QRD-1'), ticket('QRD-2'), ticket('QRD-3')]);
   assert.strictEqual(world.sessions.length, 1);
-  await world.planner.watch([ticket('QRD-1'), ticket('QRD-2'), ticket('QRD-3')]);
-  assert.strictEqual(world.sessions.length, 2);
-  assert.match(world.sessions[1].text, /^Map only QRD-3 against the rest./m);
-  hours(7);
-  await world.planner.watch([ticket('QRD-1'), ticket('QRD-2'), ticket('QRD-3')]);
-  hours(8);
-  await world.planner.watch([ticket('QRD-1'), ticket('QRD-2'), ticket('QRD-3')]);
-  assert.deepStrictEqual([world.sessions.length, world.plans.get('S27')?.status, world.plans.get('S27')?.mappingKeys], [2, 'failed', '["QRD-1","QRD-2","QRD-3"]']);
   assert.strictEqual(typeof (await world.planner.map()), 'string');
-  assert.strictEqual(world.sessions.length, 3);
+  assert.strictEqual(world.sessions.length, 2);
 });
 
-test('a session sent but not saved as mapping does not open a second session on the next tick', async () => {
+test('a session sent but not saved as mapping fails Map dependencies, and the next tick opens nothing', async () => {
   let now = NOW;
-  const world = planner([], { now: () => now });
+  const world = planner([ticket('QRD-1')], { now: () => now });
   const save = world.store.saveSprintPlan;
   world.store.saveSprintPlan = async (sprint, data) => { if (data.status === 'mapping') throw new Error('db locked'); return save(sprint, data); };
-  await assert.rejects(world.planner.watch([ticket('QRD-1')]), /db locked/);
+  await assert.rejects(world.planner.map(), /db locked/);
   now = new Date(NOW.getTime() + 60_000);
   await world.planner.watch([ticket('QRD-1')]);
   assert.strictEqual(world.sessions.length, 1);
 });
 
-test('an owner ticket joining the sprint runs a ticket-mode session for it only; a teammate ticket starts nothing', async () => {
-  const world = planner([]);
+test('an owner ticket joining the sprint starts nothing; the full map lists every owner ticket', async () => {
+  const world = planner([ticket('QRD-1'), ticket('QRD-2'), ticket('QRD-3')]);
   await world.store.saveSprintPlan('S27', { status: 'idle', mappedKeys: ['QRD-1', 'QRD-2'] });
-  await world.store.setTicketOrder('QRD-2', 1);
-  await world.store.setTicketOrder('QRD-1', 2);
   await world.planner.watch([ticket('QRD-1', { links: [{ key: 'QRD-77', relation: 'blockedBy' }] }), ticket('QRD-2')]);
-  assert.strictEqual(world.sessions.length, 0);
   await world.planner.watch([ticket('QRD-1'), ticket('QRD-2'), ticket('QRD-3')]);
-  assert.strictEqual(world.sessions.length, 1);
-  assert.match(world.sessions[0].text, /^Map only QRD-3 against the rest\. The order of the other tickets stays: QRD-2, QRD-1\.$/m);
-  assert.strictEqual(world.plans.get('S27')?.mappingKeys, '["QRD-3"]');
+  assert.strictEqual(world.sessions.length, 0);
+  await world.planner.map();
+  assert.match(world.sessions[0].text, /Owner tickets to order: QRD-1, QRD-2, QRD-3\./);
+  assert.strictEqual(world.plans.get('S27')?.mappingKeys, '["QRD-1","QRD-2","QRD-3"]');
 });
 
 test('the prompt carries only the accepted Try lines of the previous sprint', async () => {
-  const world = planner([]);
+  const world = planner([ticket('QRD-1')]);
   world.retro.push(
     { sprint: 'S26', kind: 'try', status: 'accepted', text: 'Map shared API files first' },
     { sprint: 'S26', kind: 'try', status: 'open', text: 'Open try line' },
@@ -218,7 +211,7 @@ test('the prompt carries only the accepted Try lines of the previous sprint', as
     { sprint: 'S26', kind: 'keep', status: 'accepted', text: 'Accepted keep line' },
     { sprint: 'S27', kind: 'try', status: 'accepted', text: 'This sprint line' },
   );
-  await world.planner.watch([ticket('QRD-1')]);
+  await world.planner.map();
   const text = world.sessions[0].text;
   assert.match(text, /Lessons accepted in the retro of S26, apply them:\n- Map shared API files first\n/);
   for (const absent of ['Open try line', 'Closed try line', 'Accepted keep line', 'This sprint line', 'Map only']) assert.ok(!text.includes(absent), absent);
@@ -245,16 +238,19 @@ test('the work order covers owner tickets only, skips manual ones, and a ticket 
   assert.deepStrictEqual(planOrder({ mode: 'ticket', order: ['QRD-1', 'QRD-3', 'QRD-2'], tickets: ['QRD-3'] }, new Map([['QRD-2', 1], ['QRD-1', 2]]), new Set()), ['QRD-2', 'QRD-3', 'QRD-1']);
 });
 
-test('ingest stores inferred edges as pending, writes the order, and Map again keeps accepted and rejected states', async () => {
+test('ingest stores inferred edges as pending, keeps the order as a suggestion without touching TicketOrder, and Map again keeps accepted and rejected states', async () => {
   const world = planner([ticket('QRD-1'), ticket('QRD-2'), ticket('QRD-3'), ticket('QRD-4', { sprintName: 'S28' })]);
   world.manual.add('QRD-3');
+  world.orders.set('QRD-4', 7);
   await world.store.saveSprintPlan('S27', { status: 'mapping', mappingKeys: ['QRD-1', 'QRD-2', 'QRD-3'], startedAt: NOW });
   const first = { sprint: 'S27', mode: 'full', tickets: ['QRD-1', 'QRD-2', 'QRD-3'], order: ['QRD-3', 'QRD-2', 'QRD-1', 'QRD-4'], groups: [['QRD-1', 'QRD-3']], edges: [
     { ticket: 'QRD-1', dependsOn: 'QRD-2', reason: 'a' }, { ticket: 'QRD-3', dependsOn: 'QRD-9', reason: 'b' }, { ticket: 'QRD-2', dependsOn: 'QRD-8', reason: 'c' }, { ticket: 'QRD-4', dependsOn: 'QRD-1', reason: 'other sprint' },
   ] };
   assert.deepStrictEqual(await world.planner.ingest(first), { sprint: 'S27', edges: 3, order: ['QRD-2', 'QRD-1'] });
   assert.deepStrictEqual(world.edges.map((edge) => edge.state), ['pending', 'pending', 'pending']);
-  assert.deepStrictEqual([...world.orders], [['QRD-2', 1], ['QRD-1', 2]]);
+  assert.deepStrictEqual([...world.orders], [['QRD-4', 7]]);
+  assert.deepStrictEqual(await world.planner.suggestedOrder('S27'), ['QRD-2', 'QRD-1']);
+  assert.strictEqual(world.settings.get('planSuggestedOrder:S27'), '["QRD-2","QRD-1"]');
   const plan = world.plans.get('S27')!;
   assert.deepStrictEqual([plan.status, plan.mappingKeys, plan.mappedKeys, plan.groups, plan.mappedAt, plan.error], ['idle', '[]', '["QRD-1","QRD-2","QRD-3"]', '[["QRD-1","QRD-3"]]', NOW, null]);
 

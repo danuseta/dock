@@ -26,3 +26,11 @@ test('an open tab looks for a deploy every minute and when it gets focus or come
   assert.match(update, /\[role="dialog"\]/, 'an open dialog is offered the update, not reloaded');
   assert.match(update, /box\.getClientRects\(\)\.length > 0 && box\.value\.trim\(\) !== ''/, 'the hidden prefilled Report bug box does not block the reload');
 });
+
+test('a file picker opened in the last two minutes counts as busy, so the update is offered instead of reloading', async () => {
+  const { choosingFile, PICKING_MS } = await import('../lib/appUpdate');
+  const now = 1_000_000;
+  assert.strictEqual(choosingFile(now, now - 5_000), true, 'picker just opened');
+  assert.strictEqual(choosingFile(now, now - PICKING_MS - 1), false, 'picked long ago and nothing waiting');
+  assert.strictEqual(choosingFile(now, 0), false, 'never opened');
+});

@@ -17,7 +17,7 @@ export interface PlanEdge {
   reason: string | null;
   state: string;
 }
-export interface PlanTicket { key: string; title: string; status: string; position: number; held: boolean; edges: PlanEdge[] }
+export interface PlanTicket { key: string; title: string; status: string; position: number; order: number | null; orderSource: string | null; suggestedPosition: number | null; held: boolean; edges: PlanEdge[] }
 export interface SprintPlan {
   sprint: string;
   status: string;
@@ -25,6 +25,7 @@ export interface SprintPlan {
   sessionId: string | null;
   mappedAt: string | null;
   groups: string[][];
+  suggestedOrder: string[];
   tickets: PlanTicket[];
 }
 
@@ -72,6 +73,15 @@ export const pendingEdges = (plan: SprintPlan | null) => (plan?.tickets ?? []).f
 export const edgeStateText = (state: string) => (state === 'accepted' ? 'Accepted' : state === 'rejected' ? 'Rejected' : 'Waiting for your call');
 
 export const hasMap = (plan: SprintPlan | null) => !!plan && plan.mappedAt !== null;
+
+/** True when the suggested order differs from the work order the cron follows now. */
+export const suggestionDiffers = (plan: Pick<SprintPlan, 'suggestedOrder' | 'tickets'>) => {
+  const current = plan.tickets.map((ticket) => ticket.key).filter((key) => plan.suggestedOrder.includes(key));
+  return plan.suggestedOrder.length > 0 && plan.suggestedOrder.some((key, index) => current[index] !== key);
+};
+
+/** "Jira #14", "Yours #2" or nothing when the ticket number orders the ticket. */
+export const orderSourceLabel = (ticket: Pick<PlanTicket, 'order' | 'orderSource'>) => (ticket.order == null ? '' : `${ticket.orderSource === 'owner' ? 'Yours' : 'Jira'} #${ticket.order}`);
 
 export const groupsText = (groups: string[][]) => groups.filter((group) => group.length > 1).map((group) => group.join(' · '));
 

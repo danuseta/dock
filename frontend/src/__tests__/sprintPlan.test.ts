@@ -62,7 +62,7 @@ test('Planning shows Now, Draft and Retro, the Plan page is the Order panel of D
   assert.match(source('../lib/notificationEvents.ts'), /PLAN_DEPENDENCY: \{ prefix: 'plan', title: 'waits for your call' \}/);
   const tab = source('../agents/PlanTab.tsx');
   assert.match(tab, /edge\.dependsOnStatus &&/);
-  for (const text of ['Map again', 'Accept', 'Reject', 'Map now', 'Safe in parallel']) assert.ok(tab.includes(text), text);
+  for (const text of ['Map dependencies', 'Accept', 'Reject', 'Use this order', 'Safe in parallel']) assert.ok(tab.includes(text), text);
 });
 
 test('AC drift rows name why a line is held and put held ones first', () => {
