@@ -105,6 +105,7 @@ interface Start {
   manual?: Set<string>;
   now?: Date;
   sousFlowLines?: (key: string) => Promise<string[]>;
+  readinessLine?: (key: string) => Promise<string | null>;
 }
 
 type SessionState = 'queued' | 'running' | 'idle' | 'error';
@@ -192,6 +193,7 @@ function world(start: Start = {}) {
     hasPushDevices: async () => start.pushDevices ?? false,
     push: async (message) => { state.pushes.push(message); },
     ...(start.sousFlowLines ? { sousFlowLines: start.sousFlowLines } : {}),
+    ...(start.readinessLine ? { readinessLine: start.readinessLine } : {}),
   };
   const cron = new OrchestratorCron(deps);
   const byKey = (key: string) => state.sessions.filter((session) => session.ticketKey === key).at(-1)!;
@@ -615,6 +617,25 @@ test('QRD-1534: the default Sous flow leaves the cron start prompt byte for byte
   const broken = world({ tickets: [ticket('QRD-7')], config: { engine: 'sous' }, sousFlowLines: async () => { throw new Error('settings unreadable'); } });
   await broken.cron.runFill();
   assert.strictEqual(broken.state.sent[0].text, sousStartPrompt('QRD-7'), 'a flow that cannot be read adds nothing');
+});
+
+test('the cron start prompt carries the Readiness line after the flow lines, and nothing when nothing is missing or it cannot be read', async () => {
+  const line = 'Readiness 7/9: data (Test data not named); tc (Test cases not approved by QA)';
+  const missing = world({ tickets: [ticket('QRD-7')], config: { engine: 'sous' }, readinessLine: async () => line });
+  await missing.cron.runFill();
+  assert.strictEqual(missing.state.sent[0].text, `${sousStartPrompt('QRD-7')} ${line}`);
+
+  const both = world({ tickets: [ticket('QRD-7')], config: { engine: 'sous' }, sousFlowLines: async () => ['Sous flow: stop after "plan".'], readinessLine: async () => line });
+  await both.cron.runFill();
+  assert.strictEqual(both.state.sent[0].text, `${sousStartPrompt('QRD-7')} Sous flow: stop after "plan". ${line}`);
+
+  const complete = world({ tickets: [ticket('QRD-7')], config: { engine: 'sous' }, readinessLine: async () => null });
+  await complete.cron.runFill();
+  assert.strictEqual(complete.state.sent[0].text, sousStartPrompt('QRD-7'));
+
+  const broken = world({ tickets: [ticket('QRD-7')], config: { engine: 'sous' }, readinessLine: async () => { throw new Error('Jira is down'); } });
+  await broken.cron.runFill();
+  assert.strictEqual(broken.state.sent[0].text, sousStartPrompt('QRD-7'), 'a readiness that cannot be read adds nothing and the ticket is still worked');
 });
 
 test('a stalled sous run is resumed with the sous prompt even when the cron is switched back to the older flow', async () => {

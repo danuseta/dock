@@ -2,7 +2,7 @@ import assert from 'node:assert';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { PREDICTION_LABEL, qaBusy, qaLine, qaPhase, qaVideoUrl, shortTc, uatPrediction, verdictVariant, type QaRun, type QaTrigger } from '../chat/qa';
+import { AC_GAP_NOTE, PREDICTION_LABEL, REVISION_OWNER_NOTE, qaBusy, qaLine, qaNote, qaPhase, qaVideoUrl, shortTc, uatPrediction, verdictVariant, type QaRun, type QaTrigger } from '../chat/qa';
 
 const run = (extra: Partial<QaRun> = {}): QaRun => ({
   runId: '20261104T071926Z',
@@ -24,7 +24,7 @@ const run = (extra: Partial<QaRun> = {}): QaRun => ({
   finishedAt: '2026-11-04T07:25:00.000Z',
   ...extra,
 });
-const trigger = (extra: Partial<QaTrigger> = {}): QaTrigger => ({ at: '2026-11-04T08:00:00.000Z', sessionId: 's1', pullRequests: [], error: null, ...extra });
+const trigger = (extra: Partial<QaTrigger> = {}): QaTrigger => ({ at: '2026-11-04T08:00:00.000Z', sessionId: 's1', pullRequests: [], error: null, fixRound: 0, ...extra });
 
 test('no run and no session is idle', () => {
   assert.strictEqual(qaPhase({ trigger: null, run: null }), 'idle');
@@ -76,6 +76,17 @@ test('QRD-1534: the local verdict reads as what UAT will likely say', () => {
   assert.strictEqual(uatPrediction(null), null);
   assert.strictEqual(uatPrediction('SOMETHING'), null);
   assert.strictEqual(PREDICTION_LABEL, 'UAT prediction');
+});
+
+test('AC-GAP is the PO decision and a REVISION after 2 fix rounds is the owner decision', () => {
+  assert.deepStrictEqual(qaNote({ trigger: null, run: run({ verdict: 'AC-GAP' }) }), { tone: 'ac-gap', text: AC_GAP_NOTE });
+  assert.strictEqual(AC_GAP_NOTE, 'AC kurang, keputusan di PO');
+  assert.strictEqual(qaNote({ trigger: trigger({ fixRound: 1 }), run: run({ verdict: 'REVISION' }) }), null);
+  assert.deepStrictEqual(qaNote({ trigger: trigger({ fixRound: 2 }), run: run({ verdict: 'REVISION' }) }), { tone: 'revision', text: REVISION_OWNER_NOTE });
+  assert.strictEqual(REVISION_OWNER_NOTE, 'REVISION after 2 fix rounds: owner decides');
+  assert.strictEqual(qaNote({ trigger: trigger({ fixRound: 2 }), run: run({ verdict: 'LOLOS' }) }), null);
+  assert.strictEqual(qaNote({ trigger: null, run: run({ verdict: 'AC-GAP', state: 'running' }) }), null);
+  assert.strictEqual(uatPrediction('AC-GAP'), null);
 });
 
 test('QRD-1534: the QA panel has no verdict badge, no deploy gate line and no test case list, and never gates anything', () => {

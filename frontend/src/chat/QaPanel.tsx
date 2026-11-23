@@ -5,13 +5,14 @@ import { RUN_QA, SET_QA_AUTO_RUN } from '../graphql/mutations';
 import { GET_QA_LOCAL } from '../graphql/queries';
 import { Button, Checkbox } from '../components/ui';
 import { cn } from '../lib/cn';
-import { PREDICTION_LABEL, qaBusy, qaLine, qaPhase, uatPrediction, type QaLocal } from './qa';
+import { PREDICTION_LABEL, qaBusy, qaLine, qaNote, qaPhase, uatPrediction, type QaLocal } from './qa';
 
 const label = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
 const BUSY_POLL_MS = 5000;
 const IDLE_POLL_MS = 30000;
 
 const PREDICTION_TONE = { PASS: 'text-status-merged', ESCALATED: 'text-status-warn', 'NOT PASSED': 'text-status-conflict' } as const;
+const NOTE_TONE = { 'ac-gap': 'text-status-discord', revision: 'text-status-conflict' } as const;
 
 /**
  * Local QA of the session's ticket: where the run is, a short note after it, and what UAT will likely say. It only
@@ -30,6 +31,7 @@ export const QaPanel: React.FC<{ ticketKey: string }> = ({ ticketKey }) => {
   if (!qa?.available || !phase) return null;
   const run = qa.run;
   const prediction = run && phase === 'done' ? uatPrediction(run.verdict) : null;
+  const note = phase === 'done' ? qaNote(qa) : null;
   const start = async () => {
     setError(null);
     try {
@@ -66,6 +68,9 @@ export const QaPanel: React.FC<{ ticketKey: string }> = ({ ticketKey }) => {
         <p className="font-mono text-[0.72rem] text-secondary-foreground" title={run?.rule ? `Rule ${run.rule}` : undefined}>
           {PREDICTION_LABEL}: <span className={cn('font-bold', PREDICTION_TONE[prediction])}>{prediction}</span>
         </p>
+      )}
+      {note && (
+        <p className={cn('font-mono text-[0.72rem] font-bold [overflow-wrap:anywhere]', NOTE_TONE[note.tone])}>{note.text}</p>
       )}
       {error && <p className="text-xs text-status-conflict">{error}</p>}
       <div className="flex items-center justify-between gap-2">

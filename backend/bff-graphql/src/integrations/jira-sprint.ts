@@ -43,6 +43,9 @@ export interface PlanningIssue {
   labels: string[];
   /** The Reference field as Jira returned it (ADF or text). */
   referenceRaw?: unknown;
+  /** User Story (customfield_10341, else the older field) and Problem Definition as Jira returned them. */
+  userStoryRaw?: unknown;
+  problemRaw?: unknown;
 }
 
 /** The fields a revision reads and writes, as Jira returned them, with the ticket's updated timestamp. */
@@ -63,7 +66,7 @@ export const PROBLEM_FIELD = 'customfield_10331';
 export const OPEN_TO_CONFIRM_FIELD = 'customfield_10337';
 const REVISION_FIELDS = ['summary', 'issuetype', 'updated', USER_STORY_FIELD, OLD_USER_STORY_FIELD, PROBLEM_FIELD, AC_FIELD, REFERENCE_FIELD, OPEN_TO_CONFIRM_FIELD];
 const SP_FIELDS = ['story_points', 'customfield_10016', 'customfield_10028', 'customfield_10034'];
-const PLANNING_FIELDS = ['summary', 'issuetype', 'status', 'assignee', 'issuelinks', 'parent', 'description', 'labels', AC_FIELD, REFERENCE_FIELD, ...SP_FIELDS];
+const PLANNING_FIELDS = ['summary', 'issuetype', 'status', 'assignee', 'issuelinks', 'parent', 'description', 'labels', AC_FIELD, REFERENCE_FIELD, USER_STORY_FIELD, OLD_USER_STORY_FIELD, PROBLEM_FIELD, ...SP_FIELDS];
 
 const TRACKED_FIELDS = new Set(['status', 'labels', 'Sprint', 'Story point estimate', 'assignee']);
 const ISSUE_FIELDS = [
@@ -156,6 +159,8 @@ export function planningIssue(issue: any): PlanningIssue {
     descriptionRaw: fields.description ?? null,
     labels: Array.isArray(fields.labels) ? fields.labels.filter((label: unknown): label is string => typeof label === 'string') : [],
     referenceRaw: fields[REFERENCE_FIELD] ?? null,
+    userStoryRaw: fields[USER_STORY_FIELD] ?? fields[OLD_USER_STORY_FIELD] ?? null,
+    problemRaw: fields[PROBLEM_FIELD] ?? null,
   };
 }
 

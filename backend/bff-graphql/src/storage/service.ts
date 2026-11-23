@@ -18,15 +18,17 @@ export interface SprintDraftTicketInput {
   tcs?: string; tcAt?: Date | null; tcPosted?: string | null;
   /** The ticket is also in a closed sprint: carried over from an earlier one. */
   carried?: boolean;
+  /** What the writing check reads besides the AC; null when Jira holds none or the load did not read it. */
+  issueType?: string | null; description?: string | null; userStory?: string | null; problem?: string | null;
 }
 /** A drafted new ticket as stored; ac is the JSON of its lines. */
 export interface SprintDraftNewTicketData {
   summary: string; type: string; epic: string | null; dev: string | null; sp: number | null; priority: string | null;
-  userStory: string; problem: string; ac: string; reference: string | null; source: string; createdKey?: string | null; error?: string | null;
+  userStory: string; problem: string; ac: string; reference: string | null; source: string; createdKey?: string | null; error?: string | null; flagReason?: string | null;
 }
 /** A revision as stored; after and before are JSON objects keyed by field name. */
 export interface SprintDraftRevisionData { summary: string; note: string | null; source: string; after: string; before: string; jiraUpdated: string; error: string | null; createdAt?: Date }
-export interface SprintDraftRevisionUpdate { summary?: string; status?: string; error?: string | null; appliedAt?: Date | null; appliedBy?: string | null }
+export interface SprintDraftRevisionUpdate { summary?: string; status?: string; error?: string | null; flagReason?: string | null; appliedAt?: Date | null; appliedBy?: string | null }
 export interface SprintPlanData { status?: string; mappingKeys?: string[]; sessionId?: string | null; mappedKeys?: string[]; groups?: string[][]; error?: string | null; startedAt?: Date | null; mappedAt?: Date | null }
 
 const SENSITIVE_KEYS = new Set([
@@ -489,18 +491,40 @@ export class StorageService {
   /** A load from Jira replaces the tickets and leaves the draft unpublished; decisions stay and apply to the lines that still match. */
   async replaceSprintDraft(draft: SprintDraftInput, tickets: SprintDraftTicketInput[]) {
     const { sprint, ...fields } = draft;
-    const reset = { ...fields, status: 'draft', publishedAt: null, loadedAt: new Date() };
+    const reset = { ...fields, status: 'draft', publishedAt: null, loadedAt: new Date(), addedKeys: '[]', addedAt: null };
     const rows = tickets.map((ticket, position) => ({
       draftSprint: sprint, key: ticket.key, summary: ticket.summary, dev: ticket.dev, sp: ticket.sp, wave: ticket.wave, planRank: ticket.planRank ?? null, status: ticket.status,
       ac: JSON.stringify(ticket.ac), jiraAc: JSON.stringify(ticket.jiraAc), jiraDev: ticket.jiraDev, dependsOn: JSON.stringify(ticket.dependsOn), position,
       epic: ticket.epic ?? null, frames: JSON.stringify(ticket.frames ?? []), tcs: ticket.tcs ?? '[]', tcAt: ticket.tcAt ?? null, tcPosted: ticket.tcPosted ?? null,
       carried: ticket.carried ?? false,
+      issueType: ticket.issueType ?? null, description: ticket.description ?? null, userStory: ticket.userStory ?? null, problem: ticket.problem ?? null,
     }));
     await this.db.$transaction([
       this.db.sprintDraft.upsert({ where: { sprint }, update: reset, create: { sprint, ...reset } }),
       this.db.sprintDraftTicket.deleteMany({ where: { draftSprint: sprint } }),
       ...rows.map((data) => this.db.sprintDraftTicket.create({ data })),
     ]);
+  }
+
+  /** Tickets that joined the sprint after the last load are added as they are in Jira; nothing already in the draft, no decision, is touched. */
+  async addSprintDraftTickets(sprint: string, tickets: SprintDraftTicketInput[], addedKeys: string[]) {
+    const last = await this.db.sprintDraftTicket.aggregate({ where: { draftSprint: sprint }, _max: { position: true } });
+    const from = (last._max.position ?? -1) + 1;
+    await this.db.$transaction([
+      ...tickets.map((ticket, index) => this.db.sprintDraftTicket.create({
+        data: {
+          draftSprint: sprint, key: ticket.key, summary: ticket.summary, dev: ticket.dev, sp: ticket.sp, wave: ticket.wave, planRank: ticket.planRank ?? null, status: ticket.status,
+          ac: JSON.stringify(ticket.ac), jiraAc: JSON.stringify(ticket.jiraAc), jiraDev: ticket.jiraDev, dependsOn: JSON.stringify(ticket.dependsOn), position: from + index,
+          epic: ticket.epic ?? null, frames: JSON.stringify(ticket.frames ?? []), carried: ticket.carried ?? false,
+          issueType: ticket.issueType ?? null, description: ticket.description ?? null, userStory: ticket.userStory ?? null, problem: ticket.problem ?? null,
+        },
+      })),
+      this.db.sprintDraft.update({ where: { sprint }, data: { addedKeys: JSON.stringify(addedKeys), addedAt: new Date() } }),
+    ]);
+  }
+
+  listSprintDrafts() {
+    return this.db.sprintDraft.findMany({ select: { sprint: true, sprintId: true, status: true } });
   }
 
   updateSprintDraftTicket(sprint: string, key: string, data: { dev?: string | null; sp?: number | null; wave?: number | null; ac?: string[]; jiraAc?: string[]; jiraDev?: string | null; prediction?: string | null; tcs?: string; tcAt?: Date; tcPosted?: string | null }) {

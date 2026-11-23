@@ -29,6 +29,11 @@ export const DONE_STATUSES = ['uatcheck', 'uatmerged', 'readyforproduction', 'rf
 const KEY_REF = /\bQRD-\d+\b/gi;
 const BULLET = /^(?:[-*•]\s+|\d+[.)]\s+|\[[ xX]?\]\s+)/;
 
+/** The other tickets one AC line names, each once, uppercase; the ticket's own key is left out. */
+export const acLineRefs = (text: string, ownKey = ''): string[] => (
+  [...new Set((text.match(KEY_REF) || []).map((ref) => ref.toUpperCase()))].filter((ref) => ref !== ownKey.toUpperCase())
+);
+
 export const isDoneStatus = (status: string | null | undefined) => DONE_STATUSES.includes(String(status ?? '').toLowerCase().replace(/[^a-z]/g, ''));
 
 /** One AC line as compared everywhere: bullets and numbering dropped, spaces collapsed. */
@@ -59,7 +64,7 @@ export function acFindings(
   for (const ticket of tickets) {
     const ownEnd = ends.get(ticket.key) ?? null;
     ticket.ac.forEach((text, index) => {
-      const refs = [...new Set((text.match(KEY_REF) || []).map((ref) => ref.toUpperCase()))].filter((ref) => ref !== ticket.key.toUpperCase());
+      const refs = acLineRefs(text, ticket.key);
       for (const refKey of refs) {
         const refEnd = ends.get(refKey);
         let kind: AcFindingKind;

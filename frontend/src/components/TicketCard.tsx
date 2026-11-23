@@ -6,6 +6,8 @@ import { displayAssignee } from '../lib/queryPolicy';
 import { MENU_WIDTH } from './ticket/TicketMenu';
 import { ReadinessChip } from './ticket/TicketReady';
 import { intinyaTitle, type TicketReadiness } from '../lib/ticketDetail';
+import { lintMark, type TicketLint } from '../lib/writing';
+import { WritingMark } from './ticket/WritingMark';
 
 const LONG_PRESS_MS = 500;
 
@@ -19,6 +21,8 @@ interface TicketCardProps {
     workOrder?: number | null;
     workOrderSource?: string | null;
     workManual?: boolean | null;
+    /** The writing standard on the ticket; the card marks findings only in the TODO column. */
+    lint?: TicketLint | null;
     pullRequests?: any[];
   };
   menuOpen: boolean;
@@ -104,6 +108,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({ ticket, menuOpen, readin
         {summary?.line?.trim() && <span className="-mt-1 line-clamp-2 text-pretty text-[0.78rem] leading-snug text-sky-200" title={intinyaTitle(summary)}>{summary.line}</span>}
 
         {readiness && <ReadinessChip ready={readiness} />}
+        {readiness && lintMark(ticket.lint) && <WritingMark lint={ticket.lint} />}
 
         {passLabels.length > 0 && (
           <span className="flex flex-wrap gap-1" aria-label="Approved by">

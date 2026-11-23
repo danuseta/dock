@@ -17,6 +17,7 @@ import { StorageService } from '../storage/service';
 import { activeSprint } from '../integrations/sprint-plan';
 import { lookupDependencies } from '../integrations/dependency-lookup';
 import { sprintPlanner } from '../integrations/sprint-plan-live';
+import { lintJiraTicket } from '../integrations/ticket-lint';
 import { acDriftService, acInService, planSignalService, planningVisuals, sprintDraftService, storyboardReader, testSplitPage, ticketSummaryService } from '../integrations/sprint-draft-live';
 import { StoryboardMissing, StoryboardRefused } from '../integrations/storyboard';
 import { SPLIT_PAGE_KEY, pageRef } from '../integrations/split-page';
@@ -327,7 +328,7 @@ async function qaLocalState(ticketKey?: string | null) {
   return {
     available: true,
     autoRun,
-    trigger: trigger ? { at: trigger.at, sessionId: trigger.sessionId, pullRequests: trigger.prs, error: trigger.error } : null,
+    trigger: trigger ? { at: trigger.at, sessionId: trigger.sessionId, pullRequests: trigger.prs, error: trigger.error, fixRound: trigger.round } : null,
     run: run ? { ...run, testCases: run.tcs } : null,
   };
 }
@@ -742,6 +743,7 @@ export const resolvers = {
     workOrder: async (parent: any) => (await storageAPI.ticketOrders()).get(parent.key) ?? labelOrder(parent.labels),
     workOrderSource: async (parent: any) => ((await storageAPI.ticketOrders()).has(parent.key) ? 'dock' : labelOrder(parent.labels) === null ? null : 'label'),
     workManual: async (parent: any) => (await storageAPI.manualTickets()).has(parent.key),
+    lint: (parent: any) => lintJiraTicket(parent),
     pullRequests: async (parent: any) => {
       return await githubAPI.getPullRequestsForTicket(parent.key, {
         staleWhileRevalidate: parent.__dashboard === true,
@@ -819,11 +821,11 @@ export const resolvers = {
       sprintDraftService.saveNewTicket(sprint, id ?? null, { ...input }).then((saved) => saved.view).catch(planningError)
     ),
     removeSprintDraftNewTicket: (_: unknown, { sprint, id }: { sprint: string; id: string }) => sprintDraftService.removeNewTicket(sprint, id).catch(planningError),
-    createSprintDraftNewTickets: (_: unknown, { sprint, ids }: { sprint: string; ids?: string[] | null }) => sprintDraftService.createNewTicketsOnly(sprint, ids ?? null).catch(planningError),
+    createSprintDraftNewTickets: (_: unknown, { sprint, ids, flag }: { sprint: string; ids?: string[] | null; flag?: { reason: string } | null }) => sprintDraftService.createNewTicketsOnly(sprint, ids ?? null, flag ?? undefined).catch(planningError),
     saveSprintDraftRevision: (_: unknown, { sprint, key, input }: { sprint: string; key: string; input: Record<string, unknown> }) => (
       sprintDraftService.saveRevision(sprint, key, { ...input }, 'manual').then((saved) => saved.view).catch(planningError)
     ),
-    applySprintDraftRevision: (_: unknown, { sprint, key }: { sprint: string; key: string }) => sprintDraftService.applyRevision(sprint, key, reporterName()).catch(planningError),
+    applySprintDraftRevision: (_: unknown, { sprint, key, flag }: { sprint: string; key: string; flag?: { reason: string } | null }) => sprintDraftService.applyRevision(sprint, key, reporterName(), flag ?? undefined).catch(planningError),
     discardSprintDraftRevision: (_: unknown, { sprint, key }: { sprint: string; key: string }) => sprintDraftService.discardRevision(sprint, key).catch(planningError),
     answerSprintDraftQuestion: (_: unknown, { sprint, id, answered, text }: { sprint: string; id: string; answered: boolean; text?: string | null }) => (
       sprintDraftService.answer(sprint, id, answered, reporterName(), text ?? null).catch(planningError)

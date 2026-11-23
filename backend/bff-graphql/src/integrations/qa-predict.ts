@@ -1,5 +1,5 @@
-// The QA bot's triage, run on draft AC before publish. The rules live in the qonflo-qa skill (predict.mjs, installed by
-// its install.sh); DOCK only feeds it the tickets and reads the verdicts. When the script is missing, slow or answers
+// The QA bot's triage, run on draft AC before publish. The rules live in the kit's qa-predict.mjs (or the older
+// predict.mjs of the qonflo-qa skill); DOCK only feeds it the tickets and reads the verdicts. When the script is missing, slow or answers
 // garbage, there is no prediction and the reason says why, so Planning shows that instead of guessing.
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -18,7 +18,10 @@ const VERDICTS: QaVerdict[] = ['LOLOS', 'ESCALATED', 'REVISION-RISK'];
 const TIMEOUT_MS = 60000;
 const MAX_OUTPUT = 2 * 1024 * 1024;
 
-export const predictScriptPath = () => join(homedir(), '.claude', 'skills', 'skill-qonflo-qa', 'scripts', 'predict.mjs');
+export const kitPredictPath = () => join(homedir(), '.claude', 'kit', 'qa-predict.mjs');
+export const skillPredictPath = () => join(homedir(), '.claude', 'skills', 'skill-qonflo-qa', 'scripts', 'predict.mjs');
+/** The kit's script when it is there, else the old one of the skill. */
+export const predictScriptPath = (exists: (path: string) => boolean = existsSync) => (exists(kitPredictPath()) ? kitPredictPath() : skillPredictPath());
 
 /** Runs `node <script>` with the JSON on stdin; a timeout kills it. */
 export const nodeRunner: QaRunner = (script, stdin, timeoutMs) => new Promise((resolve, reject) => {
@@ -52,8 +55,9 @@ export async function predictQa(
   tickets: QaInputTicket[],
   deps: { script?: string; exists?: (path: string) => boolean; runner?: QaRunner; timeoutMs?: number } = {},
 ): Promise<QaRun> {
-  const script = deps.script ?? predictScriptPath();
-  if (!(deps.exists ?? existsSync)(script)) return { predictions: null, reason: NOT_INSTALLED };
+  const exists = deps.exists ?? existsSync;
+  const script = deps.script ?? predictScriptPath(exists);
+  if (!exists(script)) return { predictions: null, reason: NOT_INSTALLED };
   let result: RunnerResult;
   try {
     result = await (deps.runner ?? nodeRunner)(script, JSON.stringify({ tickets }), deps.timeoutMs ?? TIMEOUT_MS);
