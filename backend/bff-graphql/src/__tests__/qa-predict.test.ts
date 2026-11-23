@@ -31,6 +31,16 @@ test('the tickets go in on stdin and each verdict comes back by key', async () =
   ]);
 });
 
+test('FOLLOWS_FE comes back with the FE key a BE ticket follows; the key is dropped from other verdicts', async () => {
+  const runner: QaRunner = async () => ({ code: 0, stdout: JSON.stringify({ results: [
+    { key: 'QRD-1579', prediction: 'FOLLOWS_FE', reasons: ['[FE_LINKED] Follows FE QRD-1582'], fix: null, followsFe: 'qrd-1582' },
+    { key: 'QRD-1582', prediction: 'LOLOS', reasons: [], fix: null, followsFe: 'QRD-1' },
+  ] }), stderr: '' });
+  const run = await predictQa(tickets, { script: 'p.mjs', exists: () => true, runner });
+  assert.deepEqual(run.predictions!.get('QRD-1579'), { prediction: 'FOLLOWS_FE', reasons: ['[FE_LINKED] Follows FE QRD-1582'], fix: null, followsFe: 'QRD-1582' });
+  assert.deepEqual(run.predictions!.get('QRD-1582'), { prediction: 'LOLOS', reasons: [], fix: null });
+});
+
 test('bad JSON, a missing results list, a failing exit and a timeout give no prediction with the reason', async () => {
   const opts = (runner: QaRunner) => ({ script: 'p.mjs', exists: () => true, runner });
   assert.deepEqual(await predictQa(tickets, opts(answer('not json'))), { predictions: null, reason: 'QA prediction answered something other than JSON' });

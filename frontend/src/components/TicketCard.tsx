@@ -8,6 +8,7 @@ import { ReadinessChip } from './ticket/TicketReady';
 import { intinyaTitle, type TicketReadiness } from '../lib/ticketDetail';
 import { lintMark, type TicketLint } from '../lib/writing';
 import { WritingMark } from './ticket/WritingMark';
+import { TestedThroughChip } from './ticket/TestedThrough';
 
 const LONG_PRESS_MS = 500;
 
@@ -23,6 +24,8 @@ interface TicketCardProps {
     workManual?: boolean | null;
     /** The writing standard on the ticket; the card marks findings only in the TODO column. */
     lint?: TicketLint | null;
+    /** FE tickets whose Jira "Test" link says they test this BE ticket. */
+    testedThrough?: string[] | null;
     pullRequests?: any[];
   };
   menuOpen: boolean;
@@ -107,6 +110,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({ ticket, menuOpen, readin
         <span className="text-pretty text-[0.92rem] leading-[1.4] font-bold text-foreground">{ticket.title}</span>
         {summary?.line?.trim() && <span className="-mt-1 line-clamp-2 text-pretty text-[0.78rem] leading-snug text-sky-200" title={intinyaTitle(summary)}>{summary.line}</span>}
 
+        <TestedThroughChip keys={ticket.testedThrough} />
         {readiness && <ReadinessChip ready={readiness} />}
         {readiness && lintMark(ticket.lint) && <WritingMark lint={ticket.lint} />}
 

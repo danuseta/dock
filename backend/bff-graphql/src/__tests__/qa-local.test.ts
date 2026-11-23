@@ -47,6 +47,17 @@ test('a finished progress file keeps its verdict and rule', () => {
   assert.strictEqual(run?.rule, 'J-ESCALATED');
 });
 
+test('a triage stop of a BE ticket that follows its FE pair reads FOLLOWS_FE with the FE key and status, from progress and from results', () => {
+  const run = parseProgress(progress({ state: 'done', verdict: 'FOLLOWS_FE', rule: 'J-FOLLOWS-FE', tcs: [], followsFe: { key: 'qrd-1582', status: 'To Do' } }), () => false);
+  assert.strictEqual(run?.verdict, 'FOLLOWS_FE');
+  assert.deepStrictEqual(run?.followsFe, { key: 'QRD-1582', status: 'To Do' });
+  assert.deepStrictEqual([run?.passed, run?.failed, run?.blocked], [0, 0, 0]);
+  const old = parseResults(JSON.stringify({ key: 'QRD-1579', runId: '20261123T131851Z', verdict: { prediction: 'FOLLOWS_FE', rule: 'J-FOLLOWS-FE' }, followsFe: { key: 'QRD-1582', status: null }, tcs: [] }));
+  assert.deepStrictEqual(old?.followsFe, { key: 'QRD-1582', status: null });
+  assert.strictEqual(parseProgress(progress({ followsFe: { key: 'not a key' } }), () => true)?.followsFe, null);
+  assert.strictEqual(parseProgress(progress(), () => true)?.followsFe, null);
+});
+
 test('a progress file that is not JSON, or has no key, is no run', () => {
   assert.strictEqual(parseProgress('{', () => true), null);
   assert.strictEqual(parseProgress(JSON.stringify({ runId: 'x' }), () => true), null);

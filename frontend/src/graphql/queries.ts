@@ -31,6 +31,7 @@ export const GET_DASHBOARD = gql`
         openToConfirm
         figmaUrl
         blockedBy
+        testedThrough
         lint { ok findings { rule field line level text fix } }
         orchestration {
           key
@@ -143,6 +144,7 @@ export const GET_TICKET_DETAIL_CORE = gql`
       openToConfirm
       developerContext
       blockedBy
+      testedThrough
       status
       assignee
       url
@@ -755,6 +757,8 @@ export const GET_SPRINT_PLAN = gql`
       mappedAt
       groups
       suggestedOrder
+      suggestion { key title jiraOrder wave jiraPosition waitedOn atRisk reason }
+      fileEdges { ticketKey dependsOnKey dependsOnTitle reason }
       tickets {
         key title status position order orderSource suggestedPosition held
         edges { id ticketKey dependsOnKey dependsOnTitle dependsOnAssignee dependsOnStatus source reason state }
@@ -897,7 +901,7 @@ export const SPRINT_DRAFT_FIELDS = `
   sprint sprintId status sprintDays startDate spPerDay createdBy loadedAt publishedAt qaReason devs blockers canPublish landed carriedPast today addedSince
   tickets {
     key summary dev jiraDev sp left wave waveSet status ac dependsOn start dur end inSprint split
-    prediction { prediction reasons fix }
+    prediction { prediction reasons fix followsFe }
     qaDecision { action note by at }
     epic frames
     storyboard { version frames held checked { action note by at } }
@@ -1057,7 +1061,7 @@ export const WRITE_QA_GUIDE = gql`
 
 export const PREVIEW_SPRINT_DRAFT_PUBLISH = gql`
   query PreviewSprintDraftPublish($sprint: String!) {
-    previewSprintDraftPublish(sprint: $sprint) { key assigneeFrom assigneeTo acRemoved acAdded referenceAdded blockedBy refused create { ${SPRINT_DRAFT_NEW_TICKET_FIELDS} } }
+    previewSprintDraftPublish(sprint: $sprint) { key assigneeFrom assigneeTo acRemoved acAdded referenceAdded blockedBy testsFor pairWarning refused create { ${SPRINT_DRAFT_NEW_TICKET_FIELDS} } }
   }
 `;
 
@@ -1772,6 +1776,7 @@ export const QA_LOCAL_FIELDS = `
   trigger { at sessionId pullRequests error fixRound }
   run {
     runId state step verdict rule passed failed blocked error startedAt updatedAt finishedAt
+    followsFe { key status }
     steps { id label state }
     testCases { id title ac state seconds video note }
   }

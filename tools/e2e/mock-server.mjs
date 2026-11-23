@@ -18,6 +18,8 @@ const DAY = 24 * 3600 * 1000;
 const adf = (...lines) => ({ type: 'doc', version: 1, content: lines.map((text) => ({ type: 'paragraph', content: [{ type: 'text', text }] })) });
 const adfList = (items) => ({ type: 'doc', version: 1, content: [{ type: 'bulletList', content: items.map((text) => ({ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })) }] });
 const iso = (ms) => new Date(ms).toISOString();
+const linkType = (id, name, inward, outward) => ({ id, name, inward, outward });
+const TEST_LINK_TYPE = linkType('10009', 'Test', 'is tested by', 'tests');
 const sha = (seed) => createHash('sha1').update(String(seed)).digest('hex');
 
 let counter = 0;
@@ -107,6 +109,7 @@ function initialState(now = Date.now()) {
   const state = {
     sprints: [sprint, future],
     issues,
+    linkTypes: [linkType('10000', 'Blocks', 'is blocked by', 'blocks'), linkType('10003', 'Relates', 'relates to', 'relates to'), TEST_LINK_TYPE],
     comments: {},
     changelog: {},
     pages,
@@ -321,6 +324,19 @@ export function createMockServer({ port = 4610 } = {}) {
       item.reviews.push(review);
       return { reviewId: review.id };
     }
+    if (action === 'setLinkTypes') {
+      state.linkTypes = state.linkTypes.filter((item) => item.name !== TEST_LINK_TYPE.name);
+      if (step.test !== false) state.linkTypes.push(TEST_LINK_TYPE);
+      return { linkTypes: state.linkTypes.map((item) => item.name) };
+    }
+    if (action === 'setIssue') {
+      const issue = issueByKey(step.key);
+      if (!issue) return { error: `no issue ${step.key}` };
+      if (typeof step.summary === 'string') issue.fields.summary = step.summary;
+      if (typeof step.description === 'string') issue.fields.description = adf(step.description);
+      if (Array.isArray(step.ac)) issue.fields.customfield_10332 = adfList(step.ac);
+      return { key: issue.key, summary: issue.fields.summary };
+    }
     if (action === 'setIssueStatus') {
       const issue = issueByKey(step.key);
       if (!issue) return { error: `no issue ${step.key}` };
@@ -346,7 +362,16 @@ export function createMockServer({ port = 4610 } = {}) {
   route('POST', /^\/jira\/rest\/api\/3\/search$/, (_m, _q, body) => { const list = jql(body?.jql); return [200, { issues: list.map((issue) => issueJson(issue, body?.expand)), total: list.length, startAt: 0, maxResults: list.length }]; });
   route('GET', /^\/jira\/rest\/api\/3\/search$/, (_m, query) => { const list = jql(query.get('jql')); return [200, { issues: list.map((issue) => issueJson(issue, query.get('expand'))), total: list.length, startAt: 0, maxResults: list.length }]; });
   route('GET', /^\/jira\/rest\/api\/3\/user\/assignable\/search$/, (_m, query) => [200, [OWNER, TEAMMATE].filter((user) => !query.get('query') || user.name.toLowerCase().includes(String(query.get('query')).toLowerCase())).map(jiraUser)]);
-  route('POST', /^\/jira\/rest\/api\/3\/issueLink$/, (_m, _q, body) => { state.received.jiraLinks.push(body); return [201, null]; });
+  route('GET', /^\/jira\/rest\/api\/3\/issueLinkType$/, () => [200, { issueLinkTypes: state.linkTypes }]);
+  route('POST', /^\/jira\/rest\/api\/3\/issueLink$/, (_m, _q, body) => {
+    const type = state.linkTypes.find((item) => item.name === body?.type?.name);
+    if (!type) return [404, { errorMessages: [`No issue link type with name '${body?.type?.name}' found.`], errors: {} }];
+    state.received.jiraLinks.push(body);
+    const link = { name: type.name, inward: type.inward, outward: type.outward };
+    issueByKey(body?.outwardIssue?.key)?.fields.issuelinks.push({ type: link, inwardIssue: { key: body.inwardIssue.key } });
+    issueByKey(body?.inwardIssue?.key)?.fields.issuelinks.push({ type: link, outwardIssue: { key: body.outwardIssue.key } });
+    return [201, null];
+  });
   route('POST', /^\/jira\/rest\/api\/3\/issue$/, (_m, _q, body) => {
     const fields = body?.fields ?? {};
     if (!fields.summary) return [400, { errorMessages: [], errors: { summary: 'You must specify a summary of the issue.' } }];

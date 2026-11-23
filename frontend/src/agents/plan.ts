@@ -18,6 +18,8 @@ export interface PlanEdge {
   state: string;
 }
 export interface PlanTicket { key: string; title: string; status: string; position: number; order: number | null; orderSource: string | null; suggestedPosition: number | null; held: boolean; edges: PlanEdge[] }
+export interface PlanSuggestion { key: string; title: string; jiraOrder: number | null; wave: number | null; jiraPosition: number; waitedOn: number; atRisk: boolean; reason: string | null }
+export interface PlanFileEdge { ticketKey: string; dependsOnKey: string; dependsOnTitle: string | null; reason: string | null }
 export interface SprintPlan {
   sprint: string;
   status: string;
@@ -26,6 +28,8 @@ export interface SprintPlan {
   mappedAt: string | null;
   groups: string[][];
   suggestedOrder: string[];
+  suggestion: PlanSuggestion[];
+  fileEdges: PlanFileEdge[];
   tickets: PlanTicket[];
 }
 
@@ -83,7 +87,10 @@ export const suggestionDiffers = (plan: Pick<SprintPlan, 'suggestedOrder' | 'tic
 /** "Jira #14", "Yours #2" or nothing when the ticket number orders the ticket. */
 export const orderSourceLabel = (ticket: Pick<PlanTicket, 'order' | 'orderSource'>) => (ticket.order == null ? '' : `${ticket.orderSource === 'owner' ? 'Yours' : 'Jira'} #${ticket.order}`);
 
-export const groupsText = (groups: string[][]) => groups.filter((group) => group.length > 1).map((group) => group.join(' · '));
+/** The Jira place of a suggested ticket: "#4", "Wave 2" without a #N, or nothing. */
+export const jiraPlaceLabel = (row: Pick<PlanSuggestion, 'jiraOrder' | 'wave'>) => (row.jiraOrder != null ? `#${row.jiraOrder}` : row.wave != null ? `Wave ${row.wave}` : '');
+
+export const groupsText =(groups: string[][]) => groups.filter((group) => group.length > 1).map((group) => group.join(' · '));
 
 export interface DriftDecision { action: string; state: string; note: string | null; by: string | null; at: string }
 export interface DriftRow {

@@ -1,7 +1,7 @@
 import { gql } from 'graphql-tag';
 
 export const typeDefs = gql`
-  "One finding of the writing standard (W1 to W8). block keeps a ticket out of Jira unless it is let in with a flag; warn is a note."
+  "One finding of the writing standard (W1 to W9). block keeps a ticket out of Jira unless it is let in with a flag; warn is a note."
   type LintFinding {
     rule: String!
     "summary, userStory, problem, ac, reference, openToConfirm, description or sp"
@@ -69,6 +69,8 @@ export const typeDefs = gql`
     developerContext: String
     """Tickets this one is blocked by (Blocks links)."""
     blockedBy: [String!]!
+    """FE tickets that test this BE ticket (Test links, "is tested by"): QA follows their result."""
+    testedThrough: [String!]!
     status: String!
     assignee: String
     url: String!
@@ -675,6 +677,33 @@ export const typeDefs = gql`
     edges: [SprintPlanEdge!]!
   }
 
+  "One ticket of the order DOCK suggests from the Jira order and the dependencies."
+  type SprintPlanSuggestion {
+    key: String!
+    title: String!
+    "The Jira #N label, null without one."
+    jiraOrder: Int
+    "The W of the sprint-S-wave-W label, null without one."
+    wave: Int
+    "Its place in the Jira order (#N, then wave, then ticket number)."
+    jiraPosition: Int!
+    "Tickets, the owner's and teammates', that wait on it."
+    waitedOn: Int!
+    "It waits on a teammate's ticket still in To Do."
+    atRisk: Boolean!
+    "Why it moved against the Jira order, null when it did not."
+    reason: String
+  }
+
+  "Two tickets the Plan agent found touching the same file or component: merge-conflict risk, never a wait."
+  type SprintPlanFileEdge {
+    ticketKey: String!
+    dependsOnKey: String!
+    dependsOnTitle: String
+    "Names the shared file."
+    reason: String
+  }
+
   """The active sprint's dependency map and work order. Status is idle, mapping or failed."""
   type SprintPlan {
     sprint: String!
@@ -683,8 +712,11 @@ export const typeDefs = gql`
     sessionId: String
     mappedAt: String
     groups: [[String!]!]!
-    "The order the last Map dependencies run suggested; it changes nothing until the owner uses it."
+    "The keys of suggestion, in order; it changes nothing until the owner uses it."
     suggestedOrder: [String!]!
+    "The order DOCK suggests once Map dependencies has run: Jira order, then dependencies, hubs and at-risk tickets."
+    suggestion: [SprintPlanSuggestion!]!
+    fileEdges: [SprintPlanFileEdge!]!
     tickets: [SprintPlanTicket!]!
   }
 
@@ -706,11 +738,13 @@ export const typeDefs = gql`
     at: String!
   }
 
-  """The QA bot's triage of a ticket's draft AC: LOLOS, ESCALATED or REVISION-RISK."""
+  """The QA bot's triage of a ticket's draft AC: LOLOS, ESCALATED, REVISION-RISK or FOLLOWS_FE."""
   type QaPrediction {
     prediction: String!
     reasons: [String!]!
     fix: String
+    """With FOLLOWS_FE: the FE ticket whose QA result this BE ticket takes."""
+    followsFe: String
   }
 
   """The Scout line of a ticket: what sous-explorer measured, and whether the change runs light or full."""
@@ -981,6 +1015,10 @@ export const typeDefs = gql`
     referenceAdded: [String!]!
     """Tickets Publish links as blocking this one."""
     blockedBy: [String!]!
+    """The [BE] tickets of those Blocks links that this [FE] ticket gets a Test link to (this ticket tests them)."""
+    testsFor: [String!]!
+    """Why an [FE] and [BE] pair gets no Test link, such as Jira having no Test link type."""
+    pairWarning: String
     refused: String
     "Set, with key the NEW-n id, when Publish would create this ticket."
     create: SprintDraftNewTicket
@@ -2580,6 +2618,12 @@ export const typeDefs = gql`
     note: String
   }
 
+  "The FE ticket a BE ticket's QA follows, with its Jira status when the QA session gave it."
+  type QaFollowsFe {
+    key: String!
+    status: String
+  }
+
   type QaRun {
     runId: String!
     "running, done or failed."
@@ -2587,9 +2631,11 @@ export const typeDefs = gql`
     step: String!
     steps: [QaStep!]!
     testCases: [QaTestCase!]!
-    "LOLOS, REVISION or ESCALATED: the QA agent's verdict this run predicts."
+    "LOLOS, REVISION, ESCALATED or FOLLOWS_FE: the QA agent's verdict this run predicts."
     verdict: String
     rule: String
+    "With FOLLOWS_FE: the FE ticket this BE ticket follows; nothing was tested here."
+    followsFe: QaFollowsFe
     passed: Int!
     failed: Int!
     blocked: Int!

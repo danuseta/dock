@@ -14,6 +14,8 @@ export interface QaRun {
   tcs: QaTc[];
   verdict: string | null;
   rule: string | null;
+  /** The FE ticket a BE ticket follows (verdict FOLLOWS_FE): its result is this ticket's, so nothing was tested here. */
+  followsFe: QaFollowsFe | null;
   passed: number;
   failed: number;
   blocked: number;
@@ -22,6 +24,7 @@ export interface QaRun {
   updatedAt: string | null;
   finishedAt: string | null;
 }
+export interface QaFollowsFe { key: string; status: string | null }
 /** `round` counts the fix rounds already used (0 at the first run); `fixFor` is the run a fix message went out for; `heads` maps each pull request to its head SHA at that moment. */
 export interface QaTrigger { prs: string[]; sessionId: string | null; at: string; error: string | null; round: number; fixFor: string | null; heads: Record<string, string> }
 /** The most fix rounds a ticket gets; a REVISION after that waits for the owner. */
@@ -53,6 +56,13 @@ const STEP_LABELS: Array<[string, string]> = [['stack', 'Stack'], ['login', 'Log
 const str = (value: unknown): string | null => (typeof value === 'string' && value.length > 0 ? value : null);
 const num = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) ? value : null);
 const record = (value: unknown): Record<string, unknown> => (value && typeof value === 'object' ? value as Record<string, unknown> : {});
+
+/** The FE pair a triage stop names; null without a ticket key. */
+function followsFeOf(value: unknown): QaFollowsFe | null {
+  const raw = record(value);
+  const key = (str(raw.key) ?? '').trim().toUpperCase();
+  return /^[A-Z][A-Z0-9]*-\d+$/.test(key) ? { key, status: str(raw.status)?.trim() || null } : null;
+}
 
 function counted(tcs: QaTc[]) {
   return {
@@ -109,6 +119,7 @@ export function parseProgress(text: string, alive: (pid: number) => boolean): Qa
     tcs,
     verdict: str(raw.verdict),
     rule: str(raw.rule),
+    followsFe: followsFeOf(raw.followsFe),
     ...counted(tcs),
     error,
     startedAt: str(raw.startedAt),
@@ -153,6 +164,7 @@ export function parseResults(text: string): QaRun | null {
     tcs,
     verdict: str(verdict.prediction),
     rule: str(verdict.rule),
+    followsFe: followsFeOf(raw.followsFe),
     ...counted(tcs),
     error: infraError,
     startedAt: str(raw.startedAt),

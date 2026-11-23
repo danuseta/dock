@@ -54,6 +54,8 @@ async function planningJira(): Promise<DraftJira> {
     postTcs: (key, body) => client.addTcComment(key, TC_MARKER, JSON.stringify(body, null, 2)),
     setReference: (key, value) => client.setReferenceField(key, value),
     addBlockedBy: (key, blocker) => client.addBlockedBy(key, blocker),
+    testLinkType: () => client.testLinkType(),
+    addTestLink: (tester, tested, typeName) => client.addTestLink(tester, tested, typeName),
     addLabel: (key, label) => client.addLabel(key, label),
     removeLabel: (key, label) => client.removeLabel(key, label),
     comment: (key, lines) => client.addComment(key, lines),

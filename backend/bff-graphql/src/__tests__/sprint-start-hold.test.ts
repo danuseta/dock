@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  CronInputError, DEFAULT_CRON_SETTINGS, HOLD_WAIT_TEXT, OrchestratorCron, SPRINT_STARTED_KEY, candidates, orderOf, orderSourceOf, parseSprintStarts, sprintHeld, startPreview,
+  CronInputError, DEFAULT_CRON_SETTINGS, HOLD_WAIT_TEXT, OrchestratorCron, SPRINT_STARTED_KEY, candidates, orderOf, orderSourceOf, parseSprintStarts, sprintHeld, startPreview, startsWithoutWaiting,
   type CronDeps, type CronTicket,
 } from '../integrations/orchestrator-cron';
 import { HOLD_NEW_SPRINT_KEY, OpsRulesInputError, parseHoldNewSprint, readHoldNewSprint } from '../integrations/ops-rules';
@@ -18,6 +18,7 @@ function world(tickets: CronTicket[], options: { hold?: string | null; started?:
   if (options.hold !== undefined && options.hold !== null) settings.set(HOLD_NEW_SPRINT_KEY, options.hold);
   if (options.started) settings.set(SPRINT_STARTED_KEY, JSON.stringify(options.started));
   const opened: string[] = [];
+  const sent: string[] = [];
   const cache = new Map<string, unknown>();
   const deps: CronDeps = {
     now: () => new Date('2026-11-23T03:00:00Z'),
@@ -49,7 +50,7 @@ function world(tickets: CronTicket[], options: { hold?: string | null; started?:
     machineOptions: async (_machine, opts) => opts,
     deleteSession: async () => undefined,
     ownerSessionBusy: async () => false,
-    send: async () => undefined,
+    send: async (_id, prompt) => { sent.push(prompt); },
     ownerReplySession: async () => 'new',
     lastTaskSession: async () => null,
     runningSessions: async () => [],
@@ -57,8 +58,30 @@ function world(tickets: CronTicket[], options: { hold?: string | null; started?:
     hasPushDevices: async () => false,
     push: async () => undefined,
   };
-  return { cron: new OrchestratorCron(deps), opened, settings };
+  return { cron: new OrchestratorCron(deps), opened, settings, sent };
 }
+
+test('a blocked ticket that says how it starts without waiting is taken in Jira order and its prompt carries the how', async () => {
+  const how = 'How it starts without waiting: names › `Guardrail rule` fixes the rule shape. The card is built standalone on a fixture form and mounted once AH-29 merges.';
+  const tickets = [
+    ticket('QRD-1639', ['#4'], { description: `${AC}\n\nBlocked by: AH-29.\n\n**${how}**` }),
+    ticket('QRD-1651', ['#9'], { description: `${AC}\n\nFolders. Blocked by: AH-26.` }),
+    ticket('QRD-1638', ['#30'], { status: 'In Progress' }), ticket('QRD-1640', ['#31'], { status: 'In Progress' }),
+    ticket('QRD-1592', ['#14']),
+  ];
+  const deps = [{ ticketKey: 'QRD-1639', dependsOnKey: 'QRD-1638' }, { ticketKey: 'QRD-1651', dependsOnKey: 'QRD-1640' }];
+  const { cron, opened, sent } = world(tickets, { hold: '{"enabled":false}', parallel: 2, deps });
+  const log = await cron.runFill();
+  assert.deepEqual(log.started, ['QRD-1639', 'QRD-1592']);
+  assert.deepEqual(opened, ['QRD-1639', 'QRD-1592']);
+  assert.match(sent[0], /Starts without waiting on QRD-1638, as the ticket says: names › Guardrail rule fixes the rule shape\. The card is built standalone on a fixture form/);
+  assert.doesNotMatch(sent[1], /Starts without waiting/);
+  assert.equal(startsWithoutWaiting('Blocked by: AH-26.'), null);
+  assert.equal(startsWithoutWaiting('How it starts without waiting: TBD'), null, 'a stub of a line is not a plan');
+  const preview = (await world(tickets, { parallel: 1, deps }).cron.sprintStart(null))!.preview;
+  assert.deepEqual(preview.blocked.map((item) => item.key), ['QRD-1651']);
+  assert.deepEqual(preview.first.map((item) => item.key), ['QRD-1639']);
+});
 
 test('hold rule: on by default, saved as { enabled }, a wrong value is refused and a broken row reads as the default', () => {
   assert.deepEqual(parseHoldNewSprint(null), { enabled: true });

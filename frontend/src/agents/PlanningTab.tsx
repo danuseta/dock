@@ -22,7 +22,7 @@ import {
 } from '../graphql/queries';
 import { cn } from '../lib/cn';
 import {
-  UNASSIGNED, devColors, changeCount, dayOf, decisionLabel, findingKindLabel, forecastOf, handOffs, lateDays, lateText, shortDate, underWay, landingDay, lanes, openQuestionsOf, parseWave, ranks, teamStats, waitersOf, publishReadiness, scopeSummary, sortFindings,
+  UNASSIGNED, devColors, changeCount, pairLinkLines, pairLinkWarning, dayOf, decisionLabel, findingKindLabel, forecastOf, handOffs, lateDays, lateText, shortDate, underWay, landingDay, lanes, openQuestionsOf, parseWave, ranks, teamStats, waitersOf, publishReadiness, scopeSummary, sortFindings,
   developerLine, freeFrom, githubLine, laneCount, laneOf, moveForecast, moveLine, planRange, scheduleWindow, scheduled, spanOf, waveRows, workingDayLabels,
   undecidedFinding, capacityOf,
   redoVisualPrompt, translatePrompt, acLineId, untranslatedKeys, draftSummaryText, type DraftChange, type DraftFinding, type DraftVisual, type DraftTicket, type LaneBar, type NewTicketInput, type PlanSignal, type PlanningPanel, type PlanningSprint, type PublishResult, type ReadyItem, type RevisionInput, type SprintDraft, type TicketSummaryLite,
@@ -705,6 +705,8 @@ const PublishDialog: React.FC<{
   const count = changes ? changeCount(changes) : 0;
   const creates = changes?.filter((change) => change.create) ?? [];
   const updates = changes?.filter((change) => !change.create) ?? [];
+  const pairs = changes ? pairLinkLines(changes) : [];
+  const pairWarning = changes ? pairLinkWarning(changes) : null;
   return (
     <Dialog open={open} onClose={() => !publishing && onClose()} dismissible={!publishing} labelledBy={`${id}-title`}>
       <Card className="w-[min(640px,calc(100vw-2rem))] shadow-card">
@@ -736,6 +738,13 @@ const PublishDialog: React.FC<{
               Jira gets only the AC and assignees that differ.
               <InfoTip label="What Publish writes">A ticket whose AC changed in Jira after the load is skipped. Also written: the Confluence page "Sprint contract {sprint}", comments for changed test cases, and the plan-published-rN label that every developer's DOCK and the cron wait for.</InfoTip>
             </p>
+            {pairs.length > 0 && (
+              <p className="mt-2 flex items-start gap-1.5 text-pretty text-[0.8rem] text-secondary-foreground">
+                <Link2 size={13} className="mt-0.5 flex-none text-muted-foreground" aria-hidden="true" />
+                <span>Pair links: <span className="font-mono">{pairs.join(', ')}</span></span>
+              </p>
+            )}
+            {pairWarning && <p className="mt-2 flex items-start gap-1.5 text-pretty text-[0.8rem] text-status-warn" role="status"><AlertTriangle size={13} className="mt-0.5 flex-none" aria-hidden="true" />{pairWarning}</p>}
             {creates.length > 0 && (
               <section aria-label="Create in Jira" className="mt-3">
                 <h3 className={head}>Create in Jira · {creates.length}</h3>

@@ -1,5 +1,6 @@
 import type { BadgeVariant } from '../components/ui/Badge';
 
+export interface QaFollowsFe { key: string; status: string | null }
 export interface QaStep { id: string; label: string; state: string }
 export interface QaTestCase { id: string; title: string; ac: number[]; state: string; seconds: number | null; video: string | null; note: string | null }
 export interface QaRun {
@@ -10,6 +11,8 @@ export interface QaRun {
   testCases: QaTestCase[];
   verdict: string | null;
   rule: string | null;
+  /** With FOLLOWS_FE: the FE ticket this BE ticket follows. */
+  followsFe?: QaFollowsFe | null;
   passed: number;
   failed: number;
   blocked: number;
@@ -41,7 +44,7 @@ export function qaPhase(qa: Pick<QaLocal, 'trigger' | 'run'>): QaPhase {
 
 export const qaBusy = (phase: QaPhase | null) => phase === 'preparing' || phase === 'running';
 
-export const verdictVariant = (verdict: string | null): BadgeVariant => (verdict === 'LOLOS' ? 'success' : verdict === 'REVISION' ? 'danger' : verdict ? 'warn' : 'neutral');
+export const verdictVariant = (verdict: string | null): BadgeVariant => (verdict === 'LOLOS' ? 'success' : verdict === 'REVISION' ? 'danger' : verdict && verdict !== 'FOLLOWS_FE' ? 'warn' : 'neutral');
 
 export const AC_GAP_NOTE = 'AC kurang, keputusan di PO';
 export const REVISION_OWNER_NOTE = 'REVISION after 2 fix rounds: owner decides';
@@ -59,18 +62,22 @@ export function qaNote(qa: Pick<QaLocal, 'trigger' | 'run'>): { tone: QaNoteTone
   return null;
 }
 
-export type UatPrediction = 'PASS' | 'ESCALATED' | 'NOT PASSED';
+export type UatPrediction = 'PASS' | 'ESCALATED' | 'NOT PASSED' | 'Follows FE';
 export const PREDICTION_LABEL = 'UAT prediction';
 
-/** What UAT will likely say, from the local run's predicted verdict (LOLOS, REVISION, ESCALATED); null when it names none. */
+/** What UAT will likely say, from the local run's predicted verdict (LOLOS, REVISION, ESCALATED, FOLLOWS_FE); null when it names none. */
 export function uatPrediction(verdict: string | null | undefined): UatPrediction | null {
   const value = verdict?.trim().toUpperCase();
   if (!value) return null;
   if (value === 'LOLOS' || value === 'PASS' || value === 'PASSED') return 'PASS';
   if (value === 'ESCALATED') return 'ESCALATED';
+  if (value === 'FOLLOWS_FE') return 'Follows FE';
   if (value === 'REVISION' || value === 'REVISION-RISK' || value === 'NOT PASSED' || value === 'FAILED' || value === 'FAIL') return 'NOT PASSED';
   return null;
 }
+
+/** "Follows FE QRD-1582 (To Do)": a BE ticket that takes its FE pair's QA result, tested through that ticket. */
+export const followsFeLine = (run: Pick<QaRun, 'followsFe'>) => (run.followsFe ? `Follows FE ${run.followsFe.key}${run.followsFe.status ? ` (${run.followsFe.status})` : ''}` : 'Follows its FE ticket');
 
 /** `QRD-1286-TC001` reads as `TC001` in the narrow panel. */
 export const shortTc = (id: string) => /TC-?\d+[A-Za-z]?$/i.exec(id)?.[0] ?? id;
@@ -87,6 +94,7 @@ export function qaLine(qa: Pick<QaLocal, 'trigger' | 'run'>, phase: QaPhase): st
     const step = run.steps.find((item) => item.id === run.step)?.label ?? run.step;
     return run.step === 'tests' ? `Tests ${finished}/${total}` : `${step}…`;
   }
+  if (phase === 'done' && run.verdict === 'FOLLOWS_FE') return followsFeLine(run);
   const counts = `${run.passed} passed · ${run.failed} failed · ${run.blocked} blocked`;
   return phase === 'failed' ? `Stopped: ${run.error ?? 'no result'}` : counts;
 }
