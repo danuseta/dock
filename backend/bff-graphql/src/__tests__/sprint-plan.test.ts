@@ -5,7 +5,7 @@ import express from 'express';
 import { PinRateLimiter } from '../auth/session';
 import { JiraService, blockLinks } from '../integrations/jira';
 import { OrchestratorInputError } from '../integrations/orchestrator';
-import { SprintPlanner, jiraEdges, parsePlanDraft, planOrder, planPrompt, planTriggers, suggestOrder, type OrderEdge, type PlanDeps, type PlanTicket } from '../integrations/sprint-plan';
+import { PLAN_PROMPT_MAX, SprintPlanner, jiraEdges, parsePlanDraft, planOrder, planPrompt, planTriggers, suggestOrder, type OrderEdge, type PlanDeps, type PlanTicket } from '../integrations/sprint-plan';
 import { createOrchestratorIngestRouter } from '../routes/orchestrator';
 import type { PlanEdgeInput, SprintPlanData } from '../storage/service';
 
@@ -387,8 +387,22 @@ test('the prompt gives each owner ticket its Jira place, without-waiting paragra
   await world.planner.map();
   const text = world.sessions[0].text;
   assert.match(text, /This order is the baseline/);
-  assert.match(text, /- QRD-2: #1, sprint-27-wave-1, has a "How it starts without waiting" paragraph, waits on QRD-9 \(To Do, Yusril\)\.\n- QRD-1: #2, no wave label\./);
+  assert.match(text, /- QRD-2 #1 sprint-27-wave-1 nowait waits QRD-9 \(To Do, Yusril\)\n- QRD-1 #2 no-wave/);
   assert.match(text, /"edges":\[\{"ticket","dependsOn","kind","reason"\}\]/);
   assert.match(text, /Never add an edge whose only reason is a shared file as a dependency/);
   assert.match(text, /keys startable together now/);
+});
+
+test('a big sprint still fits one chat message: details, lessons, the link list and last facts give way in that order', () => {
+  const keys = Array.from({ length: 60 }, (_, i) => `QRD-${1600 + i}`);
+  const facts = keys.map((key, i) => ({ key, order: i + 1, wave: 'sprint-1-wave-1', withoutWaiting: i % 3 === 0, waitsOn: [{ key: `QRD-${1700 + i}`, status: 'To Do', assignee: 'Yusril Izza' }, { key: `QRD-${1800 + i}`, status: 'In Progress', assignee: 'Alvin Theofilus Sutikno' }] }));
+  const jiraEdges = keys.flatMap((key, i) => [{ ticketKey: key, dependsOnKey: `QRD-${1700 + i}` }, { ticketKey: key, dependsOnKey: `QRD-${1800 + i}` }, { ticketKey: key, dependsOnKey: `QRD-${1900 + i}` }]);
+  const tryLines = Array.from({ length: 12 }, (_, i) => `Lesson ${i}: ${'a reason that is long enough to matter '.repeat(3)}`);
+  const input = { sprint: 'QRD Sprint 28', mode: 'full' as const, ownerKeys: keys, otherKeys: jiraEdges.map((edge) => edge.dependsOnKey), jiraEdges, previousSprint: 'QRD Sprint 27', tryLines, mapKeys: [], order: [], facts };
+  const text = planPrompt(input);
+  assert.ok(text.length <= PLAN_PROMPT_MAX, `prompt is ${text.length} characters`);
+  assert.match(text, /Post it: node "\$K\/dock-push.cjs" plan <file.json>\./, 'the instructions at the end survive');
+  const small = planPrompt({ ...input, ownerKeys: keys.slice(0, 3), otherKeys: [], jiraEdges: jiraEdges.slice(0, 3), tryLines: [], facts: facts.slice(0, 3) });
+  assert.match(small, /QRD-1600 < QRD-1700 QRD-1800 QRD-1900/, 'links are grouped per waiting ticket');
+  assert.match(small, /waits QRD-1700 \(To Do, Yusril Izza\)/, 'a small sprint keeps the details');
 });
