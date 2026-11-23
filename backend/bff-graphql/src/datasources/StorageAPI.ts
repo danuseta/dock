@@ -21,6 +21,9 @@ export const isDiscordWebhookUrl = (value: string) => {
 const MAX_SERVICE_HEALTH_REFRESH_SECONDS = 86_400;
 export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'] as const;
 /** What a chat offers; "default" (ask before each tool) stays for the cron's manual mode only. */
+/** A value updateSettings refuses; the message says which setting and why. */
+export class SettingsInputError extends Error {}
+
 export const CHAT_MODES = ['auto', 'plan', 'acceptEdits', 'bypassPermissions'] as const;
 export const RTK_SETTINGS = ['on', 'off'] as const;
 export const CAVEMAN_LEVELS = ['off', 'lite', 'full', 'ultra'] as const;
@@ -240,6 +243,7 @@ export class StorageAPI {
   }
 
   async updateSettings(input: Record<string, unknown>) {
+    let saved: Record<string, unknown>;
     try {
       if (input.serviceHealthRefreshSeconds != null
         && !isValidServiceHealthRefreshSeconds(input.serviceHealthRefreshSeconds)) {
@@ -258,22 +262,26 @@ export class StorageAPI {
       if (input.storageLocalDir != null && input.storageLocalDir !== '' && (String(input.storageLocalDir).length > 500 || !isAbsolute(String(input.storageLocalDir).trim()))) throw new Error('Invalid local folder');
       if (input.discordMessageTemplate != null) normalizeDiscordMessageTemplate(String(input.discordMessageTemplate));
       for (const key of ['autoReviewOnIt', 'autoLgtm', 'reviewFindingsToTask', 'autoReviewPostDiscord', 'reviewFindingsAutoReply'] as const) {
-        if (input[key] != null && input[key] !== 'true' && input[key] !== 'false') throw new Error('Invalid auto review setting');
+        if (input[key] != null && input[key] !== 'true' && input[key] !== 'false') throw new Error(`Invalid auto review setting: ${key}`);
       }
       for (const key of [...Object.values(MESSAGE_KEYS.post), ...Object.values(MESSAGE_KEYS.reply)]) {
-        if (input[key] != null && input[key] !== '' && !isMessageSetting(key, input[key])) throw new Error('Invalid Discord message setting');
+        if (input[key] != null && input[key] !== '' && !isMessageSetting(key, input[key])) throw new Error(`Invalid Discord message setting: ${key}`);
       }
       for (const key of LIGHT_KEYS) {
-        if (input[key] != null && !isLightSetting(key, input[key])) throw new Error('Invalid light runner setting');
+        if (input[key] != null && !isLightSetting(key, input[key])) throw new Error(`Invalid light runner setting: ${key}`);
       }
       for (const key of Object.keys(ARENA_SETTINGS) as Array<keyof typeof ARENA_SETTINGS>) {
-        if (input[key] != null && !isArenaSetting(key, input[key])) throw new Error('Invalid review arena setting');
+        if (input[key] != null && !isArenaSetting(key, input[key])) throw new Error(`Invalid review arena setting: ${key}`);
       }
       if (input.planningConfluenceParent != null && input.planningConfluenceParent !== '' && !/^\d{1,20}$/.test(String(input.planningConfluenceParent).trim())) throw new Error('Invalid Confluence page id');
       if (input.planningPlanner != null && String(input.planningPlanner).length > 120) throw new Error('Invalid planner');
       if (input.discordWebhookUrl != null && String(input.discordWebhookUrl).trim() !== '' && !isDiscordWebhookUrl(String(input.discordWebhookUrl).trim())) throw new Error('Invalid Discord webhook');
       if (input.discordUserId != null && input.discordUserId !== '' && !/^\d{5,25}$/.test(String(input.discordUserId).trim())) throw new Error('Invalid Discord user id');
-      const saved = input.notificationPrefs == null ? input : { ...input, notificationPrefs: JSON.stringify(validateNotificationPrefs(String(input.notificationPrefs))) };
+      saved = input.notificationPrefs == null ? input : { ...input, notificationPrefs: JSON.stringify(validateNotificationPrefs(String(input.notificationPrefs))) };
+    } catch (error) {
+      throw new SettingsInputError(error instanceof Error ? error.message : 'Invalid setting');
+    }
+    try {
       await Promise.all(Object.entries(saved)
         .filter(([key, value]) => !(this.sensitiveKeys.has(key)
           && (value == null || String(value).trim() === '')))

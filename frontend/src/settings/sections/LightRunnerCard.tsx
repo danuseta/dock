@@ -7,6 +7,7 @@ import { Checkbox, Input } from '../../components/ui';
 import { cn } from '../../lib/cn';
 import { LIGHT_RANGES, lightSteps, type LightValues } from '../../lib/lightRunner';
 import { SettingRow, SettingsCard } from '../SettingsParts';
+import { saveErrorText } from '../../lib/saveError';
 
 const sectionLabel = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
 const seg = (on: boolean) => cn('inline-flex items-center rounded-xs border px-2.5 py-1.5 text-[0.78rem] disabled:cursor-not-allowed disabled:opacity-45 max-[900px]:min-h-11', on ? 'border-accent bg-accent-dim text-foreground' : 'border-border bg-surface-1 text-secondary-foreground hover:border-border-glow');
@@ -22,7 +23,7 @@ const NumberInput = ({ name, label, value, disabled, onSave, className }: { name
   const valid = text.trim() !== '' && Number.isInteger(number) && number >= range.min && number <= range.max;
   return (
     <span className="inline-flex flex-col gap-1">
-      <Input type="number" min={range.min} max={range.max} aria-label={label} aria-invalid={!valid} className={cn('h-9 w-24 font-mono', className)} value={text} disabled={disabled} onChange={(event) => setText(event.target.value)} onBlur={() => { if (valid && number !== value) onSave(name, number); else setText(String(value)); }} />
+      <Input type="number" min={range.min} max={range.max} aria-label={label} aria-invalid={!valid} className={cn('h-9 w-24 font-mono', className)} value={text} disabled={disabled} onChange={(event) => setText(event.target.value)} onBlur={() => { if (valid && number !== value) onSave(name, number); else setText(String(value)); }} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
       {!valid && <span className="text-xs text-status-conflict" role="alert">{range.min} to {range.max}</span>}
     </span>
   );
@@ -37,7 +38,7 @@ export const LightRunnerCard = () => {
   if (!light || typeof light.lightRunnerOn !== 'boolean') return null;
   const store = (patch: Record<string, string | number>) => {
     setError(null);
-    update({ variables: { input: patch } }).then((result) => { if (result.data?.updateSettings !== true) setError('Not saved. Check the connection, then try again.'); }, () => setError('Not saved. Check the connection, then try again.'));
+    update({ variables: { input: patch } }).then((result) => { if (result.data?.updateSettings !== true) setError(saveErrorText(null)); }, (failure: unknown) => setError(saveErrorText(failure)));
   };
   const toggle = (key: string, label: string, help: string | undefined, on: boolean, disabled = false) => (
     <SettingRow label={label} help={help}>
