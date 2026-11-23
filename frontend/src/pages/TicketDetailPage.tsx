@@ -34,6 +34,7 @@ import { useOpenForTicket } from '../chat/useOpenForTicket';
 import { DependencyDialog } from '../components/ticket/DependencyDialog';
 import { NeedsYouCard } from '../components/ticket/NeedsYouCard';
 import { StackedOnBadge } from '../components/ticket/StackedOnBadge';
+import { TestedThroughChip } from '../components/ticket/TestedThrough';
 import { TicketSousFlow } from '../components/ticket/TicketSousFlow';
 import { MENU_WIDTH, TicketMenu, type TicketMenuTarget } from '../components/ticket/TicketMenu';
 import { useTicketWork } from '../components/ticket/useTicketWork';
@@ -550,6 +551,7 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
                 <Link2 size={13} aria-hidden="true" />{relation?.dependsOnKey || 'None'}
               </button>
             </Property>
+            {ticket.testedThrough?.length > 0 && <Property label="QA"><TestedThroughChip keys={ticket.testedThrough} /></Property>}
             <Property label="Assignee">{assignee || <span className="text-muted-foreground">Unassigned</span>}</Property>
             <Property label="Points">{ticket.storyPoints ?? <span className="text-muted-foreground">—</span>}</Property>
             <Property label="Approved">

@@ -11,7 +11,7 @@ const label = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] tex
 const BUSY_POLL_MS = 5000;
 const IDLE_POLL_MS = 30000;
 
-const PREDICTION_TONE = { PASS: 'text-status-merged', ESCALATED: 'text-status-warn', 'NOT PASSED': 'text-status-conflict' } as const;
+const PREDICTION_TONE = { PASS: 'text-status-merged', ESCALATED: 'text-status-warn', 'NOT PASSED': 'text-status-conflict', 'Follows FE': 'text-secondary-foreground' } as const;
 const NOTE_TONE = { 'ac-gap': 'text-status-discord', revision: 'text-status-conflict' } as const;
 
 /**

@@ -6,7 +6,7 @@ import { panelOf, planningRedirect, planningRoute } from '../agents/plan';
 import { movedPageRedirect } from '../lib/movedPages';
 import { applyTemplate, defaultFlow } from '../agents/planningFlow';
 import {
-  UNASSIGNED, barPlace, changeCount, publishReadiness, dayOf, decisionLabel, findingKindLabel, lanes, parseWave, predictionTone, publishHint, scopeSummary, sortFindings,
+  UNASSIGNED, barPlace, changeCount, pairLinkLines, pairLinkWarning, publishReadiness, dayOf, decisionLabel, findingKindLabel, lanes, parseWave, predictionTone, publishHint, scopeSummary, sortFindings,
   forecastOf, lateDays, lateText, shortDate, underWay, planningChatTitle, questionsLine, spanOf, devColors, handOffs, landingDay, openQuestionsOf, ranks, teamStats, waitersOf, storyboardDecisionId, storyboardLine, tcsToText, textToTcs, waveRows, workingDayLabels, scheduleWindow, laneOf, laneCount, planRange, githubLine, scheduled, developerLine, freeFrom, moveLine, moveForecast, checklistTcs, myTickets, qaChecklist, undecidedFinding, type DraftFinding, type DraftTicket, type SprintDraft,
 } from '../agents/planning';
 
@@ -83,7 +83,7 @@ test('findings sort after-it first and decisions read as words', () => {
 });
 
 test('QA tone, publish hint, change count and wave input', () => {
-  assert.deepEqual(['LOLOS', 'ESCALATED', 'REVISION-RISK', null].map(predictionTone), ['ok', 'conflict', 'warn', 'none']);
+  assert.deepEqual(['LOLOS', 'ESCALATED', 'REVISION-RISK', 'FOLLOWS_FE', null].map(predictionTone), ['ok', 'conflict', 'warn', 'none', 'none']);
   assert.equal(publishHint({ canPublish: false, blockers: ['a', 'b'], tickets: [ticket({})] }), '2 items need a decision before publish');
   assert.equal(publishHint({ canPublish: false, blockers: ['a'], tickets: [ticket({})] }), '1 item needs a decision before publish');
   assert.equal(publishHint({ canPublish: false, blockers: [], tickets: [] }), 'No tickets in this sprint');
@@ -91,6 +91,10 @@ test('QA tone, publish hint, change count and wave input', () => {
     { key: 'A', assigneeFrom: null, assigneeTo: 'Ana', acRemoved: [], acAdded: [], refused: null },
     { key: 'B', assigneeFrom: null, assigneeTo: null, acRemoved: ['x'], acAdded: [], refused: 'AC changed' },
   ]), 1);
+  const fe = { key: 'QRD-1582', assigneeFrom: null, assigneeTo: null, acRemoved: [], acAdded: [], blockedBy: ['QRD-1579'], testsFor: ['QRD-1579'], pairWarning: null, refused: null };
+  assert.deepEqual(pairLinkLines([fe, { ...fe, key: 'QRD-1590', refused: 'AC changed' }]), ['QRD-1582 tests QRD-1579']);
+  assert.equal(pairLinkWarning([fe]), null);
+  assert.equal(pairLinkWarning([{ ...fe, testsFor: [], pairWarning: 'Link type Test not found in Jira; ask a Jira admin to add it (tests / is tested by)' }]), 'Link type Test not found in Jira; ask a Jira admin to add it (tests / is tested by)');
   assert.deepEqual(['2', '0', ' 3 ', '1.5', '', '-1', '51'].map(parseWave), [2, 0, 3, null, null, null, null]);
 });
 

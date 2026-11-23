@@ -104,6 +104,22 @@ export function blockLinks(issueLinks: unknown): TicketLink[] {
   });
 }
 
+/** A "Test" link between an FE ticket and the BE ticket it tests: tests from the FE side, testedBy from the BE side. */
+export interface PairLink { key: string; relation: 'tests' | 'testedBy' }
+export const TEST_LINK_TYPE = 'Test';
+
+/** The "Test" links of an issue (outward tests, inward is tested by): an inward issue tests this one, an outward issue is tested by it. */
+export function testLinks(issueLinks: unknown): PairLink[] {
+  const lower = (value: unknown) => String(value ?? '').trim().toLowerCase();
+  return (Array.isArray(issueLinks) ? issueLinks : []).flatMap((link: any): PairLink[] => {
+    const type = link?.type;
+    if (lower(type?.name) !== 'test' && lower(type?.inward) !== 'is tested by' && lower(type?.outward) !== 'tests') return [];
+    if (typeof link?.inwardIssue?.key === 'string') return [{ key: link.inwardIssue.key, relation: 'testedBy' }];
+    if (typeof link?.outwardIssue?.key === 'string') return [{ key: link.outwardIssue.key, relation: 'tests' }];
+    return [];
+  });
+}
+
 const ASSIGNED_TICKETS_TTL_SECONDS = 3600;
 const TICKET_DETAIL_TTL_SECONDS = 600;
 const REVALIDATE_AFTER_MS = 45000;
@@ -285,6 +301,7 @@ export class JiraService {
       parentKey: typeof fields.parent?.key === 'string' ? fields.parent.key : null,
       issueType: typeof fields.issuetype?.name === 'string' ? fields.issuetype.name : null,
       links: blockLinks(fields.issuelinks),
+      pairLinks: testLinks(fields.issuelinks),
       labels: Array.isArray(fields.labels)
         ? fields.labels.filter((label: unknown): label is string => typeof label === 'string' && label.trim().length > 0)
         : [],

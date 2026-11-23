@@ -117,6 +117,22 @@ test('W7 and W8: empty story or problem, and 5 SP or more, are warnings', () => 
   assert.deepStrictEqual(at({ sp: 5 }, 'W8').map((item) => item.level), ['warn']);
 });
 
+test('W9: every AC line of a [BE] ticket starts with [UI], [API] or [Dev evidence]; a warning, never a block', () => {
+  const tagged: LintInput = { summary: '[BE][Contacts] Store the imported tag', ac: ['[UI] Contacts page: the imported contact shows its tag', '[API] GET /contacts/:id answers 404 for another workspace', '[Dev evidence] A migration adds the index on contacts.workspace_id'] };
+  assert.deepStrictEqual(at(tagged, 'W9'), []);
+  const untagged = at({ ...tagged, ac: ['[UI] Contacts page: the contact shows its tag', 'The import stores the tag', '[dev evidence] The index exists'] }, 'W9');
+  assert.deepStrictEqual(untagged.map((item) => [item.line, item.level, item.field]), [[2, 'warn', 'ac']]);
+  assert.strictEqual(untagged[0].text, 'AC 2 has no check tag: [UI], [API] or [Dev evidence].');
+  assert.strictEqual(lintTicket({ summary: '[BE] Store it', ac: ['The import stores the tag'] }).ok, true);
+  assert.deepStrictEqual(at({ summary: "[FE][Inbox] Show the contact's phone number", ac: ['The header shows the number'] }, 'W9'), [], 'an FE ticket is not checked');
+  assert.deepStrictEqual(at({ summary: 'Store the tag', description: 'Repo: BE', ac: ['The import stores the tag'] }, 'W9').map((item) => item.line), [1], 'Repo: BE in the description counts');
+  assert.deepStrictEqual(at({ summary: 'Store the tag', ac: ['The import stores the tag'] }, 'W9'), [], 'no side, no check');
+  assert.deepStrictEqual(at({ summary: '[BE] Store it', ac: ['BE', '[API] POST /tags answers 201', 'TBD'] }, 'W9'), [], 'a group header and a placeholder line are not checked');
+  const bug: LintInput = { type: 'Bug', summary: '[BE][Contacts] The import drops the tag', description: 'Expected: the tag is kept. Actual: it is dropped.' };
+  assert.deepStrictEqual(at({ ...bug, ac: ['[UI] Contacts page: after importing a CSV with a tag, the contact shows that tag (today it shows none)', '[API] GET /contacts/:id returns the tag'] }, 'W9'), [], "a bug's tagged repro line passes");
+  assert.deepStrictEqual(at({ ...bug, ac: ['After importing a CSV with a tag, the contact shows that tag', '[API] GET /contacts/:id returns the tag'] }, 'W9').map((item) => item.line), [1], "a bug's untagged repro line is noted");
+});
+
 test('a field the input leaves out is not checked', () => {
   assert.deepStrictEqual(lintTicket({ ac: ['The list shows 3 rows.'] }), { ok: true, findings: [] });
   assert.deepStrictEqual(lintTicket({}), { ok: true, findings: [] });

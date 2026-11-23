@@ -1,4 +1,4 @@
-// The writing standard (W1 to W8) as DOCK's backend checks it: findings per field, the marks on cards, the flag reason
+// The writing standard (W1 to W9) as DOCK's backend checks it: findings per field, the marks on cards, the flag reason
 // and the Humanize prompt. A block finding keeps a ticket out of Jira unless it is let in with a flag.
 
 export interface LintFinding { rule: string; field: string; line: number | null; level: 'block' | 'warn'; text: string; fix: string }
@@ -27,7 +27,7 @@ export function lintMark(lint: TicketLint | null | undefined): LintMark | null {
 export const lintTip = (lint: TicketLint | null | undefined): string => (lint?.findings ?? []).map((item) => `${item.rule} ${item.text}`).join('\n');
 
 /** The Planning chat prefill that asks the agent to rewrite a ticket for a human reader; it never sends. */
-export const humanizePrompt = (key: string, sprint: string) => `Humanize ${key} for sprint "${sprint}": rewrite its fields for a human reader by the writing standard without changing what the AC asks, and save a revision for me to review.`;
+export const humanizePrompt = (key: string, sprint: string) => `Humanize ${key} for sprint "${sprint}": rewrite its fields for a human reader by the writing standard without changing what the AC asks; on a [BE] ticket start every AC line with its check tag, [UI], [API] or [Dev evidence]; and save a revision for me to review.`;
 
 /** A ticket with a finding, for the bottom bar and the Board filter. */
 export interface LintedTicket { key: string; lint?: TicketLint | null }

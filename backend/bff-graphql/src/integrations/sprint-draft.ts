@@ -10,7 +10,7 @@ import type { MergeRead, TicketMerge } from './merge-state';
 import { SprintInputError } from './sprint-dashboard';
 import { writeContract, type ContractClient } from './sprint-contract';
 import { StoryboardMissing, framesIn, type StoryboardResult } from './storyboard';
-import { WRITING_FLAG_LABEL, flagReason, lintTicket, type LintInput, type TicketLint } from './ticket-lint';
+import { WRITING_FLAG_LABEL, flagReason, lintTicket, ticketRepo, type LintInput, type TicketLint } from './ticket-lint';
 import type { StoryboardScenario } from './storyboard-flows';
 import type { SprintDraftInput, SprintDraftNewTicketData, SprintDraftRevisionData, SprintDraftRevisionUpdate, SprintDraftTicketInput } from '../storage/service';
 import { splitView, type SplitState, type SplitView } from './split-page';
@@ -53,6 +53,10 @@ export interface DraftJira {
   setReference?(key: string, value: unknown): Promise<void>;
   /** A Blocks link: key is blocked by blocker. */
   addBlockedBy?(key: string, blocker: string): Promise<void>;
+  /** The name of Jira's "Test" link type (outward tests, inward is tested by); null when the site has none. */
+  testLinkType?(): Promise<string | null>;
+  /** A Test link: tester (the FE ticket) tests tested (the BE ticket). */
+  addTestLink?(tester: string, tested: string, typeName: string): Promise<void>;
   /** The shared publish signal: Publish labels every ticket of the plan plan-published-r<N>. */
   addLabel?(key: string, label: string): Promise<void>;
   removeLabel?(key: string, label: string): Promise<void>;
@@ -200,10 +204,14 @@ export interface DraftView {
   /** Changes the planning agent proposes to tickets that exist in Jira: pending first, then applied, newest first; discarded ones left out. */
   revisions: DraftRevision[];
 }
-/** referenceAdded: lines Publish appends to the Reference field; blockedBy: tickets Publish links as blocking this one; create: the new ticket Publish creates. */
-export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; referenceAdded: string[]; blockedBy: string[]; refused: string | null; create?: DraftNewTicket | null }
-/** One line of a publish: a ticket's AC and assignee, a new ticket, or the Confluence contract page. */
-export interface PublishResult { key: string; kind: 'ticket' | 'tc' | 'label' | 'contract' | 'create' | 'revision'; status: 'updated' | 'created' | 'refused' | 'failed' | 'skipped'; detail: string | null }
+/**
+ * referenceAdded: lines Publish appends to the Reference field; blockedBy: tickets Publish links as blocking this one; create: the new ticket Publish creates.
+ * testsFor: the [BE] tickets of those Blocks links this [FE] ticket gets a Test link to; pairWarning: why it gets none although it has such a pair.
+ */
+export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; referenceAdded: string[]; blockedBy: string[]; testsFor: string[]; pairWarning: string | null; refused: string | null; create?: DraftNewTicket | null }
+export const TEST_LINK_MISSING = 'Link type Test not found in Jira; ask a Jira admin to add it (tests / is tested by)';
+/** One line of a publish: a ticket's AC and assignee, a Test link of an FE and BE pair, a new ticket, or the Confluence contract page. */
+export interface PublishResult { key: string; kind: 'ticket' | 'link' | 'tc' | 'label' | 'contract' | 'create' | 'revision'; status: 'updated' | 'created' | 'refused' | 'failed' | 'skipped'; detail: string | null }
 /** Where the split page's weeks are read from and kept per draft; read gives null when no split page is set. */
 export interface SplitSource {
   read(): Promise<SplitState | null>;
@@ -975,10 +983,16 @@ export class SprintDraftService {
     const view = (await this.view(sprint))!;
     const open = openTickets(view);
     const ends = new Map(open.map((ticket) => [ticket.key, ticket.end]));
+    const summaries = new Map(view.tickets.map((ticket) => [ticket.key, ticket.summary]));
+    const linksOf = (key: string, dependsOn: string[]) => [
+      ...dependsOn.map((other) => ({ key: other, type: 'is blocked by', ...(summaries.has(other) ? { summary: summaries.get(other)! } : {}) })),
+      ...view.tickets.filter((other) => other.dependsOn.includes(key)).map((other) => ({ key: other.key, type: 'blocks', summary: other.summary })),
+    ];
     const input: QaInputTicket[] = open.filter((ticket) => !ticket.carried).map((ticket) => ({
       key: ticket.key, summary: ticket.summary, ac: ticket.ac, endDay: ticket.end,
       waitsOn: [...new Set([...ticket.dependsOn, ...view.findings.filter((finding) => finding.key === ticket.key).map((finding) => finding.refKey)])]
         .map((key) => ({ key, endDay: ends.get(key) ?? null })),
+      links: linksOf(ticket.key, ticket.dependsOn),
     }));
     const run = input.length ? await this.predict(input) : { predictions: new Map<string, QaPrediction>(), reason: null };
     const stored = run.predictions ? new Map([...run.predictions.entries()].map(([key, prediction]) => [key, JSON.stringify(prediction)])) : null;
@@ -1308,7 +1322,7 @@ export class SprintDraftService {
   /** One change per new ticket not created yet; refused while a required field is empty. */
   private plannedCreates(row: DraftRow): DraftChange[] {
     return (row.newTickets ?? []).map(newTicketView).filter((ticket) => !ticket.createdKey).map((ticket) => ({
-      key: ticket.id, assigneeFrom: null, assigneeTo: null, acRemoved: [], acAdded: [], referenceAdded: [], blockedBy: [], refused: newTicketRefusal(ticket) ?? (ticket.flagReason ? null : writingRefusal(ticket.lint)), create: ticket,
+      key: ticket.id, assigneeFrom: null, assigneeTo: null, acRemoved: [], acAdded: [], referenceAdded: [], blockedBy: [], testsFor: [], pairWarning: null, refused: newTicketRefusal(ticket) ?? (ticket.flagReason ? null : writingRefusal(ticket.lint)), create: ticket,
     }));
   }
 
@@ -1371,7 +1385,7 @@ export class SprintDraftService {
     return results;
   }
 
-  private async plannedChanges(sprint: string): Promise<Array<{ change: DraftChange; final: string[]; dev: string | null; now: PlanningIssue | null }>> {
+  private async plannedChanges(sprint: string): Promise<Array<{ change: DraftChange; final: string[]; dev: string | null; now: PlanningIssue | null; testType: string | null }>> {
     const row = await this.row(sprint);
     const decisions = parse<Decisions>(row.decisions, {});
     const tickets = row.tickets.map((ticket) => ({ ...ticket, ac: parse<string[]>(ticket.ac, []), jiraAc: parse<string[]>(ticket.jiraAc, []) }));
@@ -1380,6 +1394,15 @@ export class SprintDraftService {
     const touched = tickets.filter((ticket) => !sameLines(finals.get(ticket.key)!, ticket.jiraAc) || (!!ticket.dev && ticket.dev !== ticket.jiraDev)
       || sides.get(ticket.key)!.reference.length > 0 || sides.get(ticket.key)!.blockedBy.length > 0);
     const jira = touched.length ? await this.jira() : null;
+    const drafted = new Map(tickets.map((ticket) => [ticket.key, ticket]));
+    let testType: Promise<string | null> | null = null;
+    const linkType = () => (testType ??= jira!.testLinkType!().catch(() => null));
+    const repoOf = async (key: string) => {
+      const draft = drafted.get(key);
+      if (draft) return ticketRepo(draft.summary, draft.description);
+      const issue = await jira!.issueNow(key).catch(() => null);
+      return issue ? ticketRepo(issue.summary, fieldLines(issue.descriptionRaw).join('\n')) : null;
+    };
     return mapLimit(touched, READ_CONCURRENCY, async (ticket) => {
       const final = finals.get(ticket.key)!;
       const now = await jira!.issueNow(ticket.key);
@@ -1392,12 +1415,23 @@ export class SprintDraftService {
       const referenceAdded = side.reference.filter((line) => !referenceNow.includes(line));
       const linked = new Set((now?.links ?? []).filter((link) => link.relation === 'blockedBy').map((link) => link.key));
       const blockedBy = side.blockedBy.filter((key) => !linked.has(key));
+      let testsFor: string[] = [];
+      let pairWarning: string | null = null;
+      let pairType: string | null = null;
+      if (now && blockedBy.length && jira!.testLinkType && jira!.addTestLink && ticketRepo(now.summary, fieldLines(now.descriptionRaw).join('\n')) === 'FE') {
+        const pairs = (await Promise.all(blockedBy.map(async (key) => ((await repoOf(key)) === 'BE' ? key : null)))).filter((key): key is string => !!key);
+        if (pairs.length) {
+          pairType = await linkType();
+          if (pairType) testsFor = pairs;
+          else pairWarning = TEST_LINK_MISSING;
+        }
+      }
       let refused: string | null = null;
       if (!now) refused = 'The ticket is gone from Jira';
       else if (!sameLines(nowLines, ticket.jiraAc) && (removed.length || added.length || referenceAdded.length || blockedBy.length)) refused = 'The AC changed in Jira after it was loaded; load the sprint again';
       return {
-        change: { key: ticket.key, assigneeFrom: assign ? nowDev : null, assigneeTo: assign ? ticket.dev : null, acRemoved: removed, acAdded: added, referenceAdded, blockedBy, refused },
-        final, dev: ticket.dev, now,
+        change: { key: ticket.key, assigneeFrom: assign ? nowDev : null, assigneeTo: assign ? ticket.dev : null, acRemoved: removed, acAdded: added, referenceAdded, blockedBy, testsFor, pairWarning, refused },
+        final, dev: ticket.dev, now, testType: pairType,
       };
     }).then((rows) => rows.filter(({ change }) => change.refused || change.assigneeTo || change.acRemoved.length || change.acAdded.length || change.referenceAdded.length || change.blockedBy.length));
   }
@@ -1409,7 +1443,8 @@ export class SprintDraftService {
     if (!view) throw new SprintInputError(`No draft for ${sprint}; load it from Jira first`);
     const jira = await this.jira();
     const results: PublishResult[] = [];
-    for (const { change, final, dev, now } of await this.plannedChanges(sprint)) {
+    const links: PublishResult[] = [];
+    for (const { change, final, dev, now, testType } of await this.plannedChanges(sprint)) {
       if (change.refused) {
         results.push({ key: change.key, kind: 'ticket', status: 'refused', detail: change.refused });
         continue;
@@ -1430,6 +1465,16 @@ export class SprintDraftService {
           update.jiraAc = final;
         }
         for (const blocker of change.blockedBy) await jira.addBlockedBy!(change.key, blocker);
+        for (const tested of change.testsFor) {
+          try {
+            await jira.addTestLink!(change.key, tested, testType!);
+            links.push({ key: change.key, kind: 'link', status: 'created', detail: `${change.key} tests ${tested}` });
+          } catch (error: any) {
+            const status = error?.response?.status;
+            const message = error instanceof Error ? error.message : String(error);
+            links.push({ key: change.key, kind: 'link', status: 'failed', detail: `${change.key} tests ${tested}: ${status ? `Jira responded ${status}: ${message}` : message}` });
+          }
+        }
         if (accountId) {
           await jira.setAssignee(change.key, accountId);
           update.jiraDev = dev;
@@ -1443,6 +1488,7 @@ export class SprintDraftService {
       }
     }
     const tickets = results.filter((result) => result.kind === 'ticket');
+    results.push(...links);
     const creates = await this.createNewTickets(sprint, jira);
     results.push(...creates);
     const written = tickets.every((result) => result.status === 'updated') && creates.every((result) => result.status === 'created');

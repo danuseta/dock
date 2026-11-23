@@ -78,6 +78,15 @@ test('QRD-1534: the local verdict reads as what UAT will likely say', () => {
   assert.strictEqual(PREDICTION_LABEL, 'UAT prediction');
 });
 
+test('a BE ticket that follows its FE pair reads neutral: "Follows FE", no failure and no fix note', () => {
+  const follows = run({ verdict: 'FOLLOWS_FE', rule: 'J-FOLLOWS-FE', testCases: [], passed: 0, blocked: 0, followsFe: { key: 'QRD-1582', status: 'To Do' } });
+  assert.strictEqual(uatPrediction('FOLLOWS_FE'), 'Follows FE');
+  assert.strictEqual(verdictVariant('FOLLOWS_FE'), 'neutral');
+  assert.strictEqual(qaLine({ trigger: null, run: follows }, 'done'), 'Follows FE QRD-1582 (To Do)');
+  assert.strictEqual(qaLine({ trigger: null, run: { ...follows, followsFe: { key: 'QRD-1582', status: null } } }, 'done'), 'Follows FE QRD-1582');
+  assert.strictEqual(qaNote({ trigger: trigger({ fixRound: 2 }), run: follows }), null);
+});
+
 test('AC-GAP is the PO decision and a REVISION after 2 fix rounds is the owner decision', () => {
   assert.deepStrictEqual(qaNote({ trigger: null, run: run({ verdict: 'AC-GAP' }) }), { tone: 'ac-gap', text: AC_GAP_NOTE });
   assert.strictEqual(AC_GAP_NOTE, 'AC kurang, keputusan di PO');

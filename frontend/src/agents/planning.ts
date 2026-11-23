@@ -4,7 +4,7 @@ import type { TicketLint } from '../lib/writing';
 
 export interface PlanningSprint { id: number; name: string; state: string; startDate: string | null; endDate: string | null }
 export interface DraftDecision { action: string; note: string | null; by: string | null; at: string }
-export interface QaPrediction { prediction: string; reasons: string[]; fix: string | null }
+export interface QaPrediction { prediction: string; reasons: string[]; fix: string | null; followsFe?: string | null }
 export interface StoryboardFlag { version: number; frames: string[]; held: boolean; checked: DraftDecision | null }
 export interface DraftTc { id: string; ac: number; title: string; steps: string[]; expected: string }
 export interface DraftScout { line: string; mode: 'light' | 'full'; files: number; repos: string; contractChange: boolean; at: string }
@@ -177,7 +177,7 @@ export function questionsLine(questions: DraftQuestion[]): string | null {
   if (!questions.length) return null;
   return `${questions.filter((question) => question.answered).length}/${questions.length} answered`;
 }
-export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; referenceAdded?: string[]; blockedBy?: string[]; refused: string | null; create?: DraftNewTicket | null }
+export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; referenceAdded?: string[]; blockedBy?: string[]; testsFor?: string[]; pairWarning?: string | null; refused: string | null; create?: DraftNewTicket | null }
 export interface PublishResult { key: string; kind: string; status: string; detail: string | null }
 
 /** An HTML visual the planning agent made; it is a tab in Planning, stale once the draft changed after it was made. */
@@ -384,8 +384,8 @@ export function decisionLabel(decision: DraftDecision | null, refKey?: string): 
   }
 }
 
-/** The tone of a QA chip: ok for LOLOS, conflict for ESCALATED, warn for REVISION-RISK. */
-export const predictionTone = (prediction: string | null | undefined) => (prediction === 'LOLOS' ? 'ok' : prediction === 'ESCALATED' ? 'conflict' : prediction ? 'warn' : 'none');
+/** The tone of a QA chip: ok for LOLOS, conflict for ESCALATED, none for FOLLOWS_FE (tested through its FE ticket), warn for REVISION-RISK. */
+export const predictionTone = (prediction: string | null | undefined) => (prediction === 'LOLOS' ? 'ok' : prediction === 'ESCALATED' ? 'conflict' : prediction && prediction !== 'FOLLOWS_FE' ? 'warn' : 'none');
 
 /** Findings that need the planner, after-it first. */
 export const sortFindings = (findings: DraftFinding[]) => [...findings].sort((a, b) => Number(b.kind === 'after-it') - Number(a.kind === 'after-it') || a.key.localeCompare(b.key, undefined, { numeric: true }) || a.line - b.line);
@@ -500,6 +500,12 @@ export function publishReadiness(
 }
 
 export const changeCount = (changes: DraftChange[]) => changes.filter((change) => !change.refused).length;
+
+/** The Test links Publish writes for [FE] and [BE] pairs, as "QRD-1582 tests QRD-1579". */
+export const pairLinkLines = (changes: DraftChange[]) => changes.filter((change) => !change.refused).flatMap((change) => (change.testsFor ?? []).map((key) => `${change.key} tests ${key}`));
+
+/** Why a pair gets no Test link, once, or null. */
+export const pairLinkWarning = (changes: DraftChange[]) => changes.find((change) => !change.refused && change.pairWarning)?.pairWarning ?? null;
 
 /** A number input's text as a whole wave: 0 resets to the wave the dependencies give; null when it is not a whole number. */
 export function parseWave(text: string): number | null {
