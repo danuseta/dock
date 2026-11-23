@@ -168,6 +168,9 @@ async function sprintRetroNumbers(sprint: { id: number; startDate: string; endDa
   return retroNumbers(runs, { blockedWaits, mergeConflicts });
 }
 
+/** How many teammates' tickets the sprint plan view reads from Jira at once; the rest fall back to the morning snapshot. */
+const PLAN_PARENT_LOOKUPS = 60;
+
 async function sprintPlanView() {
   const active = activeSprint(await jiraAPI.getTickets());
   if (!active) return null;
@@ -176,16 +179,17 @@ async function sprintPlanView() {
     sprintPlanner.fileEdges(active.sprint), storageService.getManualTicketKeys(),
   ]);
   const known = new Map<string, { title?: string; assignee?: string | null; status?: string | null }>(active.tickets.map((ticket: any) => [ticket.key, ticket]));
+  const snapshot = new Map<string, { title?: string; assignee?: string | null; status?: string | null }>();
   const sprintId = (await sprintDashboardService.listSprints()).find((item) => item.name === active.sprint)?.id;
   if (sprintId != null) {
     try {
       for (const issue of JSON.parse(await sprintDashboardService.issueEvents(sprintId)) as Array<{ key?: string; summary?: string; assignee?: string | null; status?: string | null }>) {
-        if (issue.key && !known.has(issue.key)) known.set(issue.key, { title: issue.summary, assignee: issue.assignee, status: issue.status });
+        if (issue.key && !known.has(issue.key)) snapshot.set(issue.key, { title: issue.summary, assignee: issue.assignee, status: issue.status });
       }
     } catch { /* snapshot unreadable: parents show without a title */ }
   }
-  const outside = await lookupDependencies(edges.map((edge) => edge.dependsOnKey).filter((key) => !known.has(key)), (key) => jiraAPI.getTicket(key));
-  const lookup = (key: string) => known.get(key) ?? outside.get(key) ?? null;
+  const outside = await lookupDependencies(edges.map((edge) => edge.dependsOnKey).filter((key) => !known.has(key)), (key) => jiraAPI.getTicket(key), Date.now, PLAN_PARENT_LOOKUPS);
+  const lookup = (key: string) => known.get(key) ?? outside.get(key) ?? snapshot.get(key) ?? null;
   const pending = new Set(edges.filter((edge) => edge.state === 'pending').map((edge) => edge.ticketKey));
   const edgeViews = edges.map((edge) => {
     const parent = lookup(edge.dependsOnKey);

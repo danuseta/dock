@@ -185,8 +185,9 @@ const jiraCompare = (a: Pick<OrderTicket, 'labels'>, b: Pick<OrderTicket, 'label
  *    ticket with a lower "#N".
  * 3. A ticket that waits on a teammate's ticket still in To Do moves after every other ticket and is at risk.
  * 4. A ticket never comes before an open owner ticket it waits on (Jira Blocks, or a pending or accepted dependency edge).
- * A ticket with a "How it starts without waiting" paragraph skips 3 and 4 and keeps its place. Startable means no open
- * ticket to wait on, or that paragraph. Each row says why it moved.
+ * A ticket with a "How it starts without waiting" paragraph, and a ticket already past To Do (In Progress, PR Review),
+ * skip 3 and 4 and keep their place. Startable means no open ticket to wait on, or that paragraph. Each row says why it
+ * moved.
  */
 export function suggestOrder(tickets: OrderTicket[], edges: OrderEdge[], parentOf: (key: string) => OrderParent | null, agentOrder: string[] = []): SuggestedRow[] {
   const byKey = new Map(tickets.map((ticket) => [ticket.key, ticket]));
@@ -205,6 +206,8 @@ export function suggestOrder(tickets: OrderTicket[], edges: OrderEdge[], parentO
   for (const edge of live) if (edge.source === 'jira' || edge.state === 'accepted') waits(edge.dependsOnKey, edge.ticketKey);
   const waitedOn = (key: string) => waiters.get(key)?.size ?? 0;
   const free = (ticket: OrderTicket) => !!startsWithoutWaiting(ticket.description);
+  const started = (ticket: OrderTicket) => !isToDo(ticket.status);
+  const keepsPlace = (ticket: OrderTicket) => free(ticket) || started(ticket);
   const startable = (ticket: OrderTicket) => free(ticket) || !parents.has(ticket.key);
   const number = (ticket: OrderTicket) => labelOrder(ticket.labels) ?? NONE;
   const wave = (ticket: OrderTicket) => waveOf(ticket.labels) ?? NONE;
@@ -228,7 +231,7 @@ export function suggestOrder(tickets: OrderTicket[], edges: OrderEdge[], parentO
 
   const risk = new Map<string, string>();
   for (const ticket of list) {
-    if (free(ticket)) continue;
+    if (keepsPlace(ticket)) continue;
     const blocker = (parents.get(ticket.key) ?? []).find((edge) => !byKey.has(edge.dependsOnKey) && isToDo(statusOf(edge.dependsOnKey)));
     if (!blocker) continue;
     const assignee = parentOf(blocker.dependsOnKey)?.assignee;
@@ -237,7 +240,7 @@ export function suggestOrder(tickets: OrderTicket[], edges: OrderEdge[], parentO
   list = [...list.filter((ticket) => !risk.has(ticket.key)), ...list.filter((ticket) => risk.has(ticket.key))];
 
   const input = new Map(list.map((ticket, index) => [ticket.key, index]));
-  const ownerParents = (ticket: OrderTicket) => (free(ticket) ? [] : (parents.get(ticket.key) ?? []).filter((edge) => input.has(edge.dependsOnKey)));
+  const ownerParents = (ticket: OrderTicket) => (keepsPlace(ticket) ? [] : (parents.get(ticket.key) ?? []).filter((edge) => input.has(edge.dependsOnKey)));
   const placed: OrderTicket[] = [];
   const at = new Map<string, number>();
   const remaining = [...list];
@@ -255,7 +258,8 @@ export function suggestOrder(tickets: OrderTicket[], edges: OrderEdge[], parentO
   return placed.map((ticket) => {
     const lines = reasons.get(ticket.key)!;
     if (risk.has(ticket.key)) lines.unshift(risk.get(ticket.key)!);
-    if (free(ticket) && parents.has(ticket.key)) lines.unshift('starts without waiting');
+    if (started(ticket)) lines.unshift(`already ${ticket.status}`);
+    else if (free(ticket) && parents.has(ticket.key)) lines.unshift('starts without waiting');
     return {
       key: ticket.key,
       jiraOrder: labelOrder(ticket.labels),
