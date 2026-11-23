@@ -26,8 +26,23 @@ export function updateStep(running: string | null, server: string | null, typing
   return typing || tried === server ? 'offer' : 'reload';
 }
 
-/** Text in a box on screen, or an open dialog whose form a reload would throw away. A hidden prefilled box does not count. */
-const typing = () => [...document.querySelectorAll('textarea')].some((box) => box.getClientRects().length > 0 && box.value.trim() !== '') || document.querySelector('[role="dialog"]') !== null;
+/** How long after a file picker opens a newer build waits, so closing the picker does not reload away the upload. */
+export const PICKING_MS = 120_000;
+let pickedAt = 0;
+if (typeof document !== 'undefined') {
+  document.addEventListener('click', (event) => {
+    const target = event.target as Element | null;
+    const input = target?.closest?.('input[type="file"]') ?? (target?.closest?.('label') as HTMLLabelElement | null)?.control ?? null;
+    if (input instanceof HTMLInputElement && input.type === 'file') pickedAt = Date.now();
+  }, true);
+}
+
+/** A file picker opened in the last two minutes, or a picked file not sent yet: a reload would drop it. */
+export const choosingFile = (now = Date.now(), opened = pickedAt) => now - opened < PICKING_MS
+  || (typeof document !== 'undefined' && [...document.querySelectorAll<HTMLInputElement>('input[type="file"]')].some((input) => (input.files?.length ?? 0) > 0));
+
+/** Text in a box on screen, an open dialog whose form a reload would throw away, or a file being picked. A hidden prefilled box does not count. */
+const typing = () => [...document.querySelectorAll('textarea')].some((box) => box.getClientRects().length > 0 && box.value.trim() !== '') || document.querySelector('[role="dialog"]') !== null || choosingFile();
 
 /** Checks once; resolves true when the caller should show the "new version" offer. */
 export async function checkForUpdate(): Promise<boolean> {
