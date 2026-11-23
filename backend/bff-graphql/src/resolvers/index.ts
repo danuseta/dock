@@ -327,7 +327,7 @@ async function qaLocalState(ticketKey?: string | null) {
   return {
     available: true,
     autoRun,
-    trigger: trigger ? { at: trigger.at, sessionId: trigger.sessionId, pullRequests: trigger.prs, error: trigger.error } : null,
+    trigger: trigger ? { at: trigger.at, sessionId: trigger.sessionId, pullRequests: trigger.prs, error: trigger.error, fixRound: trigger.round } : null,
     run: run ? { ...run, testCases: run.tcs } : null,
   };
 }

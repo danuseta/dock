@@ -2426,6 +2426,8 @@ export const typeDefs = gql`
     sessionId: String
     pullRequests: [String!]!
     error: String
+    "Fix rounds already used after a REVISION; 0 at the first run."
+    fixRound: Int!
   }
 
   "One merged pull request of a ticket and whether its repo's deploy workflow has shipped it."

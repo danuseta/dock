@@ -1752,7 +1752,7 @@ export const CLAUDE_ACCOUNTS_FIELDS = `
 export const QA_LOCAL_FIELDS = `
   available
   autoRun
-  trigger { at sessionId pullRequests error }
+  trigger { at sessionId pullRequests error fixRound }
   run {
     runId state step verdict rule passed failed blocked error startedAt updatedAt finishedAt
     steps { id label state }

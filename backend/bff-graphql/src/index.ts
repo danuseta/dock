@@ -14,6 +14,7 @@ import { discordTeam, ensureTeamChannels } from './integrations/discord-team';
 import { channelStore } from './integrations/discord-threads';
 import { autoReview } from './integrations/auto-review-live';
 import { reviewFindings } from './integrations/review-findings-live';
+import { qaAuto } from './integrations/qa-local-live';
 import { uatMerged } from './integrations/uat-merged';
 import { worktrees } from './integrations/worktrees-live';
 import { autoBroadcast } from './integrations/broadcast';
@@ -85,8 +86,13 @@ export async function startServer(): Promise<void> {
       const judgeTick = () => judgeQueue.tick()
         .catch((error) => console.warn('[Judge] check failed:', error instanceof Error ? error.message : 'unknown error'));
       setInterval(judgeTick, JUDGE_MS).unref();
-      const reviewFindingsTick = () => reviewFindings.tick()
-        .catch((error) => console.warn('[ReviewFindings] check failed:', error instanceof Error ? error.message : 'unknown error'));
+      // The same minute also looks for a local QA run that ended on REVISION, to send it back to the ticket's Task session.
+      const reviewFindingsTick = () => Promise.all([
+        reviewFindings.tick()
+          .catch((error) => console.warn('[ReviewFindings] check failed:', error instanceof Error ? error.message : 'unknown error')),
+        qaAuto.tick()
+          .catch((error) => console.warn('[QaLocal] check failed:', error instanceof Error ? error.message : 'unknown error')),
+      ]);
       setInterval(reviewFindingsTick, REVIEW_FINDINGS_MS).unref();
       const rotateClaude = () => (cycleAvailable() ? claudeAccounts.tick() : Promise.resolve())
         .catch((error) => console.warn('[ClaudeAccounts] rotate check failed:', error instanceof Error ? error.message : 'unknown error'));

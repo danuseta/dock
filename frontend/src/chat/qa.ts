@@ -18,7 +18,7 @@ export interface QaRun {
   updatedAt: string | null;
   finishedAt: string | null;
 }
-export interface QaTrigger { at: string; sessionId: string | null; pullRequests: string[]; error: string | null }
+export interface QaTrigger { at: string; sessionId: string | null; pullRequests: string[]; error: string | null; fixRound: number }
 export interface QaLocal { available: boolean; autoRun: boolean; trigger: QaTrigger | null; run: QaRun | null }
 
 export type QaPhase = 'idle' | 'preparing' | 'running' | 'done' | 'failed' | 'not-started';
@@ -42,6 +42,22 @@ export function qaPhase(qa: Pick<QaLocal, 'trigger' | 'run'>): QaPhase {
 export const qaBusy = (phase: QaPhase | null) => phase === 'preparing' || phase === 'running';
 
 export const verdictVariant = (verdict: string | null): BadgeVariant => (verdict === 'LOLOS' ? 'success' : verdict === 'REVISION' ? 'danger' : verdict ? 'warn' : 'neutral');
+
+export const AC_GAP_NOTE = 'AC kurang, keputusan di PO';
+export const REVISION_OWNER_NOTE = 'REVISION after 2 fix rounds: owner decides';
+const MAX_FIX_ROUNDS = 2;
+
+export type QaNoteTone = 'ac-gap' | 'revision';
+
+/** What a finished run's verdict asks of people: AC-GAP is for the PO, a REVISION that used both fix rounds is for the owner. */
+export function qaNote(qa: Pick<QaLocal, 'trigger' | 'run'>): { tone: QaNoteTone; text: string } | null {
+  const run = qa.run;
+  if (!run || run.state !== 'done') return null;
+  const verdict = run.verdict?.trim().toUpperCase();
+  if (verdict === 'AC-GAP') return { tone: 'ac-gap', text: AC_GAP_NOTE };
+  if (verdict === 'REVISION' && (qa.trigger?.fixRound ?? 0) >= MAX_FIX_ROUNDS) return { tone: 'revision', text: REVISION_OWNER_NOTE };
+  return null;
+}
 
 export type UatPrediction = 'PASS' | 'ESCALATED' | 'NOT PASSED';
 export const PREDICTION_LABEL = 'UAT prediction';
