@@ -5,7 +5,7 @@ import express from 'express';
 import { PinRateLimiter } from '../auth/session';
 import { JiraService, blockLinks } from '../integrations/jira';
 import { OrchestratorInputError } from '../integrations/orchestrator';
-import { SprintPlanner, parsePlanDraft, planOrder, planPrompt, planTriggers, type PlanDeps, type PlanTicket } from '../integrations/sprint-plan';
+import { SprintPlanner, jiraEdges, parsePlanDraft, planOrder, planPrompt, planTriggers, suggestOrder, type OrderEdge, type PlanDeps, type PlanTicket } from '../integrations/sprint-plan';
 import { createOrchestratorIngestRouter } from '../routes/orchestrator';
 import type { PlanEdgeInput, SprintPlanData } from '../storage/service';
 
@@ -75,7 +75,7 @@ function planner(tickets: PlanTicket[], overrides: Partial<PlanDeps> = {}) {
     send: async (sessionId, text) => { sessions[Number(sessionId.split('-')[1]) - 1].text = text; },
     deleteSession: async () => undefined,
     sprints: async () => [{ id: 2, name: 'S27', state: 'active', startDate: '2026-11-02' }, { id: 1, name: 'S26', state: 'closed', startDate: '2026-10-19' }],
-    sprintKeys: async () => ['QRD-1', 'QRD-2', 'QRD-9'],
+    sprintIssues: async () => [{ key: 'QRD-1' }, { key: 'QRD-2' }, { key: 'QRD-9' }],
     ...overrides,
   };
   return { ...world, sessions, planner: new SprintPlanner(deps) };
@@ -291,4 +291,104 @@ test('the /plan ingest route stores a draft and refuses a malformed one', async 
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test('an edge without a kind is a dependency; a file edge never becomes a wait and is kept as merge-conflict risk', async () => {
+  const draft = parsePlanDraft({ sprint: 'S27', order: [], edges: [
+    { ticket: 'QRD-1', dependsOn: 'QRD-2', reason: 'needs the playbook API' },
+    { ticket: 'QRD-3', dependsOn: 'QRD-1', kind: 'file', reason: 'playbook.schema.ts' },
+    { ticket: 'QRD-2', dependsOn: 'QRD-1', kind: 'file', reason: 'would loop as a dependency' },
+    { ticket: 'QRD-3', dependsOn: 'QRD-2', kind: 'dependency', reason: 'data shape' },
+  ] }, ['QRD-1', 'QRD-2', 'QRD-3']);
+  assert.deepStrictEqual(draft.edges.map((edge) => `${edge.ticketKey}>${edge.dependsOnKey}`), ['QRD-1>QRD-2', 'QRD-3>QRD-2']);
+  assert.deepStrictEqual(draft.fileEdges, [{ ticketKey: 'QRD-3', dependsOnKey: 'QRD-1', reason: 'playbook.schema.ts' }, { ticketKey: 'QRD-2', dependsOnKey: 'QRD-1', reason: 'would loop as a dependency' }]);
+
+  const world = planner([ticket('QRD-1'), ticket('QRD-2'), ticket('QRD-3')]);
+  await world.planner.ingest({ sprint: 'S27', mode: 'full', tickets: ['QRD-1', 'QRD-2', 'QRD-3'], order: [], edges: [{ ticket: 'QRD-3', dependsOn: 'QRD-1', kind: 'file', reason: 'playbook.schema.ts' }] });
+  assert.deepStrictEqual(world.edges, []);
+  await world.planner.watch([ticket('QRD-1'), ticket('QRD-2'), ticket('QRD-3')]);
+  assert.deepStrictEqual(await world.planner.heldKeys(), new Set());
+  assert.deepStrictEqual(await world.planner.fileEdges('S27'), [{ ticketKey: 'QRD-3', dependsOnKey: 'QRD-1', reason: 'playbook.schema.ts' }]);
+  await world.planner.ingest({ sprint: 'S27', mode: 'ticket', tickets: ['QRD-2'], order: [], edges: [{ ticket: 'QRD-2', dependsOn: 'QRD-1', kind: 'file', reason: 'menu.tsx' }] });
+  assert.deepStrictEqual((await world.planner.fileEdges('S27')).map((edge) => edge.reason), ['playbook.schema.ts', 'menu.tsx'], 'a ticket run keeps the other tickets file edges');
+});
+
+const FREE = 'How it starts without waiting: against the frozen fixture of the parent API.';
+
+test('the suggested order starts from Jira #N, keeps dependencies, lets without-waiting tickets keep their place and puts at-risk tickets last', () => {
+  const hubWaiters = ['QRD-1700', 'QRD-1701', 'QRD-1702', 'QRD-1703', 'QRD-1704', 'QRD-1705'].map((key) => ({ key, relation: 'blocks' as const }));
+  const tickets = [
+    ticket('QRD-1593', { labels: ['#17'] }),
+    ticket('QRD-1580', { labels: ['#8', 'sprint-28-wave-2'] }),
+    ticket('QRD-1579', { labels: ['#1', 'sprint-28-wave-1'] }),
+    ticket('QRD-1641', { labels: ['#2', 'sprint-28-wave-1'], links: hubWaiters }),
+    ticket('QRD-1570', { labels: ['#3', 'sprint-28-wave-1'] }),
+    ticket('QRD-1639', { labels: ['#4'], description: FREE, links: [{ key: 'QRD-1638', relation: 'blockedBy' }] }),
+    ticket('QRD-1647', { labels: ['#5'] }),
+    ticket('QRD-1582', { labels: ['#6'], links: [{ key: 'QRD-1570', relation: 'blockedBy' }, { key: 'QRD-1579', relation: 'blockedBy' }] }),
+    ticket('QRD-1646', { labels: ['#7'], description: FREE, links: [{ key: 'QRD-1580', relation: 'blockedBy' }] }),
+    ticket('QRD-1650', { labels: ['#9'], links: [{ key: 'QRD-1660', relation: 'blockedBy' }] }),
+    ticket('QRD-1594', { labels: ['#10'] }),
+  ];
+  const edges: OrderEdge[] = [
+    ...jiraEdges(tickets).map((edge) => ({ ...edge, source: 'jira', state: 'accepted' })),
+    { ticketKey: 'QRD-1580', dependsOnKey: 'QRD-1579', source: 'inferred', state: 'accepted' },
+    { ticketKey: 'QRD-1647', dependsOnKey: 'QRD-1580', source: 'inferred', state: 'pending' },
+    { ticketKey: 'QRD-1593', dependsOnKey: 'QRD-1594', source: 'inferred', state: 'rejected' },
+  ];
+  const teammates: Record<string, { status: string; assignee: string }> = { 'QRD-1638': { status: 'To Do', assignee: 'Yusril' }, 'QRD-1660': { status: 'To Do', assignee: 'Yusril' } };
+  const agentOrder = ['QRD-1579', 'QRD-1580', 'QRD-1582', 'QRD-1570', 'QRD-1593', 'QRD-1641'];
+  const rows = suggestOrder(tickets, edges, (key) => teammates[key] ?? null, agentOrder);
+  assert.deepStrictEqual(rows.map((row) => [row.key, row.jiraOrder, row.reason]), [
+    ['QRD-1579', 1, null],
+    ['QRD-1641', 2, '6 tickets wait on it'],
+    ['QRD-1570', 3, null],
+    ['QRD-1639', 4, 'starts without waiting'],
+    ['QRD-1582', 6, null],
+    ['QRD-1646', 7, 'starts without waiting'],
+    ['QRD-1580', 8, null],
+    ['QRD-1647', 5, 'after QRD-1580: dependency'],
+    ['QRD-1594', 10, null],
+    ['QRD-1593', 17, null],
+    ['QRD-1650', 9, 'moved after: waits on QRD-1660 (To Do, Yusril)'],
+  ]);
+  assert.deepStrictEqual(rows.filter((row) => row.atRisk).map((row) => row.key), ['QRD-1650']);
+  assert.strictEqual(rows.find((row) => row.key === 'QRD-1641')!.waitedOn, 6);
+  assert.deepStrictEqual([rows.find((row) => row.key === 'QRD-1580')!.wave, rows.find((row) => row.key === 'QRD-1647')!.jiraPosition], [2, 5]);
+});
+
+test('a ticket many tickets wait on moves up past tickets nobody waits on, never past a startable lower #N or an earlier wave', () => {
+  const waiters = (count: number) => Array.from({ length: count }, (_, index) => ({ key: `QRD-${900 + index}`, relation: 'blocks' as const }));
+  const rows = suggestOrder([
+    ticket('QRD-1', { labels: ['#1'] }),
+    ticket('QRD-2', { labels: ['#2'], links: [{ key: 'QRD-50', relation: 'blockedBy' }] }),
+    ticket('QRD-3', { labels: ['#3'], links: waiters(3) }),
+    ticket('QRD-4', { labels: ['sprint-28-wave-1'] }),
+    ticket('QRD-5', { labels: ['sprint-28-wave-2'] }),
+    ticket('QRD-6', { labels: ['sprint-28-wave-2'] }),
+    ticket('QRD-7', { labels: ['sprint-28-wave-2'], links: waiters(4) }),
+  ], [{ ticketKey: 'QRD-2', dependsOnKey: 'QRD-50', source: 'jira', state: 'accepted' }], () => ({ status: 'In Progress', assignee: 'Rina' }));
+  assert.deepStrictEqual(rows.map((row) => [row.key, row.reason, row.atRisk]), [
+    ['QRD-1', null, false],
+    ['QRD-3', 'moved up: 3 tickets wait on it', false],
+    ['QRD-2', null, false],
+    ['QRD-4', null, false],
+    ['QRD-7', 'moved up: 4 tickets wait on it', false],
+    ['QRD-5', null, false],
+    ['QRD-6', null, false],
+  ]);
+});
+
+test('the prompt gives each owner ticket its Jira place, without-waiting paragraph and the teammates tickets it waits on, and asks for a kind on every edge', async () => {
+  const world = planner([
+    ticket('QRD-2', { labels: ['#1', 'sprint-27-wave-1'], description: FREE, links: [{ key: 'QRD-9', relation: 'blockedBy' }] }),
+    ticket('QRD-1', { labels: ['#2'] }),
+  ], { sprintIssues: async () => [{ key: 'QRD-1' }, { key: 'QRD-2' }, { key: 'QRD-9', status: 'To Do', assignee: 'Yusril' }] });
+  await world.planner.map();
+  const text = world.sessions[0].text;
+  assert.match(text, /This order is the baseline/);
+  assert.match(text, /- QRD-2: #1, sprint-27-wave-1, has a "How it starts without waiting" paragraph, waits on QRD-9 \(To Do, Yusril\)\.\n- QRD-1: #2, no wave label\./);
+  assert.match(text, /"edges":\[\{"ticket","dependsOn","kind","reason"\}\]/);
+  assert.match(text, /Never add an edge whose only reason is a shared file as a dependency/);
+  assert.match(text, /keys startable together now/);
 });

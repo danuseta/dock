@@ -14,7 +14,7 @@ import { CHAT_MACHINE, chatService } from '../integrations/chat';
 import { qaEscalations, retroNumbers, retroProblems, retroTickets, runsInWindow, triageSuggestions } from '../integrations/retro';
 import { acceptRetroLine } from '../integrations/retro-apply';
 import { StorageService } from '../storage/service';
-import { activeSprint } from '../integrations/sprint-plan';
+import { activeSprint, suggestOrder } from '../integrations/sprint-plan';
 import { lookupDependencies } from '../integrations/dependency-lookup';
 import { sprintPlanner } from '../integrations/sprint-plan-live';
 import { lintJiraTicket } from '../integrations/ticket-lint';
@@ -171,7 +171,10 @@ async function sprintRetroNumbers(sprint: { id: number; startDate: string; endDa
 async function sprintPlanView() {
   const active = activeSprint(await jiraAPI.getTickets());
   if (!active) return null;
-  const [plan, edges, orders, suggested] = await Promise.all([storageService.getSprintPlan(active.sprint), storageService.getPlanEdges(active.sprint), storageService.getTicketOrders(), sprintPlanner.suggestedOrder(active.sprint)]);
+  const [plan, edges, orders, suggested, fileEdges, manual] = await Promise.all([
+    storageService.getSprintPlan(active.sprint), storageService.getPlanEdges(active.sprint), storageService.getTicketOrders(), sprintPlanner.suggestedOrder(active.sprint),
+    sprintPlanner.fileEdges(active.sprint), storageService.getManualTicketKeys(),
+  ]);
   const known = new Map<string, { title?: string; assignee?: string | null; status?: string | null }>(active.tickets.map((ticket: any) => [ticket.key, ticket]));
   const sprintId = (await sprintDashboardService.listSprints()).find((item) => item.name === active.sprint)?.id;
   if (sprintId != null) {
@@ -191,7 +194,8 @@ async function sprintPlanView() {
   const rank = (ticket: any) => orderOf(ticket, orders) ?? Number.MAX_SAFE_INTEGER;
   const ordered = [...active.tickets].sort((a: any, b: any) => (rank(a) - rank(b)) || ((Number(a.key.split('-')[1]) || 0) - (Number(b.key.split('-')[1]) || 0)));
   const keys = new Set(ordered.map((ticket: any) => ticket.key));
-  const suggestedOrder = suggested.filter((key) => keys.has(key));
+  const suggestion = suggested.length ? suggestOrder(active.tickets.filter((ticket) => !manual.has(ticket.key)), edges, lookup, suggested).map((row) => ({ ...row, title: lookup(row.key)?.title ?? '' })) : [];
+  const suggestedOrder = suggestion.map((row) => row.key);
   let groups: string[][] = [];
   try { groups = JSON.parse(plan?.groups ?? '[]'); } catch { groups = []; }
   return {
@@ -202,6 +206,8 @@ async function sprintPlanView() {
     mappedAt: plan?.mappedAt?.toISOString() ?? null,
     groups,
     suggestedOrder,
+    suggestion,
+    fileEdges: fileEdges.filter((edge) => keys.has(edge.ticketKey)).map((edge) => ({ ...edge, dependsOnTitle: lookup(edge.dependsOnKey)?.title ?? null })),
     tickets: ordered.map((ticket: any, index) => ({
       key: ticket.key,
       title: ticket.title,

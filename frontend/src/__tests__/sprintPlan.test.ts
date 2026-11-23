@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { agentsRoute, driftReason, driftStateLabel, edgeStateText, groupsText, hasMap, isMapping, mappedText, pendingEdges, sortDrift, sourceLabel, type SprintPlan } from '../agents/plan';
+import { agentsRoute, driftReason, driftStateLabel, edgeStateText, groupsText, hasMap, isMapping, jiraPlaceLabel, mappedText, pendingEdges, sortDrift, sourceLabel, type SprintPlan } from '../agents/plan';
 import { RETRO_NUMBERS, causeShare } from '../agents/retro';
 import { signalOf } from '../lib/attention';
 
@@ -63,6 +63,17 @@ test('Planning shows Now, Draft and Retro, the Plan page is the Order panel of D
   const tab = source('../agents/PlanTab.tsx');
   assert.match(tab, /edge\.dependsOnStatus &&/);
   for (const text of ['Map dependencies', 'Accept', 'Reject', 'Use this order', 'Safe in parallel']) assert.ok(tab.includes(text), text);
+});
+
+test('the suggestion shows the Jira place, the move reason and At risk per row, and same-file edges only as merge-conflict risk', () => {
+  assert.equal(jiraPlaceLabel({ jiraOrder: 4, wave: 1 }), '#4');
+  assert.equal(jiraPlaceLabel({ jiraOrder: null, wave: 2 }), 'Wave 2');
+  assert.equal(jiraPlaceLabel({ jiraOrder: null, wave: null }), '');
+  const tab = source('../agents/PlanTab.tsx');
+  for (const text of ['plan.suggestion.map', 'Jira {jiraPlaceLabel(row)}', 'row.reason', 'At risk', 'Merge-conflict risk (same file)', '<FileRisk edges={plan.fileEdges} />']) assert.ok(tab.includes(text), text);
+  const fileRisk = tab.slice(tab.indexOf('const FileRisk'));
+  assert.doesNotMatch(fileRisk.slice(0, fileRisk.indexOf('\n);') + 3), /Accept|onAction/);
+  assert.match(source('../graphql/queries.ts'), /suggestion \{ key title jiraOrder wave jiraPosition waitedOn atRisk reason \}\s+fileEdges \{ ticketKey dependsOnKey dependsOnTitle reason \}/);
 });
 
 test('AC drift rows name why a line is held and put held ones first', () => {

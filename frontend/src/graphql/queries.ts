@@ -755,6 +755,8 @@ export const GET_SPRINT_PLAN = gql`
       mappedAt
       groups
       suggestedOrder
+      suggestion { key title jiraOrder wave jiraPosition waitedOn atRisk reason }
+      fileEdges { ticketKey dependsOnKey dependsOnTitle reason }
       tickets {
         key title status position order orderSource suggestedPosition held
         edges { id ticketKey dependsOnKey dependsOnTitle dependsOnAssignee dependsOnStatus source reason state }

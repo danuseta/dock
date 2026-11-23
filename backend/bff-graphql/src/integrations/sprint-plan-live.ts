@@ -20,5 +20,6 @@ export const sprintPlanner = new SprintPlanner({
   send: async (sessionId, text) => chatService.sendMessage(sessionId, text, await orchestratorService.machines()),
   deleteSession: (sessionId) => chatService.deleteSession(sessionId),
   sprints: () => sprintDashboardService.listSprints(),
-  sprintKeys: async (sprintId) => (JSON.parse(await sprintDashboardService.issueEvents(sprintId)) as Array<{ key?: unknown }>).map((issue) => String(issue.key)),
+  sprintIssues: async (sprintId) => (JSON.parse(await sprintDashboardService.issueEvents(sprintId)) as Array<{ key?: unknown; status?: string | null; assignee?: string | null }>)
+    .map((issue) => ({ key: String(issue.key), status: issue.status ?? null, assignee: issue.assignee ?? null })),
 });

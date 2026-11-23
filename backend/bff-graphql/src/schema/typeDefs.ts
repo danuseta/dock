@@ -675,6 +675,33 @@ export const typeDefs = gql`
     edges: [SprintPlanEdge!]!
   }
 
+  "One ticket of the order DOCK suggests from the Jira order and the dependencies."
+  type SprintPlanSuggestion {
+    key: String!
+    title: String!
+    "The Jira #N label, null without one."
+    jiraOrder: Int
+    "The W of the sprint-S-wave-W label, null without one."
+    wave: Int
+    "Its place in the Jira order (#N, then wave, then ticket number)."
+    jiraPosition: Int!
+    "Tickets, the owner's and teammates', that wait on it."
+    waitedOn: Int!
+    "It waits on a teammate's ticket still in To Do."
+    atRisk: Boolean!
+    "Why it moved against the Jira order, null when it did not."
+    reason: String
+  }
+
+  "Two tickets the Plan agent found touching the same file or component: merge-conflict risk, never a wait."
+  type SprintPlanFileEdge {
+    ticketKey: String!
+    dependsOnKey: String!
+    dependsOnTitle: String
+    "Names the shared file."
+    reason: String
+  }
+
   """The active sprint's dependency map and work order. Status is idle, mapping or failed."""
   type SprintPlan {
     sprint: String!
@@ -683,8 +710,11 @@ export const typeDefs = gql`
     sessionId: String
     mappedAt: String
     groups: [[String!]!]!
-    "The order the last Map dependencies run suggested; it changes nothing until the owner uses it."
+    "The keys of suggestion, in order; it changes nothing until the owner uses it."
     suggestedOrder: [String!]!
+    "The order DOCK suggests once Map dependencies has run: Jira order, then dependencies, hubs and at-risk tickets."
+    suggestion: [SprintPlanSuggestion!]!
+    fileEdges: [SprintPlanFileEdge!]!
     tickets: [SprintPlanTicket!]!
   }
 
