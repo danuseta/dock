@@ -21,6 +21,7 @@ import { CodeChanges } from './blackboard/CodeChanges';
 import { ContractView } from './blackboard/ContractView';
 import { ExecLog } from './blackboard/ExecLog';
 import { ReviewFindings } from './blackboard/ReviewFindings';
+import { KamusView } from './blackboard/KamusView';
 import { hasReviewHistory, reviewHistory, type ReviewRound } from '../lib/reviewRounds';
 import type { AutoReviewRow } from '../agents/autoReviews';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
@@ -351,9 +352,7 @@ const BlackboardPage: React.FC<{ onNavigate?: (path: string) => void; onTicketCl
             {selected === KAMUS_ENTRY
               ? (kamus === undefined
                 ? <p className="p-6 text-sm text-muted-foreground" role="status">Loading {KAMUS_FILE}...</p>
-                : kamus
-                  ? <div className="min-w-0 px-6 py-5 text-[0.82rem] leading-relaxed text-secondary-foreground"><Markdown text={withoutComments(kamus)} /></div>
-                  : <p className="p-6 text-sm text-muted-foreground">No pronunciation glossary yet. Put {KAMUS_FILE} at the blackboard root.</p>)
+                : <KamusView text={kamus} onSaved={() => { void fetchRootText(KAMUS_FILE).then(setKamus); }} />)
               : picked && selected === LOG_ENTRY
               ? <LogTabs ticket={picked} run={run} timeline={run?.timeline ?? null} tab={logTab} onTab={setLogTab} />
               : picked && selected === TRACE_ENTRY
