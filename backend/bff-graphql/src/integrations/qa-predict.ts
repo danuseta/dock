@@ -6,15 +6,17 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-export type QaVerdict = 'LOLOS' | 'ESCALATED' | 'REVISION-RISK';
-export interface QaPrediction { prediction: QaVerdict; reasons: string[]; fix: string | null }
-export interface QaInputTicket { key: string; summary: string; ac: string[]; waitsOn: Array<{ key: string; endDay: number | null }>; endDay: number | null }
+export type QaVerdict = 'LOLOS' | 'ESCALATED' | 'REVISION-RISK' | 'FOLLOWS_FE';
+/** followsFe: with FOLLOWS_FE, the FE ticket whose QA result a BE ticket takes. */
+export interface QaPrediction { prediction: QaVerdict; reasons: string[]; fix: string | null; followsFe?: string | null }
+/** links: the ticket's Jira links as read from it ("blocks", "is blocked by", "tests", "is tested by"), with the other ticket's summary. */
+export interface QaInputTicket { key: string; summary: string; ac: string[]; waitsOn: Array<{ key: string; endDay: number | null }>; endDay: number | null; links?: Array<{ key: string; type: string; summary?: string }> }
 export interface QaRun { predictions: Map<string, QaPrediction> | null; reason: string | null }
 export interface RunnerResult { code: number | null; stdout: string; stderr: string }
 export type QaRunner = (script: string, stdin: string, timeoutMs: number) => Promise<RunnerResult>;
 
 export const NOT_INSTALLED = 'QA prediction not installed';
-const VERDICTS: QaVerdict[] = ['LOLOS', 'ESCALATED', 'REVISION-RISK'];
+const VERDICTS: QaVerdict[] = ['LOLOS', 'ESCALATED', 'REVISION-RISK', 'FOLLOWS_FE'];
 const TIMEOUT_MS = 60000;
 const MAX_OUTPUT = 2 * 1024 * 1024;
 
@@ -47,7 +49,9 @@ function parsePrediction(item: unknown): [string, QaPrediction] | null {
   const prediction = VERDICTS.find((verdict) => verdict === row.prediction);
   if (!key || !prediction) return null;
   const reasons = Array.isArray(row.reasons) ? row.reasons.filter((reason): reason is string => typeof reason === 'string').map((reason) => reason.slice(0, 1000)) : [];
-  return [key, { prediction, reasons, fix: typeof row.fix === 'string' && row.fix.trim() ? row.fix.slice(0, 2000) : null }];
+  const fix = typeof row.fix === 'string' && row.fix.trim() ? row.fix.slice(0, 2000) : null;
+  const followsFe = typeof row.followsFe === 'string' && /^[A-Z][A-Z0-9]*-\d+$/.test(row.followsFe.trim().toUpperCase()) ? row.followsFe.trim().toUpperCase() : null;
+  return [key, prediction === 'FOLLOWS_FE' ? { prediction, reasons, fix, followsFe } : { prediction, reasons, fix }];
 }
 
 /** The verdict of each ticket, or no predictions and the reason. */

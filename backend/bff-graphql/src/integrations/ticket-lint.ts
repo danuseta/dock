@@ -48,6 +48,19 @@ const JARGON: Array<[RegExp, string]> = [
   [/\bI-\d+\b/, 'an I-<n> issue id'],
 ];
 const IMPLEMENTATION = /^(?:implement|refactor|update)\b.*\b(?:component|resolver|function)\b/i;
+/** How a [BE] ticket's AC line is checked: through a page, an endpoint, or proof the developer attaches. */
+const CHECK_TAG = /^\[(?:UI|API|Dev evidence)\]/i;
+const GROUP_HEADER = /^\**\s*(?:FE|BE)\s*\**\s*:?$/i;
+
+/** FE or BE: a tag in the summary's leading [..] group ([BE][Inbox] ...), else a "Repo: FE" line in the description. */
+export function ticketRepo(summary: string | null | undefined, description?: string | null): 'FE' | 'BE' | null {
+  const group = String(summary ?? '').match(/^\s*((?:\[[^\]]*\]\s*)+)/);
+  const tags = (group?.[1].match(/\[([^\]]*)\]/g) ?? []).map((tag) => tag.slice(1, -1).trim().toUpperCase());
+  const tagged = (['FE', 'BE'] as const).filter((side) => tags.includes(side));
+  if (tagged.length === 1) return tagged[0];
+  const repo = String(description ?? '').match(/\bRepo:\s*\**\s*(FE|BE)\b/i);
+  return repo ? (repo[1].toUpperCase() as 'FE' | 'BE') : null;
+}
 
 const finding = (rule: string, field: string, line: number | null, text: string, fix: string): LintFinding => ({
   rule, field, line, level: rule <= 'W4' ? 'block' : 'warn', text, fix,
@@ -120,6 +133,13 @@ export function lintTicket(input: LintInput): TicketLint {
   if (input.userStory !== undefined && !(input.userStory ?? '').trim()) findings.push(finding('W7', 'userStory', null, 'The User Story is empty.', 'Write "As a ..., I want ..., so ...".'));
   if (input.problem !== undefined && !(input.problem ?? '').trim()) findings.push(finding('W7', 'problem', null, 'The Problem Definition is empty.', 'Say what is wrong or missing today, in plain words.'));
   if (typeof input.sp === 'number' && input.sp >= SP_SPLIT_AT) findings.push(finding('W8', 'sp', null, `${input.sp} story points is more than one ticket should hold.`, 'Split the ticket; the team standard is under 5 SP.'));
+  if (ac && ticketRepo(input.summary, input.description) === 'BE') {
+    ac.forEach((line, index) => {
+      const n = index + 1;
+      if (!line.trim() || PLACEHOLDER.test(line) || GROUP_HEADER.test(line) || CHECK_TAG.test(line)) return;
+      findings.push(finding('W9', 'ac', n, `AC ${n} has no check tag: [UI], [API] or [Dev evidence].`, 'Start the line with [UI] and the page, [API] and the endpoint, or [Dev evidence] for proof the developer attaches.'));
+    });
+  }
 
   return { ok: !findings.some((item) => item.level === 'block'), findings };
 }

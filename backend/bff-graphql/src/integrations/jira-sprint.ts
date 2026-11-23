@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { atlassianBaseUrl, blockLinks, type JiraCredentials, type TicketLink } from './jira';
+import { atlassianBaseUrl, blockLinks, TEST_LINK_TYPE, type JiraCredentials, type TicketLink } from './jira';
 import type { SprintEvent, SprintIssue } from './sprint-metrics';
 
 export interface JiraHttp {
@@ -316,6 +316,21 @@ export class JiraSprintClient {
   /** A Blocks link: `key` is blocked by `blocker`. On create Jira reads inwardIssue as the issue that blocks. */
   async addBlockedBy(key: string, blocker: string): Promise<void> {
     await this.http.post('/rest/api/3/issueLink', { type: { name: 'Blocks' }, inwardIssue: { key: blocker }, outwardIssue: { key } });
+  }
+
+  /** The name of the site's "Test" link type (outward tests, inward is tested by); null when no such type exists. */
+  async testLinkType(): Promise<string | null> {
+    const page = await this.http.get('/rest/api/3/issueLinkType');
+    const lower = (value: unknown) => String(value ?? '').trim().toLowerCase();
+    const types: any[] = Array.isArray(page?.issueLinkTypes) ? page.issueLinkTypes : [];
+    const found = types.find((type) => lower(type?.outward) === 'tests' && lower(type?.inward) === 'is tested by')
+      ?? types.find((type) => lower(type?.name) === lower(TEST_LINK_TYPE));
+    return typeof found?.name === 'string' ? found.name : null;
+  }
+
+  /** A Test link: `tester` (the FE ticket) tests `tested` (the BE ticket). As with Blocks, Jira reads inwardIssue as the side of the outward phrase. */
+  async addTestLink(tester: string, tested: string, typeName: string = TEST_LINK_TYPE): Promise<void> {
+    await this.http.post('/rest/api/3/issueLink', { type: { name: typeName }, inwardIssue: { key: tester }, outwardIssue: { key: tested } });
   }
 
   /** The account id and display name of the Jira user DOCK's token belongs to. */

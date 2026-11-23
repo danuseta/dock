@@ -762,6 +762,7 @@ export const resolvers = {
   Ticket: {
     labels: (parent: any) => Array.isArray(parent.labels) ? parent.labels : [],
     blockedBy: (parent: any) => (Array.isArray(parent.links) ? parent.links : []).filter((link: any) => link?.relation === 'blockedBy').map((link: any) => String(link.key)),
+    testedThrough: (parent: any) => (Array.isArray(parent.pairLinks) ? parent.pairLinks : []).filter((link: any) => link?.relation === 'testedBy').map((link: any) => String(link.key)),
     workOrder: async (parent: any) => (await storageAPI.ticketOrders()).get(parent.key) ?? labelOrder(parent.labels),
     workOrderSource: async (parent: any) => ((await storageAPI.ticketOrders()).has(parent.key) ? 'dock' : labelOrder(parent.labels) === null ? null : 'label'),
     workManual: async (parent: any) => (await storageAPI.manualTickets()).has(parent.key),

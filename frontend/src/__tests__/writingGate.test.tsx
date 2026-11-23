@@ -41,7 +41,7 @@ const draft = (over: Partial<SprintDraft> = {}) => ({
 const noop = async () => true;
 
 test('the Humanize prompt is the exact text, and the chat chip fills it with a key to paste', () => {
-  assert.equal(humanizePrompt('QRD-1602', 'QRD Sprint 27'), 'Humanize QRD-1602 for sprint "QRD Sprint 27": rewrite its fields for a human reader by the writing standard without changing what the AC asks, and save a revision for me to review.');
+  assert.equal(humanizePrompt('QRD-1602', 'QRD Sprint 27'), 'Humanize QRD-1602 for sprint "QRD Sprint 27": rewrite its fields for a human reader by the writing standard without changing what the AC asks; on a [BE] ticket start every AC line with its check tag, [UI], [API] or [Dev evidence]; and save a revision for me to review.');
   const chip = chatSuggestions('Planning-QRD Sprint 27', 3).find((item) => item.id === 'humanize');
   assert.equal(chip?.label, 'Humanize a ticket');
   assert.equal(chip?.text, humanizeChipPrompt('QRD Sprint 27'));

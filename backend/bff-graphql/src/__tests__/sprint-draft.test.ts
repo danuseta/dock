@@ -5,6 +5,7 @@ import type { QaInputTicket, QaRun } from '../integrations/qa-predict';
 import { SprintDraftService, TC_MARKER, acSideEffects, acValueLines, diffLines, finalAc, rewriteAcValue, sprintProject, type DraftJira, type DraftStore } from '../integrations/sprint-draft';
 import type { SprintDraftInput, SprintDraftNewTicketData, SprintDraftRevisionData, SprintDraftRevisionUpdate, SprintDraftTicketInput } from '../storage/service';
 import { StoryboardMissing } from '../integrations/storyboard';
+import { testLinks } from '../integrations/jira';
 
 const adf = (...blocks: any[]) => ({ type: 'doc', version: 1, content: blocks });
 const para = (...content: any[]) => ({ type: 'paragraph', content });
@@ -154,6 +155,36 @@ test('the Jira client lists open sprints, leaves Epics out and resolves an assig
   ]);
 });
 
+test('the Jira client finds the Test link type by its phrases or name, writes FE tests BE, and reads Test links both ways', async () => {
+  const calls: Array<[string, string, unknown]> = [];
+  let types: any[] = [{ name: 'Blocks', inward: 'is blocked by', outward: 'blocks' }, { name: 'Relates', inward: 'relates to', outward: 'relates to' }];
+  const client = new JiraSprintClient({
+    get: async (url: string) => { calls.push(['get', url, null]); return { issueLinkTypes: types }; },
+    post: async (url: string, body: unknown) => { calls.push(['post', url, body]); },
+  });
+  assert.equal(await client.testLinkType(), null);
+  assert.deepEqual(calls[0], ['get', '/rest/api/3/issueLinkType', null]);
+  types = [...types, { name: 'Tests', inward: 'is tested by', outward: 'tests' }];
+  assert.equal(await client.testLinkType(), 'Tests');
+  types = [{ name: 'Test', inward: 'checked by', outward: 'checks' }];
+  assert.equal(await client.testLinkType(), 'Test');
+  await client.addTestLink('QRD-1582', 'QRD-1579', 'Tests');
+  assert.deepEqual(calls.at(-1), ['post', '/rest/api/3/issueLink', { type: { name: 'Tests' }, inwardIssue: { key: 'QRD-1582' }, outwardIssue: { key: 'QRD-1579' } }]);
+  const type = { name: 'Test', inward: 'is tested by', outward: 'tests' };
+  assert.deepEqual(testLinks([{ type, inwardIssue: { key: 'QRD-1582' } }, { type: { name: 'Blocks' }, inwardIssue: { key: 'QRD-1' } }]), [{ key: 'QRD-1582', relation: 'testedBy' }]);
+  assert.deepEqual(testLinks([{ type, outwardIssue: { key: 'QRD-1579' } }]), [{ key: 'QRD-1579', relation: 'tests' }]);
+  assert.deepEqual(testLinks(null), []);
+});
+
+test('the QA prediction gets the Blocks links both ways with the other ticket summary, so a [BE] ticket finds its [FE] pair', async () => {
+  const { service, seen } = setup();
+  await service.load(26, 'Alvin');
+  const input = Object.fromEntries(seen().map((ticket) => [ticket.key, ticket.links]));
+  assert.deepEqual(input['QRD-1490'], [{ key: 'QRD-1489', type: 'is blocked by', summary: 'Ticket QRD-1489' }]);
+  assert.deepEqual(input['QRD-1489'], [{ key: 'QRD-1490', type: 'blocks', summary: 'Ticket QRD-1490' }]);
+  assert.deepEqual(input['QRD-1511'], []);
+});
+
 test('the AC field reads into lines from ADF and from text', () => {
   assert.deepEqual(acValueLines(adf(para(text('One'), { type: 'hardBreak' }, text('Two')), bullets('- Three'), { type: 'codeBlock', content: [text('a\nb')] })), ['One', 'Two', 'Three', 'a', 'b']);
   assert.deepEqual(acValueLines('1. One\n\n- Two'), ['One', 'Two']);
@@ -238,9 +269,9 @@ test('preview lists only what differs from Jira, and publish writes it in Jira f
   await service.updateTicket('QRD Sprint 26', 'QRD-1511', { wave: 3, sp: 2 });
   const preview = await service.preview('QRD Sprint 26');
   assert.deepEqual(preview, [
-    { key: 'QRD-1489', assigneeFrom: 'Aken', assigneeTo: 'Danu', acRemoved: [], acAdded: [], referenceAdded: [], blockedBy: [], refused: null },
-    { key: 'QRD-1511', assigneeFrom: null, assigneeTo: null, acRemoved: ['An Edit client sees the cursor (QRD-1490)'], acAdded: [], referenceAdded: [], blockedBy: [], refused: null },
-    { key: 'QRD-1490', assigneeFrom: null, assigneeTo: null, acRemoved: [], acAdded: ['An Edit client sees the cursor (QRD-1490)'], referenceAdded: [], blockedBy: [], refused: null },
+    { key: 'QRD-1489', assigneeFrom: 'Aken', assigneeTo: 'Danu', acRemoved: [], acAdded: [], referenceAdded: [], blockedBy: [], testsFor: [], pairWarning: null, refused: null },
+    { key: 'QRD-1511', assigneeFrom: null, assigneeTo: null, acRemoved: ['An Edit client sees the cursor (QRD-1490)'], acAdded: [], referenceAdded: [], blockedBy: [], testsFor: [], pairWarning: null, refused: null },
+    { key: 'QRD-1490', assigneeFrom: null, assigneeTo: null, acRemoved: [], acAdded: ['An Edit client sees the cursor (QRD-1490)'], referenceAdded: [], blockedBy: [], testsFor: [], pairWarning: null, refused: null },
   ]);
   assert.deepEqual(jira.writes, [], 'preview writes nothing');
 
@@ -523,7 +554,7 @@ test('an AC line naming another ticket is a dependency (Blocks link) or moves to
   const preview = await service.preview('QRD Sprint 26');
   assert.deepEqual(preview, [{
     key: 'QRD-1511', assigneeFrom: null, assigneeTo: null, acRemoved: ['Works after QRD-1363'], acAdded: [],
-    referenceAdded: ['QRD-1363: Works after QRD-1363'], blockedBy: ['QRD-1490'], refused: null,
+    referenceAdded: ['QRD-1363: Works after QRD-1363'], blockedBy: ['QRD-1490'], testsFor: [], pairWarning: null, refused: null,
   }]);
   const results = await service.publish('QRD Sprint 26');
   assert.deepEqual(results.filter((result) => result.kind === 'ticket').map((result) => [result.key, result.status]), [['QRD-1511', 'updated']]);
@@ -532,6 +563,54 @@ test('an AC line naming another ticket is a dependency (Blocks link) or moves to
   assert.equal(jira.writes[2][2], 'QRD-1490');
   assert.ok(!jira.writes.some(([kind]) => kind === 'comment'));
   assert.deepEqual(JSON.parse(store.draft.tickets.find((ticket: any) => ticket.key === 'QRD-1511').jiraAc), ['Cursor shows', 'An Edit client sees the cursor (QRD-1490)']);
+});
+
+/** The dependency test's sprint with QRD-1511 an [FE] ticket and QRD-1490 its [BE] ticket, and Jira with or without the Test link type. */
+async function pairSetup(testType: string | null, beSummary = '[BE][Cursor] Store the edit cursor') {
+  const ctx = setup();
+  ctx.jira.issues = ctx.jira.issues.map((item) => (item.key === 'QRD-1511' ? { ...item, summary: '[FE][Cursor] Show the edit cursor' } : item.key === 'QRD-1490' ? { ...item, summary: beSummary } : item));
+  let typeReads = 0;
+  Object.assign(ctx.jira, {
+    testLinkType: async () => { typeReads += 1; return testType; },
+    addTestLink: async (tester: string, tested: string, typeName: string) => { ctx.jira.writes.push(['test', tester, [tested, typeName]]); },
+  });
+  const view = await ctx.service.load(26, 'Alvin');
+  await ctx.service.decide('QRD Sprint 26', view.findings[0].id, 'dependency', null, 'Alvin');
+  await ctx.service.decide('QRD Sprint 26', view.findings[1].id, 'reference', null, 'Alvin');
+  return { ...ctx, typeReads: () => typeReads };
+}
+
+test('Publish adds a Test link with the Blocks link it writes when an [FE] ticket waits on a [BE] ticket', async () => {
+  const { service, jira, typeReads } = await pairSetup('Test');
+  const preview = await service.preview('QRD Sprint 26');
+  assert.deepEqual([preview[0].blockedBy, preview[0].testsFor, preview[0].pairWarning], [['QRD-1490'], ['QRD-1490'], null]);
+  assert.equal(typeReads(), 1);
+  const results = await service.publish('QRD Sprint 26');
+  assert.deepEqual(jira.writes.filter(([kind]) => kind === 'link' || kind === 'test'), [['link', 'QRD-1511', 'QRD-1490'], ['test', 'QRD-1511', ['QRD-1490', 'Test']]]);
+  assert.deepEqual(results.filter((result) => result.kind === 'link'), [{ key: 'QRD-1511', kind: 'link', status: 'created', detail: 'QRD-1511 tests QRD-1490' }]);
+  assert.equal(typeReads(), 2, 'the link types are read once per preview and once per publish');
+});
+
+test('without the Test link type Publish writes the Blocks link only and the preview warns', async () => {
+  const { service, jira } = await pairSetup(null);
+  const preview = await service.preview('QRD Sprint 26');
+  assert.deepEqual([preview[0].testsFor, preview[0].pairWarning], [[], 'Link type Test not found in Jira; ask a Jira admin to add it (tests / is tested by)']);
+  const results = await service.publish('QRD Sprint 26');
+  assert.deepEqual(results.filter((result) => result.kind === 'ticket').map((result) => result.status), ['updated']);
+  assert.deepEqual(jira.writes.filter(([kind]) => kind === 'link' || kind === 'test'), [['link', 'QRD-1511', 'QRD-1490']]);
+});
+
+test('no Test link when the waited-on ticket is not [BE], when Repo: BE says it is, and none for a Blocks link Jira already has', async () => {
+  const fe = await pairSetup('Test', '[FE][Cursor] Another screen');
+  assert.deepEqual((await fe.service.preview('QRD Sprint 26'))[0].testsFor, []);
+  assert.equal(fe.typeReads(), 0, 'no pair, no link type read');
+  const repo = await pairSetup('Test', 'Store the edit cursor');
+  repo.store.draft.tickets.find((ticket: any) => ticket.key === 'QRD-1490').description = 'Repo: BE';
+  assert.deepEqual((await repo.service.preview('QRD Sprint 26'))[0].testsFor, ['QRD-1490']);
+  const linked = await pairSetup('Test');
+  linked.jira.now.set('QRD-1511', { ...linked.jira.issues.find((item) => item.key === 'QRD-1511')!, links: [{ key: 'QRD-1490', relation: 'blockedBy' }] });
+  const preview = await linked.service.preview('QRD Sprint 26');
+  assert.deepEqual([preview[0].blockedBy, preview[0].testsFor], [[], []], 'an already published pair gets no Test link backfilled');
 });
 
 test('older wait and drop calls read as dependency and reference, a Blocks link already in Jira decides the line, and a changed AC refuses the write', async () => {
@@ -696,7 +775,7 @@ test('publish hands the sprint to the after-publish hook once the draft is publi
   assert.deepEqual(seen, ['QRD Sprint 26:published']);
 });
 
-const NEW_TICKET = { summary: '[BE] Export the sprint plan', type: 'Task', userStory: 'As a planner I want an export so I can share the plan', problem: 'The plan cannot leave DOCK', ac: ['- The export holds every ticket'], source: 'sheet row 2' };
+const NEW_TICKET = { summary: '[FE] Export the sprint plan', type: 'Task', userStory: 'As a planner I want an export so I can share the plan', problem: 'The plan cannot leave DOCK', ac: ['- The export holds every ticket'], source: 'sheet row 2' };
 
 test('new tickets get NEW-n ids that are never reused, keep the fields an update leaves out, and refuse what is out of range', async () => {
   const { service } = setup();
@@ -704,7 +783,7 @@ test('new tickets get NEW-n ids that are never reused, keep the fields an update
   const first = await service.saveNewTicket('QRD Sprint 26', null, NEW_TICKET);
   assert.equal(first.id, 'NEW-1');
   assert.deepEqual(first.view.newTickets, [{
-    id: 'NEW-1', summary: '[BE] Export the sprint plan', type: 'Task', epic: null, dev: null, sp: null, priority: null,
+    id: 'NEW-1', summary: '[FE] Export the sprint plan', type: 'Task', epic: null, dev: null, sp: null, priority: null,
     userStory: 'As a planner I want an export so I can share the plan', problem: 'The plan cannot leave DOCK', ac: ['The export holds every ticket'], reference: null, source: 'sheet row 2',
     createdKey: null, error: null, flagReason: null, lint: { ok: true, findings: [] },
   }]);
@@ -774,7 +853,7 @@ test('publish creates each new ticket in the sprint, records the key or the erro
   assert.deepEqual(jira.created[0], {
     project: { key: 'QRD' },
     issuetype: { name: 'Story' },
-    summary: '[BE] Export the sprint plan',
+    summary: '[FE] Export the sprint plan',
     customfield_10341: adf(para(text('As a planner I want an export so I can share the plan'))),
     customfield_10331: adf(para(text('The plan cannot leave DOCK'))),
     customfield_10332: adf(bullets('The export holds every ticket')),
@@ -800,7 +879,7 @@ test('publish creates each new ticket in the sprint, records the key or the erro
   assert.equal(store.draft.status, 'draft', 'a ticket that was not created keeps the draft unpublished');
   await assert.rejects(service.saveNewTicket('QRD Sprint 26', 'NEW-1', { sp: 5 }), /NEW-1 is already created in Jira as QRD-1601/);
 
-  await service.saveNewTicket('QRD Sprint 26', 'NEW-2', { summary: '[BE] Fixed' });
+  await service.saveNewTicket('QRD Sprint 26', 'NEW-2', { summary: '[FE] Fixed' });
   await service.saveNewTicket('QRD Sprint 26', 'NEW-3', { problem: 'Now written' });
   assert.deepEqual((await service.preview('QRD Sprint 26')).filter((change) => change.create).map((change) => change.key), ['NEW-2', 'NEW-3'], 'a created ticket is not created again');
   const second = (await service.publish('QRD Sprint 26')).filter((result) => result.kind === 'create');
@@ -889,11 +968,11 @@ function revisionSetup() {
 test('a revision snapshots Jira when it is saved, replaces the pending one, and refuses what it may not change', async () => {
   const { service, jira, store } = revisionSetup();
   await service.load(26, 'Alvin');
-  const saved = await service.saveRevision('QRD Sprint 26', 'qrd-1489', { summary: '[BE] Edit the skill', ac: ['The client edits the skill', 'Changes wait for the owner'], note: 'AC follows the thread' }, 'chat');
+  const saved = await service.saveRevision('QRD Sprint 26', 'qrd-1489', { summary: '[FE] Edit the skill', ac: ['The client edits the skill', 'Changes wait for the owner'], note: 'AC follows the thread' }, 'chat');
   assert.deepEqual(saved.revision, {
     key: 'QRD-1489', summary: 'Ticket QRD-1489', status: 'pending', note: 'AC follows the thread', source: 'chat',
     fields: [
-      { name: 'summary', label: 'Summary', before: ['Ticket QRD-1489'], after: ['[BE] Edit the skill'] },
+      { name: 'summary', label: 'Summary', before: ['Ticket QRD-1489'], after: ['[FE] Edit the skill'] },
       { name: 'ac', label: 'Acceptance Criteria', before: ['The client edits the skill', 'Changes wait for Publish'], after: ['The client edits the skill', 'Changes wait for the owner'] },
     ],
     inSprint: true, error: null, createdAt: saved.revision.createdAt, appliedAt: null, flagReason: null, lint: { ok: true, findings: [] },
@@ -983,7 +1062,7 @@ test('apply writes only the fields that differ from Jira now, in Jira format, an
 test('apply is refused when the ticket changed in Jira after the revision, and a failed write keeps the revision pending', async () => {
   const { service, jira } = revisionSetup();
   await service.load(26, 'Alvin');
-  await service.saveRevision('QRD Sprint 26', 'QRD-1489', { summary: '[BE] Edit the skill' }, 'chat');
+  await service.saveRevision('QRD Sprint 26', 'QRD-1489', { summary: '[FE] Edit the skill' }, 'chat');
   jira.revisionIssues.set('QRD-1489', revisionIssue('QRD-1489', { updated: '2026-11-20T10:00:00.000+0700' }));
   const refused = await service.applyRevision('QRD Sprint 26', 'QRD-1489', 'Danu');
   assert.deepEqual(refused, { key: 'QRD-1489', kind: 'revision', status: 'refused', detail: 'QRD-1489 changed in Jira after this revision was written; ask the agent to write it again' });
@@ -991,7 +1070,7 @@ test('apply is refused when the ticket changed in Jira after the revision, and a
   let revision = (await service.view('QRD Sprint 26'))!.revisions[0];
   assert.deepEqual([revision.status, revision.error], ['pending', refused.detail]);
 
-  await service.saveRevision('QRD Sprint 26', 'QRD-1489', { summary: '[BE] Edit the skill' }, 'chat');
+  await service.saveRevision('QRD Sprint 26', 'QRD-1489', { summary: '[FE] Edit the skill' }, 'chat');
   jira.failEdit = Object.assign(new Error('Request failed with status code 400'), { response: { status: 400, data: { errorMessages: [], errors: { summary: 'Summary is too long' } } } });
   const failed = await service.applyRevision('QRD Sprint 26', 'QRD-1489', 'Danu');
   assert.deepEqual(failed, { key: 'QRD-1489', kind: 'revision', status: 'failed', detail: 'Jira responded 400: Request failed with status code 400 (summary: Summary is too long)' });
@@ -1005,13 +1084,13 @@ test('apply is refused when the ticket changed in Jira after the revision, and a
 test('discard keeps the revision as history and leaves it out of the draft', async () => {
   const { service, store } = revisionSetup();
   await service.load(26, 'Alvin');
-  await service.saveRevision('QRD Sprint 26', 'QRD-1489', { summary: '[BE] Edit the skill' }, 'chat');
+  await service.saveRevision('QRD Sprint 26', 'QRD-1489', { summary: '[FE] Edit the skill' }, 'chat');
   const view = await service.discardRevision('QRD Sprint 26', 'qrd-1489');
   assert.deepEqual(view.revisions, []);
   assert.equal(store.revisions[0].status, 'discarded');
   await assert.rejects(service.discardRevision('QRD Sprint 26', 'QRD-1489'), /QRD-1489 has no pending revision/);
   await assert.rejects(service.applyRevision('QRD Sprint 26', 'QRD-1489', 'Danu'), /QRD-1489 has no pending revision/);
-  const again = await service.saveRevision('QRD Sprint 26', 'QRD-1489', { summary: '[BE] Edit it again' }, 'chat');
+  const again = await service.saveRevision('QRD Sprint 26', 'QRD-1489', { summary: '[FE] Edit it again' }, 'chat');
   assert.equal(again.view.revisions.length, 1, 'a discarded revision does not hold a new one');
   assert.equal(store.revisions.length, 2);
 });
