@@ -18,6 +18,7 @@ import { activeSprint } from '../integrations/sprint-plan';
 import { lookupDependencies } from '../integrations/dependency-lookup';
 import { sprintPlanner } from '../integrations/sprint-plan-live';
 import { lintJiraTicket } from '../integrations/ticket-lint';
+import { KamusInputError, readKamus, saveKamus } from '../integrations/kamus';
 import { acDriftService, acInService, planSignalService, planningVisuals, sprintDraftService, storyboardReader, testSplitPage, ticketSummaryService } from '../integrations/sprint-draft-live';
 import { StoryboardMissing, StoryboardRefused } from '../integrations/storyboard';
 import { SPLIT_PAGE_KEY, pageRef } from '../integrations/split-page';
@@ -356,6 +357,12 @@ function requireAgentControls(): void {
   }
 }
 
+function requireKamus(): void {
+  if (dockMode() !== 'workspace') {
+    throw new GraphQLError('The pronunciation list is kept on the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });
+  }
+}
+
 function requireDemoVideos(): void {
   if (dockMode() !== 'workspace') {
     throw new GraphQLError('Demo videos are kept from the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });
@@ -581,6 +588,7 @@ export const resolvers = {
     installedSkills: () => installedSkills(),
     reviewRoundsForTicket: async (_: unknown, { key }: { key: string }) => (await storageService.roundsForTicket(key.trim().toUpperCase())).map(roundInfo),
     claudeAccounts: () => claudeAccountsState(),
+    kamus: () => readKamus(blackboard),
     qaLocal: (_: unknown, { ticketKey }: { ticketKey?: string | null }) => qaLocalState(ticketKey),
     deployGate: (_: unknown, { ticketKey }: { ticketKey: string }) => {
       if (!isTicketKey(ticketKey)) throw new GraphQLError('ticketKey must be a ticket key such as QRD-1292', { extensions: { code: 'BAD_USER_INPUT' } });
@@ -1208,6 +1216,15 @@ export const resolvers = {
       }
       return qaLocalState(key);
     },
+    saveKamus: async (_: unknown, { sections, intro }: { sections: Array<{ title: string; rows: Array<{ written: string; spoken: string }> }>; intro: string }) => {
+      requireKamus();
+      try {
+        return await saveKamus(blackboard, { sections, intro });
+      } catch (error) {
+        if (error instanceof KamusInputError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+        throw error;
+      }
+    },
     setQaAutoRun: async (_: unknown, { on }: { on: boolean }) => {
       requireQa();
       await storageService.upsertSetting(QA_SETTING, String(on));
@@ -1352,6 +1369,7 @@ export const resolvers = {
 };
 
 export const protectedQueries = [
+  'kamus',
   'dashboard', 'ticketPullRequests', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'installedSkills', 'reviewRoundsForTicket', 'claudeAccounts', 'qaLocal', 'deployGate', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatSessionStates', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
@@ -1363,6 +1381,7 @@ export const protectedQueries = [
   'judgeDays', 'judgeDay', 'judgeWaiting', 'judgeSettings',
 ] as const;
 export const protectedMutations = [
+  'saveKamus',
   'retroBuild',
   'sprintPlanMap',
   'sprintPlanEdgeAction',

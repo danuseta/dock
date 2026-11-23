@@ -158,6 +158,28 @@ export class Blackboard {
     return { file: full, size: stat.size, mime: TEXT_TYPES.md, name, inline: true };
   }
 
+  /** The text of a root file; null when it is missing, too big or unreadable. */
+  async readRootText(name: string): Promise<string | null> {
+    const opened = await this.rootFile(name);
+    return opened ? fs.readFile(opened.file, 'utf8').catch(() => null) : null;
+  }
+
+  /** Rewrites a root file in one step: the text goes to a temp file next to it, which then replaces the file, so a reader never sees half of it. */
+  async writeRootText(name: string, text: string): Promise<void> {
+    if (!ROOT_FILES.has(name)) throw new BlackboardRefusal(404, 'Not a root file of the blackboard');
+    if (Buffer.byteLength(text) > MAX_TEXT_BYTES) throw new BlackboardRefusal(413, 'The file is too big');
+    await fs.mkdir(this.root, { recursive: true });
+    const full = path.join(this.root, name);
+    const temp = path.join(this.root, `.${name}.${process.pid}.${Date.now()}.tmp`);
+    try {
+      await fs.writeFile(temp, text, 'utf8');
+      await fs.rename(temp, full);
+    } catch (error) {
+      await fs.rm(temp, { force: true }).catch(() => undefined);
+      throw error;
+    }
+  }
+
   private async dirOf(key: string): Promise<string | null> {
     const upper = String(key || '').trim().toUpperCase();
     if (!TICKET_KEY.test(upper)) return null;

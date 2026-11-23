@@ -921,6 +921,18 @@ export const SPRINT_DRAFT_FIELDS = `
 
 export const TICKET_SUMMARY_FIELDS = `key acHash made checked notHere waitsOn before after line testData ui acId titleId writtenAt current`;
 
+export const GET_KAMUS = gql`
+  query GetKamus {
+    kamus { exists intro sections { title rows { written spoken } } }
+  }
+`;
+
+export const SAVE_KAMUS = gql`
+  mutation SaveKamus($sections: [KamusSectionInput!]!, $intro: String!) {
+    saveKamus(sections: $sections, intro: $intro) { exists intro sections { title rows { written spoken } } }
+  }
+`;
+
 export const GET_TICKET_SUMMARY = gql`
   query GetTicketSummary($key: String!) {
     ticketSummary(key: $key) { ${TICKET_SUMMARY_FIELDS} acChangedAt }
