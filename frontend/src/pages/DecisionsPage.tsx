@@ -12,7 +12,7 @@ import { monitorsOnly, useDockMode } from '../lib/dockMode';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { AnswerSheet } from '../decisions/AnswerSheet';
 import { QuestionView } from '../decisions/QuestionView';
-import { KEEP, autoKeptGuesses, isAnswered, questionsOf, staleSent, submissionOf, unansweredGuesses, type Question } from '../decisions/questions';
+import { KEEP, isAnswered, questionsOf, staleSent, submissionOf, unansweredGuesses, type Question } from '../decisions/questions';
 import { useDraft } from '../decisions/useDraft';
 import { TicketList } from '../decisions/TicketList';
 
@@ -43,7 +43,6 @@ const DecisionsPage: React.FC = () => {
     .map((run) => ({ run, questions: questionsOf(run) }))
     .filter((item) => item.questions.length > 0)
     .sort((a, b) => Number(b.questions.some((q) => q.blocking)) - Number(a.questions.some((q) => q.blocking))), [data]);
-  const autoKept = useMemo(() => autoKeptGuesses((data?.orchestrations ?? []) as AgentRun[]), [data]);
   const current = tickets.find((item) => item.run.key === place.ticket) ?? tickets[0] ?? null;
   const questions: Question[] = current?.questions ?? [];
   const { drafts, update, clear, markSent, reopen } = useDraft(current?.run.key ?? null);
@@ -145,21 +144,6 @@ const DecisionsPage: React.FC = () => {
           </div>
         </div>
         </>
-      )}
-      {autoKept.length > 0 && (
-        <section aria-label="Kept automatically" className="mt-5">
-          <Card>
-            <h2 className="font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground">Kept automatically</h2>
-            <p className="mt-1 text-pretty text-[0.76rem] text-muted-foreground">The ticket is done or merged, so DOCK answered these guesses with Keep what sous built and recorded it on the ticket like your answer.</p>
-            <ul className="mt-2">
-              {autoKept.map((item) => (
-                <li key={`${item.key}-${item.n}`} className="border-b border-border py-1.5 text-[0.8rem] last:border-b-0">
-                  <span className="font-mono font-semibold">{item.key} D-{item.n}</span> {item.text} <span className="font-mono text-[0.64rem] text-status-merged">· kept automatically</span>
-                </li>
-              ))}
-            </ul>
-          </Card>
-        </section>
       )}
       {toast && <Toast message={toast} type="success" onClose={() => setToast(null)} />}
     </Page>
