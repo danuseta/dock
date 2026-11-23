@@ -285,35 +285,65 @@ export function planTicketFacts(tickets: PlanTicket[], edges: Edge[], issues: Sp
   }));
 }
 
-const factLine = (fact: PlanTicketFact) => [
-  `- ${fact.key}: ${fact.order === null ? 'no #N' : `#${fact.order}`}, ${fact.wave ?? 'no wave label'}`,
-  fact.withoutWaiting ? ', has a "How it starts without waiting" paragraph' : '',
-  fact.waitsOn.length ? `, waits on ${fact.waitsOn.map((item) => `${item.key} (${[item.status ?? 'status unknown', item.assignee].filter(Boolean).join(', ')})`).join(', ')}` : '',
-  '.',
+const factLine = (fact: PlanTicketFact, detail = true) => [
+  `- ${fact.key} ${fact.order === null ? 'no#N' : `#${fact.order}`} ${fact.wave ?? 'no-wave'}`,
+  fact.withoutWaiting ? ' nowait' : '',
+  fact.waitsOn.length ? ` waits ${fact.waitsOn.map((item) => (detail ? `${item.key} (${[item.status ?? '?', item.assignee].filter(Boolean).join(', ')})` : item.key)).join(', ')}` : '',
 ].join('');
+
+/** The chat bridge refuses a message over 8000 characters; the prompt keeps a margin under it. */
+export const PLAN_PROMPT_MAX = 7600;
+
+/** "QRD-2 waits for QRD-1, QRD-3" per waiting ticket, so a sprint with many links stays short. */
+const groupedLinks = (edges: Edge[]) => {
+  const byTicket = new Map<string, string[]>();
+  for (const edge of edges) byTicket.set(edge.ticketKey, [...(byTicket.get(edge.ticketKey) ?? []), edge.dependsOnKey]);
+  return [...byTicket].map(([ticket, parents]) => `${ticket} < ${parents.join(' ')}`).join('; ');
+};
 
 export interface PlanPromptInput { sprint: string; mode: PlanMode; ownerKeys: string[]; otherKeys: string[]; jiraEdges: Edge[]; previousSprint: string | null; tryLines: string[]; mapKeys: string[]; order: string[]; facts?: PlanTicketFact[] }
 
+/**
+ * The first message of a Plan run. It must fit one chat message, so when the full text is too long it drops, in this
+ * order: the teammates' status and assignee in the facts, the retro lessons past the first five, the list of Jira links
+ * DOCK already applies (the agent reads them on the tickets), and finally the facts of the last tickets.
+ */
 export function planPrompt(input: PlanPromptInput): string {
   const list = (keys: string[]) => (keys.length ? keys.join(', ') : 'none');
-  const links = input.jiraEdges.map((edge) => `${edge.ticketKey} waits for ${edge.dependsOnKey}`).join('; ') || 'none';
   const facts = input.facts ?? [];
-  return [
-    `Pakai skill sous: plan ${input.sprint}.`,
-    'Sprint plan run: read only. No branch, no code, no Jira edits, no ledger.',
-    `Owner tickets to order: ${list(input.ownerKeys)}. Other tickets of the sprint, read only as something an owner ticket may wait for: ${list(input.otherKeys)}.`,
-    'For each owner ticket read the status, the acceptance criteria (customfield_10332), the epic, the Jira issue links, and the code areas it will touch (sous-explorer).',
-    `Jira links DOCK already applies, do not repeat them: ${links}.`,
-    ...(facts.length ? ['Owner tickets in Jira order (the #N label, then the sprint-S-wave-W label, then the ticket number). This order is the baseline: keep it unless a dependency forces a ticket later.', ...facts.map(factLine)] : []),
-    ...(input.previousSprint && input.tryLines.length ? [`Lessons accepted in the retro of ${input.previousSprint}, apply them:`, ...input.tryLines.map((line) => `- ${line}`)] : []),
-    ...(input.mode === 'ticket' ? [`Map only ${list(input.mapKeys)} against the rest. The order of the other tickets stays: ${list(input.order)}.`] : []),
-    'Write JSON {"sprint","mode","tickets","order":[owner keys, first to last],"groups":[[keys startable together now]],"edges":[{"ticket","dependsOn","kind","reason"}]}.',
-    'Every edge has a kind. "dependency": the ticket needs an API, data shape, behaviour or UI that dependsOn builds, so it cannot start before dependsOn is merged. "file": they only touch the same file or component.',
-    'Never add an edge whose only reason is a shared file as a dependency: additive changes handle that, DOCK shows it as merge-conflict risk and never makes the ticket wait. The reason names the API, data shape or contract, or for a file edge the file.',
-    'A ticket with a "How it starts without waiting" paragraph starts without waiting: it can be in groups with the tickets it waits on.',
-    'Post it: node "$K/dock-push.cjs" plan <file.json>.',
-    'Write chat replies in Bahasa Indonesia.',
-  ].join('\n');
+  const build = (level: number, factCount = facts.length) => {
+    const links = level >= 3 ? `${input.jiraEdges.length} links, read them on the tickets` : groupedLinks(input.jiraEdges) || 'none';
+    const lessons = level >= 2 ? input.tryLines.slice(0, 5) : input.tryLines;
+    const shown = facts.slice(0, factCount);
+    return [
+      `Pakai skill sous: plan ${input.sprint}.`,
+      'Sprint plan run: read only. No branch, no code, no Jira edits, no ledger.',
+      `Owner tickets to order: ${list(input.ownerKeys)}. Other tickets of the sprint, read only as something an owner ticket may wait for: ${list(input.otherKeys)}.`,
+      'For each owner ticket read the status, the acceptance criteria (customfield_10332), the epic, the Jira issue links, and the code areas it will touch (sous-explorer).',
+      `Jira links DOCK already applies ("A < B" = A waits for B), do not repeat them: ${links}.`,
+      ...(shown.length ? [
+        'Owner tickets in Jira order (#N label, then sprint-S-wave-W, then ticket number; "nowait" = has a "How it starts without waiting" paragraph; "waits" = teammates\' tickets it waits on). This order is the baseline: keep it unless a dependency forces a ticket later.',
+        ...shown.map((fact) => factLine(fact, level < 1)),
+        ...(factCount < facts.length ? [`- ${facts.length - factCount} more: read their labels on the tickets.`] : []),
+      ] : []),
+      ...(input.previousSprint && lessons.length ? [`Lessons accepted in the retro of ${input.previousSprint}, apply them:`, ...lessons.map((line) => `- ${line}`)] : []),
+      ...(input.mode === 'ticket' ? [`Map only ${list(input.mapKeys)} against the rest. The order of the other tickets stays: ${list(input.order)}.`] : []),
+      'Write JSON {"sprint","mode","tickets","order":[owner keys, first to last],"groups":[[keys startable together now]],"edges":[{"ticket","dependsOn","kind","reason"}]}.',
+      'Every edge has a kind. "dependency": the ticket needs an API, data shape, behaviour or UI that dependsOn builds, so it cannot start before dependsOn is merged. "file": they only touch the same file or component.',
+      'Never add an edge whose only reason is a shared file as a dependency: additive changes handle that, DOCK shows it as merge-conflict risk and never makes the ticket wait. The reason names the API, data shape or contract, or for a file edge the file.',
+      'A ticket with a "How it starts without waiting" paragraph starts without waiting: it can be in groups with the tickets it waits on.',
+      'Post it: node "$K/dock-push.cjs" plan <file.json>.',
+      'Write chat replies in Bahasa Indonesia.',
+    ].join('\n');
+  };
+  for (const level of [0, 1, 2, 3]) {
+    const text = build(level);
+    if (text.length <= PLAN_PROMPT_MAX) return text;
+  }
+  let count = facts.length;
+  let text = build(3, count);
+  while (text.length > PLAN_PROMPT_MAX && count > 0) text = build(3, --count);
+  return text.slice(0, PLAN_PROMPT_MAX);
 }
 
 export type PlanStore = Pick<StorageService,
