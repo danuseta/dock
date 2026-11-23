@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowRightLeft, Check, Clock, EyeOff, Flag, ListOrdered, RotateCcw, Undo2, X } from 'lucide-react';
+import { AlertTriangle, ArrowRightLeft, Check, Clock, EyeOff, FileWarning, Flag, ListOrdered, RotateCcw, Undo2, X } from 'lucide-react';
 import { Button, Input } from '../components/ui';
 import { AC_IN_ACTION, GET_AC_INCOMING, GET_SPRINT_DRIFT, GET_SPRINT_PLAN, SPRINT_DRIFT_ACTION, SPRINT_PLAN_EDGE_ACTION, SPRINT_PLAN_MAP } from '../graphql/queries';
 import { SET_TICKET_WORK_ORDER } from '../graphql/mutations';
 import { cn } from '../lib/cn';
 import { InfoTip } from './InfoTip';
 import {
-  driftReason, driftStateLabel, edgeStateText, groupsText, hasMap, isMapping, mappedText, orderSourceLabel, sortDrift, sourceLabel, suggestionDiffers,
-  type AcIn, type DriftRow, type PlanEdge, type SprintDrift, type SprintPlan,
+  driftReason, driftStateLabel, edgeStateText, groupsText, hasMap, isMapping, jiraPlaceLabel, mappedText, orderSourceLabel, sortDrift, sourceLabel, suggestionDiffers,
+  type AcIn, type DriftRow, type PlanEdge, type PlanFileEdge, type SprintDrift, type SprintPlan,
 } from './plan';
 
 const head = 'font-mono text-[0.62rem] font-bold uppercase tracking-[0.1em] text-muted-foreground';
@@ -157,29 +157,58 @@ const DriftSection: React.FC = () => {
   );
 };
 
-/** The Plan agent's suggested order next to the work order the cron follows; Use this order writes it as the owner's order. */
+/** DOCK's suggested order (Jira order, then dependencies) next to the work order the cron follows; Use this order writes it as the owner's order. */
 const SuggestedOrder: React.FC<{ plan: SprintPlan; busy: boolean; onUse: () => void }> = ({ plan, busy, onUse }) => {
-  const titleOf = new Map(plan.tickets.map((ticket) => [ticket.key, ticket.title]));
   const differs = suggestionDiffers(plan);
   return (
     <section aria-label="Suggested order" className="min-w-0 rounded-md border border-dashed border-accent/60 bg-surface-0 px-4 py-3">
       <div className="flex flex-wrap items-center gap-3">
-        <h3 className={head}>Suggested by Map dependencies</h3>
+        <h3 className={head}>
+          Suggested by Map dependencies
+          <InfoTip label="About the suggested order">DOCK starts from the Jira #N (else the wave label), keeps every ticket after the dependency it waits on unless the ticket says how it starts without waiting, moves a ticket 3 or more tickets wait on up, and puts a ticket waiting on a teammate's To Do ticket last.</InfoTip>
+        </h3>
         <span className="text-[0.78rem] text-muted-foreground">{differs ? 'Nothing changes until you use it.' : 'Same as the work order now.'}</span>
         <Button size="sm" variant="primary" className="ml-auto max-[760px]:ml-0" onClick={onUse} disabled={busy || !differs}><ListOrdered size={13} aria-hidden="true" />{busy ? 'Saving...' : 'Use this order'}</Button>
       </div>
-      <ol className="mt-2 grid gap-0.5">
-        {plan.suggestedOrder.map((key, index) => (
-          <li key={key} className="flex items-baseline gap-3 text-[0.8rem]">
+      <ol className="mt-2 grid gap-1">
+        {plan.suggestion.map((row, index) => (
+          <li key={row.key} className={cn('flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[0.8rem]', row.atRisk && 'border-l-2 border-l-status-warn pl-2')}>
             <span className="w-6 font-mono text-[0.72rem] tabular-nums text-muted-foreground">{index + 1}</span>
-            <span className="font-mono font-semibold">{key}</span>
-            <span className="min-w-0 flex-1 truncate text-secondary-foreground">{titleOf.get(key) ?? ''}</span>
+            <span className="font-mono font-semibold">{row.key}</span>
+            {jiraPlaceLabel(row) && <span className={cn(chip, 'border-border text-secondary-foreground')}>Jira {jiraPlaceLabel(row)}</span>}
+            {row.atRisk && <span className={cn(chip, 'border-status-warn text-status-warn')}><AlertTriangle size={10} className="mr-0.5 inline" aria-hidden="true" />At risk</span>}
+            <span className="min-w-0 flex-1 truncate text-secondary-foreground">{row.title}</span>
+            {row.reason && <span className="basis-full pl-9 text-pretty text-[0.74rem] text-muted-foreground">{row.reason}</span>}
           </li>
         ))}
       </ol>
     </section>
   );
 };
+
+/** Tickets the Plan agent found touching the same file: shown so merges are watched, never turned into a wait. */
+const FileRisk: React.FC<{ edges: PlanFileEdge[] }> = ({ edges }) => (
+  <section aria-label="Merge-conflict risk" className="min-w-0">
+    <h3 className={head}>
+      Merge-conflict risk (same file)
+      <InfoTip label="About merge-conflict risk">Both tickets touch the same file or component. Additive changes handle it, so neither waits for the other; watch the second merge.</InfoTip>
+    </h3>
+    <ul className="mt-2 rounded-md border border-border bg-surface-0">
+      {edges.map((edge) => (
+        <li key={`${edge.ticketKey}|${edge.dependsOnKey}`} className="border-b border-border px-3 py-2 text-[0.8rem] last:border-b-0">
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-secondary-foreground">
+            <FileWarning size={13} className="text-status-warn" aria-hidden="true" />
+            <span className="font-mono font-semibold text-foreground">{edge.ticketKey}</span>
+            <span>and</span>
+            <span className="font-mono font-semibold text-foreground">{edge.dependsOnKey}</span>
+            {edge.dependsOnTitle && <span className="min-w-0 truncate text-muted-foreground">{edge.dependsOnTitle}</span>}
+          </p>
+          {edge.reason && <p className="mt-1 text-pretty text-[0.76rem] text-muted-foreground">{edge.reason}</p>}
+        </li>
+      ))}
+    </ul>
+  </section>
+);
 
 /** The sprint's work order (yours, else Jira #N), what each ticket waits for, the lead's proposals awaiting Accept or Reject, and the order Map dependencies suggests. */
 export const PlanTab: React.FC = () => {
@@ -238,7 +267,8 @@ export const PlanTab: React.FC = () => {
       </div>
       {notice && <p className="text-sm text-secondary-foreground" role="status">{notice}</p>}
       {!hasMap(plan) && <p className="text-pretty text-sm text-muted-foreground">No dependency map for {plan.sprint} yet. Map dependencies is optional: its order is only a suggestion.</p>}
-      {plan.suggestedOrder.length > 0 && <SuggestedOrder plan={plan} busy={using} onUse={() => void onUseSuggestion(plan.suggestedOrder)} />}
+      {plan.suggestion.length > 0 && <SuggestedOrder plan={plan} busy={using} onUse={() => void onUseSuggestion(plan.suggestedOrder)} />}
+      {plan.fileEdges.length > 0 && <FileRisk edges={plan.fileEdges} />}
 
       {plan.tickets.length > 0 && (
         <section aria-label="Work order">
