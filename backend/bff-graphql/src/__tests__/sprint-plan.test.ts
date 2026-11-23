@@ -357,6 +357,24 @@ test('the suggested order starts from Jira #N, keeps dependencies, lets without-
   assert.deepStrictEqual([rows.find((row) => row.key === 'QRD-1580')!.wave, rows.find((row) => row.key === 'QRD-1647')!.jiraPosition], [2, 5]);
 });
 
+test('a ticket already in progress keeps its Jira place even when it waits on a teammate To Do ticket, and its dependants follow it', () => {
+  const rows = suggestOrder([
+    ticket('QRD-1579', { labels: ['#1'], status: 'PR Review' }),
+    ticket('QRD-1570', { labels: ['#3'], status: 'In Progress', links: [{ key: 'QRD-1569', relation: 'blockedBy' }] }),
+    ticket('QRD-1582', { labels: ['#6'], links: [{ key: 'QRD-1570', relation: 'blockedBy' }] }),
+    ticket('QRD-1593', { labels: ['#17'] }),
+  ], [
+    { ticketKey: 'QRD-1570', dependsOnKey: 'QRD-1569', source: 'jira', state: 'accepted' },
+    { ticketKey: 'QRD-1582', dependsOnKey: 'QRD-1570', source: 'jira', state: 'accepted' },
+  ], () => ({ status: 'To Do', assignee: 'Dwi Indra' }));
+  assert.deepStrictEqual(rows.map((row) => [row.key, row.atRisk, row.reason]), [
+    ['QRD-1579', false, 'already PR Review'],
+    ['QRD-1570', false, 'already In Progress'],
+    ['QRD-1582', false, null],
+    ['QRD-1593', false, null],
+  ]);
+});
+
 test('a ticket many tickets wait on moves up past tickets nobody waits on, never past a startable lower #N or an earlier wave', () => {
   const waiters = (count: number) => Array.from({ length: count }, (_, index) => ({ key: `QRD-${900 + index}`, relation: 'blocks' as const }));
   const rows = suggestOrder([

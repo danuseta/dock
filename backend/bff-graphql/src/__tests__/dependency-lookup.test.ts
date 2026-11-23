@@ -39,3 +39,10 @@ test('at most 20 distinct keys are fetched per call', async () => {
   await lookupDependencies(keys, async (key) => { seen.push(key); return { title: key }; });
   assert.strictEqual(seen.length, 20);
 });
+
+test('a caller can raise the number of keys fetched per call', async () => {
+  const seen: string[] = [];
+  const keys = Array.from({ length: 45 }, (_, i) => `QRD-${i + 1}`);
+  await lookupDependencies(keys, async (key) => { seen.push(key); return { title: key }; }, Date.now, 60);
+  assert.strictEqual(seen.length, 45);
+});
