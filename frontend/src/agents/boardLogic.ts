@@ -1,7 +1,7 @@
 // The pure side of Planning > Draft > Team map > Board: a lane per developer with the cards still to build and the new tickets.
-import { UNASSIGNED, countedNewTickets, newTicketNeedsWork, pendingNewTickets, uncheckedStoryboard, undecidedFinding, unrecordedEpics, type DraftFinding, type DraftNewTicket, type NewTicketInput, type PlanningPanel, type SprintDraft } from './planning';
+import { UNASSIGNED, countedNewTickets, newTicketNeedsWork, pendingNewTickets, sortFindings, uncheckedStoryboard, undecidedFinding, unrecordedEpics, type DraftFinding, type DraftNewTicket, type NewTicketInput, type PlanningPanel, type SprintDraft } from './planning';
 import { ticketsToReview } from './revisions';
-import { belowStandard, lintMark, type LintMark, type TicketLint } from '../lib/writing';
+import { belowStandard, lintMark, type LintFinding, type LintMark, type TicketLint } from '../lib/writing';
 
 export type BoardFilter = 'all' | 'ac' | 'sb' | 'new' | 'writing';
 export type TeamView = 'board' | 'schedule';
@@ -79,9 +79,61 @@ export function keyParts(text: string, key: string): Array<{ text: string; hit: 
   return text.split(pattern).filter(Boolean).map((part) => ({ text: part, hit: part.toLowerCase() === key.toLowerCase() }));
 }
 
+/**
+ * The writing findings of one AC line, as the AC check shows them: W3 is left out because the line's reference row already
+ * carries it, and a finding without a line (W4, a missing AC) belongs to the ticket, not to a line.
+ */
+export const isLineFinding = (finding: LintFinding) => finding.field === 'ac' && finding.line !== null && finding.rule !== 'W3';
+
+/** The short label of a line badge: "placeholder", "vague", "too long", "several behaviours" or "agent jargon"; null for a rule the badges do not show. */
+export function lineBadgeLabel(finding: LintFinding): string | null {
+  if (finding.rule === 'W1') return 'placeholder';
+  if (finding.rule === 'W2') return 'vague';
+  if (finding.rule !== 'W6') return null;
+  if (/jargon/i.test(finding.text)) return 'agent jargon';
+  if (/words/i.test(finding.text)) return 'too long';
+  if (/behaviours/i.test(finding.text)) return 'several behaviours';
+  return null;
+}
+
+type LintedDraft = Pick<SprintDraft, 'tickets' | 'findings'>;
+
+/** Per ticket of the plan, the line findings of each AC line (1-based) from the ticket's writing check. */
+export function acLineFindings(draft: Pick<SprintDraft, 'tickets'>): Map<string, Map<number, LintFinding[]>> {
+  const result = new Map<string, Map<number, LintFinding[]>>();
+  for (const ticket of draft.tickets) {
+    if (ticket.carried || ticket.merged) continue;
+    const lines = new Map<number, LintFinding[]>();
+    for (const finding of (ticket.lint?.findings ?? []).filter((item) => isLineFinding(item) && lineBadgeLabel(item))) lines.set(finding.line!, [...(lines.get(finding.line!) ?? []), finding]);
+    if (lines.size) result.set(ticket.key, lines);
+  }
+  return result;
+}
+
+/** How many AC lines have a finding that blocks: the "below the writing standard" count of the AC check and its tab badge. */
+export const belowStandardLines = (draft: Pick<SprintDraft, 'tickets'>): number => (
+  [...acLineFindings(draft).values()].reduce((total, lines) => total + [...lines.values()].filter((items) => items.some((item) => item.level === 'block')).length, 0)
+);
+
+export interface AcGroup { key: string; findings: DraftFinding[]; lines: Map<number, LintFinding[]>; block: boolean }
+
+/** The tickets of the AC check: those naming another ticket, and those with a line finding only. Tickets with a block finding come first. */
+export function acGroups(draft: LintedDraft): AcGroup[] {
+  const lines = acLineFindings(draft);
+  const ordered = findingGroups(sortFindings(draft.findings));
+  const keys = [...ordered.map((group) => group.key), ...[...lines.keys()].filter((key) => !ordered.some((group) => group.key === key))];
+  const groups = keys.map((key): AcGroup => {
+    const mine = lines.get(key) ?? new Map<number, LintFinding[]>();
+    const lint = draft.tickets.find((ticket) => ticket.key === key)?.lint;
+    const block = [...mine.values()].some((items) => items.some((item) => item.level === 'block')) || (lint?.findings ?? []).some((item) => item.field === 'ac' && item.line !== null && item.level === 'block');
+    return { key, findings: ordered.find((group) => group.key === key)?.findings ?? [], lines: mine, block };
+  });
+  return groups.sort((a, b) => Number(b.block) - Number(a.block));
+}
+
 /** The count badge of a panel tab; 0 shows no badge. */
 export function panelBadge(panel: PlanningPanel, draft: Pick<SprintDraft, 'tickets' | 'newTickets' | 'findings' | 'storyboards' | 'revisions'>): number {
-  if (panel === 'ac') return draft.findings.filter(undecidedFinding).length;
+  if (panel === 'ac') return draft.findings.filter(undecidedFinding).length + belowStandardLines(draft);
   if (panel === 'storyboard') return unrecordedEpics(draft).length + draft.tickets.filter((ticket) => !ticket.carried && ticket.storyboard && !ticket.storyboard.checked).length;
   if (panel === 'new') return ticketsToReview(draft).total;
   return 0;

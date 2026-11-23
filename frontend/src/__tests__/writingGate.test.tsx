@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import React from 'react';
@@ -5,9 +7,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { PlanningBar } from '../agents/PlanningBar';
 import { NewTicketsPanel } from '../agents/NewTicketsPanel';
 import { RevisionsPanel } from '../agents/RevisionsPanel';
-import { FlagBox, Findings } from '../agents/WritingFindings';
-import { barIssues, boardCards, cardMark, cardShown, filterCounts } from '../agents/boardLogic';
-import type { DraftNewTicket, DraftRevision, DraftTicket, SprintDraft } from '../agents/planning';
+import { FlagBox, Findings, LineBadges } from '../agents/WritingFindings';
+import { acGroups, barIssues, belowStandardLines, boardCards, cardMark, cardShown, filterCounts, lineBadgeLabel, panelBadge } from '../agents/boardLogic';
+import { planAttention, type DraftNewTicket, type DraftRevision, type DraftTicket, type SprintDraft } from '../agents/planning';
 import { chatSuggestions, humanizeChipPrompt } from '../chat/suggestions';
 import { WritingMark } from '../components/ticket/WritingMark';
 import { ReadinessCard, ReadinessChip } from '../components/ticket/TicketReady';
@@ -152,4 +154,64 @@ test('a revision below the standard is applied with a flag, shows its findings p
   assert.match(empty, /Humanize/);
   assert.doesNotMatch(empty, /QRD-3/);
   assert.doesNotMatch(panel(draft({ tickets: [ticket('QRD-1', BLOCK)] })), /Humanize/, 'without a chat to ask there is no button');
+});
+
+const lineFinding = (rule: string, line: number, level: 'block' | 'warn', text: string) => ({ rule, field: 'ac', line, level, text, fix: 'Fix it.' });
+const W2_LINE = lineFinding('W2', 2, 'block', 'AC 2 says "works correctly" and shows nothing a tester can observe.');
+const W1_LINE = lineFinding('W1', 3, 'block', 'AC 3 is a placeholder ("TBD").');
+const W6_JARGON = lineFinding('W6', 1, 'warn', 'Agent jargon in AC 1: GUESS.');
+const W6_LONG = lineFinding('W6', 1, 'warn', 'AC 1 has 41 words; the most is 30.');
+const W6_MANY = lineFinding('W6', 2, 'warn', 'AC 2 joins 4 or more behaviours with "and".');
+const TICKET_WIDE = { rule: 'W5', field: 'summary', line: null, level: 'warn' as const, text: 'The summary has no prefix.', fix: 'Add [FE].' };
+const withLint = (key: string, findings: Array<ReturnType<typeof lineFinding> | typeof TICKET_WIDE>): DraftTicket => ({ ...ticket(key, { ok: !findings.some((item) => item.level === 'block'), findings: findings as never }), ac: ['One', 'Two', 'Three'] });
+const refFinding = (key: string, line: number) => ({ id: `ac|${key}|QRD-9|x`, key, line, text: 'Uses QRD-9', refKey: 'QRD-9', kind: 'outside-plan', refEnd: null, ownEnd: null, decision: null, linked: false });
+
+test('the AC check lists a ticket that has only line findings, without reference rows', () => {
+  const d = draft({ tickets: [withLint('QRD-1', [W2_LINE, TICKET_WIDE]), withLint('QRD-2', [])] });
+  const groups = acGroups(d);
+  assert.deepEqual(groups.map((group) => [group.key, group.findings.length, [...group.lines.keys()]]), [['QRD-1', 0, [2]]]);
+  assert.deepEqual(acGroups(draft({ tickets: [withLint('QRD-2', [TICKET_WIDE])] })), [], 'ticket-level findings alone do not bring a ticket to this tab');
+});
+
+test('line badges read placeholder, vague, too long, several behaviours and agent jargon', () => {
+  assert.deepEqual([W1_LINE, W2_LINE, W6_LONG, W6_MANY, W6_JARGON].map((item) => lineBadgeLabel(item)), ['placeholder', 'vague', 'too long', 'several behaviours', 'agent jargon']);
+  assert.equal(lineBadgeLabel(lineFinding('W3', 1, 'block', 'AC 1 names QRD-9')), null);
+  const html = renderToStaticMarkup(<LineBadges findings={[W2_LINE, W6_MANY]} label={lineBadgeLabel} />);
+  assert.match(html, /W2 · vague/);
+  assert.match(html, /W6 · several behaviours/);
+  assert.match(html, /border-status-conflict\/50/);
+  assert.match(html, /border-status-warn\/50/);
+  assert.match(html, /flex-wrap/);
+  assert.match(html, /title="AC 2 says &quot;works correctly&quot;[^"]*Fix it\."/);
+});
+
+test('the header count and the tab badge count undecided references plus AC lines with a block finding', () => {
+  const d = draft({
+    tickets: [withLint('QRD-1', [W2_LINE, W1_LINE, W6_JARGON]), withLint('QRD-3', [W6_LONG]), withLint('QRD-4', [lineFinding('W3', 1, 'block', 'AC 1 names QRD-9')])],
+    findings: [refFinding('QRD-4', 1)],
+  });
+  assert.equal(belowStandardLines(d), 2, 'W2 and W1 lines; a W6 note and a W3 reference are not counted here');
+  assert.equal(panelBadge('ac', { ...d, newTickets: [], storyboards: [], revisions: [] }), 3, '1 undecided reference + 2 block lines');
+  assert.equal(belowStandardLines(draft({ tickets: [withLint('QRD-3', [W6_LONG])] })), 0);
+});
+
+test('tickets with a block finding come first, and a reference row keeps its line badges', () => {
+  const d = draft({
+    tickets: [withLint('QRD-5', [W6_LONG]), withLint('QRD-1', [W2_LINE]), withLint('QRD-4', [W6_MANY]), withLint('QRD-6', [lineFinding('W3', 1, 'block', 'AC 1 names QRD-9')])],
+    findings: [refFinding('QRD-6', 1)],
+  });
+  const groups = acGroups(d);
+  assert.deepEqual(groups.map((group) => [group.key, group.block]), [['QRD-6', true], ['QRD-1', true], ['QRD-5', false], ['QRD-4', false]]);
+  assert.deepEqual(groups[0].findings.map((finding) => finding.line), [1]);
+  const tab = readFileSync(fileURLToPath(new URL('../agents/PlanningTab.tsx', import.meta.url)), 'utf8');
+  assert.match(tab, /AC \{below === 1 \? 'line' : 'lines'\} below the writing standard/);
+  assert.match(tab, /onHumanize\(group\.key\)/);
+  assert.match(tab, /humanizePrompt\(key, draft\.sprint\)\)\} \/>\}/);
+});
+
+test('the Planning status line says how many tickets joined the sprint since the last load', () => {
+  assert.deepEqual(planAttention(null, { questions: [], addedSince: ['QRD-9100', 'QRD-9101'] }).map((item) => item.text), ['2 new tickets since the last load']);
+  assert.deepEqual(planAttention(null, { questions: [], addedSince: ['QRD-9100'] }).map((item) => item.text), ['1 new ticket since the last load']);
+  assert.deepEqual(planAttention(null, { questions: [], addedSince: [] }), []);
+  assert.deepEqual(planAttention(null, { questions: [] }), []);
 });

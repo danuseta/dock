@@ -61,6 +61,8 @@ export interface SprintDraft {
   scopeCut?: DraftDecision | null;
   /** The split page as the last load read it; null or absent when none is set. */
   split?: DraftSplit | null;
+  /** Tickets that joined the sprint in Jira after the last load, added by the hourly refresh. */
+  addedSince?: string[];
   /** Tickets not in Jira yet, created on Publish. */
   newTickets?: DraftNewTicket[];
   /** Changes to tickets already in Jira, written by the planning agent: pending first, then applied; discarded ones are left out. */
@@ -130,12 +132,14 @@ export function planMetaLine(signal: PlanSignal | null, draft: { loadedAt: strin
 export interface StatusItem { text: string; action?: 'chat' | 'republish' }
 
 /** The third line, only what needs attention: the cron gate, open chat questions and changes since publish. */
-export function planAttention(signal: PlanSignal | null, draft: Pick<SprintDraft, 'questions'> | null): StatusItem[] {
+export function planAttention(signal: PlanSignal | null, draft: Pick<SprintDraft, 'questions' | 'addedSince'> | null): StatusItem[] {
   const items: StatusItem[] = [];
   const planner = signal?.planner ?? 'planner';
   if (signal && !signal.revision && signal.waitForPublish) items.push({ text: signal.isPlanner ? 'Cron waits for publish' : `Cron waits for ${planner} to publish` });
   const open = draft?.questions.filter((question) => !question.answered).length ?? 0;
   if (open) items.push({ text: `${open} ${open === 1 ? 'question' : 'questions'} in chat`, action: 'chat' });
+  const added = draft?.addedSince?.length ?? 0;
+  if (added) items.push({ text: `${added} new ${added === 1 ? 'ticket' : 'tickets'} since the last load` });
   const changed = signal ? signal.joined.length + signal.acChanged.length : 0;
   if (signal?.revision && changed) {
     items.push(signal.isPlanner

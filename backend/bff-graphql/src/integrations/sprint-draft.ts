@@ -77,11 +77,12 @@ const MAX_STEPS = 40;
 
 interface DraftRow {
   sprint: string; sprintId: number; status: string; sprintDays: number; startDate: Date | null; decisions: string; qaReason: string | null;
-  refStatuses: string; createdBy: string | null; loadedAt: Date; publishedAt: Date | null; storyboards?: string; questions?: string; merges?: string;
+  refStatuses: string; createdBy: string | null; loadedAt: Date; publishedAt: Date | null; storyboards?: string; questions?: string; merges?: string; addedKeys?: string;
   tickets: Array<{
     key: string; summary: string; dev: string | null; sp: number | null; wave: number | null; planRank?: number | null; ac: string; jiraAc: string; jiraDev: string | null;
     dependsOn: string; status: string; prediction: string | null; position: number; epic?: string | null; frames?: string;
     tcs?: string; tcAt?: Date | null; tcPosted?: string | null; carried?: boolean;
+    issueType?: string | null; description?: string | null; userStory?: string | null; problem?: string | null;
   }>;
   newTickets?: NewTicketRow[];
   revisions?: RevisionRow[];
@@ -93,6 +94,8 @@ export interface DraftStore {
   getSettings(): Promise<Array<{ key: string; value: string }>>;
   getSprintDraft(sprint: string): Promise<DraftRow | null>;
   replaceSprintDraft(draft: SprintDraftInput, tickets: SprintDraftTicketInput[]): Promise<unknown>;
+  addSprintDraftTickets(sprint: string, tickets: SprintDraftTicketInput[], addedKeys: string[]): Promise<unknown>;
+  listSprintDrafts(): Promise<Array<{ sprint: string; sprintId: number; status: string }>>;
   updateSprintDraftTicket(sprint: string, key: string, data: { dev?: string | null; sp?: number | null; wave?: number | null; ac?: string[]; jiraAc?: string[]; jiraDev?: string | null; tcs?: string; tcAt?: Date; tcPosted?: string | null }): Promise<unknown>;
   updateSprintDraft(sprint: string, data: { decisions?: string; qaReason?: string | null; status?: string; publishedAt?: Date | null; storyboards?: string; questions?: string }): Promise<unknown>;
   saveSprintDraftPredictions(sprint: string, predictions: Map<string, string> | null, qaReason: string | null): Promise<unknown>;
@@ -141,7 +144,7 @@ export interface DraftTicketView extends Omit<ScheduledTicket, 'dev' | 'wave'> {
   ac: string[]; dependsOn: string[]; prediction: QaPrediction | null; qaDecision: Decision | null;
   epic: string | null; frames: string[]; storyboard: StoryboardFlag | null;
   tcs: DraftTc[];
-  /** The writing standard on the fields the draft holds: summary, AC, SP and Blocks links. Type, User Story and Problem are read from Jira on the ticket detail. */
+  /** The writing standard on the fields the draft holds: summary, AC, SP, Blocks links, and the type, description, User Story and Problem the load read (a draft loaded before that has none, so W4 and W7 wait for the next load). */
   lint: TicketLint;
   /** QA approved the test cases as they are now (decision tc|KEY); a later change of the set needs a new approval. */
   tcApproved: boolean;
@@ -192,6 +195,8 @@ export interface DraftView {
   /** The weeks the split page gives, with the tickets that sit elsewhere; null when no split page was read for this draft. */
   split?: SplitView | null;
   newTickets: DraftNewTicket[];
+  /** Tickets that joined the sprint in Jira after the last load and were added by the hourly refresh. */
+  addedSince: string[];
   /** Changes the planning agent proposes to tickets that exist in Jira: pending first, then applied, newest first; discarded ones left out. */
   revisions: DraftRevision[];
 }
@@ -206,6 +211,23 @@ export interface SplitSource {
   save(sprint: string, state: SplitState | null): Promise<unknown>;
 }
 export interface ContractTarget { client: ContractClient | null; parentId: string | null }
+
+const MAX_DESCRIPTION = 4000;
+/** The refresh that picks up tickets added to a sprint runs at most this often. */
+const REFRESH_MS = 60 * 60 * 1000;
+
+/** A draft ticket as the load reads it from Jira: AC, links, and the text the writing check needs. */
+function draftTicketOf(issue: PlanningIssue, carried: boolean): SprintDraftTicketInput {
+  const ac = acValueLines(issue.acRaw);
+  const text = (raw: unknown) => fieldLines(raw).map((line) => line.trim()).filter(Boolean).join('\n');
+  return {
+    key: issue.key, summary: issue.summary, dev: issue.assignee, sp: issue.sp, wave: null, planRank: rankOf(issue.labels ?? []), status: issue.status,
+    ac, jiraAc: ac, jiraDev: issue.assignee,
+    dependsOn: [...new Set(issue.links.filter((link) => link.relation === 'blockedBy').map((link) => link.key))],
+    epic: issue.epic ?? null, frames: framesIn([...ac, ...fieldLines(issue.descriptionRaw)]), carried,
+    issueType: issue.type || null, description: text(issue.descriptionRaw).slice(0, MAX_DESCRIPTION), userStory: text(issue.userStoryRaw), problem: text(issue.problemRaw),
+  };
+}
 
 const parse = <T>(raw: string | null | undefined, fallback: T): T => {
   try { return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; }
@@ -741,15 +763,7 @@ export class SprintDraftService {
     const keys = new Set(issues.map((issue) => issue.key));
     const read = this.mergeStates ? await this.mergeStates([...keys]).catch(() => null) : null;
     const merges: DraftMerges = read ? { source: 'github', tickets: Object.fromEntries(read) } : { source: 'jira', tickets: {} };
-    const tickets: SprintDraftTicketInput[] = issues.map((issue) => {
-      const ac = acValueLines(issue.acRaw);
-      return {
-        key: issue.key, summary: issue.summary, dev: issue.assignee, sp: issue.sp, wave: null, planRank: rankOf(issue.labels ?? []), status: issue.status,
-        ac, jiraAc: ac, jiraDev: issue.assignee,
-        dependsOn: [...new Set(issue.links.filter((link) => link.relation === 'blockedBy').map((link) => link.key))],
-        epic: issue.epic ?? null, frames: framesIn([...ac, ...fieldLines(issue.descriptionRaw)]), carried: carried.has(issue.key),
-      };
-    });
+    const tickets: SprintDraftTicketInput[] = issues.map((issue) => draftTicketOf(issue, carried.has(issue.key)));
     const outside = new Set<string>();
     for (const ticket of tickets) {
       for (const line of ticket.ac) for (const ref of line.match(/\bQRD-\d+\b/gi) || []) outside.add(ref.toUpperCase());
@@ -772,6 +786,42 @@ export class SprintDraftService {
     await this.readSplit(sprint.name);
     await this.refreshQa(sprint.name);
     return this.checkStoryboards(sprint.name).catch(async () => (await this.view(sprint.name))!);
+  }
+
+  /**
+   * Adds the tickets that joined the sprint in Jira after the last load. Only new keys are written: the planner's changes and
+   * decisions on the tickets already in the draft stay, and the draft reports the new keys until the next load.
+   */
+  async addNewTickets(sprint: string): Promise<string[]> {
+    const row = await this.store.getSprintDraft(sprint);
+    if (!row) return [];
+    const jira = await this.jira();
+    const known = new Set(row.tickets.map((ticket) => ticket.key));
+    const fresh = (await jira.sprintIssues(row.sprintId)).filter((issue) => !known.has(issue.key));
+    if (!fresh.length) return [];
+    const carried = new Set(jira.carriedKeys ? await jira.carriedKeys(row.sprintId).catch(() => [] as string[]) : []);
+    const keys = fresh.map((issue) => issue.key);
+    await this.store.addSprintDraftTickets(sprint, fresh.map((issue) => draftTicketOf(issue, carried.has(issue.key))), [...new Set([...parse<string[]>(row.addedKeys, []), ...keys])]);
+    return keys;
+  }
+
+  private refreshedAt = 0;
+
+  /** The hourly refresh: every draft of an active or future sprint picks up the tickets added to the sprint since it was loaded. One search per sprint. */
+  async refreshNewTickets(): Promise<Record<string, string[]>> {
+    const now = this.now().getTime();
+    if (this.refreshedAt && now - this.refreshedAt < REFRESH_MS) return {};
+    this.refreshedAt = now;
+    if (this.editGuard && (await this.editGuard())) return {};
+    const drafts = await this.store.listSprintDrafts();
+    if (!drafts.length) return {};
+    const open = new Set((await (await this.jira()).listSprints()).map((item) => item.id));
+    const added: Record<string, string[]> = {};
+    for (const draft of drafts.filter((item) => open.has(item.sprintId))) {
+      const keys = await this.addNewTickets(draft.sprint).catch(() => [] as string[]);
+      if (keys.length) added[draft.sprint] = keys;
+    }
+    return added;
   }
 
   async view(sprint: string): Promise<DraftView | null> {
@@ -887,7 +937,7 @@ export class SprintDraftService {
       status: ticket.status, ac: ticket.ac, dependsOn: ticket.dependsOn, start: placed.start, dur: placed.dur, end: placed.end,
       inSprint: placed.inSprint, split: placed.split, prediction: ticket.prediction, qaDecision: decisions[qaId(ticket.key)] ?? null,
       epic: ticket.epic, frames: ticket.frames, storyboard: flagOf(ticket),
-      lint: lintTicket({ key: ticket.key, summary: ticket.summary, ac: ticket.ac, sp: ticket.sp, blockedBy: ticket.dependsOn, decidedRefs: findings.filter((finding) => finding.key === ticket.key && finding.decision).map((finding) => finding.refKey) }),
+      lint: lintTicket({ key: ticket.key, summary: ticket.summary, ac: ticket.ac, sp: ticket.sp, blockedBy: ticket.dependsOn, type: ticket.issueType ?? undefined, userStory: ticket.userStory ?? undefined, problem: ticket.problem ?? undefined, description: ticket.description ?? undefined, decidedRefs: findings.filter((finding) => finding.key === ticket.key && finding.decision).map((finding) => finding.refKey) }),
       tcs: ticket.tcs, tcApproved: tcApproved(ticket, decisions[tcId(ticket.key)]), acHash: acHash(ticket.ac), tcStale: tcStale(ticket), tcPending: ticket.tcs.length > 0 && JSON.stringify(ticket.tcs) !== (ticket.tcPosted ?? ''),
       merge: mergeOf(ticket.key)?.merge ?? 'unknown', pulls: mergeOf(ticket.key)?.pulls ?? [],
       jiraAhead: isDoneStatus(ticket.status) && mergeOf(ticket.key)?.merge === 'open',
@@ -916,6 +966,7 @@ export class SprintDraftService {
       scopeCut: decisions[SCOPE_CUT_ID] ?? null,
       newTickets,
       revisions,
+      addedSince: parse<string[]>(row.addedKeys, []).filter((key) => draftKeys.has(key)),
     };
   }
 

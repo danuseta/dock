@@ -893,7 +893,7 @@ export const SPRINT_DRAFT_NEW_TICKET_FIELDS = `id summary type epic dev sp prior
 export const SPRINT_DRAFT_REVISION_FIELDS = `key summary status note source fields { name label before after } inSprint error createdAt appliedAt flagReason ${LINT_FIELDS}`;
 
 export const SPRINT_DRAFT_FIELDS = `
-  sprint sprintId status sprintDays startDate spPerDay createdBy loadedAt publishedAt qaReason devs blockers canPublish landed carriedPast today
+  sprint sprintId status sprintDays startDate spPerDay createdBy loadedAt publishedAt qaReason devs blockers canPublish landed carriedPast today addedSince
   tickets {
     key summary dev jiraDev sp left wave waveSet status ac dependsOn start dur end inSprint split
     prediction { prediction reasons fix }

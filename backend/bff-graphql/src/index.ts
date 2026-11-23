@@ -16,6 +16,7 @@ import { autoReview } from './integrations/auto-review-live';
 import { reviewFindings } from './integrations/review-findings-live';
 import { qaAuto } from './integrations/qa-local-live';
 import { uatMerged } from './integrations/uat-merged';
+import { sprintDraftService } from './integrations/sprint-draft-live';
 import { worktrees } from './integrations/worktrees-live';
 import { autoBroadcast } from './integrations/broadcast';
 import { decisionGate, keepFinishedGuesses, sweepReleases } from './integrations/decision-gate';
@@ -64,6 +65,8 @@ export async function startServer(): Promise<void> {
         await orchestratorService.syncJira(dockMode(), tickets);
         // The laptop DOCK moves tickets only when Settings › Sous flow › Aturan says so; statusNow keeps it to one move.
         await uatMerged.tick(tickets, dockMode()).catch((error) => console.error('[UatMerged]', error));
+        // Tickets added to a sprint after its draft was loaded join the draft once an hour, on the planner's DOCK only.
+        await sprintDraftService.refreshNewTickets().catch((error) => console.warn('[SprintDraft] refresh failed:', error instanceof Error ? error.message : 'unknown error'));
       })
       .catch((error) => console.warn('[Orchestrator] Jira sync failed:', error instanceof Error ? error.message : 'unknown error'));
     setInterval(syncJira, JIRA_SYNC_MS).unref();

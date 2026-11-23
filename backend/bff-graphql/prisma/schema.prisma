@@ -548,6 +548,8 @@ model SprintDraft {
   questions   String    @default("[]") /// [{id, text, key, askedAt, answered, answeredBy, answeredAt}]: open questions the planning chat raised
   merges      String    @default("{}") /// {source: github|jira, tickets: {key: {merge, pulls}}}: GitHub merge state read on the last load
   newTicketSeq Int      @default(0) /// the n of the last NEW-n id given out; ids are never reused
+  addedKeys   String    @default("[]") /// keys of tickets added to the sprint since the last load, picked up by the hourly refresh
+  addedAt     DateTime? /// when the refresh last added tickets
   createdBy   String?
   loadedAt    DateTime  @default(now())
   publishedAt DateTime?
@@ -622,6 +624,10 @@ model SprintDraftTicket {
   tcAt        DateTime? /// when the test cases were last written
   tcPosted    String? /// the test cases of the last QONFLO-TC v1 comment posted on the ticket
   carried     Boolean @default(false) /// also in a closed sprint: carried over from an earlier sprint
+  issueType   String? /// Jira issue type as loaded; null on a draft loaded before the writing check read it
+  description String? /// Jira description as text (at most 4000 characters)
+  userStory   String? /// User Story (customfield_10341, else the older field) as text
+  problem     String? /// Problem Definition (customfield_10331) as text
   position    Int     @default(0)
   updatedAt   DateTime @default(now()) @updatedAt /// when the planner or the agent last changed the ticket
 

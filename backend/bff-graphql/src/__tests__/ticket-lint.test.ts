@@ -9,7 +9,7 @@ const BAD: LintInput = {
   problem: 'Per D-3 (GUESS) the header lacks phone; see ChatHeader.tsx:42. Agents need it.',
   ac: [
     'Phone number display works correctly.',
-    'Header is user friendly and the copy button and formatting and the empty state all behave as expected for every contact type.',
+    'Header is user friendly and the copy button and formatting and the empty state and every contact type all behave as expected.',
     'Uses the field from QRD-1603.',
     'TBD for group chats',
   ],
@@ -69,11 +69,12 @@ test('W1: no AC, or placeholder lines, block; each placeholder is a finding on i
 });
 
 test('W2: a vague phrase with nothing observable blocks; a quoted result makes it observable', () => {
-  for (const phrase of ['works correctly', 'work properly', 'as expected', 'user friendly', 'user-friendly', 'properly', 'correctly', 'sesuai', 'dengan baik', 'berjalan normal', 'optimal', 'seamless', 'intuitive']) {
+  for (const phrase of ['works correctly', 'work properly', 'as expected', 'user friendly', 'user-friendly', 'sesuai', 'dengan baik', 'berjalan normal', 'optimal', 'seamless', 'intuitive']) {
     assert.deepStrictEqual(at({ ac: [`The page ${phrase} on mobile.`] }, 'W2').map((item) => item.level), ['block'], phrase);
   }
   assert.deepStrictEqual(at({ ac: ['The toast says "Saved" as expected.'] }, 'W2'), []);
   assert.deepStrictEqual(at({ ac: ['The suboptimal row is hidden.'] }, 'W2'), []);
+  assert.deepStrictEqual(at({ ac: ['The page is rendered correctly.', 'The form is filled in properly.'] }, 'W2'), [], 'the standalone words are not enough; only works correctly and work properly are');
 });
 
 test('W3: an AC line naming another ticket needs a Blocks link or a decision to move it to Reference', () => {
@@ -102,8 +103,10 @@ test('W6: agent jargon, long AC lines and three behaviours in one line are warni
   for (const jargon of ['see File.tsx:42', 'a GUESS', 'D-12', 'task T3', 'the ledger', 'via sous', 'issue I-4']) {
     assert.strictEqual(at({ problem: `Text ${jargon} here` }, 'W6').length, 1, jargon);
   }
-  assert.strictEqual(at({ ac: [Array.from({ length: 31 }, (_, index) => `w${index}`).join(' ')] }, 'W6').length, 1);
-  assert.strictEqual(at({ ac: ['Shows A and B and C and D.'] }, 'W6').length, 1);
+  assert.strictEqual(at({ ac: [Array.from({ length: 41 }, (_, index) => `w${index}`).join(' ')] }, 'W6').length, 1);
+  assert.strictEqual(at({ ac: [Array.from({ length: 40 }, (_, index) => `w${index}`).join(' ')] }, 'W6').length, 0, '40 words is the most');
+  assert.strictEqual(at({ ac: ['Shows A and B and C and D and E.'] }, 'W6').length, 1);
+  assert.strictEqual(at({ ac: ['Shows A and B and C and D.'] }, 'W6').length, 0, 'three conjunctions are allowed; four are not');
   assert.strictEqual(at({ ac: ['Shows A and B dan C.'] }, 'W6').length, 0);
   assert.strictEqual(at({ ac: ['Shows A, B and C.'] }, 'W6').length, 0);
 });

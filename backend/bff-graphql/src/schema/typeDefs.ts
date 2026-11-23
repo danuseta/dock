@@ -784,6 +784,8 @@ export const typeDefs = gql`
 
   """A sprint being planned. blockers (finding or qa|KEY ids) are shown before publish; they never hold it."""
   type SprintDraft {
+    "Tickets that joined the sprint in Jira after the last load; the hourly refresh added them to the draft."
+    addedSince: [String!]!
     sprint: String!
     sprintId: Int!
     """draft or published."""

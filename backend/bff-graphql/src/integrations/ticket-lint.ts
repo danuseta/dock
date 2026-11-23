@@ -28,11 +28,13 @@ export const WRITING_FLAG_LABEL = 'WRITING-FLAG';
 export const FLAG_REASON_MIN = 5;
 export const FLAG_REASON_MAX = 300;
 export const SUMMARY_MAX = 100;
-export const AC_WORDS_MAX = 30;
+export const AC_WORDS_MAX = 40;
+/** A line that joins this many "and"/"dan" reads as several behaviours. */
+export const AC_AND_MAX = 4;
 export const SP_SPLIT_AT = 5;
 
 export const VAGUE_PHRASES = [
-  'works correctly', 'work properly', 'as expected', 'user friendly', 'user-friendly', 'properly', 'correctly', 'sesuai',
+  'works correctly', 'work properly', 'as expected', 'user friendly', 'user-friendly', 'sesuai',
   'dengan baik', 'berjalan normal', 'optimal', 'seamless', 'intuitive',
 ];
 const PLACEHOLDER = /(^|[^\p{L}\p{N}])(tbd|tba|n\/a|to be defined)([^\p{L}\p{N}]|$)|^[-–—.…\s]*$/iu;
@@ -112,7 +114,7 @@ export function lintTicket(input: LintInput): TicketLint {
     const found = jargonIn(line);
     if (found.length) findings.push(finding('W6', 'ac', n, `Agent jargon in AC ${n}: ${found.join(', ')}.`, 'Write it the way you would tell a teammate; leave out ids and code paths.'));
     if (words(line) > AC_WORDS_MAX) findings.push(finding('W6', 'ac', n, `AC ${n} has ${words(line)} words; the most is ${AC_WORDS_MAX}.`, 'Cut it down to one behaviour per line.'));
-    if ((line.match(/\b(?:and|dan)\b/gi) ?? []).length >= 3) findings.push(finding('W6', 'ac', n, `AC ${n} joins three or more behaviours with "and".`, 'Split it into one line per behaviour.'));
+    if ((line.match(/\b(?:and|dan)\b/gi) ?? []).length >= AC_AND_MAX) findings.push(finding('W6', 'ac', n, `AC ${n} joins ${AC_AND_MAX} or more behaviours with "and".`, 'Split it into one line per behaviour.'));
   });
 
   if (input.userStory !== undefined && !(input.userStory ?? '').trim()) findings.push(finding('W7', 'userStory', null, 'The User Story is empty.', 'Write "As a ..., I want ..., so ...".'));

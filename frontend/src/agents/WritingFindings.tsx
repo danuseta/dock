@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Flag, Send, X } from 'lucide-react';
 import { Button, Textarea } from '../components/ui';
 import { cn } from '../lib/cn';
+import type { LintFinding as LineFinding } from '../lib/writing';
 import { FLAG_REASON_MAX, FLAG_REASON_MIN, WRITING_FLAG_LABEL, blocksOf, findingsOf, flagReasonValid, type LintFinding, type TicketLint } from '../lib/writing';
 
 const tone = (level: LintFinding['level']) => (level === 'block'
@@ -20,6 +21,28 @@ export const Findings: React.FC<{ lint: TicketLint | null | undefined; field: st
         </li>
       ))}
     </ul>
+  );
+};
+
+/** The badges of one AC line: red for a block, amber for a note; a tap on a badge shows its text and fix. They wrap on a narrow screen. */
+export const LineBadges: React.FC<{ findings: LineFinding[]; label: (finding: LineFinding) => string | null }> = ({ findings, label }) => {
+  const [open, setOpen] = useState<number | null>(null);
+  const shown = findings.filter((item) => label(item));
+  if (!shown.length) return null;
+  return (
+    <span className="flex min-w-0 flex-wrap items-center gap-1" aria-label="Writing findings of this line">
+      {shown.map((item, index) => (
+        <button
+          key={`${item.rule}-${index}`} type="button" onClick={() => setOpen(open === index ? null : index)} aria-expanded={open === index} title={`${item.text} ${item.fix}`}
+          className={cn('rounded-xs border px-1.5 font-mono text-[0.6rem] font-bold tracking-[0.04em] max-[760px]:min-h-7', tone(item.level))}
+        >
+          {item.rule} · {label(item)}
+        </button>
+      ))}
+      {open !== null && shown[open] && (
+        <span className={cn('basis-full text-pretty rounded-xs border px-2 py-1 text-[0.74rem] [overflow-wrap:anywhere]', tone(shown[open].level))}>{shown[open].text} <span className="opacity-80">{shown[open].fix}</span></span>
+      )}
+    </span>
   );
 };
 
