@@ -2,7 +2,7 @@ import { gmVerifiedParty } from '../integrations/guild-master';
 import { JiraAPI, JiraTicketLookupError } from '../datasources/JiraAPI';
 import { GitHubAPI } from '../datasources/GitHubAPI';
 import { DiscordAPI } from '../datasources/DiscordAPI';
-import { StorageAPI } from '../datasources/StorageAPI';
+import { SettingsInputError, StorageAPI } from '../datasources/StorageAPI';
 import { GraphQLError } from 'graphql';
 import type { ReviewRound } from '@prisma/client';
 import { shouldRequirePin, type AuthContext } from '../auth/session';
@@ -1004,7 +1004,11 @@ export const resolvers = {
       }
     },
     updateSettings: async (_: any, { input }: { input: any }) => {
-      const saved = await storageAPI.updateSettings(input);
+      let saved: boolean;
+      try { saved = await storageAPI.updateSettings(input); } catch (error) {
+        if (error instanceof SettingsInputError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+        throw error;
+      }
       resetOwnerPassLabel();
       return saved;
     },

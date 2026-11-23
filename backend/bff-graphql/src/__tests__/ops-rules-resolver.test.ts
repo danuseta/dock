@@ -24,3 +24,15 @@ test('opsRules does not depend on the order the rows come back in', async (t) =>
   assert.deepStrictEqual(JSON.parse(rules.worktreeMerged), { mode: 'off', days: 7 });
   assert.deepStrictEqual(JSON.parse(rules.statusAfterMerge), { enabled: false, next: 'UAT CHECK', ignoreDocsSync: false, laptop: true });
 });
+
+test('updateSettings refuses a bad value with its reason as BAD_USER_INPUT', async (t) => {
+  t.mock.method(StorageService.prototype, 'hasMasterPin', async () => false);
+  const upsert = t.mock.method(StorageService.prototype, 'upsertSetting', async () => undefined);
+  const update = resolvers.Mutation.updateSettings as (parent: unknown, args: unknown, context: unknown) => Promise<boolean>;
+  await assert.rejects(update(undefined, { input: { lightMaxLines: 999999 } }, unlocked), (error: { message: string; extensions?: { code?: string } }) => {
+    assert.match(error.message, /lightMaxLines/);
+    assert.strictEqual(error.extensions?.code, 'BAD_USER_INPUT');
+    return true;
+  });
+  assert.strictEqual(upsert.mock.callCount(), 0);
+});
