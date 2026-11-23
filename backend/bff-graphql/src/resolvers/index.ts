@@ -34,7 +34,9 @@ import { discordGateway, discordReader } from '../integrations/discord-reader-li
 import { isTeamChannel } from '../integrations/discord-team';
 import { ChannelInputError, channelStore, isChannelKind, threadService, withJira } from '../integrations/discord-threads';
 import { DiscordReaderError, ROW_VERSION } from '../integrations/discord-reader';
-import { OpsRulesInputError, STATUS_AFTER_MERGE_KEY, WORKTREE_MERGED_KEY, parseStatusAfterMerge, parseWorktreeMerged, readStatusAfterMerge, readWorktreeMerged } from '../integrations/ops-rules';
+import { HOLD_NEW_SPRINT_KEY, OpsRulesInputError, STATUS_AFTER_MERGE_KEY, WORKTREE_MERGED_KEY, parseHoldNewSprint, parseStatusAfterMerge, parseWorktreeMerged, readHoldNewSprint, readStatusAfterMerge, readWorktreeMerged } from '../integrations/ops-rules';
+import { ResourcesInputError } from '../integrations/workspace-resources';
+import { workspaceResources } from '../integrations/workspace-resources-live';
 import { qaQueueService } from '../integrations/qa-queue-live';
 import { worktrees } from '../integrations/worktrees-live';
 import { CronInputError, manualRefusal, type OwnerAnswer, type OwnerChange } from '../integrations/orchestrator-cron';
@@ -44,7 +46,7 @@ import { blackboard } from '../integrations/blackboard';
 import { autoReview, listedAutoReviews } from '../integrations/auto-review-live';
 import { installedSkills } from '../integrations/installed-skills';
 import { reviewFindings } from '../integrations/review-findings-live';
-import { labelOrder } from '../integrations/orchestrator-cron';
+import { labelOrder, orderOf, orderSourceOf } from '../integrations/orchestrator-cron';
 import { pushService } from '../integrations/push';
 import { demoVideos, withTitles } from '../integrations/demo-videos';
 import { demoStorage, type DemoStorageInput } from '../integrations/demo-storage';
@@ -169,7 +171,7 @@ async function sprintRetroNumbers(sprint: { id: number; startDate: string; endDa
 async function sprintPlanView() {
   const active = activeSprint(await jiraAPI.getTickets());
   if (!active) return null;
-  const [plan, edges, orders] = await Promise.all([storageService.getSprintPlan(active.sprint), storageService.getPlanEdges(active.sprint), storageService.getTicketOrders()]);
+  const [plan, edges, orders, suggested] = await Promise.all([storageService.getSprintPlan(active.sprint), storageService.getPlanEdges(active.sprint), storageService.getTicketOrders(), sprintPlanner.suggestedOrder(active.sprint)]);
   const known = new Map<string, { title?: string; assignee?: string | null; status?: string | null }>(active.tickets.map((ticket: any) => [ticket.key, ticket]));
   const sprintId = (await sprintDashboardService.listSprints()).find((item) => item.name === active.sprint)?.id;
   if (sprintId != null) {
@@ -186,8 +188,10 @@ async function sprintPlanView() {
     const parent = lookup(edge.dependsOnKey);
     return { id: edge.id, ticketKey: edge.ticketKey, dependsOnKey: edge.dependsOnKey, dependsOnTitle: parent?.title ?? null, dependsOnAssignee: parent?.assignee ?? null, dependsOnStatus: parent?.status ?? null, source: edge.source, reason: edge.reason, state: edge.state };
   });
-  const rank = (key: string) => orders.get(key) ?? Number.MAX_SAFE_INTEGER;
-  const ordered = [...active.tickets].sort((a: any, b: any) => rank(a.key) - rank(b.key));
+  const rank = (ticket: any) => orderOf(ticket, orders) ?? Number.MAX_SAFE_INTEGER;
+  const ordered = [...active.tickets].sort((a: any, b: any) => (rank(a) - rank(b)) || ((Number(a.key.split('-')[1]) || 0) - (Number(b.key.split('-')[1]) || 0)));
+  const keys = new Set(ordered.map((ticket: any) => ticket.key));
+  const suggestedOrder = suggested.filter((key) => keys.has(key));
   let groups: string[][] = [];
   try { groups = JSON.parse(plan?.groups ?? '[]'); } catch { groups = []; }
   return {
@@ -197,11 +201,15 @@ async function sprintPlanView() {
     sessionId: plan?.sessionId ?? null,
     mappedAt: plan?.mappedAt?.toISOString() ?? null,
     groups,
+    suggestedOrder,
     tickets: ordered.map((ticket: any, index) => ({
       key: ticket.key,
       title: ticket.title,
       status: ticket.status,
       position: index + 1,
+      order: orderOf(ticket, orders),
+      orderSource: orderSourceOf(ticket, orders),
+      suggestedPosition: suggestedOrder.includes(ticket.key) ? suggestedOrder.indexOf(ticket.key) + 1 : null,
       held: pending.has(ticket.key),
       edges: edgeViews.filter((edge) => edge.ticketKey === ticket.key),
     })),
@@ -479,9 +487,15 @@ export const resolvers = {
       return { lines, prompt: sousStartPrompt(key?.trim().toUpperCase() || 'QRD-…', null, lines) };
     },
     opsRules: async () => {
-      const rows = new Map((await storageService.getSettingValues([STATUS_AFTER_MERGE_KEY, WORKTREE_MERGED_KEY])).map((row) => [row.key, row.value]));
-      return { statusAfterMerge: JSON.stringify(readStatusAfterMerge(rows.get(STATUS_AFTER_MERGE_KEY))), worktreeMerged: JSON.stringify(readWorktreeMerged(rows.get(WORKTREE_MERGED_KEY))) };
+      const rows = new Map((await storageService.getSettingValues([STATUS_AFTER_MERGE_KEY, WORKTREE_MERGED_KEY, HOLD_NEW_SPRINT_KEY])).map((row) => [row.key, row.value]));
+      return {
+        statusAfterMerge: JSON.stringify(readStatusAfterMerge(rows.get(STATUS_AFTER_MERGE_KEY))),
+        worktreeMerged: JSON.stringify(readWorktreeMerged(rows.get(WORKTREE_MERGED_KEY))),
+        holdNewSprint: JSON.stringify(readHoldNewSprint(rows.get(HOLD_NEW_SPRINT_KEY))),
+      };
     },
+    sprintStart: (_: unknown, { sprint }: { sprint?: string | null }) => orchestratorCron.sprintStart(sprint),
+    workspaceResources: () => (dockMode() === 'workspace' ? workspaceResources.view() : null),
     qaQueue: () => qaQueueService.queue(),
     qaQueuePosition: (_: unknown, { key }: { key: string }) => qaQueueService.position(key),
     worktrees: () => {
@@ -894,6 +908,21 @@ export const resolvers = {
     },
     setStatusAfterMerge: (_: unknown, { value }: { value: string }) => saveOpsRule(STATUS_AFTER_MERGE_KEY, value, parseStatusAfterMerge),
     setWorktreeMerged: (_: unknown, { value }: { value: string }) => saveOpsRule(WORKTREE_MERGED_KEY, value, parseWorktreeMerged),
+    setHoldNewSprint: (_: unknown, { value }: { value: string }) => saveOpsRule(HOLD_NEW_SPRINT_KEY, value, parseHoldNewSprint),
+    startSprintWork: (_: unknown, { sprint }: { sprint: string }) => {
+      requireAgentControls();
+      return orchestratorCron.startSprintWork(sprint).catch((error) => {
+        if (error instanceof CronInputError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+        throw error;
+      });
+    },
+    stopWorktreeServers: (_: unknown, { ticketKey }: { ticketKey: string }) => {
+      if (dockMode() !== 'workspace') throw new GraphQLError('Worktree servers are stopped from the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });
+      return workspaceResources.stopWorktreeServers(ticketKey).catch((error) => {
+        if (error instanceof ResourcesInputError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+        throw error;
+      });
+    },
     cancelAutoReviewPost: (_: unknown, { id }: { id: string }) => autoReview.cancelPost(id),
     editAutoReviewPost: (_: unknown, { id, text }: { id: string; text: string }) => autoReview.editPost(id, text),
     cancelReviewReplyPost: (_: unknown, { id }: { id: string }) => reviewFindings.cancelReply(id),
@@ -1381,7 +1410,7 @@ export const protectedQueries = [
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
   'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro', 'sprintPlan',
   'planningSprints', 'sprintDraft', 'sprintDraftVisuals', 'planningChatPrompt', 'sprintPlanSignal', 'planningFlow', 'planningSplitPage', 'previewSprintDraftPublish', 'sprintDrift', 'acIncoming', 'ticketSummary', 'ticketReadiness',
-  'checkpoints', 'sousFlow', 'ticketSousFlow', 'sousFlowPrompt', 'opsRules', 'qaQueue', 'qaQueuePosition', 'worktrees',
+  'checkpoints', 'sousFlow', 'ticketSousFlow', 'sousFlowPrompt', 'opsRules', 'sprintStart', 'workspaceResources', 'qaQueue', 'qaQueuePosition', 'worktrees',
   'judgeDays', 'judgeDay', 'judgeWaiting', 'judgeSettings',
 ] as const;
 export const protectedMutations = [
@@ -1417,6 +1446,9 @@ export const protectedMutations = [
   'writeQaGuide',
   'setStatusAfterMerge',
   'setWorktreeMerged',
+  'setHoldNewSprint',
+  'startSprintWork',
+  'stopWorktreeServers',
   'cancelAutoReviewPost',
   'editAutoReviewPost',
   'cancelReviewReplyPost',

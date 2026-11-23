@@ -25,6 +25,7 @@ import { judgeQueue } from './integrations/judge-live';
 import { dockMode } from './mode';
 import { useBusyTimeout, useWriteAheadLog } from './storage/client';
 import { StorageService } from './storage/service';
+import { WorkOrderReset } from './integrations/work-order-reset';
 
 const port = Number(process.env.PORT || 4000);
 const JIRA_SYNC_MS = 5 * 60 * 1000;
@@ -60,8 +61,21 @@ export async function startServer(): Promise<void> {
     if (dockMode() === 'workspace') startOrchestratorCron(orchestratorCron);
     // Each DOCK follows Jira for the runs its own machine owns.
     const jira = new JiraAPI();
+    const orderStorage = new StorageService();
+    const workOrderReset = new WorkOrderReset({
+      now: () => new Date(),
+      settingValue: async (key) => (await orderStorage.getSettingValues([key]))[0]?.value ?? null,
+      saveSetting: (key, value, description) => orderStorage.upsertSetting(key, value, description),
+      orders: () => orderStorage.getTicketOrders(),
+      manualKeys: () => orderStorage.getManualTicketKeys(),
+      clearOrder: (key) => orderStorage.deleteTicketOrder(key),
+    });
+    const resetWorkOrder = (tickets: Array<{ key: string; labels?: string[] }>) => workOrderReset.run(tickets)
+      .catch((error) => console.warn('[WorkOrder] Reset failed:', error instanceof Error ? error.message : 'unknown error'));
+    void jira.getTickets().then(resetWorkOrder).catch(() => undefined);
     const syncJira = () => jira.getTickets()
       .then(async (tickets) => {
+        await resetWorkOrder(tickets);
         await orchestratorService.syncJira(dockMode(), tickets);
         // The laptop DOCK moves tickets only when Settings › Sous flow › Aturan says so; statusNow keeps it to one move.
         await uatMerged.tick(tickets, dockMode()).catch((error) => console.error('[UatMerged]', error));

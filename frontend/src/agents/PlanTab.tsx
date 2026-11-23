@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowRightLeft, Check, Clock, EyeOff, Flag, RotateCcw, Undo2, X } from 'lucide-react';
+import { ArrowRightLeft, Check, Clock, EyeOff, Flag, ListOrdered, RotateCcw, Undo2, X } from 'lucide-react';
 import { Button, Input } from '../components/ui';
 import { AC_IN_ACTION, GET_AC_INCOMING, GET_SPRINT_DRIFT, GET_SPRINT_PLAN, SPRINT_DRIFT_ACTION, SPRINT_PLAN_EDGE_ACTION, SPRINT_PLAN_MAP } from '../graphql/queries';
+import { SET_TICKET_WORK_ORDER } from '../graphql/mutations';
 import { cn } from '../lib/cn';
 import { InfoTip } from './InfoTip';
 import {
-  driftReason, driftStateLabel, edgeStateText, groupsText, hasMap, isMapping, mappedText, sortDrift, sourceLabel,
+  driftReason, driftStateLabel, edgeStateText, groupsText, hasMap, isMapping, mappedText, orderSourceLabel, sortDrift, sourceLabel, suggestionDiffers,
   type AcIn, type DriftRow, type PlanEdge, type SprintDrift, type SprintPlan,
 } from './plan';
 
@@ -156,12 +157,38 @@ const DriftSection: React.FC = () => {
   );
 };
 
-/** The sprint's dependency map: the owner's tickets in work order, what each waits for, and the lead's proposals awaiting Accept or Reject. */
+/** The Plan agent's suggested order next to the work order the cron follows; Use this order writes it as the owner's order. */
+const SuggestedOrder: React.FC<{ plan: SprintPlan; busy: boolean; onUse: () => void }> = ({ plan, busy, onUse }) => {
+  const titleOf = new Map(plan.tickets.map((ticket) => [ticket.key, ticket.title]));
+  const differs = suggestionDiffers(plan);
+  return (
+    <section aria-label="Suggested order" className="min-w-0 rounded-md border border-dashed border-accent/60 bg-surface-0 px-4 py-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <h3 className={head}>Suggested by Map dependencies</h3>
+        <span className="text-[0.78rem] text-muted-foreground">{differs ? 'Nothing changes until you use it.' : 'Same as the work order now.'}</span>
+        <Button size="sm" variant="primary" className="ml-auto max-[760px]:ml-0" onClick={onUse} disabled={busy || !differs}><ListOrdered size={13} aria-hidden="true" />{busy ? 'Saving...' : 'Use this order'}</Button>
+      </div>
+      <ol className="mt-2 grid gap-0.5">
+        {plan.suggestedOrder.map((key, index) => (
+          <li key={key} className="flex items-baseline gap-3 text-[0.8rem]">
+            <span className="w-6 font-mono text-[0.72rem] tabular-nums text-muted-foreground">{index + 1}</span>
+            <span className="font-mono font-semibold">{key}</span>
+            <span className="min-w-0 flex-1 truncate text-secondary-foreground">{titleOf.get(key) ?? ''}</span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+};
+
+/** The sprint's work order (yours, else Jira #N), what each ticket waits for, the lead's proposals awaiting Accept or Reject, and the order Map dependencies suggests. */
 export const PlanTab: React.FC = () => {
   const [notice, setNotice] = useState<string | null>(null);
   const { data, loading, error, refetch } = useQuery<{ sprintPlan: SprintPlan | null }>(GET_SPRINT_PLAN, { fetchPolicy: 'cache-and-network', pollInterval: 15000 });
   const [map, mapping] = useMutation(SPRINT_PLAN_MAP);
   const [act, acting] = useMutation(SPRINT_PLAN_EDGE_ACTION);
+  const [setOrder] = useMutation(SET_TICKET_WORK_ORDER);
+  const [using, setUsing] = useState(false);
   const plan = data?.sprintPlan ?? null;
   const running = isMapping(plan) || mapping.loading;
 
@@ -177,6 +204,18 @@ export const PlanTab: React.FC = () => {
   const onAction = (id: string, action: 'accept' | 'reject') => {
     setNotice(null);
     act({ variables: { id, action } }).then(() => refetch()).catch((failure: unknown) => setNotice(failure instanceof Error ? failure.message : 'The change failed'));
+  };
+  const onUseSuggestion = async (keys: string[]) => {
+    setNotice(null);
+    setUsing(true);
+    try {
+      for (const [index, ticketKey] of keys.entries()) await setOrder({ variables: { ticketKey, position: index + 1 } });
+      await refetch();
+    } catch (failure) {
+      setNotice(failure instanceof Error ? failure.message : 'The order could not be saved');
+    } finally {
+      setUsing(false);
+    }
   };
 
   if (error && !data) return <p className="text-sm text-status-conflict" role="alert">{error.message}</p>;
@@ -195,18 +234,15 @@ export const PlanTab: React.FC = () => {
           </span>
         )}
         {plan.status === 'failed' && <span className="text-sm text-status-conflict" role="alert">Failed: {plan.error ?? 'unknown error'}</span>}
-        <Button className="ml-auto max-[760px]:ml-0" onClick={() => void onMap()} disabled={running}><RotateCcw size={14} aria-hidden="true" />Map again</Button>
+        <Button className="ml-auto max-[760px]:ml-0" onClick={() => void onMap()} disabled={running}><RotateCcw size={14} aria-hidden="true" />Map dependencies</Button>
       </div>
       {notice && <p className="text-sm text-secondary-foreground" role="status">{notice}</p>}
+      {!hasMap(plan) && <p className="text-pretty text-sm text-muted-foreground">No dependency map for {plan.sprint} yet. Map dependencies is optional: its order is only a suggestion.</p>}
+      {plan.suggestedOrder.length > 0 && <SuggestedOrder plan={plan} busy={using} onUse={() => void onUseSuggestion(plan.suggestedOrder)} />}
 
-      {!hasMap(plan) ? (
-        <section className="grid gap-3 border-y border-border py-6" aria-label="No map yet">
-          <p className="text-sm text-muted-foreground">No map for {plan.sprint} yet.</p>
-          <div><Button variant="primary" onClick={() => void onMap()} disabled={running}>Map now</Button></div>
-        </section>
-      ) : (
+      {plan.tickets.length > 0 && (
         <section aria-label="Work order">
-          <h3 className={head}>Work order</h3>
+          <h3 className={head}>Work order <span className="font-medium normal-case tracking-normal">· yours where you set it, else Jira #N, else the ticket number</span></h3>
           <ol className="mt-2">
             {plan.tickets.map((ticket) => (
               <li key={ticket.key} className="border-b border-border py-3 last:border-b-0">
@@ -214,6 +250,8 @@ export const PlanTab: React.FC = () => {
                   <span className="w-6 font-mono text-[0.72rem] tabular-nums text-muted-foreground">{ticket.position}</span>
                   <span className="font-mono text-[0.84rem] font-semibold text-foreground">{ticket.key}</span>
                   <span className="min-w-0 flex-1 text-pretty text-[0.84rem] text-secondary-foreground">{ticket.title}</span>
+                  {orderSourceLabel(ticket) && <span className={cn(chip, ticket.orderSource === 'owner' ? 'border-accent text-accent' : 'border-border text-secondary-foreground')}>{orderSourceLabel(ticket)}</span>}
+                  {ticket.suggestedPosition != null && <span className="font-mono text-[0.64rem] text-muted-foreground">suggested {ticket.suggestedPosition}</span>}
                   <span className="font-mono text-[0.64rem] uppercase tracking-[0.06em] text-muted-foreground">{ticket.status}</span>
                   {ticket.held && <span className={cn(chip, 'border-status-conflict text-status-conflict')}>Held</span>}
                 </div>

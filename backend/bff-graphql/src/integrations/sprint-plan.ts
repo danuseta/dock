@@ -1,19 +1,19 @@
-// A sprint's dependency map and work order. The lead drafts it in a `Plan-<sprint>` session; Jira "blocks" links apply
-// at once, an inferred edge waits for the owner. Only the owner's tickets are ordered.
+// A sprint's dependency map and a suggested work order. The lead drafts it in a `Plan-<sprint>` session the owner starts
+// with Map dependencies; Jira "blocks" links apply at once, an inferred edge waits for the owner. The order it proposes is
+// only kept as a suggestion: the work order is the owner's own, else the Jira "#N" label.
 import { OrchestratorInputError } from './orchestrator';
 import type { TicketLink } from './jira';
 import type { PlanEdgeInput, StorageService } from '../storage/service';
-import { inPublishedPlan } from './plan-publish';
 
 export interface PlanTicket { key: string; status: string; sprintName?: string | null; sprintState?: string | null; issueType?: string | null; links?: TicketLink[]; labels?: string[] }
 export interface PlanRow { status: string; mappingKeys: string; mappedKeys: string; startedAt: Date | null }
 export type PlanMode = 'full' | 'ticket';
-export type PlanTrigger = { kind: PlanMode; sprint: string; keys: string[] } | { kind: 'expire'; sprint: string } | null;
+export type PlanTrigger = { kind: 'expire'; sprint: string } | null;
 export interface PlanDraft { sprint: string; mode: PlanMode; tickets: string[]; order: string[]; groups: string[][]; edges: PlanEdgeInput[] }
 export interface Edge { ticketKey: string; dependsOnKey: string }
 
 export const PLAN_STALE_MS = 2 * 3600 * 1000;
-export const START_RETRY_MS = 30 * 60 * 1000;
+export const SUGGESTED_ORDER_PREFIX = 'planSuggestedOrder:';
 const MAX_EDGES = 200;
 const KEY = /^[A-Z][A-Z0-9_]*-\d+$/;
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -51,29 +51,16 @@ export function jiraEdges(tickets: PlanTicket[]): PlanEdgeInput[] {
   return [...edges.values()];
 }
 
-/**
- * What the cron tick should start: a full run when the sprint has no map, a ticket run for owner tickets that joined, or
- * expiry of a run that never posted. With `requirePublish` only tickets of the published plan (a plan-published-rN
- * label) count: nothing starts before the planner publishes, and a ticket that joined after publish waits for a republish.
- */
-export function planTriggers(ownerTickets: PlanTicket[], plan: PlanRow | null, now: Date, todoStatuses: string[] = ['To Do'], requirePublish = false): PlanTrigger {
+/** What the cron tick does with the plan: only the expiry of a mapping run that never posted. A run starts from Map dependencies alone. */
+export function planTriggers(ownerTickets: PlanTicket[], plan: PlanRow | null, now: Date): PlanTrigger {
   const found = activeSprint(ownerTickets);
-  if (!found) return null;
-  const active = requirePublish ? { ...found, tickets: found.tickets.filter((ticket) => inPublishedPlan(ticket.labels)) } : found;
-  if (active.tickets.length === 0 && plan?.status !== 'mapping') return null;
-  const keys = active.tickets.map((ticket) => ticket.key);
-  if (!plan) {
-    return active.tickets.some((ticket) => todoStatuses.some((status) => sameText(status, ticket.status))) ? { kind: 'full', sprint: active.sprint, keys } : null;
-  }
-  if (plan.status === 'mapping') {
-    return plan.startedAt && now.getTime() - plan.startedAt.getTime() > PLAN_STALE_MS ? { kind: 'expire', sprint: active.sprint } : null;
-  }
-  const mapped = new Set(parseKeys(plan.mappedKeys));
-  const tried = new Set(plan.status === 'failed' ? parseKeys(plan.mappingKeys) : []);
-  const joined = keys.filter((key) => !mapped.has(key) && !tried.has(key));
-  if (joined.length === 0) return null;
-  const fresh = mapped.size === 0 && tried.size === 0;
-  return { kind: fresh ? 'full' : 'ticket', sprint: active.sprint, keys: fresh ? keys : joined };
+  if (!found || plan?.status !== 'mapping') return null;
+  return plan.startedAt && now.getTime() - plan.startedAt.getTime() > PLAN_STALE_MS ? { kind: 'expire', sprint: found.sprint } : null;
+}
+
+/** The suggested order the last plan draft left for the sprint, or none. */
+export function parseSuggestedOrder(raw: string | null | undefined): string[] {
+  return keyList(parseKeys(raw));
 }
 
 /** True when adding "ticket dependsOn dependsOn" closes a loop in `edges`. */
@@ -124,7 +111,7 @@ export function parsePlanDraft(input: unknown, ownerKeys: string[], known: Edge[
   };
 }
 
-/** The work order to write. A ticket run puts the new keys at their draft position and keeps the others in their current order. Manual tickets are left out. */
+/** The suggested work order. A ticket run puts the new keys at their draft position and keeps the others in their current order. Manual tickets are left out. */
 export function planOrder(draft: Pick<PlanDraft, 'mode' | 'order' | 'tickets'>, current: Map<string, number>, manual: Set<string>): string[] {
   let order = draft.order;
   if (draft.mode === 'ticket') {
@@ -159,7 +146,7 @@ export function planPrompt(input: PlanPromptInput): string {
 
 export type PlanStore = Pick<StorageService,
   'getSprintPlan' | 'saveSprintPlan' | 'getPlanEdges' | 'replaceJiraEdges' | 'applyInferredEdges' | 'setPlanEdgeState' | 'getAcceptedPlanEdges'
-  | 'getPendingPlanKeys' | 'addOrchestratorEventOnce' | 'getTicketOrders' | 'getManualTicketKeys' | 'setTicketOrder' | 'getRetroItems' | 'getTicketDependencies'>;
+  | 'getPendingPlanKeys' | 'addOrchestratorEventOnce' | 'getTicketOrders' | 'getManualTicketKeys' | 'getRetroItems' | 'getTicketDependencies' | 'getSettingValues' | 'upsertSetting'>;
 
 export interface PlanDeps {
   now: () => Date;
@@ -172,16 +159,12 @@ export interface PlanDeps {
   deleteSession: (sessionId: string) => Promise<unknown>;
   sprints: () => Promise<Array<{ id: number; name: string; state: string; startDate: string }>>;
   sprintKeys: (sprintId: number) => Promise<string[]>;
-  todoStatuses?: string[];
-  /** "Plan per developer dibikin setelah publish": map only once the sprint plan is published. */
-  requirePublish?: () => Promise<boolean>;
 }
 
-/** Starts and takes back the lead's plan runs. `watch` runs on every cron tick on the tickets the cron already fetched. */
+/** Starts and takes back the lead's plan runs. `watch` runs on every cron tick on the tickets the cron already fetched; it never starts a run. */
 export class SprintPlanner {
   private lastJira = '';
   private starting = false;
-  private failedAt = Number.NEGATIVE_INFINITY;
   private sprint: string | null = null;
 
   constructor(private readonly deps: PlanDeps) {}
@@ -196,21 +179,12 @@ export class SprintPlanner {
       this.lastJira = signature;
     }
     this.sprint = active.sprint;
-    const plan = await this.deps.store.getSprintPlan(active.sprint);
-    const requirePublish = this.deps.requirePublish ? await this.deps.requirePublish() : false;
-    const trigger = planTriggers(tickets, plan, this.deps.now(), this.deps.todoStatuses, requirePublish);
-    if (trigger?.kind === 'expire') {
-      this.failedAt = this.deps.now().getTime();
-      await this.deps.store.saveSprintPlan(trigger.sprint, { status: 'failed', error: 'No draft posted within 2 h' });
-      return trigger;
-    }
-    const tried = plan?.status === 'failed' ? parseKeys(plan.mappingKeys) : [];
-    const planned = requirePublish ? active.tickets.filter((ticket) => inPublishedPlan(ticket.labels)) : active.tickets;
-    if (trigger && this.deps.canStart() && this.deps.now().getTime() - this.failedAt >= START_RETRY_MS) await this.start(trigger.sprint, trigger.kind, trigger.keys, planned, edges, tried);
+    const trigger = planTriggers(tickets, await this.deps.store.getSprintPlan(active.sprint), this.deps.now());
+    if (trigger) await this.deps.store.saveSprintPlan(trigger.sprint, { status: 'failed', error: 'No draft posted within 2 h' });
     return trigger;
   }
 
-  /** "Map again": a full run of the active sprint. Returns the session id. */
+  /** "Map dependencies": a full run of the active sprint. Returns the session id. */
   async map(): Promise<string> {
     if (!this.deps.canStart()) throw new OrchestratorInputError('The workspace is not connected');
     const tickets = await this.deps.tickets();
@@ -231,9 +205,9 @@ export class SprintPlanner {
     const draft = parsePlanDraft(body, owner, await this.knownEdges(sprint));
     if (draft.mode === 'ticket') await this.deps.store.applyInferredEdges(draft.sprint, draft.edges, draft.tickets);
     else await this.deps.store.applyInferredEdges(draft.sprint, draft.edges);
-    const [current, manual, plan] = await Promise.all([this.deps.store.getTicketOrders(), this.deps.store.getManualTicketKeys(), this.deps.store.getSprintPlan(draft.sprint)]);
-    const order = planOrder(draft, current, manual);
-    for (const [index, key] of order.entries()) await this.deps.store.setTicketOrder(key, index + 1);
+    const [previous, manual, plan] = await Promise.all([this.suggestedOrder(draft.sprint), this.deps.store.getManualTicketKeys(), this.deps.store.getSprintPlan(draft.sprint)]);
+    const order = planOrder(draft, new Map(previous.map((key, index) => [key, index + 1])), manual);
+    await this.deps.store.upsertSetting(`${SUGGESTED_ORDER_PREFIX}${draft.sprint}`, JSON.stringify(order), `Work order the Plan agent suggested for ${draft.sprint}`);
     const mappedKeys = [...new Set([...parseKeys(plan?.mappedKeys), ...parseKeys(plan?.mappingKeys), ...draft.tickets])];
     await this.deps.store.saveSprintPlan(draft.sprint, { status: 'idle', mappingKeys: [], mappedKeys, groups: draft.groups, mappedAt: now, error: null });
     return { sprint: draft.sprint, edges: draft.edges.length, order };
@@ -248,6 +222,11 @@ export class SprintPlanner {
       throw new OrchestratorInputError('Accepting this edge would make a dependency loop');
     }
     return this.deps.store.setPlanEdgeState(id, action === 'accept' ? 'accepted' : 'rejected');
+  }
+
+  /** The order the last plan draft suggested for the sprint; it changes nothing until the owner uses it. */
+  async suggestedOrder(sprint: string): Promise<string[]> {
+    return parseSuggestedOrder((await this.deps.store.getSettingValues([`${SUGGESTED_ORDER_PREFIX}${sprint}`]))[0]?.value);
   }
 
   /** Pending edge keys of the sprint the last tick saw. */
@@ -268,11 +247,12 @@ export class SprintPlanner {
       const sprints = [...await this.deps.sprints()].sort((a, b) => a.startDate.localeCompare(b.startDate));
       const index = sprints.findIndex((item) => item.name === sprint);
       const previous = index > 0 ? sprints[index - 1] : null;
-      const [sprintKeys, retro, current] = await Promise.all([
+      const [sprintKeys, retro, suggested] = await Promise.all([
         index >= 0 ? this.deps.sprintKeys(sprints[index].id).catch(() => []) : Promise.resolve([] as string[]),
         previous ? this.deps.store.getRetroItems(previous.name) : Promise.resolve([]),
-        this.deps.store.getTicketOrders(),
+        this.suggestedOrder(sprint),
       ]);
+      const current = new Map(suggested.map((key, position) => [key, position + 1]));
       const fresh = new Set(mapKeys);
       const text = planPrompt({
         sprint,
@@ -291,16 +271,10 @@ export class SprintPlanner {
         await this.deps.send(sessionId, text);
       } catch (error) {
         if (sessionId) await this.deps.deleteSession(sessionId).catch(() => undefined);
-        this.failedAt = this.deps.now().getTime();
         await this.deps.store.saveSprintPlan(sprint, { status: 'failed', error: error instanceof Error ? error.message : 'The plan session could not start' });
         throw error;
       }
-      try {
-        await this.deps.store.saveSprintPlan(sprint, { status: 'mapping', mappingKeys: [...new Set([...tried, ...mapKeys])], sessionId, startedAt: this.deps.now(), error: null });
-      } catch (error) {
-        this.failedAt = this.deps.now().getTime();
-        throw error;
-      }
+      await this.deps.store.saveSprintPlan(sprint, { status: 'mapping', mappingKeys: [...new Set([...tried, ...mapKeys])], sessionId, startedAt: this.deps.now(), error: null });
       return sessionId;
     } finally {
       this.starting = false;

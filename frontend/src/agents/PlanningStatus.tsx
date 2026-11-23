@@ -4,16 +4,16 @@ import React from 'react';
 import { ChevronRight, Lock, Send } from 'lucide-react';
 import { Button } from '../components/ui';
 import { cn } from '../lib/cn';
-import { PLAN_STEPS, planAttention, planMetaLine, stepIndex, type PlanSignal, type SprintDraft } from './planning';
+import { holdSteps, planAttention, planMetaLine, type PlanSignal, type SprintDraft } from './planning';
 
 const link = 'font-medium text-accent hover:underline';
 
-/** Draft > Published > Running, the current stage bold. */
-export const PlanningStatus: React.FC<{ signal: PlanSignal | null }> = ({ signal }) => {
-  const current = stepIndex(signal);
+/** Draft > Published > Running, the current stage bold; with the hold rule on, Waiting for start comes before Running. */
+export const PlanningStatus: React.FC<{ signal: PlanSignal | null; hold?: { holdOn: boolean; held: boolean } | null }> = ({ signal, hold = null }) => {
+  const { steps, current } = holdSteps(signal, hold);
   return (
-    <ol className="flex items-center gap-1.5" aria-label="Plan stage">
-      {PLAN_STEPS.map((step, index) => (
+    <ol className="flex flex-wrap items-center gap-1.5" aria-label="Plan stage">
+      {steps.map((step, index) => (
         <li key={step} className="flex items-center gap-1.5" aria-current={index === current ? 'step' : undefined}>
           {index > 0 && <ChevronRight size={13} className="text-muted-foreground" aria-hidden="true" />}
           <span className={cn('inline-flex items-center gap-1.5 text-sm', index === current ? 'font-semibold text-foreground' : index < current ? 'text-secondary-foreground' : 'text-muted-foreground')}>
