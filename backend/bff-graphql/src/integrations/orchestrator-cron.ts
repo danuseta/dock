@@ -5,6 +5,7 @@ import { isSettledStatus } from './attention';
 import { REVIEW_STATUS } from './broadcast-review';
 import { ticketSessionTitle } from './session-titles';
 import { inPublishedPlan, publishWait, sprintRevision } from './plan-publish';
+import { HOLD_NEW_SPRINT_KEY, readHoldNewSprint } from './ops-rules';
 
 export class CronInputError extends Error {}
 
@@ -252,8 +253,53 @@ export function labelOrder(labels: string[] | undefined): number | null {
   return numbers.length ? Math.min(...numbers) : null;
 }
 
-/** A ticket's work order: the number set in DOCK, else its "#N" Jira label, else none. */
+/** A ticket's work order: the number the owner set in DOCK, else its "#N" Jira label, else none (the ticket number decides). */
 export const orderOf = (ticket: CronTicket, dockOrder: Map<string, number>): number | null => dockOrder.get(ticket.key) ?? labelOrder(ticket.labels);
+
+/** Where a ticket's work order comes from: the owner's order in DOCK, its Jira "#N" label, or null for the ticket number. */
+export const orderSourceOf = (ticket: Pick<CronTicket, 'key' | 'labels'>, dockOrder: Map<string, number>): 'owner' | 'jira' | null => (
+  dockOrder.has(ticket.key) ? 'owner' : labelOrder(ticket.labels) !== null ? 'jira' : null
+);
+
+export const SPRINT_STARTED_KEY = 'sprintStartedAt';
+export const HOLD_WAIT_TEXT = 'waiting for Start sprint work';
+const SPRINT_STARTS_KEPT = 20;
+const PREVIEW_NEXT = 5;
+
+/** The saved sprint name to ISO start time map; an unreadable value is empty. */
+export function parseSprintStarts(raw: string | null | undefined): Record<string, string> {
+  try {
+    const value: unknown = JSON.parse(raw || '{}');
+    if (!isRecord(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && !Number.isNaN(Date.parse(entry[1]))));
+  } catch {
+    return {};
+  }
+}
+
+/** True when the hold is on and the owner has not started the ticket's sprint. A ticket without a sprint is never held. */
+export const sprintHeld = (sprintName: string | null | undefined, holdOn: boolean, starts: Record<string, string>): boolean => holdOn && !!sprintName && !starts[sprintName];
+
+export interface PreviewTicket { key: string; title: string; order: number | null; orderSource: 'owner' | 'jira' | null; waitsOn: string | null }
+export interface StartPreview { slots: number; parallel: number; first: PreviewTicket[]; blocked: PreviewTicket[]; next: PreviewTicket[]; parked: string[] }
+export interface SprintStartView { sprint: string; holdOn: boolean; held: boolean; startedAt: string | null; preview: StartPreview }
+
+/**
+ * What the cron would do once the sprint starts, in work order: the tickets it takes into the free slots (today's cap
+ * counted), the ones an open dependency or an undecided inferred edge holds, the next ones after the slots, and the
+ * ones it parks for missing acceptance criteria.
+ */
+export function startPreview(open: CronTicket[], state: Pick<DependencyState, 'blocked' | 'waitsOn'>, held: Set<string>, dockOrder: Map<string, number>, free: number, parallel: number): StartPreview {
+  const view = (ticket: CronTicket): PreviewTicket => ({ key: ticket.key, title: ticket.title, order: orderOf(ticket, dockOrder), orderSource: orderSourceOf(ticket, dockOrder), waitsOn: held.has(ticket.key) ? 'pending' : state.waitsOn.get(ticket.key) ?? null });
+  const preview: StartPreview = { slots: free, parallel, first: [], blocked: [], next: [], parked: [] };
+  for (const ticket of open) {
+    if (held.has(ticket.key) || state.blocked.has(ticket.key)) preview.blocked.push(view(ticket));
+    else if (!ticketHasAcceptanceCriteria(ticket)) preview.parked.push(ticket.key);
+    else if (preview.first.length < free) preview.first.push(view(ticket));
+    else if (preview.next.length < PREVIEW_NEXT) preview.next.push(view(ticket));
+  }
+  return preview;
+}
 
 /**
  * The tickets the cron may take: still To Do, in scope, without a run and without an open dependency, and with
@@ -570,13 +616,15 @@ export class OrchestratorCron {
    * A slot waited for by a queued message (an owner's answer, a confirmed ticket) is not free: that message goes first.
    */
   private async pick(settings: CronSettings, now: Date, log: FillLog, day: DayCount): Promise<void> {
-    const [tickets, taken, { blocked, stacked, waitsOn }, dockOrder, slots, manual, held] = await Promise.all([
+    const [tickets, taken, { blocked, stacked, waitsOn }, dockOrder, slots, manual, held, holdOn, starts] = await Promise.all([
       this.deps.tickets(), this.deps.takenKeys(), this.dependencyState(settings), this.deps.dockOrder(), this.deps.slots(settings.machine), this.deps.manualKeys(), this.deps.heldKeys(),
+      this.holdOn(), this.sprintStarts(),
     ]);
     let free = Math.max(0, settings.parallel - slots.busy - slots.waiting);
     const defer = (key: string, reason: string) => { if (log.deferred.length < MAX_DEFERRED_LOGGED) log.deferred.push({ key, reason }); };
     for (const wait of publishWaits(tickets, new Set(taken), settings, manual)) defer(wait.key, wait.reason);
     for (const ticket of candidates(tickets, new Set(taken), new Set(), settings, dockOrder, manual)) {
+      if (sprintHeld(ticket.sprintName, holdOn, starts)) { defer(ticket.key, HOLD_WAIT_TEXT); continue; }
       if (held.has(ticket.key) || blocked.has(ticket.key)) {
         await this.deps.recordWait(ticket.key, held.has(ticket.key) ? 'pending' : waitsOn.get(ticket.key) ?? '').catch(() => undefined);
         continue;
@@ -669,6 +717,42 @@ export class OrchestratorCron {
     if (settings.model) options.model = settings.model;
     if (settings.effort) options.effort = settings.effort;
     return options;
+  }
+
+  /** Settings › Sous flow › Rules › Hold a new sprint until I start it. */
+  private async holdOn(): Promise<boolean> {
+    return readHoldNewSprint(await this.deps.settingValue(HOLD_NEW_SPRINT_KEY)).enabled;
+  }
+
+  private async sprintStarts(): Promise<Record<string, string>> {
+    return parseSprintStarts(await this.deps.settingValue(SPRINT_STARTED_KEY));
+  }
+
+  /** The sprint's start state and the preview of what the cron takes first; `sprint` empty is the active sprint. Null without such a sprint. */
+  async sprintStart(sprintInput?: string | null): Promise<SprintStartView | null> {
+    const settings = await this.settings();
+    const [tickets, taken, state, dockOrder, slots, manual, held, holdOn, starts, day] = await Promise.all([
+      this.deps.tickets(), this.deps.takenKeys(), this.dependencyState(settings), this.deps.dockOrder(), this.deps.slots(settings.machine), this.deps.manualKeys(), this.deps.heldKeys(),
+      this.holdOn(), this.sprintStarts(), this.dayCount(wib(this.deps.now()).date),
+    ]);
+    const sprint = sprintInput?.trim() || tickets.find((ticket) => String(ticket.sprintState || '').toUpperCase() === 'ACTIVE' && ticket.sprintName && !sameText(ticket.issueType || '', 'Epic'))?.sprintName;
+    if (!sprint || !tickets.some((ticket) => ticket.sprintName === sprint)) return null;
+    const open = candidates(tickets.filter((ticket) => ticket.sprintName === sprint), new Set(taken), new Set(), settings, dockOrder, manual);
+    const free = Math.min(Math.max(0, settings.parallel - slots.busy - slots.waiting), Math.max(0, settings.maxPerDay - day.started.length));
+    return { sprint, holdOn, held: sprintHeld(sprint, holdOn, starts), startedAt: starts[sprint] ?? null, preview: startPreview(open, state, held, dockOrder, free, settings.parallel) };
+  }
+
+  /** "Start sprint work": the cron may take the sprint's tickets from now on. A sprint started before keeps its first start time. */
+  async startSprintWork(sprintInput: string): Promise<SprintStartView> {
+    const sprint = typeof sprintInput === 'string' ? sprintInput.trim() : '';
+    if (!sprint || sprint.length > 120) throw new CronInputError('A sprint name is required');
+    if (!(await this.deps.tickets()).some((ticket) => ticket.sprintName === sprint)) throw new CronInputError(`No ticket of ${sprint} is known`);
+    const starts = await this.sprintStarts();
+    if (!starts[sprint]) {
+      const kept = Object.entries({ ...starts, [sprint]: this.deps.now().toISOString() }).sort((a, b) => b[1].localeCompare(a[1])).slice(0, SPRINT_STARTS_KEPT);
+      await this.deps.saveSetting(SPRINT_STARTED_KEY, JSON.stringify(Object.fromEntries(kept)), 'Sprints whose work the owner started');
+    }
+    return (await this.sprintStart(sprint))!;
   }
 
   private dependencyState(settings: CronSettings): Promise<DependencyState> {

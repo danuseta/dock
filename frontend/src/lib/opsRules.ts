@@ -5,6 +5,7 @@ export type WorktreeMode = 'notify' | 'auto' | 'off';
 export interface WorktreeMerged { mode: WorktreeMode; days: number }
 export type BlockedManualMode = 'tell' | 'stop' | 'off';
 export interface CronRules { blockedManual: BlockedManualMode; stackedAllowed: boolean }
+export interface HoldNewSprint { enabled: boolean }
 
 export const DEFAULT_STATUS_AFTER_MERGE: StatusAfterMerge = { enabled: true, next: 'UAT MERGED', ignoreDocsSync: true, laptop: false };
 export const DEFAULT_WORKTREE_MERGED: WorktreeMerged = { mode: 'notify', days: 3 };
@@ -33,6 +34,11 @@ export function readWorktreeMerged(json: string | null | undefined): WorktreeMer
   const value = object(json);
   const mode = value.mode === 'auto' || value.mode === 'off' || value.mode === 'notify' ? value.mode : DEFAULT_WORKTREE_MERGED.mode;
   return { mode, days: Number.isInteger(value.days) ? Number(value.days) : DEFAULT_WORKTREE_MERGED.days };
+}
+
+/** The hold is on unless the owner turned it off. */
+export function readHoldNewSprint(json: string | null | undefined): HoldNewSprint {
+  return { enabled: object(json).enabled !== false };
 }
 
 export function readCronRules(configJson: string | null | undefined): CronRules {

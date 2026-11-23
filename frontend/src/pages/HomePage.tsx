@@ -8,6 +8,8 @@ import { WebsiteIcon } from '../components/WebsiteIcon';
 import { DockerRuntimeCard } from '../components/DockerRuntimeCard';
 import { ClaudeUsageCard } from '../components/ClaudeUsageCard';
 import { FinishSetupCard } from '../components/FinishSetupCard';
+import { SprintStartCard } from '../components/SprintStart';
+import { WorkspaceResourcesCard } from '../components/WorkspaceResourcesCard';
 import { AgentRunStrip } from '../components/AgentRunStrip';
 import { HomeAttention, type HomeAttentionItem } from '../components/HomeAttention';
 import { judgeAttention, ticketAttention, ticketQuestions } from '../lib/attention';
@@ -142,7 +144,11 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
         </div>
       </header>
 
+      {mode === 'workspace' && <WorkspaceResourcesCard className="mb-3.5" onTicketClick={onTicketClick} />}
+
       <FinishSetupCard onNavigate={onNavigate} />
+
+      {hasPage(mode, '/planning') && <SprintStartCard className="mb-3.5" onNavigate={onNavigate} />}
 
       {worktreeReminder && (
         <p className="mb-3.5 flex flex-wrap items-center gap-2 rounded-md border border-dashed border-border-glow px-4 py-2.5 text-[0.8rem] text-secondary-foreground" role="status">

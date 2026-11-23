@@ -664,6 +664,12 @@ export const typeDefs = gql`
     title: String!
     status: String!
     position: Int!
+    "The work order number: the owner's, else the Jira #N label; null when the ticket number decides."
+    order: Int
+    "owner, jira or null."
+    orderSource: String
+    "Its place in the Plan agent's suggested order; null when the suggestion leaves it out."
+    suggestedPosition: Int
     """A pending inferred dependency holds this ticket."""
     held: Boolean!
     edges: [SprintPlanEdge!]!
@@ -677,6 +683,8 @@ export const typeDefs = gql`
     sessionId: String
     mappedAt: String
     groups: [[String!]!]!
+    "The order the last Map dependencies run suggested; it changes nothing until the owner uses it."
+    suggestedOrder: [String!]!
     tickets: [SprintPlanTicket!]!
   }
 
@@ -1830,6 +1838,108 @@ export const typeDefs = gql`
     statusAfterMerge: String!
     "{ mode: notify | auto | off, days }: what DOCK does with worktrees whose ticket merged."
     worktreeMerged: String!
+    "{ enabled }: the cron takes no ticket of a new sprint until the owner starts its work."
+    holdNewSprint: String!
+  }
+
+  "A ticket in the Start sprint work preview. orderSource is owner, jira or null (the ticket number decides)."
+  type SprintStartTicket {
+    key: String!
+    title: String!
+    order: Int
+    orderSource: String
+    "What a blocked ticket waits on: a ticket key, or pending for an inferred edge not decided yet."
+    waitsOn: String
+  }
+
+  "What the cron takes once the sprint starts: the free slots now, the first tickets, the blocked ones, the next ones, and the ones it parks without AC."
+  type SprintStartPreview {
+    slots: Int!
+    parallel: Int!
+    first: [SprintStartTicket!]!
+    blocked: [SprintStartTicket!]!
+    next: [SprintStartTicket!]!
+    parked: [String!]!
+  }
+
+  "A sprint's start state: held while the hold rule is on and the owner has not started it."
+  type SprintStart {
+    sprint: String!
+    holdOn: Boolean!
+    held: Boolean!
+    startedAt: String
+    preview: SprintStartPreview!
+  }
+
+  "Memory, in bytes, of one kind of process."
+  type ResourceKind {
+    "claude, mcp, dev, tests, ffmpeg, dock, codeServer or other."
+    kind: String!
+    bytes: Float!
+    count: Int!
+  }
+
+  "The processes of one ticket, or Base when key is null."
+  type ResourceGroup {
+    key: String
+    bytes: Float!
+    count: Int!
+    kinds: [ResourceKind!]!
+    worktrees: [String!]!
+  }
+
+  "Dev servers left running in the worktrees of a ticket that is not In Progress."
+  type ResourceLeftover {
+    ticketKey: String!
+    status: String
+    bytes: Float!
+    count: Int!
+    worktrees: [String!]!
+  }
+
+  type MemorySample {
+    at: String!
+    bytes: Float!
+  }
+
+  type WorkspaceMemory {
+    current: Float!
+    "The cgroup limit; null without one."
+    max: Float
+    anon: Float
+    "The last 15 minutes, one sample each 5 seconds."
+    samples: [MemorySample!]!
+  }
+
+  type WorkspaceCpu {
+    "Percent of the CPU limit since the previous sample; null on the first one."
+    percent: Float
+    "CPUs the cgroup may use; null without a limit."
+    limit: Float
+    load1: Float
+  }
+
+  type WorkspaceDisk {
+    total: Float!
+    used: Float!
+  }
+
+  type WorkspaceOom {
+    total: Int!
+    today: Int!
+  }
+
+  "The workspace's live resources from the cgroup and proc files."
+  type WorkspaceResources {
+    at: String!
+    memory: WorkspaceMemory!
+    cpu: WorkspaceCpu!
+    disk: WorkspaceDisk
+    oom: WorkspaceOom!
+    worktrees: Int!
+    tickets: [ResourceGroup!]!
+    base: ResourceGroup!
+    leftovers: [ResourceLeftover!]!
   }
 
   type QaQueueRow {
@@ -2688,6 +2798,10 @@ export const typeDefs = gql`
     "What a profile adds to the sous prompt; key names the ticket in the preview."
     sousFlowPrompt(profile: String!, key: String): SousFlowPrompt!
     opsRules: OpsRules!
+    "The sprint's start state and preview; no sprint is the active one. Null without such a sprint."
+    sprintStart(sprint: String): SprintStart
+    "Memory, CPU, disk and processes of the workspace; null on a laptop DOCK."
+    workspaceResources: WorkspaceResources
     "The QA bot's queue from Jira: UAT CHECK plus QA-WAIT-DEPENDENCY tickets, oldest in UAT CHECK first. One Jira search a minute at most."
     qaQueue: QaQueue!
     "The ticket's place in the QA queue; null when it is not in it."
@@ -2880,6 +2994,12 @@ export const typeDefs = gql`
     setStatusAfterMerge(value: String!): String!
     "Saves the worktree-merged rule JSON after validation and returns it normalized; an empty string resets it."
     setWorktreeMerged(value: String!): String!
+    "Saves the hold-new-sprint rule JSON after validation and returns it normalized; an empty string resets it."
+    setHoldNewSprint(value: String!): String!
+    "Start sprint work: the cron may take the sprint's tickets from now on."
+    startSprintWork(sprint: String!): SprintStart!
+    "SIGTERM to the dev servers left running in the ticket's worktrees; refused while it is In Progress. Returns how many were told to stop."
+    stopWorktreeServers(ticketKey: String!): Int!
     "Stops an auto review post that has not gone out yet."
     cancelAutoReviewPost(id: ID!): Boolean!
     "Replaces the text of an auto review post that has not gone out yet; the DOCK-REVIEW marker line stays."

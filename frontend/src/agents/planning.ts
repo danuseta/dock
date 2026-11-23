@@ -111,6 +111,15 @@ export function stepIndex(signal: Pick<PlanSignal, 'stage'> | null): number {
   return signal.stage === 'running' ? 2 : 1;
 }
 
+export const HOLD_STEPS = ['Draft', 'Published', 'Waiting for start', 'Running'] as const;
+
+/** The stepper with the hold rule on: a running sprint waits for start until the owner starts it. */
+export function holdSteps(signal: Pick<PlanSignal, 'stage'> | null, hold: { holdOn: boolean; held: boolean } | null): { steps: readonly string[]; current: number } {
+  const current = stepIndex(signal);
+  if (!hold?.holdOn) return { steps: PLAN_STEPS, current };
+  return { steps: HOLD_STEPS, current: current < 2 ? current : hold.held ? 2 : 3 };
+}
+
 /** "12 Nov 16:19" in the reader's time zone. */
 export const whenText = (iso: string | null): string => {
   if (!iso) return '-';

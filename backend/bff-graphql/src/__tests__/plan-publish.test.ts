@@ -72,18 +72,14 @@ test('cron gate: after publish the plan tickets are candidates; a ticket that jo
   assert.equal(publishWait({ labels: ['plan-published-r2'] }, 2), null);
 });
 
-test('plan triggers: with requirePublish the Plan session waits for the published plan and maps only its tickets', () => {
+test('plan triggers: a published plan, a republish or a joined ticket never starts the Plan session on its own', () => {
   const now = new Date('2026-11-13T03:00:00Z');
   const ticket = (key: string, labels: string[] = []): PlanTicket => ({ key, status: 'To Do', sprintName: 'QRD Sprint 27', sprintState: 'ACTIVE', issueType: 'Task', labels });
-  const before = [ticket('QRD-1'), ticket('QRD-2')];
-  assert.equal(planTriggers(before, null, now, ['To Do'], true), null, 'nothing starts before publish');
-  assert.deepEqual(planTriggers(before, null, now, ['To Do'], false), { kind: 'full', sprint: 'QRD Sprint 27', keys: ['QRD-1', 'QRD-2'] }, 'the old behaviour without the setting');
+  assert.equal(planTriggers([ticket('QRD-1'), ticket('QRD-2')], null, now), null);
   const after = [ticket('QRD-1', ['plan-published-r1']), ticket('QRD-2', ['plan-published-r1']), ticket('QRD-9001')];
-  assert.deepEqual(planTriggers(after, null, now, ['To Do'], true), { kind: 'full', sprint: 'QRD Sprint 27', keys: ['QRD-1', 'QRD-2'] });
+  assert.equal(planTriggers(after, null, now), null);
   const mapped = { status: 'idle', mappingKeys: '[]', mappedKeys: '["QRD-1","QRD-2"]', startedAt: null };
-  assert.equal(planTriggers(after, mapped, now, ['To Do'], true), null, 'the joined ticket waits for a republish');
-  const republished = [...after.slice(0, 2), ticket('QRD-9001', ['plan-published-r2'])];
-  assert.deepEqual(planTriggers(republished, mapped, now, ['To Do'], true), { kind: 'ticket', sprint: 'QRD Sprint 27', keys: ['QRD-9001'] });
+  assert.equal(planTriggers([...after.slice(0, 2), ticket('QRD-9001', ['plan-published-r2'])], mapped, now), null);
 });
 
 test('base URL: DOCK_ATLASSIAN_BASE_URL replaces https://<domain> when set, nothing changes when it is not', async () => {
@@ -121,7 +117,7 @@ function cron(tickets: CronTicket[], dryRun: boolean) {
   const config = JSON.stringify({ ...DEFAULT_CRON_SETTINGS, waitForPublish: true, planAfterPublish: true, enabled: true, workDays: [1, 2, 3, 4, 5, 6, 7], workStart: 0, workEnd: 24 });
   const deps: CronDeps = {
     now: () => new Date('2026-11-13T03:00:00Z'),
-    settingValue: async () => config,
+    settingValue: async (key) => (key === 'holdNewSprint' ? '{"enabled":false}' : key === 'orchestratorCronConfig' ? config : null),
     saveSetting: async () => undefined,
     cacheGet: async (key) => cache.get(key) ?? null,
     cacheSet: async (key, value) => { cache.set(key, value); },
