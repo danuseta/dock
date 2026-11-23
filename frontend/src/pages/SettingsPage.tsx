@@ -32,6 +32,7 @@ import { ElevenLabsKeysSection } from '../components/ElevenLabsKeysSection';
 import { DemoStorageSection } from '../components/DemoStorageSection';
 import { PluginsSection } from '../settings/sections/PluginsSection';
 import { RulesCard } from '../settings/sections/RulesCard';
+import { saveErrorText } from '../lib/saveError';
 
 const dotClass: Record<Exclude<SectionStatus, null>, string> = {
   ok: 'bg-status-merged', bad: 'bg-status-conflict', off: 'border border-muted-foreground', unsaved: 'bg-status-warn',
@@ -85,8 +86,8 @@ const SettingsPage: React.FC = () => {
       setDrafts((current) => { const next = { ...current }; delete next[id]; return next; });
       setTests((current) => { const next = { ...current }; delete next[id as TestedSection]; return next; });
       setOutcome({ section: id, result: { ok: true, message: 'Saved. Blank secrets kept their saved value.' } });
-    } catch {
-      setOutcome({ section: id, result: { ok: false, message: 'Not saved. Check the connection, then try again.' } });
+    } catch (failure) {
+      setOutcome({ section: id, result: { ok: false, message: saveErrorText(failure) } });
     } finally {
       setSaving(null);
     }

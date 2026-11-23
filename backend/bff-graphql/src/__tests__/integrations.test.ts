@@ -13,7 +13,7 @@ import {
 } from '../integrations/discord';
 import { buildPullRequestCacheKey, hasCanonicalTicketReference } from '../integrations/github';
 import { CalendarUnavailableError, GoogleCalendarService, normalizeCalendarEvent } from '../integrations/google-calendar';
-import { isValidServiceHealthRefreshSeconds, StorageAPI } from '../datasources/StorageAPI';
+import { isValidServiceHealthRefreshSeconds, SettingsInputError, StorageAPI } from '../datasources/StorageAPI';
 import { JiraService } from '../integrations/jira';
 import { JiraAPI, JiraTicketLookupError } from '../datasources/JiraAPI';
 import { UpstreamMonitorService, validateMonitorTarget } from '../integrations/upstream-monitor';
@@ -924,7 +924,7 @@ test('internal integration behavior', async (t) => {
     const api = new StorageAPI(storage as any);
 
     assert.strictEqual((await api.getPublicSettings()).discordMessageTemplate, DEFAULT_DISCORD_MESSAGE_TEMPLATE);
-    assert.strictEqual(await api.updateSettings({ discordMessageTemplate: '{{unknownField}}' }), false);
+    await assert.rejects(api.updateSettings({ discordMessageTemplate: '{{unknownField}}' }), SettingsInputError);
     assert.deepStrictEqual(writes, []);
     assert.strictEqual(await api.updateSettings({ discordMessageTemplate: '**{{ticketKey}}**' }), true);
     assert.deepStrictEqual(writes, [['discordMessageTemplate', '**{{ticketKey}}**']]);
@@ -941,15 +941,15 @@ test('internal integration behavior', async (t) => {
 
     const settings = await api.getPublicSettings();
     assert.deepStrictEqual([settings.chatRtk, settings.chatCaveman, settings.chatDefaultModel], ['on', 'full', null]);
-    assert.strictEqual(await api.updateSettings({ chatCaveman: 'loud' }), false);
-    assert.strictEqual(await api.updateSettings({ chatRtk: 'maybe' }), false);
-    assert.strictEqual(await api.updateSettings({ chatDefaultMode: 'yolo' }), false);
-    assert.strictEqual(await api.updateSettings({ chatDefaultMode: 'default' }), false);
-    assert.strictEqual(await api.updateSettings({ chatDefaultModel: 'm'.repeat(101) }), false);
-    assert.strictEqual(await api.updateSettings({ chatDefaultEffort: 'e'.repeat(101) }), false);
-    assert.strictEqual(await api.updateSettings({ chatParallelTurns: '7' }), false);
-    assert.strictEqual(await api.updateSettings({ chatParallelTurns: '0' }), false);
-    assert.strictEqual(await api.updateSettings({ chatParallelTurns: '2.5' }), false);
+    await assert.rejects(api.updateSettings({ chatCaveman: 'loud' }), SettingsInputError);
+    await assert.rejects(api.updateSettings({ chatRtk: 'maybe' }), SettingsInputError);
+    await assert.rejects(api.updateSettings({ chatDefaultMode: 'yolo' }), SettingsInputError);
+    await assert.rejects(api.updateSettings({ chatDefaultMode: 'default' }), SettingsInputError);
+    await assert.rejects(api.updateSettings({ chatDefaultModel: 'm'.repeat(101) }), SettingsInputError);
+    await assert.rejects(api.updateSettings({ chatDefaultEffort: 'e'.repeat(101) }), SettingsInputError);
+    await assert.rejects(api.updateSettings({ chatParallelTurns: '7' }), SettingsInputError);
+    await assert.rejects(api.updateSettings({ chatParallelTurns: '0' }), SettingsInputError);
+    await assert.rejects(api.updateSettings({ chatParallelTurns: '2.5' }), SettingsInputError);
     assert.deepStrictEqual(writes, []);
     assert.strictEqual(await api.updateSettings({ chatParallelTurns: '4' }), true);
     assert.strictEqual(await api.updateSettings({ chatParallelTurns: '' }), true);
@@ -971,7 +971,7 @@ test('internal integration behavior', async (t) => {
     const settings = await api.getPublicSettings();
     assert.deepStrictEqual([settings.autoReviewPostDiscord, settings.reviewPostDelayMinutes, settings.reviewReReviewWaitMinutes, settings.reviewMaxRounds], [true, 2, 10, 3]);
     for (const bad of [{ autoReviewPostDiscord: 'yes' }, { reviewPostDelayMinutes: -1 }, { reviewPostDelayMinutes: 1.5 }, { reviewReReviewWaitMinutes: 241 }, { reviewMaxRounds: 0 }, { reviewMaxRounds: '' }]) {
-      assert.strictEqual(await api.updateSettings(bad), false, JSON.stringify(bad));
+      await assert.rejects(api.updateSettings(bad), SettingsInputError, JSON.stringify(bad));
     }
     assert.deepStrictEqual(writes, []);
     assert.strictEqual(await api.updateSettings({ autoReviewPostDiscord: 'false', reviewPostDelayMinutes: 0, reviewReReviewWaitMinutes: 15, reviewMaxRounds: 5 }), true);
@@ -996,7 +996,7 @@ test('internal integration behavior', async (t) => {
       { reviewFindingsAutoReply: 'yes' }, { reviewPostFormat: 'builtin' }, { reviewReplyFormat: 'html' }, { reviewPostSkill: '../evil' }, { reviewReplySkill: 'Review Message' },
       { reviewPostTemplate: 'x'.repeat(2001) }, { lightRunnerOn: 'on' }, { lightMaxLines: 0 }, { lightMaxFiles: 1.5 }, { lightBlastLoops: 6 }, { lightWorkerModel: 'opus' }, { lightPublish: 'merge' },
     ]) {
-      assert.strictEqual(await api.updateSettings(bad), false, JSON.stringify(bad));
+      await assert.rejects(api.updateSettings(bad), SettingsInputError, JSON.stringify(bad));
     }
     assert.deepStrictEqual(writes, []);
     assert.strictEqual(await api.updateSettings({ reviewPostFormat: 'template', reviewReplySkill: 'my-team:reply_v2', reviewReplyTemplate: 'mas {{author}}', lightForRetro: 'true', lightMaxLines: 200, lightPublish: 'draft' }), true);
@@ -1008,7 +1008,7 @@ test('internal integration behavior', async (t) => {
     const storage = { getSettings: async () => [], hasMasterPin: async () => false, upsertSetting: async (key: string, value: string) => { writes.push([key, value]); } };
     const api = new StorageAPI(storage as any);
     for (const bad of ['https://evil.example/api/webhooks/1/x', 'http://discord.com/api/webhooks/1/x', 'https://discord.com.evil.example/api/webhooks/1/x', 'https://discord.com/api/webhooks/x/y', 'https://discord.com/api/webhooks/1/x/messages/2', 'not a link']) {
-      assert.strictEqual(await api.updateSettings({ discordWebhookUrl: bad }), false, bad);
+      await assert.rejects(api.updateSettings({ discordWebhookUrl: bad }), SettingsInputError, bad);
     }
     assert.deepStrictEqual(writes, []);
     assert.strictEqual(await api.updateSettings({ discordWebhookUrl: 'https://discord.com/api/webhooks/123/abc-DEF_9' }), true);

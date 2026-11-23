@@ -2,7 +2,7 @@ import { gmVerifiedParty } from '../integrations/guild-master';
 import { JiraAPI, JiraTicketLookupError } from '../datasources/JiraAPI';
 import { GitHubAPI } from '../datasources/GitHubAPI';
 import { DiscordAPI } from '../datasources/DiscordAPI';
-import { StorageAPI } from '../datasources/StorageAPI';
+import { SettingsInputError, StorageAPI } from '../datasources/StorageAPI';
 import { GraphQLError } from 'graphql';
 import type { ReviewRound } from '@prisma/client';
 import { shouldRequirePin, type AuthContext } from '../auth/session';
@@ -479,8 +479,8 @@ export const resolvers = {
       return { lines, prompt: sousStartPrompt(key?.trim().toUpperCase() || 'QRD-…', null, lines) };
     },
     opsRules: async () => {
-      const [statusAfterMerge, worktreeMerged] = await storageService.getSettingValues([STATUS_AFTER_MERGE_KEY, WORKTREE_MERGED_KEY]);
-      return { statusAfterMerge: JSON.stringify(readStatusAfterMerge(statusAfterMerge?.value)), worktreeMerged: JSON.stringify(readWorktreeMerged(worktreeMerged?.value)) };
+      const rows = new Map((await storageService.getSettingValues([STATUS_AFTER_MERGE_KEY, WORKTREE_MERGED_KEY])).map((row) => [row.key, row.value]));
+      return { statusAfterMerge: JSON.stringify(readStatusAfterMerge(rows.get(STATUS_AFTER_MERGE_KEY))), worktreeMerged: JSON.stringify(readWorktreeMerged(rows.get(WORKTREE_MERGED_KEY))) };
     },
     qaQueue: () => qaQueueService.queue(),
     qaQueuePosition: (_: unknown, { key }: { key: string }) => qaQueueService.position(key),
@@ -1004,7 +1004,11 @@ export const resolvers = {
       }
     },
     updateSettings: async (_: any, { input }: { input: any }) => {
-      const saved = await storageAPI.updateSettings(input);
+      let saved: boolean;
+      try { saved = await storageAPI.updateSettings(input); } catch (error) {
+        if (error instanceof SettingsInputError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+        throw error;
+      }
       resetOwnerPassLabel();
       return saved;
     },
