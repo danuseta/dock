@@ -212,6 +212,20 @@ export function isStackable(status: string, run?: Pick<CronRun, 'prBe' | 'prFe' 
   return sameText(status, REVIEW_STATUS) || Boolean(run && (run.prBe || run.prFe) && run.review !== 'merged');
 }
 
+/**
+ * The ticket's own "How it starts without waiting:" text, or null. A ticket that says how it starts against fixtures or
+ * stubs is not held by its Blocks links: the links still say who merges first, the work does not wait for them.
+ */
+export function startsWithoutWaiting(description: string | null | undefined): string | null {
+  const match = /how it starts without waiting\W*?:\**\s*([^\n]+)/i.exec(description || '');
+  const text = match ? match[1].replace(/[*_`]/g, '').trim() : '';
+  return text.length >= 10 ? text : null;
+}
+
+/** The prompt line of a ticket that starts before the tickets it waits on, from its own "How it starts without waiting" text. */
+export const withoutWaitingLine = (waitsOn: string, how: string) =>
+  `Starts without waiting on ${waitsOn}, as the ticket says: ${how} Build against the fixtures or stubs it names, keep to the frozen shapes, say so in the PR body, and remove them once the real pieces merge.`;
+
 export interface DependencyState { blocked: Set<string>; stacked: Map<string, string>; waitsOn: Map<string, string> }
 export interface ManualCheck { mode: BlockedManualMode; waitsOn: string | null; stackedOn: string | null }
 
@@ -293,7 +307,7 @@ export function startPreview(open: CronTicket[], state: Pick<DependencyState, 'b
   const view = (ticket: CronTicket): PreviewTicket => ({ key: ticket.key, title: ticket.title, order: orderOf(ticket, dockOrder), orderSource: orderSourceOf(ticket, dockOrder), waitsOn: held.has(ticket.key) ? 'pending' : state.waitsOn.get(ticket.key) ?? null });
   const preview: StartPreview = { slots: free, parallel, first: [], blocked: [], next: [], parked: [] };
   for (const ticket of open) {
-    if (held.has(ticket.key) || state.blocked.has(ticket.key)) preview.blocked.push(view(ticket));
+    if (held.has(ticket.key) || (state.blocked.has(ticket.key) && !startsWithoutWaiting(ticket.description))) preview.blocked.push(view(ticket));
     else if (!ticketHasAcceptanceCriteria(ticket)) preview.parked.push(ticket.key);
     else if (preview.first.length < free) preview.first.push(view(ticket));
     else if (preview.next.length < PREVIEW_NEXT) preview.next.push(view(ticket));
@@ -625,7 +639,8 @@ export class OrchestratorCron {
     for (const wait of publishWaits(tickets, new Set(taken), settings, manual)) defer(wait.key, wait.reason);
     for (const ticket of candidates(tickets, new Set(taken), new Set(), settings, dockOrder, manual)) {
       if (sprintHeld(ticket.sprintName, holdOn, starts)) { defer(ticket.key, HOLD_WAIT_TEXT); continue; }
-      if (held.has(ticket.key) || blocked.has(ticket.key)) {
+      const how = blocked.has(ticket.key) && !held.has(ticket.key) ? startsWithoutWaiting(ticket.description) : null;
+      if (held.has(ticket.key) || (blocked.has(ticket.key) && !how)) {
         await this.deps.recordWait(ticket.key, held.has(ticket.key) ? 'pending' : waitsOn.get(ticket.key) ?? '').catch(() => undefined);
         continue;
       }
@@ -644,7 +659,8 @@ export class OrchestratorCron {
           day.started.push(ticket.key);
           log.started.push(ticket.key);
           if (this.deps.dryRun) continue;
-          if (!(await this.start(ticket, settings, now, await this.startPromptOf(settings, ticket.key, stacked.get(ticket.key))))) log.notMoved.push(ticket.key);
+          const extra = how ? [withoutWaitingLine(waitsOn.get(ticket.key) ?? 'its dependencies', how)] : [];
+          if (!(await this.start(ticket, settings, now, await this.startPromptOf(settings, ticket.key, stacked.get(ticket.key), extra)))) log.notMoved.push(ticket.key);
         }
       } catch (error) {
         console.error(`[Orchestrator cron] ${ticket.key} failed:`, error instanceof Error ? error.message : 'unknown error');
@@ -774,8 +790,8 @@ export class OrchestratorCron {
     return this.deps.saveRun({ key: ticket.key, kind: 'build', title: ticket.title, stage: 'gate', waiting, note: 'Started by the orchestrator cron', ...(engine === 'sous' ? { engine } : {}), createdAt: now.toISOString(), updatedAt: now.toISOString() }, machine);
   }
 
-  private async startPromptOf(settings: CronSettings, key: string, stackOn: string | null = null) {
-    return settings.engine === 'sous' ? sousStartPrompt(key, stackOn, await this.flowLines(key)) : startPrompt(key);
+  private async startPromptOf(settings: CronSettings, key: string, stackOn: string | null = null, extra: string[] = []) {
+    return settings.engine === 'sous' ? sousStartPrompt(key, stackOn, [...extra, ...(await this.flowLines(key))]) : startPrompt(key);
   }
 
   /** The ticket's Sous flow lines and its Readiness line; none when they are not wired or cannot be read, so the prompt stays as before. */
