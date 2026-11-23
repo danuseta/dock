@@ -57,3 +57,9 @@ test('Home My tickets rows hold links beside the button and ask for mergeable', 
   assert.match(home, /<PRBadge status="CONFLICT" \/>/);
   assert.match(read('graphql/queries.ts'), /query GetHomeTicketPrs[\s\S]*?mergeable/);
 });
+
+test('Home shows the merged worktree reminder on the workspace DOCK only, linking to Workspace › Worktrees', () => {
+  const home = read('pages/HomePage.tsx');
+  assert.match(home, /useQuery<\{ worktrees: WorktreeList \}>\(GET_WORKTREES, \{ \.\.\.CACHED_QUERY_OPTIONS, skip: !hasPage\(mode, '\/workspace'\) \}\)/);
+  assert.match(home, /onNavigate\('\/workspace\?tab=worktrees'\)/);
+});

@@ -3,34 +3,31 @@ import { DatabaseZap, RefreshCw, Settings as SettingsIcon } from 'lucide-react';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { EmptyState } from '../components/EmptyState';
 import { ChartScene } from '../components/empty/scenes/ChartScene';
-import { Button, Card, Page, PageHeader, Select } from '../components/ui';
+import { Button, Card, Select } from '../components/ui';
 import { cn } from '../lib/cn';
-import { formatUpdated, sprintOptionLabel } from '../sprint/format';
-import { MethodNotes } from '../sprint/MethodNotes';
-import { EndSection, GateSections, StartSection, VelocitySection } from '../sprint/MemberSections';
-import { OverviewSection } from '../sprint/OverviewSection';
-import { FlagsSection, ReviewDurationSection, ReviewQualitySection, StageSection } from '../sprint/ReviewSections';
-import { SprintSettingsPanel } from '../sprint/SprintSettingsPanel';
-import { TrendSection } from '../sprint/TrendSection';
-import { useSprintDashboard } from '../sprint/useSprintDashboard';
+import { formatUpdated, sprintOptionLabel } from './format';
+import { MethodNotes } from './MethodNotes';
+import { EndSection, GateSections, StartSection, VelocitySection } from './MemberSections';
+import { OverviewSection } from './OverviewSection';
+import { FlagsSection, ReviewDurationSection, ReviewQualitySection, StageSection } from './ReviewSections';
+import { SprintSettingsPanel } from './SprintSettingsPanel';
+import { TrendSection } from './TrendSection';
+import { useSprintDashboard } from './useSprintDashboard';
 
-const SprintPage: React.FC = () => {
+export const SprintTab: React.FC = () => {
   const [selected, setSelected] = useState<number | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const board = useSprintDashboard(selected);
   const { summary, result, refreshState } = board;
 
-  if (board.loading) return <Page width="full"><LoadingSkeleton /></Page>;
+  if (board.loading) return <LoadingSkeleton />;
 
   return (
-    <Page width="full" className="max-[760px]:pb-28">
-      <PageHeader>
-        <div>
-          <h1 className="text-balance font-display text-3xl font-black">Sprint dashboard</h1>
-          <p className="mt-1 text-pretty text-secondary-foreground">
-            Updated {formatUpdated(summary?.computedAt ?? null)}. Refreshed every morning from Jira, or on demand.
-          </p>
-        </div>
+    <>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-pretty text-sm text-secondary-foreground">
+          Updated {formatUpdated(summary?.computedAt ?? null)}. Refreshed every morning from Jira, or on demand.
+        </p>
         <div className="flex flex-wrap items-center gap-2 max-[760px]:w-full">
           {board.sprints.length > 0 && (
             <Select
@@ -49,7 +46,7 @@ const SprintPage: React.FC = () => {
             <SettingsIcon size={16} aria-hidden="true" />Settings
           </Button>
         </div>
-      </PageHeader>
+      </div>
 
       {board.running && refreshState && (
         <Card className="mb-4" role="status">
@@ -102,8 +99,6 @@ const SprintPage: React.FC = () => {
           </div>
         </>
       )}
-    </Page>
+    </>
   );
 };
-
-export default SprintPage;

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { Plus, X } from 'lucide-react';
-import { CREATE_CHAT_SESSION, DELETE_CHAT_SESSION, RENAME_CHAT_SESSION } from '../graphql/mutations';
+import { Crown, Plus, TerminalSquare, X } from 'lucide-react';
+import { ASK_GUILD_MASTER, CREATE_CHAT_SESSION, DELETE_CHAT_SESSION, RENAME_CHAT_SESSION } from '../graphql/mutations';
 import { GET_CHAT_MACHINES, GET_CHAT_SESSION, GET_CHAT_SESSIONS, SEARCH_CHAT } from '../graphql/queries';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { EmptyState } from '../components/EmptyState';
@@ -28,8 +28,12 @@ import { SessionInspector } from '../chat/SessionInspector';
 import { sessionStats, type ChatActivity } from '../chat/activity/activity';
 import { AgentLanes } from '../chat/activity/AgentLanes';
 import { chatStore } from '../chat/store';
-import { SESSIONS_PATH, sessionIdFromSearch, sessionUrl, threadIdFromSearch } from '../chat/sessionRoute';
+import { SESSIONS_PATH, messageIdFromSearch, sessionIdFromSearch, sessionUrl, threadIdFromSearch } from '../chat/sessionRoute';
 import { AgentThreadPane } from '../chat/AgentThreadPane';
+import { GuildMasterPanel } from '../chat/GuildMasterPanel';
+import { isGuildMaster } from '../chat/sessionGroups';
+
+type NewMode = 'work' | 'gm';
 
 interface SearchHit { session: ChatSession; messageId: number; snippet: string; at: string }
 
@@ -53,6 +57,11 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate
   const [createSession, { loading: creating }] = useMutation<{ createChatSession: ChatSession }>(CREATE_CHAT_SESSION);
   const [deleteSession, { loading: deleting }] = useMutation(DELETE_CHAT_SESSION);
   const [renameSession, { loading: renaming }] = useMutation(RENAME_CHAT_SESSION);
+  const [askGuildMaster, { loading: asking }] = useMutation<{ askGuildMaster: ChatSession }>(ASK_GUILD_MASTER);
+  const [newOpen, setNewOpen] = useState(false);
+  const [newMode, setNewMode] = useState<NewMode>('work');
+  const [pin, setPin] = useState('');
+  const [newError, setNewError] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(() => sessionIdFromSearch(window.location.search));
   const [searchText, setSearchText] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -71,6 +80,7 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate
   const [inspectorOpen, setInspectorOpen] = useState(() => window.matchMedia(WIDE_QUERY).matches);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(initialSidebarCollapsed);
   const [filter, setFilter] = useState<SessionFilter>(readSessionFilter);
+  const [focusMessage, setFocusMessage] = useState<number | null>(() => messageIdFromSearch(window.location.search));
   const closeGone = useCallback(() => setGone(false), []);
   const toggleSidebar = () => {
     const next = !sidebarCollapsed;
@@ -116,6 +126,7 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate
       if (window.location.pathname !== SESSIONS_PATH) return;
       setSelectedId(sessionIdFromSearch(window.location.search));
       setThreadId(threadIdFromSearch(window.location.search));
+      setFocusMessage(messageIdFromSearch(window.location.search));
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
@@ -125,6 +136,7 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate
     if (id !== sessionIdFromSearch(window.location.search)) window.history.pushState({}, '', sessionUrl(id));
     setSelectedId(id);
     setThreadId(null);
+    setFocusMessage(null);
     setActionError('');
     if (!window.matchMedia(WIDE_QUERY).matches) setInspectorOpen(false);
   };
@@ -145,6 +157,41 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate
       select(created.id);
     } catch (createError) {
       setActionError(errorText(createError, 'The session could not be created'));
+    }
+  };
+
+  const openNew = () => {
+    setNewMode('work');
+    setPin('');
+    setNewError('');
+    setNewOpen(true);
+  };
+
+  const startNew = async () => {
+    setNewError('');
+    try {
+      const result = await createSession({ variables: newMode === 'gm' ? { mode: 'gm', pin } : {} });
+      const created = result.data?.createChatSession;
+      if (!created) throw new Error('DOCK did not return a session');
+      setNewOpen(false);
+      setPin('');
+      await refetch();
+      select(created.id);
+    } catch (createError) {
+      setNewError(errorText(createError, 'The session could not be created'));
+    }
+  };
+
+  const askGm = async (session: ChatSession) => {
+    setActionError('');
+    try {
+      const result = await askGuildMaster({ variables: { sessionId: session.id } });
+      const gm = result.data?.askGuildMaster;
+      if (!gm) throw new Error('DOCK did not return the Guild Master session');
+      await refetch();
+      select(gm.id);
+    } catch (askError) {
+      setActionError(errorText(askError, 'The summary could not be sent to Guild Master'));
     }
   };
 
@@ -230,7 +277,7 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate
               activeThreadId={threadId}
               onSelect={select}
               onOpenThread={openThread}
-              onNew={() => void create({})}
+              onNew={openNew}
               onRename={openRename}
               onDelete={(session) => { setActionError(''); setDeleteTarget(session); }}
               collapsed={sidebarCollapsed}
@@ -256,17 +303,18 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate
                 scene={<BubblesScene />}
                 title="Pick a session on the left"
                 description="Select a session to read it."
-                action={<Button size="sm" variant="primary" disabled={creating} onClick={() => void create({})}><Plus size={14} aria-hidden="true" />New session</Button>}
+                action={<Button size="sm" variant="primary" disabled={creating} onClick={openNew}><Plus size={14} aria-hidden="true" />New session</Button>}
               />
             </div>
           ) : (
             <>
               {actionError && !deleteTarget && <p className="flex-none border-b border-border px-3.5 py-1.5 text-pretty text-xs break-words text-status-conflict" role="alert">{actionError}</p>}
-              {revisedRound(selected) && (
+              {(revisedRound(selected) || (selected.reviewRound && selected.ticketKey)) && (
                 <div className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-3.5 py-1.5 text-xs">
-                  <span className="rounded-pill border border-accent/40 px-1.5 font-mono text-[0.62rem] leading-4 text-accent">Revised from review</span>
-                  <span className="min-w-0 flex-1 truncate text-secondary-foreground">{revisedRound(selected)?.summary}</span>
-                  {revisedRound(selected)?.threadUrl && <a className="text-accent hover:underline" href={revisedRound(selected)?.threadUrl ?? undefined} target="_blank" rel="noreferrer">Open thread</a>}
+                  <span className="rounded-pill border border-accent/40 px-1.5 font-mono text-[0.62rem] leading-4 text-accent">{revisedRound(selected) ? 'Revised from review' : 'Review round'}</span>
+                  <span className="min-w-0 flex-1 truncate text-secondary-foreground">{selected.reviewRound?.summary}</span>
+                  {selected.ticketKey && onNavigate && <button type="button" className="border-0 bg-transparent p-0 text-accent hover:underline" onClick={() => onNavigate(`/blackboard?key=${encodeURIComponent(selected.ticketKey as string)}&file=%40review`)}>Blackboard › Review findings</button>}
+                  {selected.reviewRound?.threadUrl && <a className="text-accent hover:underline" href={selected.reviewRound.threadUrl} target="_blank" rel="noreferrer">Open thread</a>}
                 </div>
               )}
               <div className="flex min-h-0 flex-1">
@@ -279,6 +327,7 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate
                   onOpenThread={(id) => openThread(selected.id, id)}
                   onActivity={setEvents}
                   queuedBehind={runningBeside(selected, sessions)}
+                  focusMessageId={focusMessage}
                   renderHeader={({ control, dot, status }) => (
                     <SessionHeaderBar
                       session={selected}
@@ -290,6 +339,8 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate
                       onBack={() => select(null)}
                       onToggleInspector={() => setInspectorOpen((open) => !open)}
                       onRename={() => openRename(selected)}
+                      onAskGuildMaster={selected.source === 'dock' && !isGuildMaster(selected) ? () => void askGm(selected) : undefined}
+                      asking={asking}
                     />
                   )}
                   readOnlyAction={<Button size="sm" variant="primary" disabled={creating} onClick={() => void create({ forkFrom: selected.id, title: selected.title || undefined, ticketKey: selected.ticketKey })}>Continue as a DOCK session</Button>}
@@ -298,17 +349,22 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate
                 {threadId ? (
                   <AgentThreadPane
                     sessionId={selected.id}
+                    ticketKey={selected.ticketKey}
                     threadId={threadId}
                     onOpen={(id) => openThread(selected.id, id)}
                     onClose={() => openThread(selected.id, null)}
                     className="w-[440px] flex-none border-l border-border max-[1180px]:w-[380px] max-[900px]:fixed max-[900px]:inset-x-0 max-[900px]:top-[var(--vv-top,0px)] max-[900px]:z-[55] max-[900px]:h-[var(--vv-h,100dvh)] max-[900px]:w-auto max-[900px]:border-l-0"
                   />
-                ) : inspectorOpen && <SessionInspector session={selected} files={files} onTicketClick={onTicketClick} onNavigate={onNavigate} className="w-[260px] flex-none border-l border-border max-[900px]:hidden" />}
+                ) : inspectorOpen && (isGuildMaster(selected)
+                  ? <GuildMasterPanel proposal={selected.gmProposal} className="w-[300px] flex-none border-l border-border max-[900px]:hidden" />
+                  : <SessionInspector session={selected} files={files} onTicketClick={onTicketClick} onNavigate={onNavigate} className="w-[260px] flex-none border-l border-border max-[900px]:hidden" />)}
               </div>
               {inspectorOpen && !threadId && (
                 <div className="fixed inset-x-0 bottom-0 z-[50] max-h-[70dvh] overflow-y-auto rounded-t-lg border-t border-border-glow bg-surface-1 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-card min-[901px]:hidden" role="dialog" aria-label="About this session">
                   <div className="mb-2 flex items-center justify-between"><span className="mx-auto h-1.5 w-10 rounded-pill bg-border-glow" aria-hidden="true" /><Button size="sm" variant="ghost" className="h-11 min-w-11" aria-label="Close" onClick={() => setInspectorOpen(false)}><X size={15} aria-hidden="true" /></Button></div>
-                  <SessionInspector session={selected} files={files} costUsd={liveSession?.costUsd} onTicketClick={onTicketClick} onNavigate={onNavigate} className="bg-transparent p-0" />
+                  {isGuildMaster(selected)
+                    ? <GuildMasterPanel proposal={selected.gmProposal} className="bg-transparent p-0" />
+                    : <SessionInspector session={selected} files={files} costUsd={liveSession?.costUsd} onTicketClick={onTicketClick} onNavigate={onNavigate} className="bg-transparent p-0" />}
                 </div>
               )}
             </>
@@ -324,6 +380,38 @@ const SessionsPage: React.FC<{ onTicketClick?: (key: string) => void; onNavigate
           <p id="delete-session-description" className="mt-2 text-pretty text-sm text-muted-foreground">{deleteTarget ? titleOf(deleteTarget) : ''} and its messages are removed from DOCK. {deleteTarget?.source === 'cli' ? 'The session on the workspace is not touched.' : 'This cannot be undone.'}</p>
           {actionError && <p className="mt-3 text-pretty text-sm text-status-conflict" role="alert">{actionError}</p>}
           <div className="mt-6 flex justify-end gap-2"><Button onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button><Button variant="danger" onClick={handleDelete} disabled={deleting}>{deleting ? 'Deleting...' : 'Delete session'}</Button></div>
+        </Card>
+      </Dialog>
+
+      <Dialog open={newOpen} onClose={() => !creating && setNewOpen(false)} dismissible={!creating} labelledBy="new-session-title">
+        <Card className="w-[min(640px,calc(100vw-2rem))] shadow-card">
+          <form onSubmit={(event) => { event.preventDefault(); void startNew(); }}>
+            <h2 id="new-session-title" className="text-balance font-display text-xl font-bold">New session</h2>
+            <p className="mt-1 text-pretty text-sm text-muted-foreground">The mode is fixed for the whole session.</p>
+            <div className="mt-4 flex gap-3 max-[600px]:flex-col" role="radiogroup" aria-label="Session mode">
+              {([
+                ['work', TerminalSquare, 'Work', ['Builds, reviews, runs sous', 'Shell, git, Jira under the worker guard']],
+                ['gm', Crown, 'Guild Master', ['Changes how DOCK works', 'No shell; proposes, writes after your "ya"', 'Only you, after the PIN']],
+              ] as const).map(([value, Icon, title, lines]) => (
+                <button key={value} type="button" role="radio" aria-checked={newMode === value} onClick={() => setNewMode(value)}
+                  className={cn('flex flex-1 flex-col gap-1.5 rounded-md border p-4 text-left', newMode === value ? (value === 'gm' ? 'border-violet-400 bg-violet-400/10' : 'border-accent bg-accent-dim') : 'border-border hover:border-border-glow')}>
+                  <span className="flex items-center gap-2 font-display text-sm font-bold"><Icon size={16} aria-hidden="true" className={value === 'gm' ? 'text-violet-300' : undefined} />{title}</span>
+                  {lines.map((line) => <span key={line} className="text-[0.74rem] text-secondary-foreground">{line}</span>)}
+                </button>
+              ))}
+            </div>
+            {newMode === 'gm' && (
+              <label className="mt-4 flex flex-col gap-1 text-[0.8rem]">
+                <span className="text-secondary-foreground">Owner PIN</span>
+                <Input className="h-10 w-40 max-[900px]:h-11" type="password" inputMode="numeric" autoComplete="off" value={pin} maxLength={6} aria-label="Owner PIN" autoFocus onChange={(event) => setPin(event.target.value)} />
+              </label>
+            )}
+            {newError && <p className="mt-3 text-pretty text-sm text-status-conflict" role="alert">{newError}</p>}
+            <div className="mt-6 flex justify-end gap-2">
+              <Button type="button" onClick={() => setNewOpen(false)} disabled={creating}>Cancel</Button>
+              <Button type="submit" variant="primary" disabled={creating || (newMode === 'gm' && pin.trim().length < 4)}>{creating ? 'Starting...' : 'Start'}</Button>
+            </div>
+          </form>
         </Card>
       </Dialog>
 

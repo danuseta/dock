@@ -73,6 +73,7 @@ const DemoVideosPage = ({ onTicketClick }: { onTicketClick: (key: string) => voi
       {error && <Card className="mb-4 border-status-conflict text-pretty text-sm text-status-conflict" role="alert">{error.message}</Card>}
       {notice && <Card className={cn('mb-4 text-pretty text-sm', notice.error ? 'border-status-conflict text-status-conflict' : 'text-status-merged')} role={notice.error ? 'alert' : 'status'}>{notice.text}</Card>}
 
+      {data?.demoVideos?.storage === 'none' && <Card className="mb-4 text-pretty text-sm text-secondary-foreground" role="status">Demo video upload is off: the Storage plugin is None. Pick S3 or Local folder in Settings &gt; Plugins.</Card>}
       {videos.length === 0 ? <Card className="p-0"><EmptyState scene={<FilmScene />} description="No demo video yet." /></Card> : (
         <>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">

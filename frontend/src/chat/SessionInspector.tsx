@@ -1,25 +1,34 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowRight, FileCode, FileDiff, Workflow } from 'lucide-react';
+import { ArrowRight, FileCode, FileDiff, Flag, Route, Workflow } from 'lucide-react';
 import type { AgentRun } from '../agents/runs';
 import { changesHref } from '../changes/href';
 import { LgtmButton } from '../agents/lgtm';
 import { LGTM_CONFIRM, lgtmResult } from '../agents/lgtmCopy';
 import { VerdictBadge } from '../agents/VerdictBadge';
 import { APPROVE_REVIEW } from '../graphql/mutations';
-import { GET_CHAT_SESSION, GET_ORCHESTRATION } from '../graphql/queries';
+import { GET_CHAT_SESSION, GET_CLAUDE_SESSION_USAGE, GET_ORCHESTRATION } from '../graphql/queries';
+import type { ClaudeSessionUsage } from '../lib/claudeUsage';
 import { Toast } from '../components/Toast';
 import { Badge, Button, ConfirmDialog } from '../components/ui';
 import { cn } from '../lib/cn';
-import { monitorsOnly, useDockMode } from '../lib/dockMode';
+import { hasPage, monitorsOnly, useDockMode } from '../lib/dockMode';
+import { coverageText, useAcTrace } from '../lib/acTrace';
+import { TRACE_ENTRY, blackboardFileHref } from '../lib/blackboard';
 import { CACHED_QUERY_OPTIONS } from '../lib/queryPolicy';
 import { TICKET_STEPS, stepIndex } from '../lib/ticketDetail';
 import { CHAT_MACHINE_OPTIONS } from './composer/documents';
 import { EMPTY_OPTIONS } from './composer/composerLogic';
+import { fixLoopText, lastCheckpointLabel, latestCheckpoint } from './checkpoints';
 import { changedFiles, filesTotal, stageLabel } from './headerState';
 import { machineOf, sessionTurnOptions, type ChatSession } from './messages';
 import { appliedOptions, type SessionMachineOptions } from './sessionOptions';
 import { QaPanel } from './QaPanel';
+import { SessionJudgeBlock } from './SessionJudgeBlock';
+import { SessionUsage } from './SessionUsage';
+import { MessageTime } from './activity/TranscriptParts';
+import { SLOW_POLL_MS } from './messages';
+import { useCheckpoints } from './useCheckpoints';
 import type { ChatFileChange } from './status';
 
 const SHOWN_FILES = 12;
@@ -42,8 +51,15 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, cos
   const ticketKey = session.ticketKey || '';
   const { data: sessionData } = useQuery<{ chatSession: ChatSession | null }>(GET_CHAT_SESSION, { variables: { id: session.id } });
   const { data: machineData } = useQuery<{ chatMachineOptions: SessionMachineOptions | null }>(CHAT_MACHINE_OPTIONS, { variables: { machine: machineOf(session) } });
+  const { data: usageData } = useQuery<{ claudeSessionUsage: ClaudeSessionUsage }>(GET_CLAUDE_SESSION_USAGE, { variables: { sessionId: session.id }, fetchPolicy: 'cache-and-network' });
   const { data } = useQuery(GET_ORCHESTRATION, { ...CACHED_QUERY_OPTIONS, variables: { key: ticketKey }, skip: !ticketKey, pollInterval: 30000 });
   const mode = useDockMode();
+  const onBlackboard = hasPage(mode, '/blackboard') && Boolean(ticketKey);
+  // The short Tiket → kode line reads the board again on its poll; QRD-1534 checkpoints call refreshAcTrace.
+  const trace = useAcTrace(ticketKey, onBlackboard);
+  const checkpoints = useCheckpoints(ticketKey, SLOW_POLL_MS);
+  const lastCheckpoint = latestCheckpoint(checkpoints);
+  const loop = fixLoopText(checkpoints);
   const [approveReview, { loading: approving }] = useMutation(APPROVE_REVIEW, { refetchQueries: ['GetOrchestrations', 'GetOrchestration'] });
   const [lgtmTarget, setLgtmTarget] = useState<AgentRun | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -72,8 +88,8 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, cos
   const changesRepo = run?.pullRequests?.[0]?.repo ?? run?.prBe ?? run?.prFe ?? null;
   return (
     <aside className={cn('flex min-h-0 flex-col gap-4 overflow-y-auto bg-surface-0 p-3.5', className)} aria-label="Session details">
-      <section className={cn('flex flex-col gap-1.5', sessionRows.length === 0 && (costUsd != null ? 'min-[761px]:hidden' : 'hidden'))} aria-label="Session">
-        <h3 className={label}>Session</h3>
+      <div className="flex flex-col gap-1">
+      <section className={cn('flex flex-col', sessionRows.length === 0 && (costUsd != null ? 'min-[761px]:hidden' : 'hidden'))} aria-label="Session">
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-[0.72rem]">
           {sessionRows.map((row) => (
             <React.Fragment key={row.field}><dt className="text-muted-foreground">{row.label}</dt><dd className="min-w-0 truncate text-right text-secondary-foreground">{row.value}</dd></React.Fragment>
@@ -81,6 +97,8 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, cos
           {costUsd != null && <><dt className="text-muted-foreground min-[761px]:hidden">Cost</dt><dd className="text-right tabular-nums text-secondary-foreground min-[761px]:hidden">${costUsd.toFixed(2)}</dd></>}
         </dl>
       </section>
+      <SessionUsage usage={usageData?.claudeSessionUsage} />
+      </div>
       <section className="flex flex-col gap-2.5" aria-label="Ticket">
         <div className="flex items-center justify-between gap-2">
           <h3 className={label}>Ticket</h3>
@@ -94,13 +112,28 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, cos
                 <li key={step.id} title={step.name} aria-current={index === current ? 'step' : undefined} className={cn('h-1.5 rounded-pill', index === current ? 'bg-foreground' : index < current || run.finished ? 'bg-secondary-foreground/50' : 'bg-surface-2')}><span className="sr-only">{step.name}</span></li>
               ))}
             </ol>
-            {current >= 0 && <p className="font-mono text-[0.72rem] text-secondary-foreground">{stageLabel(current)}</p>}
+            {current >= 0 && <p className="font-mono text-[0.72rem] text-secondary-foreground">{stageLabel(current)}{loop && ` · ${loop}`}</p>}
             <div className="flex flex-wrap gap-1.5">
               <Badge variant={run.acFailed > 0 ? 'danger' : 'neutral'}>AC {run.acPassed}/{run.acTotal}</Badge>
               {run.testsFe && <Badge title={`Tests FE: ${run.testsFe}`}>FE {run.testsFe.split(/[ ,]/)[0]}</Badge>}
               {run.testsBe && <Badge title={`Tests BE: ${run.testsBe}`}>BE {run.testsBe.split(/[ ,]/)[0]}</Badge>}
             </div>
           </>
+        )}
+        {lastCheckpoint && (
+          <div className="grid min-w-0 gap-0.5 font-mono text-[0.72rem] text-secondary-foreground" title={lastCheckpoint.text}>
+            <p className="flex min-w-0 items-center gap-1.5">
+              <Flag size={12} aria-hidden="true" className="flex-none text-sky-200" />
+              <span className="text-muted-foreground">Last checkpoint</span>
+              <span className="ml-auto flex-none"><MessageTime at={lastCheckpoint.at} /></span>
+            </p>
+            <p className="min-w-0 text-pretty pl-[18px] text-foreground">{lastCheckpointLabel(lastCheckpoint)}</p>
+          </div>
+        )}
+        {onBlackboard && trace && onNavigate && (
+          <button type="button" onClick={() => onNavigate(blackboardFileHref(ticketKey, TRACE_ENTRY))} className="flex items-center gap-1.5 border-0 bg-transparent p-0 text-left font-mono text-[0.72rem] text-secondary-foreground hover:text-foreground max-[900px]:min-h-11">
+            <Route size={12} aria-hidden="true" className="flex-none text-sky-200" />Ticket → code <span className="text-foreground tabular-nums">{coverageText(trace)}</span><span className="ml-auto text-muted-foreground">open</span>
+          </button>
         )}
         <div>
           <p className={cn(label, 'mb-1 flex items-center gap-2')}>
@@ -122,6 +155,7 @@ export const SessionInspector: React.FC<SessionInspectorProps> = ({ session, cos
           )}
         </div>
       </section>
+      <SessionJudgeBlock sessionId={session.id} lastMessageAt={sessionData?.chatSession?.lastMessageAt} canAct={!monitorsOnly(mode)} onNavigate={onNavigate} />
       {ticketKey && <QaPanel ticketKey={ticketKey} />}
       <div className="mt-auto flex flex-col gap-4">
         {run?.kind === 'review' && !monitorsOnly(mode) && <LgtmButton run={run} busy={approving} onLgtm={setLgtmTarget} className="w-full max-[900px]:h-11" />}

@@ -157,17 +157,20 @@ export function rankOf(labels: string[]): number | null {
   return null;
 }
 
-export interface PlanTicket { key: string; dev: string | null; sp: number | null; rank: number | null }
+/** carried: left over from an earlier sprint; its rank is that sprint's plan. */
+export interface PlanTicket { key: string; dev: string | null; sp: number | null; rank: number | null; carried?: boolean }
 export interface PlannedTicket { key: string; planStart: number; planDur: number }
 
 /**
- * Where each card sits in the plan as written: per developer by rank (no rank last, then key), back to back from day 1,
- * each lasting its full SP. Merged cards keep their place, so the plan reads the same all sprint.
+ * Where each card sits in the plan as written: per developer the cards carried over from an earlier sprint first, then
+ * by rank (no rank last, then key), back to back from day 1, each lasting its full SP. Merged cards keep their place,
+ * so the plan reads the same all sprint.
  */
 export function planLayout(tickets: PlanTicket[], options: { spPerDay?: number } = {}): PlannedTicket[] {
   const spPerDay = options.spPerDay && options.spPerDay > 0 ? options.spPerDay : DEFAULT_SP_PER_DAY;
   const free = new Map<string, number>();
-  const order = [...tickets].sort((a, b) => (a.rank ?? Number.MAX_SAFE_INTEGER) - (b.rank ?? Number.MAX_SAFE_INTEGER) || a.key.localeCompare(b.key, undefined, { numeric: true }));
+  const order = [...tickets].sort((a, b) => Number(!!b.carried) - Number(!!a.carried)
+    || (a.rank ?? Number.MAX_SAFE_INTEGER) - (b.rank ?? Number.MAX_SAFE_INTEGER) || a.key.localeCompare(b.key, undefined, { numeric: true }));
   return order.map((ticket) => {
     const lane = ticket.dev || UNASSIGNED;
     const planStart = free.get(lane) ?? 0;

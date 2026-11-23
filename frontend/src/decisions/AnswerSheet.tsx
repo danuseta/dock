@@ -53,7 +53,10 @@ export const AnswerSheet: React.FC<AnswerSheetProps> = ({ run, questions, drafts
             <li key={question.id} className="border-b border-border">
               <button type="button" className="grid w-full grid-cols-[28px_minmax(0,1fr)] gap-x-2 py-2.5 text-left hover:bg-surface-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 max-[760px]:min-h-11" onClick={() => onOpen(index)}>
                 <span className="font-mono text-sm text-muted-foreground">{index + 1}</span>
-                <span className="text-pretty text-sm text-foreground">{question.text}</span>
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-pretty text-sm text-foreground">{question.text}</span>
+                  {question.textId && <span className="text-pretty text-[0.78rem] text-muted-foreground" lang="id">{question.textId}</span>}
+                </span>
                 <span />
                 <span className={text ? 'text-pretty text-[0.8rem] text-secondary-foreground' : 'text-[0.8rem] text-amber-200'}>
                   {text ?? 'Not answered'}{drafts[question.id]?.unsure ? ' · unsure' : ''}

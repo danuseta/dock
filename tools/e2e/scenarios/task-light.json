@@ -1,0 +1,197 @@
+{
+  "name": "task-light",
+  "match": {
+    "mode": "work",
+    "text": "^Pakai skill sous: kerjakan [A-Z][A-Z0-9]+-\\d+",
+    "party": "light",
+    "needsKey": true,
+    "priority": 20
+  },
+  "byKey": {
+    "QRD-9001": {
+      "prField": "pr.fe",
+      "ticketPr": "https://github.com/qonflo/dashboard/pull/101",
+      "repoName": "dashboard"
+    },
+    "QRD-9002": {
+      "prField": "pr.be",
+      "ticketPr": "https://github.com/qonflo/backend/pull/201",
+      "repoName": "backend"
+    },
+    "*": {
+      "prField": "pr.fe",
+      "ticketPr": "https://github.com/qonflo/dashboard/pull/{{keyNum}}",
+      "repoName": "dashboard"
+    }
+  },
+  "turns": [
+    {
+      "model": "sonnet",
+      "tokens": 24000,
+      "costUsd": 0.31,
+      "steps": [
+        {
+          "say": "Skills: sous, light / candidates: sous / using: sous"
+        },
+        {
+          "tool": "Bash",
+          "text": "node party-check.cjs {{key}}"
+        },
+        {
+          "ledger": {
+            "op": "init",
+            "title": "E2E ticket {{key}}"
+          }
+        },
+        {
+          "ledger": {
+            "op": "set",
+            "values": {
+              "engine": "sous",
+              "mode": "light",
+              "note": "light: scout (sous-explorer)"
+            }
+          }
+        },
+        {
+          "ledger": {
+            "op": "decide",
+            "text": "mode light from the Party in the Contract",
+            "status": "DECIDED",
+            "by": "sous-light-runner"
+          }
+        },
+        {
+          "ledger": {
+            "op": "acSet",
+            "lines": [
+              "The label text is fixed"
+            ]
+          }
+        },
+        {
+          "agent": {
+            "type": "sous-explorer",
+            "model": "sonnet",
+            "step": "light-scout",
+            "detail": "light scout {{key}}",
+            "tokens": 6000
+          }
+        },
+        {
+          "file": {
+            "path": "light-brief.md",
+            "text": "# Light brief {{key}}\n\nFiles: src/label.ts\nTEST-CMD: npx vitest run src/label.test.ts\n"
+          }
+        },
+        {
+          "file": {
+            "path": "tasks.md",
+            "text": "| Task | Files |\n|---|---|\n| T1 | src/label.ts |\n"
+          }
+        },
+        {
+          "ledger": {
+            "op": "set",
+            "values": {
+              "stage": "code",
+              "note": "light: work loop 1 (sous-ticket-worker)"
+            }
+          }
+        },
+        {
+          "agent": {
+            "type": "sous-ticket-worker",
+            "model": "sonnet",
+            "step": "light-work",
+            "detail": "light work {{key}}",
+            "tokens": 14000
+          }
+        },
+        {
+          "ledger": {
+            "op": "set",
+            "values": {
+              "stage": "test",
+              "note": "light: verify (sous-verifier)"
+            }
+          }
+        },
+        {
+          "agent": {
+            "type": "sous-verifier",
+            "model": "sonnet",
+            "step": "light-verify",
+            "detail": "light verify {{key}}",
+            "tokens": 5000
+          }
+        },
+        {
+          "ledger": {
+            "op": "set",
+            "values": {
+              "stage": "verify",
+              "note": "light: blast check (sous-explorer)"
+            }
+          }
+        },
+        {
+          "agent": {
+            "type": "sous-explorer",
+            "model": "sonnet",
+            "step": "light-blast",
+            "detail": "blast check {{key}}",
+            "tokens": 4000
+          }
+        },
+        {
+          "ledger": {
+            "op": "set",
+            "values": {
+              "stage": "commit",
+              "note": "light: publish (sous-publisher)"
+            }
+          }
+        },
+        {
+          "agent": {
+            "type": "sous-publisher",
+            "model": "haiku",
+            "step": "light-publish",
+            "detail": "publish {{key}}",
+            "tokens": 3000
+          }
+        },
+        {
+          "ledger": {
+            "op": "set",
+            "values": {
+              "{{prField}}": "{{ticketPr}}",
+              "stage": "pr",
+              "note": "light: PR open"
+            }
+          }
+        },
+        {
+          "file": {
+            "path": "light.md",
+            "text": "# Light run {{key}}\n\nLight settings: lines=150 files=3 worker=sonnet browser=on blast=on loops=2 publish=push\n\n| Row | Result |\n|---|---|\n| One repo per job | FE |\n| Size | 1 file, ~12 lines |\n| No AC, scope or contract change | holds |\n\nWorker: src/label.ts changed\nVerifier: pass\nBrowser check: skipped: e2e\nBlast check: clean, loops 0\nCommit: {{shortSha}}\nPR: {{ticketPr}}\n"
+          }
+        },
+        {
+          "ledger": {
+            "op": "handoff",
+            "who": "light",
+            "status": "done",
+            "summary": "light fix published",
+            "evidence": "{{board}}/light.md",
+            "unverified": "none"
+          }
+        },
+        {
+          "say": "TICKET: {{key}}   MODE: light   RESULT: DONE\nPR: {{ticketPr}}\nDISPATCH: sous-explorer (sonnet), sous-ticket-worker (sonnet), sous-verifier (sonnet), sous-publisher (haiku)"
+        }
+      ]
+    }
+  ]
+}

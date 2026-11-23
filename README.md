@@ -123,6 +123,29 @@ node <config folder>/kit/dock-chat.cjs run
 | The bridge logs `404` on `/chat/...` | The backend runs without `DOCK_MODE=workspace`. Restart it with the variable. |
 | A session stays queued and the bridge says the claude command was not found | Claude Code is not on the PATH of the terminal that runs the bridge. |
 
+## Setup
+
+Run this once after `npm install`, from the repo root. It asks for the three things DOCK needs and saves them the same way Settings does (tokens encrypted, PIN hashed):
+
+- Jira URL, email and API token
+- GitHub token
+- a PIN (4 to 6 digits)
+
+```bash
+npm run setup        # or: npx dock-setup
+```
+
+Tokens and the PIN are typed hidden, and Jira and GitHub are checked before anything is saved. Something already set is skipped. Discord, Calendar and plugins are left for later: set them in Settings, or ask Guild Master. It does not check or log in Claude Code, node or git; the workspace template provides them.
+
+For scripts, pass everything as flags or `DOCK_SETUP_*` variables and nothing is asked:
+
+```bash
+npm run setup -- --jira-url acme.atlassian.net --jira-email me@acme.io --jira-token <token> --github-token <token> --pin 1234
+# or DOCK_SETUP_JIRA_URL, DOCK_SETUP_JIRA_EMAIL, DOCK_SETUP_JIRA_TOKEN, DOCK_SETUP_GITHUB_TOKEN, DOCK_SETUP_PIN
+```
+
+Until all three are set, Home shows a Finish setup card that links to the Jira, GitHub and Security sections of Settings.
+
 ## Development
 
 ```bash

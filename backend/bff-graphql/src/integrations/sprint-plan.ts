@@ -3,8 +3,9 @@
 import { OrchestratorInputError } from './orchestrator';
 import type { TicketLink } from './jira';
 import type { PlanEdgeInput, StorageService } from '../storage/service';
+import { inPublishedPlan } from './plan-publish';
 
-export interface PlanTicket { key: string; status: string; sprintName?: string | null; sprintState?: string | null; issueType?: string | null; links?: TicketLink[] }
+export interface PlanTicket { key: string; status: string; sprintName?: string | null; sprintState?: string | null; issueType?: string | null; links?: TicketLink[]; labels?: string[] }
 export interface PlanRow { status: string; mappingKeys: string; mappedKeys: string; startedAt: Date | null }
 export type PlanMode = 'full' | 'ticket';
 export type PlanTrigger = { kind: PlanMode; sprint: string; keys: string[] } | { kind: 'expire'; sprint: string } | null;
@@ -50,10 +51,16 @@ export function jiraEdges(tickets: PlanTicket[]): PlanEdgeInput[] {
   return [...edges.values()];
 }
 
-/** What the cron tick should start: a full run when the sprint has no map, a ticket run for owner tickets that joined, or expiry of a run that never posted. */
-export function planTriggers(ownerTickets: PlanTicket[], plan: PlanRow | null, now: Date, todoStatuses: string[] = ['To Do']): PlanTrigger {
-  const active = activeSprint(ownerTickets);
-  if (!active) return null;
+/**
+ * What the cron tick should start: a full run when the sprint has no map, a ticket run for owner tickets that joined, or
+ * expiry of a run that never posted. With `requirePublish` only tickets of the published plan (a plan-published-rN
+ * label) count: nothing starts before the planner publishes, and a ticket that joined after publish waits for a republish.
+ */
+export function planTriggers(ownerTickets: PlanTicket[], plan: PlanRow | null, now: Date, todoStatuses: string[] = ['To Do'], requirePublish = false): PlanTrigger {
+  const found = activeSprint(ownerTickets);
+  if (!found) return null;
+  const active = requirePublish ? { ...found, tickets: found.tickets.filter((ticket) => inPublishedPlan(ticket.labels)) } : found;
+  if (active.tickets.length === 0 && plan?.status !== 'mapping') return null;
   const keys = active.tickets.map((ticket) => ticket.key);
   if (!plan) {
     return active.tickets.some((ticket) => todoStatuses.some((status) => sameText(status, ticket.status))) ? { kind: 'full', sprint: active.sprint, keys } : null;
@@ -166,6 +173,8 @@ export interface PlanDeps {
   sprints: () => Promise<Array<{ id: number; name: string; state: string; startDate: string }>>;
   sprintKeys: (sprintId: number) => Promise<string[]>;
   todoStatuses?: string[];
+  /** "Plan per developer dibikin setelah publish": map only once the sprint plan is published. */
+  requirePublish?: () => Promise<boolean>;
 }
 
 /** Starts and takes back the lead's plan runs. `watch` runs on every cron tick on the tickets the cron already fetched. */
@@ -188,14 +197,16 @@ export class SprintPlanner {
     }
     this.sprint = active.sprint;
     const plan = await this.deps.store.getSprintPlan(active.sprint);
-    const trigger = planTriggers(tickets, plan, this.deps.now(), this.deps.todoStatuses);
+    const requirePublish = this.deps.requirePublish ? await this.deps.requirePublish() : false;
+    const trigger = planTriggers(tickets, plan, this.deps.now(), this.deps.todoStatuses, requirePublish);
     if (trigger?.kind === 'expire') {
       this.failedAt = this.deps.now().getTime();
       await this.deps.store.saveSprintPlan(trigger.sprint, { status: 'failed', error: 'No draft posted within 2 h' });
       return trigger;
     }
     const tried = plan?.status === 'failed' ? parseKeys(plan.mappingKeys) : [];
-    if (trigger && this.deps.canStart() && this.deps.now().getTime() - this.failedAt >= START_RETRY_MS) await this.start(trigger.sprint, trigger.kind, trigger.keys, active.tickets, edges, tried);
+    const planned = requirePublish ? active.tickets.filter((ticket) => inPublishedPlan(ticket.labels)) : active.tickets;
+    if (trigger && this.deps.canStart() && this.deps.now().getTime() - this.failedAt >= START_RETRY_MS) await this.start(trigger.sprint, trigger.kind, trigger.keys, planned, edges, tried);
     return trigger;
   }
 

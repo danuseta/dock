@@ -1,9 +1,15 @@
 import React, { useState } from 'react';
 import { Bot, ChevronDown, ExternalLink } from 'lucide-react';
 import { cn } from '../lib/cn';
-import { isPhone } from '../lib/phone';
 import { formatAge } from './runs';
 import { AUTO_REVIEW_LABEL, prLabel, type AutoReviewRow } from './autoReviews';
+
+const OPEN_KEY = 'jidis.auto-reviews-open';
+
+/** Folded by default; opens again only when the owner opened it last time. */
+const readOpen = () => {
+  try { return window.localStorage.getItem(OPEN_KEY) === '1'; } catch { return false; }
+};
 
 const TONE: Record<string, string> = {
   lgtm: 'border-status-merged text-status-merged',
@@ -17,15 +23,23 @@ export const AutoReviewBadge: React.FC<{ row: AutoReviewRow | undefined; classNa
   return <span className={cn('inline-flex flex-none items-center gap-1 rounded-xs border border-status-merged px-1.5 py-px font-mono text-[0.62rem] font-bold text-status-merged', className)} title={`DOCK sent the LGTM after its review of ${prLabel(row.prUrl)}`}><Bot size={11} aria-hidden="true" />Auto LGTM</span>;
 };
 
+export const LightBadge: React.FC<{ className?: string }> = ({ className }) => (
+  <span className={cn('inline-flex flex-none items-center rounded-xs border border-accent/40 px-1.5 py-px font-mono text-[0.62rem] font-bold text-accent', className)} title="The latest review round of this ticket went to the light runner">LIGHT</span>
+);
+
 /** The reviews DOCK started on its own after the owner said on it, newest first, with what came of each. */
 export const AutoReviewList: React.FC<{ rows: AutoReviewRow[]; now: number; onTicket: (key: string) => void; onNavigate: (path: string) => void; className?: string }> = ({ rows, now, onTicket, onNavigate, className }) => {
-  const [open, setOpen] = useState(() => !isPhone());
+  const [open, setOpen] = useState(readOpen);
+  const toggle = () => setOpen((current) => {
+    try { window.localStorage.setItem(OPEN_KEY, current ? '0' : '1'); } catch { /* the choice lasts until the page closes */ }
+    return !current;
+  });
   if (rows.length === 0) return null;
   const running = rows.filter((row) => row.status === 'running' || row.status === 'deciding').length;
   const needYou = rows.filter((row) => row.status === 'blockers').length;
   return (
     <section className={cn('mb-4 rounded-md border border-border bg-surface-0', className)} aria-label="Auto reviews">
-      <button type="button" className="flex w-full items-center gap-2 px-4 py-2.5 text-left max-[760px]:min-h-11" aria-expanded={open} onClick={() => setOpen((current) => !current)}>
+      <button type="button" className="flex w-full items-center gap-2 px-4 py-2.5 text-left max-[760px]:min-h-11" aria-expanded={open} onClick={toggle}>
         <Bot size={15} aria-hidden="true" className="text-accent" />
         <b className="font-display text-sm font-semibold">Auto reviews</b>
         <span className="font-mono text-[0.68rem] text-muted-foreground">{rows.length}{running ? ` · ${running} running` : ''}<span className="hidden max-[760px]:inline">{needYou ? ` · ${needYou} need you` : ''}</span></span>

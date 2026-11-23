@@ -98,7 +98,7 @@ export const IngestTokensSection: React.FC = () => {
             <label className="min-w-[200px] flex-1"><span className="mb-1 block text-sm font-medium">New token name</span><Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Work laptop" maxLength={60} required /></label>
             <label className="min-w-[160px] flex-1"><span className="mb-1 block text-sm font-medium">Machine</span><Input value={machine} onChange={(event) => setMachine(event.target.value)} list="ingest-machines" placeholder="laptop" maxLength={24} pattern="[a-z][a-z0-9\-]{0,23}" title="Lowercase letters, digits and dashes, starting with a letter" aria-describedby="ingest-machine-hint" /><span id="ingest-machine-hint" className="mt-1 block text-pretty text-xs text-muted-foreground">Leave it empty and the token is created for laptop.</span></label>
             <datalist id="ingest-machines">{machineNames.map((item) => <option key={item} value={item} />)}</datalist>
-            <Button type="submit" variant="primary" disabled={creating || !name.trim()}>{creating ? 'Creating...' : 'Create token'}</Button>
+            <Button type="submit" variant="primary" disabled={creating || !name.trim()}>{creating ? 'Creating...' : 'Create token · applies now'}</Button>
           </form>
           {actionError && <p className="mt-3 text-pretty text-sm text-status-conflict" role="alert">{actionError}</p>}
 

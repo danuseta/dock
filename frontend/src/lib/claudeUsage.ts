@@ -18,6 +18,14 @@ export interface ClaudeTokens {
 export interface ClaudeUsageDay { date: string; totalTokens: number; cost: number }
 export interface ClaudeUsageModel extends ClaudeTokens { model: string }
 export interface ClaudeUsage { available: boolean; totals: ClaudeTokens | null; days: ClaudeUsageDay[]; models: ClaudeUsageModel[]; error: string | null }
+export interface ClaudeAgentUsage { agentId: string; name: string; model: string | null; totalTokens: number; peakContext: number; cost: number }
+export interface ClaudeSessionUsage { available: boolean; found: boolean; totalTokens: number; totalCost: number; mainTokens: number; agents: ClaudeAgentUsage[]; error: string | null }
+export interface ClaudeTicketUsage { available: boolean; sessions: number; totalTokens: number; totalCost: number; mainTokens: number; agents: ClaudeAgentUsage[]; error: string | null }
+
+export const CCUSAGE_MISSING = 'ccusage is not installed on this workspace.';
+
+export const subagentShare = (usage: Pick<ClaudeSessionUsage, 'totalTokens' | 'mainTokens'>) =>
+  (usage.totalTokens > 0 ? Math.round(((usage.totalTokens - usage.mainTokens) / usage.totalTokens) * 100) : 0);
 
 const MAX_RANGE_DAYS = 366;
 const DAY_MS = 86_400_000;

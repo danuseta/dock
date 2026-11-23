@@ -186,6 +186,11 @@ export class DevServers {
     return { main, secondary, actions: [...this.actions] };
   }
 
+  /** The working folder of every process that listens on a port, for the worktree cleanup to refuse a folder in use. */
+  async listenerDirs(): Promise<string[]> {
+    return (await this.system.listeners()).map((item) => this.system.cwd(item.pid)).filter((dir): dir is string => Boolean(dir));
+  }
+
   async start(name: string) {
     const app = this.mainApp(name);
     if ((await this.system.listeners()).some((item) => item.port === app.port)) throw new DevServerError(`${name} is already running on port ${app.port}`);

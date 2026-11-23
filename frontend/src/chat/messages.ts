@@ -20,6 +20,8 @@ export interface ChatSession {
   title: string;
   ticketKey?: string | null;
   forkFrom?: string | null;
+  mode?: 'work' | 'gm' | string | null;
+  gmProposal?: { summary: string; diff: string; at: string } | null;
   machine?: string | null;
   status: 'idle' | 'queued' | 'running' | 'error' | string;
   statusDetail?: string | null;
@@ -32,7 +34,8 @@ export interface ChatSession {
   pending?: ChatInteraction[] | null;
   settled?: SettledInteraction[] | null;
   options?: { model?: string | null; effort?: string | null; permissionMode?: string | null; fast?: boolean | null } | null;
-  reviewRound?: { status: string; summary: string; threadUrl: string; at: string } | null;
+  reviewRound?: { id?: string; status: string; summary: string; threadUrl: string; at: string; mode?: string | null; replyStatus?: string | null; replyAt?: string | null; replyText?: string | null; replyDetail?: string | null } | null;
+  judge?: { status: string; grade: string | null } | null;
 }
 
 export interface ChatMachine { name: string; online: boolean; lastSeenAt?: string | null; capabilities?: string[] | null; claudeVersion?: string | null }

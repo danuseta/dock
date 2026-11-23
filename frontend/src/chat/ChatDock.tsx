@@ -13,6 +13,7 @@ import { PHONE_PANEL_QUERY, sessionStateLine, sessionsLine } from './phonePanel'
 import { SessionHeader } from './SessionHeader';
 import { sessionUrl } from './sessionRoute';
 import { useFullViewport } from './useFullViewport';
+import { listedSessions } from './sessionGroups';
 import { SLOW_POLL_MS, machineOf, newestAssistantId, sessionTitle, type ChatMessage, type ChatSession } from './messages';
 import { useNow } from './activity/useNow';
 import { SessionRow } from './SessionRow';
@@ -72,7 +73,7 @@ export const ChatDock: React.FC<ChatDockProps> = ({ inset, onNavigate }) => {
   const listing = showList || !state.active;
   const now = useNow(open && (listing || compact));
   const { data: listData } = useQuery<{ chatSessions: ChatSession[] }>(GET_CHAT_SESSIONS, { variables: { limit: 300 }, skip: !open || !listing, pollInterval: SLOW_POLL_MS });
-  const sessions = listData?.chatSessions ?? [];
+  const sessions = listedSessions(listData?.chatSessions ?? []);
 
   const reportUnread = useCallback((sessionId: string, value: boolean) => {
     setUnread((current) => (Boolean(current[sessionId]) === value ? current : { ...current, [sessionId]: value }));

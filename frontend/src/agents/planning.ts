@@ -1,10 +1,12 @@
-// The pure side of Agents > Sprint > Planning: shapes of the draft the BFF returns and what the panel derives from it.
+// The pure side of Planning > Draft: shapes of the draft the BFF returns and what the panel derives from it.
+import { skippedStages, type PlanningFlow } from './planningFlow';
 
 export interface PlanningSprint { id: number; name: string; state: string; startDate: string | null; endDate: string | null }
 export interface DraftDecision { action: string; note: string | null; by: string | null; at: string }
 export interface QaPrediction { prediction: string; reasons: string[]; fix: string | null }
 export interface StoryboardFlag { version: number; frames: string[]; held: boolean; checked: DraftDecision | null }
 export interface DraftTc { id: string; ac: number; title: string; steps: string[]; expected: string }
+export interface DraftScout { line: string; mode: 'light' | 'full'; files: number; repos: string; contractChange: boolean; at: string }
 export interface DraftTicket {
   key: string; summary: string; dev: string | null; jiraDev: string | null; sp: number | null;
   /** SP still to do by status once the sprint is under way; null before day 1 or on a published plan. */
@@ -13,10 +15,16 @@ export interface DraftTicket {
   ac: string[]; dependsOn: string[]; start: number; dur: number; end: number; inSprint: boolean; split: number[] | null;
   prediction: QaPrediction | null; qaDecision: DraftDecision | null; epic: string | null; frames: string[]; storyboard: StoryboardFlag | null;
   tcs: DraftTc[]; tcStale: boolean; tcPending: boolean;
+  scout?: DraftScout | null; scoutRunning?: boolean;
+  /** QA approved the test cases as they are now. */
+  tcApproved?: boolean;
+  acHash?: string;
   /** GitHub merge state of the pull requests: merged, open, none or unknown; pulls read "owner/repo#n · open". */
   merge: string; pulls: string[]; jiraAhead: boolean;
   /** Past merge: drawn on the plan only, left out of everything else. */
   merged: boolean;
+  /** Carried over from an earlier sprint, not past merge yet. */
+  carried?: boolean;
   /** The ticket's #N label in Jira, its place in the owner's plan. */
   rank: number | null;
   /** Where the plan puts the ticket: by rank on its owner's lane, back to back from day 1, at its full SP. */
@@ -28,33 +36,140 @@ export interface StoryboardState {
   epic: string; version: number | null; previous: number | null; path: string | null; page: string | null; frames: number; changed: string[];
   changedAt: string | null; checkedAt: string; error: string | null;
   scenarios?: StoryboardScenario[]; htmlUrl?: string | null; previousHtmlUrl?: string | null;
+  /** The planner said this epic has no storyboard: it counts as recorded. */
+  none?: boolean;
 }
 export interface StoryboardFrame { index: number; title: string; step: string | null; changed: boolean }
 export interface StoryboardFlow { id: string; title: string; tickets: string[]; info: string[]; frames: StoryboardFrame[]; changed: boolean }
 export interface StoryboardScenario { n: number; title: string; groups: Array<{ title: string; flows: StoryboardFlow[] }> }
 export interface DraftFinding {
   id: string; key: string; line: number; text: string; refKey: string; kind: string; refEnd: number | null; ownEnd: number | null; decision: DraftDecision | null;
+  /** The ticket already has an "is blocked by" link to refKey. */
+  linked?: boolean;
 }
 export interface SprintDraft {
   sprint: string; sprintId: number; status: string; sprintDays: number; startDate: string | null; spPerDay: number; createdBy: string | null;
   loadedAt: string; publishedAt: string | null; qaReason: string | null; devs: string[]; blockers: string[]; canPublish: boolean; landed: number; today: number | null;
+  /** Carried over from an earlier sprint and past merge: left out of the draft. */
+  carriedPast?: number;
   tickets: DraftTicket[]; findings: DraftFinding[]; storyboards: StoryboardState[]; questions: DraftQuestion[];
   developers: SprintDeveloper[]; mergeSource: string; moves: SprintMove[];
+  /** The planner's written scope cut; null while none is written. */
+  scopeCut?: DraftDecision | null;
+  /** The split page as the last load read it; null or absent when none is set. */
+  split?: DraftSplit | null;
+  /** Tickets not in Jira yet, created on Publish. */
+  newTickets?: DraftNewTicket[];
+  /** Changes to tickets already in Jira, written by the planning agent: pending first, then applied; discarded ones are left out. */
+  revisions?: DraftRevision[];
 }
-export interface DraftQuestion { id: string; text: string; key: string | null; askedAt: string; answered: boolean; answeredBy: string | null; answeredAt: string | null }
+export interface DraftNewTicket {
+  id: string; summary: string; type: string; epic: string | null; dev: string | null; sp: number | null; priority: string | null;
+  userStory: string; problem: string; ac: string[]; reference: string | null; source: string;
+  /** The QRD key Publish created it as. */
+  createdKey: string | null;
+  /** The last Publish failure for this ticket. */
+  error: string | null;
+}
+export interface DraftRevisionField { name: string; label: string; before: string[]; after: string[] }
+export interface DraftRevision {
+  key: string; summary: string; status: string; note: string | null; source: string; fields: DraftRevisionField[]; inSprint: boolean; error: string | null; createdAt: string; appliedAt: string | null;
+}
+export interface RevisionInput {
+  summary?: string | null; type?: string | null; userStory?: string | null; problem?: string | null; ac?: string[] | null; reference?: string | null; openToConfirm?: string | null; note?: string | null; source?: string | null;
+}
+export type NewTicketInput = Partial<Pick<DraftNewTicket, 'summary' | 'type' | 'epic' | 'dev' | 'sp' | 'priority' | 'userStory' | 'problem' | 'ac' | 'reference' | 'source'>>;
+export interface SplitDiff { key: string; draftWeek: number; splitWeek: number; note: string | null }
+export interface DraftSplit { page: string; version: number | null; readAt: string; error: string | null; rows: number; kept: number; diffs: SplitDiff[] }
+export interface DraftQuestion { id: string; text: string; key: string | null; askedAt: string; answered: boolean; answeredBy: string | null; answeredAt: string | null; answer?: string | null; options?: string[] }
+
+/** A sprint plan as every DOCK reads it from Jira's plan-published-rN labels. */
+export interface PlanSignal {
+  sprint: string; sprintId: number; sprintState: string; activeSince: string | null; stage: 'draft' | 'published' | 'running'; revision: number | null;
+  publishedBy: string | null; publishedAt: string | null; planner: string | null; me: string | null; isPlanner: boolean;
+  draftLoadedAt: string | null; draftStatus: string | null; joined: string[]; acChanged: string[];
+  waitForPublish: boolean; planAfterPublish: boolean; myOutside: string[];
+  myOrder: Array<{ key: string; summary: string; status: string; sp: number | null; order: number | null }>;
+}
+
+export const PLAN_STEPS = ['Draft', 'Published', 'Running'] as const;
+
+/** How far the sprint got: 0 Draft, 1 Dipublish, 2 Jalan (published and active in Jira with the cron gate on). */
+export function stepIndex(signal: Pick<PlanSignal, 'stage'> | null): number {
+  if (!signal || signal.stage === 'draft') return 0;
+  return signal.stage === 'running' ? 2 : 1;
+}
+
+/** "12 Nov 16:19" in the reader's time zone. */
+export const whenText = (iso: string | null): string => {
+  if (!iso) return '-';
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime()) ? '-' : `${at.getDate()} ${at.toLocaleString('en-GB', { month: 'short' })} ${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+};
+
+/** The status block's muted second line: where the draft and the sprint stand, or who published which revision. */
+export function planMetaLine(signal: PlanSignal | null, draft: { loadedAt: string } | null): string {
+  if (signal?.revision) {
+    const by = signal.publishedBy ?? signal.planner ?? 'planner';
+    return `${signal.isPlanner ? 'Published' : `From ${by}`} · published ${whenText(signal.publishedAt)} · r${signal.revision}${signal.activeSince ? ` · active in Jira since ${whenText(signal.activeSince)}` : ''}`;
+  }
+  const parts = [draft ? `Draft loaded ${whenText(draft.loadedAt)}` : 'Draft not loaded yet'];
+  parts.push(signal?.activeSince ? `active in Jira since ${whenText(signal.activeSince)}` : 'not active in Jira yet');
+  return parts.join(' · ');
+}
+
+export interface StatusItem { text: string; action?: 'chat' | 'republish' }
+
+/** The third line, only what needs attention: the cron gate, open chat questions and changes since publish. */
+export function planAttention(signal: PlanSignal | null, draft: Pick<SprintDraft, 'questions'> | null): StatusItem[] {
+  const items: StatusItem[] = [];
+  const planner = signal?.planner ?? 'planner';
+  if (signal && !signal.revision && signal.waitForPublish) items.push({ text: signal.isPlanner ? 'Cron waits for publish' : `Cron waits for ${planner} to publish` });
+  const open = draft?.questions.filter((question) => !question.answered).length ?? 0;
+  if (open) items.push({ text: `${open} ${open === 1 ? 'question' : 'questions'} in chat`, action: 'chat' });
+  const changed = signal ? signal.joined.length + signal.acChanged.length : 0;
+  if (signal?.revision && changed) {
+    items.push(signal.isPlanner
+      ? { text: `Needs a republish (r${signal.revision + 1}): ${changeText(signal)}`, action: 'republish' }
+      : { text: `Plan r${signal.revision} · changes wait for the planner (${changeText(signal)})` });
+  }
+  return items;
+}
+
+const SHOWN_CHANGES = 3;
+
+/** "QRD-9001 masuk sprint, QRD-1533 AC berubah", the first few and how many more. */
+export function changeText(signal: Pick<PlanSignal, 'joined' | 'acChanged'>): string {
+  const all = [...signal.joined.map((key) => `${key} joined the sprint`), ...signal.acChanged.map((key) => `${key} AC changed`)];
+  return `${all.slice(0, SHOWN_CHANGES).join(', ')}${all.length > SHOWN_CHANGES ? ` +${all.length - SHOWN_CHANGES} more` : ''}`;
+}
 
 /** The chat session Planning opens for a sprint; the planning agent and the kit find it by this title. */
 export const planningChatTitle = (sprint: string) => `Planning-${sprint}`;
+
+/** The sprint a Planning chat belongs to, from its session title; null for any other chat. */
+export const planningSprintOf = (title: string | null | undefined): string | null => (title?.startsWith('Planning-') ? title.slice('Planning-'.length).trim() || null : null);
 
 /** "3/9 answered", or null when the chat raised none. */
 export function questionsLine(questions: DraftQuestion[]): string | null {
   if (!questions.length) return null;
   return `${questions.filter((question) => question.answered).length}/${questions.length} answered`;
 }
-export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; refused: string | null }
+export interface DraftChange { key: string; assigneeFrom: string | null; assigneeTo: string | null; acRemoved: string[]; acAdded: string[]; referenceAdded?: string[]; blockedBy?: string[]; refused: string | null; create?: DraftNewTicket | null }
 export interface PublishResult { key: string; kind: string; status: string; detail: string | null }
 
-export type PlanningPanel = 'team' | 'scope' | 'ac' | 'qa' | 'tc' | 'storyboard';
+/** An HTML visual the planning agent made; it is a tab in Planning, stale once the draft changed after it was made. */
+export interface DraftVisual { id: string; title: string; createdAt: string; saved: boolean; stale: boolean; url: string; sessionId: string | null }
+export const redoVisualPrompt = (title: string) => `Redo the visual '${title}' with the current draft.`;
+/** When a visual was made: the time today, the day and time before that. */
+export function visualTime(createdAt: string, now: Date = new Date()): string {
+  const at = new Date(createdAt);
+  if (Number.isNaN(at.getTime())) return '';
+  const time = at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return at.toDateString() === now.toDateString() ? time : `${at.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}, ${time}`;
+}
+
+export type PlanningPanel = 'mine' | 'team' | 'scope' | 'ac' | 'qa' | 'tc' | 'storyboard' | 'order' | 'new';
 export const UNASSIGNED = 'Unassigned';
 const DEV_COLOR_COUNT = 8;
 const UNASSIGNED_COLOR = 'var(--color-muted-foreground)';
@@ -232,14 +347,15 @@ export function scopeSummary(draft: Pick<SprintDraft, 'tickets'>) {
   return { inSprint: inSprint.length, inSprintSp: sum(inSprint.map((ticket) => ticket.sp)), backlog: backlog.length, backlogSp: sum(backlog.map((ticket) => ticket.sp)) };
 }
 
-export const findingKindLabel = (kind: string) => (kind === 'after-it' ? 'after it' : kind === 'lands-first' ? 'lands first' : 'outside plan');
+export const findingKindLabel = (kind: string) => (kind === 'after-it' ? 'lands after it' : kind === 'lands-first' ? 'lands first' : 'outside the sprint');
 
 export function decisionLabel(decision: DraftDecision | null, refKey?: string): string | null {
   if (!decision) return null;
   switch (decision.action) {
     case 'move': return refKey ? `Moved to ${refKey}` : 'Moved';
-    case 'wait': return 'Kept, waits';
-    case 'drop': return 'Dropped';
+    case 'dependency': case 'wait': return 'Dependency · Blocks link added on Publish';
+    case 'reference': case 'drop': return 'Moved to Reference';
+    case 'approve': return 'Approved by QA';
     case 'accept': return 'Risk accepted';
     case 'fix': return decision.note ? `Fixed: ${decision.note}` : 'Fixed';
     default: return decision.action;
@@ -254,9 +370,111 @@ export const sortFindings = (findings: DraftFinding[]) => [...findings].sort((a,
 
 export function publishHint(draft: Pick<SprintDraft, 'canPublish' | 'blockers' | 'tickets'>): string {
   if (draft.tickets.length === 0) return 'No tickets in this sprint';
-  if (draft.canPublish) return 'Every AC line and QA prediction that needs a call has one';
+  if (!draft.blockers.length) return 'Every AC line that needs a call has one';
   const n = draft.blockers.length;
   return `${n} ${n === 1 ? 'item needs' : 'items need'} a decision before publish`;
+}
+
+export interface ReadyItem { id: 'scope' | 'ac' | 'storyboard' | 'new'; ok: boolean; text: string; detail: string | null; panel: PlanningPanel; fix: string }
+export interface Readiness {
+  items: ReadyItem[]; done: number; total: number; missing: ReadyItem[];
+  /** SP still to build, new tickets included, against the team's capacity for the days left. */
+  sp: number; capacity: number; cut: string | null;
+}
+
+const SHOWN_KEYS = 3;
+const keysText = (keys: string[]) => `${keys.slice(0, SHOWN_KEYS).join(', ')}${keys.length > SHOWN_KEYS ? ` +${keys.length - SHOWN_KEYS} more` : ''}`;
+
+/** New tickets whose SP still count: a created one already loaded into the draft is counted as that ticket. */
+export const countedNewTickets = (draft: Pick<SprintDraft, 'tickets' | 'newTickets'>) => (draft.newTickets ?? []).filter((item) => !item.createdKey || !draft.tickets.some((ticket) => ticket.key === item.createdKey));
+
+/** New tickets Publish still has to create. */
+export const pendingNewTickets = (draft: Pick<SprintDraft, 'newTickets'>) => (draft.newTickets ?? []).filter((item) => !item.createdKey);
+
+/** The fields Jira requires that a new ticket still lacks. */
+export function newTicketMissing(item: Pick<DraftNewTicket, 'summary' | 'userStory' | 'problem' | 'ac'>): string[] {
+  return [
+    ...(item.summary.trim() ? [] : ['summary']),
+    ...(item.userStory.trim() ? [] : ['user story']),
+    ...(item.problem.trim() ? [] : ['problem definition']),
+    ...(item.ac.some((line) => line.trim()) ? [] : ['AC']),
+  ];
+}
+
+/** A new ticket that needs the planner before Publish: a required field, a developer, or a failed create. */
+export const newTicketNeedsWork = (item: DraftNewTicket) => newTicketMissing(item).length > 0 || !item.dev || !!item.error;
+
+/** SP to build and the team's capacity for the sprint days left; perDev is one developer's share. */
+export function capacityOf(draft: Pick<SprintDraft, 'tickets' | 'newTickets' | 'developers' | 'sprintDays' | 'spPerDay' | 'today'>) {
+  const open = draft.tickets.filter((ticket) => !ticket.merged);
+  const sp = Math.round((sum(open.map((ticket) => ticket.left ?? ticket.sp)) + sum(countedNewTickets(draft).map((item) => item.sp))) * 10) / 10;
+  const days = Math.max(0, draft.sprintDays - (draft.today ? draft.today - 1 : 0));
+  const perDev = Math.round(days * draft.spPerDay * 10) / 10;
+  const capacity = Math.round(draft.developers.length * days * draft.spPerDay * 10) / 10;
+  return { sp, capacity, perDev, days };
+}
+
+/** The id a "no storyboard" call on an epic is recorded under. */
+export const storyboardNoneId = (epic: string) => `sbnone|${epic}`;
+
+/** A storyboard counts as recorded once its version is read or the planner said the epic has none. */
+export const storyboardRecorded = (board: Pick<StoryboardState, 'version' | 'none'> | undefined) => !!board && (board.version !== null || !!board.none);
+
+/** The epics of the sprint: those with a storyboard entry and those of its tickets. */
+export const sprintEpics = (draft: Pick<SprintDraft, 'storyboards' | 'tickets'>) => [...new Set([...draft.storyboards.map((board) => board.epic), ...draft.tickets.map((ticket) => ticket.epic).filter((epic): epic is string => !!epic)])].sort();
+
+/** Epics of the sprint with no storyboard version recorded and no "no storyboard" call. */
+export const unrecordedEpics = (draft: Pick<SprintDraft, 'storyboards' | 'tickets'>) => sprintEpics(draft).filter((epic) => !storyboardRecorded(draft.storyboards.find((board) => board.epic === epic)));
+
+/**
+ * G1 "Siap publish": the SP fit the team's capacity or a scope cut is written, every AC line naming another ticket has a Blocks link or a decision,
+ * and each storyboard version is recorded with the AC checked against it. Only
+ * information: Publish stays open. A stage the planning flow skips is not counted.
+ */
+export function publishReadiness(
+  draft: Pick<SprintDraft, 'tickets' | 'newTickets' | 'developers' | 'sprintDays' | 'spPerDay' | 'today' | 'findings' | 'storyboards' | 'scopeCut'>,
+  flow: PlanningFlow | null,
+): Readiness {
+  const skipped = skippedStages(flow);
+  const open = draft.tickets.filter((ticket) => !ticket.merged);
+  const { sp, capacity } = capacityOf(draft);
+  const fits = sp <= capacity;
+  const cut = draft.scopeCut?.note ?? null;
+  // The same undecided set the AC check lists: every line naming another ticket with no Blocks link and no call.
+  const late = draft.findings.filter(undecidedFinding);
+  const planned = open.filter((ticket) => !ticket.carried);
+  const unread = draft.storyboards.filter((board) => !storyboardRecorded(board));
+  const unchecked = uncheckedStoryboard({ tickets: planned });
+  const recorded = draft.storyboards.length > 0 && unread.length === 0;
+  const fresh = pendingNewTickets(draft);
+  const needWork = fresh.filter(newTicketNeedsWork);
+  const items: ReadyItem[] = [
+    {
+      id: 'scope', panel: 'scope', fix: 'Scope', ok: fits || !!cut,
+      text: fits ? `${sp} SP fits the ${capacity} SP capacity` : cut ? `Scope cut written · ${sp} SP for a ${capacity} SP capacity` : `${sp} SP for a ${capacity} SP capacity`,
+      detail: fits ? null : cut ?? 'No scope cut decided yet',
+    },
+    {
+      id: 'ac', panel: 'ac', fix: 'AC check', ok: late.length === 0,
+      text: late.length ? `${late.length} ${late.length === 1 ? 'reference' : 'references'} to other tickets not decided` : 'References to other tickets decided',
+      detail: late.length ? keysText([...new Set(late.map((finding) => finding.key))]) : null,
+    },
+    {
+      id: 'storyboard', panel: 'storyboard', fix: 'Storyboard', ok: recorded && unchecked.length === 0,
+      text: !recorded ? 'Storyboard version not recorded' : unchecked.length ? `${unchecked.length} AC not checked against the latest storyboard` : 'Storyboard version recorded, AC checked',
+      detail: !recorded
+        ? (unread.length ? unread.map((board) => board.epic).join(', ') : 'No storyboard read yet')
+        : unchecked.length ? keysText(unchecked.map((ticket) => ticket.key)) : draft.storyboards.map((board) => (board.version === null ? `${board.epic} none` : `${board.epic} v${board.version}`)).join(', '),
+    },
+    ...(fresh.length ? [{
+      id: 'new' as const, panel: 'new' as const, fix: 'Tickets', ok: needWork.length === 0,
+      text: needWork.length ? `${needWork.length} of ${fresh.length} new ${fresh.length === 1 ? 'ticket needs' : 'tickets need'} a field or a developer` : `${fresh.length} new ${fresh.length === 1 ? 'ticket' : 'tickets'} ready to create`,
+      detail: needWork.length ? keysText(needWork.map((item) => item.id)) : null,
+    }] : []),
+  ];
+  const counted = items.filter((item) => item.id === 'new' || !skipped.has(item.id));
+  const missing = counted.filter((item) => !item.ok);
+  return { items: counted, done: counted.length - missing.length, total: counted.length, missing, sp, capacity, cut };
 }
 
 export const changeCount = (changes: DraftChange[]) => changes.filter((change) => !change.refused).length;
@@ -378,3 +596,70 @@ export function moveForecast(move: Pick<SprintMove, 'forecastBefore' | 'forecast
   const day = (value: number) => `D${value}${labels[value - 1] ? ` (${labels[value - 1]})` : ''}`;
   return `forecast ${day(move.forecastBefore)} → ${day(move.forecastAfter)}`;
 }
+
+/** An AC line that names another ticket and is not decided: no Blocks link and no call yet. */
+export const undecidedFinding = (finding: Pick<DraftFinding, 'decision' | 'linked'>) => !finding.decision && !finding.linked;
+
+/** The planning agent's summary of a ticket as Planning reads it: Indonesian title and AC lines. */
+export interface TicketSummaryLite { key: string; titleId: string | null; acId: string[]; current: boolean; testData: string | null; acHash?: string }
+
+/** The summary's Indonesian AC lines, only when they were written for the AC the ticket holds now, one per line. */
+export function freshAcId(ticket: Pick<DraftTicket, 'ac' | 'acHash'> | null | undefined, summary: Pick<TicketSummaryLite, 'acId' | 'current' | 'acHash'> | null | undefined): string[] | null {
+  if (!ticket || !summary?.current || summary.acId.length !== ticket.ac.length) return null;
+  if (ticket.acHash && summary.acHash && ticket.acHash !== summary.acHash) return null;
+  return summary.acId;
+}
+
+/** The Indonesian line of AC line n (1-based), or null while the summary is missing or written for other AC. */
+export const acLineId = (ticket: Pick<DraftTicket, 'ac' | 'acHash'> | null | undefined, summary: Pick<TicketSummaryLite, 'acId' | 'current' | 'acHash'> | null | undefined, n: number) =>
+  freshAcId(ticket, summary)?.[n - 1]?.trim() || null;
+
+/** The tickets among keys with no fresh Indonesian summary, in the order given. */
+export function untranslatedKeys(draft: Pick<SprintDraft, 'tickets'>, keys: string[], summaries: Map<string, TicketSummaryLite>): string[] {
+  return keys.filter((key) => !freshAcId(draft.tickets.find((ticket) => ticket.key === key), summaries.get(key)));
+}
+
+/** The planning chat prompt that asks for the Indonesian ticket summaries of the keys. */
+export const translatePrompt = (sprint: string, keys: string[]) =>
+  `Write the Indonesian ticket summaries (sprint-draft summary) for ${keys.join(', ')} in sprint "${sprint}": the Indonesian title and one Indonesian line per AC line.`;
+
+/** The Draft summary line: open tickets, working days and developers. */
+export const draftSummaryText = (draft: Pick<SprintDraft, 'tickets' | 'sprintDays' | 'devs'>) =>
+  `${draft.tickets.length} ${draft.tickets.length === 1 ? 'ticket' : 'tickets'} · ${draft.sprintDays} ${draft.sprintDays === 1 ? 'day' : 'days'} · ${draft.devs.length} dev`;
+
+/** Tiket saya: the open tickets of the draft whose developer is the DOCK owner's Jira user, by name. */
+export function myTickets(draft: Pick<SprintDraft, 'tickets'>, me: string | null | undefined): DraftTicket[] {
+  const name = me?.trim().toLowerCase();
+  if (!name) return [];
+  return draft.tickets.filter((ticket) => !ticket.merged && ticket.dev?.trim().toLowerCase() === name)
+    .sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }));
+}
+
+export interface QaLine { n: number; text: string; textId: string | null; waitsOn: string[]; testedIn: string | null }
+export interface QaChecklist { here: QaLine[]; notHere: QaLine[] }
+
+/**
+ * The QA checklist built from a ticket's AC: a line decided for Reference, or moved to the ticket that builds it, is not
+ * tested here; every other line is, and a line naming another ticket waits for it (the dependency the QA bot holds on).
+ */
+export function qaChecklist(ticket: Pick<DraftTicket, 'key' | 'ac'>, findings: DraftFinding[], acId: string[] = []): QaChecklist {
+  const mine = findings.filter((finding) => finding.key === ticket.key);
+  const here: QaLine[] = [];
+  const notHere: QaLine[] = [];
+  ticket.ac.forEach((text, index) => {
+    const n = index + 1;
+    const line = mine.filter((finding) => finding.line === n);
+    const moved = line.find((finding) => ['reference', 'move', 'drop'].includes(finding.decision?.action ?? ''));
+    const row = { n, text, textId: acId[index] ?? null, waitsOn: [] as string[], testedIn: moved?.refKey ?? null };
+    if (moved) notHere.push(row);
+    else here.push({ ...row, waitsOn: [...new Set(line.map((finding) => finding.refKey))] });
+  });
+  return { here, notHere };
+}
+
+/** Draft test cases from the "dites di tiket ini" lines, for QA to edit and approve in Test cases. */
+export const checklistTcs = (list: QaChecklist): DraftTc[] => list.here.map((line, index) => ({
+  id: `TC-${index + 1}`, ac: line.n, title: line.text.slice(0, 300),
+  steps: line.waitsOn.length ? [`Wait for ${line.waitsOn.join(', ')} to reach UAT CHECK`] : [],
+  expected: line.text,
+}));

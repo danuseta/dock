@@ -189,3 +189,16 @@ test('the plan lays every card of a developer by rank, back to back from day 1 a
     { key: 'QRD-50', planStart: 0, planDur: 0 },
   ]);
 });
+
+test('the plan lays the cards carried over from an earlier sprint first on their lane, by their old rank', () => {
+  const plan = planLayout([
+    { key: 'QRD-20', dev: 'Ana', sp: 2, rank: 1 },
+    { key: 'QRD-11', dev: 'Ana', sp: 2, rank: 9, carried: true },
+    { key: 'QRD-10', dev: 'Ana', sp: 2, rank: 4, carried: true },
+  ], { spPerDay: 2 });
+  assert.deepEqual(plan, [
+    { key: 'QRD-10', planStart: 0, planDur: 1 },
+    { key: 'QRD-11', planStart: 1, planDur: 1 },
+    { key: 'QRD-20', planStart: 2, planDur: 1 },
+  ]);
+});

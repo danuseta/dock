@@ -5,13 +5,15 @@ export interface RetroNumbers {
   replans: number;
   ownerIssues: number;
   medianOwnerWaitHours: number | null;
+  ownerWaitHours: number;
   reviews: number;
   requestChanges: number;
   blockedWaits: number;
   mergeConflicts: number;
   stackedRebases: number;
 }
-export interface RetroItem { id: string; kind: string; text: string; evidence: string[]; dest: string; status: string; sessionId: string | null; updatedAt: string }
+export interface RetroItem { id: string; kind: string; text: string; evidence: string[]; dest: string; status: string; sessionId: string | null; source?: string; updatedAt: string }
+export interface RetroTicket { key: string; title: string; kind: string; hours: number | null; rounds: number; issues: number; findings: number; ownerWaitHours: number | null; result: string }
 export interface Retro {
   sprint: string;
   sprintId: number;
@@ -19,34 +21,80 @@ export interface Retro {
   numbers: RetroNumbers;
   previousNumbers: RetroNumbers | null;
   problems: Array<{ label: string; count: number; tickets: string[] }>;
-  tickets: Array<{ key: string; title: string; kind: string; hours: number | null; rounds: number; issues: number; ownerWaitHours: number | null; result: string }>;
+  tickets: RetroTicket[];
   items: RetroItem[];
   escalations: RetroEscalations;
 }
 
-/** The numbers shown, with their unit and which way is better. */
-export const RETRO_NUMBERS: Array<[keyof RetroNumbers, string, string, 'up' | 'down' | null]> = [
-  ['tickets', 'Tickets built by agents', '', null],
-  ['medianHours', 'Median hours per ticket', ' h', 'down'],
-  ['fixRounds', 'Fix rounds per ticket', '', 'down'],
-  ['replans', 'Replans per ticket', '', 'down'],
-  ['ownerIssues', 'Issues escalated to you', '', 'down'],
-  ['medianOwnerWaitHours', 'Median wait on you', ' h', 'down'],
-  ['reviews', 'Reviews done', '', null],
-  ['requestChanges', 'Reviews asking for changes', '', null],
-  ['blockedWaits', 'Tickets that waited on a dependency', '', 'down'],
-  ['mergeConflicts', 'Pull requests with a merge conflict', '', 'down'],
-  ['stackedRebases', 'Stacked rebases', '', 'down'],
+/**
+ * Where a Keep / Problem / Try line stands, after "goes to": a ledger line is applied from the ledger without the owner,
+ * a Judge line waits for the owner's Accept. Null for a closed line.
+ */
+export function retroLineState(item: Pick<RetroItem, 'status' | 'source' | 'sessionId' | 'dest'>): string | null {
+  const ledger = (item.source || 'ledger') === 'ledger';
+  if (item.status === 'closed') return null;
+  if (item.status !== 'accepted') return ledger ? 'from the ledger, not applied yet: waits for you' : 'from Judge: waits for you';
+  const how = item.sessionId ? ', sous is applying it' : item.dest === 'qa-agent' ? ', open a PR to the QA bot repo' : '';
+  return `${ledger ? 'Applied from the ledger' : 'accepted'}${how}`;
+}
+
+/** The numbers shown, in order, with their label and unit. */
+export const RETRO_NUMBERS: Array<[keyof RetroNumbers, string, string]> = [
+  ['tickets', 'tickets built by agents', ''],
+  ['reviews', 'review', ''],
+  ['fixRounds', 'fix rounds per ticket', ''],
+  ['ownerIssues', 'escalations to you', ''],
+  ['ownerWaitHours', 'total waiting on you', ' h'],
+  ['medianHours', 'time to finish a ticket', ' h'],
+  ['blockedWaits', 'waiting on another ticket', ''],
+  ['mergeConflicts', 'PRs with merge conflicts', ''],
+  ['stackedRebases', 'stacked rebase', ''],
+  ['replans', 'replans per ticket', ''],
+  ['requestChanges', 'reviews requesting changes', ''],
 ];
 
-/** "+1.2 vs before" and whether that is the better direction; null when there is nothing to compare. */
-export function numberDelta(now: RetroNumbers, before: RetroNumbers | null, field: keyof RetroNumbers, better: 'up' | 'down' | null): { text: string; good: boolean } | null {
-  const a = now[field];
-  const b = before?.[field];
-  if (a == null || b == null) return null;
-  const diff = Math.round((a - b) * 10) / 10;
-  if (diff === 0) return { text: 'same as before', good: false };
-  return { text: `${diff > 0 ? '+' : ''}${diff} vs before`, good: better !== null && (better === 'up' ? diff > 0 : diff < 0) };
+/** A number the Indonesian way: 1,7 not 1.7. */
+export const idNumber = (value: number) => String(value).replace('.', ',');
+
+/** The numbers worth a tile: a number that is zero or empty in this sprint and the one before says nothing. */
+export function shownNumbers(now: RetroNumbers, before: RetroNumbers | null) {
+  return RETRO_NUMBERS.filter(([field]) => !!now[field] || !!before?.[field]);
+}
+
+/** "8,5 di QRD Sprint 26", or null when there is no sprint before. */
+export function beforeText(before: RetroNumbers | null, field: keyof RetroNumbers, unit: string, previous: string | null): string | null {
+  if (!before || !previous) return null;
+  const value = before[field];
+  return `${value == null ? '—' : `${idNumber(value)}${unit}`} in ${previous}`;
+}
+
+const FAILURE_LABEL: Record<string, string> = { transient: 'Transient failure', defect: 'Failed on a defect', spec: 'Failed on the spec', env: 'Failed on the environment', permission: 'Failed on permissions' };
+
+/** A recurring problem in Indonesian: "Failure: env" reads "Gagal karena environment". */
+export function problemLabel(label: string): string {
+  const [kind, value = ''] = label.split(': ');
+  if (kind === 'Failure') return FAILURE_LABEL[value] ?? `Failed: ${value}`;
+  if (kind === 'Review finding') return `Review finding ${value}`;
+  if (kind === 'Escalated to the owner') return `${value} escalated to you`;
+  return label;
+}
+
+export const SHOWN_PROBLEMS = 5;
+const SHOWN_KEYS = 3;
+
+/** The first three keys and how many more: "QRD-1, QRD-2, QRD-3 +4". */
+export const keyList = (keys: string[]) => `${keys.slice(0, SHOWN_KEYS).join(', ')}${keys.length > SHOWN_KEYS ? ` +${keys.length - SHOWN_KEYS}` : ''}`;
+
+const STAGE_LABEL: Record<string, string> = { done: 'done', pr: 'in PR', gate: 'at gate', build: 'building', verify: 'verifying', review: 'in review', parked: 'parked' };
+
+/** A built ticket's state, with its hours once done: "selesai · 26,3 j". */
+export const buildResult = (ticket: Pick<RetroTicket, 'result' | 'hours'>) => `${STAGE_LABEL[ticket.result] ?? ticket.result}${ticket.result === 'done' && ticket.hours != null ? ` · ${idNumber(ticket.hours)} h` : ''}`;
+
+/** The folded line of a sprint's reviews: "5 review · semua approve · 20 temuan". */
+export function reviewSummary(reviews: RetroTicket[]): string {
+  const approved = reviews.filter((review) => review.result === 'approve').length;
+  const verdict = approved === reviews.length ? 'all approved' : `${approved} approved, ${reviews.length - approved} other`;
+  return `${reviews.length} reviews · ${verdict} · ${reviews.reduce((sum, review) => sum + review.findings, 0)} findings`;
 }
 
 export interface RetroEscalations {
@@ -54,6 +102,8 @@ export interface RetroEscalations {
   causes: Array<{ cause: string; label: string; count: number; tickets: string[] }>;
   unpredicted: Array<{ key: string; summary: string; causes: string[]; prediction: string | null }>;
 }
+
+export const CAUSE_LABEL: Record<string, string> = { dependency: 'Waiting on another ticket', access: 'Access', data: 'Test data', environment: 'Environment', unspecified: 'No reason given' };
 
 /** The bar width of a cause against the largest one, in percent. */
 export const causeShare = (count: number, causes: Array<{ count: number }>) => Math.round((count / Math.max(1, ...causes.map((item) => item.count))) * 100);

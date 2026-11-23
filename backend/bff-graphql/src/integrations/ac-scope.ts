@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 // Which AC lines of a sprint draft need another ticket, and whether that ticket lands before this one. An AC line that
 // needs a ticket landing later cannot be tested when this ticket reaches QA: that is the line Planning makes the
 // planner decide on before publish.
@@ -38,6 +40,9 @@ export function normalizeAcLine(line: string): string {
 export function splitAc(text: string | null | undefined): string[] {
   return String(text ?? '').split(/\r?\n/).map(normalizeAcLine).filter(Boolean);
 }
+
+/** The AC as one value to compare: a summary written for other AC lines is stale. */
+export const acHash = (lines: string[]) => createHash('sha256').update(lines.map(normalizeAcLine).filter(Boolean).join('\n')).digest('hex').slice(0, 16);
 
 export const findingId = (key: string, refKey: string, text: string) => `ac|${key}|${refKey}|${normalizeAcLine(text)}`;
 

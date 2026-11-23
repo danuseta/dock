@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { OrchestratorInputError } from './orchestrator';
+import { parseGmEntry, parseGmRollback } from './guild-master';
 
 export const AGENT_OPS = ['list', 'get', 'put', 'preview', 'delete'] as const;
-export type AgentOp = typeof AGENT_OPS[number];
+export type AgentOp = typeof AGENT_OPS[number] | 'gm-log' | 'gm-rollback';
 export const GUARD_PROFILES = ['read', 'worktree', 'browser', 'board'] as const;
 export const AGENT_MODELS = ['haiku', 'sonnet', 'opus', 'inherit'] as const;
 export const AGENT_SLUG = /^[a-z0-9][a-z0-9-]{1,47}$/;
@@ -154,6 +155,7 @@ export class AgentBridge {
     const state = await this.machineState(machine);
     if (!state.online) throw new OrchestratorInputError(`The bridge on ${machine} is offline. Start dock-chat run there and try again.`);
     if (!state.capabilities.includes('agents')) throw new OrchestratorInputError(`The kit on ${machine} is too old to manage agents. Update claude-config.`);
+    if (op.startsWith('gm-') && !state.capabilities.includes('gm')) throw new OrchestratorInputError(`The kit on ${machine} is too old for Guild Master. Update claude-config.`);
     return new Promise((resolve, reject) => {
       const id = randomUUID();
       const timer = setTimeout(() => {
@@ -208,5 +210,16 @@ export class AgentBridge {
 
   async delete(machine: string, slug: unknown) {
     return this.ask(machine, 'delete', { slug: agentSlug(slug) }, saveResult);
+  }
+
+  /** The manager log every Guild Master session of the machine writes to, newest first; with the log key the kit marks unsigned entries. */
+  async gmLog(machine: string, key?: string) {
+    return this.ask(machine, 'gm-log', key ? { key } : {}, (result) => (Array.isArray(result) ? result.map(parseGmEntry) : []));
+  }
+
+  /** Restores the backup of one manager log entry with the nonce DOCK minted for it and the log key; the rollback is logged too. */
+  async gmRollback(machine: string, id: unknown, grant: () => Promise<{ nonce: string; key: string }>) {
+    if (!Number.isInteger(id) || Number(id) < 1) throw new OrchestratorInputError('A manager log id is required');
+    return this.ask(machine, 'gm-rollback', { id, ...await grant() }, parseGmRollback);
   }
 }

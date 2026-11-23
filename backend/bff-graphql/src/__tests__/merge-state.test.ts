@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeState, ownPull, readMergeStates, type MergeGitHub } from '../integrations/merge-state';
+import { isDocsSyncPull, mergeState, ownPull, readMergeStates, type MergeGitHub } from '../integrations/merge-state';
 
 test('a ticket is merged when a pull request merged and none is open; closed without merge is ignored', () => {
   assert.equal(mergeState([{ status: 'closed', merged: true }, { status: 'open', merged: false }]), 'open');
@@ -78,4 +78,10 @@ test('only the pull requests a ticket owns count: a docs sync or a PR that only 
     ],
   }, {});
   assert.deepEqual((await readMergeStates(['QRD-1292'], github))!.get('QRD-1292'), { merge: 'merged', pulls: ['qonekid/web#1115 · merged'] });
+});
+
+test('the docs-sync rule is one export: the bot branch or the bot title, not a docs change of the ticket itself', () => {
+  assert.equal(isDocsSyncPull({ headBranch: 'docs/auto-update/QRD-1292-pr-1115' }), true);
+  assert.equal(isDocsSyncPull({ title: 'docs: sync for #1115 (QRD-1292)' }), true);
+  assert.equal(isDocsSyncPull({ title: 'docs(QRD-1292): explain the flag', headBranch: 'docs/QRD-1292-flag' }), false);
 });

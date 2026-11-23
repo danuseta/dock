@@ -17,6 +17,8 @@ import { GET_DASHBOARD } from '../graphql/queries';
 import { REFRESH_DATA } from '../graphql/mutations';
 import { useTicketStore } from '../stores/useTicketStore';
 import { TicketCard } from '../components/TicketCard';
+import { useReadiness } from '../components/ticket/useReadiness';
+import { readinessOnBoard } from '../lib/ticketDetail';
 import { TicketMenu, type TicketMenuTarget } from '../components/ticket/TicketMenu';
 import { Toast } from '../components/Toast';
 import { useOpenForTicket } from '../chat/useOpenForTicket';
@@ -40,10 +42,13 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
   const [menu, setMenu] = useState<TicketMenuTarget | null>(null);
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
-  const { openForTicket, error: sessionError } = useOpenForTicket();
+  const { openForTicket, error: sessionError, notice: sessionNotice } = useOpenForTicket();
   useEffect(() => {
     if (sessionError) setToast({ message: sessionError, type: 'error' });
   }, [sessionError]);
+  useEffect(() => {
+    if (sessionNotice) setToast({ message: sessionNotice, type: 'success' });
+  }, [sessionNotice]);
   
   const { data, loading, error } = useQuery(GET_DASHBOARD, { 
     ...CACHED_QUERY_OPTIONS,
@@ -52,6 +57,10 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
   const [refreshData, { loading: refreshing }] = useMutation(REFRESH_DATA, {
     refetchQueries: [{ query: GET_DASHBOARD }]
   });
+  // One readiness query for every card of the board: "Siap dikerjain" on the TODO cards, the summary line on all of them.
+  const boardTickets: any[] = Array.isArray(data?.dashboard) ? data.dashboard.flatMap((group: any) => group.tickets || []) : [];
+  const { readiness, facts: readinessFacts } = useReadiness(boardTickets);
+  const summaries = new Map((readinessFacts?.tickets ?? []).map((item) => [item.key, item.summary]));
 
   if (error && !data) return (
     <Page width="full">
@@ -110,7 +119,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
 
   const filterTabs = ['ALL', ...canonicalColumns.map(c => c.id)];
 
-  const getCanonicalColumnId = (ticketStatus: string): string => {
+  function getCanonicalColumnId(ticketStatus: string): string {
     const st = (ticketStatus || '').toUpperCase().trim();
     if (st === 'IN PROGRESS' || st === 'PR PREVIEW' || st === 'UAT MERGED' || st === 'UAT CHECK' || st === 'UAT/BUGG IMPROVEMENT' || st === 'READY FOR PRODUCTION' || st === 'DONE/MERGED') {
       return st;
@@ -124,7 +133,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
     if (st.includes('PROGRESS') || st === 'WORKING' || st === 'ACTIVE' || st.includes('DEVELOP') || st.includes('DOING') || st.includes('DEV')) return 'IN PROGRESS';
     // Fallback to TODO for any unknown, backlog, or new statuses so NO ticket ever vanishes from the Kanban board!
     return 'TODO';
-  };
+  }
 
   const matchesCanonicalStatus = (ticketStatus: string, filter: string) => {
     if (filter === 'ALL') return true;
@@ -269,6 +278,8 @@ const DashboardPage: React.FC<DashboardPageProps> = ({ onTicketClick }) => {
                         key={ticket.key} 
                         ticket={ticket} 
                         menuOpen={menu?.key === ticket.key}
+                        readiness={readinessOnBoard(column.id, readiness.get(ticket.key))}
+                        summary={summaries.get(ticket.key) ?? null}
                         onClick={() => onTicketClick(ticket.key)} 
                         onMenu={(x, y, sheet) => setMenu({ key: ticket.key, x, y, sheet })}
                       />

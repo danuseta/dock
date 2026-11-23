@@ -1,21 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { GET_DEMO_STORAGE, GET_INGEST_TOKENS, GET_SETTINGS } from '../graphql/queries';
+import { GET_DEMO_STORAGE, GET_INGEST_TOKENS, GET_INSTALLED_SKILLS, GET_SETTINGS } from '../graphql/queries';
 import { UPDATE_SETTINGS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { IngestTokensSection } from '../components/IngestTokensSection';
-import { ElevenLabsKeysSection } from '../components/ElevenLabsKeysSection';
-import { DemoStorageSection } from '../components/DemoStorageSection';
 import { ClaudeAccountSection } from '../components/ClaudeAccountSection';
 import { ChatDefaultsSection } from '../components/ChatDefaultsSection';
 import { normalizeCaveman, normalizeRtk } from '../chat/chatDefaults';
-import { Card, Page, Select } from '../components/ui';
+import { Card, Input, Page, Select } from '../components/ui';
 import { cn } from '../lib/cn';
 import { useDockMode } from '../lib/dockMode';
-import { NAVIGATION_PREFERENCES_EVENT, readNavigationPreferences, type NavigationPreferences } from '../lib/navigationPreferences';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import {
-  SECTION_GROUPS, changedKeys, isDraftSection, savedValues, sectionErrors, sectionFromSearch, sectionInput, sectionStatus, visibleSections,
+  SECTION_GROUPS, changedKeys, isDraftSection, matchSections, savedValues, sectionErrors, sectionFromSearch, sectionInput, sectionStatus, visibleSections,
   type DraftSectionId, type SavedSettings, type SectionId, type SectionStatus, type SectionValues, type TestResult, type TestedSection,
 } from '../settings/sections';
 import { SaveBar, type SaveOutcome } from '../settings/SettingsParts';
@@ -25,7 +22,16 @@ import { SecuritySection } from '../settings/sections/SecuritySection';
 import { JiraSection } from '../settings/sections/JiraSection';
 import { GitHubSection } from '../settings/sections/GitHubSection';
 import { DiscordSection } from '../settings/sections/DiscordSection';
+import { DiscordMessagesSection } from '../settings/sections/DiscordMessagesSection';
+import { ReviewSection } from '../settings/sections/ReviewSection';
 import { CalendarSection, type GoogleReturn } from '../settings/sections/CalendarSection';
+import { PlanningFlowSection } from '../settings/sections/PlanningFlowSection';
+import { JudgeSection } from '../settings/sections/JudgeSection';
+import { SousFlowSection } from '../settings/sections/SousFlowSection';
+import { ElevenLabsKeysSection } from '../components/ElevenLabsKeysSection';
+import { DemoStorageSection } from '../components/DemoStorageSection';
+import { PluginsSection } from '../settings/sections/PluginsSection';
+import { RulesCard } from '../settings/sections/RulesCard';
 
 const dotClass: Record<Exclude<SectionStatus, null>, string> = {
   ok: 'bg-status-merged', bad: 'bg-status-conflict', off: 'border border-muted-foreground', unsaved: 'bg-status-warn',
@@ -46,15 +52,16 @@ const SettingsPage: React.FC = () => {
   const mode = useDockMode();
   const sections = visibleSections(mode);
   const [active, setActive] = useState<SectionId>(() => sectionFromSearch(window.location.search, sections));
+  const [query, setQuery] = useState('');
   const [googleReturn] = useState(readGoogleReturn);
   const [drafts, setDrafts] = useState<Partial<Record<DraftSectionId, SectionValues>>>({});
   const [saving, setSaving] = useState<DraftSectionId | null>(null);
   const [outcome, setOutcome] = useState<{ section: DraftSectionId; result: SaveOutcome } | null>(null);
   const [tests, setTests] = useState<Partial<Record<TestedSection, TestResult>>>({});
-  const [navigationMode, setNavigationMode] = useState(() => readNavigationPreferences().mode);
   const { data, loading, error, refetch } = useQuery(GET_SETTINGS, CACHED_QUERY_OPTIONS);
   const { data: tokenData } = useQuery(GET_INGEST_TOKENS, CACHED_QUERY_OPTIONS);
   const { data: storageData } = useQuery(GET_DEMO_STORAGE, CACHED_QUERY_OPTIONS);
+  const { data: skillData } = useQuery<{ installedSkills: string[] }>(GET_INSTALLED_SKILLS, { ...CACHED_QUERY_OPTIONS, skip: active !== 'messages' });
   const [updateSettings] = useMutation(UPDATE_SETTINGS);
 
   const settings: SavedSettings = data?.settings ?? {};
@@ -94,12 +101,6 @@ const SettingsPage: React.FC = () => {
     window.history.replaceState(window.history.state, '', `/settings?section=${active}`);
   }, [active]);
 
-  useEffect(() => {
-    const handleChange = (event: Event) => setNavigationMode((event as CustomEvent<NavigationPreferences>).detail.mode);
-    window.addEventListener(NAVIGATION_PREFERENCES_EVENT, handleChange);
-    return () => window.removeEventListener(NAVIGATION_PREFERENCES_EVENT, handleChange);
-  }, []);
-
   const anyDirty = dirtySections.length > 0;
   useEffect(() => {
     if (!anyDirty) return undefined;
@@ -135,24 +136,39 @@ const SettingsPage: React.FC = () => {
   const setter = (id: DraftSectionId) => (key: string, value: string) => setFields(id, { [key]: value });
   const tested = (id: TestedSection) => (result: TestResult) => setTests((current) => ({ ...current, [id]: result }));
   const statusOf = (id: SectionId) => sectionStatus(id, settings, { dirty: changesOf(id) > 0, tests, demoStorage: Boolean(storageData?.demoStorage?.configured) });
-  const sideText = (id: SectionId) => (id === 'security' ? (settings.hasMasterPin ? 'PIN on' : 'PIN off') : id === 'tokens' ? String(tokenData?.ingestTokens?.length ?? 0) : null);
+  const sideText = (id: SectionId) => (id === 'security' ? (settings.hasMasterPin ? 'PIN on' : 'PIN off') : id === 'machines' ? String(tokenData?.ingestTokens?.length ?? 0) : null);
+  const matched = matchSections(sections, query);
   const info = sections.find((section) => section.id === active) ?? sections[0];
   const chat = valuesOf('chat');
 
   return (
-    <Page width="full" className="pb-28">
-      <header className="mb-7 flex flex-wrap items-end justify-between gap-4">
+    <Page width="full">
+      <header className="sticky top-0 z-20 mb-7 flex flex-wrap items-end justify-between gap-4 bg-background py-3">
         <div><p className="mb-1 text-xs font-semibold text-muted-foreground">SYSTEM</p><h1 className="text-balance font-display text-3xl font-bold">Settings</h1></div>
-        <p className={cn('text-xs', anyDirty ? 'text-status-warn' : 'text-muted-foreground')} role="status">{anyDirty ? `Unsaved: ${dirtySections.map((section) => section.label).join(', ')}` : 'All changes saved'}</p>
+        {isDraftSection(active) && (changesOf(active) > 0 || saving === active || outcome?.section === active) ? (
+          <SaveBar
+            section={info.label}
+            changes={changesOf(active)}
+            errors={sectionErrors(active, valuesOf(active))}
+            saving={saving === active}
+            outcome={outcome?.section === active ? outcome.result : null}
+            onSave={() => void save(active)}
+            onDiscard={() => setDrafts((current) => { const next = { ...current }; delete next[active]; return next; })}
+          />
+        ) : (
+          <p className={cn('text-xs', anyDirty ? 'text-status-warn' : 'text-muted-foreground')} role="status">{anyDirty ? `Unsaved: ${dirtySections.map((section) => section.label).join(', ')}` : 'All changes saved'}</p>
+        )}
       </header>
 
       <div className="grid grid-cols-[220px_minmax(0,1fr)] items-start gap-7 max-[760px]:grid-cols-1">
         <div className="hidden max-[760px]:block">
-          <Select aria-label="Settings section" value={active} onValueChange={(value) => setActive(value as SectionId)} options={sections.map((section) => ({ value: section.id, label: `${section.group} · ${section.label}${changesOf(section.id) ? ' · unsaved' : ''}` }))} />
+          <Select aria-label="Settings section" value={active} onValueChange={(value) => setActive(value as SectionId)} options={matched.map((section) => ({ value: section.id, label: `${section.group} · ${section.label}${changesOf(section.id) ? ' · unsaved' : ''}` }))} />
         </div>
-        <aside className="sticky top-6 min-w-0 max-[760px]:hidden" aria-label="Settings sections">
+        <aside className="sticky top-24 min-w-0 max-[760px]:hidden" aria-label="Settings sections">
+          <Input type="search" aria-label="Search settings" className="mb-4" placeholder="Search settings" value={query} onChange={(event) => setQuery(event.target.value)} />
+          {query.trim() && !matched.length && <p className="px-2 text-xs text-muted-foreground" role="status">No setting matches</p>}
           {SECTION_GROUPS.map((group) => {
-            const items = sections.filter((section) => section.group === group);
+            const items = matched.filter((section) => section.group === group);
             if (!items.length) return null;
             return (
               <div key={group} className="mb-4">
@@ -179,7 +195,7 @@ const SettingsPage: React.FC = () => {
           })}
         </aside>
 
-        <main className="min-w-0 max-w-[920px]">
+        <main className="min-w-0">
           <header className="mb-5"><h2 className="text-balance font-display text-2xl font-bold">{info.title}</h2><p className="mt-1 text-pretty text-sm text-secondary-foreground">{info.description}</p></header>
           {active === 'general' && <GeneralSection values={valuesOf('general')} set={setter('general')} />}
           {active === 'chat' && (
@@ -191,27 +207,21 @@ const SettingsPage: React.FC = () => {
           {active === 'notifications' && <NotificationsSection values={valuesOf('notifications')} set={setter('notifications')} />}
           {active === 'security' && <SecuritySection hasPin={Boolean(settings.hasMasterPin)} />}
           {active === 'jira' && <JiraSection values={valuesOf('jira')} set={setter('jira')} settings={settings} test={tests.jira} onTested={tested('jira')} />}
+          {active === 'jira' && mode === 'laptop' && <div className="mt-5"><RulesCard scope="merge" /></div>}
           {active === 'github' && <GitHubSection values={valuesOf('github')} set={setter('github')} settings={settings} test={tests.github} onTested={tested('github')} />}
           {active === 'discord' && <DiscordSection values={valuesOf('discord')} set={setter('discord')} settings={settings} test={tests.discord} onTested={tested('discord')} />}
+          {active === 'review' && <ReviewSection values={valuesOf('review')} set={setter('review')} />}
+          {active === 'messages' && <DiscordMessagesSection values={valuesOf('messages')} set={setter('messages')} skills={skillData?.installedSkills} />}
           {active === 'calendar' && <CalendarSection values={valuesOf('calendar')} set={setter('calendar')} settings={settings} dirty={changesOf('calendar') > 0} googleReturn={googleReturn} />}
-          {active === 'tokens' && <IngestTokensSection />}
-          {active === 'demo' && <div className="flex flex-col gap-5"><ElevenLabsKeysSection /><DemoStorageSection /></div>}
+          {active === 'machines' && <IngestTokensSection />}
+          {active === 'plugins' && <PluginsSection values={valuesOf('plugins')} set={setter('plugins')} s3Fields={<DemoStorageSection />} voiceKeys={<ElevenLabsKeysSection />} />}
           {active === 'claude' && <ClaudeAccountSection />}
+          {active === 'planflow' && <PlanningFlowSection />}
+          {active === 'sousflow' && <SousFlowSection />}
+          {active === 'judge' && <JudgeSection />}
         </main>
       </div>
 
-      {isDraftSection(active) && (
-        <SaveBar
-          section={info.label}
-          changes={changesOf(active)}
-          errors={sectionErrors(active, valuesOf(active))}
-          saving={saving === active}
-          outcome={outcome?.section === active ? outcome.result : null}
-          navigationMode={navigationMode}
-          onSave={() => void save(active)}
-          onDiscard={() => setDrafts((current) => { const next = { ...current }; delete next[active]; return next; })}
-        />
-      )}
     </Page>
   );
 };

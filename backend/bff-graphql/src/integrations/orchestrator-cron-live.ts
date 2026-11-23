@@ -6,10 +6,12 @@ import { ledgerPeer } from './ledger-peer';
 import { DEFAULT_MACHINE, orchestratorService } from './orchestrator';
 import { CRON_CACHE, OrchestratorCron } from './orchestrator-cron';
 import { activeSprint } from './sprint-plan';
+import { cronDryRun } from './plan-publish';
 import { sprintPlanner } from './sprint-plan-live';
 import { isTaskTitle } from './session-titles';
 import { eventPush, pushService } from './push';
 import { askNotice, runDoneNotice, turnDoneNotice } from './push-notices';
+import { ticketFlowLines } from './sous-flow-live';
 
 const storage = new StorageService();
 const jira = new JiraAPI();
@@ -55,6 +57,7 @@ export const orchestratorCron = new OrchestratorCron({
   deadStarts: () => storage.getDeadCronStartKeys(new Date(Date.now() - DEAD_START_LOOKBACK_MS)),
   runs: () => orchestratorService.list(),
   saveRun: (ledger, machine) => orchestratorService.ingestLedger(ledger, new Date(), machine),
+  sousFlowLines: (key) => ticketFlowLines(key),
   park: async (key, waiting) => {
     const row = await storage.getOrchestratorRunWithLedger(key);
     if (!row) return;
@@ -85,6 +88,7 @@ export const orchestratorCron = new OrchestratorCron({
   stopTurn: (sessionId) => chatService.stopTurn(sessionId),
   hasPushDevices: async () => (await pushService.subscriptions()).length > 0,
   push: (message) => eventPush.send('needsYou', message),
+  dryRun: cronDryRun(),
 });
 
 chatService.onAsk = (ask) => { void eventPush.send('needsYou', askNotice(ask)).catch(() => undefined); };

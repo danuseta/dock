@@ -3,11 +3,12 @@ import { useLazyQuery } from '@apollo/client';
 import { Check, ChevronRight, X } from 'lucide-react';
 import { GET_RUN_THINKING_RAW } from '../graphql/queries';
 import { cn } from '../lib/cn';
+import { dayKey, dayLabel, stamp } from '../lib/logDays';
 import { clock, groupRows, isThinking, nextAt, stopName, type ThinkingRawLine, type ThinkingRow } from './thinking';
 
 const KIND: Record<string, string> = { ask: 'ask', decide: 'decide', did: 'did' };
 
-const Row: React.FC<{ runKey: string; row: ThinkingRow; until: string | null }> = ({ runKey, row, until }) => {
+const Row: React.FC<{ runKey: string; row: ThinkingRow; until: string | null; days: boolean }> = ({ runKey, row, until, days }) => {
   const [open, setOpen] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [loadRaw, raw] = useLazyQuery<{ runThinkingRaw: ThinkingRawLine[] }>(GET_RUN_THINKING_RAW);
@@ -19,7 +20,7 @@ const Row: React.FC<{ runKey: string; row: ThinkingRow; until: string | null }> 
   };
   return (
     <li className="relative grid grid-cols-[40px_14px_minmax(0,1fr)] gap-x-2 py-[5px] before:absolute before:bottom-0 before:left-[54px] before:top-0 before:w-px before:bg-border">
-      <time className="pt-0.5 text-right font-mono text-[0.66rem] tabular-nums max-[760px]:text-xs text-muted-foreground" dateTime={row.at}>{clock(row.at)}</time>
+      <time className="pt-0.5 text-right font-mono text-[0.66rem] tabular-nums max-[760px]:text-xs text-muted-foreground" dateTime={row.at} title={days ? stamp(row.at) : undefined}>{clock(row.at)}</time>
       <span className="relative z-[1] mt-0.5 grid size-3.5 place-items-center bg-surface-0" aria-hidden="true">
         <i className={cn('block rounded-full', thinking ? 'size-2 border-[1.5px] border-secondary-foreground' : 'size-1.5 bg-border-glow', row.flag && 'border-status-conflict bg-status-conflict')} />
       </span>
@@ -69,11 +70,12 @@ interface ThinkingListProps {
   /** Every row, for the time window of the raw layer; defaults to rows. */
   allRows?: ThinkingRow[];
   review?: boolean;
+  days?: boolean;
   empty?: string;
 }
 
 /** Rows grouped under their stage and round, newest first, each opening in place to its options and then its raw activity. */
-export const ThinkingList: React.FC<ThinkingListProps> = ({ runKey, rows, allRows, review = false, empty = 'Nothing here yet.' }) => {
+export const ThinkingList: React.FC<ThinkingListProps> = ({ runKey, rows, allRows, review = false, days = false, empty = 'Nothing here yet.' }) => {
   if (rows.length === 0) return <p className="py-5 text-center text-[0.8rem] text-muted-foreground">{empty}</p>;
   const every = allRows ?? rows;
   return (
@@ -83,7 +85,16 @@ export const ThinkingList: React.FC<ThinkingListProps> = ({ runKey, rows, allRow
           <li className="sticky top-0 z-[2] flex items-center gap-2 bg-surface-0 pt-3 pb-1 font-mono text-[0.6rem] font-bold uppercase max-[760px]:text-xs tracking-[0.1em] text-muted-foreground after:h-px after:flex-1 after:bg-border">
             <span>{stopName(group.stageIndex, review)}</span><span className="font-medium normal-case tracking-normal">R{group.round}</span>
           </li>
-          {group.rows.map((row) => <Row key={row.id} runKey={runKey} row={row} until={nextAt(every, row)} />)}
+          {group.rows.map((row) => {
+            const at = rows.indexOf(row);
+            const divider = days && (at === 0 || dayKey(rows[at - 1].at) !== dayKey(row.at));
+            return (
+              <React.Fragment key={row.id}>
+                {divider && <li className="flex items-center gap-2 pt-2 pb-0.5 font-mono text-[0.6rem] font-bold max-[760px]:text-xs tracking-[0.1em] text-muted-foreground after:h-px after:flex-1 after:bg-border">{dayLabel(row.at)}</li>}
+                <Row runKey={runKey} row={row} until={nextAt(every, row)} days={days} />
+              </React.Fragment>
+            );
+          })}
         </React.Fragment>
       ))}
     </ol>

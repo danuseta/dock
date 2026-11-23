@@ -1,5 +1,6 @@
 import type { ChatAttachment } from '../messages';
 import type { TurnOptionsControl } from './useTurnOptions';
+import type { SessionFlow } from './sessionFlow';
 
 export interface TurnOptions {
   model: string | null;
@@ -32,6 +33,8 @@ export interface ComposerProps {
   seed?: { text: string } | null;
   /** The chat panel on a phone: expand sits in the box, Stop takes the place of Send while the box is empty, and the model and Queue/Steer sit under it. */
   compact?: { modelLabel: string } | null;
+  /** The session's Sous flow picker; left out, the composer has none. */
+  flow?: SessionFlow | null;
 }
 
 export interface ChatCommand {

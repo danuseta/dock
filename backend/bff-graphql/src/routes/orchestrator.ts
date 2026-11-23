@@ -13,18 +13,27 @@ import { receiveDemoVideo } from './demo-videos';
 import { autoBroadcast, type AutoBroadcast } from '../integrations/broadcast';
 import { decisionGate, stillWorking, type DecisionGate } from '../integrations/decision-gate';
 import { parseRetroDraft } from '../integrations/retro';
+import type { RetroLine } from '../integrations/retro-apply';
+import { autoAcceptRetroDraft } from '../integrations/retro-apply-live';
 import type { SprintPlanner } from '../integrations/sprint-plan';
 import { sprintPlanner } from '../integrations/sprint-plan-live';
 import { deployGateFor } from '../integrations/deploy-gate-live';
 import { PLANNING_ROUTES, planningIngest, type PlanningIngestDeps } from '../integrations/planning-ingest';
-import { sprintDraftService, storyboardReader } from '../integrations/sprint-draft-live';
+import { planningVisuals, sprintDraftService, storyboardReader, ticketSummaryService } from '../integrations/sprint-draft-live';
 import { doctorReports, type DoctorReports } from '../integrations/doctor';
 import { DiscordReaderError, type DiscordReader } from '../integrations/discord-reader';
 import { discordReader } from '../integrations/discord-reader-live';
 import { dockMode } from '../mode';
 import { ELEVENLABS_ROUTES, elevenLabsKeys, elevenLabsRoute, type ElevenLabsKeys } from '../integrations/elevenlabs-keys';
 import { MAX_TRANSCRIPT_BYTES, OrchestratorInputError, OrchestratorService, orchestratorService, type Orchestration } from '../integrations/orchestrator';
+import { livePlugins } from '../integrations/plugins';
 import { StorageService } from '../storage/service';
+import { checkpointsOn } from '../integrations/sous-flow-live';
+import type { JudgeQueue } from '../integrations/judge-queue';
+import { judgeQueue } from '../integrations/judge-live';
+import { gmCron as gmCronStore, gmSettings as gmSettingsStore } from '../integrations/guild-master-live';
+import { parseGmCron, parseGmSettings } from '../integrations/guild-master';
+import { CronInputError } from '../integrations/orchestrator-cron';
 
 const broadcastFailed = (error: unknown) => console.error('[Broadcast] automatic broadcast failed:', error instanceof Error ? error.message : 'unknown error');
 const gateFailed = (error: unknown) => console.error('[Decision gate] failed:', error instanceof Error ? error.message : 'unknown error');
@@ -77,7 +86,17 @@ export function createOrchestratorIngestRouter(
   // The sprint plan draft the plan session posts.
   planner: Pick<SprintPlanner, 'ingest'> = sprintPlanner,
   // The planning chat's agent reading and changing the sprint draft Planning shows.
-  planning: PlanningIngestDeps = { drafts: sprintDraftService, storyboards: storyboardReader },
+  planning: PlanningIngestDeps = { drafts: sprintDraftService, storyboards: storyboardReader, summaries: ticketSummaryService, visuals: planningVisuals },
+  // The Sous flow "Kirim checkpoint" switch; off, a checkpoint is answered as not recorded so the lead carries on.
+  checkpointOn: () => Promise<boolean> = checkpointsOn,
+  // The Judge result of one session; DOCK computes the grade from the findings.
+  judge: Pick<JudgeQueue, 'receive'> = judgeQueue,
+  // The settings a Guild Master turn may read and change, for the kit's gm.cjs.
+  gmSettings: { view: () => Promise<unknown>; put: (values: Record<string, string>) => Promise<unknown> } = gmSettingsStore,
+  // The orchestrator cron fields a Guild Master turn may read and change.
+  gmCron: { view: () => Promise<unknown>; put: (values: Record<string, string>) => Promise<unknown> } = gmCronStore,
+  // The ledger lines of a stored retro draft, accepted without the owner; Judge lines wait.
+  retroAuto: (sprint: string, created: RetroLine[]) => Promise<unknown> = autoAcceptRetroDraft,
 ): Router {
   const router = Router();
 
@@ -106,6 +125,8 @@ export function createOrchestratorIngestRouter(
   };
 
   const small = express.json({ limit: '256kb' });
+  // A visual is a whole HTML page, so its route takes a page of up to 2 MB; every other route keeps the small limit.
+  const visualBody = express.json({ limit: '3mb' });
   // A build goes up for review, and out to Discord, only once sous stops working on it: a ledger push mid-turn waits
   // for the turn's end, which the hook events report.
   const settled = (run: Orchestration) => {
@@ -120,7 +141,9 @@ export function createOrchestratorIngestRouter(
   }));
   router.post('/retro', small, handle(async (body) => {
     const draft = parseRetroDraft(body);
-    return { sprint: draft.sprint, items: await retroStore.replaceRetroDraft(draft.sprint, draft.items) };
+    const created = await retroStore.replaceRetroDraft(draft.sprint, draft.items, draft.sources);
+    await retroAuto(draft.sprint, created).catch((error) => console.warn('[Retro] automatic accept failed:', error instanceof Error ? error.message : 'unknown error'));
+    return { sprint: draft.sprint, items: created.length };
   }));
   router.post('/plan', small, handle((body) => planner.ingest(body)));
   router.post('/deploy-gate', small, handle(async (body) => {
@@ -128,7 +151,7 @@ export function createOrchestratorIngestRouter(
     if (!/^[A-Z][A-Z0-9]+-\d+$/.test(key)) throw new OrchestratorInputError('key must be a ticket key such as QRD-1292');
     return deployGateFor(key);
   }));
-  for (const route of PLANNING_ROUTES) router.post(`/${route}`, small, handle((body) => planningIngest(planning, route, body)));
+  for (const route of PLANNING_ROUTES) router.post(`/${route}`, route === 'sprint-draft/visual' ? visualBody : small, handle((body) => planningIngest(planning, route, body)));
   router.post('/ledger/list', small, handle((_body, _signal, machine) => service.ledgerList(machine)));
   router.post('/ledger/get', small, handle((body, _signal, machine) => service.ledgerGet(body, machine)));
   router.post('/event', small, handle(async (body, _signal, machine) => {
@@ -136,6 +159,32 @@ export function createOrchestratorIngestRouter(
     if (run && !run.ignored) settled(run);
     return run && { key: run.key, activity: run.activity, ...(run.ignored ? { ignored: true, owner: run.machine } : {}) };
   }));
+  router.post('/checkpoint', small, async (request: Request, response: Response) => {
+    try {
+      const result = await checkpointOn() ? await service.recordCheckpoint(request.body) : { recorded: false as const, reason: 'off' };
+      response.status(200).json({ ok: true, ...result, result });
+    } catch (error) {
+      if (error instanceof OrchestratorInputError) {
+        response.status(400).json({ error: error.message });
+        return;
+      }
+      console.error('[Orchestrator] checkpoint failed:', error instanceof Error ? error.message : 'unknown error');
+      response.status(500).json({ error: 'Ingest failed' });
+    }
+  });
+  router.post('/judge', small, async (request: Request, response: Response) => {
+    try {
+      const result = await judge.receive(request.body);
+      response.status(200).json({ ok: true, ...result, result });
+    } catch (error) {
+      if (error instanceof OrchestratorInputError) {
+        response.status(400).json({ error: error.message });
+        return;
+      }
+      console.error('[Orchestrator] judge result failed:', error instanceof Error ? error.message : 'unknown error');
+      response.status(500).json({ error: 'Ingest failed' });
+    }
+  });
   router.post('/events', small, handle(async (body, _signal, machine) => {
     const run = await service.ingestEventBatch(body, new Date(), machine);
     if (run && !run.ignored) settled(run);
@@ -156,6 +205,7 @@ export function createOrchestratorIngestRouter(
     }
   }));
   router.post('/doctor', small, handle((body, _signal, machine) => doctor.ingest(body, machine)));
+  router.post('/plugins', small, handle(() => livePlugins()));
   for (const route of ELEVENLABS_ROUTES) router.post(`/elevenlabs/${route}`, small, handle((body) => elevenLabsRoute(keys, route, (body ?? {}) as Record<string, unknown>)));
   router.post('/dismiss', small,handle((body, _signal, machine) => service.dismiss(String((body as { key?: unknown })?.key ?? ''), machine)));
   router.post('/transcript', express.json({ limit: MAX_TRANSCRIPT_BYTES + 1024 * 1024 }), handle((body, _signal, machine) => service.saveTranscript(body, new Date(), machine)));
@@ -173,6 +223,38 @@ export function createOrchestratorIngestRouter(
   router.post('/chat/activity', small, handle((body, _signal, machine) => chat.activity(body, machine)));
   router.post('/chat/status', small, handle(async (body, _signal, machine) => chat.ingestStatus(body, machine)));
   router.post('/chat/agents/result', express.json({ limit: '1mb' }), handle(async (body, _signal, machine) => agents.receive(body, machine)));
+  // Guild Master sessions run on the chat machine only, so only its bridge reads or writes these settings. A write also consumes the
+  // one-use nonce DOCK minted for the owner's "ya" (or a panel rollback): the ingest token alone writes nothing.
+  router.post('/chat/gm/settings', small, handle(async (body, _signal, machine) => {
+    if (machine !== CHAT_MACHINE) throw new OrchestratorInputError(`Guild Master runs on ${CHAT_MACHINE} only`);
+    const values = parseGmSettings(body);
+    if (!values) return gmSettings.view();
+    chat.gmNonces.consume(body, values);
+    return gmSettings.put(values);
+  }));
+  // The cron the same way: a write consumes a nonce minted for exactly these cron fields.
+  router.post('/chat/gm/cron', small, handle(async (body, _signal, machine) => {
+    if (machine !== CHAT_MACHINE) throw new OrchestratorInputError(`Guild Master runs on ${CHAT_MACHINE} only`);
+    const values = parseGmCron(body);
+    if (!values) return gmCron.view();
+    chat.gmNonces.consume(body, values, 'cron');
+    try {
+      return await gmCron.put(values);
+    } catch (error) {
+      if (error instanceof CronInputError) throw new OrchestratorInputError(error.message);
+      throw error;
+    }
+  }));
+  // A write the kit does itself (agent, Party, allow-list, guard draft) or its rollback: DOCK consumes the nonce first.
+  router.post('/chat/gm/confirm', small, handle(async (body, _signal, machine) => {
+    if (machine !== CHAT_MACHINE) throw new OrchestratorInputError(`Guild Master runs on ${CHAT_MACHINE} only`);
+    return chat.gmNonces.consume(body);
+  }));
+  router.post('/chat/gm/verify', small, handle(async (body, _signal, machine) => {
+    if (machine !== CHAT_MACHINE) throw new OrchestratorInputError(`Guild Master runs on ${CHAT_MACHINE} only`);
+    return chat.gmVerify(body);
+  }));
+  router.post('/chat/gm/proposal', express.json({ limit: '512kb' }), handle((body, _signal, machine) => chat.gmPropose(body, machine)));
   router.post('/chat/wait', small, handle((body, signal, machine) => chat.wait(body, signal, machine)));
   router.post('/chat/ask', small, handle((body, _signal, machine) => chat.ask(body, machine)));
   router.post('/chat/catalog', express.json({ limit: '512kb' }), handle((body, _signal, machine) => chat.ingestCatalog(body, machine)));

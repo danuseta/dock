@@ -70,6 +70,10 @@ export interface LedgerDecision {
   /** What was unclear when the agent decided. */
   question: string | null;
   rejected: DecisionRejected[];
+  /** The decision in Indonesian, for the owner only; sous still reads `text`. Left out when the ledger has none. */
+  textId?: string;
+  /** Each alternative's label in Indonesian, in the order of `alts`; null where the ledger names none. */
+  optionsId?: Array<string | null>;
 }
 export const ISSUE_TYPES = ['BLOCKER', 'QUESTION', 'RISK', 'DISPUTE'] as const;
 export type IssueType = typeof ISSUE_TYPES[number];
@@ -80,6 +84,10 @@ export interface LedgerIssue {
   resolvedBy: number | null; resolvedAt: string | null; options: string[];
   /** What choosing each option changes, in the order of `options`; null where the ledger names none. */
   effects: Array<string | null>;
+  /** The question in Indonesian, for the owner only; sous still reads `text`. Left out when the ledger has none. */
+  textId?: string;
+  /** Each option in Indonesian, in the order of `options`; null where the ledger names none. */
+  optionsId?: Array<string | null>;
 }
 export interface LedgerRounds { used: number; max: number }
 export interface LedgerStackRepo { pr: string; branch: string | null; base: string | null; retargetedAt: string | null }
@@ -144,6 +152,8 @@ export interface Ledger {
   productionData: boolean;
   draft: boolean;
   issues: LedgerIssue[];
+  /** The menu path to the change in the app, written by sous at the video step for the QA guide. */
+  qaMenu: string | null;
   updatedAt: string;
 }
 
@@ -195,6 +205,74 @@ export const isCardKey = (key: string) => key.startsWith('CARD-');
 
 const positive = (value: unknown): number | null => (Number.isInteger(value) && Number(value) > 0 ? Number(value) : null);
 
+/** The Indonesian lines of a decision or issue, only when the ledger carries any, so a ledger without them reads as before. */
+function translations(textIdInput: unknown, optionsIdInput: Array<string | null>): { textId?: string; optionsId?: Array<string | null> } {
+  const textId = optionalText(textIdInput, 1000);
+  return {
+    ...(textId ? { textId } : {}),
+    ...(optionsIdInput.some(Boolean) ? { optionsId: optionsIdInput } : {}),
+  };
+}
+
+export const CHECKPOINT_KIND = 'CHECKPOINT';
+const MAX_CHECKPOINT_TEXT = 400;
+const MAX_CHECKPOINT_NOTES = 20;
+const MAX_CHECKPOINT_DETAIL = 8000;
+const CHECKPOINTS_RETURNED = 200;
+
+export interface CheckpointNotes { untestable: string[]; missingData: string[] }
+export interface CheckpointInput { key: string; step: string; agentId: string | null; agent: string | null; text: string; notes: CheckpointNotes }
+export interface Checkpoint extends CheckpointInput { id: string; at: string }
+
+/** A checkpoint's report: at most two sentences and 400 characters, cut rather than refused. */
+export function checkpointText(input: string): string {
+  const flat = input.replace(/\s+/g, ' ').trim();
+  const sentences = flat.match(/.*?[.!?]+(?=\s|$)|.+$/g) ?? [flat];
+  const two = sentences.slice(0, 2).join('').trim();
+  return two.length > MAX_CHECKPOINT_TEXT ? `${two.slice(0, MAX_CHECKPOINT_TEXT - 1).trimEnd()}…` : two;
+}
+
+const noteList = (value: unknown) => (Array.isArray(value) ? value : []).map((item) => text(item, 300)).filter(Boolean).slice(0, MAX_CHECKPOINT_NOTES);
+
+/** What the lead reports when an agent ends: the ticket, the step, who and a short report, and on the final review two notes. */
+export function parseCheckpoint(input: unknown): CheckpointInput {
+  if (!isRecord(input)) throw new OrchestratorInputError('A checkpoint object is required');
+  const key = normalizeTicketKey(input.key);
+  const step = text(input.step, 60);
+  if (!step) throw new OrchestratorInputError('step is required');
+  const report = typeof input.text === 'string' ? checkpointText(input.text) : '';
+  if (!report) throw new OrchestratorInputError('text is required');
+  const notes = isRecord(input.notes) ? input.notes : {};
+  return {
+    key,
+    step,
+    agentId: optionalText(input.agentId, 64),
+    agent: optionalText(input.agent, 80),
+    text: report,
+    notes: { untestable: noteList(notes.untestable), missingData: noteList(notes.missingData) },
+  };
+}
+
+/** A stored checkpoint event back as a checkpoint; null for a detail that no longer reads. */
+export function checkpointOf(event: { id: string | number; ticketKey?: string; detail: string | null; createdAt: Date }): Checkpoint | null {
+  try {
+    const stored = JSON.parse(event.detail ?? '') as Partial<CheckpointInput>;
+    if (!stored || typeof stored.step !== 'string' || typeof stored.text !== 'string') return null;
+    return {
+      id: String(event.id),
+      key: String(stored.key ?? event.ticketKey ?? ''),
+      step: stored.step,
+      agentId: typeof stored.agentId === 'string' ? stored.agentId : null,
+      agent: typeof stored.agent === 'string' ? stored.agent : null,
+      text: stored.text,
+      notes: { untestable: noteList(stored.notes?.untestable), missingData: noteList(stored.notes?.missingData) },
+      at: event.createdAt.toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Decisions from the ledger; an entry written before D-n existed is D-<its place>, and one that does not say who decided has no author. */
 export function normalizeDecisions(input: unknown): LedgerDecision[] {
   return (Array.isArray(input) ? input : [])
@@ -203,6 +281,11 @@ export function normalizeDecisions(input: unknown): LedgerDecision[] {
       const raw = text(item.status, 12).toUpperCase();
       const status = (raw === 'SHOV' ? 'GUESS' : raw) as DecisionStatus;
       const by = text(item.by, 12).toLowerCase() as DecisionBy;
+      const altsId = Array.isArray(item.optionsId) ? item.optionsId : [];
+      const alts = (Array.isArray(item.alts) ? item.alts : []).map((alt, at) => [alt, altsId[at]] as const)
+        .filter((pair): pair is readonly [Record<string, unknown>, unknown] => isRecord(pair[0]))
+        .map(([alt, id]) => ({ label: text(alt.label, 200), effect: optionalText(alt.effect, 500), id: optionalText(id, 300) }))
+        .filter((alt) => alt.label).slice(0, MAX_OPTIONS);
       return {
         n: positive(item.n) ?? index + 1,
         at: text(item.at, 40),
@@ -212,9 +295,7 @@ export function normalizeDecisions(input: unknown): LedgerDecision[] {
         issue: positive(item.issue),
         cancelNote: optionalText(item.cancelNote, 500),
         effect: optionalText(item.effect, 500),
-        alts: (Array.isArray(item.alts) ? item.alts : []).filter(isRecord)
-          .map((alt) => ({ label: text(alt.label, 200), effect: optionalText(alt.effect, 500) }))
-          .filter((alt) => alt.label).slice(0, MAX_OPTIONS),
+        alts: alts.map(({ label, effect }) => ({ label, effect })),
         replaces: positive(item.replaces),
         supersededBy: positive(item.supersededBy),
         author: optionalText(item.author ?? item.by, 60),
@@ -222,6 +303,7 @@ export function normalizeDecisions(input: unknown): LedgerDecision[] {
         rejected: (Array.isArray(item.rejected) ? item.rejected : []).filter(isRecord)
           .map((entry) => ({ option: text(entry.option, 300), why: text(entry.why, 500) }))
           .filter((entry) => entry.option).slice(0, MAX_OPTIONS),
+        ...translations(item.textId, alts.map((alt) => alt.id)),
       };
     })
     .filter((item) => item.text)
@@ -236,7 +318,8 @@ export function normalizeIssues(input: unknown): LedgerIssue[] {
       const level = text(item.level, 12).toLowerCase() as IssueLevel;
       const options = (Array.isArray(item.options) ? item.options : []).map((option) => text(option, 200));
       const effects = Array.isArray(item.effects) ? item.effects : [];
-      const kept = options.map((option, at) => [option, optionalText(effects[at], 500)] as const).filter(([option]) => option).slice(0, 10);
+      const optionsId = Array.isArray(item.optionsId) ? item.optionsId : [];
+      const kept = options.map((option, at) => [option, optionalText(effects[at], 500), optionalText(optionsId[at], 300)] as const).filter(([option]) => option).slice(0, 10);
       return {
         n: positive(item.n) ?? index + 1,
         at: text(item.at, 40),
@@ -248,6 +331,7 @@ export function normalizeIssues(input: unknown): LedgerIssue[] {
         resolvedAt: optionalText(item.resolvedAt, 40),
         options: kept.map(([option]) => option),
         effects: kept.map(([, effect]) => effect),
+        ...translations(item.textId, kept.map(([, , id]) => id)),
       };
     })
     .filter((item) => item.text)
@@ -405,6 +489,7 @@ export function parseLedger(input: unknown, now = new Date()): Ledger {
     productionData: input.productionData === true,
     draft: input.draft === true,
     issues: normalizeIssues(input.issues),
+    qaMenu: optionalText(input.qaMenu, 300),
     updatedAt: (Number.isNaN(updatedAt.getTime()) || updatedAt > now ? now : updatedAt).toISOString(),
   };
 }
@@ -668,7 +753,8 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     productionData: ledger.productionData === true,
     draft: ledger.draft === true,
     issues: normalizeIssues(ledger.issues),
-    blockers: Array.isArray(ledger.findings) ? ledger.findings.filter((item) => item.severity === 'blocker' && !item.resolvedAt).length : 0,
+    qaMenu: typeof ledger.qaMenu === 'string' ? ledger.qaMenu : null,
+    blockers:Array.isArray(ledger.findings) ? ledger.findings.filter((item) => item.severity === 'blocker' && !item.resolvedAt).length : 0,
     activity,
     activityDetail,
     idleSeconds: Math.floor(idleMs / 1000),
@@ -810,8 +896,30 @@ export class OrchestratorService {
   }
 
   /** An entry in the ticket's event log, for outward actions DOCK takes on the ticket (broadcast, approval, owner replies). */
-  async recordEvent(keyInput: string, kind: string, detail: string | null) {
-    await this.storage.addOrchestratorEvent(normalizeTicketKey(keyInput), kind, detail ? detail.slice(0, 500) : null, MAX_EVENTS_KEPT);
+  async recordEvent(keyInput: string, kind: string, detail: string | null, maxDetail = 500) {
+    return this.storage.addOrchestratorEvent(normalizeTicketKey(keyInput), kind, detail ? detail.slice(0, maxDetail) : null, MAX_EVENTS_KEPT);
+  }
+
+  /** The lead's report of one agent's end, kept on the ticket's event log. */
+  async recordCheckpoint(input: unknown) {
+    const checkpoint = parseCheckpoint(input);
+    let detail = JSON.stringify(checkpoint);
+    // Notes are cut before the report is, so the card always keeps the step, the agent and the text.
+    while (detail.length > MAX_CHECKPOINT_DETAIL && (checkpoint.notes.untestable.length || checkpoint.notes.missingData.length)) {
+      if (checkpoint.notes.untestable.length >= checkpoint.notes.missingData.length) checkpoint.notes.untestable.pop();
+      else checkpoint.notes.missingData.pop();
+      detail = JSON.stringify(checkpoint);
+    }
+    const event = await this.recordEvent(checkpoint.key, CHECKPOINT_KIND, detail, MAX_CHECKPOINT_DETAIL);
+    return { recorded: true as const, id: String(event.id) };
+  }
+
+  /** The ticket's checkpoints, oldest first. */
+  async checkpoints(keyInput: string): Promise<Checkpoint[]> {
+    let key: string;
+    try { key = normalizeTicketKey(keyInput); } catch { return []; }
+    const events = await this.storage.getOrchestratorEvents(key, CHECKPOINTS_RETURNED, [CHECKPOINT_KIND]);
+    return events.map(checkpointOf).filter((item): item is Checkpoint => item !== null).reverse();
   }
 
   /** The owner's LGTM ends a review run: its ledger moves to done and waits on nothing; the rest of the ledger is kept. */

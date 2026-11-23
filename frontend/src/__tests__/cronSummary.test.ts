@@ -37,7 +37,7 @@ test('the settings form round-trips the config, always saves sous on the workspa
     maxPerDay: 6, mode: 'manual', sprint: 'active', labels: ['be', 'fe'], todoStatuses: ['To Do'],
     inProgressStatus: 'In Progress', model: 'opus', effort: 'high', usageBrakePercent: 70, weeklyBrakePercent: 85, engine: 'omc',
   };
-  const saved = { ...config, machine: 'workspace', mode: null, model: null, effort: null, engine: 'sous' };
+  const saved = { ...config, machine: 'workspace', mode: null, model: null, effort: null, engine: 'sous', waitForPublish: false, planAfterPublish: false, blockedManual: 'tell', stackedAllowed: true };
   const form = formFromConfig(JSON.stringify(config));
   assert.deepStrictEqual([form.labels, form.parallel, form.activeFrom], ['be, fe', '2', '']);
   assert.deepStrictEqual(JSON.parse(configFromForm(form)), saved);

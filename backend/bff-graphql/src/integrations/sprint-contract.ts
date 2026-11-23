@@ -50,6 +50,9 @@ export function contractStorage(view: DraftView, publishedBy: string | null, now
       `${ticket.key} QA ${ticket.prediction?.prediction ?? ''}`.trim(), ticket.qaDecision!.action === 'fix' ? 'fixed' : 'risk accepted',
       ticket.qaDecision!.note, ticket.qaDecision!.by, when(ticket.qaDecision!.at),
     ])),
+    ...(view.questions ?? []).filter((question) => question.answered && question.answer).map((question) => row([
+      `${question.key ?? view.sprint} question`, question.answer, question.text, question.answeredBy, question.answeredAt ? when(question.answeredAt) : null,
+    ])),
   ];
   return [
     `<p>Published from DOCK Planning${publishedBy ? ` by ${escapeXml(publishedBy)}` : ''} on ${escapeXml(when(now.toISOString()))} UTC. ${view.sprintDays} working days, 1 SP = ${1 / view.spPerDay} day.</p>`,

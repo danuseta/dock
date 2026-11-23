@@ -963,6 +963,60 @@ test('internal integration behavior', async (t) => {
     assert.deepStrictEqual(writes, [['chatCaveman', 'lite'], ['chatRtk', 'off'], ['chatDefaultModel', 'sonnet']]);
   });
 
+  await t.test('defaults the review arena settings to post on, 2 min, 10 min and 3 rounds, and rejects values out of range', async () => {
+    const writes: Array<[string, string]> = [];
+    const saved = [{ key: 'reviewMaxRounds', value: '99' }];
+    const storage = { getSettings: async () => saved, hasMasterPin: async () => false, upsertSetting: async (key: string, value: string) => { writes.push([key, value]); } };
+    const api = new StorageAPI(storage as any);
+    const settings = await api.getPublicSettings();
+    assert.deepStrictEqual([settings.autoReviewPostDiscord, settings.reviewPostDelayMinutes, settings.reviewReReviewWaitMinutes, settings.reviewMaxRounds], [true, 2, 10, 3]);
+    for (const bad of [{ autoReviewPostDiscord: 'yes' }, { reviewPostDelayMinutes: -1 }, { reviewPostDelayMinutes: 1.5 }, { reviewReReviewWaitMinutes: 241 }, { reviewMaxRounds: 0 }, { reviewMaxRounds: '' }]) {
+      assert.strictEqual(await api.updateSettings(bad), false, JSON.stringify(bad));
+    }
+    assert.deepStrictEqual(writes, []);
+    assert.strictEqual(await api.updateSettings({ autoReviewPostDiscord: 'false', reviewPostDelayMinutes: 0, reviewReReviewWaitMinutes: 15, reviewMaxRounds: 5 }), true);
+    assert.deepStrictEqual(writes, [['autoReviewPostDiscord', 'false'], ['reviewPostDelayMinutes', '0'], ['reviewReReviewWaitMinutes', '15'], ['reviewMaxRounds', '5']]);
+  });
+
+  await t.test('defaults the Discord message formats and the light runner, takes a default for a saved value that no longer fits, and rejects invalid values', async () => {
+    const writes: Array<[string, string]> = [];
+    const saved = [{ key: 'reviewPostFormat', value: 'markdown' }, { key: 'lightMaxLines', value: '0' }, { key: 'lightWorkerModel', value: 'haiku' }];
+    const storage = { getSettings: async () => saved, hasMasterPin: async () => false, upsertSetting: async (key: string, value: string) => { writes.push([key, value]); } };
+    const api = new StorageAPI(storage as any);
+    const settings = await api.getPublicSettings();
+    assert.deepStrictEqual(
+      [settings.reviewFindingsAutoReply, settings.reviewPostFormat, settings.reviewPostSkill, settings.reviewPostTemplate, settings.reviewReplyFormat, settings.reviewReplySkill],
+      [true, 'skill', 'review-message', 'mas {{author}}, {{status}}. {{lgtm}} catatan: {{notes}}', 'builtin', 'review-message'],
+    );
+    assert.deepStrictEqual(
+      [settings.lightRunnerOn, settings.lightForFindings, settings.lightForParty, settings.lightForRetro, settings.lightMaxLines, settings.lightMaxFiles, settings.lightWorkerModel, settings.lightBrowserCheck, settings.lightBlastCheck, settings.lightBlastLoops, settings.lightPublish],
+      [true, true, true, false, 150, 3, 'haiku', true, true, 2, 'push'],
+    );
+    for (const bad of [
+      { reviewFindingsAutoReply: 'yes' }, { reviewPostFormat: 'builtin' }, { reviewReplyFormat: 'html' }, { reviewPostSkill: '../evil' }, { reviewReplySkill: 'Review Message' },
+      { reviewPostTemplate: 'x'.repeat(2001) }, { lightRunnerOn: 'on' }, { lightMaxLines: 0 }, { lightMaxFiles: 1.5 }, { lightBlastLoops: 6 }, { lightWorkerModel: 'opus' }, { lightPublish: 'merge' },
+    ]) {
+      assert.strictEqual(await api.updateSettings(bad), false, JSON.stringify(bad));
+    }
+    assert.deepStrictEqual(writes, []);
+    assert.strictEqual(await api.updateSettings({ reviewPostFormat: 'template', reviewReplySkill: 'my-team:reply_v2', reviewReplyTemplate: 'mas {{author}}', lightForRetro: 'true', lightMaxLines: 200, lightPublish: 'draft' }), true);
+    assert.deepStrictEqual(writes, [['reviewPostFormat', 'template'], ['reviewReplySkill', 'my-team:reply_v2'], ['reviewReplyTemplate', 'mas {{author}}'], ['lightForRetro', 'true'], ['lightMaxLines', '200'], ['lightPublish', 'draft']]);
+  });
+
+  await t.test('saves only a Discord webhook link as the webhook', async () => {
+    const writes: Array<[string, string]> = [];
+    const storage = { getSettings: async () => [], hasMasterPin: async () => false, upsertSetting: async (key: string, value: string) => { writes.push([key, value]); } };
+    const api = new StorageAPI(storage as any);
+    for (const bad of ['https://evil.example/api/webhooks/1/x', 'http://discord.com/api/webhooks/1/x', 'https://discord.com.evil.example/api/webhooks/1/x', 'https://discord.com/api/webhooks/x/y', 'https://discord.com/api/webhooks/1/x/messages/2', 'not a link']) {
+      assert.strictEqual(await api.updateSettings({ discordWebhookUrl: bad }), false, bad);
+    }
+    assert.deepStrictEqual(writes, []);
+    assert.strictEqual(await api.updateSettings({ discordWebhookUrl: 'https://discord.com/api/webhooks/123/abc-DEF_9' }), true);
+    assert.strictEqual(await api.updateSettings({ discordWebhookUrl: 'https://discordapp.com/api/webhooks/123/abc' }), true);
+    assert.strictEqual(await api.updateSettings({ discordWebhookUrl: '' }), true, 'blank keeps the saved one');
+    assert.strictEqual(writes.length, 2, 'the two links are saved, the blank one is not');
+  });
+
   await t.test('validates bounded credential-free upstream targets', () => {
     assert.throws(() => validateMonitorTarget({ name: 'FTP', url: 'ftp://example.com' }));
     assert.throws(() => validateMonitorTarget({ name: 'Secret', url: 'https://user:pass@example.com' }));

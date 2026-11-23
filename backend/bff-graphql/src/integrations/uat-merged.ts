@@ -3,10 +3,14 @@ import { JiraAPI } from '../datasources/JiraAPI';
 import { StorageService } from '../storage/service';
 import { REVIEW_STATUS } from './broadcast-review';
 import { orchestratorService } from './orchestrator';
+import { qaGuide } from './qa-guide-live';
+import { isDocsSyncPull } from './merge-state';
+import { DEFAULT_STATUS_AFTER_MERGE, STATUS_AFTER_MERGE_KEY, readStatusAfterMerge, type StatusAfterMerge } from './ops-rules';
+import type { DockMode } from '../mode';
 
 export const UAT_MERGED_STATUS = 'UAT MERGED';
 
-export interface UatPullRequest { url: string; status: string; owner: string; repo: string; number: number }
+export interface UatPullRequest { url: string; status: string; owner: string; repo: string; number: number; title?: string; headBranch?: string }
 
 export interface UatMergedDeps {
   cachedPullRequests(key: string): Promise<UatPullRequest[] | null>;
@@ -17,6 +21,10 @@ export interface UatMergedDeps {
   marker(key: string): Promise<string[] | null>;
   setMarker(key: string, urls: string[]): Promise<unknown>;
   event(key: string, kind: string, detail: string): Promise<unknown>;
+  /** Runs once the ticket moved to UAT MERGED: the QA guide block in Developer Context. A failure never undoes the move. */
+  afterMove?(key: string): Promise<unknown>;
+  /** Settings › Sous flow › Aturan: on or off, the status to move to, docs-sync ignored, the laptop DOCK too. Left out, the defaults. */
+  settings?(): Promise<StatusAfterMerge>;
   now?(): number;
 }
 
@@ -28,8 +36,10 @@ const sameUrls = (a: string[] | null, b: string[]) => a !== null && a.length ===
 const inReview = (status: string | null | undefined) => String(status ?? '').trim().toLowerCase() === REVIEW_STATUS.toLowerCase();
 
 /**
- * Moves a ticket from PR Review to UAT MERGED once every pull request linked to it is merged, whatever the base branch.
- * GitHub is asked only about pull requests still open; the Jira status is read fresh just before the move.
+ * Moves a ticket from PR Review to UAT MERGED (or the status Settings name) once every pull request linked to it is
+ * merged, whatever the base branch; with ignoreDocsSync a docs-sync pull request of the bot does not count. GitHub is
+ * asked only about pull requests still open; the Jira status is read fresh just before the move, so a ticket two DOCKs
+ * look at moves once.
  */
 export class UatMerged {
   private busy = false;
@@ -39,16 +49,18 @@ export class UatMerged {
 
   constructor(private readonly deps: UatMergedDeps) {}
 
-  /** Returns the keys it moved. */
-  async tick(tickets: Array<{ key: string; status?: string | null }>): Promise<string[]> {
+  /** Returns the keys it moved. The laptop DOCK moves nothing unless the laptop rule is on. */
+  async tick(tickets: Array<{ key: string; status?: string | null }>, mode: DockMode = 'workspace'): Promise<string[]> {
     const candidates = tickets.filter((ticket) => inReview(ticket.status));
     if (candidates.length === 0 || this.busy) return [];
+    const rules = this.deps.settings ? await this.deps.settings() : DEFAULT_STATUS_AFTER_MERGE;
+    if (!rules.enabled || (mode === 'laptop' && !rules.laptop)) return [];
     this.busy = true;
     const moved: string[] = [];
     try {
       for (const { key } of candidates) {
         try {
-          if (await this.check(key)) moved.push(key);
+          if (await this.check(key, rules)) moved.push(key);
         } catch (error) {
           console.error(`[UatMerged] ${key}:`, error instanceof Error ? error.message : error);
         }
@@ -59,10 +71,12 @@ export class UatMerged {
     return moved;
   }
 
-  private async check(key: string): Promise<boolean> {
+  private async check(key: string, rules: StatusAfterMerge): Promise<boolean> {
     const now = this.deps.now?.() ?? Date.now();
     if ((this.skipUntil.get(key) ?? 0) > now) return false;
-    const cached = await this.deps.cachedPullRequests(key);
+    const counted = (prs: UatPullRequest[]) => (rules.ignoreDocsSync ? prs.filter((pr) => !isDocsSyncPull(pr)) : prs);
+    const listed = await this.deps.cachedPullRequests(key);
+    const cached = listed && counted(listed);
     if (cached) {
       const merged = new Set(cached.filter((pr) => pr.status === 'merged').map((pr) => pr.url));
       for (const pr of cached.filter((item) => isOpen(item.status))) {
@@ -74,8 +88,9 @@ export class UatMerged {
       if (sameUrls(await this.deps.marker(key), [...merged].sort())) return false;
     }
 
-    const fresh = await this.deps.freshPullRequests(key);
-    if (!fresh.complete) return false;
+    const read = await this.deps.freshPullRequests(key);
+    if (!read.complete) return false;
+    const fresh = { prs: counted(read.prs) };
     const urls = new Set(fresh.prs.map((pr) => pr.url));
     if (cached && cached.some((pr) => !urls.has(pr.url))) return false;
     if (fresh.prs.some((pr) => isOpen(pr.status))) return false;
@@ -84,7 +99,7 @@ export class UatMerged {
 
     if (!inReview(await this.deps.statusNow(key))) return false;
 
-    const result = await this.deps.move(key, UAT_MERGED_STATUS);
+    const result = await this.deps.move(key, rules.next);
     if (result !== 'moved') {
       const count = (this.failures.get(key) ?? 0) + 1;
       this.failures.set(key, count);
@@ -94,14 +109,15 @@ export class UatMerged {
       }
       if (result === 'not-offered' && !this.failed.has(key)) {
         this.failed.add(key);
-        await this.deps.event(key, 'JIRA_MOVE_FAILED', `Jira offers no move to ${UAT_MERGED_STATUS}`).catch(() => undefined);
+        await this.deps.event(key, 'JIRA_MOVE_FAILED', `Jira offers no move to ${rules.next}`).catch(() => undefined);
       }
       return false;
     }
     this.failed.delete(key);
     this.failures.delete(key);
     await this.deps.setMarker(key, mergedUrls);
-    await this.deps.event(key, 'JIRA', `${UAT_MERGED_STATUS}: every pull request merged (${mergedUrls.join(', ')})`).catch(() => undefined);
+    await this.deps.event(key, 'JIRA', `${rules.next}: every pull request merged (${mergedUrls.join(', ')})`).catch(() => undefined);
+    await this.deps.afterMove?.(key).catch((error) => console.error(`[UatMerged] ${key} after the move:`, error instanceof Error ? error.message : error));
     return true;
   }
 }
@@ -123,4 +139,6 @@ export const uatMerged = new UatMerged({
   },
   setMarker: (key, urls) => storage.upsertCache(UAT_MERGED_CACHE, key, { at: new Date().toISOString(), prs: urls }, 0),
   event: (key, kind, detail) => orchestratorService.recordEvent(key, kind, detail),
+  afterMove: (key) => qaGuide.afterUat(key),
+  settings: async () => readStatusAfterMerge((await storage.getSettingValues([STATUS_AFTER_MERGE_KEY]))[0]?.value),
 });

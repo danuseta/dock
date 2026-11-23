@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 
 export type BlackboardFileKind = 'text' | 'image' | 'video' | 'other';
-export interface BlackboardTicket { key: string; epic: string | null; updatedAt: string; files: number }
+export type BlackboardKind = 'task' | 'review';
+export interface BlackboardTicket { key: string; epic: string | null; updatedAt: string; files: number; sprint?: string | null; kind?: BlackboardKind }
 export interface BlackboardFile { path: string; size: number; updatedAt: string; kind: BlackboardFileKind; generated: boolean }
 
 const BASE = '/api/blackboard';
@@ -33,8 +34,88 @@ export function groupFiles(files: BlackboardFile[]): Array<{ folder: string; fil
 /** The "generated, do not edit" marker status.cjs puts on top is an HTML comment; the page says it in its own note. */
 export const withoutComments = (text: string) => text.replace(/<!--[\s\S]*?-->\s*/g, '');
 
+export interface ContractParty { mode: 'light' | 'full' | null; worker: string | null; verify: string | null; skip: string | null; by: string | null; log: number | null; lines: string[] }
+
+/** The "## Party" block Guild Master writes into contract.md: its field lines right under the heading; null when there is none. */
+export function partyOf(text: string): ContractParty | null {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const start = lines.findIndex((line) => /^## Party\s*$/.test(line));
+  if (start < 0) return null;
+  const fields: Record<string, string> = {};
+  const block: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    const hit = /^(mode|worker|verify|skip|by): (.+)$/.exec(line.trim());
+    if (!hit) break;
+    fields[hit[1]] = hit[2].trim();
+    block.push(line.trim());
+  }
+  const log = /log #(\d+)/.exec(fields.by ?? '');
+  return {
+    mode: fields.mode === 'light' || fields.mode === 'full' ? fields.mode : null,
+    worker: fields.worker ?? null,
+    verify: fields.verify ?? null,
+    skip: fields.skip ?? null,
+    by: fields.by ?? null,
+    log: log ? Number(log[1]) : null,
+    lines: block,
+  };
+}
+
+/** The Contract says "Written by Guild Master" only when DOCK verified the signed log entry and the block is exactly its lines. */
+export function partySigned(party: ContractParty | null, verified: { log: number; lines: string[] } | null | undefined): boolean {
+  return Boolean(party && verified && party.log === verified.log && JSON.stringify(party.lines) === JSON.stringify(verified.lines));
+}
+
+/** The newest "Scout:" line the light runner's scout appended to contract.md. */
+export const scoutOf = (text: string) => text.replace(/\r\n/g, '\n').split('\n').reverse().find((line) => /^Scout: /.test(line)) ?? null;
+
 /** The Log entry of the file list: the run's execution log, not a file on the board. */
 export const LOG_ENTRY = '@log';
+/** Generated entries of the Dokumen folder: Tiket → kode and the contract, read from the board, not files on it. */
+export const TRACE_ENTRY = '@trace';
+export const CONTRACT_ENTRY = '@contract';
+export const REVIEW_ENTRY = '@review';
+/** The pronunciation list at the blackboard root. */
+export const KAMUS_ENTRY = '@kamus';
+export const KAMUS_FILE = 'kamus-pengucapan.md';
+/** Perubahan kode of one repository's pull request; the old Changes page opens here. */
+export const pullEntry = (repo: string | null) => `pr:${repo ?? ''}`;
+export const isPullEntry = (entry: string | null | undefined) => Boolean(entry?.startsWith('pr:'));
+export const pullRepo = (entry: string | null) => (entry?.startsWith('pr:') ? entry.slice(3) || null : null);
+
+/** Files that hold the ticket's contract: the copy sous saved under materials/, newest first. */
+export function contractFiles(files: BlackboardFile[]): BlackboardFile[] {
+  return files.filter((file) => /(^|\/)contract[^/]*\.md$/i.test(file.path)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+export interface BoardTree { docs: BlackboardFile[]; artifacts: Array<{ folder: string; files: BlackboardFile[] }>; other: Array<{ folder: string; files: BlackboardFile[] }> }
+
+const ARTIFACT_FOLDER = /^(screenshots|materials|demo|video|videos|narasi|storyboard|replay|artifacts|shots)$/i;
+
+/** One ticket's folders as the page draws them: Dokumen (the top files), Artifacts (screenshots, materials, video), then the rest. */
+export function boardTree(files: BlackboardFile[]): BoardTree {
+  const groups = groupFiles(files);
+  return {
+    docs: groups.find((group) => group.folder === '')?.files ?? [],
+    artifacts: groups.filter((group) => group.folder && (ARTIFACT_FOLDER.test(group.folder) || group.files.every((file) => file.kind !== 'text'))),
+    other: groups.filter((group) => group.folder && !(ARTIFACT_FOLDER.test(group.folder) || group.files.every((file) => file.kind !== 'text'))),
+  };
+}
+
+export type BoardFilter = 'all' | 'task' | 'review';
+export const NO_SPRINT = 'No sprint';
+
+/** The ticket list per sprint, newest sprint first, filtered to Task or Review boards. */
+export function sprintGroups(tickets: BlackboardTicket[], filter: BoardFilter, sprintOf: (ticket: BlackboardTicket) => string | null = (ticket) => ticket.sprint ?? null, kindOf: (ticket: BlackboardTicket) => BlackboardKind = (ticket) => ticket.kind ?? 'task'): Array<{ sprint: string; tickets: BlackboardTicket[] }> {
+  const groups = new Map<string, BlackboardTicket[]>();
+  for (const ticket of tickets) {
+    if (filter !== 'all' && kindOf(ticket) !== filter) continue;
+    const sprint = sprintOf(ticket) || NO_SPRINT;
+    groups.set(sprint, [...(groups.get(sprint) ?? []), ticket]);
+  }
+  const number = (name: string) => Number(/(\d+)\s*$/.exec(name)?.[1] ?? -1);
+  return [...groups].map(([sprint, list]) => ({ sprint, tickets: list })).sort((a, b) => (a.sprint === NO_SPRINT ? 1 : b.sprint === NO_SPRINT ? -1 : number(b.sprint) - number(a.sprint) || a.sprint.localeCompare(b.sprint)));
+}
 
 
 export const formatSize =(bytes: number) => (bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`);
@@ -49,6 +130,9 @@ async function getJson<T>(url: string): Promise<T> {
 }
 
 export const fetchTickets = () => getJson<{ tickets: BlackboardTicket[] }>(`${BASE}/tickets`).then((body) => body.tickets);
+/** A file at the blackboard root; null when it is not there. */
+export const fetchRootText = (name: string) => fetch(`${BASE}/root/${encodeURIComponent(name)}`, { credentials: 'same-origin', cache: 'no-store' })
+  .then((response) => (response.ok ? response.text() : null), () => null);
 /** Null when the ticket has no blackboard folder. */
 export const fetchFiles = (key: string) => fetch(`${BASE}/${encodeURIComponent(key)}/files`, { credentials: 'same-origin', cache: 'no-store' })
   .then(async (response) => (response.status === 404 ? null : response.ok ? ((await response.json()) as { files: BlackboardFile[] }).files : Promise.reject(new Error(`Blackboard answered ${response.status}`))));

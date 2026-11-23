@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { CAVEMAN_LEVELS, CHAT_MODES, parallelTurns } from '../datasources/StorageAPI';
 import { StorageService } from '../storage/service';
@@ -60,6 +60,9 @@ import {
   type WaitAnswer,
 } from './chat-interactions';
 import { DEFAULT_MACHINE, OrchestratorInputError, normalizeMachine, normalizeTicketKey } from './orchestrator';
+import { GM_TITLE, GmNonces, askGmSummary, gmCronShow, gmMacValid, isGmConfirm, parseGmProposal, sessionMode, type GmProposal } from './guild-master';
+
+const GM_KEY_SETTING = 'gmLogKey';
 
 /** The only machine whose sessions DOCK lists, searches, opens and accepts history from. */
 export const CHAT_MACHINE = 'workspace';
@@ -363,6 +366,7 @@ interface SessionRow {
   lastMessageAt: Date;
   options?: string | null;
   origin?: string;
+  mode?: string;
 }
 
 interface InteractionRow {
@@ -409,6 +413,7 @@ function toSession(row: SessionRow, lastText: string | null, waiting = false, wo
     title: row.title,
     ticketKey: row.ticketKey,
     forkFrom: row.forkFrom,
+    mode: row.mode === 'gm' ? 'gm' : 'work',
     status: row.status,
     statusDetail: row.statusDetail,
     messageCount: row.messageCount,
@@ -467,6 +472,21 @@ export class ChatService {
   onTurnEnded: (turn: { sessionId: string; ticketKey: string | null; failed: boolean }) => void = () => undefined;
   /** Agent file jobs waiting for a machine's bridge, handed out once on a claim. Wired by the agents bridge like cronLimit. */
   agentJobs: (machine: string) => Array<{ id: string; op: string; input: unknown }> = () => [];
+  /** What a Guild Master turn sees of the settings (values it may change, secrets as set / not set). Wired by the settings like cronLimit. */
+  gmSettings: () => Promise<unknown> = async () => ({ values: {}, secrets: {} });
+  /** The cron fields a Guild Master may change and the per-ticket usage numbers it bases suggestions on. Wired like gmSettings. */
+  gmData: () => Promise<{ cron: { values: Record<string, string> }; usage: unknown[] }> = async () => ({ cron: { values: {} }, usage: [] });
+  /** Signs the manager log entries the kit writes; kept in DOCK's settings, handed to the bridge per gm turn and job, never on the workspace disk. */
+  gmKey: () => Promise<string> = async () => {
+    const [row] = (await this.storage.getSettingValues([GM_KEY_SETTING])).filter((item) => item.key === GM_KEY_SETTING);
+    if (row?.value) return row.value;
+    const key = randomBytes(32).toString('hex');
+    await this.storage.upsertSetting(GM_KEY_SETTING, key, 'Guild Master manager log signing key');
+    return key;
+  };
+  readonly gmNonces = new GmNonces(() => this.now().getTime());
+  private readonly gmProposals = new Map<string, GmProposal>();
+  private readonly gmProposedFor = new Map<string, number>();
 
   constructor(
     private readonly storage = new StorageService(),
@@ -977,7 +997,11 @@ export class ChatService {
     return nextSessionTitle(title, await this.storage.getChatSessionTitles(title));
   }
 
-  async createSession(input: { title?: string | null; ticketKey?: string | null; forkFrom?: string | null; machine?: string | null; origin?: 'cron' | 'manual'; options?: unknown }) {
+  async createSession(input: { title?: string | null; ticketKey?: string | null; forkFrom?: string | null; machine?: string | null; origin?: 'cron' | 'manual'; options?: unknown; account?: string | null; mode?: unknown }) {
+    const mode = sessionMode(input.mode);
+    if (mode === 'gm' && (input.forkFrom || input.ticketKey || input.origin === 'cron' || input.account)) {
+      throw new OrchestratorInputError('A Guild Master session is opened by the owner alone, without a ticket, a fork or an account');
+    }
     const forkFrom = optionalChatId(input.forkFrom, 'forkFrom');
     const source = forkFrom ? await this.storage.getChatSession(forkFrom) : null;
     if (forkFrom && source?.source !== 'cli') {
@@ -994,15 +1018,94 @@ export class ChatService {
       id: randomUUID(),
       source: 'dock',
       machine,
-      title: await this.uniqueTitle(text(input.title, MAX_TITLE_CHARS)),
+      title: mode === 'gm' ? text(input.title, MAX_TITLE_CHARS) || GM_TITLE : await this.uniqueTitle(text(input.title, MAX_TITLE_CHARS)),
       ticketKey: optionalTicketKey(input.ticketKey),
       forkFrom,
       startedAt: now,
       lastMessageAt: now,
       origin: input.origin === 'cron' ? 'cron' : 'manual',
       ...(cronOptions ? { options: JSON.stringify(cronOptions) } : {}),
+      ...(text(input.account, 40) ? { account: text(input.account, 40) } : {}),
+      ...(mode === 'gm' ? { mode } : {}),
     });
     return toSession(row, null);
+  }
+
+  /**
+   * The bridge's pending change after a gm turn. DOCK keeps the text it shows the owner and its sha256; only the next owner message,
+   * when it is a plain "ya", gets a nonce for exactly that change. One proposal per finished turn: replyTo must be the session's newest
+   * finished owner message, and a turn that already posted one cannot post again. A settings diff is drawn here from the values and the
+   * current settings, never from the text the bridge sent.
+   */
+  async gmPropose(input: unknown, machine: string) {
+    const proposal = parseGmProposal(input);
+    const session = await this.storage.getChatSession(chatId(proposal.sessionId, 'sessionId'));
+    if (!session || session.mode !== 'gm' || session.machine !== machine) throw new OrchestratorInputError('Unknown Guild Master session');
+    const ids = (states: string[]) => this.storage.getChatMessageIdsInState(session.id, states);
+    const [done, taken, waiting, newest] = await Promise.all([ids(['done']), ids(['taken']), ids(['queued', 'held', 'steer', 'draft']), this.storage.getNewestChatMessage(session.id, 'user')]);
+    const later = newest && newest.id !== proposal.replyTo && !waiting.includes(newest.id);
+    if (!done.includes(proposal.replyTo) || taken.length > 0 || later || (this.gmProposedFor.get(session.id) ?? 0) >= proposal.replyTo) return { accepted: false };
+    this.gmProposedFor.set(session.id, proposal.replyTo);
+    const { sha256, values, target, rollback } = proposal;
+    let { summary, diff } = proposal;
+    if (values) {
+      const view = (target === 'cron' ? (await this.gmData()).cron : await this.gmSettings()) as { values?: Record<string, string> } | null;
+      const current = view?.values ?? {};
+      const title = target === 'cron' ? 'Cron settings' : 'DOCK settings';
+      const show = (key: string, value: string) => (target === 'cron' ? gmCronShow(key, value) : value);
+      diff = `--- ${title}\n+++ ${title}\n${Object.entries(values).map(([key, value]) => `- ${key}: ${show(key, current[key] ?? '')}\n+ ${key}: ${show(key, value)}`).join('\n')}`;
+      summary = `${rollback ? `Rollback of ${target}` : target === 'cron' ? 'Cron' : 'Settings'}: ${Object.keys(values).join(', ')}`;
+    }
+    this.gmProposals.set(session.id, { sha256, summary, diff, values, target, rollback, afterMessageId: Math.max(newest?.id ?? 0, proposal.replyTo), at: this.now().toISOString() });
+    return { accepted: true, sha256 };
+  }
+
+  /** party-check.cjs on the chat machine: is this manager log row signed with DOCK's log key? Only the answer goes back. */
+  async gmVerify(input: unknown) {
+    const entry = isRecord(input) ? input.entry : null;
+    return { valid: gmMacValid(await this.gmKey(), entry) };
+  }
+
+  /** The change a Guild Master session waits on, as the owner sees it before answering. */
+  gmProposal(sessionId: string) {
+    const proposal = this.gmProposals.get(sessionId);
+    return proposal ? { summary: proposal.summary, diff: proposal.diff, at: proposal.at } : null;
+  }
+
+  /** Any owner message ends the proposal; a plain "ya" written after it was shown gets the nonce for it. */
+  private gmConfirmFor(sessionId: string, message: { id: number; text: string }) {
+    const proposal = this.gmProposals.get(sessionId);
+    this.gmProposals.delete(sessionId);
+    if (!proposal || !isGmConfirm(message.text) || message.id <= proposal.afterMessageId) return {};
+    return { gmConfirm: this.gmNonces.mint({ sessionId, sha256: proposal.sha256, values: proposal.values, target: proposal.target, rollback: proposal.rollback }) };
+  }
+
+  /** The Guild Master fields of a claim. The log key rides only with a confirmed write, never on an ordinary gm turn. */
+  private async gmClaim(sessionId: string, message: { id: number; text: string }) {
+    const confirm = this.gmConfirmFor(sessionId, message);
+    return { mode: 'gm', ...confirm, gmSettings: await this.gmSettings(), gmData: await this.gmData(), ...('gmConfirm' in confirm ? { gmKey: await this.gmKey() } : {}) };
+  }
+
+  /** "Ask Guild Master" from a Work session: a summary of its structured state only, sent to the newest Guild Master session. */
+  async askGuildMaster(sessionIdInput: string, machines: string[], run: { stage: string | null; verdict: string | null } | null = null) {
+    const session = await this.storage.getChatSession(chatId(sessionIdInput, 'sessionId'));
+    if (!session) throw new OrchestratorInputError('Unknown chat session');
+    if (session.mode === 'gm') throw new OrchestratorInputError('This is a Guild Master session already');
+    const gm = (await this.storage.getChatSessions('dock', SESSIONS_LIMIT.max)).find((row) => row.mode === 'gm');
+    if (!gm) throw new OrchestratorInputError('Start a Guild Master session first: New session, Guild Master, with the PIN');
+    const status = this.sessionStatus.get(session.machine)?.get(session.id);
+    const summary = askGmSummary({
+      ticketKey: session.ticketKey,
+      status: session.status,
+      stage: run?.stage ?? null,
+      verdict: run?.verdict ?? null,
+      model: status?.model ?? null,
+      contextTokens: status?.contextTokens ?? null,
+      contextSize: status?.contextSize ?? null,
+      costUsd: status?.costUsd ?? null,
+    });
+    await this.sendMessage(gm.id, summary, machines, { mode: 'queue' });
+    return toSession(gm, null);
   }
 
   /** The cron options a new session on the machine can carry: none on a machine that never reported what it offers, else checked. */
@@ -1376,6 +1479,12 @@ export class ChatService {
       if (await this.storage.countChatMessagesInState(message.sessionId, ['taken']) > 0) continue;
       const session = await this.storage.getChatSession(message.sessionId);
       if (!session) continue;
+      const gm = session.mode === 'gm';
+      if (gm && caps?.features.includes('gm') !== true) {
+        const detail = 'The kit on this machine is too old for Guild Master. Update claude-config.';
+        if (session.statusDetail !== detail) await this.storage.updateChatSession(session.id, { statusDetail: detail });
+        continue;
+      }
       if (message.origin === 'cron' && message.cronSlot && limit !== null && slots && slots.busy >= limit) {
         const detail = `Waiting for a cron slot (${slots.busy} of ${limit} in use)`;
         if (session.statusDetail !== detail) await this.storage.updateChatSession(session.id, { statusDetail: detail });
@@ -1391,6 +1500,9 @@ export class ChatService {
         text: message.text,
         claudeSessionId: session.claudeSessionId,
         forkFrom: session.forkFrom,
+        // Every turn of the session runs on that Claude account instead of the machine's active one; a Judge turn is named.
+        ...(session.account ? { account: session.account } : {}),
+        ...(session.title.startsWith('Judge-') ? { title: session.title } : {}),
       };
       if (!caps) return taken;
       return {
@@ -1398,6 +1510,7 @@ export class ChatService {
         attachments: caps.features.includes('attachments') ? await this.attachments.forClaim(message.id) : [],
         options: parseStoredOptions(message.options),
         agent: await this.agentSettings(),
+        ...(gm ? await this.gmClaim(session.id, message) : {}),
       };
     }
     return null;

@@ -3,15 +3,21 @@
 // are fixed; the kit is written against them.
 import { OrchestratorInputError } from './orchestrator';
 import { SprintInputError } from './sprint-dashboard';
+import type { PlanningVisualService } from './planning-visual';
 import { openTickets, type DraftView, type SprintDraftService } from './sprint-draft';
 import { StoryboardMissing, type StoryboardReader } from './storyboard';
+import type { TicketSummaryService } from './ticket-summary';
 
-export const PLANNING_ROUTES = ['sprint-draft/get', 'sprint-draft/update', 'sprint-draft/tc', 'sprint-draft/question', 'storyboard'] as const;
+export const PLANNING_ROUTES = ['sprint-draft/get', 'sprint-draft/update', 'sprint-draft/tc', 'sprint-draft/question', 'sprint-draft/summary', 'sprint-draft/visual', 'sprint-draft/new', 'sprint-draft/revise', 'storyboard'] as const;
 export type PlanningRoute = typeof PLANNING_ROUTES[number];
 
 export interface PlanningIngestDeps {
-  drafts: Pick<SprintDraftService, 'view' | 'updateTicket' | 'ask' | 'applyStoryboard' | 'setTcs'>;
+  drafts: Pick<SprintDraftService, 'view' | 'updateTicket' | 'ask' | 'applyStoryboard' | 'setTcs' | 'saveNewTicket' | 'removeNewTicket' | 'saveRevision' | 'discardRevision'>;
   storyboards: Pick<StoryboardReader, 'sync'>;
+  /** The ticket summaries; get lists the acHash each stored summary was written for. */
+  summaries?: Pick<TicketSummaryService, 'write' | 'hashes'>;
+  /** The visuals the agent puts in Planning; without them the route answers that visuals are not available. */
+  visuals?: Pick<PlanningVisualService, 'put' | 'remove' | 'list'>;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -39,7 +45,7 @@ const open = (view: DraftView): DraftView => ({ ...view, tickets: openTickets(vi
 
 async function draftOf(drafts: PlanningIngestDeps['drafts'], sprint: string): Promise<DraftView> {
   const view = await drafts.view(sprint);
-  if (!view) throw new OrchestratorInputError(`No draft for ${sprint}; load it in Agents › Sprint › Planning first`);
+  if (!view) throw new OrchestratorInputError(`No draft for ${sprint}; load it in Planning › Draft first`);
   return open(view);
 }
 
@@ -52,8 +58,46 @@ export async function planningIngest(deps: PlanningIngestDeps, route: PlanningRo
       return { version: result.version, path: result.path, frames: result.frames, changed: result.changed };
     }
     const sprint = textField(body, 'sprint')!;
-    if (route === 'sprint-draft/get') return await draftOf(deps.drafts, sprint);
-    if (route === 'sprint-draft/question') return open(await deps.drafts.ask(sprint, textField(body, 'text')!, textField(body, 'key', false)));
+    if (route === 'sprint-draft/get') {
+      const view = await draftOf(deps.drafts, sprint);
+      const withSummaries = deps.summaries ? { ...view, summaries: await deps.summaries.hashes(view.tickets.map((ticket) => ticket.key)) } : view;
+      return deps.visuals ? { ...withSummaries, visuals: (await deps.visuals.list(sprint)).map(({ id, title, saved, stale }) => ({ id, title, saved, stale })) } : withSummaries;
+    }
+    if (route === 'sprint-draft/visual') {
+      if (!deps.visuals) throw new OrchestratorInputError('Visuals are not available on this DOCK');
+      if (body.action === 'rm') return await deps.visuals.remove(sprint, body.id);
+      if (body.action !== 'put') throw new OrchestratorInputError("action must be 'put' or 'rm'");
+      return await deps.visuals.put(sprint, { id: body.id, title: body.title, html: body.html, sessionId: body.sessionId });
+    }
+    if (route === 'sprint-draft/new') {
+      const id = textField(body, 'id', false)?.toUpperCase() ?? null;
+      if (body.remove === true) {
+        if (!id) throw new OrchestratorInputError('id is required');
+        await deps.drafts.removeNewTicket(sprint, id);
+        return { removed: id };
+      }
+      if (!isRecord(body.ticket)) throw new OrchestratorInputError('ticket must be an object');
+      const saved = await deps.drafts.saveNewTicket(sprint, id, body.ticket);
+      return { id: saved.id, ticket: saved.view.newTickets.find((ticket) => ticket.id === saved.id) ?? null };
+    }
+    if (route === 'sprint-draft/revise') {
+      const key = textField(body, 'key')!.toUpperCase();
+      if (body.remove === true) {
+        await deps.drafts.discardRevision(sprint, key);
+        return { discarded: key };
+      }
+      if (!isRecord(body.revision)) throw new OrchestratorInputError('revision must be an object');
+      const saved = await deps.drafts.saveRevision(sprint, key, body.revision, 'chat');
+      return { key: saved.revision.key, revision: saved.revision };
+    }
+    if (route === 'sprint-draft/summary') {
+      if (!deps.summaries) throw new OrchestratorInputError('Ticket summaries are not available on this DOCK');
+      return await deps.summaries.write(sprint, body);
+    }
+    if (route === 'sprint-draft/question') {
+      const options = Array.isArray(body.options) ? body.options.filter((option): option is string => typeof option === 'string') : [];
+      return open(await deps.drafts.ask(sprint, textField(body, 'text')!, textField(body, 'key', false), options));
+    }
     const key = textField(body, 'key')!.toUpperCase();
     if (route === 'sprint-draft/tc') return open(await deps.drafts.setTcs(sprint, key, body.tcs));
     const change: { dev?: string | null; wave?: number | null; sp?: number | null; ac?: string[] } = {};

@@ -112,7 +112,7 @@ test('a row names its tickets, pull requests and mentions', () => {
   assert.strictEqual(row.createdBy, 'Rina');
   assert.strictEqual(row.createdById, RINA.id);
   assert.deepStrictEqual(row.posterPrs, [], 'a link from someone other than the poster is not the poster PR');
-  assert.strictEqual(ROW_VERSION, 8);
+  assert.strictEqual(ROW_VERSION, 9);
   assert.deepStrictEqual([row.channelId, row.channel, row.kind], ['f1', 'bug-report', 'bug']);
   assert.strictEqual(row.needsYou, false, 'the owner replied last');
 });

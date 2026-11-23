@@ -39,6 +39,30 @@ export const UPDATE_SETTINGS = gql`
   }
 `;
 
+export const CANCEL_AUTO_REVIEW_POST = gql`
+  mutation CancelAutoReviewPost($id: ID!) {
+    cancelAutoReviewPost(id: $id)
+  }
+`;
+
+export const EDIT_AUTO_REVIEW_POST = gql`
+  mutation EditAutoReviewPost($id: ID!, $text: String!) {
+    editAutoReviewPost(id: $id, text: $text)
+  }
+`;
+
+export const CANCEL_REVIEW_REPLY_POST = gql`
+  mutation CancelReviewReplyPost($id: ID!) {
+    cancelReviewReplyPost(id: $id)
+  }
+`;
+
+export const EDIT_REVIEW_REPLY_POST = gql`
+  mutation EditReviewReplyPost($id: ID!, $text: String!) {
+    editReviewReplyPost(id: $id, text: $text)
+  }
+`;
+
 export const REFRESH_DATA = gql`
   mutation RefreshData {
     refreshData
@@ -231,10 +255,25 @@ export const DISMISS_ORCHESTRATION = gql`
 `;
 
 export const CREATE_CHAT_SESSION = gql`
-  mutation CreateChatSession($title: String, $ticketKey: String, $forkFrom: ID, $machine: String) {
-    createChatSession(title: $title, ticketKey: $ticketKey, forkFrom: $forkFrom, machine: $machine) {
+  mutation CreateChatSession($title: String, $ticketKey: String, $forkFrom: ID, $machine: String, $mode: String, $pin: String) {
+    createChatSession(title: $title, ticketKey: $ticketKey, forkFrom: $forkFrom, machine: $machine, mode: $mode, pin: $pin) {
+      ${CHAT_SESSION_FIELDS}
+      waitsOn
+    }
+  }
+`;
+
+export const ASK_GUILD_MASTER = gql`
+  mutation AskGuildMaster($sessionId: ID!) {
+    askGuildMaster(sessionId: $sessionId) {
       ${CHAT_SESSION_FIELDS}
     }
+  }
+`;
+
+export const GUILD_MASTER_ROLLBACK = gql`
+  mutation GuildMasterRollback($id: Int!) {
+    guildMasterRollback(id: $id) { id }
   }
 `;
 

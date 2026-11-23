@@ -42,7 +42,7 @@ export const CronSettingsDialog = ({ open, onClose }: { open: boolean; onClose: 
   }, [open]);
 
   const set = <K extends keyof CronForm>(key: K, value: CronForm[K]) => form && setForm({ ...form, [key]: value });
-  const text = (key: Exclude<keyof CronForm, 'enabled' | 'workDays'>) => ({ id: `cron-${key}`, value: form ? form[key] : '', onChange: (event: React.ChangeEvent<HTMLInputElement>) => set(key, event.target.value) });
+  const text = (key: Exclude<keyof CronForm, 'enabled' | 'workDays' | 'waitForPublish' | 'planAfterPublish' | 'stackedAllowed'>) => ({ id: `cron-${key}`, value: form ? form[key] : '', onChange: (event: React.ChangeEvent<HTMLInputElement>) => set(key, event.target.value) });
   const toggleDay = (day: number) => form && set('workDays', form.workDays.includes(day) ? form.workDays.filter((item) => item !== day) : [...form.workDays, day]);
 
   const act = async (work: () => Promise<string>, close = false) => {
@@ -163,6 +163,17 @@ export const CronSettingsDialog = ({ open, onClose }: { open: boolean; onClose: 
                       <Input {...text('weeklyBrakePercent')} inputMode="numeric" />
                     </Field>
                   </div>
+                </Section>
+
+                <Section title="Sprint plan">
+                  <label className="flex items-start gap-3 text-sm">
+                    <Checkbox checked={form.waitForPublish} onChange={(event) => set('waitForPublish', event.target.checked)} />
+                    <span>Start work after the plan is published<span className="block text-xs text-muted-foreground">Cron only takes tickets with a plan-published-rN label. A ticket that joins the sprint after publish waits for a republish.</span></span>
+                  </label>
+                  <label className="flex items-start gap-3 text-sm">
+                    <Checkbox checked={form.planAfterPublish} onChange={(event) => set('planAfterPublish', event.target.checked)} />
+                    <span>Make the per-developer plan after publish<span className="block text-xs text-muted-foreground">The Plan-&lt;sprint&gt; session waits for the plan to be published instead of starting when the sprint goes active.</span></span>
+                  </label>
                 </Section>
 
                 <p className="text-xs text-secondary-foreground" role="status">Last fill: {fillSummary(settings ? JSON.parse(settings.lastFill) : null)}</p>

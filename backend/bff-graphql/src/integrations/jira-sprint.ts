@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { blockLinks, type JiraCredentials, type TicketLink } from './jira';
+import { atlassianBaseUrl, blockLinks, type JiraCredentials, type TicketLink } from './jira';
 import type { SprintEvent, SprintIssue } from './sprint-metrics';
 
 export interface JiraHttp {
@@ -41,11 +41,29 @@ export interface PlanningIssue {
   /** The description as Jira returned it (ADF or text). */
   descriptionRaw?: unknown;
   labels: string[];
+  /** The Reference field as Jira returned it (ADF or text). */
+  referenceRaw?: unknown;
+}
+
+/** The fields a revision reads and writes, as Jira returned them, with the ticket's updated timestamp. */
+export interface RevisionIssue {
+  key: string;
+  summary: string;
+  type: string;
+  updated: string;
+  fields: Record<string, unknown>;
 }
 
 export const AC_FIELD = 'customfield_10332';
+export const REFERENCE_FIELD = 'customfield_10333';
+export const USER_STORY_FIELD = 'customfield_10341';
+/** The User Story field older tickets still hold their story in. */
+export const OLD_USER_STORY_FIELD = 'customfield_10330';
+export const PROBLEM_FIELD = 'customfield_10331';
+export const OPEN_TO_CONFIRM_FIELD = 'customfield_10337';
+const REVISION_FIELDS = ['summary', 'issuetype', 'updated', USER_STORY_FIELD, OLD_USER_STORY_FIELD, PROBLEM_FIELD, AC_FIELD, REFERENCE_FIELD, OPEN_TO_CONFIRM_FIELD];
 const SP_FIELDS = ['story_points', 'customfield_10016', 'customfield_10028', 'customfield_10034'];
-const PLANNING_FIELDS = ['summary', 'issuetype', 'status', 'assignee', 'issuelinks', 'parent', 'description', 'labels', AC_FIELD, ...SP_FIELDS];
+const PLANNING_FIELDS = ['summary', 'issuetype', 'status', 'assignee', 'issuelinks', 'parent', 'description', 'labels', AC_FIELD, REFERENCE_FIELD, ...SP_FIELDS];
 
 const TRACKED_FIELDS = new Set(['status', 'labels', 'Sprint', 'Story point estimate', 'assignee']);
 const ISSUE_FIELDS = [
@@ -60,10 +78,6 @@ const REQUEST_TIMEOUT_MS = 30000;
 const DEFAULT_RETRY_AFTER_SECONDS = 5;
 
 const sleepMs = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-function cleanDomain(domain: string): string {
-  return domain.replace(/^https?:\/\//i, '').replace(/\/+$/, '').trim();
-}
 
 export async function retryOn429(send: () => Promise<any>, sleep: (ms: number) => Promise<void> = sleepMs): Promise<any> {
   for (let attempt = 0; ; attempt++) {
@@ -80,7 +94,7 @@ export async function retryOn429(send: () => Promise<any>, sleep: (ms: number) =
 export function createJiraHttp(credentials: JiraCredentials, sleep: (ms: number) => Promise<void> = sleepMs): JiraHttp {
   const auth = Buffer.from(`${credentials.email.trim()}:${credentials.apiToken.trim()}`).toString('base64');
   const client = axios.create({
-    baseURL: `https://${cleanDomain(credentials.domain)}`,
+    baseURL: atlassianBaseUrl(credentials.domain),
     headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
     timeout: REQUEST_TIMEOUT_MS,
   });
@@ -141,6 +155,7 @@ export function planningIssue(issue: any): PlanningIssue {
     epic: typeof fields.parent?.key === 'string' ? fields.parent.key : null,
     descriptionRaw: fields.description ?? null,
     labels: Array.isArray(fields.labels) ? fields.labels.filter((label: unknown): label is string => typeof label === 'string') : [],
+    referenceRaw: fields[REFERENCE_FIELD] ?? null,
   };
 }
 
@@ -215,6 +230,11 @@ export class JiraSprintClient {
       .filter((issue) => !/^(epic|sub-?task)$/i.test(issue.type));
   }
 
+  /** The keys of the sprint's tickets that are also in a closed sprint: Jira carried them over when that sprint closed. */
+  async fetchCarriedKeys(sprintId: number): Promise<string[]> {
+    return (await this.searchPlanning(`sprint = ${Number(sprintId)} AND sprint in closedSprints()`)).map((issue) => issue.key);
+  }
+
   /** Status by key, for tickets outside the sprint that an AC line or a link names. */
   async statusesOf(keys: string[]): Promise<Map<string, string>> {
     const safe = keys.filter((key) => /^[A-Z][A-Z0-9_]*-\d+$/.test(key));
@@ -235,6 +255,24 @@ export class JiraSprintClient {
     }
   }
 
+  /** The fields a revision may change and the updated timestamp, as Jira holds them now; null when the ticket is not in Jira. */
+  async revisionIssueNow(key: string): Promise<RevisionIssue | null> {
+    try {
+      const issue = await this.http.get(`/rest/api/3/issue/${encodeURIComponent(key)}`, { fields: REVISION_FIELDS.join(',') });
+      const fields = issue?.fields || {};
+      return { key: issue.key, summary: fields.summary || '', type: fields.issuetype?.name || '', updated: String(fields.updated ?? ''), fields };
+    } catch (error: any) {
+      if (error?.response?.status === 404) return null;
+      throw error;
+    }
+  }
+
+  /** Writes the given fields of the issue in one edit. */
+  async editIssue(key: string, fields: Record<string, unknown>): Promise<void> {
+    if (!this.http.put) throw new Error('This Jira connection cannot write');
+    await this.http.put(`/rest/api/3/issue/${encodeURIComponent(key)}`, { fields });
+  }
+
   /** The account ids of users assignable to the ticket whose display name is exactly `name`. */
   async assignableAccounts(key: string, name: string): Promise<string[]> {
     const users = await this.http.get('/rest/api/3/user/assignable/search', { issueKey: key, query: name, maxResults: 50 });
@@ -244,9 +282,46 @@ export class JiraSprintClient {
       .map((user: any) => user.accountId as string);
   }
 
+  /** The account ids of users assignable in the project whose display name is exactly `name`. */
+  async projectAssignableAccounts(project: string, name: string): Promise<string[]> {
+    const users = await this.http.get('/rest/api/3/user/assignable/search', { project, query: name, maxResults: 50 });
+    const wanted = name.trim().toLowerCase();
+    return (Array.isArray(users) ? users : [])
+      .filter((user: any) => String(user?.displayName ?? '').trim().toLowerCase() === wanted && typeof user?.accountId === 'string')
+      .map((user: any) => user.accountId as string);
+  }
+
+  /** Creates an issue from its fields and returns the new key. */
+  async createIssue(fields: Record<string, unknown>): Promise<string> {
+    const created = await this.http.post('/rest/api/3/issue', { fields });
+    if (typeof created?.key !== 'string') throw new Error('Jira created the issue without returning its key');
+    return created.key;
+  }
+
   async setAcField(key: string, value: unknown): Promise<void> {
     if (!this.http.put) throw new Error('This Jira connection cannot write');
     await this.http.put(`/rest/api/3/issue/${encodeURIComponent(key)}`, { fields: { [AC_FIELD]: value } });
+  }
+
+  async setReferenceField(key: string, value: unknown): Promise<void> {
+    if (!this.http.put) throw new Error('This Jira connection cannot write');
+    await this.http.put(`/rest/api/3/issue/${encodeURIComponent(key)}`, { fields: { [REFERENCE_FIELD]: value } });
+  }
+
+  /** A Blocks link: `key` is blocked by `blocker`. On create Jira reads inwardIssue as the issue that blocks. */
+  async addBlockedBy(key: string, blocker: string): Promise<void> {
+    await this.http.post('/rest/api/3/issueLink', { type: { name: 'Blocks' }, inwardIssue: { key: blocker }, outwardIssue: { key } });
+  }
+
+  /** The account id and display name of the Jira user DOCK's token belongs to. */
+  async me(): Promise<{ accountId: string | null; displayName: string | null }> {
+    const me = await this.http.get('/rest/api/3/myself');
+    return { accountId: typeof me?.accountId === 'string' ? me.accountId : null, displayName: typeof me?.displayName === 'string' ? me.displayName : null };
+  }
+
+  /** The issue's whole changelog, oldest first. */
+  changelog(key: string): Promise<any[]> {
+    return this.fullChangelog(key);
   }
 
   /** The display name of the Jira user DOCK's token belongs to. */

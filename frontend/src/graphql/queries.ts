@@ -27,6 +27,10 @@ export const GET_DASHBOARD = gql`
         workOrder
         workOrderSource
         workManual
+        acceptanceCriteria
+        openToConfirm
+        figmaUrl
+        blockedBy
         orchestration {
           key
           machine
@@ -134,6 +138,10 @@ export const GET_TICKET_DETAIL_CORE = gql`
       userStory
       problemDefinition
       figmaUrl
+      reference
+      openToConfirm
+      developerContext
+      blockedBy
       status
       assignee
       url
@@ -244,9 +252,10 @@ export const GET_OWNER_QUESTIONS = gql`
       key
       kind
       title
-      issues { n at type text level status resolvedBy resolvedAt options effects }
-      decisions { n at text status by issue cancelNote effect alts { label effect } replaces supersededBy }
+      issues { n at type text level status resolvedBy resolvedAt options effects textId optionsId }
+      decisions { n at text status by issue cancelNote effect alts { label effect } replaces supersededBy textId optionsId }
       confirmedDecisions
+      autoConfirmedDecisions
     }
   }
 `;
@@ -278,6 +287,28 @@ export const GET_SETTINGS = gql`
       autoReviewOnIt
       autoLgtm
       reviewFindingsToTask
+      autoReviewPostDiscord
+      reviewPostDelayMinutes
+      reviewReReviewWaitMinutes
+      reviewMaxRounds
+      reviewFindingsAutoReply
+      reviewPostFormat
+      reviewPostSkill
+      reviewPostTemplate
+      reviewReplyFormat
+      reviewReplySkill
+      reviewReplyTemplate
+      lightRunnerOn
+      lightForFindings
+      lightForParty
+      lightForRetro
+      lightMaxLines
+      lightMaxFiles
+      lightWorkerModel
+      lightBrowserCheck
+      lightBlastCheck
+      lightBlastLoops
+      lightPublish
       discordMessageTemplate
       hasGoogleClientSecret
       googleCalendarConnected
@@ -291,8 +322,12 @@ export const GET_SETTINGS = gql`
       chatCaveman
       chatParallelTurns
       ownerReplySession
+      storagePlugin
+      voicePlugin
+      storageLocalDir
       notificationPrefs
       planningConfluenceParent
+      planningPlanner
     }
   }
 `;
@@ -629,8 +664,9 @@ export const ORCHESTRATION_FIELDS = `
   finished
   note
   brief
-  decisions { n at text status by issue cancelNote effect alts { label effect } replaces supersededBy }
+  decisions { n at text status by issue cancelNote effect alts { label effect } replaces supersededBy textId optionsId }
   confirmedDecisions
+  autoConfirmedDecisions
   assumptions { n text falsifier state evidence }
   failures { at type what evidence attempt }
   closing { hours fixRounds replans }
@@ -643,7 +679,7 @@ export const ORCHESTRATION_FIELDS = `
   stackedOn { key be { pr branch base retargetedAt } fe { pr branch base retargetedAt } }
   productionData
   draft
-  issues { n at type text level status resolvedBy resolvedAt options effects }
+  issues { n at type text level status resolvedBy resolvedAt options effects textId optionsId }
   blockers
   activity
   activityDetail
@@ -697,12 +733,12 @@ export const GET_RETRO = gql`
       sprint
       sprintId
       previous
-      numbers { tickets medianHours fixRounds replans ownerIssues medianOwnerWaitHours reviews requestChanges blockedWaits mergeConflicts stackedRebases }
-      previousNumbers { tickets medianHours fixRounds replans ownerIssues medianOwnerWaitHours reviews requestChanges blockedWaits mergeConflicts stackedRebases }
+      numbers { tickets medianHours fixRounds replans ownerIssues medianOwnerWaitHours ownerWaitHours reviews requestChanges blockedWaits mergeConflicts stackedRebases }
+      previousNumbers { tickets medianHours fixRounds replans ownerIssues medianOwnerWaitHours ownerWaitHours reviews requestChanges blockedWaits mergeConflicts stackedRebases }
       problems { label count tickets }
-      tickets { key title kind hours rounds issues ownerWaitHours result }
+      tickets { key title kind hours rounds issues findings ownerWaitHours result }
       escalations { tickets planned causes { cause label count tickets } unpredicted { key summary causes prediction } }
-      items { id kind text evidence dest status sessionId updatedAt }
+      items { id kind text evidence dest status sessionId source updatedAt }
     }
   }
 `;
@@ -744,30 +780,156 @@ export const RETRO_BUILD = gql`
 
 export const RETRO_ITEM_ACTION = gql`
   mutation RetroItemAction($id: ID!, $action: String!, $text: String) {
-    retroItemAction(id: $id, action: $action, text: $text) { id kind text evidence dest status sessionId updatedAt }
+    retroItemAction(id: $id, action: $action, text: $text) { id kind text evidence dest status sessionId source updatedAt }
   }
 `;
 
+export const JUDGE_FINDING_FIELDS = `
+  id sessionId day messageId threadUrl cause causeLabel text quote shouldHave judgeCall ownerCall call note createdAt
+`;
+
+export const JUDGE_DAY_FIELDS = `
+  day sessions judged pending failed findings totalFindings sessionsWithFindings grade status confirmedAt cutoffAt judgedAt ownerWaitMinutes
+`;
+
+export const GET_JUDGE_DAYS = gql`
+  query GetJudgeDays($sprint: String) {
+    judgeDays(sprint: $sprint) {
+      sprint
+      activeSprint
+      previous
+      days { ${JUDGE_DAY_FIELDS} }
+      sheet {
+        dayCount daysAnswered sessions judged waiting failed lastRun findings findingSessions grade previousGrade ownerHours
+        causes { cause label count }
+        waitingDays { day findings }
+        summary { status requestedAt notJudged }
+      }
+    }
+  }
+`;
+
+export const GET_JUDGE_DAY = gql`
+  query GetJudgeDay($day: String!) {
+    judgeDay(day: $day) {
+      ${JUDGE_DAY_FIELDS}
+      note
+      previousDay
+      nextDay
+      sessionList {
+        sessionId title ticketKey origin startedAt lastMessageAt status grade ownerWaitMinutes error
+        findings { ${JUDGE_FINDING_FIELDS} }
+      }
+    }
+  }
+`;
+
+export const GET_JUDGE_WAITING = gql`
+  query GetJudgeWaiting {
+    judgeWaiting { day findings }
+  }
+`;
+
+export const GET_SESSION_JUDGE = gql`
+  query GetSessionJudge($id: ID!) {
+    chatSession(id: $id) {
+      id
+      judge {
+        status grade judgedAt ownerWaitMinutes error
+        findings { ${JUDGE_FINDING_FIELDS} }
+      }
+    }
+  }
+`;
+
+export const SET_JUDGE_CALL = gql`
+  mutation SetJudgeCall($findingId: ID!, $call: String!, $note: String) {
+    setJudgeCall(findingId: $findingId, call: $call, note: $note) { ${JUDGE_FINDING_FIELDS} grade }
+  }
+`;
+
+export const CONFIRM_JUDGE_DAY = gql`
+  mutation ConfirmJudgeDay($day: String!, $note: String) {
+    confirmJudgeDay(day: $day, note: $note) { day status confirmedAt }
+  }
+`;
+
+export const JUDGE_NOW = gql`
+  mutation JudgeNow {
+    judgeNow { started skipped }
+  }
+`;
+
+export const JUDGE_AGAIN = gql`
+  mutation JudgeAgain($sessionId: ID!) {
+    judgeAgain(sessionId: $sessionId) { started skipped }
+  }
+`;
+
+export const JUDGE_SPRINT = gql`
+  mutation JudgeSprint($sprint: String!) {
+    judgeSprint(sprint: $sprint) { status requestedAt notJudged }
+  }
+`;
+
+export const GET_JUDGE_SETTINGS = gql`
+  query GetJudgeSettings {
+    judgeSettings
+  }
+`;
+
+export const SET_JUDGE_SETTINGS = gql`
+  mutation SetJudgeSettings($settings: String!) {
+    setJudgeSettings(settings: $settings)
+  }
+`;
+
+export const SPRINT_DRAFT_NEW_TICKET_FIELDS = `id summary type epic dev sp priority userStory problem ac reference source createdKey error`;
+
+export const SPRINT_DRAFT_REVISION_FIELDS = `key summary status note source fields { name label before after } inSprint error createdAt appliedAt`;
+
 export const SPRINT_DRAFT_FIELDS = `
-  sprint sprintId status sprintDays startDate spPerDay createdBy loadedAt publishedAt qaReason devs blockers canPublish landed today
+  sprint sprintId status sprintDays startDate spPerDay createdBy loadedAt publishedAt qaReason devs blockers canPublish landed carriedPast today
   tickets {
     key summary dev jiraDev sp left wave waveSet status ac dependsOn start dur end inSprint split
     prediction { prediction reasons fix }
     qaDecision { action note by at }
     epic frames
     storyboard { version frames held checked { action note by at } }
-    tcs { id ac title steps expected } tcStale tcPending
-    merge pulls jiraAhead merged rank planStart planDur
+    tcs { id ac title steps expected } tcStale tcPending tcApproved acHash
+    scout { line mode files repos contractChange at } scoutRunning
+    merge pulls jiraAhead merged carried rank planStart planDur
   }
-  findings { id key line text refKey kind refEnd ownEnd decision { action note by at } }
+  findings { id key line text refKey kind refEnd ownEnd linked decision { action note by at } }
   storyboards {
-    epic version previous path page frames changed changedAt checkedAt error htmlUrl previousHtmlUrl
+    epic version previous path page frames changed changedAt checkedAt error htmlUrl previousHtmlUrl none
     scenarios { n title groups { title flows { id title tickets info changed frames { index title step changed } } } }
   }
-  questions { id text key askedAt answered answeredBy answeredAt }
+  questions { id text key askedAt answered answeredBy answeredAt answer options }
   developers { name merged open sp leftSp end }
   mergeSource
   moves { keys from to sp forecastBefore forecastAfter improves }
+  scopeCut { action note by at }
+  split { page version readAt error rows kept diffs { key draftWeek splitWeek note } }
+  newTickets { ${SPRINT_DRAFT_NEW_TICKET_FIELDS} }
+  revisions { ${SPRINT_DRAFT_REVISION_FIELDS} }
+`;
+
+export const TICKET_SUMMARY_FIELDS = `key acHash made checked notHere waitsOn before after line testData ui acId titleId writtenAt current`;
+
+export const GET_TICKET_SUMMARY = gql`
+  query GetTicketSummary($key: String!) {
+    ticketSummary(key: $key) { ${TICKET_SUMMARY_FIELDS} acChangedAt }
+  }
+`;
+
+export const GET_TICKET_READINESS = gql`
+  query GetTicketReadiness($keys: [String!]!, $refs: [String!]) {
+    ticketReadiness(keys: $keys, refs: $refs) {
+      tickets { key sprint tcApproved decisions { refKey action } summary { ${TICKET_SUMMARY_FIELDS} } }
+      statuses { key status }
+    }
+  }
 `;
 
 export const GET_PLANNING_SPRINTS = gql`
@@ -782,9 +944,103 @@ export const GET_SPRINT_DRAFT = gql`
   }
 `;
 
+export const GET_SPRINT_PLAN_SIGNAL = gql`
+  query GetSprintPlanSignal($sprint: String!) {
+    sprintPlanSignal(sprint: $sprint) {
+      sprint sprintId sprintState activeSince stage revision publishedBy publishedAt planner me isPlanner draftLoadedAt draftStatus
+      joined acChanged waitForPublish planAfterPublish myOutside
+      myOrder { key summary status sp order }
+    }
+  }
+`;
+
+export const GET_PLANNING_FLOW = gql`
+  query GetPlanningFlow {
+    planningFlow
+  }
+`;
+
+export const SET_PLANNING_FLOW = gql`
+  mutation SetPlanningFlow($flow: String!) {
+    setPlanningFlow(flow: $flow)
+  }
+`;
+
+export const GET_PLANNING_SPLIT_PAGE = gql`
+  query GetPlanningSplitPage {
+    planningSplitPage
+  }
+`;
+
+export const SET_PLANNING_SPLIT_PAGE = gql`
+  mutation SetPlanningSplitPage($page: String!) {
+    setPlanningSplitPage(page: $page)
+  }
+`;
+
+export const TEST_PLANNING_SPLIT_PAGE = gql`
+  mutation TestPlanningSplitPage($page: String!) {
+    testPlanningSplitPage(page: $page) { success message }
+  }
+`;
+
+export const USE_SPRINT_DRAFT_SPLIT = gql`
+  mutation UseSprintDraftSplit($sprint: String!, $key: String!) {
+    useSprintDraftSplit(sprint: $sprint, key: $key) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const KEEP_SPRINT_DRAFT_SPLIT = gql`
+  mutation KeepSprintDraftSplit($sprint: String!, $key: String!) {
+    keepSprintDraftSplit(sprint: $sprint, key: $key) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const GET_SOUS_FLOW = gql`
+  query GetSousFlow {
+    sousFlow
+  }
+`;
+
+export const SET_SOUS_FLOW = gql`
+  mutation SetSousFlow($flow: String!) {
+    setSousFlow(flow: $flow)
+  }
+`;
+
+export const GET_TICKET_SOUS_FLOW = gql`
+  query GetTicketSousFlow($key: String!) {
+    ticketSousFlow(key: $key)
+  }
+`;
+
+export const SET_TICKET_SOUS_FLOW = gql`
+  mutation SetTicketSousFlow($key: String!, $profile: String) {
+    setTicketSousFlow(key: $key, profile: $profile)
+  }
+`;
+
+export const GET_SOUS_FLOW_PROMPT = gql`
+  query GetSousFlowPrompt($profile: String!, $key: String) {
+    sousFlowPrompt(profile: $profile, key: $key) { lines prompt }
+  }
+`;
+
+export const GET_CHECKPOINTS = gql`
+  query GetCheckpoints($key: String!) {
+    checkpoints(key: $key) { id key step agentId agent text untestable missingData at }
+  }
+`;
+
+export const WRITE_QA_GUIDE = gql`
+  mutation WriteQaGuide($key: String!) {
+    writeQaGuide(key: $key) { written reason lines }
+  }
+`;
+
 export const PREVIEW_SPRINT_DRAFT_PUBLISH = gql`
   query PreviewSprintDraftPublish($sprint: String!) {
-    previewSprintDraftPublish(sprint: $sprint) { key assigneeFrom assigneeTo acRemoved acAdded refused }
+    previewSprintDraftPublish(sprint: $sprint) { key assigneeFrom assigneeTo acRemoved acAdded referenceAdded blockedBy refused create { ${SPRINT_DRAFT_NEW_TICKET_FIELDS} } }
   }
 `;
 
@@ -812,6 +1068,48 @@ export const DECIDE_SPRINT_DRAFT = gql`
   }
 `;
 
+export const SAVE_SPRINT_DRAFT_NEW_TICKET = gql`
+  mutation SaveSprintDraftNewTicket($sprint: String!, $id: ID, $input: SprintDraftNewTicketInput!) {
+    saveSprintDraftNewTicket(sprint: $sprint, id: $id, input: $input) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const CREATE_SPRINT_DRAFT_NEW_TICKETS = gql`
+  mutation CreateSprintDraftNewTickets($sprint: String!, $ids: [ID!]) {
+    createSprintDraftNewTickets(sprint: $sprint, ids: $ids) { key kind status detail }
+  }
+`;
+
+export const REMOVE_SPRINT_DRAFT_NEW_TICKET = gql`
+  mutation RemoveSprintDraftNewTicket($sprint: String!, $id: ID!) {
+    removeSprintDraftNewTicket(sprint: $sprint, id: $id) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const SAVE_SPRINT_DRAFT_REVISION = gql`
+  mutation SaveSprintDraftRevision($sprint: String!, $key: ID!, $input: SprintDraftRevisionInput!) {
+    saveSprintDraftRevision(sprint: $sprint, key: $key, input: $input) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const APPLY_SPRINT_DRAFT_REVISION = gql`
+  mutation ApplySprintDraftRevision($sprint: String!, $key: ID!) {
+    applySprintDraftRevision(sprint: $sprint, key: $key) { key kind status detail }
+  }
+`;
+
+export const DISCARD_SPRINT_DRAFT_REVISION = gql`
+  mutation DiscardSprintDraftRevision($sprint: String!, $key: ID!) {
+    discardSprintDraftRevision(sprint: $sprint, key: $key) { ${SPRINT_DRAFT_FIELDS} }
+  }
+`;
+
+export const RUN_SCOUT = gql`
+  mutation RunScout($key: String!) {
+    runScout(key: $key)
+  }
+`;
+
 export const REFRESH_SPRINT_DRAFT_QA = gql`
   mutation RefreshSprintDraftQa($sprint: String!) {
     refreshSprintDraftQa(sprint: $sprint) { ${SPRINT_DRAFT_FIELDS} }
@@ -822,6 +1120,32 @@ export const SPRINT_DRIFT_FIELDS = `
   sprint publishedAt today
   rows { id key line text refKey refStatus refDev refEnd ownEnd reason state decision { action state note by at } }
   storyboard { key version frames held checked }
+`;
+
+export const GET_PLANNING_CHAT_PROMPT = gql`
+  query GetPlanningChatPrompt($sprint: String!) {
+    planningChatPrompt(sprint: $sprint)
+  }
+`;
+
+export const SPRINT_DRAFT_VISUAL_FIELDS = `id title createdAt saved stale url sessionId`;
+
+export const GET_SPRINT_DRAFT_VISUALS = gql`
+  query GetSprintDraftVisuals($sprint: String!) {
+    sprintDraftVisuals(sprint: $sprint) { ${SPRINT_DRAFT_VISUAL_FIELDS} }
+  }
+`;
+
+export const SAVE_SPRINT_DRAFT_VISUAL = gql`
+  mutation SaveSprintDraftVisual($sprint: String!, $id: ID!) {
+    saveSprintDraftVisual(sprint: $sprint, id: $id) { ${SPRINT_DRAFT_VISUAL_FIELDS} }
+  }
+`;
+
+export const DROP_SPRINT_DRAFT_VISUAL = gql`
+  mutation DropSprintDraftVisual($sprint: String!, $id: ID!) {
+    dropSprintDraftVisual(sprint: $sprint, id: $id) { ${SPRINT_DRAFT_VISUAL_FIELDS} }
+  }
 `;
 
 export const OPEN_PLANNING_CHAT = gql`
@@ -861,8 +1185,8 @@ export const SET_SPRINT_DRAFT_TCS = gql`
 `;
 
 export const ANSWER_SPRINT_DRAFT_QUESTION = gql`
-  mutation AnswerSprintDraftQuestion($sprint: String!, $id: ID!, $answered: Boolean!) {
-    answerSprintDraftQuestion(sprint: $sprint, id: $id, answered: $answered) { ${SPRINT_DRAFT_FIELDS} }
+  mutation AnswerSprintDraftQuestion($sprint: String!, $id: ID!, $answered: Boolean!, $text: String) {
+    answerSprintDraftQuestion(sprint: $sprint, id: $id, answered: $answered, text: $text) { ${SPRINT_DRAFT_FIELDS} }
   }
 `;
 
@@ -923,6 +1247,8 @@ export const CHAT_SESSION_FIELDS = `
   title
   ticketKey
   forkFrom
+  mode
+  gmProposal { summary diff at }
   machine
   status
   statusDetail
@@ -932,7 +1258,8 @@ export const CHAT_SESSION_FIELDS = `
   lastText
   waiting
   workerCount
-  reviewRound { status summary threadUrl at }
+  reviewRound { id status summary threadUrl at mode replyStatus replyAt replyText replyDetail }
+  judge { status grade }
 `;
 
 export const CHAT_INTERACTION_FIELDS = `
@@ -1145,6 +1472,28 @@ export const GET_CHAT_BALLOONS = gql`
   }
 `;
 
+export const GET_TICKET_REVIEW_ROUNDS = gql`
+  query GetTicketReviewRounds {
+    chatSessions(source: "dock", limit: 300) {
+      id
+      ticketKey
+      reviewRound { id status summary threadUrl at mode replyStatus replyAt replyText replyDetail }
+    }
+  }
+`;
+
+export const GET_REVIEW_ROUNDS_FOR_TICKET = gql`
+  query GetReviewRoundsForTicket($key: String!) {
+    reviewRoundsForTicket(key: $key) { id status summary threadUrl at mode replyStatus replyAt replyText replyDetail }
+  }
+`;
+
+export const GET_INSTALLED_SKILLS = gql`
+  query GetInstalledSkills {
+    installedSkills
+  }
+`;
+
 export const GET_ORCHESTRATOR_CRON_SETTINGS = gql`
   query GetOrchestratorCronSettings {
     orchestratorCronSettings {
@@ -1169,6 +1518,7 @@ export const GET_PUSH_PUBLIC_KEY = gql`
 export const GET_DEMO_VIDEOS = gql`
   query GetDemoVideos {
     demoVideos {
+      storage
       videos { ticketKey url size updatedAt title }
     }
   }
@@ -1223,6 +1573,18 @@ export const GET_DEMO_STORAGE = gql`
 export const GET_AGENT_LOOKS = gql`
   query GetAgentLooks {
     agentLooks { slug displayName initials color avatarUrl }
+  }
+`;
+
+export const GET_GUILD_MASTER_LOG = gql`
+  query GuildMasterLog {
+    guildMasterLog { id at by sessionId kind target summary diff backup rollbackOf rolledBack unverified }
+  }
+`;
+
+export const GET_GUILD_MASTER_PARTY = gql`
+  query GuildMasterParty($key: String!) {
+    guildMasterParty(key: $key) { log lines }
   }
 `;
 
@@ -1346,9 +1708,37 @@ export const GET_CLAUDE_USAGE = gql`
   }
 `;
 
+export const GET_CLAUDE_SESSION_USAGE = gql`
+  query GetClaudeSessionUsage($sessionId: ID!) {
+    claudeSessionUsage(sessionId: $sessionId) {
+      available
+      found
+      error
+      totalTokens
+      totalCost
+      mainTokens
+      agents { agentId name model totalTokens peakContext cost }
+    }
+  }
+`;
+
+export const GET_CLAUDE_TICKET_USAGE = gql`
+  query GetClaudeTicketUsage($key: String!) {
+    claudeTicketUsage(key: $key) {
+      available
+      sessions
+      error
+      totalTokens
+      totalCost
+      mainTokens
+      agents { agentId name model totalTokens peakContext cost }
+    }
+  }
+`;
+
 export const GET_AUTO_REVIEWS = gql`
   query GetAutoReviews {
-    autoReviews { id ticketKey prUrl headSha threadUrl sessionId status detail startedAt finishedAt }
+    autoReviews { id ticketKey prUrl headSha threadUrl sessionId status detail startedAt finishedAt round postStatus postAt postText postDetail }
   }
 `;
 
@@ -1486,5 +1876,62 @@ export const WORKSPACE_RENAME = gql`
 export const WORKSPACE_DELETE = gql`
   mutation WorkspaceDelete($path: String!) {
     workspaceDelete(path: $path)
+  }
+`;
+
+export const GET_OPS_RULES = gql`
+  query GetOpsRules {
+    opsRules { statusAfterMerge worktreeMerged }
+  }
+`;
+
+export const SET_STATUS_AFTER_MERGE = gql`
+  mutation SetStatusAfterMerge($value: String!) {
+    setStatusAfterMerge(value: $value)
+  }
+`;
+
+export const SET_WORKTREE_MERGED = gql`
+  mutation SetWorktreeMerged($value: String!) {
+    setWorktreeMerged(value: $value)
+  }
+`;
+
+export const GET_QA_QUEUE = gql`
+  query GetQaQueue {
+    qaQueue {
+      at
+      me
+      error
+      capped
+      more
+      metrics { total queue dependency escalated averageWaitMinutes oldestWaitMinutes }
+      rows { position key summary status assignee labels kind waitsOn enteredAt waitingMinutes }
+    }
+  }
+`;
+
+export const GET_QA_QUEUE_POSITION = gql`
+  query GetQaQueuePosition($key: String!) {
+    qaQueuePosition(key: $key)
+  }
+`;
+
+export const GET_WORKTREES = gql`
+  query GetWorktrees {
+    worktrees {
+      root
+      mode
+      days
+      error
+      rows { repo path branch ticketKey merge pulls dirty changes session devServer mergedSince refusals }
+      history { path ok output at by }
+    }
+  }
+`;
+
+export const CLEAN_WORKTREES = gql`
+  mutation CleanWorktrees($paths: [String!]!) {
+    cleanWorktrees(paths: $paths) { path ok output at by }
   }
 `;

@@ -7,7 +7,7 @@ const RUN_WITHOUT_LEDGER = {
   key: true, title: true, stage: true, waiting: true, payload: true, activity: true, activityDetail: true, activityEndedAt: true,
   lastEventAt: true, ledgerUpdatedAt: true, transcriptAt: true, dismissedAt: true, machine: true, jiraStatus: true, jiraStage: true, stalledDetail: true, stalledAt: true, createdAt: true, updatedAt: true,
 } as const;
-const KEPT_EVENT_KINDS = ['STAGE', 'WAITING', 'DEP_WAIT', 'CONFLICT'];
+const KEPT_EVENT_KINDS = ['STAGE', 'WAITING', 'DEP_WAIT', 'CONFLICT', 'CHECKPOINT'];
 
 export interface PlanEdgeInput { ticketKey: string; dependsOnKey: string; reason?: string | null }
 export interface SprintDraftInput { sprint: string; sprintId: number; sprintDays: number; startDate: Date | null; createdBy: string | null; refStatuses: string; merges?: string }
@@ -16,7 +16,17 @@ export interface SprintDraftTicketInput {
   ac: string[]; jiraAc: string[]; jiraDev: string | null; dependsOn: string[]; epic?: string | null; frames?: string[];
   /** Kept from the previous load: the test cases and what was last posted. */
   tcs?: string; tcAt?: Date | null; tcPosted?: string | null;
+  /** The ticket is also in a closed sprint: carried over from an earlier one. */
+  carried?: boolean;
 }
+/** A drafted new ticket as stored; ac is the JSON of its lines. */
+export interface SprintDraftNewTicketData {
+  summary: string; type: string; epic: string | null; dev: string | null; sp: number | null; priority: string | null;
+  userStory: string; problem: string; ac: string; reference: string | null; source: string; createdKey?: string | null; error?: string | null;
+}
+/** A revision as stored; after and before are JSON objects keyed by field name. */
+export interface SprintDraftRevisionData { summary: string; note: string | null; source: string; after: string; before: string; jiraUpdated: string; error: string | null; createdAt?: Date }
+export interface SprintDraftRevisionUpdate { summary?: string; status?: string; error?: string | null; appliedAt?: Date | null; appliedBy?: string | null }
 export interface SprintPlanData { status?: string; mappingKeys?: string[]; sessionId?: string | null; mappedKeys?: string[]; groups?: string[][]; error?: string | null; startedAt?: Date | null; mappedAt?: Date | null }
 
 const SENSITIVE_KEYS = new Set([
@@ -29,6 +39,7 @@ const SENSITIVE_KEYS = new Set([
   'googleClientSecret',
   'googleRefreshToken',
   'demoStorage',
+  'gmLogKey',
 ]);
 
 export interface ChatActivityInput {
@@ -436,7 +447,43 @@ export class StorageService {
   async getSprintDraft(sprint: string) {
     const draft = await this.db.sprintDraft.findUnique({ where: { sprint } });
     if (!draft) return null;
-    return { ...draft, tickets: await this.db.sprintDraftTicket.findMany({ where: { draftSprint: sprint }, orderBy: { position: 'asc' } }) };
+    return {
+      ...draft,
+      tickets: await this.db.sprintDraftTicket.findMany({ where: { draftSprint: sprint }, orderBy: { position: 'asc' } }),
+      newTickets: await this.db.sprintDraftNewTicket.findMany({ where: { draftSprint: sprint }, orderBy: { position: 'asc' } }),
+      revisions: await this.db.sprintDraftRevision.findMany({ where: { draftSprint: sprint }, orderBy: { createdAt: 'asc' } }),
+    };
+  }
+
+  /** Replaces the pending revision of the key, or adds one when there is none; applied and discarded ones stay as history. */
+  saveSprintDraftRevision(sprint: string, key: string, data: SprintDraftRevisionData) {
+    return this.db.$transaction(async (tx) => {
+      const pending = await tx.sprintDraftRevision.findFirst({ where: { draftSprint: sprint, key, status: 'pending' }, select: { id: true } });
+      if (pending) return tx.sprintDraftRevision.update({ where: { id: pending.id }, data });
+      return tx.sprintDraftRevision.create({ data: { ...data, draftSprint: sprint, key } });
+    });
+  }
+
+  updateSprintDraftRevision(id: string, data: SprintDraftRevisionUpdate) {
+    return this.db.sprintDraftRevision.update({ where: { id }, data });
+  }
+
+  /** A new ticket gets the next NEW-n of the draft; the counter only grows, so a removed id is never given out again. */
+  async addSprintDraftNewTicket(sprint: string, data: SprintDraftNewTicketData): Promise<string> {
+    return this.db.$transaction(async (tx) => {
+      const { newTicketSeq } = await tx.sprintDraft.update({ where: { sprint }, data: { newTicketSeq: { increment: 1 } }, select: { newTicketSeq: true } });
+      const id = `NEW-${newTicketSeq}`;
+      await tx.sprintDraftNewTicket.create({ data: { ...data, draftSprint: sprint, id, position: newTicketSeq } });
+      return id;
+    });
+  }
+
+  updateSprintDraftNewTicket(sprint: string, id: string, data: Partial<SprintDraftNewTicketData>) {
+    return this.db.sprintDraftNewTicket.update({ where: { draftSprint_id: { draftSprint: sprint, id } }, data });
+  }
+
+  removeSprintDraftNewTicket(sprint: string, id: string) {
+    return this.db.sprintDraftNewTicket.deleteMany({ where: { draftSprint: sprint, id } });
   }
 
   /** A load from Jira replaces the tickets and leaves the draft unpublished; decisions stay and apply to the lines that still match. */
@@ -447,6 +494,7 @@ export class StorageService {
       draftSprint: sprint, key: ticket.key, summary: ticket.summary, dev: ticket.dev, sp: ticket.sp, wave: ticket.wave, planRank: ticket.planRank ?? null, status: ticket.status,
       ac: JSON.stringify(ticket.ac), jiraAc: JSON.stringify(ticket.jiraAc), jiraDev: ticket.jiraDev, dependsOn: JSON.stringify(ticket.dependsOn), position,
       epic: ticket.epic ?? null, frames: JSON.stringify(ticket.frames ?? []), tcs: ticket.tcs ?? '[]', tcAt: ticket.tcAt ?? null, tcPosted: ticket.tcPosted ?? null,
+      carried: ticket.carried ?? false,
     }));
     await this.db.$transaction([
       this.db.sprintDraft.upsert({ where: { sprint }, update: reset, create: { sprint, ...reset } }),
@@ -463,9 +511,44 @@ export class StorageService {
     });
   }
 
+  /** When the draft row or one of its tickets last changed; null without a draft. */
+  async sprintDraftChangedAt(sprint: string): Promise<Date | null> {
+    const draft = await this.db.sprintDraft.findUnique({ where: { sprint }, select: { updatedAt: true } });
+    if (!draft) return null;
+    const tickets = await this.db.sprintDraftTicket.aggregate({ where: { draftSprint: sprint }, _max: { updatedAt: true } });
+    const latest = tickets._max.updatedAt;
+    return latest && latest > draft.updatedAt ? latest : draft.updatedAt;
+  }
+
+  listSprintDraftVisuals(sprint: string) {
+    return this.db.sprintDraftVisual.findMany({ where: { sprint }, orderBy: { createdAt: 'asc' } });
+  }
+
+  getSprintDraftVisual(id: string) {
+    return this.db.sprintDraftVisual.findUnique({ where: { id } });
+  }
+
+  putSprintDraftVisual(data: { id: string; sprint: string; title: string; sessionId: string | null; draftStamp: Date; createdAt: Date }) {
+    const { id, ...rest } = data;
+    return this.db.sprintDraftVisual.upsert({ where: { id }, create: data, update: rest });
+  }
+
+  setSprintDraftVisualSaved(id: string, saved: boolean) {
+    return this.db.sprintDraftVisual.update({ where: { id }, data: { saved } });
+  }
+
+  deleteSprintDraftVisual(id: string) {
+    return this.db.sprintDraftVisual.deleteMany({ where: { id } });
+  }
+
   /** The drafts holding a ticket of the epic, so a new storyboard version flags them all. */
   async sprintDraftsWithEpic(epic: string): Promise<string[]> {
     return (await this.db.sprintDraftTicket.findMany({ where: { epic }, select: { draftSprint: true }, distinct: ['draftSprint'] })).map((row) => row.draftSprint);
+  }
+
+  /** The drafts holding any of the tickets, for the ticket summary and readiness. */
+  async sprintDraftsWithKeys(keys: string[]): Promise<string[]> {
+    return (await this.db.sprintDraftTicket.findMany({ where: { key: { in: keys } }, select: { draftSprint: true }, distinct: ['draftSprint'] })).map((row) => row.draftSprint);
   }
 
   updateSprintDraft(sprint: string, data: { decisions?: string; qaReason?: string | null; status?: string; publishedAt?: Date | null; storyboards?: string; questions?: string }) {
@@ -493,13 +576,11 @@ export class StorageService {
     return this.db.retroItem.findUnique({ where: { id } });
   }
 
-  /** A new draft replaces the lines still open; lines the owner accepted or closed stay. */
-  async replaceRetroDraft(sprint: string, items: Array<{ kind: string; text: string; evidence: string[]; dest: string }>) {
-    await this.db.$transaction([
-      this.db.retroItem.deleteMany({ where: { sprint, status: 'open' } }),
-      ...items.map((item) => this.db.retroItem.create({ data: { sprint, kind: item.kind, text: item.text, evidence: JSON.stringify(item.evidence), dest: item.dest } })),
-    ]);
-    return items.length;
+  /** A new draft replaces the lines still open from the same sources; lines the owner accepted or closed stay. */
+  async replaceRetroDraft(sprint: string, items: Array<{ kind: string; text: string; evidence: string[]; dest: string; source?: string }>, sources: string[] = ['ledger']) {
+    const creates = items.map((item) => this.db.retroItem.create({ data: { sprint, kind: item.kind, text: item.text, evidence: JSON.stringify(item.evidence), dest: item.dest, source: item.source ?? 'ledger' } }));
+    const [, ...created] = await this.db.$transaction([this.db.retroItem.deleteMany({ where: { sprint, status: 'open', source: { in: sources } } }), ...creates]);
+    return created as Array<Awaited<typeof creates[number]>>;
   }
 
   /** A line DOCK proposes itself: added once by its text, its evidence refreshed while it is still open. */
@@ -512,6 +593,129 @@ export class StorageService {
 
   updateRetroItem(id: string, data: { status?: string; text?: string; sessionId?: string | null }) {
     return this.db.retroItem.update({ where: { id }, data });
+  }
+
+  /** The sessions on the machine that moved since `since`, with their first owner message and their newest message id. */
+  async getJudgeCandidates(machine: string, since: Date, take = 300) {
+    const sessions = await this.db.chatSession.findMany({
+      where: { machine, lastMessageAt: { gte: since } }, orderBy: { lastMessageAt: 'desc' }, take,
+      select: { id: true, title: true, ticketKey: true, status: true, origin: true, startedAt: true, lastMessageAt: true },
+    });
+    const ids = sessions.map((session) => session.id);
+    if (!ids.length) return [];
+    const [newest, firsts] = await Promise.all([
+      this.db.chatMessage.groupBy({ by: ['sessionId'], where: { sessionId: { in: ids }, state: { not: 'draft' } }, _max: { id: true } }),
+      this.db.chatMessage.groupBy({ by: ['sessionId'], where: { sessionId: { in: ids }, role: 'user' }, _min: { id: true } }),
+    ]);
+    const firstIds = firsts.map((row) => row._min.id).filter((id): id is number => id !== null);
+    const texts = new Map((firstIds.length ? await this.db.chatMessage.findMany({ where: { id: { in: firstIds } }, select: { sessionId: true, text: true } }) : []).map((row) => [row.sessionId, row.text]));
+    const last = new Map(newest.map((row) => [row.sessionId, row._max.id ?? null]));
+    return sessions.map((session) => ({ ...session, firstText: texts.get(session.id) ?? null, lastMessageId: last.get(session.id) ?? null }));
+  }
+
+  /** The session's messages after `afterId`, oldest first, drafts left out. */
+  getJudgeMessages(sessionId: string, afterId: number | null, take = 2000) {
+    return this.db.chatMessage.findMany({
+      where: { sessionId, state: { not: 'draft' }, ...(afterId !== null ? { id: { gt: afterId } } : {}) },
+      orderBy: { id: 'asc' }, take, select: { id: true, role: true, text: true, at: true },
+    });
+  }
+
+  /** The tool steps of the session's turns, oldest first. */
+  getJudgeActivity(sessionId: string, take = 3000) {
+    return this.db.chatActivity.findMany({
+      where: { sessionId, kind: { in: ['tool', 'agent', 'skill'] } }, orderBy: { seq: 'asc' }, take,
+      select: { name: true, label: true, summary: true, detail: true, status: true, agent: true, startedAt: true, kind: true },
+    });
+  }
+
+  /** Sessions on the machine with a turn running or waiting, Judge's own sessions left out. */
+  async countBusyChatSessions(machine: string, exceptTitlePrefix: string) {
+    const [row] = await this.db.$queryRaw<Array<{ total: number | bigint }>>(Prisma.sql`
+      SELECT COUNT(DISTINCT s."id") AS "total" FROM "ChatSession" s JOIN "ChatMessage" m ON m."sessionId" = s."id"
+      WHERE s."machine" = ${machine} AND s."source" = 'dock' AND m."state" IN ('taken', 'queued') AND s."title" NOT LIKE ${`${exceptTitlePrefix}%`}`);
+    return Number(row?.total ?? 0);
+  }
+
+  /** Auto reviews still at work: deciding, starting, or running with a turn taken or queued. A run whose session went quiet without a verdict does not count. */
+  async countRunningAutoReviews() {
+    const [row] = await this.db.$queryRaw<Array<{ total: number | bigint }>>(Prisma.sql`
+      SELECT COUNT(*) AS "total" FROM "AutoReview" a
+      WHERE a."status" = 'deciding' OR (a."status" = 'running' AND (a."sessionId" IS NULL OR EXISTS (
+        SELECT 1 FROM "ChatMessage" m WHERE m."sessionId" = a."sessionId" AND m."state" IN ('taken', 'queued'))))`);
+    return Number(row?.total ?? 0);
+  }
+
+  getJudgeSession(sessionId: string) {
+    return this.db.judgeSession.findUnique({ where: { sessionId } });
+  }
+
+  getJudgeSessions(where: { sessionIds?: string[]; statuses?: string[]; days?: string[] } = {}) {
+    return this.db.judgeSession.findMany({
+      where: {
+        ...(where.sessionIds ? { sessionId: { in: where.sessionIds } } : {}),
+        ...(where.statuses ? { status: { in: where.statuses } } : {}),
+        ...(where.days ? { day: { in: where.days } } : {}),
+      },
+      orderBy: { updatedAt: 'asc' },
+    });
+  }
+
+  upsertJudgeSession(sessionId: string, data: { day: string; status: string; error?: string | null }) {
+    return this.db.judgeSession.upsert({ where: { sessionId }, create: { sessionId, ...data }, update: data });
+  }
+
+  /** Drops queue rows that never ran; a row that ran or was judged is left alone. */
+  deleteJudgeSessions(sessionIds: string[]) {
+    return this.db.judgeSession.deleteMany({ where: { sessionId: { in: sessionIds }, status: 'pending', judgedAt: null, judgedUntilMessageId: null } });
+  }
+
+  updateJudgeSession(sessionId: string, data: {
+    day?: string; status?: string; judgedUntilMessageId?: number | null; runUntilMessageId?: number | null; judgeChatId?: string | null; grade?: string | null;
+    ownerWaitMinutes?: number; attempts?: number; startedAt?: Date | null; judgedAt?: Date | null; error?: string | null;
+  }) {
+    return this.db.judgeSession.update({ where: { sessionId }, data });
+  }
+
+  /** Stores one Judge run: its findings and the session's new state, together. */
+  async saveJudgeRun(sessionId: string, findings: Array<{ day: string; messageId: number | null; threadUrl: string | null; cause: string; text: string; quote: string; shouldHave: string; judgeCall: string }>, data: { judgedUntilMessageId: number | null; ownerWaitMinutes: number; judgedAt: Date }) {
+    await this.db.$transaction([
+      ...findings.map((finding) => this.db.judgeFinding.create({ data: { sessionId, ...finding } })),
+      this.db.judgeSession.update({ where: { sessionId }, data: { ...data, status: 'judged', runUntilMessageId: null, judgeChatId: null, attempts: 0, error: null } }),
+    ]);
+  }
+
+  getJudgeFindings(where: { sessionIds?: string[]; days?: string[] }) {
+    return this.db.judgeFinding.findMany({
+      where: { ...(where.sessionIds ? { sessionId: { in: where.sessionIds } } : {}), ...(where.days ? { day: { in: where.days } } : {}) },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+  }
+
+  getJudgeFinding(id: string) {
+    return this.db.judgeFinding.findUnique({ where: { id } });
+  }
+
+  updateJudgeFinding(id: string, data: { ownerCall: string | null; note?: string | null }) {
+    return this.db.judgeFinding.update({ where: { id }, data });
+  }
+
+  /** Before judging a session again from the start: its findings go, except the ones the owner called not a mistake. */
+  deleteJudgeFindings(sessionId: string) {
+    return this.db.judgeFinding.deleteMany({ where: { sessionId, OR: [{ ownerCall: null }, { ownerCall: { not: 'not' } }] } });
+  }
+
+  /** The negative examples: the newest findings the owner called not a mistake. */
+  getJudgeExamples(take: number) {
+    return this.db.judgeFinding.findMany({ where: { ownerCall: 'not' }, orderBy: { createdAt: 'desc' }, take });
+  }
+
+  getJudgeDays(days: string[]) {
+    return this.db.judgeDay.findMany({ where: { day: { in: days } } });
+  }
+
+  upsertJudgeDay(day: string, data: { confirmedAt: Date | null; note: string | null }) {
+    return this.db.judgeDay.upsert({ where: { day }, create: { day, ...data }, update: data });
   }
 
   /** The ticket's chat sessions, so their activity can join the run's log. */
@@ -632,12 +836,28 @@ export class StorageService {
     return this.db.autoReview.findFirst({ where: { ticketKey, status: 'running' }, orderBy: { startedAt: 'desc' } });
   }
 
-  createAutoReview(data: { prUrl: string; headSha: string; ticketKey: string; threadUrl: string; startedAt: Date }) {
+  getAutoReview(id: string) {
+    return this.db.autoReview.findUnique({ where: { id } });
+  }
+
+  getDueAutoReviewPosts(now: Date) {
+    return this.db.autoReview.findMany({ where: { postStatus: 'pending', postAt: { lte: now } }, orderBy: { postAt: 'asc' }, take: 20 });
+  }
+
+  createAutoReview(data: { prUrl: string; headSha: string; ticketKey: string; threadUrl: string; startedAt: Date; round?: number }) {
     return this.db.autoReview.create({ data });
   }
 
-  updateAutoReview(id: string, data: { sessionId?: string | null; status?: string; detail?: string | null; finishedAt?: Date | null }) {
+  updateAutoReview(id: string, data: {
+    sessionId?: string | null; status?: string; detail?: string | null; finishedAt?: Date | null;
+    postStatus?: string | null; postAt?: Date | null; postText?: string | null; postMessageId?: string | null; postDetail?: string | null; postImages?: string | null;
+  }) {
     return this.db.autoReview.update({ where: { id }, data });
+  }
+
+  /** Changes an auto review post only while it is still pending, and with `detail` only while its detail is that; false when another change got there first. */
+  async updatePendingAutoReview(id: string, data: { postStatus?: string | null; postAt?: Date | null; postText?: string | null; postDetail?: string | null; postImages?: string | null }, detail?: string) {
+    return (await this.db.autoReview.updateMany({ where: { id, postStatus: 'pending', ...(detail ? { postDetail: detail } : {}) }, data })).count > 0;
   }
 
   createReviewRound(data: { threadId: string; ticketKey: string; threadUrl: string; prUrls: string; messageIds: string; findings?: string; lastMessageId: string; lastMessageAt: Date }) {
@@ -646,9 +866,29 @@ export class StorageService {
 
   updateReviewRound(id: string, data: {
     sessionId?: string | null; opened?: boolean; status?: string; attempts?: number;
-    valid?: number | null; invalid?: number | null; pushed?: boolean | null; detail?: string | null; reportedAt?: Date | null;
+    valid?: number | null; invalid?: number | null; pushed?: boolean | null; detail?: string | null; reportedAt?: Date | null; mode?: string | null;
+    replyStatus?: string | null; replyAt?: Date | null; replyText?: string | null; replyMessageId?: string | null; replyDetail?: string | null; replyImages?: string | null;
   }) {
     return this.db.reviewRound.update({ where: { id }, data });
+  }
+
+  /** Changes a round's reply only while it is still pending; false when another change got there first. */
+  async updatePendingReviewReply(id: string, data: { replyStatus?: string | null; replyAt?: Date | null; replyText?: string | null; replyMessageId?: string | null; replyDetail?: string | null; replyImages?: string | null }) {
+    return (await this.db.reviewRound.updateMany({ where: { id, replyStatus: 'pending' }, data })).count > 0;
+  }
+
+  /** The rounds of a thread with a reply scheduled or sent. */
+  getThreadReplies(threadId: string) {
+    return this.db.reviewRound.findMany({ where: { threadId, replyStatus: { in: ['pending', 'sending', 'sent'] } } });
+  }
+
+  getDueReviewReplies(now: Date) {
+    return this.db.reviewRound.findMany({ where: { replyStatus: 'pending', replyAt: { lte: now } }, orderBy: { replyAt: 'asc' }, take: 20 });
+  }
+
+  /** 1 for the first round of a thread, one more for each round created after it. */
+  reviewRoundNumber(threadId: string, createdAt: Date) {
+    return this.db.reviewRound.count({ where: { threadId, createdAt: { lte: createdAt } } });
   }
 
   /** Sessions owing a result: `sending` and `sent` rounds, and rounds expired in the last 24 h whose late marker may still arrive. */
@@ -684,6 +924,11 @@ export class StorageService {
     const rows = await this.db.reviewRound.findMany({ where: { sessionId: { in: sessionIds } }, orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }] });
     for (const row of rows) if (row.sessionId && !latest.has(row.sessionId)) latest.set(row.sessionId, row);
     return latest;
+  }
+
+  /** Every round of a ticket, newest first. */
+  roundsForTicket(ticketKey: string) {
+    return this.db.reviewRound.findMany({ where: { ticketKey }, orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }] });
   }
 
   /** The round a session still owes a result for, newest first. */
@@ -727,6 +972,11 @@ export class StorageService {
     return this.db.chatSession.findMany({ where: { title: { startsWith: prefix } }, select: { title: true } }).then((rows) => rows.map((row) => row.title));
   }
 
+  getTicketClaudeSessionIds(ticketKey: string) {
+    return this.db.chatSession.findMany({ where: { ticketKey, claudeSessionId: { not: null } }, select: { claudeSessionId: true }, orderBy: { startedAt: 'asc' } })
+      .then((rows) => rows.flatMap((row) => (row.claudeSessionId ? [row.claudeSessionId] : [])));
+  }
+
   getChatSessionsWithTicket(source: string, since: Date) {
     return this.db.chatSession.findMany({ where: { source, ticketKey: { not: null }, lastMessageAt: { gte: since } } });
   }
@@ -737,7 +987,7 @@ export class StorageService {
 
   createChatSession(data: {
     id: string; source: string; machine?: string; title: string; ticketKey: string | null; forkFrom?: string | null;
-    messageCount?: number; startedAt: Date; lastMessageAt: Date; origin?: 'cron' | 'manual'; options?: string | null;
+    messageCount?: number; startedAt: Date; lastMessageAt: Date; origin?: 'cron' | 'manual'; options?: string | null; account?: string | null; mode?: string;
   }) {
     return this.db.chatSession.create({ data });
   }

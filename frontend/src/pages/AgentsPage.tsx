@@ -1,7 +1,7 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowDown, ArrowUp, Building2, CalendarRange, ChevronLeft, ChevronRight, ClipboardList, Clock, ExternalLink, EyeOff, FileDiff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Square, Table2, X } from 'lucide-react';
-import { GET_AUTO_REVIEWS, GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS } from '../graphql/queries';
+import { ArrowDown, ArrowUp, Building2, ChevronLeft, ChevronRight, ClipboardList, Clock, ExternalLink, EyeOff, FileDiff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Route, Square, Table2, X } from 'lucide-react';
+import { GET_AUTO_REVIEWS, GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS, GET_TICKET_REVIEW_ROUNDS } from '../graphql/queries';
 import { APPROVE_REVIEW, CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { EmptyState } from '../components/EmptyState';
@@ -9,28 +9,27 @@ import { DeskScene } from '../components/empty/scenes/DeskScene';
 import { RobotScene } from '../components/empty/scenes/RobotScene';
 import { Toast } from '../components/Toast';
 import { Badge, Button, Card, ConfirmDialog, Dialog, Page, PageHeader, PhoneCards } from '../components/ui';
-import { RetroTab } from '../agents/RetroTab';
-import { PlanTab } from '../agents/PlanTab';
-import { PlanningTab } from '../agents/PlanningTab';
-import { agentsRoute, type AgentsTab, type SprintSub } from '../agents/plan';
+import { agentsRoute, type AgentsTab } from '../agents/plan';
 import { PhoneFold } from '../agents/PhoneFold';
 import { PhoneTabs, type PhoneTab } from '../agents/PhoneTabs';
 import { isPhone } from '../lib/phone';
 import { apiOrigin } from '../lib/apollo';
 import { cn } from '../lib/cn';
 import { hasPage, monitorsOnly, useDockMode } from '../lib/dockMode';
-import { blackboardFileHref, blackboardHref, folderOf, sortFiles, useBlackboardFiles } from '../lib/blackboard';
+import { TRACE_ENTRY, blackboardFileHref, blackboardHref, folderOf, sortFiles, useBlackboardFiles } from '../lib/blackboard';
+import { coverageText, useAcTrace } from '../lib/acTrace';
 import { CACHED_QUERY_OPTIONS, isInitialQueryLoading } from '../lib/queryPolicy';
 import { openIssues } from '../lib/sousReport';
-import { RUN_STATE_LABEL, isLongDescription, runState } from '../lib/ticketDetail';
+import { RUN_STATE_LABEL, isLongDescription, runState, slimDetail } from '../lib/ticketDetail';
 import { FILTER_KINDS, FLOW_RAIL, PARKED_TEXT, START_FAILED_TEXT, canLgtm, completeRun, formatAge, reviewFindings, hasTrouble, isArchived, kindLabel, matchesRunFilter, pageOf, runActions, runFilterFromSearch, runFilterSearch, runKeyFromSearch, runStatus, sortRuns, stageColor, stageLabel, stageName, statusLabel, type AgentEvent, type AgentRun, type AgentTimeline, type RunFilter, type RunSort, type RunSortColumn, type RunStatus } from '../agents/runs';
 import { KindBadge } from '../agents/KindBadge';
 import { RunDecisions } from '../agents/RunDecisions';
 import { VerdictBadge } from '../agents/VerdictBadge';
 import { LgtmButton } from '../agents/lgtm';
 import { LGTM_CONFIRM, lgtmResult } from '../agents/lgtmCopy';
-import { AutoReviewBadge, AutoReviewList } from '../agents/AutoReviewList';
+import { AutoReviewBadge, AutoReviewList, LightBadge } from '../agents/AutoReviewList';
 import { latestByTicket, type AutoReviewRow } from '../agents/autoReviews';
+import { lightTickets, type SessionRounds } from '../lib/reviewRounds';
 import { RAIL_STAGES, railIndex } from '../agents/office/layout';
 import { sampleRuns, sampleTimeline } from '../agents/sampleRuns';
 import { AgentFlowGraph } from '../components/AgentFlowGraph';
@@ -135,7 +134,9 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
   const { data: autoData } = useQuery<{ autoReviews: AutoReviewRow[] }>(GET_AUTO_REVIEWS, { ...CACHED_QUERY_OPTIONS, pollInterval: POLL_MS, skip: !chat });
   const autoReviews = useMemo(() => autoData?.autoReviews ?? [], [autoData]);
   const autoByTicket = useMemo(() => latestByTicket(autoReviews), [autoReviews]);
-  const { openForTicket, opening: openingChat, error: chatError } = useOpenForTicket();
+  const { data: roundData } = useQuery<{ chatSessions: SessionRounds[] }>(GET_TICKET_REVIEW_ROUNDS, { ...CACHED_QUERY_OPTIONS, pollInterval: POLL_MS, skip: !chat });
+  const lightKeys = useMemo(() => lightTickets(roundData?.chatSessions ?? []), [roundData]);
+  const { openForTicket, opening: openingChat, error: chatError, notice: chatNotice } = useOpenForTicket();
   const [view, setView] = useState<View>(() => (isPhone() ? 'table' : 'office'));
   const [flowView, setFlowView] = useState<FlowView>('live');
   const [selectedKey, setSelectedKey] = useState<string | null>(() => runKeyFromSearch(window.location.search));
@@ -193,6 +194,8 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
     : (detailData?.orchestration?.key === selected?.key ? detailData?.orchestration?.timeline || null : null);
   const actions = selected ? runActions(selected, monitorsOnly(mode)) : null;
   const blackboardFiles = useBlackboardFiles(selected?.key, hasPage(mode, '/blackboard'));
+  const slim = slimDetail(mode);
+  const trace = useAcTrace(selected?.sample ? null : selected?.key, slim);
   // Failing criteria first, so the fold never hides one.
   const acList = selected ? [...selected.ac].sort((first, second) => Number(second.state === 'FAIL') - Number(first.state === 'FAIL')) : [];
 
@@ -489,7 +492,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
                       const lgtmShown = runActions(run, monitorsOnly(mode)).hide && (canLgtm(run) || (run.kind === 'review' && run.approved));
                       return (
                       <tr key={run.key} className={cn('cursor-pointer border-t border-border hover:bg-surface-1', selected?.key === run.key && 'bg-surface-1')} onClick={() => pickRun(run.key)}>
-                        <td className="px-3 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => pickRun(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><VerdictBadge run={run} className="ml-2" /><AutoReviewBadge row={autoByTicket.get(run.key)} className="ml-1.5" /><span className="mt-0.5 block max-w-[200px] truncate text-[0.8rem] text-foreground max-[760px]:line-clamp-2 max-[760px]:max-w-none max-[760px]:whitespace-normal">{run.title || 'Untitled'}</span><span className="mt-1.5 hidden flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground max-[760px]:flex"><StatusChip status={statusOf(run)} review={run.review} /><span>{kindLabel(run.kind)} · {stageName(run.stage, run.kind)} · AC {run.acPassed}/{run.acTotal}{run.acFailed > 0 && <span className="text-status-conflict"> {run.acFailed} failed</span>} · {formatAge(run.idleSeconds + drift)} ago</span></span></button></td>
+                        <td className="px-3 py-3"><button type="button" className="border-0 bg-transparent p-0 text-left" onClick={() => pickRun(run.key)}><span className="font-mono text-xs font-extrabold text-accent">{run.key}</span><VerdictBadge run={run} className="ml-2" /><AutoReviewBadge row={autoByTicket.get(run.key)} className="ml-1.5" />{lightKeys.has(run.key.toUpperCase()) && <LightBadge className="ml-1.5" />}<span className="mt-0.5 block max-w-[200px] truncate text-[0.8rem] text-foreground max-[760px]:line-clamp-2 max-[760px]:max-w-none max-[760px]:whitespace-normal">{run.title || 'Untitled'}</span><span className="mt-1.5 hidden flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground max-[760px]:flex"><StatusChip status={statusOf(run)} review={run.review} /><span>{kindLabel(run.kind)} · {stageName(run.stage, run.kind)} · AC {run.acPassed}/{run.acTotal}{run.acFailed > 0 && <span className="text-status-conflict"> {run.acFailed} failed</span>} · {formatAge(run.idleSeconds + drift)} ago</span></span></button></td>
                         <td className="px-3 py-3 text-xs text-secondary-foreground max-[760px]:hidden!">{kindLabel(run.kind)}</td>
                         <td className="px-3 py-3 max-[760px]:hidden!"><StageChip stage={run.stage} kind={run.kind} /></td>
                         <td className="px-3 py-3 max-[760px]:hidden!"><StatusChip status={statusOf(run)} review={run.review} /></td>
@@ -532,6 +535,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
                 {!selected.sample && actions?.hide && <Button size="sm" variant="ghost" className="hidden h-7 px-2.5 max-[760px]:inline-flex" onClick={() => { setActionError(''); setDismissTarget(selected); }}><EyeOff size={14} aria-hidden="true" />Hide run</Button>}
               </div>
               {chatError && <p className="text-pretty text-xs break-words text-status-conflict" role="alert">The chat could not be opened: {chatError}</p>}
+              {chatNotice && <p className="text-pretty text-xs break-words text-status-warn" role="status">{chatNotice}</p>}
               <h2 className="text-pretty font-display text-base leading-snug font-bold">{selected.title || 'Untitled'}</h2>
 
               {questionsOf(selected).length > 0 ? (
@@ -582,6 +586,26 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
                 </ol>
               </div>
 
+              {slim && (
+                <div className="flex flex-col gap-2.5">
+                  <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.82rem]">
+                    <span className={sectionLabel}>AC</span>
+                    <span className="font-mono tabular-nums">{selected.acPassed}/{selected.acTotal}</span>
+                    {selected.acFailed > 0 && <span className="font-mono text-status-conflict">{selected.acFailed} failed</span>}
+                    <span className="text-muted-foreground">·</span>
+                    <span className="inline-flex items-center gap-1 text-secondary-foreground"><Route size={12} aria-hidden="true" className="text-sky-200" />Ticket → code <span className="font-mono tabular-nums text-foreground">{coverageText(trace)}</span></span>
+                  </p>
+                  {!selected.sample && (
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" onClick={() => onNavigate(blackboardFileHref(selected.key, TRACE_ENTRY))}><ClipboardList size={13} aria-hidden="true" />Open Blackboard</Button>
+                      <Button size="sm" disabled={openingChat} onClick={() => void openForTicket(selected.key)}><MessagesSquare size={13} aria-hidden="true" />Open Session</Button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!slim && (
+              <>
               <RunDecisions key={`decisions-${selected.key}`} run={selected} />
 
               <PhoneFold label={`Acceptance criteria · ${selected.acPassed}/${selected.acTotal}`}>
@@ -719,6 +743,8 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
                   </ol>
                 </PhoneFold>
               )}
+              </>
+              )}
 
               {!selected.sample && (
                 <div className="mt-auto flex flex-wrap gap-2 border-t border-border pt-3.5 max-[760px]:hidden">
@@ -778,16 +804,13 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
 /** Office shows the runs; Library edits the agent files, on the DOCK that has chat and the kit bridge. */
 const AgentsPage: React.FC<AgentsPageProps> = (props) => {
   const library = hasPage(useDockMode(), '/sessions');
-  const [route, setRoute] = useState(() => (library ? agentsRoute(window.location.search) : { tab: 'office' as AgentsTab, sub: 'plan' as SprintSub }));
-  const { tab, sub } = route;
+  const [tab, setTab] = useState<AgentsTab>(() => (library ? agentsRoute(window.location.search) : 'office'));
   const [startArchive, setStartArchive] = useState(false);
-  const choose = (next: AgentsTab, nextSub: SprintSub = sub) => {
-    setRoute({ tab: next, sub: nextSub });
+  const choose = (next: AgentsTab) => {
+    setTab(next);
     const params = new URLSearchParams(window.location.search);
     if (next !== 'office') params.set('tab', next);
     else params.delete('tab');
-    if (next === 'sprint') params.set('sub', nextSub);
-    else params.delete('sub');
     const query = params.toString();
     window.history.replaceState(window.history.state, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
   };
@@ -799,7 +822,7 @@ const AgentsPage: React.FC<AgentsPageProps> = (props) => {
   };
   const tabs = library && (
     <div className="mb-4 flex border-b border-border max-[760px]:hidden" role="tablist" aria-label="Agents">
-      {([['office', 'Office', Building2], ['sprint', 'Sprint', CalendarRange], ['library', 'Library', Library]] as const).map(([id, label, Icon]) => (
+      {([['office', 'Office', Building2], ['library', 'Library', Library]] as const).map(([id, label, Icon]) => (
         <button
           key={id}
           type="button"
@@ -814,32 +837,6 @@ const AgentsPage: React.FC<AgentsPageProps> = (props) => {
     </div>
   );
   if (tab === 'office') return <OfficeTab {...props} tabs={tabs} library={library} startArchive={startArchive} onPickTab={pickPhoneTab} />;
-  if (tab === 'sprint') return (
-    <Page width="full" className="max-[760px]:pb-28">
-      <PageHeader>
-        <div>
-          <h1 className="text-balance font-display text-3xl font-black">Agents</h1>
-          <p className="mt-1 text-pretty text-secondary-foreground">The sprint's dependency map and work order, and the retro of the agents' work.</p>
-        </div>
-      </PageHeader>
-      {tabs}
-      <PhoneTabs current="sprint" library={library} onPick={pickPhoneTab} />
-      <div className="mb-4 flex flex-wrap gap-1.5" role="group" aria-label="Sprint view">
-        {([['planning', 'Planning'], ['plan', 'Plan'], ['retro', 'Retro']] as const).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            aria-pressed={sub === id}
-            onClick={() => choose('sprint', id)}
-            className={cn('h-7 rounded-xs border border-border bg-surface-1 px-3 font-display text-xs font-semibold text-secondary-foreground max-[760px]:h-11', sub === id && 'border-accent bg-accent text-black')}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      {sub === 'planning' ? <PlanningTab /> : sub === 'plan' ? <PlanTab /> : <RetroTab />}
-    </Page>
-  );
   return (
     <Page width="full" className="max-[760px]:pb-28">
       <PageHeader>

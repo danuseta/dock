@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useSyncExternalStore } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Repeat } from 'lucide-react';
 import { cn } from '../../lib/cn';
 import { Markdown } from '../Markdown';
 import { agentTask, agentType, durationOf, formatDuration, type ChatActivity } from './activity';
@@ -7,6 +7,9 @@ import { StatusIcon } from './ActivityRow';
 import type { DetailStore } from './detailStore';
 import { AgentAvatar, FoldedList, LiveDuration, MessageShell, TranscriptRow } from './TranscriptParts';
 import { agentDetail, agentLook, descendantsOf, shortAgent, threadMessages, toolArg, toolName, treeStats, type ThreadPart } from './transcript';
+import type { Checkpoint } from '../checkpoints';
+import { CheckpointRoundRow } from '../CheckpointCard';
+import { fixLoops, foldLoops, type FixLoop, type LoopPart } from '../fixLoops';
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
@@ -71,7 +74,7 @@ export const AgentCall: React.FC<CallProps> = ({ event, rows, store, now, open, 
 };
 
 /** A worker an agent called, as one line in that agent's thread. */
-const CallLine: React.FC<{ event: ChatActivity; rows: readonly ChatActivity[]; store: DetailStore; now: number; onOpen?: (eventId: string) => void; parentName: string }> = ({ event, rows, store, now, onOpen, parentName }) => {
+const CallLine: React.FC<{ event: ChatActivity; rows: readonly ChatActivity[]; store: DetailStore; now: number; onOpen?: (eventId: string) => void; parentName: string; round?: number }> = ({ event, rows, store, now, onOpen, parentName, round }) => {
   const [inline, setInline] = useState(false);
   const own = descendantsOf(rows, event.eventId);
   const stats = treeStats(own);
@@ -82,12 +85,41 @@ const CallLine: React.FC<{ event: ChatActivity; rows: readonly ChatActivity[]; s
       <button type="button" aria-expanded={onOpen ? undefined : inline} onClick={() => (onOpen ? onOpen(event.eventId) : setInline((current) => !current))} className={cn('-mx-2 flex w-[calc(100%+1rem)] min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 rounded-xs border-t border-border px-2 py-1.5 text-left font-body text-[0.78rem] text-secondary-foreground hover:bg-surface-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 max-[900px]:min-h-11', running && 'border-transparent bg-status-open-bg')}>
         <AgentAvatar name={event.name} small className="self-center" />
         <AgentName name={event.name} />
-        <span className="min-w-0">{agentTask(event)}</span>
+        <span className="min-w-0">{round ? `round ${round}` : agentTask(event)}</span>
         <span className="inline-flex items-center gap-1 font-mono text-[0.68rem]"><StatusIcon status={event.status} size={11} />{plural(stats.steps, 'step')}{elapsed !== null && <> · {formatDuration(elapsed)}</>}</span>
         <ChevronRight size={12} aria-hidden="true" className="ml-auto self-center text-status-open" />
         {running && <span className="basis-full"><LiveStep rows={own} now={now} /></span>}
       </button>
       {!onOpen && inline && <ul className="mt-2 flex min-w-0 flex-col gap-3 border-l border-border pl-3"><AgentThreadBody agent={event} rows={own} parentName={parentName} store={store} now={now} /></ul>}
+    </li>
+  );
+};
+
+const clock = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+/** Worker and verifier runs on one task, boxed as "Fix loop T1 · 3 rounds", each failed round's line under its verifier. */
+export const FixLoopBox: React.FC<{ loop: FixLoop; parts: readonly ThreadPart[]; render: (part: ThreadPart, round?: number) => React.ReactNode }> = ({ loop, parts, render }) => {
+  const calls = parts.filter((part) => part.kind === 'call').map((part) => part.event);
+  const first = calls[0];
+  const last = calls[calls.length - 1];
+  const running = calls.some((call) => call.status === 'running');
+  return (
+    <li className="min-w-0">
+      <div className="flex min-w-0 flex-col gap-1.5 rounded-sm border border-status-warn/40 px-2.5 py-2" role="group" aria-label={`Fix loop ${loop.task}`}>
+        <p className="flex items-center gap-1.5 text-[0.76rem] font-semibold text-status-warn">
+          <Repeat size={13} aria-hidden="true" className="flex-none" />
+          Fix loop {loop.task} · {plural(loop.rounds, 'round')}
+          {first && <span className="ml-auto font-mono text-[0.66rem] font-normal text-muted-foreground">{clock(first.startedAt)}–{running || !last?.endedAt ? 'now' : clock(last.endedAt)}</span>}
+        </p>
+        <ul className="flex min-w-0 flex-col gap-1">
+          {parts.map((part) => (
+            <React.Fragment key={part.event.eventId}>
+              {render(part, part.kind === 'call' ? loop.roundOf.get(part.event.eventId) : undefined)}
+              {part.kind === 'call' && loop.notes.get(part.event.eventId)?.map((checkpoint) => <CheckpointRoundRow key={`cp-${checkpoint.id}`} checkpoint={checkpoint} />)}
+            </React.Fragment>
+          ))}
+        </ul>
+      </div>
     </li>
   );
 };
@@ -100,10 +132,12 @@ interface BodyProps {
   store: DetailStore;
   now: number;
   onOpenChild?: (eventId: string) => void;
+  /** The ticket's checkpoints; the failed rounds go under their verifier inside the fix loop. */
+  checkpoints?: readonly Checkpoint[];
 }
 
 /** One agent's thread, as Claude Code reads a subagent: the task it was given, every step it took, and what it reported back. */
-export const AgentThreadBody: React.FC<BodyProps> = ({ agent, rows, parentName, store, now, onOpenChild }) => {
+export const AgentThreadBody: React.FC<BodyProps> = ({ agent, rows, parentName, store, now, onOpenChild, checkpoints = [] }) => {
   const entry = useSyncExternalStore(store.subscribe, () => store.get(agent.id));
   const version = `${agent.status}:${agent.seq}`;
   useEffect(() => {
@@ -113,7 +147,8 @@ export const AgentThreadBody: React.FC<BodyProps> = ({ agent, rows, parentName, 
   const detail = agentDetail(entry.text);
   const own = descendantsOf(rows, agent.eventId);
   const direct = treeStats(own.filter((row) => row.parentId === agent.eventId));
-  const messages = threadMessages(own, agent.eventId);
+  const loops = fixLoops(own.filter((row) => row.parentId === agent.eventId && row.kind === 'agent'), checkpoints);
+  const messages = foldLoops(threadMessages(own, agent.eventId), loops);
   const running = agent.status === 'running';
   const elapsed = durationOf(agent, now);
   const prompt = detail.prompt || agentTask(agent);
@@ -122,9 +157,12 @@ export const AgentThreadBody: React.FC<BodyProps> = ({ agent, rows, parentName, 
     detail.tokens !== null ? `${(detail.tokens / 1000).toFixed(1)}k tokens` : null,
     detail.durationMs !== null ? formatDuration(detail.durationMs) : elapsed !== null ? formatDuration(elapsed) : null,
   ].filter(Boolean).join(' · ');
-  const renderPart = (part: ThreadPart) => (part.kind === 'call'
-    ? <CallLine key={part.event.eventId} event={part.event} rows={own} store={store} now={now} onOpen={onOpenChild} parentName={agent.name} />
+  const renderOne = (part: ThreadPart, round?: number) => (part.kind === 'call'
+    ? <CallLine key={part.event.eventId} event={part.event} rows={own} store={store} now={now} onOpen={onOpenChild} parentName={agent.name} round={round} />
     : <TranscriptRow key={part.event.eventId} event={part.event} store={store} now={now} />);
+  const renderPart = (part: LoopPart<ThreadPart>) => (part.kind === 'loop'
+    ? <FixLoopBox key={`loop-${part.loop.calls[0]}`} loop={part.loop} parts={part.parts} render={renderOne} />
+    : renderOne(part));
   return (
     <>
       <MessageShell name={parentName} at={agent.startedAt} title={<>{shortAgent(parentName)} → <AgentName name={agent.name} /></>}>

@@ -3,9 +3,7 @@ import { useQuery } from '@apollo/client';
 import type { Components } from 'react-markdown';
 import { Bug, ExternalLink, Plus } from 'lucide-react';
 import { GET_DOCK_ISSUE, GET_DOCK_ISSUES } from '../graphql/queries';
-import { LoadingSkeleton } from '../components/LoadingSkeleton';
-import { ReportDockIssue } from '../components/ReportDockIssue';
-import { Button, Input, Page } from '../components/ui';
+import { Button, Input } from './ui';
 import { Markdown } from '../chat/Markdown';
 import { cn } from '../lib/cn';
 import { ago } from '../lib/discordThreads';
@@ -16,7 +14,7 @@ const ISSUE_MARKDOWN: Components = {
   img: ({ src, alt }) => <img src={src} alt={alt ?? ''} referrerPolicy="no-referrer" loading="lazy" className="my-2 max-w-full rounded-sm border border-border" />,
 };
 
-interface DockIssuesPageProps { onNavigate: (path: string) => void }
+interface DockIssuesBrowserProps { onNewIssue: () => void; onOpenSettings: () => void }
 
 interface DockIssueComment { id: string; author: DockIssueAuthor; createdAt: string; body: string }
 
@@ -36,7 +34,7 @@ const IssueDetail: React.FC<{ number: number; onBack: () => void }> = ({ number,
   const now = new Date();
   return (
     <section className="flex min-w-0 flex-col" aria-label="Issue">
-      <button type="button" onClick={onBack} className="mx-5 mt-3 hidden min-h-11 self-start border-0 bg-transparent p-0 text-xs text-secondary-foreground max-[960px]:block">‹ DOCK Issues</button>
+      <button type="button" onClick={onBack} className="mx-5 mt-3 hidden min-h-11 self-start border-0 bg-transparent p-0 text-xs text-secondary-foreground max-[960px]:block">‹ Reported bugs</button>
       {isInitialQueryLoading(loading, data) && <p className="px-5 py-6 text-sm text-muted-foreground" role="status">Loading issue...</p>}
       {error && !issue && <p className="px-5 py-6 text-sm text-status-conflict" role="alert">{error.message}</p>}
       {!loading && !error && !issue && <p className="px-5 py-6 text-sm text-muted-foreground">Issue not found</p>}
@@ -77,36 +75,32 @@ const IssueDetail: React.FC<{ number: number; onBack: () => void }> = ({ number,
 };
 
 /** The issues of the DOCK repo: a list on the left, the open issue on the right. Reading only; the owner resolves them on GitHub. */
-const DockIssuesPage: React.FC<DockIssuesPageProps> = ({ onNavigate }) => {
+export const DockIssuesBrowser: React.FC<DockIssuesBrowserProps> = ({ onNewIssue, onOpenSettings }) => {
   const [filter, setFilter] = useState<DockIssueFilter>('OPEN');
   const [query, setQuery] = useState('');
   const [picked, setPicked] = useState<number | null>(null);
-  const [reporting, setReporting] = useState(false);
   const { data, loading, error } = useQuery(GET_DOCK_ISSUES, { ...CACHED_QUERY_OPTIONS, variables: { filter } });
   const feed = data?.dockIssues;
   const issues: DockIssueSummary[] = useMemo(() => (feed?.issues ?? []).filter((issue: DockIssueSummary) => matchesIssue(issue, query)), [feed, query]);
   const now = new Date();
 
-  if (isInitialQueryLoading(loading, data)) return <Page width="full"><LoadingSkeleton /></Page>;
+  if (isInitialQueryLoading(loading, data)) return <p className="py-6 text-sm text-muted-foreground" role="status">Loading issues...</p>;
 
   return (
-    <Page width="full">
-      <header className="mb-4 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl font-bold">DOCK Issues</h1>
-          <p className="mt-1 text-xs text-muted-foreground">Bugs reported on DOCK itself. The owner resolves them on GitHub.</p>
-        </div>
-        <Button size="sm" variant="primary" onClick={() => setReporting(true)}><Plus size={14} aria-hidden="true" />New issue</Button>
-      </header>
+    <div className="flex flex-col">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-muted-foreground">Bugs reported on DOCK itself. The owner resolves them on GitHub.</p>
+        <Button size="sm" variant="primary" onClick={onNewIssue}><Plus size={14} aria-hidden="true" />New issue</Button>
+      </div>
 
       {feed?.tokenMissing && (
         <p className="mb-4 rounded-sm border border-status-warn/40 bg-status-warn/10 px-3 py-2 text-xs text-status-warn" role="status">
-          Add a GitHub token in Settings to post from DOCK. <button type="button" className="border-0 bg-transparent p-0 text-status-warn underline" onClick={() => onNavigate('/settings')}>Open Settings</button>
+          Add a GitHub token in Settings to post from DOCK. <button type="button" className="border-0 bg-transparent p-0 text-status-warn underline" onClick={onOpenSettings}>Open Settings</button>
         </p>
       )}
       {error && !feed && <p className="mb-4 text-xs text-status-conflict" role="alert">{error.message}</p>}
 
-      <div className="grid min-h-[640px] grid-cols-[400px_minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-background max-[960px]:grid-cols-1">
+      <div className="grid min-h-[480px] grid-cols-[360px_minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-background max-[960px]:grid-cols-1">
         <section className={cn('flex min-w-0 flex-col border-r border-border max-[960px]:border-r-0', picked !== null && 'max-[960px]:hidden')} aria-label="Issues">
           <div className="border-b border-border px-4 py-2.5">
             <Input type="search" aria-label="Search issues" className="h-8 text-xs max-[760px]:h-11" placeholder="Search title or #number" value={query} onChange={(event) => setQuery(event.target.value)} />
@@ -116,7 +110,7 @@ const DockIssuesPage: React.FC<DockIssuesPageProps> = ({ onNavigate }) => {
               <button key={entry.id} type="button" role="tab" aria-selected={filter === entry.id} onClick={() => { setFilter(entry.id); setPicked(null); }} className={cn('min-h-11 whitespace-nowrap border-0 border-b-2 bg-transparent px-0 pt-2 text-xs font-medium', filter === entry.id ? 'border-accent text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}>{entry.label}</button>
             ))}
           </div>
-          <div className="max-h-[calc(100dvh-15rem)] min-h-[320px] flex-1 overflow-y-auto max-[960px]:max-h-none">
+          <div className="max-h-[calc(100dvh-20rem)] min-h-[320px] flex-1 overflow-y-auto max-[960px]:max-h-none">
             {issues.length === 0 && (
               <p className="px-4 py-6 text-sm text-muted-foreground" role="status">
                 {feed?.tokenMissing ? 'Issues need a GitHub token.' : query.trim() ? 'No issue matches.' : filter === 'MINE' ? 'You have not reported an issue yet.' : 'No issues here.'}
@@ -145,9 +139,6 @@ const DockIssuesPage: React.FC<DockIssuesPageProps> = ({ onNavigate }) => {
             </section>
           )}
       </div>
-      <ReportDockIssue open={reporting} onClose={() => setReporting(false)} onNavigate={onNavigate} />
-    </Page>
+    </div>
   );
 };
-
-export default DockIssuesPage;

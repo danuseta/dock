@@ -1,4 +1,5 @@
-/** Links into the Changes page from the places DOCK shows a pull request. */
+/** Links into Perubahan kode, the Blackboard view of a ticket's pull requests, from the places DOCK shows a pull request. */
+import { blackboardFileHref, pullEntry } from '../lib/blackboard';
 
 export type ChangesFrom = 'agents' | 'board' | 'ticket' | 'discord' | 'sessions';
 
@@ -10,9 +11,17 @@ export function repoName(value: string): string {
 }
 
 export function changesHref(ticketKey: string, repo: string | null, from: ChangesFrom, session?: string): string {
-  const query = new URLSearchParams({ ticket: ticketKey });
-  if (repo) query.set('repo', repoName(repo));
-  query.set('from', from);
+  const query = new URLSearchParams({ from });
   if (session) query.set('session', session);
-  return `/changes?${query.toString()}`;
+  return `${blackboardFileHref(ticketKey, pullEntry(repo ? repoName(repo) : null))}&${query.toString()}`;
+}
+
+/** An old /changes?ticket=…&repo=…&from=… link (bookmark, PWA, notification) as its Blackboard link; the file to open rides along. */
+export function changesRedirect(search: string): string {
+  const query = new URLSearchParams(search);
+  const ticket = query.get('ticket');
+  if (!ticket) return '/blackboard';
+  const href = changesHref(ticket, query.get('repo'), (query.get('from') as ChangesFrom | null) || 'board', query.get('session') ?? undefined);
+  const file = query.get('file');
+  return file ? `${href}&path=${encodeURIComponent(file)}` : href;
 }

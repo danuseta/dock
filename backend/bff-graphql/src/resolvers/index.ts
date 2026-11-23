@@ -1,30 +1,47 @@
+import { gmVerifiedParty } from '../integrations/guild-master';
 import { JiraAPI, JiraTicketLookupError } from '../datasources/JiraAPI';
 import { GitHubAPI } from '../datasources/GitHubAPI';
 import { DiscordAPI } from '../datasources/DiscordAPI';
 import { StorageAPI } from '../datasources/StorageAPI';
 import { GraphQLError } from 'graphql';
+import type { ReviewRound } from '@prisma/client';
 import { shouldRequirePin, type AuthContext } from '../auth/session';
 import { CalendarUnavailableError, googleCalendarService } from '../integrations/google-calendar';
 import { upstreamMonitorService } from '../integrations/upstream-monitor';
 import { dockerRuntimeService } from '../integrations/docker-runtime';
 import { OrchestratorInputError, attentionItems, normalizeTicketKey, orchestratorService, type Orchestration } from '../integrations/orchestrator';
 import { CHAT_MACHINE, chatService } from '../integrations/chat';
-import { MANUAL_DESTS, qaEscalations, retroApplyPrompt, retroNumbers, retroProblems, retroTickets, triageSuggestions } from '../integrations/retro';
+import { qaEscalations, retroNumbers, retroProblems, retroTickets, runsInWindow, triageSuggestions } from '../integrations/retro';
+import { acceptRetroLine } from '../integrations/retro-apply';
 import { StorageService } from '../storage/service';
 import { activeSprint } from '../integrations/sprint-plan';
 import { lookupDependencies } from '../integrations/dependency-lookup';
 import { sprintPlanner } from '../integrations/sprint-plan-live';
-import { acDriftService, acInService, sprintDraftService, storyboardReader } from '../integrations/sprint-draft-live';
+import { acDriftService, acInService, planSignalService, planningVisuals, sprintDraftService, storyboardReader, testSplitPage, ticketSummaryService } from '../integrations/sprint-draft-live';
 import { StoryboardMissing, StoryboardRefused } from '../integrations/storyboard';
+import { SPLIT_PAGE_KEY, pageRef } from '../integrations/split-page';
+import { PLANNING_FLOW_KEY, PlanningFlowError, parsePlanningFlow, storedPlanningFlow } from '../integrations/planning-flow';
+import { SOUS_FLOW_KEY, SousFlowError, flowLines, parseSousFlow, profileFor, storedSousFlow } from '../integrations/sous-flow';
+import { setTicketProfile, sousFlowSettings, ticketProfile } from '../integrations/sous-flow-live';
+import { sousStartPrompt } from '../integrations/orchestrator-cron';
+import { qaGuide } from '../integrations/qa-guide-live';
+import type { Checkpoint } from '../integrations/orchestrator';
 import { planningChatPrompt, planningChatTitle } from '../integrations/planning-ingest';
 import { isSettledStatus, mergeAttention, planAttentionItems, withoutSettledTickets } from '../integrations/attention';
 import { discordGateway, discordReader } from '../integrations/discord-reader-live';
 import { isTeamChannel } from '../integrations/discord-team';
 import { ChannelInputError, channelStore, isChannelKind, threadService, withJira } from '../integrations/discord-threads';
 import { DiscordReaderError, ROW_VERSION } from '../integrations/discord-reader';
-import { CronInputError, type OwnerAnswer, type OwnerChange } from '../integrations/orchestrator-cron';
+import { OpsRulesInputError, STATUS_AFTER_MERGE_KEY, WORKTREE_MERGED_KEY, parseStatusAfterMerge, parseWorktreeMerged, readStatusAfterMerge, readWorktreeMerged } from '../integrations/ops-rules';
+import { qaQueueService } from '../integrations/qa-queue-live';
+import { worktrees } from '../integrations/worktrees-live';
+import { CronInputError, manualRefusal, type OwnerAnswer, type OwnerChange } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
+import { ScoutRunner, readScout } from '../integrations/scout';
+import { blackboard } from '../integrations/blackboard';
 import { autoReview, listedAutoReviews } from '../integrations/auto-review-live';
+import { installedSkills } from '../integrations/installed-skills';
+import { reviewFindings } from '../integrations/review-findings-live';
 import { labelOrder } from '../integrations/orchestrator-cron';
 import { pushService } from '../integrations/push';
 import { demoVideos, withTitles } from '../integrations/demo-videos';
@@ -32,6 +49,7 @@ import { demoStorage, type DemoStorageInput } from '../integrations/demo-storage
 import { DevServerError, devServers } from '../integrations/dev-servers';
 import { WorkspaceFilesError, workspaceFiles } from '../integrations/workspace-files';
 import { elevenLabsKeys } from '../integrations/elevenlabs-keys';
+import { livePlugins } from '../integrations/plugins';
 import { broadcastDeps, sendBroadcast } from '../integrations/broadcast';
 import { ReviewApprovalError, approvalRecords, lgtmReview, ownerPassLabel, resetOwnerPassLabel } from '../integrations/review-approval';
 import { MAX_ROUND_ATTEMPTS, roundSummary } from '../integrations/review-findings';
@@ -50,6 +68,9 @@ import { dockMode, ownRuns } from '../mode';
 import { buildIssueBody, currentBuild, dockIssueError, draftUrl, issueEnvironment, issueTitle, issuesRepo, reporterName, type IssueDraft } from '../integrations/dock-issues';
 import { ChangesInputError } from '../integrations/pull-changes';
 import { pullChangesService } from '../integrations/pull-changes-live';
+import { judgeQueue } from '../integrations/judge-live';
+import { JudgeInputError } from '../integrations/judge-queue';
+import { JUDGE_SETTINGS_KEY, JudgeSettingsError, parseJudgeSettings, storedJudgeSettings } from '../integrations/judge';
 
 const jiraAPI = new JiraAPI();
 const githubAPI = new GitHubAPI();
@@ -57,12 +78,20 @@ const discordAPI = new DiscordAPI();
 const storageAPI = new StorageAPI();
 const storageService = new StorageService();
 
+const roundInfo = (round: ReviewRound) => ({
+  id: round.id, status: round.status, summary: `${round.ticketKey}: ${roundSummary(round)}`, threadUrl: round.threadUrl, at: (round.reportedAt ?? round.lastMessageAt).toISOString(),
+  mode: round.mode, replyStatus: round.replyStatus, replyAt: round.replyAt?.toISOString() ?? null, replyText: round.replyText, replyMessageId: round.replyMessageId, replyDetail: round.replyDetail,
+});
+
 /** The newest review round of each listed session, from one query. */
 async function withReviewRounds<T extends { id: string }>(sessions: T[]) {
   const rounds = await storageService.roundsForSessions(sessions.map((session) => session.id));
   return sessions.map((session) => {
     const round = rounds.get(session.id);
-    return { ...session, reviewRound: round ? { status: round.status, summary: `${round.ticketKey}: ${roundSummary(round)}`, threadUrl: round.threadUrl, at: (round.reportedAt ?? round.lastMessageAt).toISOString() } : null };
+    return {
+      ...session,
+      reviewRound: round ? roundInfo(round) : null,
+    };
   });
 }
 const isPresent = <T>(value: T | null | undefined): value is T => value != null;
@@ -117,9 +146,11 @@ async function sprintRuns(keys: string[]) {
   return (await orchestratorService.list()).filter((run) => wanted.has(run.key));
 }
 
+const sprintWindow = (sprint: { startDate: string; endDate: string }) => ({ from: new Date(sprint.startDate), to: new Date(sprint.endDate) });
+
 async function sprintLoad(sprint: { id: number; startDate: string; endDate: string }) {
   const keys = await sprintKeyList(sprint.id);
-  const runs = await sprintRuns(keys);
+  const runs = runsInWindow(await sprintRuns(keys), sprintWindow(sprint));
   return { runs, numbers: await sprintRetroNumbers(sprint, runs, keys) };
 }
 
@@ -196,25 +227,56 @@ async function retroView(sprintId?: number | null) {
 }
 
 /** QA escalations of the whole team by cause, from the sprint dashboard's tickets; the ones Planning did not predict become proposed triage rules. */
-async function sprintEscalations(sprint: { id: number; name: string }) {
-  let issues: Array<{ key: string; summary?: string; labels?: string[]; events?: Array<{ field: string; to: string | null }> }> = [];
+async function sprintEscalations(sprint: { id: number; name: string; startDate: string; endDate: string }) {
+  let issues: Array<{ key: string; summary?: string; labels?: string[]; events?: Array<{ field: string; at?: string; from?: string | null; to: string | null }> }> = [];
   try { issues = JSON.parse(await sprintDashboardService.issueEvents(sprint.id)); } catch { issues = []; }
   const draft = await storageService.getSprintDraft(sprint.name);
   const predictions = draft ? new Map(draft.tickets.map((ticket) => {
     try { return [ticket.key, ticket.prediction ? String(JSON.parse(ticket.prediction).prediction ?? '') || null : null] as const; } catch { return [ticket.key, null] as const; }
   })) : null;
-  const escalations = qaEscalations(Array.isArray(issues) ? issues : [], predictions);
+  const escalations = qaEscalations(Array.isArray(issues) ? issues : [], predictions, sprintWindow(sprint));
   for (const item of triageSuggestions(escalations)) await storageService.upsertRetroSuggestion(sprint.name, item);
   return escalations;
 }
 
 /** A new session on the workspace that runs one sous prompt, for the retro draft and for an accepted line. */
-async function runSousPrompt(title: string, text: string) {
+async function openSousSession(title: string) {
   requireAgentControls();
   if (!(await orchestratorService.machines()).includes(CHAT_MACHINE)) throw new GraphQLError('The workspace is not connected', { extensions: { code: 'BAD_USER_INPUT' } });
-  const session = await chatService.createSession({ title, machine: CHAT_MACHINE }).catch(orchestratorInputError);
+  return chatService.createSession({ title, machine: CHAT_MACHINE }).catch(orchestratorInputError);
+}
+
+async function runSousPrompt(title: string, text: string) {
+  const session = await openSousSession(title);
   await chatService.sendMessage(session.id, text, await orchestratorService.machines()).catch(orchestratorInputError);
   return session.id;
+}
+
+/** The sprint-planner prompt of the Planning chat: the sprint and the epics of its draft. */
+async function planningPrompt(sprint: string) {
+  const name = sprint.trim();
+  if (!name) throw new GraphQLError('sprint is required', { extensions: { code: 'BAD_USER_INPUT' } });
+  const draft = await sprintDraftService.view(name).catch(() => null);
+  const epics = (draft?.tickets ?? []).map((ticket) => ticket.epic).filter((epic): epic is string => !!epic);
+  return planningChatPrompt(name, epics);
+}
+
+const judgeError = (error: unknown): never => {
+  if (error instanceof JudgeInputError || error instanceof JudgeSettingsError || error instanceof OrchestratorInputError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+  throw error;
+};
+
+type JudgeGrades = Awaited<ReturnType<typeof judgeQueue.grades>>;
+let judgeBatch: { ids: Set<string>; rows: Promise<JudgeGrades> } | null = null;
+
+/** The Judge row of a listed session; the sessions of one request are read in one query. */
+function sessionJudge(sessionId: string) {
+  if (!judgeBatch) {
+    const ids = new Set<string>();
+    judgeBatch = { ids, rows: new Promise<void>((resolve) => setImmediate(resolve)).then(() => { judgeBatch = null; return judgeQueue.grades([...ids]); }) };
+  }
+  judgeBatch.ids.add(sessionId);
+  return judgeBatch.rows.then((rows) => rows.get(sessionId) ?? null);
 }
 
 function orchestratorInputError(error: unknown): never {
@@ -331,11 +393,34 @@ function elevenLabsError(error: unknown): never {
   throw new GraphQLError(error instanceof Error ? error.message : 'ElevenLabs keys failed', { extensions: { code: 'BAD_USER_INPUT' } });
 }
 
+const scoutRunner = new ScoutRunner(blackboard, (key, prompt) => orchestratorCron.openReview(key, prompt, 'Scout'));
+
 function cronError(error: unknown): never {
   if (error instanceof CronInputError || error instanceof OrchestratorInputError) {
     throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
   }
   throw error;
+}
+
+function requireWorktrees(): void {
+  if (dockMode() !== 'workspace') {
+    throw new GraphQLError('Worktrees are cleaned from the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });
+  }
+}
+
+/** Saves one Aturan rule after validation and returns it normalized; an empty value goes back to the defaults. */
+async function saveOpsRule<T>(key: string, value: string, parse: (raw: string | null) => T): Promise<string> {
+  if (!value.trim()) {
+    await storageService.deleteSetting(key);
+    return JSON.stringify(parse(null));
+  }
+  let saved: string;
+  try { saved = JSON.stringify(parse(value)); } catch (error) {
+    if (error instanceof OpsRulesInputError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+    throw error;
+  }
+  await storageService.upsertSetting(key, saved);
+  return saved;
 }
 
 async function hasMasterPin(): Promise<boolean> {
@@ -369,6 +454,32 @@ export const resolvers = {
     sprintPlan: () => sprintPlanView(),
     planningSprints: () => sprintDraftService.sprints().catch(planningError),
     sprintDraft: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.view(sprint).catch(planningError),
+    sprintDraftVisuals: (_: unknown, { sprint }: { sprint: string }) => planningVisuals.list(sprint).catch(planningError),
+    planningChatPrompt: (_: unknown, { sprint }: { sprint: string }) => planningPrompt(sprint),
+    sprintPlanSignal: (_: unknown, { sprint }: { sprint: string }) => planSignalService.view(sprint).catch(planningError),
+    planningSplitPage: async () => (await storageService.getSettingValues([SPLIT_PAGE_KEY]))[0]?.value || null,
+    planningFlow: async () => storedPlanningFlow((await storageService.getSettingValues([PLANNING_FLOW_KEY]))[0]?.value),
+    judgeDays: (_: unknown, { sprint }: { sprint?: string | null }) => judgeQueue.days(sprint).catch(judgeError),
+    judgeDay: (_: unknown, { day }: { day: string }) => judgeQueue.day(day).catch(judgeError),
+    judgeWaiting: () => (dockMode() === 'workspace' ? judgeQueue.waitingDays() : []),
+    judgeSettings: async () => JSON.stringify(storedJudgeSettings((await storageService.getSettingValues([JUDGE_SETTINGS_KEY]))[0]?.value)),
+    checkpoints: (_: unknown, { key }: { key: string }) => orchestratorService.checkpoints(key),
+    sousFlow: async () => storedSousFlow((await storageService.getSettingValues([SOUS_FLOW_KEY]))[0]?.value),
+    ticketSousFlow: (_: unknown, { key }: { key: string }) => ticketProfile(key),
+    sousFlowPrompt: async (_: unknown, { profile, key }: { profile: string; key?: string | null }) => {
+      const lines = flowLines(profileFor(await sousFlowSettings(), profile).profile);
+      return { lines, prompt: sousStartPrompt(key?.trim().toUpperCase() || 'QRD-…', null, lines) };
+    },
+    opsRules: async () => {
+      const [statusAfterMerge, worktreeMerged] = await storageService.getSettingValues([STATUS_AFTER_MERGE_KEY, WORKTREE_MERGED_KEY]);
+      return { statusAfterMerge: JSON.stringify(readStatusAfterMerge(statusAfterMerge?.value)), worktreeMerged: JSON.stringify(readWorktreeMerged(worktreeMerged?.value)) };
+    },
+    qaQueue: () => qaQueueService.queue(),
+    qaQueuePosition: (_: unknown, { key }: { key: string }) => qaQueueService.position(key),
+    worktrees: () => {
+      requireWorktrees();
+      return worktrees.list();
+    },
     previewSprintDraftPublish: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.preview(sprint).catch(planningError),
     acIncoming: () => acInService.incoming().catch(planningError),
     sprintDrift: async () => {
@@ -455,6 +566,8 @@ export const resolvers = {
         throw error;
       }
     },
+    ticketSummary: (_: unknown, { key }: { key: string }) => ticketSummaryService.summary(key).catch(planningError),
+    ticketReadiness: (_: unknown, { keys, refs }: { keys: string[]; refs?: string[] | null }) => ticketSummaryService.readiness(keys, refs ?? []).catch(planningError),
     ticketRelationGroup: async (_: any, { ticketKey }: { ticketKey: string }) => {
       return storageAPI.getTicketRelationGroup(ticketKey);
     },
@@ -464,6 +577,8 @@ export const resolvers = {
     pullFileLines: (_: unknown, args: { ticketKey: string; url: string; path: string; ref: string; from: number; to: number }) =>
       pullChangesService.fileLines(args.ticketKey, args.url, args.path, args.ref, args.from, args.to).catch(changesInputError),
     autoReviews: async () => listedAutoReviews(await storageAPI.getAutoReviews()),
+    installedSkills: () => installedSkills(),
+    reviewRoundsForTicket: async (_: unknown, { key }: { key: string }) => (await storageService.roundsForTicket(key.trim().toUpperCase())).map(roundInfo),
     claudeAccounts: () => claudeAccountsState(),
     qaLocal: (_: unknown, { ticketKey }: { ticketKey?: string | null }) => qaLocalState(ticketKey),
     deployGate: (_: unknown, { ticketKey }: { ticketKey: string }) => {
@@ -502,7 +617,8 @@ export const resolvers = {
       return withoutSettledTickets(items, statusOf);
     },
     settings: async () => {
-      return await storageAPI.getPublicSettings();
+      const { storage, voice, storageLocalDir } = await livePlugins();
+      return { ...await storageAPI.getPublicSettings(), storagePlugin: storage, voicePlugin: voice, storageLocalDir };
     },
     jiraProjects: async (_: any, { url, email, token }: { url?: string, email?: string, token?: string }) => {
       return await jiraAPI.listProjects(url, email, token);
@@ -535,6 +651,12 @@ export const resolvers = {
     ingestTokens: async () => orchestratorService.tokens(),
     doctorReports: async () => doctorReports.list(),
     claudeUsage: async (_: unknown, { from, to }: { from: string; to: string }) => claudeUsage.usage(from, to).catch(orchestratorInputError),
+    claudeSessionUsage: async (_: unknown, { sessionId }: { sessionId: string }) => {
+      const claudeSessionId = (await storageService.getChatSession(sessionId))?.claudeSessionId;
+      if (!claudeSessionId) return { available: true, found: false, totalTokens: 0, totalCost: 0, mainTokens: 0, agents: [], error: null };
+      return claudeUsage.session(claudeSessionId).catch(orchestratorInputError);
+    },
+    claudeTicketUsage: async (_: unknown, { key }: { key: string }) => claudeUsage.ticket(await storageService.getTicketClaudeSessionIds(key.trim().toUpperCase())),
     agentLooks: async () => agentLooks.list(),
     libraryAgents: async (_: unknown, { machine }: { machine?: string | null }) => {
       requireAgents();
@@ -543,6 +665,14 @@ export const resolvers = {
     libraryAgent: async (_: unknown, { slug, machine }: { slug: string; machine?: string | null }) => {
       requireAgents();
       return agentBridge.get(machine || CHAT_MACHINE, slug).catch(orchestratorInputError);
+    },
+    guildMasterLog: async () => {
+      requireAgents();
+      return agentBridge.gmLog(CHAT_MACHINE, await chatService.gmKey()).catch(orchestratorInputError);
+    },
+    guildMasterParty: async (_: unknown, { key }: { key: string }) => {
+      requireAgents();
+      return gmVerifiedParty(await agentBridge.gmLog(CHAT_MACHINE, await chatService.gmKey()).catch(() => []), normalizeTicketKey(key));
     },
     demoVideos: async () => {
       requireDemoVideos();
@@ -608,6 +738,7 @@ export const resolvers = {
   
   Ticket: {
     labels: (parent: any) => Array.isArray(parent.labels) ? parent.labels : [],
+    blockedBy: (parent: any) => (Array.isArray(parent.links) ? parent.links : []).filter((link: any) => link?.relation === 'blockedBy').map((link: any) => String(link.key)),
     workOrder: async (parent: any) => (await storageAPI.ticketOrders()).get(parent.key) ?? labelOrder(parent.labels),
     workOrderSource: async (parent: any) => ((await storageAPI.ticketOrders()).has(parent.key) ? 'dock' : labelOrder(parent.labels) === null ? null : 'label'),
     workManual: async (parent: any) => (await storageAPI.manualTickets()).has(parent.key),
@@ -628,6 +759,7 @@ export const resolvers = {
   Orchestration: {
     approved: async (parent: { key: string }) => approvalRecords.approved(parent.key).catch(() => false),
     confirmedDecisions: async (parent: { key: string }) => decisionGate.confirmed(parent.key).catch(() => []),
+    autoConfirmedDecisions: async (parent: { key: string }) => decisionGate.autoConfirmed(parent.key).catch(() => []),
     events: async (parent: { key: string }) => orchestratorService.events(parent.key),
     timeline: async (parent: { key: string }) => orchestratorService.timeline(parent.key),
     members: async (parent: { key: string }) => orchestratorService.members(parent.key).catch(() => []),
@@ -674,20 +806,113 @@ export const resolvers = {
       sprintDraftService.decide(sprint, id, action, note ?? null, reporterName()).catch(planningError)
     ),
     refreshSprintDraftQa: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.refreshQa(sprint).catch(planningError),
+    runScout: (_: unknown, { key }: { key: string }) => {
+      let ticket: string;
+      try { ticket = normalizeTicketKey(key); } catch { throw new GraphQLError('A valid ticket key is required', { extensions: { code: 'BAD_USER_INPUT' } }); }
+      return scoutRunner.run(ticket).catch(cronError);
+    },
     checkSprintStoryboards: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.checkStoryboards(sprint).catch(planningError),
     uploadSprintStoryboard: (_: unknown, { sprint, epic, html }: { sprint: string; epic: string; html: string }) => uploadStoryboard(sprint, epic, html),
     setSprintDraftTcs: (_: unknown, { sprint, key, tcs }: { sprint: string; key: string; tcs: unknown[] }) => sprintDraftService.setTcs(sprint, key, tcs).catch(planningError),
     moveSprintDraftCards: (_: unknown, { sprint, keys, to }: { sprint: string; keys: string[]; to: string }) => sprintDraftService.moveCards(sprint, keys, to).catch(planningError),
-    answerSprintDraftQuestion: (_: unknown, { sprint, id, answered }: { sprint: string; id: string; answered: boolean }) => (
-      sprintDraftService.answer(sprint, id, answered, reporterName()).catch(planningError)
+    saveSprintDraftNewTicket: (_: unknown, { sprint, id, input }: { sprint: string; id?: string | null; input: Record<string, unknown> }) => (
+      sprintDraftService.saveNewTicket(sprint, id ?? null, { ...input }).then((saved) => saved.view).catch(planningError)
     ),
+    removeSprintDraftNewTicket: (_: unknown, { sprint, id }: { sprint: string; id: string }) => sprintDraftService.removeNewTicket(sprint, id).catch(planningError),
+    createSprintDraftNewTickets: (_: unknown, { sprint, ids }: { sprint: string; ids?: string[] | null }) => sprintDraftService.createNewTicketsOnly(sprint, ids ?? null).catch(planningError),
+    saveSprintDraftRevision: (_: unknown, { sprint, key, input }: { sprint: string; key: string; input: Record<string, unknown> }) => (
+      sprintDraftService.saveRevision(sprint, key, { ...input }, 'manual').then((saved) => saved.view).catch(planningError)
+    ),
+    applySprintDraftRevision: (_: unknown, { sprint, key }: { sprint: string; key: string }) => sprintDraftService.applyRevision(sprint, key, reporterName()).catch(planningError),
+    discardSprintDraftRevision: (_: unknown, { sprint, key }: { sprint: string; key: string }) => sprintDraftService.discardRevision(sprint, key).catch(planningError),
+    answerSprintDraftQuestion: (_: unknown, { sprint, id, answered, text }: { sprint: string; id: string; answered: boolean; text?: string | null }) => (
+      sprintDraftService.answer(sprint, id, answered, reporterName(), text ?? null).catch(planningError)
+    ),
+    saveSprintDraftVisual: (_: unknown, { sprint, id }: { sprint: string; id: string }) => planningVisuals.save(sprint, id).catch(planningError),
+    dropSprintDraftVisual: (_: unknown, { sprint, id }: { sprint: string; id: string }) => planningVisuals.drop(sprint, id).catch(planningError),
     publishSprintDraft: (_: unknown, { sprint }: { sprint: string }) => sprintDraftService.publish(sprint, reporterName()).catch(planningError),
+    setJudgeCall: (_: unknown, { findingId, call, note }: { findingId: string; call: string; note?: string | null }) => { requireAgentControls(); return judgeQueue.setCall(findingId, call, note ?? null).catch(judgeError); },
+    confirmJudgeDay: (_: unknown, { day, note }: { day: string; note?: string | null }) => { requireAgentControls(); return judgeQueue.confirmDay(day, note ?? null).catch(judgeError); },
+    judgeNow: () => { requireAgentControls(); return judgeQueue.judgeNow().catch(judgeError); },
+    judgeSprint: (_: unknown, { sprint }: { sprint: string }) => { requireAgentControls(); return judgeQueue.requestSprint(sprint).catch(judgeError); },
+    judgeAgain: (_: unknown, { sessionId }: { sessionId: string }) => { requireAgentControls(); return judgeQueue.judgeAgain(sessionId).catch(judgeError); },
+    setJudgeSettings: async (_: unknown, { settings }: { settings: string }) => {
+      requireAgentControls();
+      let saved: string;
+      try { saved = JSON.stringify(parseJudgeSettings(settings)); } catch (error) { return judgeError(error); }
+      await storageService.upsertSetting(JUDGE_SETTINGS_KEY, saved, 'Settings › Judge');
+      return saved;
+    },
+    setPlanningFlow: async (_: unknown, { flow }: { flow: string }) => {
+      if (!flow.trim()) {
+        await storageService.deleteSetting(PLANNING_FLOW_KEY);
+        return null;
+      }
+      let saved: string;
+      try { saved = JSON.stringify(parsePlanningFlow(flow)); } catch (error) {
+        if (error instanceof PlanningFlowError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+        throw error;
+      }
+      await storageService.upsertSetting(PLANNING_FLOW_KEY, saved);
+      return saved;
+    },
+    setPlanningSplitPage: async (_: unknown, { page }: { page: string }) => {
+      const value = page.trim();
+      if (!value) {
+        await storageService.deleteSetting(SPLIT_PAGE_KEY);
+        return null;
+      }
+      if (!pageRef(value)) throw new GraphQLError('The split page must be a page id, a page URL or a title', { extensions: { code: 'BAD_USER_INPUT' } });
+      await storageService.upsertSetting(SPLIT_PAGE_KEY, value);
+      return value;
+    },
+    testPlanningSplitPage: (_: unknown, { page }: { page: string }) => testSplitPage(page),
+    useSprintDraftSplit: (_: unknown, { sprint, key }: { sprint: string; key: string }) => sprintDraftService.useSplit(sprint, key).catch(planningError),
+    keepSprintDraftSplit: (_: unknown, { sprint, key }: { sprint: string; key: string }) => sprintDraftService.keepSplit(sprint, key).catch(planningError),
+    setSousFlow: async (_: unknown, { flow }: { flow: string }) => {
+      if (!flow.trim()) {
+        await storageService.deleteSetting(SOUS_FLOW_KEY);
+        return storedSousFlow(null);
+      }
+      let saved: string;
+      try { saved = JSON.stringify(parseSousFlow(flow)); } catch (error) {
+        if (error instanceof SousFlowError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+        throw error;
+      }
+      await storageService.upsertSetting(SOUS_FLOW_KEY, saved);
+      return saved;
+    },
+    setStatusAfterMerge: (_: unknown, { value }: { value: string }) => saveOpsRule(STATUS_AFTER_MERGE_KEY, value, parseStatusAfterMerge),
+    setWorktreeMerged: (_: unknown, { value }: { value: string }) => saveOpsRule(WORKTREE_MERGED_KEY, value, parseWorktreeMerged),
+    cancelAutoReviewPost: (_: unknown, { id }: { id: string }) => autoReview.cancelPost(id),
+    editAutoReviewPost: (_: unknown, { id, text }: { id: string; text: string }) => autoReview.editPost(id, text),
+    cancelReviewReplyPost: (_: unknown, { id }: { id: string }) => reviewFindings.cancelReply(id),
+    editReviewReplyPost: (_: unknown, { id, text }: { id: string; text: string }) => reviewFindings.editReply(id, text),
+    cleanWorktrees: (_: unknown, { paths }: { paths: string[] }) => {
+      requireWorktrees();
+      return worktrees.clean(paths.slice(0, 50));
+    },
+    setTicketSousFlow: async (_: unknown, { key, profile }: { key: string; profile?: string | null }) => {
+      let ticket: string;
+      try { ticket = normalizeTicketKey(key); } catch { throw new GraphQLError('A valid ticket key is required', { extensions: { code: 'BAD_USER_INPUT' } }); }
+      const name = profile?.trim() || null;
+      if (name && !(await sousFlowSettings()).profiles[name]) throw new GraphQLError(`No Sous flow profile named ${name}`, { extensions: { code: 'BAD_USER_INPUT' } });
+      return setTicketProfile(ticket, name);
+    },
+    writeQaGuide: async (_: unknown, { key }: { key: string }) => {
+      let ticket: string;
+      try { ticket = normalizeTicketKey(key); } catch { throw new GraphQLError('A valid ticket key is required', { extensions: { code: 'BAD_USER_INPUT' } }); }
+      try {
+        return await qaGuide.write(ticket);
+      } catch (error) {
+        const status = (error as any)?.response?.status;
+        throw new GraphQLError(status ? `Jira responded ${status}` : error instanceof Error ? error.message : 'The QA guide could not be written', { extensions: { code: status ? 'BAD_GATEWAY' : 'BAD_USER_INPUT' } });
+      }
+    },
     openPlanningChat: async (_: unknown, { sprint }: { sprint: string }) => {
       const name = sprint.trim();
       if (!name) throw new GraphQLError('sprint is required', { extensions: { code: 'BAD_USER_INPUT' } });
-      const draft = await sprintDraftService.view(name).catch(() => null);
-      const epics = (draft?.tickets ?? []).map((ticket) => ticket.epic).filter((epic): epic is string => !!epic);
-      return runSousPrompt(planningChatTitle(name), planningChatPrompt(name, epics));
+      return (await openSousSession(planningChatTitle(name))).id;
     },
     acInAction: (_: unknown, { to, id, action, reason }: { to: string; id: string; action: string; reason?: string | null }) => (
       acInService.act(to.trim().toUpperCase(), id, action, reason ?? null, reporterName()).catch(planningError)
@@ -707,9 +932,7 @@ export const resolvers = {
       }
       if (action === 'close' || action === 'reopen') return retroItemView(await storageService.updateRetroItem(id, { status: action === 'close' ? 'closed' : 'open' }));
       if (action !== 'accept') throw new GraphQLError('action must be accept, close, reopen or edit', { extensions: { code: 'BAD_USER_INPUT' } });
-      const view = retroItemView(item);
-      const sessionId = MANUAL_DESTS.includes(item.dest) ? null : await runSousPrompt(`Retro-apply-${item.sprint}`, retroApplyPrompt(view));
-      return retroItemView(await storageService.updateRetroItem(id, { status: 'accepted', sessionId }));
+      return retroItemView(await acceptRetroLine(item, { update: (lineId, data) => storageService.updateRetroItem(lineId, data), run: (title, prompt) => runSousPrompt(title, prompt) }));
     },
     workspaceMkdir: async (_: unknown, { path }: { path: string }) => {
       requireWorkspaceFiles();
@@ -892,14 +1115,31 @@ export const resolvers = {
       requireAgentControls();
       return orchestratorService.dismiss(key, dockMode()).catch(orchestratorInputError);
     },
-    createChatSession: async (_: unknown, args: { title?: string; ticketKey?: string; forkFrom?: string; machine?: string | null }) => {
+    createChatSession: async (_: unknown, { pin, ...args }: { title?: string; ticketKey?: string; forkFrom?: string; machine?: string | null; mode?: string | null; pin?: string | null }, context: AuthContext) => {
+      if (args.mode === 'gm') {
+        requireAgents();
+        if (!(await hasMasterPin())) throw new GraphQLError('Set a master PIN in Settings before opening Guild Master', { extensions: { code: 'BAD_USER_INPUT' } });
+        const retryAfter = context.pinRateLimiter.retryAfterSeconds(context.clientKey);
+        if (retryAfter > 0) throw new GraphQLError('Too many PIN attempts. Try again later.', { extensions: { code: 'RATE_LIMITED', retryAfter } });
+        if (!(await storageAPI.verifyMasterPin(pin ?? ''))) {
+          context.pinRateLimiter.recordFailure(context.clientKey);
+          throw new GraphQLError('Wrong PIN', { extensions: { code: 'BAD_USER_INPUT' } });
+        }
+        context.pinRateLimiter.reset(context.clientKey);
+      }
       if (args.machine && args.machine !== CHAT_MACHINE) {
         throw new GraphQLError(`Chat sessions run on ${CHAT_MACHINE} only`, { extensions: { code: 'BAD_USER_INPUT' } });
       }
       if (!(await orchestratorService.machines()).includes(CHAT_MACHINE)) {
         throw new GraphQLError('Unknown machine', { extensions: { code: 'BAD_USER_INPUT' } });
       }
-      return chatService.createSession({ ...args, machine: CHAT_MACHINE }).catch(orchestratorInputError);
+      const check = args.ticketKey && !args.forkFrom
+        ? await Promise.resolve().then(() => orchestratorCron.manualCheck(normalizeTicketKey(args.ticketKey!))).catch(() => null)
+        : null;
+      const refused = check ? manualRefusal(check) : null;
+      if (refused) throw new GraphQLError(refused, { extensions: { code: 'BAD_USER_INPUT' } });
+      const session = await chatService.createSession({ ...args, machine: CHAT_MACHINE }).catch(orchestratorInputError);
+      return { ...session, waitsOn: check?.waitsOn ?? null };
     },
     sendChatMessage: async (
       _: unknown,
@@ -1011,6 +1251,21 @@ export const resolvers = {
       if (result.ok) await agentLooks.remove(slug);
       return result;
     },
+    askGuildMaster: async (_: unknown, { sessionId }: { sessionId: string }) => {
+      requireAgents();
+      const session = await chatService.session(sessionId).catch(orchestratorInputError);
+      const run = session?.ticketKey ? await orchestratorService.get(normalizeTicketKey(session.ticketKey)).catch(() => null) : null;
+      return chatService.askGuildMaster(sessionId, await orchestratorService.machines(), run ? { stage: run.stage, verdict: run.verdict ?? null } : null).catch(orchestratorInputError);
+    },
+    guildMasterRollback: async (_: unknown, { id }: { id: number }) => {
+      requireAgents();
+      // The owner's click is the confirmation: DOCK mints the nonce the kit's write consumes, bound to the settings the backup restores.
+      const grant = async () => {
+        const entry = (await agentBridge.gmLog(CHAT_MACHINE)).find((row) => row.id === id);
+        return { nonce: chatService.gmNonces.mint({ sessionId: null, sha256: `rollback:${id}`, values: entry?.restoreValues ?? null, target: entry?.type === 'cron' ? 'cron' : 'settings', rollback: true }).nonce, key: await chatService.gmKey() };
+      };
+      return agentBridge.gmRollback(CHAT_MACHINE, id, grant).catch(orchestratorInputError);
+    },
     renameChatSession: async (_: unknown, { id, title }: { id: string; title: string }) => {
       return chatService.renameSession(id, title).catch(orchestratorInputError);
     },
@@ -1061,30 +1316,49 @@ export const resolvers = {
     },
   },
   ChatSession: {
+    judge: (session: { id: string }) => sessionJudge(session.id),
+    gmProposal: (session: { id: string; mode?: string }) => (session.mode === 'gm' ? chatService.gmProposal(session.id) : null),
     pending: async (session: { id: string; status: string; machine: string }) => chatService.pending(session.id, session.status, session.machine),
     settled: async (session: { id: string; status: string; machine: string }) => chatService.settled(session.id, session.status, session.machine),
   },
   DiscordChannel: {
     team: (channel: { team?: boolean }) => Boolean(channel.team),
   },
+  SprintDraftTicket: {
+    scout: (ticket: { key: string }) => readScout(blackboard, ticket.key),
+    scoutRunning: (ticket: { key: string }) => scoutRunner.running(ticket.key),
+  },
+  SprintDraftQuestion: {
+    options: (question: { options?: string[] }) => question.options ?? [],
+  },
   SprintStoryboard: {
     scenarios: (board: { scenarios?: unknown[] }) => board.scenarios ?? [],
     htmlUrl: (board: { epic: string; version: number | null; error: string | null }) => storyboardUrl(board.epic, board.version),
     previousHtmlUrl: (board: { epic: string; previous: number | null }) => storyboardUrl(board.epic, board.previous),
+    none: (board: { none?: boolean }) => !!board.none,
   },
   ChatMessage: {
     attachments: (message: { attachments?: unknown[] }) => message.attachments ?? [],
   },
+  SessionJudge: {
+    findings: (judge: { sessionId: string }) => judgeQueue.findings(judge.sessionId),
+  },
+  Checkpoint: {
+    untestable: (checkpoint: Checkpoint) => checkpoint.notes.untestable,
+    missingData: (checkpoint: Checkpoint) => checkpoint.notes.missingData,
+  },
 };
 
 export const protectedQueries = [
-  'dashboard', 'ticketPullRequests', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'claudeAccounts', 'qaLocal', 'deployGate', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
+  'dashboard', 'ticketPullRequests', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'installedSkills', 'reviewRoundsForTicket', 'claudeAccounts', 'qaLocal', 'deployGate', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatSessionStates', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
-  'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'agentLooks', 'libraryAgents', 'libraryAgent',
+  'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'claudeSessionUsage', 'claudeTicketUsage', 'agentLooks', 'libraryAgents', 'libraryAgent', 'guildMasterLog', 'guildMasterParty',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
   'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro', 'sprintPlan',
-  'planningSprints', 'sprintDraft', 'previewSprintDraftPublish', 'sprintDrift', 'acIncoming',
+  'planningSprints', 'sprintDraft', 'sprintDraftVisuals', 'planningChatPrompt', 'sprintPlanSignal', 'planningFlow', 'planningSplitPage', 'previewSprintDraftPublish', 'sprintDrift', 'acIncoming', 'ticketSummary', 'ticketReadiness',
+  'checkpoints', 'sousFlow', 'ticketSousFlow', 'sousFlowPrompt', 'opsRules', 'qaQueue', 'qaQueuePosition', 'worktrees',
+  'judgeDays', 'judgeDay', 'judgeWaiting', 'judgeSettings',
 ] as const;
 export const protectedMutations = [
   'retroBuild',
@@ -1093,8 +1367,38 @@ export const protectedMutations = [
   'loadSprintDraft',
   'updateSprintDraftTicket',
   'decideSprintDraft',
+  'saveSprintDraftNewTicket',
+  'removeSprintDraftNewTicket',
+  'createSprintDraftNewTickets',
+  'saveSprintDraftRevision',
+  'applySprintDraftRevision',
+  'discardSprintDraftRevision',
+  'saveSprintDraftVisual',
+  'dropSprintDraftVisual',
   'refreshSprintDraftQa',
+  'setPlanningFlow',
+  'setPlanningSplitPage',
+  'testPlanningSplitPage',
+  'useSprintDraftSplit',
+  'keepSprintDraftSplit',
+  'setJudgeCall',
+  'confirmJudgeDay',
+  'judgeNow',
+  'judgeSprint',
+  'judgeAgain',
+  'setJudgeSettings',
+  'setSousFlow',
+  'setTicketSousFlow',
+  'writeQaGuide',
+  'setStatusAfterMerge',
+  'setWorktreeMerged',
+  'cancelAutoReviewPost',
+  'editAutoReviewPost',
+  'cancelReviewReplyPost',
+  'editReviewReplyPost',
+  'cleanWorktrees',
   'checkSprintStoryboards',
+  'runScout',
   'uploadSprintStoryboard',
   'answerSprintDraftQuestion',
   'setSprintDraftTcs',
@@ -1156,6 +1460,8 @@ export const protectedMutations = [
   'unparkElevenLabsKey',
   'dismissOrchestration',
   'createChatSession',
+  'askGuildMaster',
+  'guildMasterRollback',
   'sendChatMessage',
   'answerTicket',
   'submitDecisions',

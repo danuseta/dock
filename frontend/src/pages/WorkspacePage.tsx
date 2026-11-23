@@ -8,6 +8,9 @@ import { apiOrigin } from '../lib/apollo';
 import { formatSize } from '../lib/blackboard';
 import { cn } from '../lib/cn';
 import { joinPath, nameProblem, renamedPath } from '../lib/workspacePaths';
+import { WorktreesPanel } from '../components/WorktreesPanel';
+import { DevServersTab } from '../components/DevServersTab';
+import { HealthTab } from '../components/HealthTab';
 
 interface Entry { name: string; path: string; kind: 'dir' | 'file' | 'link' | 'other'; size: number | null; modifiedAt: string | null; masked: boolean }
 interface Dir { path: string; parent: string | null; truncated: boolean; entries: Entry[] }
@@ -19,8 +22,15 @@ function readQuery() {
   return { path: params.get('path') ?? '', file: params.get('file') };
 }
 
-function writeQuery(path: string, file: string | null) {
+type WorkspaceTab = 'files' | 'worktrees' | 'servers' | 'health';
+
+const WORKSPACE_TABS: Array<[WorkspaceTab, string]> = [['files', 'Files'], ['worktrees', 'Worktrees'], ['servers', 'Servers'], ['health', 'Health']];
+
+const readTab = (): WorkspaceTab => WORKSPACE_TABS.find(([id]) => id === new URLSearchParams(window.location.search).get('tab'))?.[0] ?? 'files';
+
+function writeQuery(path: string, file: string | null, tab: WorkspaceTab = 'files') {
   const params = new URLSearchParams();
+  if (tab !== 'files') params.set('tab', tab);
   if (path) params.set('path', path);
   if (file) params.set('file', file);
   const search = params.toString();
@@ -138,6 +148,7 @@ type Asking = { kind: 'folder' } | { kind: 'file' } | { kind: 'rename'; entry: E
 /** The workspace's home folder: folders like `cd` and `ls`, files read and edited one at a time. Secrets are listed, never opened or changed. */
 const WorkspacePage: React.FC = () => {
   const [place, setPlace] = useState(readQuery);
+  const [tab, setTab] = useState<WorkspaceTab>(readTab);
   const [showHidden, setShowHidden] = useState(false);
   const [query, setQuery] = useState('');
   const [asking, setAsking] = useState<Asking | null>(null);
@@ -146,12 +157,12 @@ const WorkspacePage: React.FC = () => {
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
-  const { data, loading, error, refetch } = useQuery<{ workspaceDir: Dir }>(GET_WORKSPACE_DIR, { variables: { path: place.path }, fetchPolicy: 'cache-and-network' });
+  const { data, loading, error, refetch } = useQuery<{ workspaceDir: Dir }>(GET_WORKSPACE_DIR, { variables: { path: place.path }, fetchPolicy: 'cache-and-network', skip: tab !== 'files' });
   const [mkdir] = useMutation(WORKSPACE_MKDIR);
   const [rename] = useMutation(WORKSPACE_RENAME);
   const [remove] = useMutation(WORKSPACE_DELETE);
 
-  useEffect(() => { writeQuery(place.path, place.file); }, [place]);
+  useEffect(() => { writeQuery(place.path, place.file, tab); }, [place, tab]);
 
   const open = (path: string) => { setQuery(''); setNotice(null); setPlace({ path, file: null }); };
   const dir = data?.workspaceDir?.path === place.path ? data.workspaceDir : null;
@@ -216,21 +227,28 @@ const WorkspacePage: React.FC = () => {
       <header className="mb-4 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-bold">Workspace</h1>
-          <p className="mt-1 text-xs text-muted-foreground max-[760px]:line-clamp-1">The folders and files of this workspace, from the home folder down. Keys, logins and .env files are listed but never opened or changed.</p>
+          <p className="mt-1 text-xs text-muted-foreground max-[760px]:line-clamp-1">The folders and files of this workspace, from the home folder down, its worktrees, its dev servers and its health. Keys, logins and .env files are listed but never opened or changed.</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2" role="tablist" aria-label="Workspace">
+          {WORKSPACE_TABS.map(([id, label]) => <Button key={id} size="sm" role="tab" aria-selected={tab === id} variant={tab === id ? 'primary' : 'default'} onClick={() => setTab(id)}>{label}</Button>)}
+        </div>
+        {tab === 'files' && <div className="flex flex-wrap gap-2">
           <Button size="sm" onClick={() => { setActionError(null); setAsking({ kind: 'folder' }); }} disabled={!dir}><FolderPlus size={13} aria-hidden="true" />New folder</Button>
           <Button size="sm" onClick={() => { setActionError(null); setAsking({ kind: 'file' }); }} disabled={!dir}><FilePlus size={13} aria-hidden="true" />New file</Button>
           <Button size="sm" onClick={() => uploadRef.current?.click()} disabled={!dir || busy}><Upload size={13} aria-hidden="true" />{busy && !asking && !deleting ? 'Uploading...' : 'Upload'}</Button>
           <input ref={uploadRef} type="file" multiple hidden onChange={(event) => void upload(event.target.files)} />
-        </div>
+        </div>}
       </header>
+
+      {tab === 'worktrees' && <WorktreesPanel />}
+      {tab === 'servers' && <DevServersTab onOpenHealth={() => setTab('health')} />}
+      {tab === 'health' && <HealthTab />}
 
       {(notice || (actionError && !asking && !deleting)) && (
         <p className={cn('mb-3 text-xs', actionError && !asking && !deleting ? 'text-status-conflict' : 'text-muted-foreground')} role={actionError ? 'alert' : 'status'}>{actionError && !asking && !deleting ? actionError : notice}</p>
       )}
 
-      <div className="grid min-h-[640px] grid-cols-[minmax(280px,380px)_minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-background max-[760px]:min-h-0 max-[760px]:grid-cols-1">
+      <div className={cn('grid min-h-[640px] grid-cols-[minmax(280px,380px)_minmax(0,1fr)] overflow-hidden rounded-md border border-border bg-background max-[760px]:min-h-0 max-[760px]:grid-cols-1', tab !== 'files' && 'hidden')}>
         <section className={cn('flex min-w-0 flex-col border-r border-border max-[760px]:border-r-0', place.file && 'max-[760px]:hidden')} aria-label="Folder">
           <div className="flex flex-col gap-2 border-b border-border px-3 py-2.5">
             <Crumbs path={place.path} onOpen={open} />

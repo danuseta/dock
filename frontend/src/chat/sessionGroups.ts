@@ -32,16 +32,26 @@ export function sidebarDot(session: Pick<ChatSession, 'waiting' | 'status'>, fac
   return dotState({ bridgeUp: facts.bridgeUp, waiting: Boolean(session.waiting), busy });
 }
 
-export type SessionFilter = 'all' | 'task' | 'review';
+export type SessionFilter = 'all' | 'task' | 'review' | 'gm';
+
+export const isGuildMaster = (session: Pick<ChatSession, 'mode'>) => session.mode === 'gm';
 
 export function sessionKind(title: string): 'task' | 'review' | null {
   if (/^Task-/.test(title)) return 'task';
   return /^Review-/.test(title) ? 'review' : null;
 }
 
+/** A local QA session (`QA-QRD-1565`): it shows as the QA local card of its ticket's session, not in the list. */
+export const isQaSession = (session: Pick<ChatSession, 'title'>) => /^QA-/.test(session.title || '');
+
+/** The sessions the list shows: every one but local QA. */
+export const listedSessions = (sessions: ChatSession[]) => sessions.filter((session) => !isQaSession(session));
+
 export function filterSessions(sessions: ChatSession[], filter: SessionFilter): ChatSession[] {
-  if (filter === 'all') return sessions;
-  return sessions.filter((s) => sessionKind(s.title) === filter);
+  const listed = listedSessions(sessions);
+  if (filter === 'all') return listed;
+  if (filter === 'gm') return listed.filter(isGuildMaster);
+  return listed.filter((s) => sessionKind(s.title) === filter);
 }
 
 export function groupSessions(sessions: ChatSession[], now: number): SessionGroup[] {

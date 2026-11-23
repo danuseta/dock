@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { DecisionGate, ownerPending, stillWorking, sweepReleases, type GateDeps } from '../integrations/decision-gate';
+import { AUTO_KEEP_REASON, DecisionGate, keepFinishedGuesses, ownerPending, stillWorking, sweepReleases, type GateDeps } from '../integrations/decision-gate';
 import { normalizeDecisions } from '../integrations/orchestrator';
 
 const decision = (n: number, status: string) => ({ n, at: '', text: `D${n}`, status, by: 'sous', issue: null, cancelNote: null, effect: null, alts: [], replaces: null, supersededBy: null }) as never;
@@ -132,4 +132,36 @@ test('the sweep releases and posts quiet builds at their pull request stage, and
   });
   assert.deepStrictEqual(settled, ['QRD-1275', 'QRD-1286'], 'a fresh ACTIVE run, a run still at code and a review are left alone');
   assert.deepStrictEqual(posted, ['QRD-1275'], 'only a build with a pull request out of draft is offered to the broadcast');
+});
+
+test('guesses on a done or merged build are kept as built, once, and open issues still wait on the owner', async () => {
+  const w = world();
+  const written: Array<{ key: string; decisions: number[]; auto: string | null | undefined }> = [];
+  const cache = new Map<string, unknown>();
+  const gate = new DecisionGate({
+    getCache: async (namespace, key) => cache.get(`${namespace}:${key}`) ?? null,
+    upsertCache: async (namespace, key, value) => { cache.set(`${namespace}:${key}`, JSON.parse(JSON.stringify(value))); },
+    markReady: async () => true,
+    event: async (_key, kind, detail) => { w.events.push(`${kind} ${detail}`); },
+    afterReady: async () => undefined,
+    writeLedger: async (key, _machine, decisions, auto) => { written.push({ key, decisions: decisions.map((item) => item.n), auto }); return 'written'; },
+  });
+  const runs = [
+    build({ key: 'ZED-1', finished: true, issues: [issue(1, 'open')] }),
+    build({ key: 'ZED-2', finished: false }),
+    build({ key: 'ZED-3', kind: 'review', finished: true }),
+    build({ key: 'ZED-4', finished: true, decisions: [decision(1, 'DECIDED')] }),
+  ];
+  const list = async () => runs as never;
+  await gate.confirm(runs[0] as never, [3]);
+  assert.deepStrictEqual(await keepFinishedGuesses({ list, gate }), [{ key: 'ZED-1', decisions: [2] }], 'only the unanswered guess of the finished build');
+  assert.deepStrictEqual(await gate.confirmed('ZED-1'), [2, 3]);
+  assert.deepStrictEqual(await gate.autoConfirmed('ZED-1'), [2], 'the owner confirmed D-3 and it stays an owner answer');
+  assert.deepStrictEqual(await gate.confirmed('ZED-2'), [], 'a build still at work keeps asking');
+  assert.deepStrictEqual(await gate.confirmed('ZED-3'), [], 'a review is never asked');
+  assert.deepStrictEqual(written.map((item) => [item.key, item.decisions, item.auto]), [['ZED-1', [3], null], ['ZED-1', [2], AUTO_KEEP_REASON]]);
+  assert.ok(w.events.includes('AUTO_CONFIRMED D-2 (ticket done)'), w.events.join(' | '));
+  assert.deepStrictEqual(ownerPending(runs[0] as never, await gate.confirmed('ZED-1')), { issues: [1], decisions: [] }, 'the open issue is not answered');
+  assert.deepStrictEqual(await keepFinishedGuesses({ list, gate }), [], 'a second sweep keeps nothing again');
+  assert.strictEqual(written.length, 2);
 });

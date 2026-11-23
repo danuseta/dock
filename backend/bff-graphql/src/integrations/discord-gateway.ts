@@ -4,6 +4,7 @@
  * hands every dispatch to the reader. A dropped connection resumes, so the events missed meanwhile are sent again;
  * when Discord refuses the resume, the next READY tells the reader to read everything once.
  */
+import { discordGatewayUrl } from './mock-base';
 
 export const GATEWAY_URL = 'wss://gateway.discord.gg/?v=10&encoding=json';
 /** Guilds, guild messages and message content: the threads, their messages and what the messages say. */
@@ -87,7 +88,7 @@ export class DiscordGateway {
 
   private open(resume: boolean) {
     this.state = 'connecting';
-    const url = resume && this.session ? `${this.session.url}/?v=10&encoding=json` : GATEWAY_URL;
+    const url = resume && this.session ? `${this.session.url}/?v=10&encoding=json` : discordGatewayUrl(GATEWAY_URL);
     if (!resume) {
       this.session = null;
       this.seq = null;

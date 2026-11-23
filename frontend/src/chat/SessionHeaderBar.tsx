@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, PanelRight, Pencil, SlidersHorizontal, X } from 'lucide-react';
+import { ArrowLeft, Crown, PanelRight, Pencil, SlidersHorizontal, X } from 'lucide-react';
 import { Button } from '../components/ui';
 import { cn } from '../lib/cn';
 import { ModelOptions, ModelPopover } from './ModelPopover';
@@ -21,11 +21,15 @@ interface SessionHeaderBarProps {
   onBack: () => void;
   onToggleInspector: () => void;
   onRename: () => void;
+  /** Work sessions only: sends DOCK's summary of this session to a Guild Master session. */
+  onAskGuildMaster?: () => void;
+  asking?: boolean;
 }
 
-export const SessionHeaderBar: React.FC<SessionHeaderBarProps> = ({ session, dot, status, control, inspectorOpen, lanes, onBack, onToggleInspector, onRename }) => {
+export const SessionHeaderBar: React.FC<SessionHeaderBarProps> = ({ session, dot, status, control, inspectorOpen, lanes, onBack, onToggleInspector, onRename, onAskGuildMaster, asking = false }) => {
   const [drawer, setDrawer] = useState(false);
   const readOnly = session.source === 'cli';
+  const gm = session.mode === 'gm';
   const context = status?.contextPercentage != null ? Math.min(100, Math.max(0, status.contextPercentage)) : null;
   const { machineOptions, rows, label } = modelSummary(control, status?.model || 'Model');
   const makeDefault = useMakeDefault(machineOf(session), rows);
@@ -52,8 +56,10 @@ export const SessionHeaderBar: React.FC<SessionHeaderBarProps> = ({ session, dot
         </p>
       </div>
       {readOnly && <ReadOnlyChip />}
+      {gm && <span className="inline-flex h-7 flex-none items-center gap-1.5 rounded-pill border border-violet-400/40 bg-violet-400/10 px-2.5 font-mono text-[0.68rem] font-semibold text-violet-300" title="Guild Master: sonnet, no shell, writes only after your ya"><Crown size={11} aria-hidden="true" />Guild Master<span className="max-[760px]:hidden"> · no shell · owner only</span></span>}
       <div className="contents max-[760px]:hidden">
-      <ModelPopover control={control} machine={machineOf(session)} fallbackLabel={status?.model || 'Model'} disabled={readOnly} />
+      {onAskGuildMaster && !gm && !readOnly && <Button size="sm" variant="ghost" className="h-8 flex-none border-violet-400/40 px-2 text-violet-200 hover:bg-violet-400/10" disabled={asking} onClick={onAskGuildMaster}><Crown size={13} aria-hidden="true" />{asking ? 'Sending...' : 'Ask Guild Master'}</Button>}
+      <ModelPopover control={control} machine={machineOf(session)} fallbackLabel={gm ? 'sonnet' : status?.model || 'Model'} disabled={readOnly || gm} />
       {context !== null && (
         <span className="inline-flex h-7 flex-none items-center gap-1.5 rounded-xs border border-border px-2 font-mono text-[0.68rem] tabular-nums text-secondary-foreground" title="Context used">
           <span className="h-1.5 w-8 overflow-hidden max-[760px]:hidden rounded-pill bg-surface-2" role="meter" aria-label="Context used" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(context)}><span className="block h-full bg-secondary-foreground" style={{ width: `${context}%` }} /></span>
