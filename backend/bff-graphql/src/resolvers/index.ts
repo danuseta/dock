@@ -479,8 +479,8 @@ export const resolvers = {
       return { lines, prompt: sousStartPrompt(key?.trim().toUpperCase() || 'QRD-…', null, lines) };
     },
     opsRules: async () => {
-      const [statusAfterMerge, worktreeMerged] = await storageService.getSettingValues([STATUS_AFTER_MERGE_KEY, WORKTREE_MERGED_KEY]);
-      return { statusAfterMerge: JSON.stringify(readStatusAfterMerge(statusAfterMerge?.value)), worktreeMerged: JSON.stringify(readWorktreeMerged(worktreeMerged?.value)) };
+      const rows = new Map((await storageService.getSettingValues([STATUS_AFTER_MERGE_KEY, WORKTREE_MERGED_KEY])).map((row) => [row.key, row.value]));
+      return { statusAfterMerge: JSON.stringify(readStatusAfterMerge(rows.get(STATUS_AFTER_MERGE_KEY))), worktreeMerged: JSON.stringify(readWorktreeMerged(rows.get(WORKTREE_MERGED_KEY))) };
     },
     qaQueue: () => qaQueueService.queue(),
     qaQueuePosition: (_: unknown, { key }: { key: string }) => qaQueueService.position(key),
