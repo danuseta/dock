@@ -201,6 +201,19 @@ test('a blocker or a request change is handed to the owner; a resolved blocker d
   assert.deepStrictEqual(ignored.approved, []);
 });
 
+test('a ledger write during a later round keeps the round running while its verdict is the one left from the round before; the new approve is LGTM\'d', async () => {
+  const w = world({ autoLgtm: true });
+  await w.review.tick();
+  const before = new Date(NOW.getTime() - 3_600_000).toISOString();
+  const blocker = { at: before, severity: 'blocker', text: 'No crumb', resolvedAt: null, resolvedWhy: null };
+  await w.review.ledger(verdict({ verdict: 'request-change', verdictAt: before, findings: [blocker] } as Partial<Orchestration>));
+  assert.strictEqual(w.records[0].status, 'running', 'the old verdict does not settle the new round');
+  assert.deepStrictEqual(w.pushes, []);
+  await w.review.ledger(verdict({ verdictAt: new Date(NOW.getTime() + 600_000).toISOString(), findings: [{ ...blocker, resolvedAt: '2026-11-24', resolvedWhy: 'fixed' }] } as Partial<Orchestration>));
+  assert.deepStrictEqual(w.approved, ['QRD-1473']);
+  assert.strictEqual(w.records[0].status, 'lgtm');
+});
+
 const FE = 'https://github.com/qonekid/ms-client-dashboard-frontend/pull/88';
 
 test('a thread with a BE and an FE pull request starts one Review session for both, and its verdict settles both records', async () => {
