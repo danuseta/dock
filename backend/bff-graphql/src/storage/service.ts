@@ -1467,8 +1467,8 @@ export class StorageService {
     return this.db.chatMessage.updateMany({ where: { sessionId, state: from }, data: { state: to } });
   }
 
-  getNewestChatMessage(sessionId: string, role: string) {
-    return this.db.chatMessage.findFirst({ where: { sessionId, role }, orderBy: { id: 'desc' } });
+  getNewestChatMessage(sessionId: string, role: string, contains?: string) {
+    return this.db.chatMessage.findFirst({ where: { sessionId, role, ...(contains ? { text: { contains } } : {}) }, orderBy: { id: 'desc' } });
   }
 
   /** Case-insensitive for ASCII. Prisma's `contains` leaves % and _ as wildcards on sqlite, so the pattern is escaped here. */

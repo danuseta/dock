@@ -3,7 +3,7 @@ import { decrypt } from '../storage/crypto';
 import { StorageService } from '../storage/service';
 import { AutoReview, MESSAGE_KEYS, WAITING_SKILL, arenaSetting, currentReviews, messageFormat, type AutoReviewOwner, type PullState } from './auto-review';
 import { defaultBlackboardRoot, ticketScreenshots } from './blackboard';
-import { DiscordPoster } from './discord-post';
+import { DISCORD_OPEN, DiscordPoster } from './discord-post';
 import { installedSkills } from './installed-skills';
 import { threadService } from './discord-threads';
 import { reporterName } from './dock-issues';
@@ -91,7 +91,7 @@ export const autoReview = new AutoReview({
   push: (message) => eventPush.send('needsYou', message),
   owner: reviewOwner,
   postDiscord: (webhookUrl, content, options) => poster.post(webhookUrl, content, options),
-  newestReply: async (sessionId) => (await storage.getNewestChatMessage(sessionId, 'assistant'))?.text ?? null,
+  newestReply: async (sessionId) => (await storage.getNewestChatMessage(sessionId, 'assistant', DISCORD_OPEN))?.text ?? null,
   skills: () => installedSkills(),
   imageRoot: screenshotsOf,
   now: () => new Date(),

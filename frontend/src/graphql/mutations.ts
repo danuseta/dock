@@ -8,8 +8,8 @@ export const SAVE_DEMO_LINK = gql`
 `;
 
 export const SEND_TO_DISCORD = gql`
-  mutation SendToDiscord($ticketKey: String!, $customMessage: String, $threadId: String, $threadName: String) {
-    sendToDiscord(ticketKey: $ticketKey, customMessage: $customMessage, threadId: $threadId, threadName: $threadName)
+  mutation SendToDiscord($ticketKey: String!, $customMessage: String, $threadId: String, $threadName: String, $notes: String) {
+    sendToDiscord(ticketKey: $ticketKey, customMessage: $customMessage, threadId: $threadId, threadName: $threadName, notes: $notes)
   }
 `;
 

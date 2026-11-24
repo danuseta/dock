@@ -1,10 +1,10 @@
 import { useRef } from 'react';
 import { Lock } from 'lucide-react';
-import { Badge, Button, Select, Textarea } from '../../components/ui';
-import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, renderDiscordMessageTemplate } from '../../lib/discordTemplate';
+import { Badge, Button, Checkbox, Input, Select, Textarea } from '../../components/ui';
+import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, DEFAULT_PR_TAG_TEMPLATE, MAX_PR_TAG_ROLE_LENGTH, MAX_PR_TAG_TEMPLATE_LENGTH, getPrTagError, renderDiscordMessageTemplate, renderPrTag } from '../../lib/discordTemplate';
 import { DEFAULT_REVIEW_POST_TEMPLATE, DEFAULT_REVIEW_REPLY_TEMPLATE, DEFAULT_REVIEW_SKILL, MAX_TEMPLATE_CHARS, MESSAGE_FORMATS, MESSAGE_KEYS, MESSAGE_MARKER, TEMPLATE_PLACEHOLDERS, previewMessage, type MessageKind } from '../../lib/reviewMessages';
 import { sectionErrors, type SectionValues } from '../sections';
-import { SettingsCard } from '../SettingsParts';
+import { SettingRow, SettingsCard } from '../SettingsParts';
 
 const TEMPLATE_FIELDS = ['ticketKey', 'ticketTitle', 'ticketUrl', 'relatedTickets', 'pullRequests', 'demoUrl'];
 
@@ -17,6 +17,32 @@ const previewData = {
 const REVIEW_MESSAGES: Record<MessageKind, { title: string; caption: string; fallback: string }> = {
   post: { title: 'Review post', caption: 'The message DOCK posts to the pr-review thread after a review. A skill writes it; the DOCK template needs no model.', fallback: DEFAULT_REVIEW_POST_TEMPLATE },
   reply: { title: 'Review reply', caption: 'The reply DOCK posts after a fix, or when every finding was not valid.', fallback: DEFAULT_REVIEW_REPLY_TEMPLATE },
+};
+
+const ReviewerTagCard = ({ values, set }: { values: SectionValues; set: (key: string, value: string) => void }) => {
+  const on = values.prTagEnabled === 'true';
+  const error = getPrTagError(values.prTagTemplate, values.prTagRole);
+  return (
+    <SettingsCard title="Reviewer tag" caption="A second message DOCK sends in the new pull request thread right after the post, so the team is pinged. Notes typed when posting by hand go before it.">
+      <label className="mb-3 flex items-start gap-3 text-sm">
+        <Checkbox checked={on} onChange={(event) => set('prTagEnabled', String(event.target.checked))} />
+        <span><b className="font-semibold text-foreground">Tag reviewers after the PR post</b><span className="block text-xs text-muted-foreground">{'{{slots}}'} is -1 when every posted ticket is a Bug in Jira, -2 otherwise. When Jira or the role cannot be read, you are told.</span></span>
+      </label>
+      <div className={on ? '' : 'opacity-50'}>
+        <SettingRow label="Message" help="{{role}} is the role, {{slots}} is -1 or -2.">
+          <Input aria-label="Reviewer tag message" className="font-mono text-xs" value={values.prTagTemplate} maxLength={MAX_PR_TAG_TEMPLATE_LENGTH} disabled={!on} aria-invalid={Boolean(error)} onChange={(event) => set('prTagTemplate', event.target.value)} />
+        </SettingRow>
+        <SettingRow label="Role" help="The Discord role name, found with the DOCK bot and pinged.">
+          <Input aria-label="Reviewer tag role" className="w-48 font-mono text-xs" value={values.prTagRole} maxLength={MAX_PR_TAG_ROLE_LENGTH} disabled={!on} onChange={(event) => set('prTagRole', event.target.value)} />
+        </SettingRow>
+        {error && <p className="mt-2 text-pretty text-xs text-status-conflict" role="alert">{error}</p>}
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <p className="m-0 font-mono text-xs text-muted-foreground" aria-live="polite">{renderPrTag(values.prTagTemplate, values.prTagRole, '-2')}</p>
+          <Button size="sm" variant="ghost" disabled={!on} onClick={() => set('prTagTemplate', DEFAULT_PR_TAG_TEMPLATE)}>Restore default</Button>
+        </div>
+      </div>
+    </SettingsCard>
+  );
 };
 
 const ReviewMessageCard = ({ kind, values, set, skills }: { kind: MessageKind; values: SectionValues; set: (key: string, value: string) => void; skills: string[] }) => {
@@ -60,7 +86,8 @@ const ReviewMessageCard = ({ kind, values, set, skills }: { kind: MessageKind; v
 export const DiscordMessagesSection = ({ values, set, skills = [] }: { values: SectionValues; set: (key: string, value: string) => void; skills?: string[] }) => {
   const templateRef = useRef<HTMLTextAreaElement>(null);
   const template = values.discordMessageTemplate;
-  const error = sectionErrors('messages', values)[0];
+  const tagError = getPrTagError(values.prTagTemplate, values.prTagRole);
+  const error = sectionErrors('messages', values).find((message) => message !== tagError);
 
   const insert = (field: string) => {
     const area = templateRef.current;
@@ -93,6 +120,7 @@ export const DiscordMessagesSection = ({ values, set, skills = [] }: { values: S
         <p className="mt-3 text-pretty text-xs text-muted-foreground">The ticket page lets you post to an existing thread or start a new one in a forum channel.</p>
       </SettingsCard>
     </div>
+    <ReviewerTagCard values={values} set={set} />
     <div className="grid grid-cols-2 gap-5 max-[1100px]:grid-cols-1">
       <ReviewMessageCard kind="post" values={values} set={set} skills={skills} />
       <ReviewMessageCard kind="reply" values={values} set={set} skills={skills} />

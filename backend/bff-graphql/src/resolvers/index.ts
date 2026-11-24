@@ -1005,7 +1005,7 @@ export const resolvers = {
     saveDemoLink: async (_: any, { ticketKey, url }: { ticketKey: string, url: string }) => {
       return await storageAPI.saveDemoLink(ticketKey, url);
     },
-    sendToDiscord: async (_: any, args: { ticketKey: string, customMessage?: string, threadId?: string, threadName?: string }) => {
+    sendToDiscord: async (_: any, args: { ticketKey: string, customMessage?: string, threadId?: string, threadName?: string, notes?: string }) => {
       return sendBroadcast(broadcastDeps, args);
     },
     setTicketDependency: async (_: unknown, { ticketKey, dependsOnKey }: { ticketKey: string; dependsOnKey: string }) => {

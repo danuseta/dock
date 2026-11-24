@@ -7,15 +7,16 @@ export class DiscordAPI {
     private readonly storageAPI: Pick<StorageAPI, 'getSettings'> = new StorageAPI(),
   ) {}
 
-  async sendSummary(payload: any) {
+  /** False when the post failed; otherwise the thread it went to, when it went to one. */
+  async sendSummary(payload: any): Promise<false | { threadId?: string }> {
     try {
       if (!payload.webhookUrl) return false;
-      await this.discordService.sendSummary(
+      const threadId = await this.discordService.sendSummary(
         { ticket: payload.ticket, relatedTickets: payload.relatedTickets, prs: payload.prs, demoUrl: payload.demoUrl },
         payload.webhookUrl,
         { customMessage: payload.customMessage, messageTemplate: payload.messageTemplate, threadId: payload.threadId, threadName: payload.threadName },
       );
-      return true;
+      return { threadId: threadId || undefined };
     } catch (error) {
       console.error('[Discord] Send failed:', describeDiscordError(error));
       return false;

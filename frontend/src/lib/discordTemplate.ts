@@ -5,6 +5,26 @@ export const DEFAULT_DISCORD_MESSAGE_TEMPLATE = `🚀 **Update: {{ticketKey}} - 
 {{pullRequests}}
 {{demoUrl}}`;
 
+export const DEFAULT_PR_TAG_TEMPLATE = '@{{role}} {{slots}} mas mas, thanks';
+export const DEFAULT_PR_TAG_ROLE = 'ITteam';
+export const MAX_PR_TAG_TEMPLATE_LENGTH = 1000;
+export const MAX_PR_TAG_ROLE_LENGTH = 100;
+const PR_TAG_FIELDS = new Set(['role', 'slots']);
+
+/** The error of the reviewer tag settings, or an empty string; an empty template falls back to the default. */
+export const getPrTagError = (template: string, role: string) => {
+  if (template.length > MAX_PR_TAG_TEMPLATE_LENGTH) return `The reviewer tag must not exceed ${MAX_PR_TAG_TEMPLATE_LENGTH} characters.`;
+  for (const match of template.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)) {
+    if (!PR_TAG_FIELDS.has(match[1])) return `Unsupported reviewer tag field: ${match[1]}`;
+  }
+  if (role.length > MAX_PR_TAG_ROLE_LENGTH || /[\r\n]/.test(role)) return `The role is one line of at most ${MAX_PR_TAG_ROLE_LENGTH} characters.`;
+  return '';
+};
+
+/** The reviewer tag as it reads in Discord, before the role becomes a ping. */
+export const renderPrTag = (template: string, role: string, slots: string) => (template.trim() || DEFAULT_PR_TAG_TEMPLATE)
+  .replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_match, field: string) => (field === 'role' ? (role.trim().replace(/^@+/, '') || DEFAULT_PR_TAG_ROLE) : field === 'slots' ? slots : ''));
+
 const ALLOWED_TEMPLATE_FIELDS = new Set(['ticketKey', 'ticketTitle', 'ticketUrl', 'relatedTickets', 'pullRequests', 'demoUrl']);
 const TICKET_FIELD_PATTERN = /\{\{\s*(ticketKey|ticketTitle|ticketUrl)\s*\}\}/;
 const MAX_DISCORD_THREAD_NAME_LENGTH = 100;

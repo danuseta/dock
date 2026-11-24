@@ -266,9 +266,9 @@ const TicketDetailPage: React.FC<TicketDetailPageProps> = ({ ticketKey, onBack, 
     setShowDiscordModal(true);
   };
 
-  const handleConfirmDiscord = async (customMessage: string, threadId?: string, threadName?: string) => {
+  const handleConfirmDiscord = async (customMessage: string, threadId?: string, threadName?: string, notes?: string) => {
     try {
-      const res = await sendToDiscord({ variables: { ticketKey, customMessage, threadId, threadName } });
+      const res = await sendToDiscord({ variables: { ticketKey, customMessage, threadId, threadName, notes } });
       if (res.data?.sendToDiscord) {
         setToast({ message: 'Summary posted to Discord. Tickets before review moved to PR Review.', type: 'success' });
         setShowDiscordModal(false);
