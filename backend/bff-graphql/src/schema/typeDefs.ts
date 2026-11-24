@@ -2177,6 +2177,15 @@ export const typeDefs = gql`
     replyText: String
     replyMessageId: String
     replyDetail: String
+    "The images of the reply, in number order."
+    replyImages: [ReviewImage!]!
+  }
+
+  "An image of a review post or reply: the number it is labelled with, its file in screenshots/ and its caption."
+  type ReviewImage {
+    n: Int!
+    file: String!
+    caption: String!
   }
 
   type ChatSessionState {
@@ -2563,6 +2572,8 @@ export const typeDefs = gql`
     postText: String
     postMessageId: String
     postDetail: String
+    "The images of the post, in number order."
+    postImages: [ReviewImage!]!
   }
 
   type ClaudeUsageWindow {

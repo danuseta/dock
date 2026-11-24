@@ -63,7 +63,7 @@ function world(options: { rows?: ThreadRow[]; enabled?: boolean; ownTickets?: st
     settings: { autoReply: true, delayMinutes: 2, maxRounds: 3, reply: { format: 'builtin', skill: 'review-message', template: DEFAULT_REVIEW_REPLY_TEMPLATE }, light: null } as FindingsSettings,
     skills: ['review-message'],
     pull: { open: true, headSha: 'b71e0d4aa' } as PullState | null,
-    posts: [] as Array<{ content: string; options: { threadId: string; username: string; users: string[]; files?: { root: string; names: string[] } } }>,
+    posts: [] as Array<{ content: string; options: { threadId: string; username: string; users: string[]; files?: { root: string; images: Array<{ n: number; file: string; caption: string }> } } }>,
     skipped: [] as string[],
   };
   const call = (name: string) => state.calls.push(name);
@@ -473,14 +473,15 @@ test('after a push the block is posted 2 min later with the reviewers mentioned,
   assert.match(lines[0], /\[ini\]\u200B\(<https:\/\/evil\.example\/x>\)/, 'a masked link shows as text');
   assert.deepStrictEqual(lines.slice(1), [fixMarker(1, 'b71e0d4aa')], 'a forged marker line in the block is dropped');
   assert.strictEqual(lines.at(-1), 'DOCK-FIX round 1 · head b71e0d4');
-  assert.deepStrictEqual(JSON.parse(round.replyImages ?? '[]'), ['03-empty-fixed-dark.png']);
+  assert.deepStrictEqual(JSON.parse(round.replyImages ?? '[]'), [{ n: 1, file: '03-empty-fixed-dark.png', caption: '' }]);
+  assert.match(lines[0], /fixed di b71e0d4 \(gambar 1\)\./, 'the file name in the text reads gambar 1');
   assert.match(w.state.pushes.at(-1)!.body, /DOCK posts the reply to the thread in 2 min/);
 
   await w.tickAt(INDRA_NOTES + ROUND_QUIET_MS + MIN);
   assert.strictEqual(w.state.posts.length, 0, 'not before the delay');
   await w.tickAt(INDRA_NOTES + ROUND_QUIET_MS + 3 * MIN);
   assert.strictEqual(w.state.posts.length, 1);
-  assert.deepStrictEqual(w.state.posts[0].options, { threadId: '1566728431721259084', username: 'Danu (DOCK)', users: ['71111'], files: { root: '/evidence/QRD-1292/screenshots', names: ['03-empty-fixed-dark.png'] } });
+  assert.deepStrictEqual(w.state.posts[0].options, { threadId: '1566728431721259084', username: 'Danu (DOCK)', users: ['71111'], files: { root: '/evidence/QRD-1292/screenshots', images: [{ n: 1, file: '03-empty-fixed-dark.png', caption: '' }] } });
   assert.strictEqual(w.state.posts[0].content, round.replyText);
   assert.deepStrictEqual([round.replyStatus, round.replyMessageId], ['sent', 'msg1']);
   await w.tickAt(INDRA_NOTES + ROUND_QUIET_MS + 4 * MIN);
@@ -668,4 +669,14 @@ test('reply images of a ticket that is not on this blackboard are not uploaded a
   await w.tickAt(INDRA_NOTES + ROUND_QUIET_MS + 3 * MIN);
   assert.strictEqual(w.state.posts[0].options.files, undefined);
   assert.deepStrictEqual([w.state.pushes.at(-1)!.title, w.state.pushes.at(-1)!.body], ['QRD-1292: images left out of the reply', '03-empty-fixed-dark.png']);
+});
+
+test('reply images sent without a label are named in a notification', async () => {
+  const { w, round } = await sentRound();
+  w.deps.postDiscord = async () => ({ id: 'msg1', skipped: [], unlabelled: ['03-empty-fixed-dark.png'] });
+  w.state.replies.set('task-9', REPLY(round.id));
+  await report(w);
+  await w.tickAt(INDRA_NOTES + ROUND_QUIET_MS + 3 * MIN);
+  assert.strictEqual(round.replyStatus, 'sent');
+  assert.deepStrictEqual([w.state.pushes.at(-1)!.title, w.state.pushes.at(-1)!.body], ['QRD-1292: images sent without a label', '03-empty-fixed-dark.png']);
 });

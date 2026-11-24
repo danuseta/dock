@@ -2,7 +2,7 @@ import { ExternalLink } from 'lucide-react';
 import { Badge, Button, Textarea } from '../../components/ui';
 import type { BadgeVariant } from '../../components/ui/Badge';
 import { cn } from '../../lib/cn';
-import { DISCORD_LABEL, isPending, markerSummary, splitMarker, type HistoryRow, type ReviewRound } from '../../lib/reviewRounds';
+import { DISCORD_LABEL, imageLine, isPending, markerSummary, splitMarker, type HistoryRow, type ReviewRound } from '../../lib/reviewRounds';
 
 const DISCORD_TONE: Record<string, BadgeVariant> = { pending: 'warn', sending: 'warn', sent: 'success', cancelled: 'neutral', failed: 'danger', skipped: 'neutral' };
 
@@ -70,6 +70,11 @@ export const ReviewHistoryTable = ({ rows, busy, editing, onCancel, onEdit, onTe
                       <span className="line-clamp-2 max-w-[320px] whitespace-pre-wrap text-secondary-foreground">{splitMarker(row.discordText).body}</span>
                       {splitMarker(row.discordText).marker && <span className="font-mono text-[0.68rem] text-muted-foreground">{markerSummary(splitMarker(row.discordText).marker)}</span>}
                     </>
+                  )}
+                  {isPending(row) && row.discordImages.length > 0 && (
+                    <ul className="m-0 flex list-none flex-col gap-0.5 p-0" aria-label="Post images">
+                      {row.discordImages.map((image) => <li key={image.n} className="max-w-[320px] break-words font-mono text-[0.68rem] text-secondary-foreground">{imageLine(image)}</li>)}
+                    </ul>
                   )}
                 </div>
               ) : <span className="text-muted-foreground">—</span>}

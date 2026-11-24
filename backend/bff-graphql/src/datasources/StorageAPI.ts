@@ -1,6 +1,7 @@
 import { isAbsolute } from 'node:path';
 import { StorageService } from '../storage/service';
 import { discordTeam, workspaceDiscordSetting } from '../integrations/discord-team';
+import { readImageList } from '../integrations/discord-post';
 import { ARENA_SETTINGS, MESSAGE_KEYS, arenaSetting, isArenaSetting, isMessageSetting, messageFormat } from '../integrations/auto-review';
 import { LIGHT_KEYS, isLightSetting, lightSettings } from '../integrations/light-runner';
 import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, normalizeDiscordMessageTemplate } from '../integrations/discord';
@@ -175,7 +176,7 @@ export class StorageAPI {
   }
 
   async getAutoReviews(take = 30) {
-    return (await this.storage.getAutoReviews(take)).map((row) => ({ ...row, startedAt: row.startedAt.toISOString(), finishedAt: row.finishedAt?.toISOString() ?? null, postAt: row.postAt?.toISOString() ?? null }));
+    return (await this.storage.getAutoReviews(take)).map((row) => ({ ...row, startedAt: row.startedAt.toISOString(), finishedAt: row.finishedAt?.toISOString() ?? null, postAt: row.postAt?.toISOString() ?? null, postImages: readImageList(row.postImages) }));
   }
 
   hasMasterPin() {

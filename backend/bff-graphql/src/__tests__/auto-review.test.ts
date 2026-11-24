@@ -1,6 +1,7 @@
 import assert from 'node:assert';
 import test from 'node:test';
 import { AutoReview, DEFAULT_REVIEW_POST_TEMPLATE, markerVerdict, DEFAULT_REVIEW_REPLY_TEMPLATE, ON_IT_WINDOW_MS, WAITING_SKILL, fillTemplate, isMessageSetting, messageFormat, reviewTemplateValues, answeredFindings, currentReviews, reviewBody, reviewMarker, reviewPost, reviewPrompt, withMarker, type AutoReviewDeps, type AutoReviewRecord, type AutoReviewSettings, type PushMessage } from '../integrations/auto-review';
+import type { DiscordPostFiles } from '../integrations/discord-post';
 import { sortThread } from '../integrations/discord-reader';
 import type { ThreadRow } from '../integrations/discord-threads';
 import type { Orchestration } from '../integrations/orchestrator';
@@ -566,12 +567,13 @@ const at = (minutes: number) => () => new Date(NOW.getTime() + minutes * 60_000)
 test('in skill mode the review prompt asks for the message with that skill in the DISCORD block, and the post goes out with the block and its images', async () => {
   const w = world({ rows: [row({ url: THREAD })] });
   w.deps.settings = async () => SKILL_SETTINGS;
-  const sent: Array<{ content: string; files?: { root: string; names: string[] } }> = [];
+  const sent: Array<{ content: string; files?: DiscordPostFiles }> = [];
   w.deps.postDiscord = async (_url, content, options) => { sent.push({ content, files: options.files }); return { id: 'msg7', skipped: ['01-tooltip-dark.png'] }; };
   await w.review.tick();
   assert.strictEqual(w.opened[0].prompt, reviewPrompt('QRD-1473', [PR], THREAD, 'review-message'));
   assert.match(w.opened[0].prompt, /tulis pesan Discord hasil review pakai skill review-message/);
-  assert.match(w.opened[0].prompt, /<<<DISCORD dan <<<AKHIR DISCORD>>>.*GAMBAR: <nama file>.*screenshots\/ di blackboard QRD-1473, maksimal 10/);
+  assert.match(w.opened[0].prompt, /<<<DISCORD dan <<<AKHIR DISCORD>>>\.\nLampirkan screenshot cuma untuk temuan blocker\. Di teks sebut sebagai "gambar N", nomor urut pertama kali disebut; jangan pernah tulis nama file di teks\.\n/);
+  assert.match(w.opened[0].prompt, /\nDi dalam blok, satu baris GAMBAR N: <nama file> \| <keterangan pendek> per gambar, nama file saja dari folder screenshots\/ di blackboard QRD-1473, maksimal 10\.\n/);
   assert.match(w.opened[0].prompt, /jangan post sendiri/);
   await w.review.ledger(verdict({ verdict: 'request-change', findings: [finding('blocker', 'No tooltip')] } as Partial<Orchestration>));
   const record = w.records[0];
@@ -585,10 +587,31 @@ test('in skill mode the review prompt asks for the message with that skill in th
   assert.strictEqual(w.pushes.at(-1)?.title, 'QRD-1473: review post ready, sends in 2 min');
   w.deps.now = at(6);
   await w.review.tick();
-  assert.strictEqual(sent[0].content, 'mas indra, ada blocker 1. 1) blocker, be: tooltip hilang (gambar 01-tooltip-dark.png)\nDOCK-REVIEW on it by <@111> · round 1 · @ abc1234 · Request change · 1 blocker');
-  assert.deepStrictEqual(sent[0].files, { root: '/evidence/QRD-1473/screenshots', names: ['01-tooltip-dark.png'] });
+  assert.strictEqual(sent[0].content, 'mas indra, ada blocker 1. 1) blocker, be: tooltip hilang (gambar 1)\nDOCK-REVIEW on it by <@111> · round 1 · @ abc1234 · Request change · 1 blocker', 'an old GAMBAR line still works and the file name in the text reads gambar 1');
+  assert.deepStrictEqual(sent[0].files, { root: '/evidence/QRD-1473/screenshots', images: [{ n: 1, file: '01-tooltip-dark.png', caption: '' }] });
   assert.deepStrictEqual([record.postStatus, record.postMessageId, record.postDetail], ['sent', 'msg7', null]);
   assert.deepStrictEqual([w.pushes.at(-1)?.title, w.pushes.at(-1)?.body], ['QRD-1473: images left out of the review post', '01-tooltip-dark.png']);
+});
+
+test('numbered GAMBAR lines with captions are kept in number order, and images sent without a label are named in a notification', async () => {
+  const w = world({ rows: [row({ url: THREAD })] });
+  w.deps.settings = async () => SKILL_SETTINGS;
+  const sent: Array<DiscordPostFiles | undefined> = [];
+  w.deps.postDiscord = async (_url, _content, options) => { sent.push(options.files); return { id: 'msg8', skipped: [], unlabelled: ['11-file-noparent.png'] }; };
+  await w.review.tick();
+  await w.review.ledger(verdict({ verdict: 'request-change', findings: [finding('blocker', 'No crumb')] } as Partial<Orchestration>));
+  const block = '<<<DISCORD\nmas indra, ada blocker 1. 1) blocker, fe: gambar 1 buat new agent tool, gambar 2 buat ?file=\nGAMBAR 2: 11-file-noparent.png | ?file= gak kebuka\nGAMBAR 1: 10-tool-noparent-agent.png | New › Agent tool dari Lab root\n<<<AKHIR DISCORD>>>';
+  w.deps.newestReply = async () => block;
+  w.deps.now = at(3);
+  await w.review.tick();
+  assert.deepStrictEqual(JSON.parse(w.records[0].postImages ?? '[]'), [
+    { n: 1, file: '10-tool-noparent-agent.png', caption: 'New › Agent tool dari Lab root' },
+    { n: 2, file: '11-file-noparent.png', caption: '?file= gak kebuka' },
+  ]);
+  w.deps.now = at(6);
+  await w.review.tick();
+  assert.deepStrictEqual(sent[0]?.images.map((image) => image.n), [1, 2]);
+  assert.deepStrictEqual([w.pushes.at(-1)?.title, w.pushes.at(-1)?.body], ['QRD-1473: images sent without a label', '11-file-noparent.png']);
 });
 
 test('in skill mode with no block the post waits up to 15 min after the verdict, then the template goes out and the owner is told; an edit stops the wait', async () => {

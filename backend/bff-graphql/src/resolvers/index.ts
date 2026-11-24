@@ -57,6 +57,7 @@ import { livePlugins } from '../integrations/plugins';
 import { broadcastDeps, sendBroadcast } from '../integrations/broadcast';
 import { ReviewApprovalError, approvalRecords, lgtmReview, ownerPassLabel, resetOwnerPassLabel } from '../integrations/review-approval';
 import { MAX_ROUND_ATTEMPTS, roundSummary } from '../integrations/review-findings';
+import { readImageList } from '../integrations/discord-post';
 import { decisionGate } from '../integrations/decision-gate';
 import { doctorReports } from '../integrations/doctor';
 import { claudeUsage } from '../integrations/claude-usage';
@@ -85,6 +86,7 @@ const storageService = new StorageService();
 const roundInfo = (round: ReviewRound) => ({
   id: round.id, status: round.status, summary: `${round.ticketKey}: ${roundSummary(round)}`, threadUrl: round.threadUrl, at: (round.reportedAt ?? round.lastMessageAt).toISOString(),
   mode: round.mode, replyStatus: round.replyStatus, replyAt: round.replyAt?.toISOString() ?? null, replyText: round.replyText, replyMessageId: round.replyMessageId, replyDetail: round.replyDetail,
+  replyImages: readImageList(round.replyImages),
 });
 
 /** The newest review round of each listed session, from one query. */
