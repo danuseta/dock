@@ -460,7 +460,7 @@ export class ReviewFindings {
     const mine = authorsOf(round);
     const answered = (other: ReviewRound) => other.replyText?.split('\n').pop()?.endsWith(head) && mine.every((id) => authorsOf(other).includes(id));
     const skip = !settled && replies.some(answered) ? 'Already replied for this head'
-      : replies.length >= settings.maxRounds ? `${settings.maxRounds} replies in this thread` : null;
+      : replies.filter((other) => authorsOf(other).some((id) => mine.includes(id))).length >= settings.maxRounds ? `${settings.maxRounds} replies to this reviewer` : null;
     if (skip) {
       await this.deps.update(round.id, { replyStatus: 'skipped', replyDetail: skip });
       return null;

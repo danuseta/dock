@@ -695,7 +695,13 @@ test('no second reply for the same head, and no more replies in a thread than th
   capped.w.state.rounds.push({ ...capped.round, id: 'r-old', replyStatus: 'sent', replyText: 'x\nDOCK-FIX round 1 · head 0000000' });
   capped.w.state.replies.set('task-9', REPLY(capped.round.id));
   await report(capped.w);
-  assert.deepStrictEqual([capped.round.replyStatus, capped.round.replyDetail], ['skipped', '1 replies in this thread']);
+  assert.deepStrictEqual([capped.round.replyStatus, capped.round.replyDetail], ['skipped', '1 replies to this reviewer']);
+
+  const fresh = await sentRound((x) => { x.state.settings = { ...x.state.settings, maxRounds: 1 }; });
+  fresh.w.state.rounds.push({ ...fresh.round, id: 'r-other', replyStatus: 'sent', replyText: 'x\nDOCK-FIX round 1 · head 0000000', findings: JSON.stringify({ since: '', blocks: [], authors: [{ id: '79999', name: 'Alvin' }] }) });
+  fresh.w.state.replies.set('task-9', REPLY(fresh.round.id));
+  await report(fresh.w);
+  assert.strictEqual(fresh.round.replyStatus, 'pending', 'replies to another reviewer do not use up this reviewer\'s limit');
 });
 
 test('a Light settings line typed in a finding is defused; only DOCK\'s own line above the findings counts', async () => {
