@@ -111,6 +111,12 @@ export function formatDiscordMessage(summary: DiscordSummary, messageTemplate?: 
   return message;
 }
 
+/** The webhook URL that waits for the message, so Discord answers with it, and posts into the thread when one is given. */
+function webhookTarget(webhookUrl: string, threadId?: string): string {
+  const thread = threadId?.trim();
+  return `${webhookUrl}${webhookUrl.includes('?') ? '&' : '?'}wait=true${thread ? `&thread_id=${encodeURIComponent(thread)}` : ''}`;
+}
+
 export class DiscordService {
   private delay(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
@@ -120,12 +126,10 @@ export class DiscordService {
     options: { customMessage?: string; messageTemplate?: string; threadId?: string; threadName?: string } = {},
     retryCount = 0,
     forumFallbackAttempted = false,
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     const message = options.customMessage?.trim() || formatDiscordMessage(payload, options.messageTemplate);
     if (message.length > MAX_DISCORD_MESSAGE_LENGTH) throw new Error('Discord message must not exceed 2000 characters');
-    const targetUrl = options.threadId?.trim()
-      ? `${webhookUrl}${webhookUrl.includes('?') ? '&' : '?'}thread_id=${encodeURIComponent(options.threadId.trim())}`
-      : webhookUrl;
+    const targetUrl = webhookTarget(webhookUrl, options.threadId);
     const body: { content: string; thread_name?: string; allowed_mentions: { parse: string[] } } = {
       content: message,
       allowed_mentions: { parse: [] },
@@ -133,7 +137,10 @@ export class DiscordService {
     if (options.threadName?.trim() && !options.threadId?.trim()) body.thread_name = options.threadName.trim();
 
     try {
-      await axios.post(targetUrl, body, { timeout: 10000 });
+      const response = await axios.post(targetUrl, body, { timeout: 10000 });
+      if (!body.thread_name && !options.threadId?.trim()) return undefined;
+      const channelId = response?.data?.channel_id;
+      return typeof channelId === 'string' && channelId ? channelId : options.threadId?.trim() || undefined;
     } catch (error) {
       if (error instanceof AxiosError && error.response?.status === 429 && retryCount < 3) {
         const header = Number.parseFloat(String(error.response.headers['retry-after'] || ''));
@@ -154,6 +161,27 @@ export class DiscordService {
           retryCount,
           true,
         );
+      }
+      throw error;
+    }
+  }
+
+  /** One more message from the webhook: into the thread when one is given, else into the webhook's channel. */
+  async sendToThread(
+    webhookUrl: string,
+    threadId: string | undefined,
+    content: string,
+    allowedMentions: { parse: string[]; roles?: string[] },
+    retryCount = 0,
+  ): Promise<void> {
+    if (!content.trim() || content.length > MAX_DISCORD_MESSAGE_LENGTH) throw new Error('Discord message must be between 1 and 2000 characters');
+    try {
+      await axios.post(webhookTarget(webhookUrl, threadId), { content, allowed_mentions: allowedMentions }, { timeout: 10000 });
+    } catch (error) {
+      if (error instanceof AxiosError && error.response?.status === 429 && retryCount < 3) {
+        const header = Number.parseFloat(String(error.response.headers['retry-after'] || ''));
+        await this.delay(Number.isFinite(header) ? header * 1000 : (2 ** retryCount) * 1000);
+        return this.sendToThread(webhookUrl, threadId, content, allowedMentions, retryCount + 1);
       }
       throw error;
     }

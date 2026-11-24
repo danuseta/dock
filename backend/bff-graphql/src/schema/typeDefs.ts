@@ -230,6 +230,12 @@ export const typeDefs = gql`
     hasGithubToken: Boolean!
     hasDiscordWebhookUrl: Boolean!
     discordMessageTemplate: String!
+    "Whether DOCK tags the reviewers in the thread right after a pull request post."
+    prTagEnabled: Boolean!
+    "The reviewer tag message; {{role}} is the role, {{slots}} is -1 or -2 from the Jira issue types."
+    prTagTemplate: String!
+    "The Discord role the reviewer tag pings."
+    prTagRole: String!
     hasDiscordBotToken: Boolean!
     "True when the bot token comes from the workspace template, not from these settings."
     discordManagedToken: Boolean!
@@ -2405,6 +2411,9 @@ export const typeDefs = gql`
     githubRepos: String
     discordWebhookUrl: String
     discordMessageTemplate: String
+    prTagEnabled: String
+    prTagTemplate: String
+    prTagRole: String
     discordBotToken: String
     discordGuildId: String
     discordUserId: String
@@ -2939,7 +2948,7 @@ export const typeDefs = gql`
     """Deletes a file, or a folder with everything in it; refused when a secret is inside."""
     workspaceDelete(path: String!): Boolean!
     saveDemoLink(ticketKey: String!, url: String!): Boolean
-    sendToDiscord(ticketKey: String!, customMessage: String, threadId: String, threadName: String): Boolean
+    sendToDiscord(ticketKey: String!, customMessage: String, threadId: String, threadName: String, notes: String): Boolean
     setTicketDependency(ticketKey: String!, dependsOnKey: String!): TicketRelationGroup!
     clearTicketDependency(ticketKey: String!): TicketRelationGroup!
     setTicketWorkOrder(ticketKey: String!, position: Int!): Boolean!
