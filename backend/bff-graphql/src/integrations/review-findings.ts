@@ -15,7 +15,7 @@ export const MAX_ROUND_ATTEMPTS = 3;
 export const EXPIRED_DETAIL = 'no result from the session in 3 h';
 const MAX_FINDING_TEXT = 1500;
 const MAX_PROMPT = 7500;
-const MARKER = /^DOCK-REVIEW-ROUND (\S+) valid=(\d+) invalid=(\d+) pushed=(yes|no)\s*$/m;
+const MARKER = /^DOCK-REVIEW-ROUND (\S+) valid=(\d+) invalid=(\d+) pushed=(yes|no|body)\s*$/m;
 const REVIEW_LINE = /^DOCK-REVIEW on it by (.+)$/m;
 const FIX_LINE = /^DOCK-FIX\b/m;
 const WEBHOOK = /\/webhooks\/(\d+)\//;
@@ -35,7 +35,8 @@ const LIGHT_LINE = /(light[\s\u200B]*settings)[\s\u200B]*:/gi;
 interface StoredFindings { since: string; blocks: string[]; authors?: Array<{ id: string; name: string }> }
 
 export interface PushMessage { title: string; body: string; url: string; tag: string }
-export interface RoundResult { roundId: string; valid: number; invalid: number; pushed: boolean }
+/** `body`: the valid findings were settled without a commit, in the pull request body or the ticket. */
+export interface RoundResult { roundId: string; valid: number; invalid: number; pushed: boolean; body?: boolean }
 export interface TurnEnded { sessionId: string; ticketKey: string | null; failed: boolean }
 /** `delayMinutes` and `maxRounds` are the review arena's; `light` is null when the light runner does not take review findings. */
 export interface FindingsSettings { autoReply: boolean; delayMinutes: number; maxRounds: number; reply: MessageFormat; light: LightSettings | null }
@@ -46,7 +47,7 @@ export const fixMarker = (round: number, sha: string) => `DOCK-FIX round ${round
 
 /** The placeholders of the reply template: the reviewers, what the round fixed and the session's own reply as the notes. */
 export function replyTemplateValues(input: { key: string; prUrls: string[]; round: number; sha: string; authors: string[]; result: RoundResult; notes: string }): Record<string, string> {
-  const status = [input.result.valid ? `${input.result.valid} temuan difix` : '', input.result.invalid ? `${input.result.invalid} tidak diubah` : ''].filter(Boolean).join(', ');
+  const status = [input.result.valid ? `${input.result.valid} temuan ${input.result.body ? 'dibenerin di body PR' : 'difix'}` : '', input.result.invalid ? `${input.result.invalid} tidak diubah` : ''].filter(Boolean).join(', ');
   return {
     author: input.authors.join(', '), status, lgtm: '', blockers: '', notes: input.notes, ticket: input.key,
     pr: input.prUrls.map((url) => `<${url}>`).join(' '), sha: input.sha.slice(0, 7), round: String(input.round),
@@ -187,6 +188,7 @@ export function findingsPrompt(input: { key: string; threadUrl: string; threadId
     `1. Valid: perbaiki di branch head PR itu, jalankan type check dan tes terkait per file, stage per path (tanpa git add . atau -A, tanpa docs/), commit fix(${key}): ... tanpa trailer Co-Authored-By, lalu push ke branch itu. Owner sudah mengizinkan commit dan push tanpa go untuk round ini; lint, build:app dan test:all penuh tidak wajib.`,
     '2. Tidak valid: tulis alasannya dengan path:line, kutipan AC, atau kutipan kontrak.',
     '3. Ragu: perlakukan sebagai tidak valid, tulis apa yang perlu diputuskan owner, jangan push tebakan.',
+    '4. Valid tapi beresnya tanpa ubah kode (body PR, centang AC): tulis pushed=body di baris terakhir, bukan pushed=no.',
     'Jangan posting apa pun ke Discord, Jira, atau komentar GitHub. Jangan merge, jangan force-push, jangan ganti base branch.',
     ...(input.autoReply
       ? [
@@ -197,7 +199,7 @@ export function findingsPrompt(input: { key: string; threadUrl: string; threadId
         'Setelah blok itu, baris terakhir persis:',
       ]
       : ['Di akhir, tulis draft balasan Discord untuk owner salin (bahasa santai tim, satu baris per temuan: "fixed di <sha pendek>" atau "tidak diubah karena ..."), lalu baris terakhir persis:']),
-    `DOCK-REVIEW-ROUND ${roundId} valid=<jumlah valid> invalid=<jumlah tidak valid> pushed=<yes|no>`,
+    `DOCK-REVIEW-ROUND ${roundId} valid=<jumlah valid> invalid=<jumlah tidak valid> pushed=<yes|no|body>`,
   ].join('\n');
   let room = MAX_PROMPT - head.length - tail.length - 2;
   const lines: string[] = [];
@@ -216,7 +218,7 @@ export function findingsPrompt(input: { key: string; threadUrl: string; threadId
 
 export function parseRoundResult(text: string | null | undefined): RoundResult | null {
   const match = text ? MARKER.exec(text) : null;
-  return match ? { roundId: match[1], valid: Number(match[2]), invalid: Number(match[3]), pushed: match[4] === 'yes' } : null;
+  return match ? { roundId: match[1], valid: Number(match[2]), invalid: Number(match[3]), pushed: match[4] === 'yes', body: match[4] === 'body' } : null;
 }
 
 /** "2 valid, pushed · 1 not valid"; a zero part is left out. */
@@ -381,7 +383,8 @@ export class ReviewFindings {
    */
   private async scheduleReply(round: ReviewRound, result: RoundResult, reply: string | null): Promise<number | null> {
     const settings = await this.deps.settings();
-    if (!settings.autoReply || !(result.pushed || (result.valid === 0 && result.invalid > 0))) return null;
+    const settled = result.body === true && result.valid > 0;
+    if (!settings.autoReply || !(result.pushed || settled || (result.valid === 0 && result.invalid > 0))) return null;
     const block = parseDiscordBlock(reply);
     const { format, skill, template } = settings.reply;
     const fallback = format === 'skill' && (!block || !(await this.replySkill(settings)));
@@ -394,7 +397,7 @@ export class ReviewFindings {
     }
     const replies = (await this.deps.threadReplies(round.threadId)).filter((other) => other.id !== round.id);
     const head = ` · head ${state.headSha.slice(0, 7)}`;
-    const skip = replies.some((other) => other.replyText?.split('\n').pop()?.endsWith(head)) ? 'Already replied for this head'
+    const skip = !settled && replies.some((other) => other.replyText?.split('\n').pop()?.endsWith(head)) ? 'Already replied for this head'
       : replies.length >= settings.maxRounds ? `${settings.maxRounds} replies in this thread` : null;
     if (skip) {
       await this.deps.update(round.id, { replyStatus: 'skipped', replyDetail: skip });
