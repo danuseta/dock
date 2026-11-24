@@ -19,6 +19,11 @@ const MARKER = /^DOCK-REVIEW-ROUND (\S+) valid=(\d+) invalid=(\d+) pushed=(yes|n
 const REVIEW_LINE = /^DOCK-REVIEW on it by (.+)$/m;
 /** A reviewer DOCK's verdict line that approves: its notes are not findings, so no fix round answers an approve. */
 const APPROVED = /· Approve(?: with comments)? · 0 blocker\s*$/;
+const NO_BLOCKER = /\b(?:gak|ga|gk|nggak|enggak|engga|tidak|tak|no)\s+(?:ada\s+)?blockers?\b/gi;
+const SOME_BLOCKER = /\bblockers?\b/i;
+const LGTM_FIRST = /^\W*(?:mas\s+\S+,?\s+)?(?:lgtm|approved?)\b/i;
+/** The status of a round that only thanks an approval; it never reaches a session and does not count as a fix reply. */
+export const THANKED = 'thanked';
 const FIX_LINE = /^DOCK-FIX\b/m;
 const WEBHOOK = /\/webhooks\/(\d+)\//;
 const BARE_WORDS = /\b(?:on\s?it|lgtm|approved?|acc|ok|oke|okay|sip|siap|mantap|aman|thanks|thx|makasih|done)\b/gi;
@@ -121,16 +126,36 @@ export function isBare(message: Pick<ThreadMessage, 'text' | 'mentions' | 'attac
  * it, not bare, and newer than `since`. An on it older than the kept messages still counts through `row.onIt`.
  */
 export function findings(row: ThreadRow, since: number, webhookId: string | null = null): ThreadMessage[] {
+  return reviewerMessages(row, since, webhookId).filter((item) => !item.approval && !isBare(item.message)).map((item) => item.message);
+}
+
+/** The teammates' approvals after `since`, oldest first: a reviewer DOCK verdict or a message that says LGTM or no blocker. */
+export function approvals(row: ThreadRow, since: number, webhookId: string | null = null): ThreadMessage[] {
+  return reviewerMessages(row, since, webhookId).filter((item) => item.approval).map((item) => item.message);
+}
+
+/**
+ * An approval: a reviewer DOCK verdict line that approves, or a first line that says LGTM or that there is no blocker. The
+ * text is read as well as the verdict line, since an older reviewer DOCK can write "gak ada blocker" over a stale verdict.
+ */
+export function isApproval(text: string, verdictLine: string | null): boolean {
+  if (verdictLine && APPROVED.test(verdictLine)) return true;
+  const first = text.trim().split('\n')[0] ?? '';
+  const rest = first.replace(NO_BLOCKER, ' ');
+  if (SOME_BLOCKER.test(rest)) return false;
+  return rest !== first || LGTM_FIRST.test(first);
+}
+
+function reviewerMessages(row: ThreadRow, since: number, webhookId: string | null): Array<{ message: ThreadMessage; approval: boolean }> {
   const onItAt = new Map<string, number>();
   for (const message of row.messages) {
     if (!onItAt.has(message.authorId) && ON_IT.test(message.text)) onItAt.set(message.authorId, Date.parse(message.at));
   }
   const names = new Map(row.messages.map((message) => [message.authorId, message.author]));
-  const found: ThreadMessage[] = [];
+  const found: Array<{ message: ThreadMessage; approval: boolean }> = [];
   for (const raw of row.messages) {
     if (raw.mine || raw.authorId === row.createdById || (webhookId && raw.webhookId === webhookId) || FIX_LINE.test(raw.text)) continue;
     const line = raw.webhookId ? REVIEW_LINE.exec(raw.text) : null;
-    if (line && APPROVED.test(line[1])) continue;
     const userId = line ? /<@!?(\d+)>/.exec(line[1])?.[1] ?? raw.mentions.find((mention) => !mention.role && line[1].startsWith(`@${mention.name}`))?.id : undefined;
     const author = userId ? names.get(userId) ?? raw.mentions.find((mention) => mention.id === userId)?.name : undefined;
     if (line && !author) continue;
@@ -138,7 +163,7 @@ export function findings(row: ThreadRow, since: number, webhookId: string | null
     if (message.mine || message.authorId === row.createdById) continue;
     const claimed = onItAt.get(message.authorId) ?? (row.onIt.includes(message.author) ? -Infinity : undefined);
     const at = Date.parse(message.at);
-    if (claimed !== undefined && at > claimed && at > since && !isBare(message)) found.push(message);
+    if (claimed !== undefined && at > claimed && at > since) found.push({ message, approval: isApproval(message.text, line ? line[1] : null) });
   }
   return found;
 }
@@ -277,12 +302,43 @@ export class ReviewFindings {
         }
         const cursor = last ? last.lastMessageAt.getTime() : -Infinity;
         if (Date.parse(row.lastActivity) <= cursor) continue;
-        sent += await this.start(row, dueRound(row, cursor, now, webhookId));
+        const due = dueRound(row, cursor, now, webhookId);
+        if (due.length) sent += await this.start(row, due);
+        else await this.thank(row, approvals(row, Math.max(cursor, now.getTime() - FINDINGS_WINDOW_MS), webhookId));
       }
       return sent;
     } finally {
       this.busy = false;
     }
+  }
+
+  /**
+   * An approval gets no fix round, only a short thanks to its authors after the post delay. The round that holds it never
+   * reaches a session and moves the cursor past the approval, so the same approval is thanked once.
+   */
+  private async thank(row: ThreadRow, messages: ThreadMessage[]): Promise<void> {
+    if (!messages.length || !row.tickets[0] || !row.posterPrs?.length) return;
+    const lastMessage = messages[messages.length - 1];
+    const authors = [...new Map(messages.map((message) => [message.authorId, { id: message.authorId, name: message.author }])).values()];
+    let round: ReviewRound;
+    try {
+      round = await this.deps.create({
+        threadId: row.id, ticketKey: row.tickets[0], threadUrl: row.url, prUrls: JSON.stringify(row.posterPrs),
+        messageIds: JSON.stringify(messages.map((message) => message.id)), lastMessageId: lastMessage.id, lastMessageAt: new Date(lastMessage.at),
+        findings: JSON.stringify({ since: messages[0].at, blocks: [], authors } satisfies StoredFindings),
+      });
+    } catch (error) {
+      if (isDuplicate(error)) return;
+      throw error;
+    }
+    const settings = await this.deps.settings();
+    const now = this.deps.now();
+    const mentions = authors.filter((author) => USER_ID.test(author.id)).map((author) => `<@${author.id}>`).join(' ');
+    const names = authors.map((author) => author.name).join(' sama ');
+    await this.deps.update(round.id, {
+      status: THANKED, valid: 0, invalid: 0, pushed: false, reportedAt: now,
+      ...(settings.autoReply ? { replyStatus: 'pending', replyAt: new Date(now.getTime() + settings.delayMinutes * 60_000), replyText: `${mentions ? `${mentions} ` : ''}makasih mas ${names} 🙏` } : {}),
+    });
   }
 
   private async start(row: ThreadRow, messages: ThreadMessage[]): Promise<number> {
@@ -398,7 +454,7 @@ export class ReviewFindings {
       await this.deps.update(round.id, { replyStatus: 'failed', replyDetail: 'GitHub did not give the pull request head' });
       return null;
     }
-    const replies = (await this.deps.threadReplies(round.threadId)).filter((other) => other.id !== round.id);
+    const replies = (await this.deps.threadReplies(round.threadId)).filter((other) => other.id !== round.id && other.status !== THANKED);
     const head = ` · head ${state.headSha.slice(0, 7)}`;
     const skip = !settled && replies.some((other) => other.replyText?.split('\n').pop()?.endsWith(head)) ? 'Already replied for this head'
       : replies.length >= settings.maxRounds ? `${settings.maxRounds} replies in this thread` : null;
