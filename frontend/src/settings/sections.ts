@@ -1,7 +1,7 @@
 import { Bell, CalendarDays, Gavel, GitBranch, LayoutPanelLeft, Lock, MessageSquare, Mail, MessagesSquare, Monitor, Plug, Route, ScanSearch, ShieldCheck, Users, Workflow, type LucideIcon } from 'lucide-react';
 import { normalizeCaveman, normalizeRtk } from '../chat/chatDefaults';
 import { hasPage, type DockMode } from '../lib/dockMode';
-import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, getDiscordTemplateError } from '../lib/discordTemplate';
+import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, DEFAULT_PR_TAG_ROLE, DEFAULT_PR_TAG_TEMPLATE, getDiscordTemplateError, getPrTagError } from '../lib/discordTemplate';
 import { parseNotificationPrefs, prefsToValues, valuesToPrefs } from '../lib/notificationPrefs';
 import { DEFAULT_REVIEW_POST_TEMPLATE, DEFAULT_REVIEW_REPLY_TEMPLATE, DEFAULT_REVIEW_SKILL, REVIEW_NUMBERS, reviewMessageErrors, reviewNumberErrors } from '../lib/reviewMessages';
 import { isValidServiceHealthRefreshSeconds, normalizeServiceHealthRefreshSeconds } from '../lib/serviceHealthRefresh';
@@ -37,6 +37,9 @@ export interface SavedSettings {
   hasGithubToken?: boolean | null;
   hasDiscordWebhookUrl?: boolean | null;
   discordMessageTemplate?: string | null;
+  prTagEnabled?: boolean | null;
+  prTagTemplate?: string | null;
+  prTagRole?: string | null;
   hasDiscordBotToken?: boolean | null;
   discordManagedToken?: boolean | null;
   discordManagedGuild?: string | null;
@@ -124,7 +127,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
   planflow: ['Stages', 'Skip stage', 'Approval'],
   sousflow: ['Stages', 'Skip stage', 'After each stage', 'Light runner', 'Max production lines', 'Max production files', 'Worker model', 'Browser check', 'Blast check', 'Publish'],
   judge: ['Judge on or off', 'Judge account', 'Idle minutes', 'Answer cutoff'],
-  messages: ['Message template', 'Preview', 'Review post', 'Review reply', 'Skill', 'Template'],
+  messages: ['Message template', 'Preview', 'Reviewer tag', 'Review post', 'Review reply', 'Skill', 'Template'],
   plugins: ['Storage', 'Voice', 'Harness', 'ElevenLabs keys', 'Demo storage', 'Bucket', 'Local folder'],
 };
 
@@ -186,6 +189,9 @@ export function savedValues(settings: SavedSettings): Record<DraftSectionId, Sec
     },
     messages: {
       discordMessageTemplate: settings.discordMessageTemplate || DEFAULT_DISCORD_MESSAGE_TEMPLATE,
+      prTagEnabled: String(settings.prTagEnabled !== false),
+      prTagTemplate: settings.prTagTemplate || DEFAULT_PR_TAG_TEMPLATE,
+      prTagRole: settings.prTagRole || DEFAULT_PR_TAG_ROLE,
       reviewPostFormat: settings.reviewPostFormat || 'skill',
       reviewPostSkill: settings.reviewPostSkill || DEFAULT_REVIEW_SKILL,
       reviewPostTemplate: settings.reviewPostTemplate || DEFAULT_REVIEW_POST_TEMPLATE,
@@ -207,7 +213,8 @@ export function sectionErrors(id: DraftSectionId, values: SectionValues): string
   if (id === 'general') return isValidServiceHealthRefreshSeconds(healthSeconds(values)) ? [] : ['Enter a whole-number interval between 5 seconds and 24 hours.'];
   if (id === 'messages') {
     const error = getDiscordTemplateError(values.discordMessageTemplate);
-    return [...(error ? [error] : []), ...reviewMessageErrors(values)];
+    const tagError = getPrTagError(values.prTagTemplate ?? '', values.prTagRole ?? '');
+    return [...(error ? [error] : []), ...(tagError ? [tagError] : []), ...reviewMessageErrors(values)];
   }
   if (id === 'review') return reviewNumberErrors(values);
   if (id === 'discord') {

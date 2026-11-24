@@ -3,11 +3,13 @@ import { MessageSquare, X, Send, Hash, PlusSquare, Info } from 'lucide-react';
 import { Button, Card, Dialog, IconButton, Input, Textarea } from './ui';
 import { buildDiscordForumTitle, renderDiscordMessageTemplate } from '../lib/discordTemplate';
 
+const MAX_NOTES_LENGTH = 1992;
+
 interface PullRequestItem { id?: string; title?: string; url?: string; repo?: string; status?: string; type?: string; headBranch?: string; baseBranch?: string }
 interface DiscordPreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (customMessage: string, threadId?: string, threadName?: string) => Promise<void>;
+  onConfirm: (customMessage: string, threadId?: string, threadName?: string, notes?: string) => Promise<void>;
   ticket: { key: string; title: string; url?: string };
   relatedTickets?: Array<{ key: string; title: string; url?: string }>;
   pullRequests: PullRequestItem[];
@@ -20,6 +22,7 @@ export const DiscordPreviewModal: React.FC<DiscordPreviewModalProps> = ({ isOpen
   const [message, setMessage] = useState('');
   const [threadId, setThreadId] = useState('');
   const [threadName, setThreadName] = useState('');
+  const [notes, setNotes] = useState('');
   const [showThreadInfo, setShowThreadInfo] = useState(false);
 
   useEffect(() => {
@@ -27,9 +30,10 @@ export const DiscordPreviewModal: React.FC<DiscordPreviewModalProps> = ({ isOpen
     setMessage(renderDiscordMessageTemplate(messageTemplate, { ticket, relatedTickets, pullRequests, demoUrl }));
     setThreadId('');
     setThreadName('');
+    setNotes('');
   }, [isOpen]);
 
-  const handleSubmit = async () => onConfirm(message, threadId.trim() || undefined, threadName.trim() || undefined);
+  const handleSubmit = async () => onConfirm(message, threadId.trim() || undefined, threadName.trim() || undefined, notes.trim() || undefined);
 
   return (
     <Dialog open={isOpen} onClose={onClose} dismissible={!loading} labelledBy="discord-preview-title">
@@ -38,6 +42,8 @@ export const DiscordPreviewModal: React.FC<DiscordPreviewModalProps> = ({ isOpen
         <p className="mb-4 text-pretty text-sm text-secondary-foreground">Review and customize the Markdown summary before sending it to your Discord server.</p>
 
         <label className="mb-5 block"><span className="mb-2 block font-mono text-xs text-muted-foreground uppercase">Message Content (Markdown Supported)</span><Textarea className="min-h-[200px] bg-surface-0 font-mono leading-6" value={message} onChange={(event) => setMessage(event.target.value)} maxLength={2000} disabled={loading} /><span className="mt-1 block text-right font-mono text-[0.68rem] text-muted-foreground tabular-nums">{message.length}/2000</span></label>
+
+        <label className="mb-5 block"><span className="mb-2 block font-mono text-xs text-muted-foreground uppercase">Notes (Optional)</span><Textarea aria-label="Notes" className="min-h-[72px] bg-surface-0 font-mono leading-6" value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={MAX_NOTES_LENGTH} disabled={loading} /><span className="mt-1 block text-pretty text-[0.7rem] text-muted-foreground">Sent as a second message, Notes :, in the same thread before the reviewer tag. Leave blank to send none.</span></label>
 
         <section className="mb-6 rounded-sm border border-border bg-surface-1 p-4" aria-labelledby="discord-destination-title">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-2"><Hash size={18} className="text-accent" aria-hidden="true" /><h3 id="discord-destination-title" className="font-mono text-sm font-bold">Post to a Specific Thread or Forum (Optional)</h3></div><Button size="sm" onClick={() => setShowThreadInfo(!showThreadInfo)} aria-expanded={showThreadInfo} aria-controls="discord-thread-guide"><Info size={13} aria-hidden="true" />{showThreadInfo ? 'Hide Guide' : 'How does this work?'}</Button></div>

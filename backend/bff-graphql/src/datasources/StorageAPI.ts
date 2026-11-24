@@ -5,6 +5,7 @@ import { readImageList } from '../integrations/discord-post';
 import { ARENA_SETTINGS, MESSAGE_KEYS, arenaSetting, isArenaSetting, isMessageSetting, messageFormat } from '../integrations/auto-review';
 import { LIGHT_KEYS, isLightSetting, lightSettings } from '../integrations/light-runner';
 import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, normalizeDiscordMessageTemplate } from '../integrations/discord';
+import { DEFAULT_PR_TAG_TEMPLATE, MAX_PR_TAG_ROLE_LENGTH, normalizePrTagRole, normalizePrTagTemplate } from '../integrations/pr-followup';
 import { forgetNotificationPrefs, parseNotificationPrefs, validateNotificationPrefs } from '../integrations/notification-prefs';
 import { isMockDiscordWebhookUrl } from '../integrations/mock-base';
 
@@ -203,6 +204,9 @@ export class StorageAPI {
       hasGithubToken: Boolean(settings.githubToken),
       hasDiscordWebhookUrl: Boolean(settings.discordWebhookUrl),
       discordMessageTemplate: settings.discordMessageTemplate || DEFAULT_DISCORD_MESSAGE_TEMPLATE,
+      prTagEnabled: settings.prTagEnabled !== 'false',
+      prTagTemplate: settings.prTagTemplate || DEFAULT_PR_TAG_TEMPLATE,
+      prTagRole: normalizePrTagRole(settings.prTagRole),
       hasDiscordBotToken: Boolean(settings.discordBotToken),
       discordManagedToken: !settings.discordBotToken && Boolean(workspaceDiscordSetting('discordBotToken')),
       discordManagedGuild: settings.discordGuildId ? null : workspaceDiscordSetting('discordGuildId'),
@@ -262,6 +266,9 @@ export class StorageAPI {
       if (input.voicePlugin != null && !(VOICE_PLUGINS as readonly string[]).includes(String(input.voicePlugin))) throw new Error('Invalid voice plugin');
       if (input.storageLocalDir != null && input.storageLocalDir !== '' && (String(input.storageLocalDir).length > 500 || !isAbsolute(String(input.storageLocalDir).trim()))) throw new Error('Invalid local folder');
       if (input.discordMessageTemplate != null) normalizeDiscordMessageTemplate(String(input.discordMessageTemplate));
+      if (input.prTagEnabled != null && input.prTagEnabled !== 'true' && input.prTagEnabled !== 'false') throw new Error('Invalid reviewer tag setting');
+      if (input.prTagTemplate != null) normalizePrTagTemplate(String(input.prTagTemplate));
+      if (input.prTagRole != null && (String(input.prTagRole).length > MAX_PR_TAG_ROLE_LENGTH || /[\r\n]/.test(String(input.prTagRole)))) throw new Error('Invalid reviewer role');
       for (const key of ['autoReviewOnIt', 'autoLgtm', 'reviewFindingsToTask', 'autoReviewPostDiscord', 'reviewFindingsAutoReply'] as const) {
         if (input[key] != null && input[key] !== 'true' && input[key] !== 'false') throw new Error(`Invalid auto review setting: ${key}`);
       }

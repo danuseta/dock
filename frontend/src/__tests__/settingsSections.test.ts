@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { DEFAULT_DISCORD_MESSAGE_TEMPLATE } from '../lib/discordTemplate';
+import { DEFAULT_DISCORD_MESSAGE_TEMPLATE, renderPrTag } from '../lib/discordTemplate';
 import { changedKeys, savedValues, sectionErrors, sectionFromSearch, sectionInput, sectionStatus, visibleSections } from '../settings/sections';
 
 const laptop = visibleSections('laptop');
@@ -40,6 +40,16 @@ test('saved values start secrets blank and show a whole-minute interval in minut
 test('a section sends only its own keys, and General sends seconds', () => {
   assert.deepStrictEqual(sectionInput('general', { healthValue: '3', healthUnit: 'minutes' }), { serviceHealthRefreshSeconds: 180 });
   assert.deepStrictEqual(Object.keys(sectionInput('jira', savedValues({}).jira)), ['jiraUrl', 'jiraEmail', 'jiraApiToken', 'jiraProjectKeys', 'planningConfluenceParent', 'planningPlanner']);
+});
+
+test('the reviewer tag starts on with the default message and role, and a bad field blocks the save', () => {
+  const messages = savedValues({}).messages;
+  assert.deepStrictEqual([messages.prTagEnabled, messages.prTagTemplate, messages.prTagRole], ['true', '@{{role}} {{slots}} mas mas, thanks', 'ITteam']);
+  assert.strictEqual(savedValues({ prTagEnabled: false }).messages.prTagEnabled, 'false');
+  assert.deepStrictEqual(sectionErrors('messages', messages), []);
+  assert.match(sectionErrors('messages', { ...messages, prTagTemplate: '@{{role}} {{ticketKey}}' })[0], /Unsupported reviewer tag field/);
+  assert.strictEqual(renderPrTag(messages.prTagTemplate, '@QA', '-1'), '@QA -1 mas mas, thanks');
+  assert.ok(['prTagEnabled', 'prTagTemplate', 'prTagRole'].every((key) => key in sectionInput('messages', messages)));
 });
 
 test('errors belong to their own section only', () => {

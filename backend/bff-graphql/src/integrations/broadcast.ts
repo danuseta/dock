@@ -4,9 +4,18 @@ import { JiraAPI } from '../datasources/JiraAPI';
 import { StorageAPI } from '../datasources/StorageAPI';
 import { StorageService } from '../storage/service';
 import { isBeforeReview, moveToReview } from './broadcast-review';
+import { DiscordService } from './discord';
+import { workspaceDiscordSetting } from './discord-team';
+import { SETTING_KEYS } from './discord-reader';
+import { discordApiBase } from './mock-base';
 import { orchestratorService } from './orchestrator';
+import { RoleLookup, sendPrFollowUps, type PrFollowUpInput } from './pr-followup';
+import { eventPush } from './push';
 
-export interface BroadcastInput { ticketKey: string; customMessage?: string; threadId?: string; threadName?: string }
+export interface BroadcastInput { ticketKey: string; customMessage?: string; threadId?: string; threadName?: string; notes?: string }
+
+/** The pull request post that went out: the thread it opened or went to, and what the follow-up messages need. */
+export interface BroadcastPost extends PrFollowUpInput { threadId?: string }
 
 export interface BroadcastDeps {
   relation(key: string): Promise<{ ticketKeys: string[]; primaryKey?: string | null }>;
@@ -14,10 +23,13 @@ export interface BroadcastDeps {
   pullRequests(key: string): Promise<any[]>;
   demoLink(key: string): Promise<{ url: string } | null>;
   settings(): Promise<Record<string, any>>;
-  send(payload: any): Promise<boolean>;
+  /** False when Discord did not take the post; an object carries the thread it went to. */
+  send(payload: any): Promise<boolean | { threadId?: string }>;
   move(key: string, status: string): Promise<boolean>;
   /** Remembers that the ticket was broadcast, so the automatic broadcast never posts it again. */
   markPosted?(key: string): Promise<unknown>;
+  /** The notes and the reviewer tag sent in the thread right after the post. */
+  followUp?(post: BroadcastPost): Promise<unknown>;
 }
 
 const isPresent = <T>(value: T | null | undefined): value is T => value != null;
@@ -26,7 +38,7 @@ const isPresent = <T>(value: T | null | undefined): value is T => value != null;
  * The Discord broadcast of a ticket and the tickets grouped with it that have a pull request; tickets before review move
  * to PR Review once it is sent. A grouped ticket without a pull request (a dependent one still in work) is left out.
  */
-export async function sendBroadcast(deps: BroadcastDeps, { ticketKey, customMessage, threadId, threadName }: BroadcastInput): Promise<boolean> {
+export async function sendBroadcast(deps: BroadcastDeps, { ticketKey, customMessage, threadId, threadName, notes }: BroadcastInput): Promise<boolean> {
   const relation = await deps.relation(ticketKey);
   const grouped = (await Promise.all(relation.ticketKeys.map((key) => deps.ticket(key)))).filter(isPresent);
   const groupedPullRequests = await Promise.all(grouped.map((ticket) => deps.pullRequests(ticket.key)));
@@ -68,9 +80,14 @@ export async function sendBroadcast(deps: BroadcastDeps, { ticketKey, customMess
     threadName
   };
 
-  const sent = await deps.send(payload);
+  const result = await deps.send(payload);
+  const sent = Boolean(result);
   if (sent) {
     if (deps.markPosted) await Promise.all(tickets.map((ticket) => deps.markPosted?.(ticket.key).catch(() => undefined)));
+    if (deps.followUp) {
+      const post = { threadId: typeof result === 'object' ? result.threadId : undefined, settings, tickets, notes };
+      await deps.followUp(post).catch((error) => console.error(`[Broadcast] follow-up of ${ticketKey} failed:`, error instanceof Error ? error.message : 'unknown error'));
+    }
     const notMoved = await moveToReview(tickets, deps.move);
     if (notMoved.length) console.warn(`[Broadcast] Jira did not move ${notMoved.join(', ')} to PR Review`);
   }
@@ -151,6 +168,20 @@ const storageAPI = new StorageAPI();
 const jiraAPI = new JiraAPI();
 const githubAPI = new GitHubAPI();
 const discordAPI = new DiscordAPI();
+const discordService = new DiscordService();
+const roleLookup = new RoleLookup({
+  config: async () => {
+    const settings = await storageAPI.getSettings();
+    const token = settings[SETTING_KEYS.token] || workspaceDiscordSetting(SETTING_KEYS.token);
+    const guild = settings[SETTING_KEYS.guild] || workspaceDiscordSetting(SETTING_KEYS.guild);
+    return token && guild ? { token, guild } : null;
+  },
+  request: async (path, token) => {
+    const response = await fetch(`${discordApiBase()}${path}`, { headers: { Authorization: `Bot ${token}` }, signal: AbortSignal.timeout(15000) });
+    return { status: response.status, body: await response.json().catch(() => null) };
+  },
+  now: () => Date.now(),
+});
 
 export const broadcastDeps: BroadcastDeps = {
   relation: (key) => storageAPI.getTicketRelationGroup(key),
@@ -161,6 +192,11 @@ export const broadcastDeps: BroadcastDeps = {
   send: (payload) => discordAPI.sendSummary(payload),
   move: (key, status) => jiraAPI.transitionTicket(key, status),
   markPosted: (key) => storage.upsertCache(AUTO_BROADCAST_CACHE, key, { at: new Date().toISOString() }, 0),
+  followUp: (post) => sendPrFollowUps({
+    roleId: (name) => roleLookup.id(name),
+    post: (content, allowedMentions) => discordService.sendToThread(String(post.settings.discordWebhookUrl || ''), post.threadId, content, allowedMentions),
+    push: (message) => eventPush.send('needsYou', message),
+  }, post),
 };
 
 export const autoBroadcast = new AutoBroadcast({

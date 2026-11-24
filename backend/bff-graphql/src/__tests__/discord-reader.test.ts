@@ -458,6 +458,11 @@ test('the reviewers a pull request asks for come from its first message, then it
   const botPost = [msg(BOT, 'Jira: QRD-1460, review please'), toRole(RINA, '-1 <@&r7>'), msg(HAMZAH, 'on it buat besok')];
   assert.strictEqual(slotsOf(botPost.map((message) => toMessage(message, ME, SERVER)), BOT.id, []), 1, 'a bot posted the thread and a person asked the role with -1');
   assert.strictEqual(sorted('pr', botPost, BOT.id, false, false, [], 1).state, 'NOT_YOURS', 'the one slot is taken');
+  const HOOK = user('104', 'pr-danu');
+  const docked = [msg(HOOK, 'Minta tolong buat review : QRD-1565 - Timer drops'), msg(HOOK, 'Notes :\nseed first'), toRole(HOOK, '<@&r7> -1 mas mas, thanks'), msg(HAMZAH, 'on it')];
+  assert.strictEqual(slotsOf(docked.map((message) => toMessage(message, ME, SERVER)), HOOK.id, []), 1, 'the tag DOCK sends after its post is read');
+  const unpinged = [msg(HOOK, 'Minta tolong buat review : QRD-1565'), msg(HOOK, '@ITteam -1 mas mas, thanks'), msg(HAMZAH, 'on it')];
+  assert.strictEqual(slotsOf(unpinged.map((message) => toMessage(message, ME, SERVER)), HOOK.id, []), 1, 'a tag sent without a ping is still the poster asking');
   const row = buildRow({ id: 'fp', name: 'pull-request', kind: 'pr', thread: false, enabled: true }, 'g1', { id: '1298000000000000009', parent_id: 'fp', name: 'PR', owner_id: RINA.id }, new Map(), [msg({ ...RINA, avatar: 'a1' }, '-1 please'), msg(HAMZAH, 'on it')], ME);
   assert.deepStrictEqual([row.slots, row.createdByAvatar], [1, `https://cdn.discordapp.com/avatars/${RINA.id}/a1.png?size=64`], 'the avatar is the poster, not the last writer');
 });

@@ -314,6 +314,9 @@ export const GET_SETTINGS = gql`
       lightBlastLoops
       lightPublish
       discordMessageTemplate
+      prTagEnabled
+      prTagTemplate
+      prTagRole
       hasGoogleClientSecret
       googleCalendarConnected
       googleCalendarError
