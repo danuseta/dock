@@ -129,7 +129,7 @@ export interface AutoReviewDeps {
   owner(): Promise<AutoReviewOwner>;
   /** Posts to a thread through the owner's webhook; the message id and the image names left out. */
   postDiscord(webhookUrl: string, content: string, options: { threadId: string; username: string; files?: DiscordPostFiles }): Promise<DiscordPostResult>;
-  /** The text of the session's newest assistant message, or null. */
+  /** The text of the session's newest assistant message with a Discord block, or null; a later reply without one, such as a saved note, does not hide it. */
   newestReply(sessionId: string): Promise<string | null>;
   /** The names of the skills installed where the sessions read them. */
   skills(): Promise<string[]>;
