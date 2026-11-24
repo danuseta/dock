@@ -1,6 +1,6 @@
 import type { ReviewRound } from '@prisma/client';
 import { discordBlockLines, fillTemplate, plainText, saysStop, withMarker, type AutoReviewOwner, type MessageFormat, type PullState } from './auto-review';
-import { parseDiscordBlock, threadIdOf, type DiscordPostFiles, type DiscordPostResult } from './discord-post';
+import { parseDiscordBlock, readImageList, threadIdOf, type DiscordPostFiles, type DiscordPostResult } from './discord-post';
 import { ON_IT } from './discord-reader';
 import type { ThreadMessage, ThreadRow } from './discord-threads';
 import { lightSettingsLine, type LightSettings } from './light-runner';
@@ -470,14 +470,15 @@ export class ReviewFindings {
     try {
       const current = await this.deps.roundById(round.id);
       if (!current?.replyText) throw new Error('Nothing to post to this thread');
-      const names = current.replyImages ? JSON.parse(current.replyImages) as string[] : [];
+      const images = readImageList(current.replyImages);
       const users = ((current.findings ? JSON.parse(current.findings) as StoredFindings : null)?.authors ?? []).map((author) => author.id);
-      const root = names.length ? await this.deps.imageRoot(round.ticketKey) : null;
-      const posted = await this.deps.postDiscord(owner.webhookUrl, current.replyText, { threadId, username: `${owner.name} (DOCK)`, users, files: root ? { root, names } : undefined });
+      const root = images.length ? await this.deps.imageRoot(round.ticketKey) : null;
+      const posted = await this.deps.postDiscord(owner.webhookUrl, current.replyText, { threadId, username: `${owner.name} (DOCK)`, users, files: root ? { root, images } : undefined });
       const { id } = posted;
-      const skipped = root ? posted.skipped : names;
+      const skipped = root ? posted.skipped : images.map((image) => image.file);
       await this.deps.update(round.id, { replyStatus: 'sent', replyMessageId: id, replyDetail: null });
       if (skipped.length) await this.deps.push({ title: `${round.ticketKey}: images left out of the reply`, body: skipped.join(', '), url: '/blackboard', tag: `review-reply-${round.id}` });
+      if (posted.unlabelled?.length) await this.deps.push({ title: `${round.ticketKey}: images sent without a label`, body: posted.unlabelled.join(', '), url: '/blackboard', tag: `review-reply-label-${round.id}` });
     } catch (error) {
       const detail = errorText(error) || 'Discord refused the post';
       await this.deps.update(round.id, { replyStatus: 'failed', replyDetail: detail });

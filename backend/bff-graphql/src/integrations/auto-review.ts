@@ -1,4 +1,4 @@
-import { DISCORD_CLOSE, DISCORD_OPEN, parseDiscordBlock, threadIdOf, type DiscordPostFiles, type DiscordPostResult } from './discord-post';
+import { DISCORD_CLOSE, DISCORD_OPEN, parseDiscordBlock, readImageList, threadIdOf, type DiscordPostFiles, type DiscordPostResult } from './discord-post';
 import type { ThreadMessage, ThreadRow } from './discord-threads';
 import type { Orchestration } from './orchestrator';
 
@@ -69,7 +69,9 @@ export const fillTemplate = (template: string, values: Record<string, string>) =
 
 /** The lines asking a session to write a Discord message for DOCK to post, wrapped in the block DOCK reads. */
 export const discordBlockLines = (key: string) => [
-  `Bungkus pesannya persis di antara baris ${DISCORD_OPEN} dan ${DISCORD_CLOSE}. Di dalam blok, satu baris GAMBAR: <nama file> per gambar, nama file saja dari folder screenshots/ di blackboard ${key}, maksimal 10.`,
+  `Bungkus pesannya persis di antara baris ${DISCORD_OPEN} dan ${DISCORD_CLOSE}.`,
+  'Lampirkan screenshot cuma untuk temuan blocker. Di teks sebut sebagai "gambar N", nomor urut pertama kali disebut; jangan pernah tulis nama file di teks.',
+  `Di dalam blok, satu baris GAMBAR N: <nama file> | <keterangan pendek> per gambar, nama file saja dari folder screenshots/ di blackboard ${key}, maksimal 10.`,
   'DOCK yang mem-post pesan itu ke thread setelah jeda; jangan post sendiri.',
 ];
 
@@ -474,13 +476,14 @@ export class AutoReview {
     try {
       const current = await this.deps.get(record.id);
       if (!current?.postText) throw new Error('Nothing to post to this thread');
-      const names = current.postImages ? JSON.parse(current.postImages) as string[] : [];
-      const root = names.length ? await this.deps.imageRoot(record.ticketKey) : null;
-      const posted = await this.deps.postDiscord(owner.webhookUrl, current.postText, { threadId, username: `${owner.name} (DOCK)`, files: root ? { root, names } : undefined });
+      const images = readImageList(current.postImages);
+      const root = images.length ? await this.deps.imageRoot(record.ticketKey) : null;
+      const posted = await this.deps.postDiscord(owner.webhookUrl, current.postText, { threadId, username: `${owner.name} (DOCK)`, files: root ? { root, images } : undefined });
       const { id } = posted;
-      const skipped = root ? posted.skipped : names;
+      const skipped = root ? posted.skipped : images.map((image) => image.file);
       await this.deps.update(record.id, { postStatus: 'sent', postMessageId: id, postDetail: null });
       if (skipped.length) await this.deps.push({ title: `${record.ticketKey}: images left out of the review post`, body: skipped.join(', '), url: '/agents', tag: `auto-review-post-${record.id}` });
+      if (posted.unlabelled?.length) await this.deps.push({ title: `${record.ticketKey}: images sent without a label`, body: posted.unlabelled.join(', '), url: '/agents', tag: `auto-review-label-${record.id}` });
     } catch (error) {
       const detail = error instanceof Error ? error.message.slice(0, 300) : 'Discord refused the post';
       await this.deps.update(record.id, { postStatus: 'failed', postDetail: detail });

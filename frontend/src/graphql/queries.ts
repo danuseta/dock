@@ -1279,7 +1279,7 @@ export const CHAT_SESSION_FIELDS = `
   lastText
   waiting
   workerCount
-  reviewRound { id status summary threadUrl at mode replyStatus replyAt replyText replyDetail }
+  reviewRound { id status summary threadUrl at mode replyStatus replyAt replyText replyDetail replyImages { n file caption } }
   judge { status grade }
 `;
 
@@ -1498,14 +1498,14 @@ export const GET_TICKET_REVIEW_ROUNDS = gql`
     chatSessions(source: "dock", limit: 300) {
       id
       ticketKey
-      reviewRound { id status summary threadUrl at mode replyStatus replyAt replyText replyDetail }
+      reviewRound { id status summary threadUrl at mode replyStatus replyAt replyText replyDetail replyImages { n file caption } }
     }
   }
 `;
 
 export const GET_REVIEW_ROUNDS_FOR_TICKET = gql`
   query GetReviewRoundsForTicket($key: String!) {
-    reviewRoundsForTicket(key: $key) { id status summary threadUrl at mode replyStatus replyAt replyText replyDetail }
+    reviewRoundsForTicket(key: $key) { id status summary threadUrl at mode replyStatus replyAt replyText replyDetail replyImages { n file caption } }
   }
 `;
 
@@ -1759,7 +1759,7 @@ export const GET_CLAUDE_TICKET_USAGE = gql`
 
 export const GET_AUTO_REVIEWS = gql`
   query GetAutoReviews {
-    autoReviews { id ticketKey prUrl headSha threadUrl sessionId status detail startedAt finishedAt round postStatus postAt postText postDetail }
+    autoReviews { id ticketKey prUrl headSha threadUrl sessionId status detail startedAt finishedAt round postStatus postAt postText postDetail postImages { n file caption } }
   }
 `;
 
