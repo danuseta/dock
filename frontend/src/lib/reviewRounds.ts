@@ -1,4 +1,4 @@
-import { AUTO_REVIEW_LABEL, type AutoReviewRow } from '../agents/autoReviews';
+import { AUTO_REVIEW_LABEL, type AutoReviewRow, type ReviewImage } from '../agents/autoReviews';
 
 export interface ReviewRound {
   id: string;
@@ -11,6 +11,7 @@ export interface ReviewRound {
   replyAt?: string | null;
   replyText?: string | null;
   replyDetail?: string | null;
+  replyImages?: ReviewImage[] | null;
 }
 
 export interface SessionRounds { id: string; ticketKey?: string | null; reviewRound?: ReviewRound | null }
@@ -30,6 +31,7 @@ export interface HistoryRow {
   discordAt: string | null;
   discordText: string | null;
   discordDetail: string | null;
+  discordImages: ReviewImage[];
 }
 
 export const DISCORD_LABEL: Record<string, string> = {
@@ -49,6 +51,9 @@ export function markerSummary(marker: string): string {
   return parts.map((part) => part.replace('DOCK-FIX ', '').replace('@ ', '@')).join(' · ');
 }
 
+/** An image as the owner checks it before the post goes out: "GAMBAR 1 · caption · file". */
+export const imageLine = (image: ReviewImage) => [`GAMBAR ${image.n}`, image.caption, image.file].filter(Boolean).join(' · ');
+
 export const isPending = (row: Pick<HistoryRow, 'discord'>) => row.discord === 'pending';
 
 /** Review history of a ticket, oldest first: your DOCK's reviews with their post, and the teammate rounds with your reply. */
@@ -65,6 +70,7 @@ export function reviewHistory(autoReviews: AutoReviewRow[], rounds: ReviewRound[
     discordAt: row.postAt ?? null,
     discordText: row.postText ?? null,
     discordDetail: row.postDetail ?? null,
+    discordImages: row.postImages ?? [],
   }));
   const teammate: HistoryRow[] = rounds.map((round) => ({
     id: round.id,
@@ -78,6 +84,7 @@ export function reviewHistory(autoReviews: AutoReviewRow[], rounds: ReviewRound[
     discordAt: round.replyAt ?? null,
     discordText: round.replyText ?? null,
     discordDetail: round.replyDetail ?? null,
+    discordImages: round.replyImages ?? [],
   }));
   return [...reviews, ...teammate].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 }

@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { LatestFindings, ReviewHistoryTable, type ReviewHistoryProps } from '../pages/blackboard/ReviewHistory';
 import { LightBadge } from '../agents/AutoReviewList';
 import type { AutoReviewRow } from '../agents/autoReviews';
-import { hasReviewHistory, isPending, latestRound, lightTickets, markerSummary, reviewHistory, splitMarker, type ReviewRound } from '../lib/reviewRounds';
+import { hasReviewHistory, imageLine, isPending, latestRound, lightTickets, markerSummary, reviewHistory, splitMarker, type ReviewRound } from '../lib/reviewRounds';
 import { lightSteps, type LightValues } from '../lib/lightRunner';
 
 const auto = (extra: Partial<AutoReviewRow> = {}): AutoReviewRow => ({
@@ -144,4 +144,17 @@ test('the light runner steps follow the settings, and an off runner has none', (
   assert.deepEqual(lightSteps(light), ['scout', 'brief', 'worker · sonnet', 'verifier', 'browser check (FE)', 'blast check', 'publisher · push to PR']);
   assert.deepEqual(lightSteps({ ...light, lightBrowserCheck: false, lightBlastCheck: false, lightWorkerModel: 'haiku', lightPublish: 'draft' }), ['scout', 'brief', 'worker · haiku', 'verifier', 'publisher · draft PR']);
   assert.deepEqual(lightSteps({ ...light, lightRunnerOn: false }), []);
+});
+
+test('a pending post lists its images as GAMBAR N · caption · file; a sent one and old rows without images show none', () => {
+  const images = [{ n: 1, file: '10-tool-noparent-agent.png', caption: 'New › Agent tool dari Lab root' }, { n: 2, file: '11-file-noparent.png', caption: '' }];
+  const pending = reviewHistory([auto({ postStatus: 'pending', postImages: images })], [round({ replyImages: [images[1]] })]);
+  assert.deepEqual(pending.map((row) => row.discordImages.length), [2, 1]);
+  const html = renderToStaticMarkup(<ReviewHistoryTable {...props({ rows: pending })} />);
+  assert.match(html, /GAMBAR 1 · New › Agent tool dari Lab root · 10-tool-noparent-agent\.png/);
+  assert.match(html, /GAMBAR 2 · 11-file-noparent\.png/);
+  assert.equal(imageLine(images[1]), 'GAMBAR 2 · 11-file-noparent.png');
+  const sent = renderToStaticMarkup(<ReviewHistoryTable {...props({ rows: reviewHistory([auto({ postImages: images })], []) })} />);
+  assert.doesNotMatch(sent, /GAMBAR/);
+  assert.deepEqual(reviewHistory([auto()], [round()]).map((row) => row.discordImages), [[], []]);
 });

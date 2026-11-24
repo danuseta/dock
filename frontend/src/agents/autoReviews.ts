@@ -14,7 +14,11 @@ export interface AutoReviewRow {
   postAt?: string | null;
   postText?: string | null;
   postDetail?: string | null;
+  postImages?: ReviewImage[] | null;
 }
+
+/** An image of a review post or reply, as DOCK labels it: "GAMBAR N" with a caption, from a file in screenshots/. */
+export interface ReviewImage { n: number; file: string; caption: string }
 
 export const AUTO_REVIEW_LABEL: Record<string, string> = {
   running: 'Reviewing',
