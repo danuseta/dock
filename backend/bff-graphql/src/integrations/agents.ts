@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { OrchestratorInputError } from './orchestrator';
 import { parseGmEntry, parseGmRollback } from './guild-master';
+import { isMergePath, kitResolveAction, parseKitMergeReport, skillPath, skillText, type KitMergeReport, type KitResolveAction } from './kit-merge';
 
 export const AGENT_OPS = ['list', 'get', 'put', 'preview', 'delete'] as const;
-export type AgentOp = typeof AGENT_OPS[number] | 'gm-log' | 'gm-rollback';
+export type AgentOp = typeof AGENT_OPS[number] | 'gm-log' | 'gm-rollback' | 'gm-skill-put' | 'gm-kit-resolve'
+  | 'skill-list' | 'skill-get' | 'skill-preview' | 'kit-merge-report' | 'kit-merge-file';
 export const GUARD_PROFILES = ['read', 'worktree', 'browser', 'board'] as const;
 export const AGENT_MODELS = ['haiku', 'sonnet', 'opus', 'inherit'] as const;
 export const AGENT_SLUG = /^[a-z0-9][a-z0-9-]{1,47}$/;
@@ -128,6 +130,38 @@ function parsePreview(input: unknown) {
   };
 }
 
+export interface LibrarySkillFile { path: string; bytes: number }
+export interface LibrarySkillFileDetail extends LibrarySkillFile { text: string; kitNew: boolean }
+export interface KitConflictFile { path: string; local: string | null; kit: string; base: string | null; merged: string | null; clean: boolean }
+
+const MAX_SKILL_TEXT = 200_000;
+
+function parseSkillFile(input: unknown): LibrarySkillFile {
+  if (!isRecord(input) || typeof input.path !== 'string') throw new Error('The bridge sent a skill file without a path');
+  return { path: skillPath(input.path), bytes: Number.isInteger(input.bytes) ? Number(input.bytes) : 0 };
+}
+
+function parseSkillDetail(input: unknown): LibrarySkillFileDetail {
+  const item = parseSkillFile(input);
+  const record = input as Record<string, unknown>;
+  return { ...item, text: text(record.text, MAX_SKILL_TEXT), kitNew: flag(record.kitNew) };
+}
+
+function parseConflictFile(input: unknown): KitConflictFile {
+  if (!isRecord(input) || !isMergePath(input.path) || typeof input.kit !== 'string') throw new Error('The bridge sent no conflict file');
+  const maybe = (value: unknown) => (typeof value === 'string' ? value.slice(0, MAX_SKILL_TEXT) : null);
+  return { path: input.path, local: maybe(input.local), kit: input.kit.slice(0, MAX_SKILL_TEXT), base: maybe(input.base), merged: maybe(input.merged), clean: flag(input.clean) };
+}
+
+function parseResolve(machine: string, now: Date) {
+  return (input: unknown): { ok: boolean; error: string | null; report: KitMergeReport | null } => (isRecord(input) && input.ok === true
+    ? { ok: true, error: null, report: isRecord(input.report) ? parseKitMergeReport(input.report, machine, now) : null }
+    : { ok: false, error: (isRecord(input) && text(input.error, 500)) || 'The kit refused the change', report: null });
+}
+
+/** What a write the owner clicks hands the kit: DOCK's one-use nonce for exactly that write, and the manager log key. */
+export type GmGrant = (sha256: string) => Promise<{ nonce: string; key: string }>;
+
 export type MachineState = (machine: string) => Promise<{ online: boolean; capabilities: string[] }>;
 
 /**
@@ -156,6 +190,8 @@ export class AgentBridge {
     if (!state.online) throw new OrchestratorInputError(`The bridge on ${machine} is offline. Start dock-chat run there and try again.`);
     if (!state.capabilities.includes('agents')) throw new OrchestratorInputError(`The kit on ${machine} is too old to manage agents. Update claude-config.`);
     if (op.startsWith('gm-') && !state.capabilities.includes('gm')) throw new OrchestratorInputError(`The kit on ${machine} is too old for Guild Master. Update claude-config.`);
+    if ((op.startsWith('skill-') || op === 'gm-skill-put') && !state.capabilities.includes('skills')) throw new OrchestratorInputError(`The kit on ${machine} is too old to edit skills. Update claude-config.`);
+    if ((op.startsWith('kit-merge-') || op === 'gm-kit-resolve') && !state.capabilities.includes('kit-merge')) throw new OrchestratorInputError(`The kit on ${machine} is too old for install merges. Update claude-config.`);
     return new Promise((resolve, reject) => {
       const id = randomUUID();
       const timer = setTimeout(() => {
@@ -210,6 +246,42 @@ export class AgentBridge {
 
   async delete(machine: string, slug: unknown) {
     return this.ask(machine, 'delete', { slug: agentSlug(slug) }, saveResult);
+  }
+
+  async skillFiles(machine: string) {
+    return this.ask(machine, 'skill-list', {}, (result) => (Array.isArray(result) ? result.map(parseSkillFile) : []));
+  }
+
+  async skillFile(machine: string, path: unknown) {
+    return this.ask(machine, 'skill-get', { path: skillPath(path) }, parseSkillDetail);
+  }
+
+  async previewSkillFile(machine: string, path: unknown, body: unknown) {
+    return this.ask(machine, 'skill-preview', { path: skillPath(path), text: skillText(body) }, (result) => ({ diff: isRecord(result) ? text(result.diff, 200_000) : '' }));
+  }
+
+  /** The owner's save of one skill file: a Guild Master write with DOCK's nonce for this path and text, a backup and a log entry. */
+  async saveSkillFile(machine: string, path: unknown, body: unknown, grant: GmGrant, sha: (rel: string, body: string) => string) {
+    const rel = skillPath(path);
+    const value = skillText(body);
+    return this.ask(machine, 'gm-skill-put', { path: rel, text: value, ...await grant(sha(rel, value)) }, saveResult);
+  }
+
+  async kitMergeReport(machine: string, now = new Date()) {
+    return this.ask(machine, 'kit-merge-report', {}, (result) => parseKitMergeReport(result, machine, now));
+  }
+
+  async kitConflictFile(machine: string, path: unknown) {
+    if (!isMergePath(path)) throw new OrchestratorInputError('Not a skill or agent file the kit merges');
+    return this.ask(machine, 'kit-merge-file', { path }, parseConflictFile);
+  }
+
+  /** Settles one install conflict: local stays, the kit version, or the owner's merge. Logged by the kit like any Guild Master write. */
+  async resolveKitConflict(machine: string, path: unknown, action: unknown, body: unknown, grant: GmGrant, sha: (rel: string, action: KitResolveAction, body: string | null) => string, now = new Date()) {
+    if (!isMergePath(path)) throw new OrchestratorInputError('Not a skill or agent file the kit merges');
+    const chosen = kitResolveAction(action);
+    const value = chosen === 'edit' ? skillText(body) : null;
+    return this.ask(machine, 'gm-kit-resolve', { path, action: chosen, ...(value !== null ? { text: value } : {}), ...await grant(sha(path, chosen, value)) }, parseResolve(machine, now));
   }
 
   /** The manager log every Guild Master session of the machine writes to, newest first; with the log key the kit marks unsigned entries. */

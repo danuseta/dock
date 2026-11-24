@@ -438,6 +438,29 @@ test('while the arena is open, a new head is reviewed again after the DOCK-FIX f
   assert.strictEqual(sameHead.review.skipReason('t1'), 'same head commit, already reviewed');
 });
 
+test('a DOCK-FIX that answers the blockers on the same head starts the next round; once, and only after the round settled', async () => {
+  const answer = (at: Date) => message('m5', at, 'mas danu, 1) blocker kartu: tidak diubah karena sesuai AC.\nDOCK-FIX round 1 · head abc1234', { webhookId: '7' });
+  const settledAt = new Date(NOW.getTime() - 40 * 60_000);
+  const answered = arena({ messages: [answer(new Date(NOW.getTime() - 5 * 60_000))] });
+  answered.records[0].finishedAt = settledAt;
+  answered.deps.pull = async () => ({ open: true, headSha: 'abc1234' });
+  assert.strictEqual(await answered.review.tick(), 1);
+  assert.deepStrictEqual(answered.records.map((record) => [record.headSha, record.round]), [['abc1234', 1], ['abc1234', 2]]);
+  answered.records[1].status = 'blockers';
+  answered.records[1].finishedAt = new Date(NOW.getTime() - 60_000);
+  assert.strictEqual(await answered.review.tick(), 0, 'the same answer is judged once');
+
+  const old = arena({ messages: [answer(new Date(NOW.getTime() - 45 * 60_000))] });
+  old.records[0].finishedAt = settledAt;
+  old.deps.pull = async () => ({ open: true, headSha: 'abc1234' });
+  assert.strictEqual(await old.review.tick(), 0, 'a DOCK-FIX from before the round settled does not count');
+
+  const approved = arena({ status: 'clean', messages: [answer(new Date(NOW.getTime() - 5 * 60_000))] });
+  approved.records[0].finishedAt = settledAt;
+  approved.deps.pull = async () => ({ open: true, headSha: 'abc1234' });
+  assert.strictEqual(await approved.review.tick(), 0, 'an approved arena stays closed');
+});
+
 test('the arena closes on approve, on a closed pull request, after the last round, on stop dock and after 72 h without a commit', async () => {
   const fresh = new Date(NOW.getTime() - 20 * 60_000);
   const cases: Array<[Parameters<typeof arena>[0], string]> = [

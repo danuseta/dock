@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { ClaudeTicketUsage } from './claude-usage';
 import { FAILURE_TYPES, OrchestratorInputError, type LedgerFailure, type LedgerRounds } from './orchestrator';
+import { skillPath } from './kit-merge';
 
 export const SESSION_MODES = ['work', 'gm'] as const;
 export type SessionMode = typeof SESSION_MODES[number];
@@ -128,6 +129,8 @@ export function parseGmProposal(input: unknown) {
   let change: unknown;
   try { change = JSON.parse(input.pending); } catch { throw new OrchestratorInputError('The pending change is not JSON'); }
   if (!isRecord(change) || typeof change.diff !== 'string' || typeof change.summary !== 'string') throw new OrchestratorInputError('The pending change has no diff');
+  // A skill edit names one text file under skills/; DOCK checks the path itself, whatever the session wrote.
+  if (change.type === 'skill' && (skillPath(change.path) !== change.path || change.target !== `skills/${change.path}`)) throw new OrchestratorInputError('A skill change must name one skill text file');
   const cron = change.type === 'cron' || (change.type === 'rollback' && change.cron !== undefined);
   if (cron) {
     return {
