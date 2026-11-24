@@ -456,7 +456,10 @@ export class ReviewFindings {
     }
     const replies = (await this.deps.threadReplies(round.threadId)).filter((other) => other.id !== round.id && other.status !== THANKED);
     const head = ` · head ${state.headSha.slice(0, 7)}`;
-    const skip = !settled && replies.some((other) => other.replyText?.split('\n').pop()?.endsWith(head)) ? 'Already replied for this head'
+    const authorsOf = (item: ReviewRound) => ((item.findings ? JSON.parse(item.findings) as StoredFindings : null)?.authors ?? []).map((author) => author.id);
+    const mine = authorsOf(round);
+    const answered = (other: ReviewRound) => other.replyText?.split('\n').pop()?.endsWith(head) && mine.every((id) => authorsOf(other).includes(id));
+    const skip = !settled && replies.some(answered) ? 'Already replied for this head'
       : replies.length >= settings.maxRounds ? `${settings.maxRounds} replies in this thread` : null;
     if (skip) {
       await this.deps.update(round.id, { replyStatus: 'skipped', replyDetail: skip });
