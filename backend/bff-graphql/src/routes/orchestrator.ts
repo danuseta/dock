@@ -21,6 +21,7 @@ import { deployGateFor } from '../integrations/deploy-gate-live';
 import { PLANNING_ROUTES, planningIngest, type PlanningIngestDeps } from '../integrations/planning-ingest';
 import { planningVisuals, sprintDraftService, storyboardReader, ticketSummaryService } from '../integrations/sprint-draft-live';
 import { doctorReports, type DoctorReports } from '../integrations/doctor';
+import { kitMergeReports, type KitMergeReports } from '../integrations/kit-merge';
 import { DiscordReaderError, type DiscordReader } from '../integrations/discord-reader';
 import { discordReader } from '../integrations/discord-reader-live';
 import { dockMode } from '../mode';
@@ -97,6 +98,8 @@ export function createOrchestratorIngestRouter(
   gmCron: { view: () => Promise<unknown>; put: (values: Record<string, string>) => Promise<unknown> } = gmCronStore,
   // The ledger lines of a stored retro draft, accepted without the owner; Judge lines wait.
   retroAuto: (sprint: string, created: RetroLine[]) => Promise<unknown> = autoAcceptRetroDraft,
+  // The install merge report the bridge posts when it changed: local skill and agent edits merged, kept or in conflict.
+  kitMerge: Pick<KitMergeReports, 'ingest'> = kitMergeReports,
 ): Router {
   const router = Router();
 
@@ -222,6 +225,7 @@ export function createOrchestratorIngestRouter(
   router.post('/chat/delta', small, handle((body, _signal, machine) => chat.delta(body, machine)));
   router.post('/chat/activity', small, handle((body, _signal, machine) => chat.activity(body, machine)));
   router.post('/chat/status', small, handle(async (body, _signal, machine) => chat.ingestStatus(body, machine)));
+  router.post('/chat/kit/merge-report', express.json({ limit: '1mb' }), handle(async (body, _signal, machine) => kitMerge.ingest(body, machine)));
   router.post('/chat/agents/result', express.json({ limit: '1mb' }), handle(async (body, _signal, machine) => agents.receive(body, machine)));
   // Guild Master sessions run on the chat machine only, so only its bridge reads or writes these settings. A write also consumes the
   // one-use nonce DOCK minted for the owner's "ya" (or a panel rollback): the ingest token alone writes nothing.

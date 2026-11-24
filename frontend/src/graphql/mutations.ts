@@ -503,6 +503,12 @@ export const SAVE_LIBRARY_AGENT = gql`
   }
 `;
 
+export const RESOLVE_KIT_CONFLICT = gql`
+  mutation ResolveKitConflict($path: String!, $action: String!, $text: String) {
+    resolveKitConflict(path: $path, action: $action, text: $text) { ok error }
+  }
+`;
+
 export const DELETE_LIBRARY_AGENT = gql`
   mutation DeleteLibraryAgent($slug: String!, $machine: String) {
     deleteLibraryAgent(slug: $slug, machine: $machine) { ok diff error }

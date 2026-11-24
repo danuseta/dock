@@ -1612,6 +1612,23 @@ export const GET_GUILD_MASTER_PARTY = gql`
   }
 `;
 
+export const GET_KIT_MERGE_REPORTS = gql`
+  query KitMergeReports {
+    kitMergeReports {
+      machine at receivedAt
+      merged { path at }
+      kept { path at }
+      conflicts { path kitNew reason at }
+    }
+  }
+`;
+
+export const GET_KIT_CONFLICT_FILE = gql`
+  query KitConflictFile($path: String!) {
+    kitConflictFile(path: $path) { path local kit base merged clean }
+  }
+`;
+
 export const GET_LIBRARY_AGENTS = gql`
   query GetLibraryAgents($machine: String) {
     libraryAgents(machine: $machine) {
