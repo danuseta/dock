@@ -11,6 +11,7 @@ import { sprintPlanner } from './sprint-plan-live';
 import { isTaskTitle } from './session-titles';
 import { eventPush, pushService } from './push';
 import { askNotice, runDoneNotice, turnDoneNotice } from './push-notices';
+import { kitConflictNotice, kitMergeReports } from './kit-merge';
 import { ticketFlowLines } from './sous-flow-live';
 import { ticketReadinessLine } from './ticket-readiness-live';
 
@@ -96,6 +97,7 @@ export const orchestratorCron = new OrchestratorCron({
 chatService.onAsk = (ask) => { void eventPush.send('needsYou', askNotice(ask)).catch(() => undefined); };
 chatService.onTurnDone = (turn) => { void eventPush.send('sessionDone', turnDoneNotice(turn)).catch(() => undefined); };
 orchestratorService.onFinished = (run) => { void eventPush.send('sessionDone', runDoneNotice(run)).catch(() => undefined); };
+kitMergeReports.onConflicts = (machine, paths) => { void eventPush.send('needsYou', kitConflictNotice(machine, paths)).catch(() => undefined); };
 chatService.cronLimit = async () => (await orchestratorCron.settings().catch(() => null))?.parallel ?? null;
 chatService.cronTurn = async (ticketKey, stalledDetail, ended) => {
   await orchestratorService.setStalledDetail(ticketKey, stalledDetail);

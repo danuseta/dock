@@ -4,7 +4,7 @@ import type { ReviewRound } from '@prisma/client';
 import type { ThreadMessage, ThreadRow } from '../integrations/discord-threads';
 import { ON_IT } from '../integrations/discord-reader';
 import {
-  EXPIRED_DETAIL, ROUND_QUIET_MS, ReviewFindings, findingBlock, findingsEnabled, findingsPrompt, fixMarker, isBare, isOwnThread, parseRoundResult, replyTemplateValues, roundSummary, webhookIdOf,
+  EXPIRED_DETAIL, ROUND_QUIET_MS, ReviewFindings, findingBlock, findingsEnabled, findingsPrompt, fixMarker, isApproval, isBare, isOwnThread, parseRoundResult, replyTemplateValues, roundSummary, webhookIdOf,
   type FindingsSettings, type PushMessage, type ReviewFindingsDeps,
 } from '../integrations/review-findings';
 import { DEFAULT_REVIEW_REPLY_TEMPLATE, type PullState } from '../integrations/auto-review';
@@ -30,7 +30,7 @@ const ECHOPE_BLOCKERS = INDRA_NOTES + 90 * MIN;
 const reference = (): ThreadMessage[] => [
   POST(),
   message('indra', 'Indra', INDRA_ON_IT, 'on it'),
-  message('indra', 'Indra', INDRA_NOTES, 'LGTM mas, cuman ada beberapa notes: nama kolom di tabel export masih pakai snake_case, sama empty state belum ada copy-nya.'),
+  message('indra', 'Indra', INDRA_NOTES, 'mas, cuman ada beberapa notes: nama kolom di tabel export masih pakai snake_case, sama empty state belum ada copy-nya.'),
   message('echope', 'echope', ECHOPE_ON_IT - 5 * MIN, 'nanti aku cek juga, notesnya agak panjang'),
   message('echope', 'echope', ECHOPE_ON_IT, 'onit'),
   message('echope', 'echope', ECHOPE_BLOCKERS, '1. Filter status tidak reset waktu ganti tab\n2. Query tanpa index di collection orders'),
@@ -150,7 +150,7 @@ test('the QRD-1292 thread gives two rounds, Indra alone and echope batched, even
   assert.strictEqual(await late.tickAt(end + MIN), 1);
   assert.strictEqual(await late.tickAt(end + 2 * MIN), 0);
   assert.deepStrictEqual(late.state.sends.map((sent) => roundTexts(sent.prompt).length), [1, 2]);
-  assert.match(late.state.sends[0].prompt, /<<<TEMUAN Indra [^\n]*>>>\nLGTM mas, cuman ada beberapa notes/);
+  assert.match(late.state.sends[0].prompt, /<<<TEMUAN Indra [^\n]*>>>\nmas, cuman ada beberapa notes/);
   assert.match(late.state.sends[1].prompt, /minta asistenmu verify dlu/);
   assert.doesNotMatch(late.state.sends[1].prompt, /notesnya agak panjang/, 'a message before the author said on it is not a finding');
   assert.deepStrictEqual(late.state.rounds.map((round) => round.status), ['sent', 'sent']);
@@ -250,7 +250,7 @@ test('a refused send fails the round, the next ticks retry it, and the third fai
   assert.strictEqual(retry.state.rounds[0].status, 'failed');
   assert.strictEqual(await retry.tickAt(start + MIN), 1);
   assert.deepStrictEqual([retry.state.rounds[0].status, retry.state.rounds[0].attempts, retry.state.pushes.length], ['sent', 1, 0]);
-  assert.match(retry.state.sends[0].prompt, /LGTM mas/, 'the retry carries the same findings');
+  assert.match(retry.state.sends[0].prompt, /cuman ada beberapa notes/, 'the retry carries the same findings');
 });
 
 test('a round goes to the last Task session or a new one; the marker reports it once; no marker leaves it sent', async () => {
@@ -412,7 +412,7 @@ test('a retry sends the findings stored at create time after the messages rolled
   await w.tickAt(INDRA_NOTES + ROUND_QUIET_MS);
   w.state.rows = [row(reference().slice(0, 3), { messages: [] })];
   assert.strictEqual(await w.tickAt(INDRA_NOTES + ROUND_QUIET_MS + MIN), 1);
-  assert.match(w.state.sends[0].prompt, /LGTM mas, cuman ada beberapa notes/);
+  assert.match(w.state.sends[0].prompt, /mas, cuman ada beberapa notes/);
 });
 
 test('a teammate DOCK review post counts as the user named in its marker, only when that user said on it', async () => {
@@ -622,6 +622,36 @@ test('the longer DOCK-REVIEW marker with the ledger verdict still reads as the u
   const w = world({ rows: [row([POST(), message('1111', 'Indra', T0 + 10 * MIN, 'on it'), message(OTHER, 'DOCK Indra', T0 + 20 * MIN, marked, { webhookId: OTHER })])] });
   assert.strictEqual(await w.tickAt(T0 + 60 * MIN), 1);
   assert.match(w.state.sends[0].prompt, /<<<TEMUAN Indra [^\n]*>>>\nada blocker: kolom export salah format\n<<<AKHIR TEMUAN>>>/);
+});
+
+test('an approval starts no fix round and is thanked once after the post delay', async () => {
+  const OTHER = '1600000000000000001';
+  const cases = [
+    ['mas danu, gak ada blocker. catatan: 1) label tombol masih inggris', 'Approve with comments · 0 blocker'],
+    ['mas danu, gak ada blocker.', 'Approve · 0 blocker'],
+    ['mas danu, gak ada blocker buat fe #1234. catatan: 1) script-docs bisa ditambah satu kalimat', 'Request change · 1 blocker'],
+  ];
+  for (const [text, verdict] of cases) {
+    const marked = `${text}\nDOCK-REVIEW on it by <@1111> · round 2 · @ 9f3c2a1 · ${verdict}`;
+    const w = world({ rows: [row([POST(), message('1111', 'Indra', T0 + 10 * MIN, 'on it'), message(OTHER, 'DOCK Indra', T0 + 20 * MIN, marked, { webhookId: OTHER })])] });
+    assert.strictEqual(await w.tickAt(T0 + 60 * MIN), 0, verdict);
+    assert.strictEqual(w.state.sends.length, 0, verdict);
+    assert.strictEqual(w.state.rounds.length, 1, verdict);
+    const [thanks] = w.state.rounds;
+    assert.deepStrictEqual([thanks.status, thanks.replyStatus, thanks.replyText], ['thanked', 'pending', 'makasih mas Indra 🙏'], verdict);
+    await w.tickAt(T0 + 61 * MIN);
+    assert.strictEqual(w.state.rounds.length, 1, `${verdict}: thanked once`);
+  }
+});
+
+test('which first lines read as an approval', () => {
+  assert.ok(isApproval('mas danu, gak ada blocker. catatan: 1) x', null));
+  assert.ok(isApproval('LGTM mas', null));
+  assert.ok(isApproval('mas danu, lgtm, makasih', null));
+  assert.ok(!isApproval('mas danu, ada blocker 2, belum bisa approve.', null));
+  assert.ok(!isApproval('mas danu, ada blocker 1, belum bisa approve. 1) blocker, fe: gak ada blocker lain', null));
+  assert.ok(!isApproval('label tombol masih inggris', null));
+  assert.ok(isApproval('apa aja', '<@1> · round 1 · @ abc · Approve · 0 blocker'));
 });
 
 test('no second reply for the same head, and no more replies in a thread than the arena allows', async () => {

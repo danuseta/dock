@@ -12,10 +12,11 @@ import { GUARD_PROFILES, filterAgents, filterCounts, needsGuard, titleFromSlug, 
 import { AgentEditor } from './AgentEditor';
 import { AgentReview } from './AgentReview';
 import { LookAvatar } from './LookAvatar';
+import { KitConflicts } from './KitConflicts';
 
 const FILTERS: Array<[LibraryFilter, string]> = [['all', 'All'], ['kit', 'SOUS kit'], ['custom', 'Custom'], ['guard', 'Needs a guard']];
 
-type Screen = { name: 'list' } | { name: 'edit'; slug: string | null; initial?: { form: AgentForm; avatar: File | null } } | { name: 'review'; form: AgentForm; avatar: File | null };
+type Screen = { name: 'list' } | { name: 'merge'; path: string } | { name: 'edit'; slug: string | null; initial?: { form: AgentForm; avatar: File | null } } | { name: 'review'; form: AgentForm; avatar: File | null };
 
 const guardLabel = (agent: LibraryAgent) => {
   if (needsGuard(agent)) return agent.source === 'custom' ? 'No guard profile, draft' : 'No hooks block';
@@ -69,12 +70,16 @@ export const AgentsLibrary: React.FC = () => {
   if (screen.name === 'edit') {
     return <AgentEditor slug={screen.slug} known={agents.map((agent) => agent.slug)} onBack={() => setScreen({ name: 'list' })} onReview={(form, avatar) => setScreen({ name: 'review', form, avatar })} onDeleted={() => { setScreen({ name: 'list' }); void refetch(); }} initial={screen.initial} />;
   }
+  if (screen.name === 'merge') {
+    return <KitConflicts editing={screen.path} onEdit={(path) => setScreen(path ? { name: 'merge', path } : { name: 'list' })} />;
+  }
   if (screen.name === 'review') {
     return <AgentReview form={screen.form} avatar={screen.avatar} onBack={() => setScreen({ name: 'edit', slug: screen.form.create ? null : screen.form.slug, initial: { form: screen.form, avatar: screen.avatar } })} onSaved={() => { setScreen({ name: 'list' }); void refetch(); }} />;
   }
 
   return (
     <section aria-label="Agent library">
+      <KitConflicts editing={null} onEdit={(path) => { if (path) setScreen({ name: 'merge', path }); }} />
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="relative min-w-[220px] flex-1 max-w-sm">
           <Search size={14} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />

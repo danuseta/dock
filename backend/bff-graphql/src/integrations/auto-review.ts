@@ -384,7 +384,7 @@ export class AutoReview {
         reasons.push('pull request closed');
         continue;
       }
-      if (last && last.headSha === state.headSha) {
+      if (last && last.headSha === state.headSha && !(arena && this.answeredOnSameHead(row, arena, state.headSha))) {
         reasons.push('same head commit, already reviewed');
         continue;
       }
@@ -416,6 +416,17 @@ export class AutoReview {
     if (row.messages.some((message) => Date.parse(message.at) > saidAt && saysStop(message))) return 'arena closed: stop dock';
     if (this.deps.now().getTime() - lastActivity(arena) > ON_IT_WINDOW_MS) return 'arena closed: 72 h without a new commit';
     return null;
+  }
+
+  /**
+   * The author answered the last round's blockers without a new commit: a DOCK-FIX for this same head came after that round
+   * settled. The next round then judges the answers, so a reviewer never goes quiet on "tidak diubah karena ...".
+   */
+  private answeredOnSameHead(row: ThreadRow, arena: AutoReviewRecord, headSha: string): boolean {
+    if (arena.status !== 'blockers') return false;
+    const settled = (arena.finishedAt ?? arena.startedAt).getTime();
+    const short = headSha.slice(0, 7);
+    return row.messages.some((message) => isFixReply(message, settled) && message.text.includes(short));
   }
 
   /** When DOCK first saw a head commit; a commit date can be set to anything, the moment it showed up cannot. */

@@ -1719,6 +1719,69 @@ export const typeDefs = gql`
     error: String
   }
 
+  "A text file of an installed skill (<config>/skills/**) the kit lets DOCK and Guild Master edit."
+  type LibrarySkillFile {
+    path: String!
+    bytes: Int!
+  }
+
+  type LibrarySkillFileDetail {
+    path: String!
+    bytes: Int!
+    text: String!
+    "True when an install left the kit version next to it as <file>.kit-new."
+    kitNew: Boolean!
+  }
+
+  type LibrarySkillPreview {
+    diff: String!
+  }
+
+  type KitMergeRow {
+    path: String!
+    at: String!
+  }
+
+  type KitMergeConflict {
+    path: String!
+    kitNew: String!
+    reason: String!
+    at: String!
+  }
+
+  type KitMergeResolved {
+    path: String!
+    action: String!
+    at: String!
+  }
+
+  "The last kit install of a machine: local skill and agent edits merged, kept, or in conflict with the kit."
+  type KitMergeReport {
+    machine: String!
+    at: String
+    receivedAt: String!
+    merged: [KitMergeRow!]!
+    kept: [KitMergeRow!]!
+    conflicts: [KitMergeConflict!]!
+    resolved: [KitMergeResolved!]!
+  }
+
+  "One install conflict: the local file, the kit version (.kit-new), the base both started from, and their merge with conflict markers."
+  type KitConflictFile {
+    path: String!
+    local: String
+    kit: String!
+    base: String
+    merged: String
+    clean: Boolean!
+  }
+
+  type KitConflictResolve {
+    ok: Boolean!
+    error: String
+    report: KitMergeReport
+  }
+
   input LibraryAgentInput {
     slug: String!
     create: Boolean!
@@ -2793,6 +2856,10 @@ export const typeDefs = gql`
     agentLooks: [AgentLook!]!
     libraryAgents(machine: String): [LibraryAgent!]!
     libraryAgent(slug: String!, machine: String): LibraryAgentDetail!
+    librarySkillFiles(machine: String): [LibrarySkillFile!]!
+    librarySkillFile(path: String!, machine: String): LibrarySkillFileDetail!
+    kitMergeReports: [KitMergeReport!]!
+    kitConflictFile(path: String!): KitConflictFile!
     guildMasterLog: [GuildMasterLogEntry!]!
     guildMasterParty(key: String!): GuildMasterParty
     demoVideos: DemoVideoList!
@@ -3022,6 +3089,10 @@ export const typeDefs = gql`
     previewLibraryAgent(input: LibraryAgentInput!, machine: String): LibraryAgentPreview!
     saveLibraryAgent(input: LibraryAgentInput!, machine: String): LibraryAgentSave!
     deleteLibraryAgent(slug: String!, machine: String): LibraryAgentSave!
+    previewLibrarySkillFile(path: String!, text: String!, machine: String): LibrarySkillPreview!
+    saveLibrarySkillFile(path: String!, text: String!): LibraryAgentSave!
+    "Settles an install conflict on the chat machine: action local, kit, or edit with the merged text. Logged like a Guild Master write."
+    resolveKitConflict(path: String!, action: String!, text: String): KitConflictResolve!
     renameChatSession(id: ID!, title: String!): ChatSession!
     setChatSessionOptions(id: ID!, options: ChatTurnOptionsInput!): ChatSession!
     deleteChatSession(id: ID!): Boolean!

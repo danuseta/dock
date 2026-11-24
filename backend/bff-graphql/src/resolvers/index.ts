@@ -67,6 +67,7 @@ import { isTicketKey, runPullRequests } from '../integrations/qa-local';
 import { deployGateFor } from '../integrations/deploy-gate-live';
 import { agentLooks } from '../integrations/agent-looks';
 import { agentBridge } from '../integrations/agents-live';
+import { kitMergeReports, kitResolveSha, skillPutSha } from '../integrations/kit-merge';
 import type { AnswerInput } from '../integrations/chat-interactions';
 import { SprintBusyError, SprintInputError, sprintDashboardService } from '../integrations/sprint-dashboard';
 import { dockMode, ownRuns } from '../mode';
@@ -362,6 +363,11 @@ function requireCron(): void {
   if (dockMode() !== 'workspace') {
     throw new GraphQLError('The cron runs on the workspace DOCK.', { extensions: { code: 'BAD_USER_INPUT' } });
   }
+}
+
+/** The owner's click is the confirmation: DOCK mints the one-use nonce the kit's write consumes, bound to exactly that write. */
+async function ownerGrant(sha256: string) {
+  return { nonce: chatService.gmNonces.mint({ sessionId: null, sha256, values: null, rollback: false }).nonce, key: await chatService.gmKey() };
 }
 
 function requireAgents(): void {
@@ -700,6 +706,22 @@ export const resolvers = {
     libraryAgent: async (_: unknown, { slug, machine }: { slug: string; machine?: string | null }) => {
       requireAgents();
       return agentBridge.get(machine || CHAT_MACHINE, slug).catch(orchestratorInputError);
+    },
+    librarySkillFiles: async (_: unknown, { machine }: { machine?: string | null }) => {
+      requireAgents();
+      return agentBridge.skillFiles(machine || CHAT_MACHINE).catch(orchestratorInputError);
+    },
+    librarySkillFile: async (_: unknown, { path, machine }: { path: string; machine?: string | null }) => {
+      requireAgents();
+      return agentBridge.skillFile(machine || CHAT_MACHINE, path).catch(orchestratorInputError);
+    },
+    kitMergeReports: async () => {
+      requireAgents();
+      return kitMergeReports.list();
+    },
+    kitConflictFile: async (_: unknown, { path }: { path: string }) => {
+      requireAgents();
+      return agentBridge.kitConflictFile(CHAT_MACHINE, path).catch(orchestratorInputError);
     },
     guildMasterLog: async () => {
       requireAgents();
@@ -1310,6 +1332,21 @@ export const resolvers = {
       requireAgents();
       return agentBridge.put(machine || CHAT_MACHINE, input).catch(orchestratorInputError);
     },
+    previewLibrarySkillFile: async (_: unknown, { path, text, machine }: { path: string; text: string; machine?: string | null }) => {
+      requireAgents();
+      return agentBridge.previewSkillFile(machine || CHAT_MACHINE, path, text).catch(orchestratorInputError);
+    },
+    // Skill writes are Guild Master writes: they run on the chat machine, with a nonce, a backup and a manager log entry.
+    saveLibrarySkillFile: async (_: unknown, { path, text }: { path: string; text: string }) => {
+      requireAgents();
+      return agentBridge.saveSkillFile(CHAT_MACHINE, path, text, ownerGrant, skillPutSha).catch(orchestratorInputError);
+    },
+    resolveKitConflict: async (_: unknown, { path, action, text }: { path: string; action: string; text?: string | null }) => {
+      requireAgents();
+      const result = await agentBridge.resolveKitConflict(CHAT_MACHINE, path, action, text ?? null, ownerGrant, kitResolveSha).catch(orchestratorInputError);
+      if (result.report) await kitMergeReports.ingest(result.report, CHAT_MACHINE);
+      return result;
+    },
     deleteLibraryAgent: async (_: unknown, { slug, machine }: { slug: string; machine?: string | null }) => {
       requireAgents();
       const result = await agentBridge.delete(machine || CHAT_MACHINE, slug).catch(orchestratorInputError);
@@ -1419,7 +1456,7 @@ export const protectedQueries = [
   'dashboard', 'ticketPullRequests', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'installedSkills', 'reviewRoundsForTicket', 'claudeAccounts', 'qaLocal', 'deployGate', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatSessionStates', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
-  'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'claudeSessionUsage', 'claudeTicketUsage', 'agentLooks', 'libraryAgents', 'libraryAgent', 'guildMasterLog', 'guildMasterParty',
+  'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'claudeSessionUsage', 'claudeTicketUsage', 'agentLooks', 'libraryAgents', 'libraryAgent', 'librarySkillFiles', 'librarySkillFile', 'kitMergeReports', 'kitConflictFile', 'guildMasterLog', 'guildMasterParty',
   'sprintList', 'sprintDashboard', 'sprintTrend', 'sprintDashboardSettings', 'sprintIssueEvents', 'orchestratorCronSettings', 'orchestratorCronStatus', 'pushPublicKey', 'ownerName',
   'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro', 'sprintPlan',
   'planningSprints', 'sprintDraft', 'sprintDraftVisuals', 'planningChatPrompt', 'sprintPlanSignal', 'planningFlow', 'planningSplitPage', 'previewSprintDraftPublish', 'sprintDrift', 'acIncoming', 'ticketSummary', 'ticketReadiness',
@@ -1544,6 +1581,9 @@ export const protectedMutations = [
   'previewLibraryAgent',
   'saveLibraryAgent',
   'deleteLibraryAgent',
+  'previewLibrarySkillFile',
+  'saveLibrarySkillFile',
+  'resolveKitConflict',
   'setChatSessionOptions',
   'deleteChatSession',
   'refreshSprintDashboard',
