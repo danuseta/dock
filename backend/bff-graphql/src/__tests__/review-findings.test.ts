@@ -624,6 +624,16 @@ test('the longer DOCK-REVIEW marker with the ledger verdict still reads as the u
   assert.match(w.state.sends[0].prompt, /<<<TEMUAN Indra [^\n]*>>>\nada blocker: kolom export salah format\n<<<AKHIR TEMUAN>>>/);
 });
 
+test('a reviewer DOCK post that approves starts no fix round, with or without notes', async () => {
+  const OTHER = '1600000000000000001';
+  for (const verdict of ['Approve with comments · 0 blocker', 'Approve · 0 blocker']) {
+    const marked = `mas danu, gak ada blocker. catatan: 1) label tombol masih inggris\nDOCK-REVIEW on it by <@1111> · round 2 · @ 9f3c2a1 · ${verdict}`;
+    const w = world({ rows: [row([POST(), message('1111', 'Indra', T0 + 10 * MIN, 'on it'), message(OTHER, 'DOCK Indra', T0 + 20 * MIN, marked, { webhookId: OTHER })])] });
+    assert.strictEqual(await w.tickAt(T0 + 60 * MIN), 0, verdict);
+    assert.strictEqual(w.state.sends.length, 0, verdict);
+  }
+});
+
 test('no second reply for the same head, and no more replies in a thread than the arena allows', async () => {
   const messages = [POST(), message('71111', 'Indra', INDRA_ON_IT, 'on it'), message('71111', 'Indra', INDRA_NOTES, 'notes: empty state belum ada copy-nya'), message('71111', 'Indra', INDRA_NOTES + 30 * MIN, 'notes: label tombol masih inggris')];
   const w = world({ rows: [row(messages)] });

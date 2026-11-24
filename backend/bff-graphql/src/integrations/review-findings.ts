@@ -17,6 +17,8 @@ const MAX_FINDING_TEXT = 1500;
 const MAX_PROMPT = 7500;
 const MARKER = /^DOCK-REVIEW-ROUND (\S+) valid=(\d+) invalid=(\d+) pushed=(yes|no|body)\s*$/m;
 const REVIEW_LINE = /^DOCK-REVIEW on it by (.+)$/m;
+/** A reviewer DOCK's verdict line that approves: its notes are not findings, so no fix round answers an approve. */
+const APPROVED = /· Approve(?: with comments)? · 0 blocker\s*$/;
 const FIX_LINE = /^DOCK-FIX\b/m;
 const WEBHOOK = /\/webhooks\/(\d+)\//;
 const BARE_WORDS = /\b(?:on\s?it|lgtm|approved?|acc|ok|oke|okay|sip|siap|mantap|aman|thanks|thx|makasih|done)\b/gi;
@@ -128,6 +130,7 @@ export function findings(row: ThreadRow, since: number, webhookId: string | null
   for (const raw of row.messages) {
     if (raw.mine || raw.authorId === row.createdById || (webhookId && raw.webhookId === webhookId) || FIX_LINE.test(raw.text)) continue;
     const line = raw.webhookId ? REVIEW_LINE.exec(raw.text) : null;
+    if (line && APPROVED.test(line[1])) continue;
     const userId = line ? /<@!?(\d+)>/.exec(line[1])?.[1] ?? raw.mentions.find((mention) => !mention.role && line[1].startsWith(`@${mention.name}`))?.id : undefined;
     const author = userId ? names.get(userId) ?? raw.mentions.find((mention) => mention.id === userId)?.name : undefined;
     if (line && !author) continue;
