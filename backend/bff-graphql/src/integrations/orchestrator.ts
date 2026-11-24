@@ -142,6 +142,8 @@ export interface Ledger {
   findings: LedgerFinding[];
   lgtm: LedgerLgtm[];
   verdict: ReviewVerdict | null;
+  /** When the verdict was written; null for a ledger written before status.cjs stamped it. */
+  verdictAt: string | null;
   /** Whether the reviewed ticket is ready for QA, with what stops it (AC without path:line, a dependency not in UAT, no test data). */
   readyForQa: ReadyForQa | null;
   /** The ticket a review run approves and its pull requests, from the verdict; null and empty mean the ledger key and a lookup. */
@@ -450,6 +452,7 @@ export function parseLedger(input: unknown, now = new Date()): Ledger {
     .slice(-MAX_FINDINGS);
   const verdictValue = isRecord(input.verdict) ? text(input.verdict.value, 20) as ReviewVerdict : null;
   const verdict = verdictValue && REVIEW_VERDICTS.includes(verdictValue) ? verdictValue : null;
+  const verdictAt = verdict && isRecord(input.verdict) ? optionalText(input.verdict.at, 40) : null;
   let reviewTicket: string | null = null;
   try { reviewTicket = isRecord(input.verdict) && input.verdict.ticket ? normalizeTicketKey(input.verdict.ticket) : null; } catch { reviewTicket = null; }
   const reviewPrs = (isRecord(input.verdict) && Array.isArray(input.verdict.prs) ? input.verdict.prs : [])
@@ -481,6 +484,7 @@ export function parseLedger(input: unknown, now = new Date()): Ledger {
     findings,
     lgtm,
     verdict,
+    verdictAt,
     readyForQa: parseReadyForQa(input),
     reviewTicket,
     reviewPrs,
@@ -745,6 +749,7 @@ export function toOrchestration(row: RunRow, now: Date, githubPullRequests: RunP
     findings: Array.isArray(ledger.findings) ? ledger.findings : [],
     lgtm: Array.isArray(ledger.lgtm) ? ledger.lgtm : [],
     verdict: ledger.verdict ?? null,
+    verdictAt: ledger.verdictAt ?? null,
     readyForQa: ledger.readyForQa ?? null,
     reviewTicket: ledger.reviewTicket ?? null,
     reviewPrs: Array.isArray(ledger.reviewPrs) ? ledger.reviewPrs : [],

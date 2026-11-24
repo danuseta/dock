@@ -229,10 +229,10 @@ test('sous ledger fields: engine, card kind, rounds, draft, numbered decisions a
     { n: 2, at: '2026-10-20T00:30:00.000Z', type: 'DISPUTE', text: 'BE and FE disagree on the field', level: 'owner', status: 'open', resolvedBy: null, resolvedAt: null, options: ['A', 'B'], effects: ['BE adapts', null] },
     { n: 1, at: '', type: 'QUESTION', text: 'Old question', level: 'arbiter', status: 'resolved', resolvedBy: 3, resolvedAt: '2026-10-20T01:00:00.000Z', options: [], effects: [] },
   ]);
-  const review = parseLedger({ ...ledger, kind: 'review', verdict: { value: 'approve', ticket: 'qrd-77', prs: ['https://github.com/o/be/pull/4', 'javascript:x'] } });
-  assert.deepStrictEqual([review.verdict, review.reviewTicket, review.reviewPrs], ['approve', 'QRD-77', ['https://github.com/o/be/pull/4']]);
+  const review = parseLedger({ ...ledger, kind: 'review', verdict: { at: '2026-11-24T04:29:00.000Z', value: 'approve', ticket: 'qrd-77', prs: ['https://github.com/o/be/pull/4', 'javascript:x'] } });
+  assert.deepStrictEqual([review.verdict, review.verdictAt, review.reviewTicket, review.reviewPrs], ['approve', '2026-11-24T04:29:00.000Z', 'QRD-77', ['https://github.com/o/be/pull/4']]);
   const old = parseLedger(ledger);
-  assert.deepStrictEqual([old.reviewTicket, old.reviewPrs], [null, []]);
+  assert.deepStrictEqual([old.verdictAt, old.reviewTicket, old.reviewPrs], [null, null, []]);
   assert.strictEqual(old.stackedOn, null, 'a ledger without stackedOn is unchanged');
   const stacked = parseLedger({ ...ledger, stackedOn: {
     key: 'qrd-1345',

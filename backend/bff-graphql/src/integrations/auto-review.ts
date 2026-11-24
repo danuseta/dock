@@ -523,11 +523,13 @@ export class AutoReview {
     return true;
   }
 
-  /** A review ledger with a verdict, for the auto review running on that ticket. */
+  /** A review ledger with a verdict written during this round, for the auto review running on that ticket. A verdict left from an earlier round is ignored. */
   async ledger(run: Orchestration): Promise<void> {
     if (run.kind !== 'review' || !run.verdict) return;
     const record = await this.deps.running(run.key);
-    if (!record || this.deciding.has(record.id) || new Date(run.updatedAt).getTime() < record.startedAt.getTime()) return;
+    const verdictAt = Date.parse(run.verdictAt ?? '');
+    const writtenAt = Number.isNaN(verdictAt) ? new Date(run.updatedAt).getTime() : verdictAt;
+    if (!record || this.deciding.has(record.id) || writtenAt < record.startedAt.getTime()) return;
     this.deciding.add(record.id);
     try {
       await this.decide(run, record);
