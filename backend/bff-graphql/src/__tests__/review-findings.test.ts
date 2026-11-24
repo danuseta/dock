@@ -296,12 +296,13 @@ test('ten messages of 2000 characters give a prompt of at most 8000 with the mar
   const prompt = findingsPrompt({ key: 'QRD-1292', threadUrl: 'https://discord.com/channels/g/t', threadId: 't', roundId: 'r1', prUrls: ['https://github.com/a/b/pull/1'], since: at(T0), blocks: messages.map(findingBlock) });
   assert.ok(prompt.length <= 8000, String(prompt.length));
   assert.match(prompt, /^Pakai skill sous\. Lanjutkan tiket QRD-1292/);
-  assert.match(prompt.split('\n').at(-1)!, /^DOCK-REVIEW-ROUND r1 valid=<jumlah valid> invalid=<jumlah tidak valid> pushed=<yes\|no>$/);
+  assert.match(prompt.split('\n').at(-1)!, /^DOCK-REVIEW-ROUND r1 valid=<jumlah valid> invalid=<jumlah tidak valid> pushed=<yes\|no\|body>$/);
   assert.ok(roundTexts(prompt).every((block) => block.split('<<<AKHIR TEMUAN>>>')[0].length <= 1600));
 });
 
 test('the round result and summary', () => {
-  assert.deepStrictEqual(parseRoundResult('x\nDOCK-REVIEW-ROUND r1 valid=0 invalid=2 pushed=no\n'), { roundId: 'r1', valid: 0, invalid: 2, pushed: false });
+  assert.deepStrictEqual(parseRoundResult('x\nDOCK-REVIEW-ROUND r1 valid=0 invalid=2 pushed=no\n'), { roundId: 'r1', valid: 0, invalid: 2, pushed: false, body: false });
+  assert.deepStrictEqual(parseRoundResult('DOCK-REVIEW-ROUND r1 valid=1 invalid=0 pushed=body'), { roundId: 'r1', valid: 1, invalid: 0, pushed: false, body: true });
   assert.strictEqual(parseRoundResult('DOCK-REVIEW-ROUND r1 valid=x'), null);
   assert.strictEqual(roundSummary({ valid: 2, invalid: 1, pushed: true }), '2 valid, pushed · 1 not valid');
   assert.strictEqual(roundSummary({ valid: 0, invalid: 2, pushed: false }), '2 not valid');
@@ -499,6 +500,12 @@ test('a reply is posted when every finding was not valid; not when a valid findi
   await report(unpushed.w);
   assert.strictEqual(unpushed.round.replyStatus, null);
 
+  const body = await sentRound();
+  body.w.state.replies.set('task-9', REPLY(body.round.id, 'valid=1 invalid=0 pushed=body'));
+  await report(body.w);
+  assert.strictEqual(body.round.replyStatus, 'pending', 'a valid finding settled in the pull request body is replied to');
+  assert.match((body.round.replyText ?? '').split('\n').at(-1)!, /^DOCK-FIX round \d+ · head /);
+
   const failed = await sentRound();
   failed.w.state.replies.set('task-9', REPLY(failed.round.id));
   await report(failed.w, true);
@@ -630,6 +637,17 @@ test('no second reply for the same head, and no more replies in a thread than th
   w.state.replies.set('task-9', REPLY(second.id));
   await report(w);
   assert.deepStrictEqual([first.replyStatus, second.replyStatus, second.replyDetail], ['pending', 'skipped', 'Already replied for this head']);
+
+  const settled = world({ rows: [row(messages)] });
+  settled.state.lastSession = 'task-9';
+  await settled.tickAt(INDRA_NOTES + 30 * MIN + ROUND_QUIET_MS);
+  await settled.tickAt(INDRA_NOTES + 31 * MIN + ROUND_QUIET_MS);
+  const [fixed, inBody] = settled.state.rounds;
+  settled.state.replies.set('task-9', REPLY(fixed.id));
+  await report(settled);
+  settled.state.replies.set('task-9', REPLY(inBody.id, 'valid=1 invalid=0 pushed=body'));
+  await report(settled);
+  assert.deepStrictEqual([fixed.replyStatus, inBody.replyStatus], ['pending', 'pending'], 'a round settled in the pull request body is replied to on the same head');
 
   const capped = await sentRound((x) => { x.state.settings = { ...x.state.settings, maxRounds: 1 }; });
   capped.w.state.rounds.push({ ...capped.round, id: 'r-old', replyStatus: 'sent', replyText: 'x\nDOCK-FIX round 1 · head 0000000' });
