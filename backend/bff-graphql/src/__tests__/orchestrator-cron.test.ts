@@ -414,6 +414,34 @@ test('a run that goes stalled pushes once; the first look and a run waiting on t
   assert.deepStrictEqual([await silent.cron.notifyStalled(), silent.state.pushes.length], [[], 0], 'no phone, no push');
 });
 
+test('a new open owner issue pushes once to the ticket session; later ticks, sous-level issues and the waited issue stay quiet', async () => {
+  const run: CronRun = { key: 'QRD-21', machine: 'workspace', title: 'Owner issue', waiting: null, activity: 'IDLE', engine: 'sous', issues: [] };
+  const { state, cron } = world({ runs: [run], pushDevices: true });
+  assert.deepStrictEqual(await cron.notifyOwnerIssues(), [], 'the first look only remembers');
+
+  state.sessions.push({ id: 'task-21', ticketKey: 'QRD-21', machine: 'workspace', title: ticketSessionTitle('Task', 'QRD-21'), origin: 'cron', options: {}, state: 'idle', queuedAt: 0, replied: true });
+  state.runs = [{ ...run, issues: [
+    { n: 9, level: 'owner', status: 'open', text: '  Lint guard is broken on develop, fix here or not?  ' },
+    { n: 10, level: 'sous', status: 'open', text: 'Prop optional or required?' },
+    { n: 11, level: 'owner', status: 'resolved', text: 'Answered already' },
+  ] }];
+  assert.deepStrictEqual(await cron.notifyOwnerIssues(), ['QRD-21']);
+  assert.deepStrictEqual(state.pushes, [{ title: 'QRD-21: waiting on you — I-9', body: 'Lint guard is broken on develop, fix here or not?', url: '/sessions?session=task-21', tag: 'owner-issue-QRD-21-9' }]);
+  assert.deepStrictEqual(await cron.notifyOwnerIssues(), [], 'the same issue on a later tick');
+  await cron.tick();
+  assert.strictEqual(state.pushes.filter((push) => push.title.includes('I-9')).length, 1, 'the tick does not push it again');
+
+  state.runs = [{ key: 'QRD-22', machine: 'workspace', title: 'No session', waiting: 'I-3: Which endpoint?', activity: 'WAITING', issues: [
+    { n: 3, level: 'owner', status: 'open', text: 'Which endpoint?' },
+    { n: 4, level: 'owner', status: 'open', text: 'Scope change?' },
+  ] }];
+  assert.deepStrictEqual(await cron.notifyOwnerIssues(), ['QRD-22'], 'the issue the waiting text names is announced as waiting');
+  assert.deepStrictEqual([state.pushes.at(-1)!.title, state.pushes.at(-1)!.url], ['QRD-22: waiting on you — I-4', '/sessions']);
+
+  const silent = world({ runs: [run] });
+  assert.deepStrictEqual([await silent.cron.notifyOwnerIssues(), silent.state.pushes.length], [[], 0], 'no phone, no push');
+});
+
 test('settings are saved after validation; every tick fills while enabled', async () => {
   const { state, cron } = world({ tickets: [ticket('QRD-1'), ticket('QRD-2')], config: { enabled: false, parallel: 1 } });
   await assert.rejects(() => cron.updateSettings('{"machine":"mars"}'), /Unknown machine mars/);
