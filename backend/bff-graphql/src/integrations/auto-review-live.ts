@@ -12,6 +12,7 @@ import { orchestratorCron } from './orchestrator-cron-live';
 import { eventPush } from './push';
 import { lessonsFileFor } from './lessons-hook';
 import { lgtmReview } from './review-approval';
+import { sprintDashboardService } from './sprint-dashboard';
 
 const storage = new StorageService();
 const github = new GitHubAPI();
@@ -99,6 +100,7 @@ export const autoReview = new AutoReview({
   newestReply: async (sessionId) => (await storage.getNewestChatMessage(sessionId, 'assistant', DISCORD_OPEN))?.text ?? null,
   skills: () => installedSkills(),
   imageRoot: screenshotsOf,
+  people: async () => (await sprintDashboardService.roster()).map((member) => member.full),
   now: () => new Date(),
 });
 
