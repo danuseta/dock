@@ -498,6 +498,14 @@ export const typeDefs = gql`
     hasMasterPin: Boolean!
   }
 
+  """The GitHub quota of the Settings token as the last response said; null fields when nothing is known."""
+  type GitHubQuota {
+    """GitHub said the quota is used up: requests wait for resetAt and data comes from the cache."""
+    limited: Boolean!
+    remaining: Int
+    resetAt: String
+  }
+
   type NeedsAttentionItem {
     id: ID!
     type: String!
@@ -2900,6 +2908,7 @@ export const typeDefs = gql`
     ticketReadiness(keys: [String!]!, refs: [String!]): TicketReadinessFacts!
     ticketRelationGroup(ticketKey: String!): TicketRelationGroup!
     needsAttention: [NeedsAttentionItem!]!
+    githubQuota: GitHubQuota!
     discordThreads: DiscordThreads!
     """The ticket's pull requests with the files of the one in tab (the first when not given) and its review findings."""
     ticketChanges(ticketKey: String!, tab: String): TicketChanges!

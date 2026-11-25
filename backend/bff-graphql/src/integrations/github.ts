@@ -4,13 +4,19 @@ import { StorageService } from '../storage/service';
 import { checkRunsState, combineChecks, commitStatusState, reviewDecisionOf, type PullRequestSignal } from './pr-signals';
 import { pullRequestProblems } from './attention';
 import { githubApiBase } from './mock-base';
+import { GitHubBudget, GitHubRateLimitError, githubBudget, isRateLimitError, type GitHubQuotaState } from './github-budget';
 
 function credentialCacheId(token: string): string {
   return createHash('sha256').update(token).digest('hex').slice(0, 16);
 }
 
 export function buildPullRequestCacheKey(token: string, repos: string[], ticketKey: string): string {
-  return `prs_v4_${credentialCacheId(token)}_${repos.slice().sort().join(',')}_${ticketKey}`;
+  return `prs_v5_${credentialCacheId(token)}_${repos.slice().sort().join(',')}_${ticketKey}`;
+}
+
+/** The quota of a token as the last GitHub response said. */
+export function githubQuotaOf(token: string, budget: GitHubBudget = githubBudget): GitHubQuotaState {
+  return budget.state(credentialCacheId(token));
 }
 
 function escapeRegExp(value: string): string {
@@ -37,6 +43,13 @@ const SIGNAL_PULL_REQUESTS = 5;
 const NEEDS_ATTENTION_TTL_SECONDS = 300;
 const MERGEABILITY_PENDING_TTL_SECONDS = 15;
 const SIGNAL_REFRESH_MS = 5 * 60 * 1000;
+const OPEN_TTL_SECONDS = 180;
+const SETTLED_TTL_SECONDS = 1800;
+const FAILED_TTL_SECONDS = 300;
+const REPO_PULLS_FRESH_MS = 120_000;
+const TICKET_KEEP_SECONDS = 3600;
+const REPO_PULLS_KEEP_SECONDS = 86_400;
+const PULL_DETAIL_KEEP_SECONDS = 7 * 86_400;
 
 export interface SearchPRsOptions {
   staleWhileRevalidate?: boolean;
@@ -44,11 +57,21 @@ export interface SearchPRsOptions {
   fresh?: boolean;
 }
 
+export interface GitHubClientOptions {
+  /** Work that may still use the last requests of a low quota: review replies, approvals, live lookups. */
+  priority?: boolean;
+  budget?: GitHubBudget;
+}
+
+const RELEASE = Symbol('githubBudgetRelease');
+
 export class GitHubClient {
   private readonly client: AxiosInstance;
   readonly rateLimit = { remaining: -1, reset: -1 };
 
-  constructor(pat: string) {
+  constructor(pat: string, options: GitHubClientOptions = {}) {
+    const budget = options.budget ?? githubBudget;
+    const budgetKey = credentialCacheId(pat);
     this.client = axios.create({
       baseURL: githubApiBase(),
       headers: {
@@ -58,10 +81,24 @@ export class GitHubClient {
       },
       timeout: 15000,
     });
+    const release = (config: any) => { config?.[RELEASE]?.(); };
+    this.client.interceptors.request.use(async (config) => {
+      (config as any)[RELEASE] = await budget.acquire(budgetKey, options.priority === true);
+      return config;
+    });
     this.client.interceptors.response.use(
-      (response) => { this.updateRateLimit(response); return response; },
+      (response) => {
+        release(response.config);
+        this.updateRateLimit(response);
+        budget.record(budgetKey, response.status, response.headers);
+        return response;
+      },
       (error) => {
-        if (error.response) this.updateRateLimit(error.response);
+        release(error.config);
+        if (error.response) {
+          this.updateRateLimit(error.response);
+          budget.record(budgetKey, error.response.status, error.response.headers, String(error.response.data?.message ?? ''));
+        }
         return Promise.reject(error);
       },
     );
@@ -74,38 +111,24 @@ export class GitHubClient {
     if (reset !== undefined) this.rateLimit.reset = Number.parseInt(reset, 10);
   }
 
-  async searchPRsByTicketKey(repos: string[], ticketKey: string, onIncomplete?: () => void) {
-    const results = new Map<string, any>();
-    try {
-      const repoQuery = repos.map((repo) => `repo:${repo}`).join(' ');
-      const response = await this.client.get('/search/issues', {
-        params: { q: `type:pr ${repoQuery} "${ticketKey}"`, per_page: 50 },
-      });
-      for (const item of response.data?.items || []) {
-        if (item.html_url && hasCanonicalTicketReference(item, ticketKey)) results.set(item.html_url, item);
-      }
-    } catch (error: any) {
-      console.error('[GitHub] Search API failed:', error.message);
-      onIncomplete?.();
-    }
+  /** Pull requests that name the ticket, from the search API; the fallback for ones beyond the newest of each repository. */
+  async searchTicketPRs(repos: string[], ticketKey: string): Promise<any[]> {
+    const repoQuery = repos.map((repo) => `repo:${repo}`).join(' ');
+    const response = await this.client.get('/search/issues', {
+      params: { q: `type:pr ${repoQuery} "${ticketKey}"`, per_page: 50 },
+    });
+    return (response.data?.items || []).filter((item: any) => item.html_url && hasCanonicalTicketReference(item, ticketKey));
+  }
 
-    await Promise.all(repos.map(async (fullName) => {
-      try {
-        const response = await this.client.get(`/repos/${fullName}/pulls`, {
-          params: { state: 'all', per_page: 50 },
-        });
-        for (const pr of response.data || []) {
-          if (hasCanonicalTicketReference(pr, ticketKey)) {
-            pr.repository_url ||= `${githubApiBase()}/repos/${fullName}`;
-            results.set(pr.html_url, pr);
-          }
-        }
-      } catch (error: any) {
-        console.error(`[GitHub] Failed to inspect ${fullName}:`, error.message);
-        onIncomplete?.();
-      }
-    }));
-    return [...results.values()];
+  /** The newest 50 pull requests of a repository; with the ETag of the last answer, GitHub says 304 when nothing changed. */
+  async listPulls(fullName: string, etag?: string | null): Promise<{ notModified: true } | { notModified: false; pulls: any[]; etag: string | null }> {
+    const response = await this.client.get(`/repos/${fullName}/pulls`, {
+      params: { state: 'all', per_page: 50 },
+      headers: etag ? { 'If-None-Match': etag } : undefined,
+      validateStatus: (status) => (status >= 200 && status < 300) || status === 304,
+    });
+    if (response.status === 304) return { notModified: true };
+    return { notModified: false, pulls: Array.isArray(response.data) ? response.data : [], etag: response.headers.etag ? String(response.headers.etag) : null };
   }
 
   async getPRStatus(owner: string, repo: string, pullNumber: number) {
@@ -276,18 +299,60 @@ export class GitHubClient {
   }
 }
 
+interface TicketEntry { expiresAt: number; prs: any[] }
+interface RepoPulls { at: number; etag: string | null; pulls: any[] }
+interface PullDetail {
+  updatedAt: string;
+  status: { merged: boolean; draft: boolean; mergeable: boolean | null; mergeable_state: string; head: { sha: string; ref: string }; base: { ref: string } };
+  activity: { commits: any[]; files: any[] };
+}
+
+export interface GitHubServiceOptions {
+  now?: () => number;
+  budget?: GitHubBudget;
+}
+
+const isOpenStatus = (status: unknown) => status === 'open' || status === 'draft';
+
+function slimPull(pr: any, fullName: string) {
+  return {
+    id: pr.id, number: pr.number, title: pr.title, body: pr.body, state: pr.state, draft: pr.draft, merged_at: pr.merged_at,
+    html_url: pr.html_url, url: pr.url, created_at: pr.created_at, updated_at: pr.updated_at,
+    head: { ref: pr.head?.ref }, base: { ref: pr.base?.ref },
+    repository_url: pr.repository_url || `${githubApiBase()}/repos/${fullName}`,
+  };
+}
+
 export class GitHubService {
-  private readonly lastRefresh = new Map<string, number>();
   private readonly inFlight = new Map<string, Promise<any[]>>();
+  private readonly repoPullsInFlight = new Map<string, Promise<{ pulls: any[]; error?: any }>>();
   private readonly signalsInFlight = new Map<string, Promise<void>>();
   private readonly incomplete = new Set<string>();
+  private readonly now: () => number;
+  private readonly budget: GitHubBudget;
 
-  constructor(private readonly storage = new StorageService()) {}
+  constructor(private readonly storage = new StorageService(), options: GitHubServiceOptions = {}) {
+    this.now = options.now ?? Date.now;
+    this.budget = options.budget ?? githubBudget;
+  }
+
+  private client(pat: string, priority = false) {
+    return new GitHubClient(pat, { priority, budget: this.budget });
+  }
+
+  private async ticketEntry(cacheKey: string): Promise<TicketEntry | null> {
+    const cached = await this.storage.getCache('github', cacheKey).catch(() => null) as TicketEntry | null;
+    return cached && typeof cached.expiresAt === 'number' && Array.isArray(cached.prs) ? cached : null;
+  }
+
+  private writeTicket(cacheKey: string, prs: any[], expiresAt: number) {
+    const keep = Math.max(TICKET_KEEP_SECONDS, Math.ceil((expiresAt - this.now()) / 1000));
+    return this.storage.upsertCache('github', cacheKey, { expiresAt, prs }, keep).catch(() => undefined);
+  }
 
   /** The cached search result only; null on a miss. Never calls GitHub. */
   async cachedPRs(pat: string, repos: string[], ticketKey: string): Promise<any[] | null> {
-    const cached = await this.storage.getCache('github', buildPullRequestCacheKey(pat, repos, ticketKey)).catch(() => null);
-    return Array.isArray(cached) ? cached : null;
+    return (await this.ticketEntry(buildPullRequestCacheKey(pat, repos, ticketKey)))?.prs ?? null;
   }
 
   /** False when the last fetch for this ticket dropped a pull request it could not enrich, or failed outright. */
@@ -295,6 +360,10 @@ export class GitHubService {
     return !this.incomplete.has(buildPullRequestCacheKey(pat, repos, ticketKey));
   }
 
+  /**
+   * A ticket's pull requests. A cached answer is served until it expires (3 minutes while a pull request is open or
+   * draft, 30 minutes otherwise) and only then asked again; `fresh` asks GitHub now.
+   */
   async searchPRs(
     pat: string,
     repos: string[],
@@ -302,19 +371,13 @@ export class GitHubService {
     options: SearchPRsOptions = {},
   ) {
     const cacheKey = buildPullRequestCacheKey(pat, repos, ticketKey);
-    if (options.fresh) return this.fetchAndCachePRsOnce(pat, repos, ticketKey, cacheKey);
-    const cached = await this.storage.getCache('github', cacheKey).catch(() => null);
-    if (Array.isArray(cached)) {
-      const lastRefresh = this.lastRefresh.get(cacheKey) || 0;
-      if (Date.now() - lastRefresh > 45000) {
-        void this.fetchAndCachePRsOnce(pat, repos, ticketKey, cacheKey);
-      }
-      return cached;
-    }
+    if (options.fresh) return this.fetchAndCachePRsOnce(pat, repos, ticketKey, cacheKey, true);
+    const entry = await this.ticketEntry(cacheKey);
+    if (entry && entry.expiresAt > this.now()) return entry.prs;
 
-    const pending = this.fetchAndCachePRsOnce(pat, repos, ticketKey, cacheKey);
+    const pending = this.fetchAndCachePRsOnce(pat, repos, ticketKey, cacheKey, false);
     if (options.staleWhileRevalidate) {
-      return [];
+      return entry?.prs ?? [];
     }
     return pending;
   }
@@ -351,7 +414,7 @@ export class GitHubService {
     previous: Record<string, PullRequestSignal>,
   ) {
     try {
-      const client = new GitHubClient(pat);
+      const client = this.client(pat);
       const signals: Record<string, PullRequestSignal> = {};
       await Promise.all(open.map(async (pr) => {
         try { signals[pr.url] = await client.getPRSignal(pr.owner, pr.repo, pr.number, pr.headSha); }
@@ -363,32 +426,123 @@ export class GitHubService {
     }
   }
 
-  private fetchAndCachePRsOnce(pat: string, repos: string[], ticketKey: string, cacheKey: string) {
-    const pending = this.inFlight.get(cacheKey);
+  private fetchAndCachePRsOnce(pat: string, repos: string[], ticketKey: string, cacheKey: string, fresh: boolean) {
+    const flightKey = `${cacheKey}_${fresh ? 'fresh' : 'cached'}`;
+    const pending = this.inFlight.get(flightKey);
     if (pending) return pending;
 
-    const request = this.fetchAndCachePRs(pat, repos, ticketKey, cacheKey)
+    const request = this.fetchAndCachePRs(pat, repos, ticketKey, cacheKey, fresh)
       .finally(() => {
-        if (this.inFlight.get(cacheKey) === request) this.inFlight.delete(cacheKey);
+        if (this.inFlight.get(flightKey) === request) this.inFlight.delete(flightKey);
       });
-    this.inFlight.set(cacheKey, request);
+    this.inFlight.set(flightKey, request);
     return request;
   }
 
-  private async fetchAndCachePRs(pat: string, repos: string[], ticketKey: string, cacheKey: string) {
-    this.incomplete.delete(cacheKey);
+  /** The newest pull requests of one repository, shared by every ticket: fresh for two minutes, then asked with its ETag. */
+  private repoPulls(client: GitHubClient, pat: string, fullName: string, fresh: boolean) {
+    const cacheKey = `repo_pulls_v1_${credentialCacheId(pat)}_${fullName}`;
+    const flightKey = `${cacheKey}_${fresh ? 'fresh' : 'cached'}`;
+    const pending = this.repoPullsInFlight.get(flightKey);
+    if (pending) return pending;
+    const request = this.loadRepoPulls(client, cacheKey, fullName, fresh)
+      .finally(() => {
+        if (this.repoPullsInFlight.get(flightKey) === request) this.repoPullsInFlight.delete(flightKey);
+      });
+    this.repoPullsInFlight.set(flightKey, request);
+    return request;
+  }
+
+  private async loadRepoPulls(client: GitHubClient, cacheKey: string, fullName: string, fresh: boolean): Promise<{ pulls: any[]; error?: any }> {
+    const cached = await this.storage.getCache('github', cacheKey).catch(() => null) as RepoPulls | null;
+    const entry = cached && Array.isArray(cached.pulls) ? cached : null;
+    if (!fresh && entry && this.now() - entry.at < REPO_PULLS_FRESH_MS) return { pulls: entry.pulls };
     try {
-      const client = new GitHubClient(pat);
-      let searchFailed = false;
-      const pullRequests = await client.searchPRsByTicketKey(repos, ticketKey, () => { searchFailed = true; this.incomplete.add(cacheKey); });
-      const enhanced = (await Promise.all(pullRequests.map(async (pr: any) => {
-        const [owner, repo] = (pr.repository_url || '').split('/').slice(-2);
-        if (!owner || !repo) { this.incomplete.add(cacheKey); return null; }
+      const response = await client.listPulls(fullName, entry?.etag);
+      const next: RepoPulls = response.notModified
+        ? { at: this.now(), etag: entry?.etag ?? null, pulls: entry?.pulls ?? [] }
+        : { at: this.now(), etag: response.etag, pulls: response.pulls.map((pr) => slimPull(pr, fullName)) };
+      await this.storage.upsertCache('github', cacheKey, next, REPO_PULLS_KEEP_SECONDS).catch(() => undefined);
+      return { pulls: next.pulls };
+    } catch (error: any) {
+      return { pulls: entry?.pulls ?? [], error };
+    }
+  }
+
+  /** The search fallback for a ticket missing from the repository lists; its answer is kept as long as a ticket's. */
+  private async searchFallback(client: GitHubClient, pat: string, repos: string[], ticketKey: string, fresh: boolean): Promise<any[]> {
+    const cacheKey = `pr_search_v1_${credentialCacheId(pat)}_${repos.slice().sort().join(',')}_${ticketKey}`;
+    const cached = await this.storage.getCache('github', cacheKey).catch(() => null) as TicketEntry | null;
+    if (!fresh && cached && Array.isArray(cached.prs) && cached.expiresAt > this.now()) return cached.prs;
+    const prs = await client.searchTicketPRs(repos, ticketKey);
+    const ttl = prs.some((pr) => pr.state === 'open') ? OPEN_TTL_SECONDS : SETTLED_TTL_SECONDS;
+    await this.storage.upsertCache('github', cacheKey, { expiresAt: this.now() + ttl * 1000, prs }, ttl).catch(() => undefined);
+    return prs;
+  }
+
+  /** Status and activity of a pull request, asked again only when its `updated_at` moved. */
+  private async pullDetail(client: GitHubClient, pat: string, owner: string, repo: string, pr: any, fresh: boolean, onError: (error: any) => void): Promise<PullDetail> {
+    const cacheKey = `pr_detail_v1_${credentialCacheId(pat)}_${owner}/${repo}#${pr.number}`;
+    const cached = await this.storage.getCache('github', cacheKey).catch(() => null) as PullDetail | null;
+    const entry = cached && cached.status && cached.activity ? cached : null;
+    if (!fresh && entry && pr.updated_at && entry.updatedAt === pr.updated_at) return entry;
+    try {
+      const [status, activity] = await Promise.all([
+        client.getPRStatus(owner, repo, pr.number),
+        client.getPRActivity(owner, repo, pr.number),
+      ]);
+      const detail: PullDetail = {
+        updatedAt: pr.updated_at || '',
+        status: {
+          merged: status.merged, draft: status.draft, mergeable: status.mergeable, mergeable_state: status.mergeable_state,
+          head: { sha: status.head?.sha || '', ref: status.head?.ref || '' }, base: { ref: status.base?.ref || '' },
+        },
+        activity,
+      };
+      if (pr.updated_at && status.mergeable !== null) await this.storage.upsertCache('github', cacheKey, detail, PULL_DETAIL_KEEP_SECONDS).catch(() => undefined);
+      return detail;
+    } catch (error: any) {
+      if (!entry || !isRateLimitError(error)) throw error;
+      onError(error);
+      return entry;
+    }
+  }
+
+  private async fetchAndCachePRs(pat: string, repos: string[], ticketKey: string, cacheKey: string, fresh: boolean) {
+    this.incomplete.delete(cacheKey);
+    const previous = await this.ticketEntry(cacheKey);
+    let failed = false;
+    let limit: GitHubRateLimitError | null = null;
+    const noteFailure = (error: any) => {
+      failed = true;
+      if (isRateLimitError(error) && (!limit || error.resetAt > limit.resetAt)) limit = error;
+    };
+    try {
+      const client = this.client(pat, fresh);
+      const found = new Map<string, any>();
+      const lists = await Promise.all(repos.map((fullName) => this.repoPulls(client, pat, fullName, fresh)));
+      lists.forEach((list, index) => {
+        if (list.error) {
+          console.error(`[GitHub] Failed to inspect ${repos[index]}:`, list.error.message);
+          noteFailure(list.error);
+        }
+        for (const pr of list.pulls) {
+          if (hasCanonicalTicketReference(pr, ticketKey)) found.set(pr.html_url, pr);
+        }
+      });
+      if (found.size === 0) {
         try {
-          const [status, activity] = await Promise.all([
-            client.getPRStatus(owner, repo, pr.number),
-            client.getPRActivity(owner, repo, pr.number),
-          ]);
+          for (const pr of await this.searchFallback(client, pat, repos, ticketKey, fresh)) found.set(pr.html_url, pr);
+        } catch (error: any) {
+          console.error('[GitHub] Search API failed:', error.message);
+          noteFailure(error);
+        }
+      }
+      const enhanced = (await Promise.all([...found.values()].map(async (pr: any) => {
+        const [owner, repo] = (pr.repository_url || '').split('/').slice(-2);
+        if (!owner || !repo) { failed = true; return null; }
+        try {
+          const { status, activity } = await this.pullDetail(client, pat, owner, repo, pr, fresh, noteFailure);
           const prStatus = status.merged ? 'merged' : status.draft ? 'draft' : pr.state || 'open';
           return {
             id: String(pr.id), title: pr.title, url: pr.html_url || pr.url || '',
@@ -405,23 +559,31 @@ export class GitHubService {
           };
         } catch (error: any) {
           console.error(`[GitHub] Failed to enrich ${owner}/${repo}#${pr.number}:`, error.message);
-          this.incomplete.add(cacheKey);
+          noteFailure(error);
           return null;
         }
       }))).filter(Boolean);
-      await this.storage.upsertCache('github', cacheKey, enhanced, searchFailed ? 300 : 3600);
-      this.lastRefresh.set(cacheKey, Date.now());
+      if (failed) this.incomplete.add(cacheKey);
+      const limited = limit as GitHubRateLimitError | null;
+      if (limited) {
+        if (previous) {
+          await this.writeTicket(cacheKey, previous.prs, limited.resetAt);
+          return previous.prs;
+        }
+        return enhanced;
+      }
+      const ttl = Math.min(enhanced.some((pr: any) => isOpenStatus(pr.status)) ? OPEN_TTL_SECONDS : SETTLED_TTL_SECONDS, failed ? FAILED_TTL_SECONDS : Infinity);
+      await this.writeTicket(cacheKey, enhanced, this.now() + ttl * 1000);
       return enhanced;
     } catch (error: any) {
       console.error(`[GitHub] Failed to fetch PRs for ${ticketKey}:`, error.message);
       this.incomplete.add(cacheKey);
-      await this.storage.upsertCache('github', cacheKey, [], 300).catch(() => undefined);
-      return [];
+      return previous?.prs ?? [];
     }
   }
 
   async checkConflicts(pat: string, owner: string, repo: string, number: number) {
-    const status = await new GitHubClient(pat).getPRStatus(owner, repo, number);
+    const status = await this.client(pat, true).getPRStatus(owner, repo, number);
     return {
       hasConflicts: status.mergeable === false,
       mergeableState: status.mergeable_state,
@@ -430,13 +592,13 @@ export class GitHubService {
     };
   }
 
-  validateCredentials(pat: string) { return new GitHubClient(pat).validateCredentials(); }
+  validateCredentials(pat: string) { return this.client(pat, true).validateCredentials(); }
 
   async listRepositories(pat: string) {
     const cacheKey = `repos_list_${credentialCacheId(pat)}`;
     const cached = await this.storage.getCache('github', cacheKey).catch(() => null);
     if (Array.isArray(cached)) return cached;
-    const repos = await new GitHubClient(pat).listRepositories();
+    const repos = await this.client(pat).listRepositories();
     await this.storage.upsertCache('github', cacheKey, repos, 600).catch(() => undefined);
     return repos;
   }
@@ -447,7 +609,7 @@ export class GitHubService {
     const cached = await this.storage.getCache('github', cacheKey).catch(() => null);
     if (Array.isArray(cached)) return cached;
     try {
-      const client = new GitHubClient(pat);
+      const client = this.client(pat);
       let mergeabilityPending = false;
       const results = (await Promise.all((await client.searchOwnOpenPRs(repos)).map(async (pr: any) => {
         const [owner, repo] = (pr.repository_url || '').split('/').slice(-2);
@@ -468,7 +630,8 @@ export class GitHubService {
       return results;
     } catch (error: any) {
       console.error('[GitHub] Failed to fetch needs-attention:', error.message);
-      await this.storage.upsertCache('github', cacheKey, [], 180).catch(() => undefined);
+      const ttl = isRateLimitError(error) ? Math.max(180, Math.ceil((error.resetAt - this.now()) / 1000)) : 180;
+      await this.storage.upsertCache('github', cacheKey, [], ttl).catch(() => undefined);
       return [];
     }
   }
