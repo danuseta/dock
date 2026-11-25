@@ -305,6 +305,9 @@ test('ten messages of 2000 characters give a prompt of at most 8000 with the mar
   const prompt = findingsPrompt({ key: 'QRD-1292', threadUrl: 'https://discord.com/channels/g/t', threadId: 't', roundId: 'r1', prUrls: ['https://github.com/a/b/pull/1'], since: at(T0), blocks: messages.map(findingBlock) });
   assert.ok(prompt.length <= 8000, String(prompt.length));
   assert.match(prompt, /^Pakai skill sous\. Lanjutkan tiket QRD-1292/);
+  assert.match(prompt, /\n3\. Ragu: putuskan, jangan parkir ke owner\. .*status\.cjs decide QRD-1292 .*--status GUESS --rejected .*GUESS dari round review tidak menahan PR\./);
+  assert.match(prompt, /dinaikkan ke owner sebagai issue hanya: tooling, guard, atau akses yang rusak; membalik keputusan owner yang DECIDED; perubahan scope produk atau kontrak\..*"lagi dikonfirmasi ke owner"/);
+  assert.doesNotMatch(prompt, /jangan push tebakan/);
   assert.match(prompt.split('\n').at(-1)!, /^DOCK-REVIEW-ROUND r1 valid=<jumlah valid> invalid=<jumlah tidak valid> pushed=<yes\|no\|body>$/);
   assert.ok(roundTexts(prompt).every((block) => block.split('<<<AKHIR TEMUAN>>>')[0].length <= 1600));
 });
