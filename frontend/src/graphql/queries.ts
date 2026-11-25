@@ -270,6 +270,12 @@ export const GET_OWNER_NAME = gql`
   }
 `;
 
+export const GET_GITHUB_QUOTA = gql`
+  query GetGithubQuota {
+    githubQuota { limited remaining resetAt }
+  }
+`;
+
 export const GET_SETTINGS = gql`
   query GetSettings {
     settings {
