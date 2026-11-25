@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import { defaultBlackboardRoot, type Blackboard } from './blackboard';
+import { lessonsLines } from './lessons';
 
 export interface Scout { line: string; mode: 'light' | 'full'; files: number; repos: string; contractChange: boolean; at: string }
 
@@ -26,10 +27,11 @@ export async function readScout(board: Blackboard, key: string): Promise<Scout |
   return { ...parsed, at: stat.mtime.toISOString() };
 }
 
-export function scoutPrompt(key: string): string {
+export function scoutPrompt(key: string, lessons: string | null = null): string {
   const board = `${defaultBlackboardRoot()}/${key}`;
   return [
     `SCOUT ${key}, read only. Dispatch the sous-explorer agent (sonnet) with a SCOUT task for ${key}: BOARD=${board}, the findings or brief on that board, and the ticket's AC.`,
+    ...lessonsLines(lessons),
     'It measures the change and answers REPOS, FILES, LINES, CONTRACT and SCOUT as its agent file says.',
     `Then append one line to ${board}/materials/contract.md (create the file when it does not exist): Scout: <repos> · ~<n> files · <contract change|no contract change> → light|full.`,
     'Light only when REPOS is one repo, the change is small and CONTRACT is no contract change; otherwise full. Do not edit code, do not start the ticket, do not touch any other file.',
@@ -44,6 +46,8 @@ export class ScoutRunner {
     private readonly board: Blackboard,
     private readonly open: (key: string, prompt: string) => Promise<string>,
     private readonly now: () => number = Date.now,
+    /** The ticket's lessons file for the scout prompt; left out, the prompt names none. */
+    private readonly lessons: (key: string) => Promise<string | null> = async () => null,
   ) {}
 
   async running(key: string): Promise<boolean> {
@@ -61,7 +65,7 @@ export class ScoutRunner {
     if (await this.running(key)) return false;
     this.started.set(key, this.now());
     try {
-      await this.open(key, scoutPrompt(key));
+      await this.open(key, scoutPrompt(key, await this.lessons(key).catch(() => null)));
     } catch (error) {
       this.started.delete(key);
       throw error;

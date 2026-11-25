@@ -596,3 +596,32 @@ export const SET_QA_AUTO_RUN = gql`
     setQaAutoRun(on: $on) { ${QA_LOCAL_FIELDS} }
   }
 `;
+
+export const LESSON_FIELDS = `
+  id targetKind targetName text cause count ignored ticketKeys sessionIds status cardKey cardState cardSessionId writtenTo createdAt updatedAt
+  sources { id kind ref sessionId messageId ticketKey text cause status createdAt }
+`;
+
+export const EDIT_LESSON = gql`
+  mutation EditLesson($id: ID!, $text: String!) {
+    editLesson(id: $id, text: $text) { ${LESSON_FIELDS} }
+  }
+`;
+
+export const RETARGET_LESSON = gql`
+  mutation RetargetLesson($id: ID!, $kind: String!, $name: String!) {
+    retargetLesson(id: $id, kind: $kind, name: $name) { ${LESSON_FIELDS} }
+  }
+`;
+
+export const DELETE_LESSON = gql`
+  mutation DeleteLesson($id: ID!) {
+    deleteLesson(id: $id)
+  }
+`;
+
+export const APPROVE_LESSON_CODE = gql`
+  mutation ApproveLessonCode($id: ID!) {
+    approveLessonCode(id: $id) { ${LESSON_FIELDS} }
+  }
+`;

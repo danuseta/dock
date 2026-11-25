@@ -3,7 +3,7 @@
 import { OrchestratorInputError } from './orchestrator';
 
 export const JUDGE_CAUSES = [
-  'stopped-with-way-out', 'self-inflicted-rework', 'misread-ac-scope', 'skipped-step', 'asked-instead-of-looking', 'wrong-code', 'environment',
+  'stopped-with-way-out', 'self-inflicted-rework', 'misread-ac-scope', 'skipped-step', 'asked-instead-of-looking', 'wrong-code', 'lesson-ignored', 'environment',
 ] as const;
 export type JudgeCause = typeof JUDGE_CAUSES[number];
 export const JUDGE_CALLS = ['mistake', 'not'] as const;
@@ -18,6 +18,7 @@ export const CAUSE_LABELS: Record<JudgeCause, string> = {
   'skipped-step': 'Skipped step',
   'asked-instead-of-looking': 'Asked instead of looking',
   'wrong-code': 'Wrong code',
+  'lesson-ignored': 'Lesson ignored',
   environment: 'Environment (not graded)',
 };
 
@@ -33,7 +34,10 @@ const WIB_OFFSET_MS = 7 * 3600 * 1000;
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const text = (value: unknown, max: number) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
 
-export interface JudgeFindingInput { messageId: number | null; threadUrl: string | null; cause: JudgeCause; text: string; quote: string; shouldHave: string; call: JudgeCall }
+/** Where a finding's lesson goes (Agents › Lessons); left out for environment and by a Judge result from before lessons. */
+export interface JudgeLessonTarget { kind: 'skill' | 'agent' | 'flow' | 'repo' | 'fact' | 'code'; name: string }
+export interface JudgeFindingInput { messageId: number | null; threadUrl: string | null; cause: JudgeCause; text: string; quote: string; shouldHave: string; call: JudgeCall; target: JudgeLessonTarget | null; lesson: string | null }
+const LESSON_TARGET_KINDS = ['skill', 'agent', 'flow', 'repo', 'fact', 'code'];
 export interface JudgeResult { sessionId: string; untilMessageId: number | null; findings: JudgeFindingInput[]; ownerWaitMinutes: number }
 
 function messageIdOf(value: unknown): number | null {
@@ -67,7 +71,11 @@ export function parseJudgeResult(input: unknown): JudgeResult {
     if (!(JUDGE_CALLS as readonly string[]).includes(call)) throw new OrchestratorInputError(`findings[${index}].call must be mistake or not`);
     const body = text(item.text, 1500);
     if (!body) throw new OrchestratorInputError(`findings[${index}].text is required`);
-    return { messageId: messageIdOf(item.messageId), threadUrl: httpUrl(item.threadUrl), cause: cause as JudgeCause, text: body, quote: text(item.quote, 1500), shouldHave: text(item.shouldHave, 1000), call: call as JudgeCall };
+    const target = cause !== 'environment' && isRecord(item.target) && LESSON_TARGET_KINDS.includes(String(item.target.kind)) && text(item.target.name, 120)
+      ? { kind: String(item.target.kind) as JudgeLessonTarget['kind'], name: text(item.target.name, 120) }
+      : null;
+    const lesson = target ? text(item.lesson, 1500) || null : null;
+    return { messageId: messageIdOf(item.messageId), threadUrl: httpUrl(item.threadUrl), cause: cause as JudgeCause, text: body, quote: text(item.quote, 1500), shouldHave: text(item.shouldHave, 1000), call: call as JudgeCall, target: lesson ? target : null, lesson };
   });
   const wait = Number(input.ownerWaitMinutes ?? 0);
   return {
@@ -219,7 +227,8 @@ export function sprintDays(startDate: string, endDate: string, now: Date): strin
 
 // ---- Prompts -------------------------------------------------------------------------------------------------------
 
-export const judgeSessionPrompt = (sessionId: string, inputPath: string, untilMessageId: number | null) => `Pakai skill judge: session ${sessionId} input ${inputPath} until ${untilMessageId ?? '-'}`;
+/** With `lessons`, the session's lessons file: Judge checks the session against it and marks a broken lesson lesson-ignored. */
+export const judgeSessionPrompt = (sessionId: string, inputPath: string, untilMessageId: number | null, lessons: string | null = null) => `Pakai skill judge: session ${sessionId} input ${inputPath} until ${untilMessageId ?? '-'}${lessons ? ` lessons ${lessons}` : ''}`;
 export const judgeSprintPrompt = (sprint: string, inputPath: string) => `Pakai skill judge: sprint "${sprint.replace(/"/g, "'")}" input ${inputPath}`;
 export const judgeTitle = (sessionId: string) => `${JUDGE_TITLE_PREFIX}${sessionId.slice(0, 8)}`;
 /** One Judge chat per WIB day judges the sessions one turn each; after this many turns the next one opens a new chat. */

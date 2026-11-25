@@ -42,6 +42,10 @@ import { worktrees } from '../integrations/worktrees-live';
 import { CronInputError, manualRefusal, type OwnerAnswer, type OwnerChange } from '../integrations/orchestrator-cron';
 import { orchestratorCron } from '../integrations/orchestrator-cron-live';
 import { ScoutRunner, readScout } from '../integrations/scout';
+import { lessonsFileFor } from '../integrations/lessons-hook';
+import { lessonService, evidenceRoot } from '../integrations/lessons-live';
+import { LessonInputError } from '../integrations/lessons';
+import { importLessons } from '../integrations/lessons-import';
 import { blackboard } from '../integrations/blackboard';
 import { autoReview, listedAutoReviews } from '../integrations/auto-review-live';
 import { installedSkills } from '../integrations/installed-skills';
@@ -285,7 +289,7 @@ async function planningPrompt(sprint: string) {
 }
 
 const judgeError = (error: unknown): never => {
-  if (error instanceof JudgeInputError || error instanceof JudgeSettingsError || error instanceof OrchestratorInputError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
+  if (error instanceof JudgeInputError || error instanceof JudgeSettingsError || error instanceof OrchestratorInputError || error instanceof LessonInputError) throw new GraphQLError(error.message, { extensions: { code: 'BAD_USER_INPUT' } });
   throw error;
 };
 
@@ -427,7 +431,7 @@ function elevenLabsError(error: unknown): never {
   throw new GraphQLError(error instanceof Error ? error.message : 'ElevenLabs keys failed', { extensions: { code: 'BAD_USER_INPUT' } });
 }
 
-const scoutRunner = new ScoutRunner(blackboard, (key, prompt) => orchestratorCron.openReview(key, prompt, 'Scout'));
+const scoutRunner = new ScoutRunner(blackboard, (key, prompt) => orchestratorCron.openReview(key, prompt, 'Scout'), Date.now, lessonsFileFor);
 
 function cronError(error: unknown): never {
   if (error instanceof CronInputError || error instanceof OrchestratorInputError) {
@@ -497,6 +501,7 @@ export const resolvers = {
     judgeDay: (_: unknown, { day }: { day: string }) => judgeQueue.day(day).catch(judgeError),
     judgeWaiting: () => (dockMode() === 'workspace' ? judgeQueue.waitingDays() : []),
     judgeSettings: async () => JSON.stringify(storedJudgeSettings((await storageService.getSettingValues([JUDGE_SETTINGS_KEY]))[0]?.value)),
+    lessons: () => lessonService.overview(),
     checkpoints: (_: unknown, { key }: { key: string }) => orchestratorService.checkpoints(key),
     sousFlow: async () => storedSousFlow((await storageService.getSettingValues([SOUS_FLOW_KEY]))[0]?.value),
     ticketSousFlow: (_: unknown, { key }: { key: string }) => ticketProfile(key),
@@ -895,6 +900,11 @@ export const resolvers = {
     judgeNow: () => { requireAgentControls(); return judgeQueue.judgeNow().catch(judgeError); },
     judgeSprint: (_: unknown, { sprint }: { sprint: string }) => { requireAgentControls(); return judgeQueue.requestSprint(sprint).catch(judgeError); },
     judgeAgain: (_: unknown, { sessionId }: { sessionId: string }) => { requireAgentControls(); return judgeQueue.judgeAgain(sessionId).catch(judgeError); },
+    editLesson: (_: unknown, { id, text }: { id: string; text: string }) => { requireAgentControls(); return lessonService.edit(id, text).catch(judgeError); },
+    retargetLesson: (_: unknown, { id, kind, name }: { id: string; kind: string; name: string }) => { requireAgentControls(); return lessonService.retarget(id, kind, name).catch(judgeError); },
+    deleteLesson: (_: unknown, { id }: { id: string }) => { requireAgentControls(); return lessonService.remove(id).catch(judgeError); },
+    approveLessonCode: (_: unknown, { id }: { id: string }) => { requireAgentControls(); return lessonService.approveCard(id).catch(judgeError); },
+    importLessons: (_: unknown, { sprints }: { sprints: string[] }) => { requireAgentControls(); return importLessons({ evidence: evidenceRoot(), sprints, service: lessonService }).catch(judgeError); },
     setJudgeSettings: async (_: unknown, { settings }: { settings: string }) => {
       requireAgentControls();
       let saved: string;
@@ -1461,7 +1471,7 @@ export const protectedQueries = [
   'dockBuild', 'dockIssues', 'dockIssue', 'dockIssueDraftUrl', 'workspaceDir', 'workspaceFile', 'runThinking', 'runThinkingRaw', 'retro', 'sprintPlan',
   'planningSprints', 'sprintDraft', 'sprintDraftVisuals', 'planningChatPrompt', 'sprintPlanSignal', 'planningFlow', 'planningSplitPage', 'previewSprintDraftPublish', 'sprintDrift', 'acIncoming', 'ticketSummary', 'ticketReadiness',
   'checkpoints', 'sousFlow', 'ticketSousFlow', 'sousFlowPrompt', 'opsRules', 'sprintStart', 'workspaceResources', 'qaQueue', 'qaQueuePosition', 'worktrees',
-  'judgeDays', 'judgeDay', 'judgeWaiting', 'judgeSettings',
+  'judgeDays', 'judgeDay', 'judgeWaiting', 'judgeSettings', 'lessons',
 ] as const;
 export const protectedMutations = [
   'saveKamus',
@@ -1486,6 +1496,11 @@ export const protectedMutations = [
   'useSprintDraftSplit',
   'keepSprintDraftSplit',
   'setJudgeCall',
+  'editLesson',
+  'retargetLesson',
+  'deleteLesson',
+  'approveLessonCode',
+  'importLessons',
   'confirmJudgeDay',
   'judgeNow',
   'judgeSprint',

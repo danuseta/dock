@@ -742,6 +742,42 @@ export class StorageService {
     return this.db.judgeDay.upsert({ where: { day }, create: { day, ...data }, update: data });
   }
 
+  /** A lesson source, kept once per ref: null when the ref is in the queue already. */
+  async addLessonSource(input: { kind: string; ref: string; sessionId?: string | null; messageId?: number | null; sprint?: string | null; ticketKey?: string | null; text: string; cause: string; shouldHave?: string; targetKind?: string | null; targetName?: string | null; lesson?: string | null }) {
+    if (await this.db.lessonSource.findUnique({ where: { ref: input.ref }, select: { id: true } })) return null;
+    return this.db.lessonSource.create({ data: { ...input, shouldHave: input.shouldHave ?? '' } }).catch((error: unknown) => {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return null;
+      throw error;
+    });
+  }
+
+  getLessonSources(where: { statuses?: string[]; lessonIds?: string[] } = {}) {
+    return this.db.lessonSource.findMany({
+      where: { ...(where.statuses ? { status: { in: where.statuses } } : {}), ...(where.lessonIds ? { lessonId: { in: where.lessonIds } } : {}) },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+  }
+
+  updateLessonSource(id: string, data: { status?: string; lessonId?: string | null; error?: string | null; processedAt?: Date | null }) {
+    return this.db.lessonSource.update({ where: { id }, data });
+  }
+
+  getLessons(where: { statuses?: string[] } = {}) {
+    return this.db.lesson.findMany({ where: where.statuses ? { status: { in: where.statuses } } : {}, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+  }
+
+  getLesson(id: string) {
+    return this.db.lesson.findUnique({ where: { id } });
+  }
+
+  createLesson(data: Prisma.LessonCreateInput) {
+    return this.db.lesson.create({ data });
+  }
+
+  updateLesson(id: string, data: Prisma.LessonUpdateInput) {
+    return this.db.lesson.update({ where: { id }, data });
+  }
+
   /** The ticket's chat sessions, so their activity can join the run's log. */
   private async ticketSessionIds(ticketKey: string): Promise<string[]> {
     const sessions = await this.db.chatSession.findMany({ where: { ticketKey }, select: { id: true } });

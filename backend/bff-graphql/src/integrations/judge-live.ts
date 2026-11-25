@@ -14,6 +14,7 @@ import { buildSessionInput, buildSprintInput, cleanJudgeInputs, judgeInputDir, w
 import { JudgeQueue, withActiveSprint, type JudgeSprintRef } from './judge-queue';
 import { sprintDraftService } from './sprint-draft-live';
 import type { PlanningSprint } from './jira-sprint';
+import { lessonsFileFor } from './lessons-hook';
 
 const storage = new StorageService();
 const CUT_TEXTS = new Set([STALE_TEXT, SILENT_TEXT, TAKEN_HARD_TEXT, STOPPED_TEXT, STOPPED_QUEUED_TEXT]);
@@ -160,4 +161,5 @@ export const judgeQueue = new JudgeQueue({
     return { state: 'done', detail: null };
   },
   sprints,
+  lessonsFile: async (sessionId) => lessonsFileFor((await storage.getChatSession(sessionId))?.ticketKey),
 });

@@ -4,6 +4,7 @@ import { parseDiscordBlock, readImageList, threadIdOf, type DiscordPostFiles, ty
 import { ON_IT } from './discord-reader';
 import type { ThreadMessage, ThreadRow } from './discord-threads';
 import { lightSettingsLine, type LightSettings } from './light-runner';
+import { lessonsLines } from './lessons';
 
 /** Findings posted within this long of each other go in one round; a round is sent once its newest finding is this old. */
 export const ROUND_QUIET_MS = 5 * 60 * 1000;
@@ -81,6 +82,8 @@ export interface ReviewFindingsDeps {
   /** The text of the session's newest assistant message, or null. */
   newestReply(sessionId: string): Promise<string | null>;
   taskMessage(key: string, prompt: string): Promise<{ sessionId: string; opened: boolean }>;
+  /** The ticket's lessons file for the round's prompt; left out, the prompt names none. */
+  lessonsFile?(key: string): Promise<string | null>;
   push(message: PushMessage): Promise<unknown>;
   settings(): Promise<FindingsSettings>;
   /** The pull request as GitHub has it now; null when GitHub cannot be asked. */
@@ -196,7 +199,7 @@ export const findingBlock = (message: Pick<ThreadMessage, 'author' | 'at' | 'tex
  * sous-light-runner with the owner's light settings; the runner keeps its own gate. With `autoReply` the reply goes in the
  * block DOCK posts, written with `skill` when one is given; without it the session drafts a reply for the owner to copy.
  */
-export function findingsPrompt(input: { key: string; threadUrl: string; threadId: string; roundId: string; prUrls: string[]; since: string; blocks: string[]; light?: LightSettings | null; autoReply?: boolean; skill?: string | null }): string {
+export function findingsPrompt(input: { key: string; threadUrl: string; threadId: string; roundId: string; prUrls: string[]; since: string; blocks: string[]; light?: LightSettings | null; autoReply?: boolean; skill?: string | null; lessons?: string | null }): string {
   const { key, roundId } = input;
   const start = input.light
     ? [
@@ -206,6 +209,7 @@ export function findingsPrompt(input: { key: string; threadUrl: string; threadId
     : [`Pakai skill sous. Lanjutkan tiket ${key} dari blackboard dan ledger (node $K/status.cjs show ${key}), jangan mulai dari awal.`];
   const head = [
     ...start,
+    ...lessonsLines(input.lessons),
     `Temuan review baru dari thread Discord pr-review: ${input.threadUrl} (round ${roundId}).`,
     `PR: ${input.prUrls.join(' ')}`,
     `Temuan teammate setelah on it mereka, sejak ${input.since}. Kalau ada yang terpotong, baca thread lengkap lewat discord-files.cjs ${input.threadId}:`,
@@ -373,6 +377,7 @@ export class ReviewFindings {
     const prompt = findingsPrompt({
       key: round.ticketKey, threadUrl: round.threadUrl, threadId: round.threadId, roundId: round.id, prUrls: JSON.parse(round.prUrls) as string[],
       since: stored.since, blocks: stored.blocks, light: settings.light, autoReply: settings.autoReply, skill: await this.replySkill(settings),
+      lessons: this.deps.lessonsFile ? await this.deps.lessonsFile(round.ticketKey).catch(() => null) : null,
     });
     let sessionId: string;
     let opened: boolean;

@@ -5,7 +5,7 @@ import { OrchestratorInputError } from './orchestrator';
 import {
   CAUSE_LABELS, EXAMPLES_TAKEN, JUDGE_CAUSES, JUDGE_TITLE_PREFIX, JUDGE_TURNS_PER_CHAT, MAX_JUDGE_ATTEMPTS, judgeDayTitle, activeWindow, dayCutoff, dayStatus, effectiveCall, gradeOf, gradedFindings,
   inJudgeScope, judgeSessionPrompt, judgeSprintPrompt, judgeSprintTitle, nextDay, parseJudgeResult, sprintDays, sprintGrade, wibAt, wibDay, worstGrade,
-  type JudgeCall, type JudgeSettings,
+  type JudgeCall, type JudgeResult, type JudgeSettings,
 } from './judge';
 import { INPUT_KEEP_MS } from './judge-input';
 
@@ -83,6 +83,8 @@ export interface JudgeDeps {
   send(chatId: string, prompt: string, model: 'sonnet' | 'opus'): Promise<void>;
   turnState(chatId: string): Promise<{ state: TurnState; detail: string | null }>;
   sprints(): Promise<JudgeSprintRef[]>;
+  /** The lessons file of the session's ticket, which Judge checks the session against; left out, the prompt names none. */
+  lessonsFile?(sessionId: string): Promise<string | null>;
 }
 
 export interface TickResult { started: string | null; skipped: string | null }
@@ -99,6 +101,8 @@ export type JudgeFindingView = ReturnType<typeof findingView>;
 
 export class JudgeQueue {
   private lastClean = 0;
+  /** Told after a result is stored, with the session's ticket, so every finding becomes a lesson source. It must not throw. */
+  onResult: (result: JudgeResult, ticketKey: string | null) => void = () => undefined;
 
   constructor(private readonly deps: JudgeDeps) {}
 
@@ -254,7 +258,8 @@ export class JudgeQueue {
     }
     try {
       const file = await this.deps.writeInput(`${row.sessionId}-${input.untilMessageId}`, input.text);
-      const chatId = await this.dayChat(judgeSessionPrompt(row.sessionId, file, input.untilMessageId), settings);
+      const lessons = this.deps.lessonsFile ? await this.deps.lessonsFile(row.sessionId).catch(() => null) : null;
+      const chatId = await this.dayChat(judgeSessionPrompt(row.sessionId, file, input.untilMessageId, lessons), settings);
       await store.updateJudgeSession(row.sessionId, { status: 'running', judgeChatId: chatId, runUntilMessageId: input.untilMessageId, startedAt: this.deps.now(), error: null });
       return { started: chatId, skipped: null };
     } catch (error) {
@@ -281,7 +286,10 @@ export class JudgeQueue {
       ownerWaitMinutes: row.ownerWaitMinutes + result.ownerWaitMinutes,
       judgedAt: this.deps.now(),
     });
-    return { sessionId: row.sessionId, grade: await this.regrade(row.sessionId) };
+    const grade = await this.regrade(row.sessionId);
+    const chat = (await store.getChatSessionsByIds([row.sessionId]).catch(() => []))[0];
+    this.onResult(result, chat?.ticketKey ?? null);
+    return { sessionId: row.sessionId, grade };
   }
 
   private async regrade(sessionId: string): Promise<string> {

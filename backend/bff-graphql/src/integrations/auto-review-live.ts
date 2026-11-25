@@ -10,6 +10,7 @@ import { reporterName } from './dock-issues';
 import { orchestratorService } from './orchestrator';
 import { orchestratorCron } from './orchestrator-cron-live';
 import { eventPush } from './push';
+import { lessonsFileFor } from './lessons-hook';
 import { lgtmReview } from './review-approval';
 
 const storage = new StorageService();
@@ -85,6 +86,7 @@ export const autoReview = new AutoReview({
   updatePending: (id, data) => storage.updatePendingAutoReview(id, data),
   updateWaitingSkill: (id, data) => storage.updatePendingAutoReview(id, data, WAITING_SKILL),
   openReview: (key, prompt) => orchestratorCron.openReview(key, prompt),
+  lessonsFile: (key) => lessonsFileFor(key),
   approve: async (key) => {
     const steps = await lgtmReview(key);
     return steps.length > 0 && steps.every((step) => step.ok);

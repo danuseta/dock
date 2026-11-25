@@ -22,6 +22,7 @@ import { autoBroadcast } from './integrations/broadcast';
 import { decisionGate, keepFinishedGuesses, sweepReleases } from './integrations/decision-gate';
 import { claudeAccounts, cycleAvailable } from './integrations/claude-accounts-live';
 import { judgeQueue } from './integrations/judge-live';
+import { lessonsTick, startLessons } from './integrations/lessons-live';
 import { dockMode } from './mode';
 import { useBusyTimeout, useWriteAheadLog } from './storage/client';
 import { StorageService } from './storage/service';
@@ -43,6 +44,8 @@ const REVIEW_FINDINGS_MS = 60 * 1000;
 const WORKTREE_AUTO_MS = 15 * 60 * 1000;
 /** How often the Judge queue looks for quiet sessions and, inside its windows, starts the next one. */
 const JUDGE_MS = 60 * 1000;
+/** How often Agents › Lessons retries a lessons file the bridge missed and tells the owner of a card still waiting. */
+const LESSONS_MS = 15 * 60 * 1000;
 
 export async function startServer(): Promise<void> {
   const journal = await useWriteAheadLog().catch((error) => `unchanged (${error instanceof Error ? error.message : 'unknown error'})`);
@@ -52,6 +55,7 @@ export async function startServer(): Promise<void> {
   const pinWarning = missingPinWarning(await new StorageService().hasMasterPin().catch(() => true));
   if (pinWarning) console.warn(pinWarning);
   await chatService.restoreLimits();
+  startLessons();
 
   app.listen(port, () => {
     const shellStatus = frontendEnabled ? 'with React SPA' : 'API only';
@@ -103,6 +107,7 @@ export async function startServer(): Promise<void> {
       const judgeTick = () => judgeQueue.tick()
         .catch((error) => console.warn('[Judge] check failed:', error instanceof Error ? error.message : 'unknown error'));
       setInterval(judgeTick, JUDGE_MS).unref();
+      setInterval(() => { void lessonsTick(); }, LESSONS_MS).unref();
       // The same minute also looks for a local QA run that ended on REVISION, to send it back to the ticket's Task session.
       const reviewFindingsTick = () => Promise.all([
         reviewFindings.tick()

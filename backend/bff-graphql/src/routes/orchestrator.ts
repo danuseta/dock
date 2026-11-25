@@ -13,6 +13,7 @@ import { receiveDemoVideo } from './demo-videos';
 import { autoBroadcast, type AutoBroadcast } from '../integrations/broadcast';
 import { decisionGate, stillWorking, type DecisionGate } from '../integrations/decision-gate';
 import { parseRetroDraft } from '../integrations/retro';
+import { lessonHooks } from '../integrations/lessons-hook';
 import type { RetroLine } from '../integrations/retro-apply';
 import { autoAcceptRetroDraft } from '../integrations/retro-apply-live';
 import type { SprintPlanner } from '../integrations/sprint-plan';
@@ -146,6 +147,8 @@ export function createOrchestratorIngestRouter(
     const draft = parseRetroDraft(body);
     const created = await retroStore.replaceRetroDraft(draft.sprint, draft.items, draft.sources);
     await retroAuto(draft.sprint, created).catch((error) => console.warn('[Retro] automatic accept failed:', error instanceof Error ? error.message : 'unknown error'));
+    // Every Problem and Try line of the Judge sprint summary becomes a lesson source.
+    if (lessonHooks.retroDraft) await lessonHooks.retroDraft(draft.sprint, draft.items).catch((error) => console.warn('[Lessons] sprint lines not ingested:', error instanceof Error ? error.message : 'unknown error'));
     return { sprint: draft.sprint, items: created.length };
   }));
   router.post('/plan', small, handle((body) => planner.ingest(body)));
