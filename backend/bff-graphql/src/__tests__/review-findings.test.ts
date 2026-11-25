@@ -663,6 +663,26 @@ test('an approval starts no fix round and is thanked once after the post delay',
   }
 });
 
+test('an approval right after a finding still in its quiet window does not carry the cursor past the finding', async () => {
+  const INDRA_DOCK = '1600000000000000001';
+  const DANU_DOCK = '1600000000000000002';
+  const blocker = 'mas alvin, ada blocker 1, belum bisa approve.\nDOCK-REVIEW on it by <@1111> · round 1 · @ 37f5cfb · Request change · 1 blocker';
+  const approve = 'mas alvin, gak ada blocker.\nDOCK-REVIEW on it by <@2222> · round 1 · @ 37f5cfb · Approve · 0 blocker';
+  const w = world({ rows: [row([
+    POST(), message('1111', 'Indra', T0 + 10 * MIN, 'on it'), message('2222', 'Danu', T0 + 10 * MIN, 'on it mas'),
+    message(INDRA_DOCK, 'Kusuma (DOCK)', T0 + 20 * MIN, blocker, { webhookId: INDRA_DOCK }),
+    message(DANU_DOCK, 'M Danu Seta W (DOCK)', T0 + 21 * MIN, approve, { webhookId: DANU_DOCK }),
+  ])] });
+  assert.strictEqual(await w.tickAt(T0 + 22 * MIN), 0);
+  assert.strictEqual(w.state.rounds.length, 0, 'no thanks while the finding waits');
+  assert.strictEqual(await w.tickAt(T0 + 20 * MIN + ROUND_QUIET_MS), 1);
+  assert.match(w.state.sends[0].prompt, /<<<TEMUAN Indra [^\n]*>>>\nmas alvin, ada blocker 1/);
+  await w.tickAt(T0 + 21 * MIN + ROUND_QUIET_MS);
+  const thanks = w.state.rounds.find((round) => round.status === 'thanked');
+  assert.ok(thanks, 'the approval is thanked after the finding round');
+  assert.strictEqual(thanks.replyText, 'makasih mas Danu 🙏');
+});
+
 test('which first lines read as an approval', () => {
   assert.ok(isApproval('mas danu, gak ada blocker. catatan: 1) x', null));
   assert.ok(isApproval('LGTM mas', null));
