@@ -18,7 +18,7 @@ const row = (extra: Partial<ThreadRow> = {}): ThreadRow => ({
   onIt: ['Danu'], claimerRepliedAt: null, mentionedAt: null, repliedAt: null, messages: [], ...extra,
 });
 
-const SETTINGS: AutoReviewSettings = { enabled: true, autoLgtm: false, post: true, postDelayMinutes: 2, reReviewWaitMinutes: 10, maxRounds: 3, message: { format: 'template', skill: 'review-message', template: DEFAULT_REVIEW_POST_TEMPLATE } };
+const SETTINGS: AutoReviewSettings = { enabled: true, autoLgtm: false, post: true, postDelayMinutes: 2, reReviewOnCommit: true, reReviewWaitMinutes: 10, maxRounds: 3, message: { format: 'template', skill: 'review-message', template: DEFAULT_REVIEW_POST_TEMPLATE } };
 
 function world(options: { enabled?: boolean; autoLgtm?: boolean; rows?: ThreadRow[]; open?: boolean; headSha?: string; approve?: boolean; failOpen?: boolean } = {}) {
   const records: AutoReviewRecord[] = [];
@@ -459,6 +459,16 @@ test('a DOCK-FIX that answers the blockers on the same head starts the next roun
   approved.records[0].finishedAt = settledAt;
   approved.deps.pull = async () => ({ open: true, headSha: 'abc1234' });
   assert.strictEqual(await approved.review.tick(), 0, 'an approved arena stays closed');
+});
+
+test('with re-review on commit off, the default, a new head waits for a DOCK-FIX however old its last commit is', async () => {
+  const quiet = arena({ commitAt: new Date(NOW.getTime() - 60 * 60_000) });
+  quiet.deps.settings = async () => ({ ...SETTINGS, reReviewOnCommit: undefined });
+  assert.strictEqual(await quiet.review.tick(), 0, 'a merge of develop starts no round');
+  assert.strictEqual(quiet.review.skipReason('t1'), 'waiting for DOCK-FIX');
+  const fixed = arena({ messages: [message('m5', new Date(NOW.getTime() - 5 * 60_000), 'mas danu, fixed di def5678.\nDOCK-FIX round 1 · head def5678', { webhookId: '7' })] });
+  fixed.deps.settings = async () => ({ ...SETTINGS, reReviewOnCommit: false });
+  assert.strictEqual(await fixed.review.tick(), 1, 'a DOCK-FIX for the head still starts the next round');
 });
 
 test('the arena closes on approve, on a closed pull request, after the last round, on stop dock and after 72 h without a commit', async () => {

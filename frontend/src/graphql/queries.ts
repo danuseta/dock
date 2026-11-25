@@ -293,6 +293,7 @@ export const GET_SETTINGS = gql`
       reviewFindingsToTask
       autoReviewPostDiscord
       reviewPostDelayMinutes
+      reviewReReviewOnCommit
       reviewReReviewWaitMinutes
       reviewMaxRounds
       reviewFindingsAutoReply

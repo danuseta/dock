@@ -91,7 +91,7 @@ export const isArenaSetting = (key: ArenaSettingKey, value: unknown) => {
 /** A saved arena number, or its default when it was never saved or no longer fits. */
 export const arenaSetting = (key: ArenaSettingKey, value: string | null | undefined) => (value != null && isArenaSetting(key, value) ? Number(value) : ARENA_SETTINGS[key].fallback);
 
-export interface AutoReviewSettings { enabled: boolean; autoLgtm: boolean; post: boolean; postDelayMinutes: number; reReviewWaitMinutes: number; maxRounds: number; message: MessageFormat }
+export interface AutoReviewSettings { enabled: boolean; autoLgtm: boolean; post: boolean; postDelayMinutes: number; reReviewOnCommit?: boolean; reReviewWaitMinutes: number; maxRounds: number; message: MessageFormat }
 export interface PullState { open: boolean; headSha: string }
 export interface AutoReviewRecord {
   id: string; prUrl: string; headSha: string; ticketKey: string; threadUrl: string; sessionId: string | null; status: string; detail: string | null; startedAt: Date; finishedAt: Date | null;
@@ -440,7 +440,10 @@ export class AutoReview {
     return now;
   }
 
-  /** Why a new head commit is not reviewed yet: 72 h went by without a commit, or the author may still be pushing. */
+  /**
+   * Why a new head commit is not reviewed yet: 72 h went by without a commit, the author has not posted a DOCK-FIX for it, or,
+   * with re-review on commit turned on, the author may still be pushing.
+   */
   private async waiting(row: ThreadRow, match: RegExpExecArray, arena: AutoReviewRecord, headSha: string, saidAt: number, settings: AutoReviewSettings): Promise<string | null> {
     const now = this.deps.now().getTime();
     const seen = this.firstSeen(match[0], headSha);
@@ -448,6 +451,7 @@ export class AutoReview {
     if (Math.max(at?.getTime() ?? 0, seen) - lastActivity(arena) > ON_IT_WINDOW_MS) return 'arena closed: 72 h without a new commit';
     const short = headSha.slice(0, 7);
     if (row.messages.some((message) => isFixReply(message, Math.max(saidAt, arena.startedAt.getTime())) && message.text.includes(short))) return null;
+    if (!settings.reReviewOnCommit) return 'waiting for DOCK-FIX';
     if (at && now - at.getTime() >= settings.reReviewWaitMinutes * 60_000) return null;
     return `waiting for DOCK-FIX or ${settings.reReviewWaitMinutes} min after the last commit`;
   }

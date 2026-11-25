@@ -36,7 +36,7 @@ function listedPull(owner: string, repo: string, number: number): Promise<PullSt
 /** The auto reviews the Agents page lists: the stored ones that still say something about the pull request as it is now. */
 export const listedAutoReviews = async <T extends { prUrl: string; headSha: string; status: string }>(rows: T[]) => currentReviews(rows, listedPull);
 
-export const AUTO_REVIEW_KEYS = ['autoReviewOnIt', 'autoLgtm', 'autoReviewPostDiscord', 'reviewPostDelayMinutes', 'reviewReReviewWaitMinutes', 'reviewMaxRounds', ...Object.values(MESSAGE_KEYS.post)] as const;
+export const AUTO_REVIEW_KEYS = ['autoReviewOnIt', 'autoLgtm', 'autoReviewPostDiscord', 'reviewPostDelayMinutes', 'reviewReReviewWaitMinutes', 'reviewReReviewOnCommit', 'reviewMaxRounds', ...Object.values(MESSAGE_KEYS.post)] as const;
 
 /** Who posts to a thread: the owner's Discord user id, webhook and name. */
 export const reviewOwner = async (): Promise<AutoReviewOwner> => {
@@ -55,6 +55,7 @@ export const autoReview = new AutoReview({
       autoLgtm: values.get('autoLgtm') === 'true',
       post: values.get('autoReviewPostDiscord') !== 'false',
       postDelayMinutes: arenaSetting('reviewPostDelayMinutes', values.get('reviewPostDelayMinutes')),
+      reReviewOnCommit: values.get('reviewReReviewOnCommit') === 'true',
       reReviewWaitMinutes: arenaSetting('reviewReReviewWaitMinutes', values.get('reviewReReviewWaitMinutes')),
       maxRounds: arenaSetting('reviewMaxRounds', values.get('reviewMaxRounds')),
       message: messageFormat('post', values),
