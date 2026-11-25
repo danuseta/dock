@@ -2,7 +2,7 @@ import { DISCORD_CLOSE, DISCORD_OPEN, parseDiscordBlock, readImageList, threadId
 import type { ThreadMessage, ThreadRow } from './discord-threads';
 import type { Orchestration } from './orchestrator';
 import { lessonsLines } from './lessons';
-import { personName, webhookReviewer } from './review-findings';
+import { isApproval, personName, webhookReviewer } from './review-findings';
 
 /** How long an "on it" starts a review: long enough for one said while the workspace was off, through a weekend. */
 export const ON_IT_WINDOW_MS = 72 * 60 * 60 * 1000;
@@ -21,6 +21,11 @@ const SEEN_HEADS = 500;
 const NOT_PENDING = 'Only a pending post can be changed';
 /** The detail of a pending post whose body the review session still owes through its skill; the template text waits as the fallback. */
 export const WAITING_SKILL = 'Waiting for the skill message';
+/** The detail of a pending post held because the session's message and the ledger verdict say opposite things; only the owner sends it on. */
+export const TEXT_DISAGREES = 'Review text and verdict disagree';
+const MARKER_BLOCKED = /· Request change · [1-9]\d* blocker\s*$/;
+const MARKER_APPROVED = /· Approve(?: with comments)? · 0 blocker\s*$/;
+const BLOCKER_FIRST = /\b(?:ada|[1-9]\d*)\s+blockers?\b|\brequest[\s-]*changes?\b/i;
 /** How long past its time a post waits for the skill message before the template goes out instead. */
 const SKILL_WAIT_MS = 15 * 60_000;
 /** A post the session writes waits at least a minute, so the owner can read it before it goes out. */
@@ -157,12 +162,13 @@ export interface AutoReviewDeps {
  * The prompt of an auto review: one sous review of every pull request of the ticket, with the thread as context. With a skill,
  * the session also writes the Discord message with it for DOCK to post; it never posts anything itself.
  */
-export const reviewPrompt = (key: string, prUrls: string[], threadUrl: string, skill: string | null = null, lessons: string | null = null) => [
+export const reviewPrompt = (key: string, prUrls: string[], threadUrl: string, skill: string | null = null, lessons: string | null = null, author: string | null = null) => [
   `Pakai skill sous. review ${key}: ${prUrls.join(' ')}`,
   ...lessonsLines(lessons),
   `Thread Discord pr-review: ${threadUrl} (baca dulu lewat discord-files.cjs).`,
   'Ini auto review dari DOCK karena owner bilang on it di thread itu. Jangan komentar di PR, Jira, atau Discord; tulis verdict dan temuan ke ledger seperti biasa.',
   ...(skill ? [`Setelah verdict tertulis di ledger, tulis pesan Discord hasil review pakai skill ${skill} sebagai bagian akhir balasanmu.`, ...discordBlockLines(key)] : []),
+  ...(skill && author ? [`Author PR ini ${author}: sapa "mas ${author.split(/\s+/)[0].toLowerCase()}" di pesan itu, bukan nama pemilik DOCK ini dan bukan nama bot atau webhook.`] : []),
 ].join('\n');
 
 /**
@@ -236,6 +242,13 @@ export function reviewBody(run: ReviewLedger, pulls: Array<{ url: string; headSh
     ...[...blockers, ...notes].map((finding, index) => `${index + 1}) ${finding.severity}: ${plainText(finding.text)}`),
     ...(nits ? [`nit: ${nits}, di ledger`] : []),
   ].join('\n');
+}
+
+/** The message opens as an approval while the marker's ledger verdict has blockers, or opens with blockers over an approve. */
+export function textDisagrees(body: string, marker: string): boolean {
+  if (MARKER_BLOCKED.test(marker)) return isApproval(body, null);
+  if (MARKER_APPROVED.test(marker)) return !isApproval(body, null) && BLOCKER_FIRST.test(body.trim().split('\n')[0] ?? '');
+  return false;
 }
 
 /** A body with the marker under it; a marker line typed into the body is dropped and the whole post fits Discord's 2000 characters. */
@@ -351,7 +364,7 @@ export class AutoReview {
     const marker = record.postText?.split('\n').pop() ?? '';
     if (!marker.startsWith('DOCK-REVIEW on it by')) throw new Error('The post has no DOCK marker');
     if (!withMarker(text, '').trim()) throw new Error('The post text is empty');
-    const detail = record.postDetail === WAITING_SKILL ? { postDetail: null, postImages: null } : {};
+    const detail = record.postDetail === WAITING_SKILL ? { postDetail: null, postImages: null } : record.postDetail === TEXT_DISAGREES ? { postDetail: null } : {};
     if (!(await this.deps.updatePending(id, { postText: withMarker(text, marker), ...detail }))) throw new Error(NOT_PENDING);
     return true;
   }
@@ -436,7 +449,9 @@ export class AutoReview {
     }
     try {
       const lessons = this.deps.lessonsFile ? await this.deps.lessonsFile(key).catch(() => null) : null;
-      const sessionId = await this.deps.openReview(key, reviewPrompt(key, due.map((pull) => pull.url), row.url, await this.postSkill(settings), lessons));
+      const people = [...(this.deps.people ? await this.deps.people().catch(() => [] as string[]) : []), ...row.messages.filter((message) => !message.webhookId).map((message) => message.author)];
+      const author = row.createdBy ? personName(row.createdBy, people) : null;
+      const sessionId = await this.deps.openReview(key, reviewPrompt(key, due.map((pull) => pull.url), row.url, await this.postSkill(settings), lessons, author));
       for (const record of records) await this.deps.update(record.id, { sessionId });
       return 1;
     } catch (error) {
@@ -558,6 +573,7 @@ export class AutoReview {
       await this.deps.updatePending(record.id, { postStatus: 'failed', postDetail: !owner.webhookUrl ? 'No Discord webhook in Settings' : 'Nothing to post to this thread' });
       return;
     }
+    if (record.postDetail === TEXT_DISAGREES) return;
     if (record.postDetail === WAITING_SKILL && !(await this.takeSkillMessage(record, settings))) return;
     if (!(await this.deps.updatePending(record.id, { postStatus: 'sending' }))) return;
     try {
@@ -595,6 +611,14 @@ export class AutoReview {
     const block = parseDiscordBlock(record.sessionId ? await this.deps.newestReply(record.sessionId) : null);
     const marker = record.postText?.split('\n').pop() ?? '';
     const now = this.deps.now().getTime();
+    if (block && textDisagrees(block.body, marker)) {
+      const held = await this.deps.updateWaitingSkill(record.id, {
+        postText: withMarker(plainText(block.body), marker), postImages: block.images.length ? JSON.stringify(block.images) : null, postDetail: TEXT_DISAGREES,
+      });
+      if (!held) return true;
+      await this.deps.push({ title: `${record.ticketKey}: review text and verdict disagree`, body: `The review session's Discord message does not match the ledger verdict (${marker.split(' · ').slice(-2).join(' · ')}). Edit or cancel the post on Agents; it does not go out on its own.`, url: '/agents', tag: `auto-review-post-${record.id}` });
+      return false;
+    }
     if (block) {
       const minutes = skillDelay(settings);
       const swapped = await this.deps.updateWaitingSkill(record.id, {

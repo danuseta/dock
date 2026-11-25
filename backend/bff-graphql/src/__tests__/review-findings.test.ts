@@ -4,7 +4,7 @@ import type { ReviewRound } from '@prisma/client';
 import type { ThreadMessage, ThreadRow } from '../integrations/discord-threads';
 import { ON_IT } from '../integrations/discord-reader';
 import {
-  EXPIRED_DETAIL, GITHUB_HEAD_DETAIL, GITHUB_WAIT_MS, MAX_ROUND_ATTEMPTS, NO_MARKER_DETAIL, ROUND_QUIET_MS, WAITING_GITHUB, ReviewFindings, resumePrompt, findingBlock, findingsEnabled, findingsPrompt, fixMarker, isApproval, webhookReviewer, isBare, isChatter, personName, isOwnThread, parseRoundResult, replyTemplateValues, roundSummary, webhookIdOf,
+  EXPIRED_DETAIL, GITHUB_HEAD_DETAIL, GITHUB_WAIT_MS, MAX_ROUND_ATTEMPTS, NO_MARKER_DETAIL, ROUND_QUIET_MS, WAITING_GITHUB, ReviewFindings, heldRoundLines, resumePrompt, findingBlock, findingsEnabled, findingsPrompt, fixMarker, isApproval, webhookReviewer, isBare, isChatter, personName, isOwnThread, parseRoundResult, replyTemplateValues, roundSummary, webhookIdOf,
   type FindingsSettings, type PushMessage, type ReviewFindingsDeps,
 } from '../integrations/review-findings';
 import { DEFAULT_REVIEW_REPLY_TEMPLATE, type PullState } from '../integrations/auto-review';
@@ -960,4 +960,53 @@ test('a reply that failed on the head before the retry existed is picked up; one
   assert.deepStrictEqual(gone.w.state.pushes.slice(pushes).map((push) => push.title), ['QRD-1292: review reply not posted']);
   await gone.w.tickAt(reportedAt + GITHUB_WAIT_MS + 30 * MIN);
   assert.strictEqual(gone.w.state.pushes.length, pushes + 1, 'given up once');
+});
+
+test('an owner answer on a ticket whose round is held names the round, asks for the Discord block and the marker; none once replied', async () => {
+  const { w, round } = await sentRound();
+  w.deps.ticketRounds = async (key) => w.state.rounds.filter((item) => item.ticketKey === key).reverse();
+  w.state.replies.set('task-9', REPLY(round.id, 'valid=2 invalid=0 pushed=no'));
+  await report(w);
+  assert.deepStrictEqual([round.status, round.pushed, round.replyStatus], ['reported', false, null]);
+  const lines = await w.findings.ownerAnswerLines('QRD-1292');
+  assert.deepStrictEqual(lines, heldRoundLines({ key: 'QRD-1292', roundId: round.id, threadUrl: round.threadUrl, valid: 2, pushed: false, reviewers: ['Indra'] }));
+  assert.strictEqual(lines[0], `Round review ${round.id} (https://discord.com/channels/g/1566728431721259084) sudah dilaporkan valid=2 pushed=no, tapi balasan ke Indra belum terkirim.`);
+  assert.match(lines.join('\n'), /Bungkus pesannya persis di antara baris <<<DISCORD dan <<<AKHIR DISCORD>>>\./);
+  assert.strictEqual(lines.at(-1), `DOCK-REVIEW-ROUND ${round.id} valid=<jumlah valid> invalid=<jumlah tidak valid> pushed=<yes|no|body>`);
+  assert.deepStrictEqual(await w.findings.ownerAnswerLines('QRD-7'), [], 'another ticket');
+  w.state.settings = { ...w.state.settings, autoReply: false };
+  assert.deepStrictEqual(await w.findings.ownerAnswerLines('QRD-1292'), [], 'auto reply off');
+  w.state.settings = { ...w.state.settings, autoReply: true };
+  round.replyStatus = 'sent';
+  assert.deepStrictEqual(await w.findings.ownerAnswerLines('QRD-1292'), [], 'a round already replied to is not held');
+});
+
+test('after an owner answer a second marker that pushed schedules the reply from the new session; a repeat after the reply went out changes nothing', async () => {
+  const { w, round } = await sentRound();
+  w.deps.ticketRounds = async (key) => w.state.rounds.filter((item) => item.ticketKey === key).reverse();
+  w.state.replies.set('task-9', REPLY(round.id, 'valid=2 invalid=0 pushed=no'));
+  await report(w);
+  const owner = { sessionId: 'owner-1', ticketKey: 'QRD-1292', failed: false };
+  w.state.replies.set('owner-1', REPLY(round.id, 'valid=2 invalid=0 pushed=yes'));
+  assert.strictEqual(await w.findings.onTurnEnded(owner), false, 'no owner answer named the round: the other session is not read');
+  assert.strictEqual(round.replyStatus, null);
+
+  await w.findings.ownerAnswerLines('QRD-1292');
+  assert.strictEqual(await w.findings.onTurnEnded(owner), true);
+  assert.deepStrictEqual([round.status, round.sessionId, round.valid, round.pushed, round.replyStatus], ['reported', 'owner-1', 2, true, 'pending']);
+  assert.strictEqual((round.replyText ?? '').split('\n').at(-1), 'DOCK-FIX round 1 · head b71e0d4');
+  assert.deepStrictEqual(w.state.pushes.at(-1), { title: 'QRD-1292: 2 valid, pushed', body: 'DOCK posts the reply to the thread in 2 min; cancel or edit it before then.', url: '/sessions?session=owner-1', tag: `review-round-${round.id}` });
+
+  await w.tickAt(w.state.now.getTime() + 3 * MIN);
+  assert.deepStrictEqual([round.replyStatus, w.state.posts.length], ['sent', 1]);
+  const pushes = w.state.pushes.length;
+  const sent = { ...round };
+  await w.findings.ownerAnswerLines('QRD-1292');
+  w.state.replies.set('task-9', REPLY(round.id, 'valid=2 invalid=0 pushed=yes'));
+  assert.strictEqual(await w.findings.onTurnEnded(owner), false);
+  assert.strictEqual(await report(w), false);
+  assert.deepStrictEqual(round, sent, 'the round stays as it was');
+  assert.strictEqual(w.state.pushes.length, pushes, 'no second notification');
+  await w.tickAt(w.state.now.getTime() + 10 * MIN);
+  assert.strictEqual(w.state.posts.length, 1, 'no second reply');
 });
