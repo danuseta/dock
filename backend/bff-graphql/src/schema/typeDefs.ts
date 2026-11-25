@@ -1349,6 +1349,8 @@ export const typeDefs = gql`
     targetKind: String!
     targetName: String!
     text: String!
+    "The same lesson in Indonesian, shown grey under the English text; null when there is none."
+    textId: String
     cause: String!
     count: Int!
     "How often a session broke it after reading it."
@@ -3214,7 +3216,7 @@ export const typeDefs = gql`
     "Saves Settings › Judge after validation and returns it normalized."
     setJudgeSettings(settings: String!): String!
     "Changes a lesson's sentence; its target file and the ticket files are written again."
-    editLesson(id: ID!, text: String!): Lesson!
+    editLesson(id: ID!, text: String!, textId: String): Lesson!
     "Moves a lesson to another target (skill, agent, flow, repo, fact or code)."
     retargetLesson(id: ID!, kind: String!, name: String!): Lesson!
     "Deletes a lesson; it leaves every file it was written to."

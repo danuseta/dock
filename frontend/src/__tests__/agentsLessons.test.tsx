@@ -8,7 +8,7 @@ import { agentsRoute } from '../agents/plan';
 import { PhoneTabs } from '../agents/PhoneTabs';
 
 const lesson = (id: string, over: Partial<Lesson> = {}): Lesson => ({
-  id, targetKind: 'skill', targetName: 'demo-video', text: 'Walk the whole ElevenLabs rotation before using edge.', cause: 'self-inflicted-rework', count: 1, ignored: 0,
+  id, targetKind: 'skill', targetName: 'demo-video', text: 'Walk the whole ElevenLabs rotation before using edge.', textId: null, cause: 'self-inflicted-rework', count: 1, ignored: 0,
   ticketKeys: ['QRD-1639'], sessionIds: ['4e75771b'], status: 'active', cardKey: null, cardState: null, cardSessionId: null, writtenTo: 'skills/demo-video/lessons.md',
   createdAt: '2026-11-24T14:00:00.000Z', updatedAt: '2026-11-24T14:00:00.000Z',
   sources: [{ id: 's1', kind: 'judge-session', ref: 'judge:4e75771b:x', sessionId: '4e75771b-aaaa', messageId: 76050, ticketKey: 'QRD-1639', text: 't', cause: 'self-inflicted-rework', status: 'lesson', createdAt: '2026-11-24T14:00:00.000Z' }],
@@ -77,4 +77,11 @@ test('the board shows the unprocessed count, the target filter, each lesson with
   assert.match(waiting, /aria-label="4 sources not processed"/);
   assert.match(waiting, /No lessons yet/);
   assert.match(renderToStaticMarkup(<LessonsBoard data={data([lesson('a')])} actions={noop} initialFilter="agent" />), /No lesson for this target/);
+});
+
+test('a lesson shows its Indonesian translation grey under the English text, and nothing when there is none', () => {
+  const html = renderToStaticMarkup(<LessonsBoard data={data([lesson('a', { textId: 'Coba semua key ElevenLabs dulu sebelum pakai edge.' })])} actions={noop} />);
+  assert.match(html, /Walk the whole ElevenLabs rotation before using edge\.<\/p><p class="mt-1 text-pretty text-sm text-muted-foreground" lang="id">Coba semua key ElevenLabs dulu sebelum pakai edge\.<\/p>/);
+  const none = renderToStaticMarkup(<LessonsBoard data={data([lesson('a')])} actions={noop} />);
+  assert.doesNotMatch(none, /lang="id"/);
 });

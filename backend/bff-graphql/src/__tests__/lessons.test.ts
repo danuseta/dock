@@ -18,6 +18,8 @@ import { qaPrompt, revisionPrompt } from '../integrations/qa-local';
 import { scoutPrompt } from '../integrations/scout';
 import { flowRuleLines, readFlowRules } from '../integrations/sous-flow';
 import { protectedMutations, protectedQueries, resolvers } from '../resolvers';
+import { buildASTSchema, graphql } from 'graphql';
+import { typeDefs } from '../schema/typeDefs';
 
 const NOW = new Date('2026-11-25T03:00:00Z');
 const FILE = '/home/coder/projects/.evidence/lessons/QRD-1592.md';
@@ -31,7 +33,7 @@ function memoryStore() {
   const store: LessonStore = {
     addLessonSource: async (input) => {
       if (sources.some((row) => row.ref === input.ref)) return null;
-      const row: SourceRow = { id: randomUUID(), kind: input.kind, ref: input.ref, sessionId: input.sessionId ?? null, messageId: input.messageId ?? null, sprint: input.sprint ?? null, ticketKey: input.ticketKey ?? null, text: input.text, cause: input.cause, shouldHave: input.shouldHave ?? '', targetKind: input.targetKind ?? null, targetName: input.targetName ?? null, lesson: input.lesson ?? null, status: 'pending', lessonId: null, error: null, createdAt: stamp(), processedAt: null };
+      const row: SourceRow = { id: randomUUID(), kind: input.kind, ref: input.ref, sessionId: input.sessionId ?? null, messageId: input.messageId ?? null, sprint: input.sprint ?? null, ticketKey: input.ticketKey ?? null, text: input.text, cause: input.cause, shouldHave: input.shouldHave ?? '', targetKind: input.targetKind ?? null, targetName: input.targetName ?? null, lesson: input.lesson ?? null, lessonTextId: input.lessonTextId ?? null, status: 'pending', lessonId: null, error: null, createdAt: stamp(), processedAt: null };
       sources.push(row);
       return row;
     },
@@ -40,7 +42,7 @@ function memoryStore() {
     getLessons: async (where = {}) => lessons.filter((row) => !where.statuses || where.statuses.includes(row.status)).map((row) => ({ ...row })),
     getLesson: async (id) => { const row = lessons.find((item) => item.id === id); return row ? { ...row } : null; },
     createLesson: async (data) => {
-      const row: LessonRow = { id: randomUUID(), count: 1, ignored: 0, ticketKeys: '[]', sessionIds: '[]', status: 'active', cardKey: null, cardState: null, cardSessionId: null, noticeAt: null, createdAt: stamp(), updatedAt: stamp(), ...data } as LessonRow;
+      const row: LessonRow = { id: randomUUID(), textId: null, count: 1, ignored: 0, ticketKeys: '[]', sessionIds: '[]', status: 'active', cardKey: null, cardState: null, cardSessionId: null, noticeAt: null, createdAt: stamp(), updatedAt: stamp(), ...data } as LessonRow;
       lessons.push(row);
       return { ...row };
     },
@@ -338,6 +340,51 @@ test('the importer reads Judge results, Judge sprint summaries and closed ledger
     assert.ok(w.lessons.some((row) => row.targetKind === 'repo' && row.targetName === 'ms-admin-worker-backend'));
     assert.match(readFileSync(path.join(evidence, 'judge', '4e75771b.json'), 'utf8'), /4e75771b/, 'the import only reads');
   } finally { w.done(); rmSync(evidence, { recursive: true, force: true }); }
+});
+
+test('a Judge lessonId becomes the lesson textId: a merge keeps or fills it, the owner edits it, files stay English', async () => {
+  const parsed = parseJudgeResult({ sessionId: 'abc', untilMessageId: '-', findings: [
+    finding({ lessonId: 'Coba semua key ElevenLabs dulu sebelum pakai edge.' }),
+    finding({ lesson: null, lessonId: 'tanpa lesson' }),
+    { messageId: 1, cause: 'skipped-step', text: 'old', quote: '', shouldHave: '', call: 'mistake', target: { kind: 'skill', name: 'demo-video' }, lesson: 'Old lesson.' },
+  ] });
+  assert.deepStrictEqual(parsed.findings.map((item) => item.lessonId), ['Coba semua key ElevenLabs dulu sebelum pakai edge.', null, null]);
+  const w = world();
+  try {
+    await w.service.ingest(judgeSessionSources('a', 'QRD-1639', [finding()] as never));
+    assert.strictEqual(w.lessons[0].textId, null, 'no translation leaves it null');
+    await w.service.ingest(judgeSessionSources('b', 'QRD-1592', [finding({ text: 'second', lessonId: 'Coba semua key ElevenLabs dulu sebelum pakai edge.' })] as never));
+    assert.strictEqual(w.lessons.length, 1);
+    assert.strictEqual(w.lessons[0].textId, 'Coba semua key ElevenLabs dulu sebelum pakai edge.', 'a merge fills a missing translation');
+    assert.strictEqual(w.sources[1].lessonTextId, 'Coba semua key ElevenLabs dulu sebelum pakai edge.');
+    await w.service.ingest(judgeSessionSources('c', 'QRD-1600', [finding({ text: 'third', lessonId: 'Terjemahan lain.' })] as never));
+    assert.strictEqual(w.lessons[0].textId, 'Coba semua key ElevenLabs dulu sebelum pakai edge.', 'a merge keeps the translation it has');
+    await w.service.ingest(ledgerSources({ key: 'QRD-1646', kind: 'build', stage: 'done', finished: true, prBe: null, prFe: null, failures: [], findings: [], issues: [{ n: 2, type: 'QUESTION', text: 'Keep the old export?', level: 'owner' }], decisions: [], rounds: null, closing: null }));
+    assert.strictEqual(w.lessons.find((row) => row.targetKind === 'flow')!.textId, null, 'a ledger source has no translation');
+    const view = (await w.service.overview()).lessons.find((row) => row.targetKind === 'skill')!;
+    assert.strictEqual(view.textId, 'Coba semua key ElevenLabs dulu sebelum pakai edge.');
+    const file = await w.service.prepareTicket('QRD-1639');
+    assert.ok(!w.files.get(file!)!.includes('Coba semua key'), 'the per-ticket file stays English');
+    assert.strictEqual((await w.service.edit(view.id, view.text, ' Ganti terjemahan. ')).textId, 'Ganti terjemahan.');
+    assert.strictEqual((await w.service.edit(view.id, 'Edited text.')).textId, 'Ganti terjemahan.', 'an edit without textId keeps it');
+    assert.strictEqual((await w.service.edit(view.id, 'Edited text.', '')).textId, null, 'an empty translation clears it');
+  } finally { w.done(); }
+});
+
+test('GraphQL returns a lesson textId and editLesson takes an optional textId', async () => {
+  const w = world();
+  try {
+    await w.service.ingest(judgeSessionSources('a', 'QRD-1639', [finding({ lessonId: 'Coba semua key dulu.' }), finding({ cause: 'wrong-code', text: 'other', lesson: 'Run tsc on scripts.' })] as never));
+    const schema = buildASTSchema(typeDefs);
+    const overview = await w.service.overview();
+    const read = await graphql({ schema, source: '{ lessons { lessons { text textId } } }', rootValue: { lessons: overview } });
+    assert.strictEqual(read.errors, undefined);
+    assert.deepStrictEqual((read.data as { lessons: { lessons: Array<{ text: string; textId: string | null }> } }).lessons.lessons.map((row) => row.textId).sort(), ['Coba semua key dulu.', null].sort());
+    const id = overview.lessons.find((row) => row.textId)!.id;
+    const edit = await graphql({ schema, source: 'mutation($id: ID!) { editLesson(id: $id, text: "New text.", textId: "Teks baru.") { textId } }', variableValues: { id }, rootValue: { editLesson: (args: { id: string; text: string; textId?: string | null }) => w.service.edit(args.id, args.text, args.textId) } });
+    assert.strictEqual(edit.errors, undefined);
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(edit.data)), { editLesson: { textId: 'Teks baru.' } });
+  } finally { w.done(); }
 });
 
 test('GraphQL: the lessons query and the lesson mutations exist and sit behind the PIN', () => {
