@@ -4,7 +4,7 @@ import type { BadgeVariant } from '../../components/ui/Badge';
 import { cn } from '../../lib/cn';
 import { DISCORD_LABEL, imageLine, isPending, markerSummary, splitMarker, type HistoryRow, type ReviewRound } from '../../lib/reviewRounds';
 
-const DISCORD_TONE: Record<string, BadgeVariant> = { pending: 'warn', sending: 'warn', sent: 'success', cancelled: 'neutral', failed: 'danger', skipped: 'neutral' };
+const DISCORD_TONE: Record<string, BadgeVariant> = { pending: 'warn', sending: 'warn', sent: 'success', cancelled: 'neutral', failed: 'danger', skipped: 'neutral', 'waiting-github': 'warn' };
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 

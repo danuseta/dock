@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { AutoReview, DEFAULT_REVIEW_POST_TEMPLATE, markerVerdict, DEFAULT_REVIEW_REPLY_TEMPLATE, ON_IT_WINDOW_MS, WAITING_SKILL, fillTemplate, isMessageSetting, messageFormat, reviewTemplateValues, answeredFindings, currentReviews, reviewBody, reviewMarker, reviewPost, reviewPrompt, withMarker, type AutoReviewDeps, type AutoReviewRecord, type AutoReviewSettings, type PushMessage } from '../integrations/auto-review';
+import { AutoReview, DEFAULT_REVIEW_POST_TEMPLATE, ENDED_DETAIL, MAX_REVIEW_RETRIES, markerVerdict, DEFAULT_REVIEW_REPLY_TEMPLATE, ON_IT_WINDOW_MS, WAITING_SKILL, fillTemplate, isMessageSetting, messageFormat, reviewTemplateValues, answeredFindings, currentReviews, reviewBody, reviewMarker, reviewPost, reviewPrompt, withMarker, type AutoReviewDeps, type AutoReviewRecord, type AutoReviewSettings, type PushMessage } from '../integrations/auto-review';
 import type { DiscordPostFiles } from '../integrations/discord-post';
 import { sortThread } from '../integrations/discord-reader';
 import type { ThreadRow } from '../integrations/discord-threads';
@@ -25,6 +25,7 @@ function world(options: { enabled?: boolean; autoLgtm?: boolean; rows?: ThreadRo
   const opened: Array<{ key: string; prompt: string }> = [];
   const approved: string[] = [];
   const pushes: PushMessage[] = [];
+  const busy = new Set<string>();
   let n = 0;
   const deps: AutoReviewDeps = {
     settings: async () => ({ ...SETTINGS, enabled: options.enabled ?? true, autoLgtm: options.autoLgtm ?? false }),
@@ -35,6 +36,8 @@ function world(options: { enabled?: boolean; autoLgtm?: boolean; rows?: ThreadRo
     duePosts: async (now) => records.filter((record) => record.postStatus === 'pending' && record.postAt && record.postAt <= now),
     latest: async (prUrl) => [...records].reverse().find((record) => record.prUrl === prUrl) ?? null,
     running: async (key) => [...records].reverse().find((record) => record.ticketKey === key && record.status === 'running') ?? null,
+    staleRunning: async (before) => records.filter((record) => record.status === 'running' && record.startedAt < before),
+    sessionIdle: async (sessionId) => !busy.has(sessionId),
     create: async (data) => { const record: AutoReviewRecord = { id: `r${(n += 1)}`, sessionId: null, status: 'running', detail: null, finishedAt: null, postStatus: null, postAt: null, postText: null, postMessageId: null, postDetail: null, postImages: null, ...data }; records.push(record); return record; },
     update: async (id, data) => { Object.assign(records.find((record) => record.id === id) as AutoReviewRecord, data); },
     updatePending: async (id, data) => {
@@ -59,7 +62,7 @@ function world(options: { enabled?: boolean; autoLgtm?: boolean; rows?: ThreadRo
     imageRoot: async (key) => `/evidence/${key}/screenshots`,
     now: () => NOW,
   };
-  return { review: new AutoReview(deps), records, opened, approved, pushes, deps };
+  return { review: new AutoReview(deps), records, opened, approved, pushes, deps, busy };
 }
 
 const verdict = (extra: Partial<Orchestration> = {}) => ({
@@ -114,6 +117,7 @@ test('a skipped pull request thread records why', async () => {
   await same.review.tick();
   same.records[0].startedAt = new Date(NOW.getTime() - 3_600_000);
   same.records[0].headSha = 'abc1234';
+  same.busy.add('s1');
   same.deps.rows = async () => [row({ ownClaim: { messageId: 'm9', authorId: 'me', author: 'Danu', mine: true, at: new Date(NOW.getTime() - 60_000).toISOString() } })];
   await same.review.tick();
   assert.strictEqual(same.review.skipReason('t1'), 'same head commit, already reviewed');
@@ -137,9 +141,11 @@ test('a new on it on a new head commit opens a new arena; a new on it on the sam
   w.records[0].startedAt = new Date(NOW.getTime() - 30 * 60_000);
   const later = world({ headSha: 'def5678' });
   later.records.push(...w.records);
+  later.busy.add('s1');
   assert.strictEqual(await later.review.tick(), 1, 'the on it at 02:59 is newer than the review at 02:30, and the head moved');
   const same = world();
   same.records.push({ ...w.records[0] });
+  same.busy.add('s1');
   assert.strictEqual(await same.review.tick(), 0, 'same head commit');
   const stale = world({ headSha: 'def5678' });
   stale.records.push({ ...w.records[0], startedAt: NOW });
@@ -775,4 +781,68 @@ test('template values cannot hide a link, and images of a ticket that is not on 
   await w.review.tick();
   assert.strictEqual(sent[0].files, undefined);
   assert.deepStrictEqual([w.pushes.at(-1)?.title, w.pushes.at(-1)?.body], ['QRD-1473: images left out of the review post', 'a.png']);
+});
+
+test('a running review whose session went idle without a verdict for 15 min fails with a push, and the same head is reviewed again in the same round, twice at most', async () => {
+  const MIN = 60_000;
+  const w = world();
+  assert.strictEqual(await w.review.tick(), 1);
+  const record = w.records[0];
+  let now = NOW.getTime() + 14 * MIN;
+  w.deps.now = () => new Date(now);
+  assert.strictEqual(await w.review.tick(), 0);
+  assert.strictEqual(record.status, 'running', 'under 15 min it waits');
+  now += 2 * MIN;
+  w.busy.add('s1');
+  assert.strictEqual(await w.review.tick(), 0);
+  assert.strictEqual(record.status, 'running', 'a session still at work keeps it running');
+  w.busy.clear();
+
+  assert.strictEqual(await w.review.tick(), 1);
+  assert.deepStrictEqual([w.records.length, record.status, record.detail, record.round, record.retries, record.sessionId, record.startedAt.getTime()], [1, 'running', null, 1, 1, 's2', now]);
+  assert.deepStrictEqual(w.pushes, [{ title: `QRD-1473: ${ENDED_DETAIL}`, body: 'DOCK starts the review again on the next look.', url: '/agents', tag: `auto-review-${record.id}` }]);
+
+  now += 16 * MIN;
+  assert.strictEqual(await w.review.tick(), 1);
+  assert.deepStrictEqual([record.status, record.round, record.retries, record.sessionId, w.opened.length], ['running', 1, 2, 's3', 3]);
+
+  now += 16 * MIN;
+  assert.strictEqual(await w.review.tick(), 0);
+  assert.deepStrictEqual([record.status, record.detail, w.opened.length], ['failed', ENDED_DETAIL, 3]);
+  assert.strictEqual(w.pushes.length, 3);
+  assert.strictEqual(w.pushes[2].body, `DOCK already started it again ${MAX_REVIEW_RETRIES} times; review it by hand on Agents.`);
+  assert.strictEqual(w.review.skipReason('t1'), 'same head commit, review failed 3 times');
+  now += MIN;
+  assert.strictEqual(await w.review.tick(), 0);
+  assert.deepStrictEqual([w.opened.length, w.pushes.length], [3, 3], 'left failed, pushed once');
+});
+
+test('a failed review on the same head is started again with its own round number, also the last round; other statuses stay already reviewed', async () => {
+  const w = world();
+  await w.review.tick();
+  Object.assign(w.records[0], { status: 'failed', detail: 'No slot', round: 3 });
+  assert.strictEqual(await w.review.tick(), 1, 'a failed last round does not close the arena');
+  assert.deepStrictEqual([w.records.length, w.records[0].status, w.records[0].round, w.records[0].retries, w.records[0].sessionId], [1, 'running', 3, 1, 's2']);
+
+  const moved = world({ headSha: 'def5678' });
+  moved.records.push({ ...w.records[0], status: 'failed', headSha: 'abc1234', round: 3 });
+  assert.strictEqual(await moved.review.tick(), 0);
+  assert.strictEqual(moved.review.skipReason('t1'), 'arena closed: 3 rounds', 'a new head after a failed last round does not open a fourth');
+
+  for (const status of ['blockers', 'clean', 'lgtm']) {
+    const settled = world();
+    await settled.review.tick();
+    Object.assign(settled.records[0], { status, round: 1 });
+    assert.strictEqual(await settled.review.tick(), 0, status);
+    assert.strictEqual(settled.review.skipReason('t1'), status === 'blockers' ? 'same head commit, already reviewed' : 'arena closed: approved');
+  }
+});
+
+test('a review session that cannot start is tried twice more on the same head, then left failed with one push', async () => {
+  const w = world({ failOpen: true });
+  for (let i = 0; i < 3; i += 1) assert.strictEqual(await w.review.tick(), 0);
+  assert.deepStrictEqual([w.records.length, w.records[0].status, w.records[0].detail, w.records[0].retries], [1, 'failed', 'No slot', 2]);
+  assert.deepStrictEqual(w.pushes, [{ title: 'QRD-1473: review did not start', body: 'No slot. DOCK tried 3 times on this head commit; review it by hand on Agents.', url: '/agents', tag: `auto-review-${w.records[0].id}` }]);
+  assert.strictEqual(await w.review.tick(), 0);
+  assert.deepStrictEqual([w.review.skipReason('t1'), w.pushes.length], ['same head commit, review failed 3 times', 1]);
 });

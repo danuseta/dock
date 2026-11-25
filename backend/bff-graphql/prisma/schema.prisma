@@ -383,6 +383,8 @@ model AutoReview {
   postDetail    String?
   /// JSON array of the image names the post uploads from the ticket's screenshots folder
   postImages    String?
+  /// How many times a failed review of this head was started again; null before the first retry
+  retries       Int?
 
   @@unique([prUrl, headSha])
   @@index([ticketKey, startedAt])
@@ -417,7 +419,7 @@ model ReviewRound {
   reportedAt    DateTime?
   /// light or full: the runner the round prompt asked sous for
   mode          String?
-  /// The DOCK-FIX reply to the thread: pending, sending, sent, cancelled, failed, skipped; null when nothing was scheduled
+  /// The DOCK-FIX reply to the thread: pending, sending, sent, cancelled, failed, skipped, waiting-github; null when nothing was scheduled
   replyStatus    String?
   replyAt        DateTime?
   replyText      String?
@@ -425,6 +427,8 @@ model ReviewRound {
   replyDetail    String?
   /// JSON array of the image names the reply uploads from the ticket's screenshots folder
   replyImages    String?
+  /// How many times DOCK asked the session to finish the round after a turn ended without its marker; null before the first
+  resumes        Int?
 
   @@unique([threadId, lastMessageId])
   @@index([replyStatus, replyAt])

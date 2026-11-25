@@ -1,5 +1,5 @@
 import { Prisma, type PrismaClient, type ReviewRound } from '@prisma/client';
-import { EXPIRED_DETAIL } from '../integrations/review-findings';
+import { EXPIRED_DETAIL, GITHUB_HEAD_DETAIL, NO_MARKER_DETAIL, WAITING_GITHUB } from '../integrations/review-findings';
 import { prisma } from './client';
 import { decrypt, encrypt, hashPin, verifyPin } from './crypto';
 
@@ -896,6 +896,11 @@ export class StorageService {
     return this.db.autoReview.findFirst({ where: { ticketKey, status: 'running' }, orderBy: { startedAt: 'desc' } });
   }
 
+  /** Auto reviews still running that started before the cutoff, oldest first. */
+  getRunningAutoReviewsBefore(before: Date) {
+    return this.db.autoReview.findMany({ where: { status: 'running', startedAt: { lt: before } }, orderBy: { startedAt: 'asc' } });
+  }
+
   getAutoReview(id: string) {
     return this.db.autoReview.findUnique({ where: { id } });
   }
@@ -909,7 +914,7 @@ export class StorageService {
   }
 
   updateAutoReview(id: string, data: {
-    sessionId?: string | null; status?: string; detail?: string | null; finishedAt?: Date | null;
+    sessionId?: string | null; status?: string; detail?: string | null; finishedAt?: Date | null; startedAt?: Date; round?: number; retries?: number | null;
     postStatus?: string | null; postAt?: Date | null; postText?: string | null; postMessageId?: string | null; postDetail?: string | null; postImages?: string | null;
   }) {
     return this.db.autoReview.update({ where: { id }, data });
@@ -925,7 +930,7 @@ export class StorageService {
   }
 
   updateReviewRound(id: string, data: {
-    sessionId?: string | null; opened?: boolean; status?: string; attempts?: number;
+    sessionId?: string | null; opened?: boolean; status?: string; attempts?: number; resumes?: number | null;
     valid?: number | null; invalid?: number | null; pushed?: boolean | null; detail?: string | null; reportedAt?: Date | null; mode?: string | null;
     replyStatus?: string | null; replyAt?: Date | null; replyText?: string | null; replyMessageId?: string | null; replyDetail?: string | null; replyImages?: string | null;
   }) {
@@ -946,6 +951,20 @@ export class StorageService {
     return this.db.reviewRound.findMany({ where: { replyStatus: 'pending', replyAt: { lte: now } }, orderBy: { replyAt: 'asc' }, take: 20 });
   }
 
+  /** Replies waiting for GitHub whose next try has come, and replies that failed on the head before the retry existed, reported since `since`. */
+  getWaitingGithubReplies(now: Date, since: Date) {
+    return this.db.reviewRound.findMany({
+      where: {
+        OR: [
+          { replyStatus: WAITING_GITHUB, replyAt: { lte: now } },
+          { replyStatus: 'failed', replyDetail: GITHUB_HEAD_DETAIL, reportedAt: { gte: since } },
+        ],
+      },
+      orderBy: { reportedAt: 'asc' },
+      take: 20,
+    });
+  }
+
   /** 1 for the first round of a thread, one more for each round created after it. */
   reviewRoundNumber(threadId: string, createdAt: Date) {
     return this.db.reviewRound.count({ where: { threadId, createdAt: { lte: createdAt } } });
@@ -957,7 +976,7 @@ export class StorageService {
     const rows = await this.db.reviewRound.findMany({
       where: {
         sessionId: { not: null },
-        OR: [{ status: { in: ['sending', 'sent'] } }, { status: 'failed', detail: EXPIRED_DETAIL, createdAt: { gte: day } }],
+        OR: [{ status: { in: ['sending', 'sent'] } }, { status: 'failed', detail: { in: [EXPIRED_DETAIL, NO_MARKER_DETAIL] }, createdAt: { gte: day } }],
       },
       select: { sessionId: true },
     });
@@ -994,6 +1013,11 @@ export class StorageService {
   /** The round a session still owes a result for, newest first. */
   getSentRoundForSession(sessionId: string) {
     return this.db.reviewRound.findFirst({ where: { sessionId, status: 'sent' }, orderBy: { lastMessageAt: 'desc' } });
+  }
+
+  /** The oldest round a session was sent and has not reported: the one its turns work through first. */
+  getOldestSentRoundForSession(sessionId: string) {
+    return this.db.reviewRound.findFirst({ where: { sessionId, status: 'sent' }, orderBy: { createdAt: 'asc' } });
   }
 
   /** Failed rounds with attempts left, and rounds left in `sending` with no session for over a minute (a crash between create and send). */
