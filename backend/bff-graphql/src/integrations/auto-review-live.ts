@@ -79,6 +79,8 @@ export const autoReview = new AutoReview({
   },
   latest: (prUrl) => storage.getLatestAutoReview(prUrl),
   running: (ticketKey) => storage.getRunningAutoReview(ticketKey),
+  staleRunning: (before) => storage.getRunningAutoReviewsBefore(before),
+  sessionIdle: async (sessionId) => (await storage.countChatMessagesInState(sessionId, ['taken', 'queued'])) === 0,
   get: (id) => storage.getAutoReview(id),
   duePosts: (now) => storage.getDueAutoReviewPosts(now),
   create: (data) => storage.createAutoReview(data),

@@ -4,7 +4,7 @@ import type { ReviewRound } from '@prisma/client';
 import type { ThreadMessage, ThreadRow } from '../integrations/discord-threads';
 import { ON_IT } from '../integrations/discord-reader';
 import {
-  EXPIRED_DETAIL, ROUND_QUIET_MS, ReviewFindings, findingBlock, findingsEnabled, findingsPrompt, fixMarker, isApproval, webhookReviewer, isBare, isOwnThread, parseRoundResult, replyTemplateValues, roundSummary, webhookIdOf,
+  EXPIRED_DETAIL, GITHUB_HEAD_DETAIL, GITHUB_WAIT_MS, MAX_ROUND_ATTEMPTS, NO_MARKER_DETAIL, ROUND_QUIET_MS, WAITING_GITHUB, ReviewFindings, resumePrompt, findingBlock, findingsEnabled, findingsPrompt, fixMarker, isApproval, webhookReviewer, isBare, isOwnThread, parseRoundResult, replyTemplateValues, roundSummary, webhookIdOf,
   type FindingsSettings, type PushMessage, type ReviewFindingsDeps,
 } from '../integrations/review-findings';
 import { DEFAULT_REVIEW_REPLY_TEMPLATE, type PullState } from '../integrations/auto-review';
@@ -60,6 +60,7 @@ function world(options: { rows?: ThreadRow[]; enabled?: boolean; ownTickets?: st
     staleLatest: false,
     lastSession: null as string | null,
     replies: new Map<string, string>(),
+    busy: new Set<string>(),
     settings: { autoReply: true, delayMinutes: 2, maxRounds: 3, reply: { format: 'builtin', skill: 'review-message', template: DEFAULT_REVIEW_REPLY_TEMPLATE }, light: null } as FindingsSettings,
     skills: ['review-message'],
     pull: { open: true, headSha: 'b71e0d4aa' } as PullState | null,
@@ -86,7 +87,7 @@ function world(options: { rows?: ThreadRow[]; enabled?: boolean; ownTickets?: st
       call('create');
       if (state.rounds.some((round) => round.threadId === data.threadId && round.lastMessageId === data.lastMessageId)) throw Object.assign(new Error('Unique constraint failed'), { code: 'P2002' });
       const round: ReviewRound = {
-        id: `r${++n}`, ...data, findings: data.findings ?? null, sessionId: null, opened: false, status: 'sending', attempts: 0, valid: null, invalid: null, pushed: null, detail: null, createdAt: state.now, reportedAt: null,
+        id: `r${++n}`, ...data, findings: data.findings ?? null, sessionId: null, opened: false, status: 'sending', attempts: 0, resumes: null, valid: null, invalid: null, pushed: null, detail: null, createdAt: state.now, reportedAt: null,
         mode: null, replyStatus: null, replyAt: null, replyText: null, replyMessageId: null, replyDetail: null, replyImages: null,
       };
       state.rounds.push(round);
@@ -109,6 +110,14 @@ function world(options: { rows?: ThreadRow[]; enabled?: boolean; ownTickets?: st
     roundById: async (id) => { call('roundById'); return state.rounds.find((round) => round.id === id) ?? null; },
     pendingSessions: async () => { call('pendingSessions'); return state.rounds.filter((round) => round.sessionId && (round.status === 'sent' || round.status === 'sending')).map((round) => round.sessionId as string); },
     newestReply: async (sessionId) => { call('newestReply'); return state.replies.get(sessionId) ?? null; },
+    roundReply: async (sessionId, roundId) => { call('roundReply'); const text = state.replies.get(sessionId); return text?.includes(`DOCK-REVIEW-ROUND ${roundId} `) ? text : null; },
+    owedRound: async (sessionId) => { call('owedRound'); return state.rounds.find((round) => round.sessionId === sessionId && round.status === 'sent') ?? null; },
+    sessionIdle: async (sessionId) => { call('sessionIdle'); return !state.busy.has(sessionId); },
+    waitingReplies: async (now, since) => {
+      call('waitingReplies');
+      return state.rounds.filter((round) => (round.replyStatus === 'waiting-github' && round.replyAt && round.replyAt <= now)
+        || (round.replyStatus === 'failed' && round.replyDetail === 'GitHub did not give the pull request head' && round.reportedAt && round.reportedAt >= since));
+    },
     taskMessage: async (key, prompt) => {
       call('taskMessage');
       if (state.failSend > 0) {
@@ -755,4 +764,112 @@ test('reply images sent without a label are named in a notification', async () =
   await w.tickAt(INDRA_NOTES + ROUND_QUIET_MS + 3 * MIN);
   assert.strictEqual(round.replyStatus, 'sent');
   assert.deepStrictEqual([w.state.pushes.at(-1)!.title, w.state.pushes.at(-1)!.body], ['QRD-1292: images sent without a label', '03-empty-fixed-dark.png']);
+});
+
+test('a turn that ends without the round marker resumes the round twice, a failed turn too; the third ends it failed with one push; a late marker still reports', async () => {
+  const w = world({ rows: [row(reference().slice(0, 3))] });
+  w.state.lastSession = 'task-9';
+  await w.tickAt(INDRA_NOTES + ROUND_QUIET_MS);
+  const round = w.state.rounds[0];
+  w.state.replies.set('task-9', 'Runner jalan di background, nanti aku kabari.');
+  assert.strictEqual(await w.findings.onTurnEnded({ sessionId: 'task-9', ticketKey: 'QRD-1292', failed: false }), false);
+  assert.strictEqual(w.state.sends.length, 2);
+  assert.strictEqual(w.state.sends[1].prompt, resumePrompt(round.id, true));
+  assert.match(w.state.sends[1].prompt, new RegExp(`^Round review ${round.id} belum selesai`));
+  assert.match(w.state.sends[1].prompt, /foreground/);
+  assert.strictEqual(w.state.sends[1].prompt.split('\n').at(-1), `DOCK-REVIEW-ROUND ${round.id} valid=<jumlah valid> invalid=<jumlah tidak valid> pushed=<yes|no|body>`);
+  assert.deepStrictEqual([round.status, round.resumes, round.sessionId], ['sent', 1, 'task-9']);
+
+  assert.strictEqual(await w.findings.onTurnEnded({ sessionId: 'task-9', ticketKey: 'QRD-1292', failed: true }), false);
+  assert.deepStrictEqual([w.state.sends.length, round.status, round.resumes], [3, 'sent', 2]);
+  assert.strictEqual(w.state.pushes.length, 0);
+
+  assert.strictEqual(await w.findings.onTurnEnded({ sessionId: 'task-9', ticketKey: 'QRD-1292', failed: false }), false);
+  assert.deepStrictEqual([w.state.sends.length, round.status, round.detail, round.attempts], [3, 'failed', NO_MARKER_DETAIL, MAX_ROUND_ATTEMPTS]);
+  assert.deepStrictEqual(w.state.pushes, [{
+    title: 'QRD-1292: review round got no result', body: 'The session ended 3 turns without the DOCK-REVIEW-ROUND line. Open the session and finish the round by hand.',
+    url: '/sessions?session=task-9', tag: `review-round-${round.id}`,
+  }]);
+  assert.strictEqual(await w.findings.onTurnEnded({ sessionId: 'task-9', ticketKey: 'QRD-1292', failed: false }), false);
+  await w.tickAt(INDRA_NOTES + ROUND_QUIET_MS + MIN);
+  assert.deepStrictEqual([w.state.sends.length, w.state.pushes.length], [3, 1], 'no further resume, resend or push');
+
+  w.state.replies.set('task-9', `DOCK-REVIEW-ROUND ${round.id} valid=1 invalid=0 pushed=no`);
+  assert.strictEqual(await w.findings.onTurnEnded({ sessionId: 'task-9', ticketKey: 'QRD-1292', failed: false }), true);
+  assert.strictEqual(round.status, 'reported');
+});
+
+test('a marker after a resume reports the round as usual; a session still busy or queued is not resumed', async () => {
+  const w = world({ rows: [row(reference().slice(0, 3))] });
+  w.state.lastSession = 'task-9';
+  await w.tickAt(INDRA_NOTES + ROUND_QUIET_MS);
+  const round = w.state.rounds[0];
+  w.state.busy.add('task-9');
+  assert.strictEqual(await w.findings.onTurnEnded({ sessionId: 'task-9', ticketKey: 'QRD-1292', failed: false }), false);
+  assert.deepStrictEqual([w.state.sends.length, round.resumes], [1, null], 'the round message is still queued behind that turn');
+  w.state.busy.clear();
+  assert.strictEqual(await w.findings.onTurnEnded({ sessionId: 'task-9', ticketKey: 'QRD-1292', failed: false }), false);
+  assert.deepStrictEqual([w.state.sends.length, round.resumes], [2, 1]);
+  w.state.replies.set('task-9', `Draft:\n- fixed di abc123\nDOCK-REVIEW-ROUND ${round.id} valid=1 invalid=0 pushed=yes`);
+  assert.strictEqual(await w.findings.onTurnEnded({ sessionId: 'task-9', ticketKey: 'QRD-1292', failed: false }), true);
+  assert.deepStrictEqual([round.status, round.valid, round.pushed, w.state.sends.length], ['reported', 1, true, 2]);
+  assert.deepStrictEqual(w.state.pushes.map((push) => push.title), ['QRD-1292: 1 valid, pushed']);
+});
+
+test('a reply whose head GitHub did not give waits for GitHub; a later tick with the head schedules it with the right text and marker', async () => {
+  const { w, round } = await sentRound();
+  const reportedAt = INDRA_NOTES + ROUND_QUIET_MS;
+  w.state.pull = null;
+  w.state.replies.set('task-9', REPLY(round.id));
+  assert.strictEqual(await report(w), true);
+  assert.deepStrictEqual([round.status, round.replyStatus, round.replyDetail, round.replyAt?.getTime()], ['reported', WAITING_GITHUB, GITHUB_HEAD_DETAIL, reportedAt + MIN]);
+  assert.match(w.state.pushes.at(-1)!.body, /GitHub did not give the pull request head; DOCK tries again/);
+
+  const reply = REPLY(round.id);
+  w.deps.roundReply = async (sessionId, roundId) => (sessionId === 'task-9' && roundId === round.id ? reply : null);
+  w.state.replies.set('task-9', 'Catatan lain sesudahnya.');
+  await w.tickAt(reportedAt + 30_000);
+  assert.strictEqual(round.replyStatus, WAITING_GITHUB, 'not before the next try');
+  await w.tickAt(reportedAt + MIN);
+  assert.deepStrictEqual([round.replyStatus, round.replyAt?.getTime()], [WAITING_GITHUB, reportedAt + 2 * MIN], 'GitHub still down');
+
+  w.state.pull = { open: true, headSha: 'b71e0d4aa' };
+  await w.tickAt(reportedAt + 2 * MIN);
+  assert.deepStrictEqual([round.replyStatus, round.replyDetail, round.replyAt?.getTime()], ['pending', null, reportedAt + 4 * MIN]);
+  const lines = (round.replyText ?? '').split('\n');
+  assert.match(lines[0], /^<@71111> mas danu, empty state/);
+  assert.strictEqual(lines.at(-1), 'DOCK-FIX round 1 · head b71e0d4');
+  assert.deepStrictEqual(JSON.parse(round.replyImages ?? '[]'), [{ n: 1, file: '03-empty-fixed-dark.png', caption: '' }]);
+  assert.deepStrictEqual([w.state.pushes.at(-1)!.title, w.state.pushes.at(-1)!.body], ['QRD-1292: review reply scheduled', 'GitHub answered; DOCK posts the reply to the thread in 2 min. Cancel or edit it before then.']);
+  await w.tickAt(reportedAt + 4 * MIN);
+  assert.deepStrictEqual([round.replyStatus, w.state.posts.length], ['sent', 1]);
+});
+
+test('a reply that failed on the head before the retry existed is picked up; one waiting 24 h gives up with a push', async () => {
+  const { w, round } = await sentRound();
+  const reportedAt = INDRA_NOTES + ROUND_QUIET_MS;
+  Object.assign(round, { status: 'reported', valid: 0, invalid: 2, pushed: false, reportedAt: new Date(reportedAt), replyStatus: 'failed', replyDetail: GITHUB_HEAD_DETAIL });
+  w.state.replies.set('task-9', REPLY(round.id, 'valid=0 invalid=2 pushed=no'));
+  await w.tickAt(reportedAt + 2 * 3600_000);
+  assert.deepStrictEqual([round.replyStatus, round.replyDetail], ['pending', null], 'the old failed row is scheduled');
+  assert.strictEqual(round.replyText?.split('\n').at(-1), 'DOCK-FIX round 1 · head b71e0d4');
+
+  const old = await sentRound();
+  Object.assign(old.round, { status: 'reported', valid: 1, invalid: 0, pushed: true, reportedAt: new Date(reportedAt - GITHUB_WAIT_MS - MIN), replyStatus: 'failed', replyDetail: GITHUB_HEAD_DETAIL });
+  await old.w.tickAt(reportedAt + MIN);
+  assert.deepStrictEqual([old.round.replyStatus, old.w.state.pushes.length], ['failed', 0], 'a failed row older than 24 h is left alone');
+
+  const gone = await sentRound();
+  gone.w.state.pull = null;
+  gone.w.state.replies.set('task-9', REPLY(gone.round.id));
+  await report(gone.w);
+  assert.strictEqual(gone.round.replyStatus, WAITING_GITHUB);
+  for (let at = reportedAt + MIN; at < reportedAt + GITHUB_WAIT_MS; at += 15 * MIN) await gone.w.tickAt(at);
+  assert.strictEqual(gone.round.replyStatus, WAITING_GITHUB);
+  const pushes = gone.w.state.pushes.length;
+  await gone.w.tickAt(reportedAt + GITHUB_WAIT_MS + 15 * MIN);
+  assert.deepStrictEqual([gone.round.replyStatus, gone.round.replyDetail], ['failed', 'GitHub did not give the pull request head in 24 h']);
+  assert.deepStrictEqual(gone.w.state.pushes.slice(pushes).map((push) => push.title), ['QRD-1292: review reply not posted']);
+  await gone.w.tickAt(reportedAt + GITHUB_WAIT_MS + 30 * MIN);
+  assert.strictEqual(gone.w.state.pushes.length, pushes + 1, 'given up once');
 });

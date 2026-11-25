@@ -24,6 +24,11 @@ export const WAITING_SKILL = 'Waiting for the skill message';
 const SKILL_WAIT_MS = 15 * 60_000;
 /** A post the session writes waits at least a minute, so the owner can read it before it goes out. */
 const skillDelay = (settings: Pick<AutoReviewSettings, 'postDelayMinutes'>) => Math.max(1, settings.postDelayMinutes);
+/** A running review whose session went idle this long after it started, with no verdict in the ledger, has ended without one. */
+export const ENDED_WAIT_MS = 15 * 60_000;
+export const ENDED_DETAIL = 'review session ended without a verdict';
+/** How many times a failed review of one head commit is started again, in the same round. */
+export const MAX_REVIEW_RETRIES = 2;
 const PLACEHOLDER =/\{\{\s*(\w+)\s*\}\}/g;
 
 export const REVIEW_POST_FORMATS = ['skill', 'template'] as const;
@@ -97,9 +102,10 @@ export interface PullState { open: boolean; headSha: string }
 export interface AutoReviewRecord {
   id: string; prUrl: string; headSha: string; ticketKey: string; threadUrl: string; sessionId: string | null; status: string; detail: string | null; startedAt: Date; finishedAt: Date | null;
   round: number; postStatus: string | null; postAt: Date | null; postText: string | null; postMessageId: string | null; postDetail: string | null; postImages: string | null;
+  retries?: number | null;
 }
 export interface AutoReviewUpdate {
-  sessionId?: string | null; status?: string; detail?: string | null; finishedAt?: Date | null;
+  sessionId?: string | null; status?: string; detail?: string | null; finishedAt?: Date | null; startedAt?: Date; round?: number; retries?: number | null;
   postStatus?: string | null; postAt?: Date | null; postText?: string | null; postMessageId?: string | null; postDetail?: string | null; postImages?: string | null;
 }
 export interface PushMessage { title: string; body: string; url: string; tag: string }
@@ -114,6 +120,10 @@ export interface AutoReviewDeps {
   commitAt(owner: string, repo: string, sha: string): Promise<Date | null>;
   latest(prUrl: string): Promise<AutoReviewRecord | null>;
   running(ticketKey: string): Promise<AutoReviewRecord | null>;
+  /** The reviews still running that started before the cutoff, oldest first. */
+  staleRunning(before: Date): Promise<AutoReviewRecord[]>;
+  /** True when the session has no turn running and no message queued. */
+  sessionIdle(sessionId: string): Promise<boolean>;
   get(id: string): Promise<AutoReviewRecord | null>;
   /** Pending posts whose time has come, oldest first. */
   duePosts(now: Date): Promise<AutoReviewRecord[]>;
@@ -305,6 +315,7 @@ export class AutoReview {
       this.wasEnabled = true;
       const rows = await this.deps.rows();
       await this.sendDue(rows, settings);
+      await this.failEnded();
       let started = 0;
       for (const row of rows) started += await this.consider(row, settings);
       return started;
@@ -358,7 +369,7 @@ export class AutoReview {
     if (this.enabledAt !== null && saidAt < this.enabledAt) return this.skip(row, ['said before the setting was turned on']);
     const key = ticketOf(row);
     if (!key) return this.skip(row, ['no ticket key']);
-    const due: Array<{ url: string; headSha: string; round: number }> = [];
+    const due: Array<{ url: string; headSha: string; round: number; retry?: AutoReviewRecord }> = [];
     const reasons: string[] = [];
     if (!row.prs.some((prUrl) => PULL.test(prUrl))) return this.skip(row, ['no pull request link']);
     for (const prUrl of row.prs) {
@@ -388,8 +399,17 @@ export class AutoReview {
         reasons.push('pull request closed');
         continue;
       }
+      if (last && last.headSha === state.headSha && last.status === 'failed') {
+        if ((last.retries ?? 0) >= MAX_REVIEW_RETRIES) reasons.push(`same head commit, review failed ${MAX_REVIEW_RETRIES + 1} times`);
+        else due.push({ url, headSha: state.headSha, round: arena ? arena.round : 1, retry: last });
+        continue;
+      }
       if (last && last.headSha === state.headSha && !(arena && this.answeredOnSameHead(row, arena, state.headSha))) {
         reasons.push('same head commit, already reviewed');
+        continue;
+      }
+      if (arena?.status === 'failed' && arena.round >= settings.maxRounds) {
+        reasons.push(`arena closed: ${settings.maxRounds} rounds`);
         continue;
       }
       const waiting = arena ? await this.waiting(row, match, arena, state.headSha, saidAt, settings) : null;
@@ -401,7 +421,10 @@ export class AutoReview {
     }
     if (!due.length) return this.skip(row, reasons);
     const records: AutoReviewRecord[] = [];
-    for (const pull of due) records.push(await this.deps.create({ prUrl: pull.url, headSha: pull.headSha, ticketKey: key, threadUrl: row.url, startedAt: this.deps.now(), round: pull.round }));
+    for (const pull of due) {
+      records.push(pull.retry ? await this.restart(pull.retry, pull.round)
+        : await this.deps.create({ prUrl: pull.url, headSha: pull.headSha, ticketKey: key, threadUrl: row.url, startedAt: this.deps.now(), round: pull.round }));
+    }
     try {
       const lessons = this.deps.lessonsFile ? await this.deps.lessonsFile(key).catch(() => null) : null;
       const sessionId = await this.deps.openReview(key, reviewPrompt(key, due.map((pull) => pull.url), row.url, await this.postSkill(settings), lessons));
@@ -410,14 +433,48 @@ export class AutoReview {
     } catch (error) {
       const detail = error instanceof Error ? error.message.slice(0, 300) : 'the session did not start';
       for (const record of records) await this.deps.update(record.id, { status: 'failed', detail, finishedAt: this.deps.now() });
+      const spent = records.find((record) => (record.retries ?? 0) >= MAX_REVIEW_RETRIES);
+      if (spent) {
+        await this.deps.push({ title: `${key}: review did not start`, body: `${detail}. DOCK tried ${MAX_REVIEW_RETRIES + 1} times on this head commit; review it by hand on Agents.`, url: '/agents', tag: `auto-review-${spent.id}` });
+      }
       return this.skip(row, [`session did not start: ${detail}`]);
+    }
+  }
+
+  /** A failed review of a head commit started again in the same round: the record runs again from now, one retry more. */
+  private async restart(record: AutoReviewRecord, round: number): Promise<AutoReviewRecord> {
+    const data = { status: 'running', detail: null, sessionId: null, startedAt: this.deps.now(), finishedAt: null, round, retries: (record.retries ?? 0) + 1 };
+    await this.deps.update(record.id, data);
+    return { ...record, ...data };
+  }
+
+  /**
+   * Fails the reviews still running whose session went idle without a verdict 15 min or more after they started, such as a
+   * session whose runner was killed, so the arena is not blocked. One push per session; the next look starts the review again
+   * on the same head until the retries are spent.
+   */
+  private async failEnded(): Promise<void> {
+    const now = this.deps.now();
+    const pushed = new Set<string>();
+    for (const record of await this.deps.staleRunning(new Date(now.getTime() - ENDED_WAIT_MS))) {
+      if (this.deciding.has(record.id) || (record.sessionId && !(await this.deps.sessionIdle(record.sessionId)))) continue;
+      await this.deps.update(record.id, { status: 'failed', detail: ENDED_DETAIL, finishedAt: now });
+      const group = record.sessionId ?? record.id;
+      if (pushed.has(group)) continue;
+      pushed.add(group);
+      const left = (record.retries ?? 0) < MAX_REVIEW_RETRIES;
+      await this.deps.push({
+        title: `${record.ticketKey}: ${ENDED_DETAIL}`,
+        body: left ? 'DOCK starts the review again on the next look.' : `DOCK already started it again ${MAX_REVIEW_RETRIES} times; review it by hand on Agents.`,
+        url: '/agents', tag: `auto-review-${record.id}`,
+      });
     }
   }
 
   /** Why an arena no longer reviews: approved, out of rounds, or a person wrote stop dock in the thread since the on it. */
   private closed(row: ThreadRow, arena: AutoReviewRecord, saidAt: number, settings: AutoReviewSettings): string | null {
     if (ARENA_DONE.includes(arena.status)) return 'arena closed: approved';
-    if (arena.round >= settings.maxRounds) return `arena closed: ${settings.maxRounds} rounds`;
+    if (arena.round >= settings.maxRounds && arena.status !== 'failed') return `arena closed: ${settings.maxRounds} rounds`;
     if (row.messages.some((message) => Date.parse(message.at) > saidAt && saysStop(message))) return 'arena closed: stop dock';
     if (this.deps.now().getTime() - lastActivity(arena) > ON_IT_WINDOW_MS) return 'arena closed: 72 h without a new commit';
     return null;

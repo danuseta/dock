@@ -984,6 +984,22 @@ test('SQLite storage expires review rounds stuck in sending', {
   assert.ok((await storage.pendingReviewSessions()).includes('session-3'), 'a round expired in the last day is still pending');
   await prisma.reviewRound.update({ where: { id: stuck.id }, data: { createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000) } });
   assert.ok(!(await storage.pendingReviewSessions()).includes('session-3'), 'an expired round older than a day is not pending');
+
+  const { GITHUB_HEAD_DETAIL, NO_MARKER_DETAIL, WAITING_GITHUB } = await import('../integrations/review-findings');
+  await prisma.reviewRound.update({ where: { id: stuck.id }, data: { createdAt: new Date() } });
+  await storage.updateReviewRound(stuck.id, { detail: NO_MARKER_DETAIL, resumes: 2 });
+  assert.ok((await storage.pendingReviewSessions()).includes('session-3'), 'a round failed after its resumes is still pending for a late marker');
+  await storage.updateReviewRound(stuck.id, { status: 'sent' });
+  assert.strictEqual((await storage.getOldestSentRoundForSession('session-3'))?.id, stuck.id);
+  const now = new Date();
+  await storage.updateReviewRound(stuck.id, { status: 'reported', reportedAt: now, replyStatus: WAITING_GITHUB, replyAt: new Date(now.getTime() + 60_000), replyDetail: GITHUB_HEAD_DETAIL });
+  const waiting = async (at: Date) => (await storage.getWaitingGithubReplies(at, new Date(at.getTime() - 24 * 3600_000))).map((row) => row.id);
+  assert.ok(!(await waiting(now)).includes(stuck.id), 'not before its next try');
+  assert.ok((await waiting(new Date(now.getTime() + 60_000))).includes(stuck.id));
+  await storage.updateReviewRound(stuck.id, { replyStatus: 'failed' });
+  assert.ok((await waiting(now)).includes(stuck.id), 'a reply that failed on the head is retried');
+  await storage.updateReviewRound(stuck.id, { reportedAt: new Date(now.getTime() - 25 * 3600_000) });
+  assert.ok(!(await waiting(now)).includes(stuck.id), 'one reported over a day ago is left alone');
 });
 
 test('SQLite storage keeps sprint plan edges, their state across a re-map, and mapped-at per sprint', {
@@ -1067,6 +1083,12 @@ test('SQLite storage keeps the Judge queue, findings, examples and days, the ses
   const turn = await storage.createChatMessage({ sessionId: 'judge-a', role: 'user', text: 'review', state: 'taken', at: hoursAgo(0) });
   assert.strictEqual(await storage.countRunningAutoReviews(), reviews + 1, 'a review with a turn running keeps Judge waiting');
   await storage.deleteChatMessage(turn.id);
+  assert.ok(!(await storage.getRunningAutoReviewsBefore(hoursAgo(1))).some((row) => row.id === review.id), 'a review started now is not stale');
+  assert.ok((await storage.getRunningAutoReviewsBefore(new Date(Date.now() + 1000))).some((row) => row.id === review.id));
+  await storage.updateAutoReview(review.id, { status: 'failed', retries: 1 });
+  assert.ok(!(await storage.getRunningAutoReviewsBefore(new Date(Date.now() + 1000))).some((row) => row.id === review.id), 'only running reviews');
+  await storage.updateAutoReview(review.id, { status: 'running', startedAt: new Date(), round: 2, retries: 2 });
+  assert.deepStrictEqual([(await storage.getAutoReview(review.id))?.round, (await storage.getAutoReview(review.id))?.retries], [2, 2]);
 
   await storage.upsertJudgeSession('judge-a', { day: '2026-11-13', status: 'pending' });
   assert.strictEqual((await storage.getJudgeSessions({ statuses: ['pending'], days: ['2026-11-13'] })).length, 1);
