@@ -51,6 +51,7 @@ export interface SavedSettings {
   reviewFindingsToTask?: boolean | null;
   autoReviewPostDiscord?: boolean | null;
   reviewPostDelayMinutes?: number | null;
+  reviewReReviewOnCommit?: boolean | null;
   reviewReReviewWaitMinutes?: number | null;
   reviewMaxRounds?: number | null;
   reviewFindingsAutoReply?: boolean | null;
@@ -123,7 +124,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
   discord: ['Webhook URL', 'Bot token', 'Server id', 'Your Discord user id'],
   calendar: ['Client ID', 'Client secret', 'Calendar ID'],
   machines: ['Ingest tokens', 'Create token', 'Kit setup'],
-  review: ['Review when I say on it', 'LGTM when the review is clean', 'Send review findings to the Task session', 'Post the review to the thread', 'Reply after a fix', 'Post delay', 'Re-review wait', 'Max rounds', 'Stop word'],
+  review: ['Review when I say on it', 'LGTM when the review is clean', 'Send review findings to the Task session', 'Post the review to the thread', 'Reply after a fix', 'Re-review new commits without DOCK-FIX', 'Post delay', 'Re-review wait', 'Max rounds', 'Stop word'],
   planflow: ['Stages', 'Skip stage', 'Approval'],
   sousflow: ['Stages', 'Skip stage', 'After each stage', 'Light runner', 'Max production lines', 'Max production files', 'Worker model', 'Browser check', 'Blast check', 'Publish'],
   judge: ['Judge on or off', 'Judge account', 'Idle minutes', 'Answer cutoff'],
@@ -184,6 +185,7 @@ export function savedValues(settings: SavedSettings): Record<DraftSectionId, Sec
       autoReviewPostDiscord: String(settings.autoReviewPostDiscord !== false),
       reviewFindingsAutoReply: String(settings.reviewFindingsAutoReply !== false),
       reviewPostDelayMinutes: String(settings.reviewPostDelayMinutes ?? REVIEW_NUMBERS.reviewPostDelayMinutes.fallback),
+      reviewReReviewOnCommit: String(settings.reviewReReviewOnCommit === true),
       reviewReReviewWaitMinutes: String(settings.reviewReReviewWaitMinutes ?? REVIEW_NUMBERS.reviewReReviewWaitMinutes.fallback),
       reviewMaxRounds: String(settings.reviewMaxRounds ?? REVIEW_NUMBERS.reviewMaxRounds.fallback),
     },
