@@ -3,7 +3,7 @@ import test from 'node:test';
 import { TICKET_TITLE, isTaskTitle, nextSessionTitle, ticketSessionTitle, ticketTitleFromText } from '../integrations/session-titles';
 import {
   CronInputError, DEFAULT_CRON_SETTINGS, MAX_RESUMES, OrchestratorCron, PARKED_TEXT, RESUME_GAVE_UP_TEXT, START_FAILED_TEXT, candidates, hasAcceptanceCriteria, labelOrder, ticketHasAcceptanceCriteria, outsideWindow, parseCronSettings,
-  OWNER_BUSY_TEXT, confirmedPrompt, dependencyState, isStackable, manualRefusal, stackLine, ownerReplyPrompt, resumePrompt, sousConfirmedPrompt, sousStartPrompt, startPrompt, wib, type CronDeps, type CronRun, type CronSettings, type CronTicket,
+  OWNER_BUSY_TEXT, allMergedToDevelop, confirmedPrompt, dependencyState, isStackable, manualRefusal, stackLine, ownerReplyPrompt, resumePrompt, sousConfirmedPrompt, sousStartPrompt, startPrompt, wib, type CronDeps, type CronRun, type CronSettings, type CronTicket,
 } from '../integrations/orchestrator-cron';
 
 const AC = 'Context.\n\nAcceptance criteria\n\nReloading the page still shows Disconnected.\n\nA manually disabled channel keeps its status.';
@@ -775,6 +775,28 @@ test('dependencyState is the cron rule on its own: blocked, stacked and waitsOn 
   assert.deepStrictEqual([[...on.blocked], [...on.stacked], [...on.waitsOn]], [['QRD-5'], [['QRD-1', 'QRD-2']], [['QRD-5', 'QRD-3']]]);
   const off = await dependencyState(deps, settings({ engine: 'sous', stackedAllowed: false }));
   assert.deepStrictEqual([[...off.blocked].sort(), off.stacked.size, off.waitsOn.get('QRD-1')], [['QRD-1', 'QRD-5'], 0, 'QRD-2']);
+});
+
+test('a UAT MERGED dependency is settled only when its pull requests merged into develop', async () => {
+  const tickets = new Map<string, CronTicket>([['QRD-2', ticket('QRD-2', { status: 'UAT MERGED' })], ['QRD-3', ticket('QRD-3', { status: 'UAT MERGED' })]]);
+  const developed = new Set(['QRD-2']);
+  const deps = {
+    dependencies: async () => [{ ticketKey: 'QRD-1', dependsOnKey: 'QRD-2' }, { ticketKey: 'QRD-5', dependsOnKey: 'QRD-3' }],
+    ticket: async (key: string) => tickets.get(key) ?? null,
+    runs: async () => [] as CronRun[],
+    mergedToDevelop: async (key: string) => developed.has(key),
+  };
+  const state = await dependencyState(deps, settings({ engine: 'sous', stackedAllowed: false }));
+  assert.deepStrictEqual([...state.blocked], ['QRD-5'], 'QRD-3 merged into a feature branch, so QRD-5 still waits');
+  const unknown = await dependencyState({ ...deps, mergedToDevelop: undefined }, settings({ engine: 'sous', stackedAllowed: false }));
+  assert.deepStrictEqual([...unknown.blocked].sort(), ['QRD-1', 'QRD-5'], 'without the check UAT MERGED still waits');
+});
+
+test('allMergedToDevelop: every own pull request merged into develop, docs syncs aside', () => {
+  assert.strictEqual(allMergedToDevelop([{ title: 'QRD-1 feat', status: 'merged', baseBranch: 'develop' }, { title: 'docs: sync for #1', status: 'open', baseBranch: 'develop' }]), true);
+  assert.strictEqual(allMergedToDevelop([{ title: 'QRD-1 feat', status: 'merged', baseBranch: 'feat/V1-Playbook' }]), false);
+  assert.strictEqual(allMergedToDevelop([{ title: 'QRD-1 feat', status: 'merged', baseBranch: 'develop' }, { title: 'QRD-1 fe', status: 'open', baseBranch: 'develop' }]), false);
+  assert.strictEqual(allMergedToDevelop([]), false);
 });
 
 test('stackedAllowed off makes the cron wait on a PR Review parent instead of stacking', async () => {
