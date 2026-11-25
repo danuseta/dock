@@ -226,6 +226,15 @@ export function startsWithoutWaiting(description: string | null | undefined): st
 export const withoutWaitingLine = (waitsOn: string, how: string) =>
   `Starts without waiting on ${waitsOn}, as the ticket says: ${how} Build against the fixtures or stubs it names, keep to the frozen shapes, say so in the PR body, and remove them once the real pieces merge.`;
 
+/** UAT MERGED: the ticket's pull requests merged, into develop or into a feature branch. */
+export const isUatMerged = (status: string | null | undefined) => String(status || '').trim().toLowerCase() === 'uat merged';
+
+/** Pull requests of a ticket all merged into develop (docs syncs aside), and at least one. */
+export function allMergedToDevelop(pulls: Array<{ title?: string; status?: string; baseBranch?: string }>): boolean {
+  const own = pulls.filter((pull) => !/^docs: sync\b/i.test(pull.title ?? ''));
+  return own.length > 0 && own.every((pull) => pull.status === 'merged' && /^(develop|development)$/.test(pull.baseBranch ?? ''));
+}
+
 export interface DependencyState { blocked: Set<string>; stacked: Map<string, string>; waitsOn: Map<string, string> }
 export interface ManualCheck { mode: BlockedManualMode; waitsOn: string | null; stackedOn: string | null }
 
@@ -239,7 +248,7 @@ export function manualRefusal(check: ManualCheck): string | null {
  * stackedAllowed is on: then the ticket runs stacked on its parent, and `stacked` names that parent. A ticket with more
  * than one unsettled dependency is blocked, never stacked. `waitsOn` names the first dependency a blocked ticket waits for.
  */
-export async function dependencyState(deps: Pick<CronDeps, 'dependencies' | 'ticket' | 'runs'>, settings: Pick<CronSettings, 'engine' | 'stackedAllowed'>): Promise<DependencyState> {
+export async function dependencyState(deps: Pick<CronDeps, 'dependencies' | 'ticket' | 'runs' | 'mergedToDevelop'>, settings: Pick<CronSettings, 'engine' | 'stackedAllowed'>): Promise<DependencyState> {
   const blocked = new Set<string>();
   const stacked = new Map<string, string>();
   const waitsOn = new Map<string, string>();
@@ -247,9 +256,14 @@ export async function dependencyState(deps: Pick<CronDeps, 'dependencies' | 'tic
   const stacking = settings.engine === 'sous' && settings.stackedAllowed !== false;
   const dependencies = await deps.dependencies();
   const runs = stacking && dependencies.length ? await deps.runs() : [];
+  const merged = new Map<string, Promise<boolean>>();
+  const mergedToDevelop = (key: string) => {
+    if (!merged.has(key)) merged.set(key, deps.mergedToDevelop ? deps.mergedToDevelop(key).catch(() => false) : Promise.resolve(false));
+    return merged.get(key)!;
+  };
   for (const { ticketKey, dependsOnKey } of dependencies) {
     const dependency = await deps.ticket(dependsOnKey).catch(() => null);
-    if (dependency && isSettledStatus(dependency.status)) continue;
+    if (dependency && (isSettledStatus(dependency.status) || (isUatMerged(dependency.status) && await mergedToDevelop(dependsOnKey)))) continue;
     open.set(ticketKey, [...new Set([...(open.get(ticketKey) ?? []), dependsOnKey])]);
     if (dependency && stacking && isStackable(dependency.status, runs.find((run) => run.key === dependsOnKey))) stacked.set(ticketKey, dependsOnKey);
     else blocked.add(ticketKey);
@@ -478,6 +492,8 @@ export interface CronDeps {
   ticket(key: string): Promise<CronTicket | null>;
   moveTicket(key: string, statusName: string): Promise<boolean>;
   dependencies(): Promise<Array<{ ticketKey: string; dependsOnKey: string }>>;
+  /** Every pull request of the ticket (docs syncs aside) merged into develop; a UAT MERGED dependency then counts as settled. */
+  mergedToDevelop?(key: string): Promise<boolean>;
   /** Tickets with a pending inferred dependency: held until the owner decides. */
   heldKeys(): Promise<Set<string>>;
   /** Lets the sprint planner see the tickets the cron fetched. */

@@ -1,10 +1,11 @@
+import { GitHubAPI } from '../datasources/GitHubAPI';
 import { JiraAPI } from '../datasources/JiraAPI';
 import { ownerReplySession } from '../datasources/StorageAPI';
 import { StorageService } from '../storage/service';
 import { STOPPED_QUEUED_TEXT, STOPPED_TEXT, chatService } from './chat';
 import { ledgerPeer } from './ledger-peer';
 import { DEFAULT_MACHINE, orchestratorService } from './orchestrator';
-import { CRON_CACHE, OrchestratorCron } from './orchestrator-cron';
+import { CRON_CACHE, OrchestratorCron, allMergedToDevelop } from './orchestrator-cron';
 import { activeSprint } from './sprint-plan';
 import { cronDryRun } from './plan-publish';
 import { sprintPlanner } from './sprint-plan-live';
@@ -17,6 +18,7 @@ import { ticketReadinessLine } from './ticket-readiness-live';
 
 const storage = new StorageService();
 const jira = new JiraAPI();
+const github = new GitHubAPI();
 const SESSIONS_LOOKED_AT = 200;
 const activeSprintName = async () => activeSprint(await jira.getTickets())?.sprint ?? null;
 const DEAD_START_LOOKBACK_MS = 2 * 24 * 3600 * 1000;
@@ -32,6 +34,7 @@ export const orchestratorCron = new OrchestratorCron({
   tickets: () => jira.getTickets(),
   ticket: (key) => jira.getTicket(key),
   moveTicket: (key, statusName) => jira.transitionTicket(key, statusName),
+  mergedToDevelop: async (key) => allMergedToDevelop(await github.getPullRequestsForTicket(key)),
   dependencies: async () => {
     const sprint = await activeSprintName();
     return [...await storage.getTicketDependencies(), ...(sprint ? await storage.getAcceptedPlanEdges(sprint) : [])];
