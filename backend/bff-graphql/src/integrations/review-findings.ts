@@ -146,6 +146,19 @@ export function isApproval(text: string, verdictLine: string | null): boolean {
   return rest !== first || LGTM_FIRST.test(first);
 }
 
+const nameWords = (name: string) => name.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3 && word !== 'dock' && word !== 'sous');
+
+/**
+ * The person a reviewer's own webhook posts for when its post has no DOCK-REVIEW line: a webhook named after someone who
+ * said on it ("sous-shovian" for Shovian). One match only; none or several gives undefined.
+ */
+export function webhookReviewer(webhookName: string, claimers: Array<{ id: string; name: string }>): string | undefined {
+  const words = new Set(nameWords(webhookName));
+  if (!words.size) return undefined;
+  const matches = claimers.filter((claimer) => nameWords(claimer.name).some((word) => words.has(word)));
+  return matches.length === 1 ? matches[0].id : undefined;
+}
+
 function reviewerMessages(row: ThreadRow, since: number, webhookId: string | null): Array<{ message: ThreadMessage; approval: boolean }> {
   const onItAt = new Map<string, number>();
   for (const message of row.messages) {
@@ -156,10 +169,12 @@ function reviewerMessages(row: ThreadRow, since: number, webhookId: string | nul
   for (const raw of row.messages) {
     if (raw.mine || raw.authorId === row.createdById || (webhookId && raw.webhookId === webhookId) || FIX_LINE.test(raw.text)) continue;
     const line = raw.webhookId ? REVIEW_LINE.exec(raw.text) : null;
-    const userId = line ? /<@!?(\d+)>/.exec(line[1])?.[1] ?? raw.mentions.find((mention) => !mention.role && line[1].startsWith(`@${mention.name}`))?.id : undefined;
+    const userId = line ? /<@!?(\d+)>/.exec(line[1])?.[1] ?? raw.mentions.find((mention) => !mention.role && line[1].startsWith(`@${mention.name}`))?.id
+      : raw.webhookId ? webhookReviewer(raw.author, [...onItAt.keys()].map((id) => ({ id, name: names.get(id) ?? '' }))) : undefined;
     const author = userId ? names.get(userId) ?? raw.mentions.find((mention) => mention.id === userId)?.name : undefined;
     if (line && !author) continue;
-    const message = line && userId && author ? { ...raw, authorId: userId, author, text: raw.text.replace(line[0], '').trim() } : raw;
+    const message = line && userId && author ? { ...raw, authorId: userId, author, text: raw.text.replace(line[0], '').trim() }
+      : userId && author ? { ...raw, authorId: userId, author } : raw;
     if (message.mine || message.authorId === row.createdById) continue;
     const claimed = onItAt.get(message.authorId) ?? (row.onIt.includes(message.author) ? -Infinity : undefined);
     const at = Date.parse(message.at);
