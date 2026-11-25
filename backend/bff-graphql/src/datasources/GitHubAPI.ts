@@ -1,5 +1,6 @@
 import { StorageAPI } from './StorageAPI';
-import { GitHubClient, GitHubService, SearchPRsOptions } from '../integrations/github';
+import { GitHubClient, GitHubService, SearchPRsOptions, githubQuotaOf } from '../integrations/github';
+import type { GitHubQuotaState } from '../integrations/github-budget';
 import type { PullRequestProblem } from '../integrations/attention';
 import { dockIssueError, issuesRepo, toDockIssue } from '../integrations/dock-issues';
 
@@ -146,7 +147,7 @@ export class GitHubAPI {
   async pullState(owner: string, repo: string, pullNumber: number): Promise<{ open: boolean; headSha: string }> {
     const auth = await this.getAuth();
     if (!auth.hasToken) throw new Error('GitHub token is not configured in Settings');
-    const pull = await new GitHubClient(auth.headers.Authorization.replace('Bearer ', '')).getPRStatus(owner, repo, pullNumber);
+    const pull = await new GitHubClient(auth.headers.Authorization.replace('Bearer ', ''), { priority: true }).getPRStatus(owner, repo, pullNumber);
     return { open: pull?.state === 'open' && !pull?.merged_at, headSha: String(pull?.head?.sha ?? '') };
   }
 
@@ -154,7 +155,7 @@ export class GitHubAPI {
   async commitAt(owner: string, repo: string, sha: string): Promise<Date | null> {
     const auth = await this.getAuth();
     if (!auth.hasToken) throw new Error('GitHub token is not configured in Settings');
-    const date = await new GitHubClient(auth.headers.Authorization.replace('Bearer ', '')).getCommitDate(owner, repo, sha);
+    const date = await new GitHubClient(auth.headers.Authorization.replace('Bearer ', ''), { priority: true }).getCommitDate(owner, repo, sha);
     return date ? new Date(date) : null;
   }
 
@@ -162,14 +163,14 @@ export class GitHubAPI {
   async approvePullRequest(owner: string, repo: string, pullNumber: number) {
     const auth = await this.getAuth();
     if (!auth.hasToken) throw new Error('GitHub token is not configured in Settings');
-    await new GitHubClient(auth.headers.Authorization.replace('Bearer ', '')).approvePullRequest(owner, repo, pullNumber);
+    await new GitHubClient(auth.headers.Authorization.replace('Bearer ', ''), { priority: true }).approvePullRequest(owner, repo, pullNumber);
   }
 
   /** Marks a draft pull request ready for review; false when it was not a draft. Throws when there is no token or GitHub refuses. */
   async markReadyForReview(owner: string, repo: string, pullNumber: number): Promise<boolean> {
     const auth = await this.getAuth();
     if (!auth.hasToken) throw new Error('GitHub token is not configured in Settings');
-    return new GitHubClient(auth.headers.Authorization.replace('Bearer ', '')).markReadyForReview(owner, repo, pullNumber);
+    return new GitHubClient(auth.headers.Authorization.replace('Bearer ', ''), { priority: true }).markReadyForReview(owner, repo, pullNumber);
   }
 
   /** DOCK issues of the repo; without a token it answers `tokenMissing` and never calls GitHub. */
@@ -212,8 +213,15 @@ export class GitHubAPI {
   async createDockIssue(title: string, body: string) {
     const auth = await this.getAuth();
     if (!auth.hasToken) throw new Error('GitHub token is not configured in Settings');
-    const created = await new GitHubClient(auth.headers.Authorization.replace('Bearer ', '')).createIssue(issuesRepo(), title, body);
+    const created = await new GitHubClient(auth.headers.Authorization.replace('Bearer ', ''), { priority: true }).createIssue(issuesRepo(), title, body);
     return { number: created.number, url: created.html_url };
+  }
+
+  /** The quota of the Settings token as the last GitHub response said; nothing known reads as not limited. */
+  async quota(): Promise<GitHubQuotaState> {
+    const auth = await this.getAuth();
+    if (!auth.hasToken) return { limited: false, remaining: null, resetAt: null };
+    return githubQuotaOf(auth.headers.Authorization.replace('Bearer ', ''));
   }
 
   async getNeedsAttention() {

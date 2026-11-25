@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
 import { GitBranch, Plus, RefreshCw, Trash2, X } from 'lucide-react';
-import { GET_DISCORD_THREADS, GET_HOME_CORE, GET_HOME_SECONDARY, GET_HOME_TICKET_PRS, GET_JUDGE_WAITING, GET_OWNER_NAME, GET_OWNER_QUESTIONS, GET_WORKTREES } from '../graphql/queries';
+import { GET_DISCORD_THREADS, GET_GITHUB_QUOTA, GET_HOME_CORE, GET_HOME_SECONDARY, GET_HOME_TICKET_PRS, GET_JUDGE_WAITING, GET_OWNER_NAME, GET_OWNER_QUESTIONS, GET_WORKTREES } from '../graphql/queries';
 import { ADD_QUICK_LINK, REMOVE_QUICK_LINK } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
 import { WebsiteIcon } from '../components/WebsiteIcon';
@@ -16,6 +16,8 @@ import { judgeAttention, ticketAttention, ticketQuestions } from '../lib/attenti
 import { dayLabel } from '../agents/judge';
 import { openConflict, passCount, slotsForTicket } from '../lib/ticketApprovals';
 import { PRBadge } from '../components/PRBadge';
+import { GitHubQuotaBadge } from '../components/GitHubQuotaBadge';
+import type { GitHubQuota } from '../lib/githubQuota';
 import { discordAttention } from '../lib/discordThreads';
 import { isArchived, type AgentRunSummary } from '../agents/runs';
 import { MonthCalendar } from '../components/MonthCalendar';
@@ -54,6 +56,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
     { ...CACHED_QUERY_OPTIONS, variables: { calendar: showCalendar, docker: showDocker, monitors: showMonitors }, pollInterval: healthRefreshSeconds * 1000 },
   );
   const { data: ownerData } = useQuery(GET_OWNER_NAME, CACHED_QUERY_OPTIONS);
+  const { data: quotaData } = useQuery<{ githubQuota: GitHubQuota }>(GET_GITHUB_QUOTA, { ...CACHED_QUERY_OPTIONS, pollInterval: 60000 });
   const { data: questionsData } = useQuery(GET_OWNER_QUESTIONS, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
   const { data: worktreeData } = useQuery<{ worktrees: WorktreeList }>(GET_WORKTREES, { ...CACHED_QUERY_OPTIONS, skip: !hasPage(mode, '/workspace') });
   const { data: discordData } = useQuery(GET_DISCORD_THREADS, { ...CACHED_QUERY_OPTIONS, pollInterval: 60000, skip: !hasPage(mode, '/discord') });
@@ -131,6 +134,7 @@ const HomePage: React.FC<HomePageProps> = ({ onTicketClick, onNavigate }) => {
         <div>
           <h1 className="text-balance font-display text-[clamp(2rem,4vw,2.75rem)] leading-[1.05] font-bold max-[600px]:text-[1.65rem]">{greeting}{ownerData?.ownerName ? `, ${ownerData.ownerName}` : ''}.</h1>
           <p className="mt-2 text-pretty text-secondary-foreground max-[600px]:text-[0.72rem]">{summary}</p>
+          <GitHubQuotaBadge quota={quotaData?.githubQuota} className="mt-2" />
         </div>
         <div className="grid flex-none justify-items-end gap-3 max-[600px]:justify-items-start">
           <div className="text-right max-[600px]:text-left">

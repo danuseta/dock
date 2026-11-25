@@ -631,6 +631,7 @@ export const resolvers = {
       if (!isTicketKey(ticketKey)) throw new GraphQLError('ticketKey must be a ticket key such as QRD-1292', { extensions: { code: 'BAD_USER_INPUT' } });
       return deployGateFor(ticketKey);
     },
+    githubQuota: () => githubAPI.quota(),
     needsAttention: async () => {
       const [agentItems, pullRequestItems] = await Promise.all([
         Promise.all([
@@ -1463,7 +1464,7 @@ export const resolvers = {
 
 export const protectedQueries = [
   'kamus',
-  'dashboard', 'ticketPullRequests', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'installedSkills', 'reviewRoundsForTicket', 'claudeAccounts', 'qaLocal', 'deployGate', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
+  'dashboard', 'ticketPullRequests', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'githubQuota', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'installedSkills', 'reviewRoundsForTicket', 'claudeAccounts', 'qaLocal', 'deployGate', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatSessionStates', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'claudeSessionUsage', 'claudeTicketUsage', 'agentLooks', 'libraryAgents', 'libraryAgent', 'librarySkillFiles', 'librarySkillFile', 'kitMergeReports', 'kitConflictFile', 'guildMasterLog', 'guildMasterParty',
