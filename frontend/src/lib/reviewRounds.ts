@@ -35,7 +35,7 @@ export interface HistoryRow {
 }
 
 export const DISCORD_LABEL: Record<string, string> = {
-  pending: 'pending', sending: 'sending', sent: 'sent', cancelled: 'cancelled', failed: 'failed', skipped: 'skipped',
+  pending: 'pending', sending: 'sending', sent: 'sent', cancelled: 'cancelled', failed: 'failed', skipped: 'skipped', 'waiting-github': 'waiting for GitHub',
 };
 
 /** A post without its DOCK marker line, which DOCK adds again on send, and the marker itself. */

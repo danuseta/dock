@@ -40,6 +40,14 @@ test('the history lists your DOCK reviews and the teammate rounds in time order,
   assert.doesNotMatch(html, /Cancel post/);
 });
 
+test('a reply waiting for GitHub shows as waiting with its detail and no Cancel post', () => {
+  const rows = reviewHistory([], [round({ replyStatus: 'waiting-github', replyDetail: 'GitHub did not give the pull request head' })]);
+  const html = renderToStaticMarkup(<ReviewHistoryTable {...props({ rows })} />);
+  assert.ok(html.includes('waiting for GitHub'));
+  assert.ok(html.includes('GitHub did not give the pull request head'));
+  assert.doesNotMatch(html, /Cancel post/);
+});
+
 test('only a pending post has Cancel post and Edit, and each calls its handler with the row', () => {
   const cancelled: string[] = [];
   const edited: string[] = [];

@@ -14,6 +14,17 @@ export const FINDINGS_WINDOW_MS = 24 * 3600 * 1000;
 export const ROUND_EXPIRY_MS = 3 * 3600 * 1000;
 export const MAX_ROUND_ATTEMPTS = 3;
 export const EXPIRED_DETAIL = 'no result from the session in 3 h';
+/** How many times a session whose turn ended without the round's marker is asked to finish the round before it fails. */
+export const MAX_ROUND_RESUMES = 2;
+export const NO_MARKER_DETAIL = `no result from the session after ${MAX_ROUND_RESUMES} resumes`;
+/** The reply status of a reported round whose pull request head GitHub did not give; later ticks try again. */
+export const WAITING_GITHUB = 'waiting-github';
+export const GITHUB_HEAD_DETAIL = 'GitHub did not give the pull request head';
+/** A reply waiting for GitHub gives up this long after the round reported. */
+export const GITHUB_WAIT_MS = 24 * 3600 * 1000;
+const GITHUB_GAVE_UP = 'GitHub did not give the pull request head in 24 h';
+const GITHUB_RETRY_MIN_MS = 60 * 1000;
+const GITHUB_RETRY_MAX_MS = 15 * 60 * 1000;
 const MAX_FINDING_TEXT = 1500;
 const MAX_PROMPT = 7500;
 const MARKER = /^DOCK-REVIEW-ROUND (\S+) valid=(\d+) invalid=(\d+) pushed=(yes|no|body)\s*$/m;
@@ -73,7 +84,7 @@ export interface ReviewFindingsDeps {
   latestRounds(threadIds: string[]): Promise<Map<string, ReviewRound>>;
   /** Throws a P2002 error when the round already exists. */
   create(data: { threadId: string; ticketKey: string; threadUrl: string; prUrls: string; messageIds: string; lastMessageId: string; lastMessageAt: Date; findings?: string }): Promise<ReviewRound>;
-  update(id: string, data: ReplyUpdate & { sessionId?: string | null; opened?: boolean; status?: string; attempts?: number; valid?: number | null; invalid?: number | null; pushed?: boolean | null; detail?: string | null; reportedAt?: Date | null; mode?: string | null }): Promise<unknown>;
+  update(id: string, data: ReplyUpdate & { sessionId?: string | null; opened?: boolean; status?: string; attempts?: number; resumes?: number | null; valid?: number | null; invalid?: number | null; pushed?: boolean | null; detail?: string | null; reportedAt?: Date | null; mode?: string | null }): Promise<unknown>;
   roundsToSend(maxAttempts: number): Promise<ReviewRound[]>;
   expire(before: Date, maxAttempts: number, detail: string): Promise<ReviewRound[]>;
   roundById(id: string): Promise<ReviewRound | null>;
@@ -81,6 +92,14 @@ export interface ReviewFindingsDeps {
   pendingSessions(): Promise<string[]>;
   /** The text of the session's newest assistant message, or null. */
   newestReply(sessionId: string): Promise<string | null>;
+  /** The text of the session's newest assistant message that carries the round's marker, or null. */
+  roundReply(sessionId: string, roundId: string): Promise<string | null>;
+  /** The oldest round sent to the session that has not reported yet, or null. */
+  owedRound(sessionId: string): Promise<ReviewRound | null>;
+  /** True when the session has no turn running and no message queued. */
+  sessionIdle(sessionId: string): Promise<boolean>;
+  /** Replies waiting for GitHub whose next try has come, and replies that failed on the head before the retry existed, reported since `since`. */
+  waitingReplies(now: Date, since: Date): Promise<ReviewRound[]>;
   taskMessage(key: string, prompt: string): Promise<{ sessionId: string; opened: boolean }>;
   /** The ticket's lessons file for the round's prompt; left out, the prompt names none. */
   lessonsFile?(key: string): Promise<string | null>;
@@ -263,6 +282,18 @@ export function findingsPrompt(input: { key: string; threadUrl: string; threadId
   return [head, ...lines, tail].join('\n');
 }
 
+/**
+ * The message that sends a round back to the session whose turn ended without the round's marker: finish it in this turn,
+ * with agents waited for in the foreground, and end on the marker line. With `autoReply` the Discord block goes in the same reply.
+ */
+export const resumePrompt = (roundId: string, autoReply: boolean) => [
+  `Round review ${roundId} belum selesai: giliranmu berakhir tanpa baris DOCK-REVIEW-ROUND untuk round ini.`,
+  'Selesaikan round ini di giliran ini juga. Tunggu agent dan runner di foreground sampai selesai; jangan jalankan di background lalu mengakhiri giliran.',
+  ...(autoReply ? ['Tulis blok balasan Discord untuk reviewer seperti di pesan round, di balasan terakhir ini, sebelum baris penutup.'] : []),
+  'Baris terakhir balasanmu persis:',
+  `DOCK-REVIEW-ROUND ${roundId} valid=<jumlah valid> invalid=<jumlah tidak valid> pushed=<yes|no|body>`,
+].join('\n');
+
 export function parseRoundResult(text: string | null | undefined): RoundResult | null {
   const match = text ? MARKER.exec(text) : null;
   return match ? { roundId: match[1], valid: Number(match[2]), invalid: Number(match[3]), pushed: match[4] === 'yes', body: match[4] === 'body' } : null;
@@ -304,6 +335,7 @@ export class ReviewFindings {
       const now = this.deps.now();
       const all = await this.deps.rows();
       await this.sendDueReplies(all);
+      await this.retryWaitingReplies(now);
       if (this.ticks++ % EXPIRE_EVERY === 0) await this.deps.expire(new Date(now.getTime() - ROUND_EXPIRY_MS), MAX_ROUND_ATTEMPTS, EXPIRED_DETAIL);
       const byId = new Map(all.map((row) => [row.id, row]));
       let sent = 0;
@@ -415,18 +447,28 @@ export class ReviewFindings {
     return 1;
   }
 
-  /** A turn ended in some session: the round named by the marker in its newest reply is reported, when it was sent to that session, also after it expired. */
+  /**
+   * A turn ended in some session: the round named by the marker in its newest reply is reported, when it was sent to that
+   * session, also after it expired. When no round was reported and the session, now idle, still owes one, the session is
+   * asked to finish it; after the last allowed resume the round fails.
+   */
   async onTurnEnded(turn: TurnEnded): Promise<boolean> {
     if (!turn.ticketKey) return false;
     await this.seed();
     if (!this.owing.has(turn.sessionId)) return false;
     const reply = await this.deps.newestReply(turn.sessionId);
     const result = parseRoundResult(reply);
-    if (!result || this.reporting.has(result.roundId)) return false;
+    if (result && this.reporting.has(result.roundId)) return false;
+    if (result && (await this.report(turn, result, reply))) return true;
+    await this.resume(turn, result?.roundId ?? null);
+    return false;
+  }
+
+  private async report(turn: TurnEnded, result: RoundResult, reply: string | null): Promise<boolean> {
     this.reporting.add(result.roundId);
     try {
       const round = await this.deps.roundById(result.roundId);
-      const late = round?.status === 'failed' && round.detail === EXPIRED_DETAIL;
+      const late = round?.status === 'failed' && (round.detail === EXPIRED_DETAIL || round.detail === NO_MARKER_DETAIL);
       if (!round || (round.sessionId !== null && round.sessionId !== turn.sessionId) || (round.status !== 'sent' && round.status !== 'sending' && !late)) return false;
       const left = (this.owing.get(turn.sessionId) ?? 1) - 1;
       if (left > 0) this.owing.set(turn.sessionId, left);
@@ -438,12 +480,54 @@ export class ReviewFindings {
       });
       await this.deps.push({
         title: `${round.ticketKey}: ${roundSummary(result)}`,
-        body: delay === null ? 'Copy the drafted Discord reply from the session.' : `DOCK posts the reply to the thread in ${delay} min; cancel or edit it before then.`,
+        body: delay === WAITING_GITHUB ? 'GitHub did not give the pull request head; DOCK tries again and schedules the reply once it does.'
+          : typeof delay === 'number' ? `DOCK posts the reply to the thread in ${delay} min; cancel or edit it before then.` : 'Copy the drafted Discord reply from the session.',
         url: `/sessions?session=${turn.sessionId}`, tag: `review-round-${round.id}`,
       });
       return true;
     } finally {
       this.reporting.delete(result.roundId);
+    }
+  }
+
+  /**
+   * The session ended a turn, idle and with nothing queued, while it still owes a round: one message asks it to finish that
+   * round. The resumes are counted on the round; one more turn end after the last allowed resume fails the round and pushes.
+   * A resume that cannot be sent leaves the round to the 3 h expiry.
+   */
+  private async resume(turn: TurnEnded, reportedId: string | null): Promise<void> {
+    const round = await this.deps.owedRound(turn.sessionId);
+    if (!round || round.id === reportedId || this.reporting.has(round.id)) return;
+    if (!(await this.deps.sessionIdle(turn.sessionId))) return;
+    this.reporting.add(round.id);
+    try {
+      const resumes = round.resumes ?? 0;
+      if (resumes >= MAX_ROUND_RESUMES) {
+        await this.deps.update(round.id, { status: 'failed', attempts: MAX_ROUND_ATTEMPTS, detail: NO_MARKER_DETAIL });
+        await this.deps.push({
+          title: `${round.ticketKey}: review round got no result`,
+          body: `The session ended ${resumes + 1} turns without the DOCK-REVIEW-ROUND line. Open the session and finish the round by hand.`,
+          url: `/sessions?session=${turn.sessionId}`, tag: `review-round-${round.id}`,
+        });
+        return;
+      }
+      const settings = await this.deps.settings();
+      let sessionId: string;
+      try {
+        ({ sessionId } = await this.deps.taskMessage(round.ticketKey, resumePrompt(round.id, settings.autoReply)));
+      } catch (error) {
+        console.warn(`[ReviewFindings] round ${round.id} not resumed:`, errorText(error));
+        return;
+      }
+      if (sessionId !== turn.sessionId) {
+        const left = (this.owing.get(turn.sessionId) ?? 1) - 1;
+        if (left > 0) this.owing.set(turn.sessionId, left);
+        else this.owing.delete(turn.sessionId);
+        this.owing.set(sessionId, (this.owing.get(sessionId) ?? 0) + 1);
+      }
+      await this.deps.update(round.id, { sessionId, resumes: resumes + 1 });
+    } finally {
+      this.reporting.delete(round.id);
     }
   }
 
@@ -458,9 +542,10 @@ export class ReviewFindings {
    * Keeps the DOCK-FIX reply of a reported round for later, so the owner can cancel or edit it: after a push, or when every
    * finding was not valid. The session's block is the body; the template fills it in template mode, and stands in for a missing
    * skill or an empty skill block. An empty built-in block posts nothing, and neither does a second reply for the same head or
-   * one past the arena's round limit in the thread. The minutes until it goes out, or null.
+   * one past the arena's round limit in the thread. When GitHub does not give the pull request head the reply waits for
+   * GitHub, and later ticks schedule it. The minutes until it goes out, WAITING_GITHUB, or null.
    */
-  private async scheduleReply(round: ReviewRound, result: RoundResult, reply: string | null): Promise<number | null> {
+  private async scheduleReply(round: ReviewRound, result: RoundResult, reply: string | null): Promise<number | typeof WAITING_GITHUB | null> {
     const settings = await this.deps.settings();
     const settled = result.body === true && result.valid > 0;
     if (!settings.autoReply || !(result.pushed || settled || (result.valid === 0 && result.invalid > 0))) return null;
@@ -471,8 +556,11 @@ export class ReviewFindings {
     const prUrls = JSON.parse(round.prUrls) as string[];
     const state = prUrls[0] ? await this.deps.pull(prUrls[0]) : null;
     if (!state) {
-      await this.deps.update(round.id, { replyStatus: 'failed', replyDetail: 'GitHub did not give the pull request head' });
-      return null;
+      const now = this.deps.now().getTime();
+      const waited = round.reportedAt ? now - round.reportedAt.getTime() : 0;
+      const next = Math.min(GITHUB_RETRY_MAX_MS, Math.max(GITHUB_RETRY_MIN_MS, waited / 2));
+      await this.deps.update(round.id, { replyStatus: WAITING_GITHUB, replyDetail: GITHUB_HEAD_DETAIL, replyAt: new Date(now + next) });
+      return WAITING_GITHUB;
     }
     const replies = (await this.deps.threadReplies(round.threadId)).filter((other) => other.id !== round.id && other.status !== THANKED);
     const head = ` · head ${state.headSha.slice(0, 7)}`;
@@ -531,6 +619,47 @@ export class ReviewFindings {
       } catch (error) {
         console.warn('[ReviewFindings] reply failed:', errorText(error));
       }
+    }
+  }
+
+  /** Schedules the replies that waited for GitHub, each from the round's result and the session's reply that carries its marker. */
+  private async retryWaitingReplies(now: Date): Promise<void> {
+    const rounds = await this.deps.waitingReplies(now, new Date(now.getTime() - GITHUB_WAIT_MS));
+    for (const round of rounds) {
+      try {
+        await this.retryReply(round, now);
+      } catch (error) {
+        console.warn(`[ReviewFindings] reply of round ${round.id} not retried:`, errorText(error));
+      }
+    }
+  }
+
+  /**
+   * One reply waiting for GitHub: given up with a push 24 h after the round reported, skipped when the owner answered the
+   * thread by hand, otherwise scheduled again as it would have been when the round reported.
+   */
+  private async retryReply(round: ReviewRound, now: Date): Promise<void> {
+    if (now.getTime() - (round.reportedAt ?? round.createdAt).getTime() >= GITHUB_WAIT_MS) {
+      await this.deps.update(round.id, { replyStatus: 'failed', replyDetail: GITHUB_GAVE_UP });
+      await this.deps.push({ title: `${round.ticketKey}: review reply not posted`, body: `${GITHUB_GAVE_UP}. Copy the reply from the session and post it by hand.`, url: '/blackboard', tag: `review-reply-${round.id}` });
+      return;
+    }
+    if (round.status === 'answered') {
+      await this.deps.update(round.id, { replyStatus: 'skipped', replyDetail: 'You answered the thread' });
+      return;
+    }
+    const reply = round.sessionId ? await this.deps.roundReply(round.sessionId, round.id) : null;
+    const parsed = parseRoundResult(reply);
+    const result: RoundResult = parsed?.roundId === round.id ? parsed : { roundId: round.id, valid: round.valid ?? 0, invalid: round.invalid ?? 0, pushed: round.pushed ?? false };
+    const delay = await this.scheduleReply(round, result, reply);
+    if (typeof delay === 'number') {
+      await this.deps.push({ title: `${round.ticketKey}: review reply scheduled`, body: `GitHub answered; DOCK posts the reply to the thread in ${delay} min. Cancel or edit it before then.`, url: '/blackboard', tag: `review-reply-${round.id}` });
+      return;
+    }
+    if (delay === WAITING_GITHUB) return;
+    const current = await this.deps.roundById(round.id);
+    if (current?.replyDetail === GITHUB_HEAD_DETAIL && (current.replyStatus === WAITING_GITHUB || current.replyStatus === 'failed')) {
+      await this.deps.update(round.id, { replyStatus: 'skipped', replyDetail: 'Nothing to reply' });
     }
   }
 
