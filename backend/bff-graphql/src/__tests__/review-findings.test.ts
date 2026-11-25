@@ -4,7 +4,7 @@ import type { ReviewRound } from '@prisma/client';
 import type { ThreadMessage, ThreadRow } from '../integrations/discord-threads';
 import { ON_IT } from '../integrations/discord-reader';
 import {
-  EXPIRED_DETAIL, GITHUB_HEAD_DETAIL, GITHUB_WAIT_MS, MAX_ROUND_ATTEMPTS, NO_MARKER_DETAIL, ROUND_QUIET_MS, WAITING_GITHUB, ReviewFindings, resumePrompt, findingBlock, findingsEnabled, findingsPrompt, fixMarker, isApproval, webhookReviewer, isBare, isOwnThread, parseRoundResult, replyTemplateValues, roundSummary, webhookIdOf,
+  EXPIRED_DETAIL, GITHUB_HEAD_DETAIL, GITHUB_WAIT_MS, MAX_ROUND_ATTEMPTS, NO_MARKER_DETAIL, ROUND_QUIET_MS, WAITING_GITHUB, ReviewFindings, resumePrompt, findingBlock, findingsEnabled, findingsPrompt, fixMarker, isApproval, webhookReviewer, isBare, isChatter, personName, isOwnThread, parseRoundResult, replyTemplateValues, roundSummary, webhookIdOf,
   type FindingsSettings, type PushMessage, type ReviewFindingsDeps,
 } from '../integrations/review-findings';
 import { DEFAULT_REVIEW_REPLY_TEMPLATE, type PullState } from '../integrations/auto-review';
@@ -202,6 +202,34 @@ test('a reviewer who never said on it starts nothing; bare on it and LGTM start 
   assert.ok(isBare({ text: 'Approved, thx!', mentions: [], attachments: [] }));
   assert.ok(!isBare({ text: 'LGTM, ada notes', mentions: [], attachments: [] }), '"LGTM, ada notes" counts');
   assert.ok(!isBare({ text: 'lgtm', mentions: [], attachments: [{ name: 'shot.png', size: 1, type: 'image/png', url: 'u', width: null, height: null }] }));
+});
+
+test('banter after on it is no finding; a short real note or a numbered blocker is', async () => {
+  const banter = [POST(), message('yusril', 'Yusril', T0 + MIN, 'on it'), message('shovian', 'Shovian', T0 + MIN, 'on it'),
+    message('yusril', 'Yusril', T0 + 2 * MIN, 'telat mas @Shovian wkwkw', { mentions: [{ id: 'shovian', name: 'Shovian', me: false, role: false }] }),
+    message('shovian', 'Shovian', T0 + 3 * MIN, 'wkkwkw jari wes di keyboard padahal')];
+  const quiet = world({ rows: [row(banter)] });
+  assert.strictEqual(await quiet.tickAt(T0 + 60 * MIN), 0);
+  assert.strictEqual(quiet.state.rounds.length, 0);
+
+  for (const text of ['label tombol masih inggris', '1) blocker fe: empty state belum ada copy-nya']) {
+    const w = world({ rows: [row([...banter, message('yusril', 'Yusril', T0 + 10 * MIN, text)])] });
+    assert.strictEqual(await w.tickAt(T0 + 60 * MIN), 1, text);
+    assert.deepStrictEqual(roundTexts(w.state.sends[0].prompt).length, 1);
+    assert.match(w.state.sends[0].prompt, new RegExp(text.slice(0, 12).replace(/[()]/g, '\\$&')));
+  }
+  assert.ok(isChatter({ text: 'siap mas, haha', mentions: [], attachments: [] }));
+  assert.ok(!isChatter({ text: 'wkwk tapi ini bug ya, tombolnya gak bisa diklik', mentions: [], attachments: [] }));
+  assert.ok(!isChatter({ text: 'telat', mentions: [], attachments: [], webhookId: '42' }), 'a DOCK post is never banter');
+  assert.ok(!isChatter({ text: `wkwk ${'panjang '.repeat(20)}`, mentions: [], attachments: [] }), 'a long message is never banter');
+});
+
+test('a webhook name stands for the person it posts for: the one roster or thread match, else the name without its prefix', () => {
+  assert.strictEqual(personName('pr-danu', []), 'danu');
+  assert.strictEqual(personName('sous-shovian', ['Yusril', 'Shovian']), 'Shovian');
+  assert.strictEqual(personName('Kusuma (DOCK)', ['Indra Kusuma', 'Alvin']), 'Indra Kusuma');
+  assert.strictEqual(personName('pr-indra', ['Indra Kusuma', 'Indra Wijaya']), 'indra', 'two matches guess nobody');
+  assert.strictEqual(personName('Indra', ['Indra Kusuma']), 'Indra', 'a name of a person stays');
 });
 
 test('an on it older than the kept messages still counts through onIt', async () => {
@@ -744,6 +772,43 @@ test('no second reply for the same head, and no more replies in a thread than th
   fresh.w.state.replies.set('task-9', REPLY(fresh.round.id));
   await report(fresh.w);
   assert.strictEqual(fresh.round.replyStatus, 'pending', 'replies to another reviewer do not use up this reviewer\'s limit');
+});
+
+test('a round with two pull requests reads both: a merged first one neither skips nor cancels the reply, and the marker names the open heads', async () => {
+  const FE = 'https://github.com/qonekid/fe/pull/88';
+  const pulls = (fe: PullState, be: PullState) => (w: ReturnType<typeof world>) => { w.deps.pull = async (url) => (url === FE ? fe : be); };
+  const merged = { open: false, headSha: '9dd73a1aa' };
+  const pushed = { open: true, headSha: '302fffa00' };
+  const sendAt = INDRA_NOTES + ROUND_QUIET_MS + 3 * MIN;
+
+  const split = await sentRound(pulls(merged, pushed));
+  split.w.state.rounds.push({ ...split.round, id: 'r-old', replyStatus: 'sent', replyText: 'x\nDOCK-FIX round 1 · head 9dd73a1' });
+  split.w.state.replies.set('task-9', REPLY(split.round.id));
+  await report(split.w);
+  assert.strictEqual(split.round.replyStatus, 'pending', 'a reply on the merged FE head does not answer a push to BE');
+  assert.strictEqual(split.round.replyText?.split('\n').at(-1), 'DOCK-FIX round 1 · head 302fffa');
+  await split.w.tickAt(sendAt);
+  assert.deepStrictEqual([split.round.replyStatus, split.w.state.posts.length], ['sent', 1], 'BE is still open, so the reply goes out');
+
+  const both = await sentRound(pulls({ open: true, headSha: '9dd73a1aa' }, pushed));
+  both.w.state.rounds.push({ ...both.round, id: 'r-old', replyStatus: 'sent', replyText: 'x\nDOCK-FIX round 1 · head 9dd73a1 1111111' });
+  both.w.state.replies.set('task-9', REPLY(both.round.id));
+  await report(both.w);
+  assert.strictEqual(both.round.replyStatus, 'pending', 'a new push on BE is a new head');
+  assert.strictEqual(both.round.replyText?.split('\n').at(-1), 'DOCK-FIX round 1 · head 9dd73a1 302fffa');
+
+  const same = await sentRound(pulls(merged, pushed));
+  same.w.state.rounds.push({ ...same.round, id: 'r-old', replyStatus: 'sent', replyText: 'x\nDOCK-FIX round 1 · head 9dd73a1 302fffa' });
+  same.w.state.replies.set('task-9', REPLY(same.round.id));
+  await report(same.w);
+  assert.deepStrictEqual([same.round.replyStatus, same.round.replyDetail], ['skipped', 'Already replied for this head']);
+
+  const closed = await sentRound(pulls(merged, pushed));
+  closed.w.state.replies.set('task-9', REPLY(closed.round.id));
+  await report(closed.w);
+  pulls(merged, { ...pushed, open: false })(closed.w);
+  await closed.w.tickAt(sendAt);
+  assert.deepStrictEqual([closed.round.replyStatus, closed.round.replyDetail, closed.w.state.posts.length], ['cancelled', 'pull request closed', 0]);
 });
 
 test('a Light settings line typed in a finding is defused; only DOCK\'s own line above the findings counts', async () => {
