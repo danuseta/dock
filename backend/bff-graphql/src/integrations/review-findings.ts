@@ -37,10 +37,16 @@ const LGTM_FIRST = /^\W*(?:mas\s+\S+,?\s+)?(?:lgtm|approved?)\b/i;
 /** The status of a round that only thanks an approval; it never reaches a session and does not count as a fix reply. */
 export const THANKED = 'thanked';
 const FIX_LINE = /^DOCK-FIX\b/m;
+const FIX_HEADS = / · head ([\da-f]+(?: [\da-f]+)*)$/;
 const WEBHOOK = /\/webhooks\/(\d+)\//;
 const BARE_WORDS = /\b(?:on\s?it|lgtm|approved?|acc|ok|oke|okay|sip|siap|mantap|aman|thanks|thx|makasih|done)\b/gi;
 const EMOJI = /<a?:\w+:\d+>|:\w+:|[\p{Extended_Pictographic}\p{Emoji_Modifier}‍️]/gu;
 const MENTION_TOKEN = /<[@#][!&]?\d+>/g;
+const CHATTER_MAX = 120;
+const WEBHOOK_NAME = /^(?:pr|sous)-(.+)$|^(.+?)\s*\(DOCK\)$/i;
+const REVIEW_SIGNAL = /\b(?:blockers?|catatan|notes?|temuan|fix\w*|salah|bug|error|AC|PR|commit|test|tes)\b|`|\?|#\d+|\b[0-9a-f]{7,40}\b|https?:\/\/|\w\/\w|\.\w{1,4}\b(?::\d+)?|^\s*\d+[.)]/im;
+const LAUGHTER = /\b(?:w+k+[wk]*|(?:ha){2,}h?|(?:he){2,}|(?:hi){2,}|(?:xi){2,}|awok\w*|lol|lmao)\b/i;
+const BANTER_WORDS = /\b(?:mas|mbak|bang|kak|pak|bu|bro|telat|duluan|keduluan|ya|yaa|deh|dong|sih|nih|kok|loh|lho|aja|wkwk\w*)\b/gi;
 const PUNCTUATION = /[\p{P}\p{S}]/gu;
 const QUOTE_OPEN = '<<<TEMUAN';
 const QUOTE_CLOSE = '<<<AKHIR TEMUAN>>>';
@@ -61,15 +67,17 @@ export interface TurnEnded { sessionId: string; ticketKey: string | null; failed
 export interface FindingsSettings { autoReply: boolean; delayMinutes: number; maxRounds: number; reply: MessageFormat; light: LightSettings | null }
 export interface ReplyUpdate { replyStatus?: string | null; replyAt?: Date | null; replyText?: string | null; replyMessageId?: string | null; replyDetail?: string | null; replyImages?: string | null }
 
-/** The line DOCK puts under every reply after a fix; the reviewer's DOCK reviews the head it names again. */
-export const fixMarker = (round: number, sha: string) => `DOCK-FIX round ${round} · head ${sha.slice(0, 7)}`;
+const shortHeads = (sha: string | string[]) => [...new Set([sha].flat().map((item) => item.slice(0, 7)))];
+
+/** The line DOCK puts under every reply after a fix; the reviewer's DOCK reviews the heads it names again. */
+export const fixMarker = (round: number, sha: string | string[]) => `DOCK-FIX round ${round} · head ${shortHeads(sha).join(' ')}`;
 
 /** The placeholders of the reply template: the reviewers, what the round fixed and the session's own reply as the notes. */
-export function replyTemplateValues(input: { key: string; prUrls: string[]; round: number; sha: string; authors: string[]; result: RoundResult; notes: string }): Record<string, string> {
+export function replyTemplateValues(input: { key: string; prUrls: string[]; round: number; sha: string | string[]; authors: string[]; result: RoundResult; notes: string }): Record<string, string> {
   const status = [input.result.valid ? `${input.result.valid} temuan ${input.result.body ? 'dibenerin di body PR' : 'difix'}` : '', input.result.invalid ? `${input.result.invalid} tidak diubah` : ''].filter(Boolean).join(', ');
   return {
     author: input.authors.join(', '), status, lgtm: '', blockers: '', notes: input.notes, ticket: input.key,
-    pr: input.prUrls.map((url) => `<${url}>`).join(' '), sha: input.sha.slice(0, 7), round: String(input.round),
+    pr: input.prUrls.map((url) => `<${url}>`).join(' '), sha: shortHeads(input.sha).join(' '), round: String(input.round),
   };
 }
 
@@ -143,12 +151,22 @@ export function isBare(message: Pick<ThreadMessage, 'text' | 'mentions' | 'attac
   return text.replace(/\s+/g, '').length < 8;
 }
 
+export function isChatter(message: Pick<ThreadMessage, 'text' | 'mentions' | 'attachments' | 'webhookId'>): boolean {
+  if (message.webhookId || message.attachments.length || message.text.trim().length > CHATTER_MAX) return false;
+  if (REVIEW_SIGNAL.test(message.text)) return false;
+  if (LAUGHTER.test(message.text)) return true;
+  let text = message.text;
+  for (const mention of message.mentions) text = text.split(`@${mention.name}`).join(' ');
+  text = text.replace(MENTION_TOKEN, ' ').replace(/@\S+/g, ' ').replace(EMOJI, ' ').replace(PUNCTUATION, ' ').replace(BARE_WORDS, ' ').replace(BANTER_WORDS, ' ');
+  return text.split(/\s+/).filter(Boolean).length < 3;
+}
+
 /**
  * The teammates' messages that are findings, oldest first: not the owner's, not the poster's, after the author's first on
- * it, not bare, and newer than `since`. An on it older than the kept messages still counts through `row.onIt`.
+ * it, not bare, not banter, and newer than `since`. An on it older than the kept messages still counts through `row.onIt`.
  */
 export function findings(row: ThreadRow, since: number, webhookId: string | null = null): ThreadMessage[] {
-  return reviewerMessages(row, since, webhookId).filter((item) => !item.approval && !isBare(item.message)).map((item) => item.message);
+  return reviewerMessages(row, since, webhookId).filter((item) => !item.approval && !isBare(item.message) && !isChatter(item.message)).map((item) => item.message);
 }
 
 /** The teammates' approvals after `since`, oldest first: a reviewer DOCK verdict or a message that says LGTM or no blocker. */
@@ -169,6 +187,7 @@ export function isApproval(text: string, verdictLine: string | null): boolean {
 }
 
 const nameWords = (name: string) => name.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3 && word !== 'dock' && word !== 'sous');
+const peopleOf = (row: ThreadRow) => row.messages.filter((message) => !message.webhookId).map((message) => message.author);
 
 /**
  * The person a reviewer's own webhook posts for when its post has no DOCK-REVIEW line: a webhook named after someone who
@@ -179,6 +198,15 @@ export function webhookReviewer(webhookName: string, claimers: Array<{ id: strin
   if (!words.size) return undefined;
   const matches = claimers.filter((claimer) => nameWords(claimer.name).some((word) => words.has(word)));
   return matches.length === 1 ? matches[0].id : undefined;
+}
+
+export function personName(name: string, people: string[]): string {
+  const match = WEBHOOK_NAME.exec(name.trim());
+  if (!match) return name;
+  const bare = (match[1] ?? match[2]).trim();
+  const words = new Set(nameWords(bare));
+  const matches = [...new Set(people)].filter((person) => !WEBHOOK_NAME.test(person.trim()) && nameWords(person).some((word) => words.has(word)));
+  return matches.length === 1 ? matches[0] : bare;
 }
 
 function reviewerMessages(row: ThreadRow, since: number, webhookId: string | null): Array<{ message: ThreadMessage; approval: boolean }> {
@@ -376,7 +404,7 @@ export class ReviewFindings {
   private async thank(row: ThreadRow, messages: ThreadMessage[]): Promise<void> {
     if (!messages.length || !row.tickets[0] || !row.posterPrs?.length) return;
     const lastMessage = messages[messages.length - 1];
-    const authors = [...new Map(messages.map((message) => [message.authorId, { id: message.authorId, name: message.author }])).values()];
+    const authors = [...new Map(messages.map((message) => [message.authorId, { id: message.authorId, name: personName(message.author, peopleOf(row)) }])).values()];
     let round: ReviewRound;
     try {
       round = await this.deps.create({
@@ -401,7 +429,7 @@ export class ReviewFindings {
   private async start(row: ThreadRow, messages: ThreadMessage[]): Promise<number> {
     if (!messages.length || !row.tickets[0] || !row.posterPrs?.length) return 0;
     const lastMessage = messages[messages.length - 1];
-    const authors = [...new Map(messages.map((message) => [message.authorId, { id: message.authorId, name: message.author }])).values()];
+    const authors = [...new Map(messages.map((message) => [message.authorId, { id: message.authorId, name: personName(message.author, peopleOf(row)) }])).values()];
     const stored: StoredFindings = { since: messages[0].at, blocks: messages.map(findingBlock), authors };
     let round: ReviewRound;
     try {
@@ -560,8 +588,8 @@ export class ReviewFindings {
     const fallback = format === 'skill' && (!block || !(await this.replySkill(settings)));
     if (!block && format === 'builtin') return null;
     const prUrls = JSON.parse(round.prUrls) as string[];
-    const state = prUrls[0] ? await this.deps.pull(prUrls[0]) : null;
-    if (!state) {
+    const states = await Promise.all(prUrls.map((url) => this.deps.pull(url)));
+    if (!states.length || states.some((state) => !state)) {
       const now = this.deps.now().getTime();
       const waited = round.reportedAt ? now - round.reportedAt.getTime() : 0;
       const next = Math.min(GITHUB_RETRY_MAX_MS, Math.max(GITHUB_RETRY_MIN_MS, waited / 2));
@@ -569,10 +597,14 @@ export class ReviewFindings {
       return WAITING_GITHUB;
     }
     const replies = (await this.deps.threadReplies(round.threadId)).filter((other) => other.id !== round.id && other.status !== THANKED);
-    const head = ` · head ${state.headSha.slice(0, 7)}`;
+    const known = states as PullState[];
+    const open = known.filter((state) => state.open);
+    const heads = (open.length ? open : known).map((state) => state.headSha);
+    const short = shortHeads(heads);
+    const headsOf = (item: ReviewRound) => FIX_HEADS.exec(item.replyText?.split('\n').pop() ?? '')?.[1].split(' ') ?? [];
     const authorsOf = (item: ReviewRound) => ((item.findings ? JSON.parse(item.findings) as StoredFindings : null)?.authors ?? []).map((author) => author.id);
     const mine = authorsOf(round);
-    const answered = (other: ReviewRound) => other.replyText?.split('\n').pop()?.endsWith(head) && mine.every((id) => authorsOf(other).includes(id));
+    const answered = (other: ReviewRound) => short.every((sha) => headsOf(other).includes(sha)) && mine.every((id) => authorsOf(other).includes(id));
     const skip = !settled && replies.some(answered) ? 'Already replied for this head'
       : replies.filter((other) => authorsOf(other).some((id) => mine.includes(id))).length >= settings.maxRounds ? `${settings.maxRounds} replies to this reviewer` : null;
     if (skip) {
@@ -583,12 +615,12 @@ export class ReviewFindings {
     const stored = round.findings ? JSON.parse(round.findings) as StoredFindings : null;
     const authors = stored?.authors ?? [];
     const body = format === 'template' || fallback
-      ? fillTemplate(template, replyTemplateValues({ key: round.ticketKey, prUrls, round: number, sha: state.headSha, authors: authors.map((author) => author.name), result, notes: block?.body ?? '' }))
+      ? fillTemplate(template, replyTemplateValues({ key: round.ticketKey, prUrls, round: number, sha: heads, authors: authors.map((author) => author.name), result, notes: block?.body ?? '' }))
       : block!.body;
     const mentions = authors.filter((author) => USER_ID.test(author.id)).map((author) => `<@${author.id}>`).join(' ');
     const delay = settings.delayMinutes;
     await this.deps.update(round.id, {
-      replyStatus: 'pending', replyAt: new Date(this.deps.now().getTime() + delay * 60_000), replyText: withMarker(`${mentions ? `${mentions} ` : ''}${plainText(body)}`, fixMarker(number, state.headSha)),
+      replyStatus: 'pending', replyAt: new Date(this.deps.now().getTime() + delay * 60_000), replyText: withMarker(`${mentions ? `${mentions} ` : ''}${plainText(body)}`, fixMarker(number, heads)),
       replyImages: block?.images.length ? JSON.stringify(block.images) : null, replyDetail: null,
     });
     if (fallback) {
@@ -614,7 +646,7 @@ export class ReviewFindings {
     return true;
   }
 
-  /** Sends the replies that are due, unless auto reply was turned off, the pull request closed or a person wrote stop dock. */
+  /** Sends the replies that are due, unless auto reply was turned off, every pull request closed or a person wrote stop dock. */
   private async sendDueReplies(rows: ThreadRow[]): Promise<void> {
     const due = await this.deps.dueReplies(this.deps.now());
     if (!due.length) return;
@@ -674,9 +706,9 @@ export class ReviewFindings {
     const row = rows.find((item) => item.id === round.threadId);
     const since = (round.reportedAt ?? round.createdAt).getTime();
     const stopped = row?.messages.some((message) => Date.parse(message.at) > since && saysStop(message));
-    const prUrl = (JSON.parse(round.prUrls) as string[])[0];
-    const state = prUrl ? await this.deps.pull(prUrl) : null;
-    const cancel = !settings.autoReply ? 'Auto reply is turned off' : stopped ? 'stop dock' : state && !state.open ? 'pull request closed' : null;
+    const states = await Promise.all((JSON.parse(round.prUrls) as string[]).map((url) => this.deps.pull(url)));
+    const closed = states.length > 0 && states.every((state) => state && !state.open);
+    const cancel = !settings.autoReply ? 'Auto reply is turned off' : stopped ? 'stop dock' : closed ? 'pull request closed' : null;
     if (cancel) {
       await this.deps.updatePendingReply(round.id, { replyStatus: 'cancelled', replyDetail: cancel });
       return;

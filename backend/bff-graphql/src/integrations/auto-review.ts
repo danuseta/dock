@@ -2,6 +2,7 @@ import { DISCORD_CLOSE, DISCORD_OPEN, parseDiscordBlock, readImageList, threadId
 import type { ThreadMessage, ThreadRow } from './discord-threads';
 import type { Orchestration } from './orchestrator';
 import { lessonsLines } from './lessons';
+import { personName, webhookReviewer } from './review-findings';
 
 /** How long an "on it" starts a review: long enough for one said while the workspace was off, through a weekend. */
 export const ON_IT_WINDOW_MS = 72 * 60 * 60 * 1000;
@@ -148,6 +149,7 @@ export interface AutoReviewDeps {
   skills(): Promise<string[]>;
   /** The folder a ticket's review screenshots are uploaded from; null when the key is not one of this DOCK's blackboard tickets. */
   imageRoot(key: string): Promise<string | null>;
+  people?(): Promise<string[]>;
   now(): Date;
 }
 
@@ -177,6 +179,13 @@ export const plainText = (text: string) => text.trim().replace(/\]\(/g, ']\u200B
 /** A DOCK-FIX reply: posted by a webhook, as a DOCK does, after the arena opened. A person typing the words is not one. */
 const isFixReply = (message: Pick<ThreadMessage, 'text' | 'at' | 'webhookId'>, since: number) =>
   Boolean(message.webhookId) && Date.parse(message.at) > since && /\bDOCK-FIX\b/.test(message.text);
+
+function authorReplied(row: ThreadRow, since: number): boolean {
+  const humans = row.messages.filter((message) => !message.webhookId && !message.mine);
+  const poster = row.messages.find((message) => message.authorId === row.createdById);
+  const named = poster?.webhookId ? webhookReviewer(poster.author, [...new Map(humans.map((message) => [message.authorId, { id: message.authorId, name: message.author }])).values()]) : undefined;
+  return humans.some((message) => Date.parse(message.at) > since && (message.authorId === row.createdById || message.authorId === named));
+}
 
 /** What the author answered "tidak diubah karena" to in a DOCK-FIX reply since `since`: the text before it on each such line, normalized. */
 export function answeredFindings(messages: Array<Pick<ThreadMessage, 'text' | 'at' | 'webhookId'>>, since: number): string[] {
@@ -503,8 +512,8 @@ export class AutoReview {
   }
 
   /**
-   * Why a new head commit is not reviewed yet: 72 h went by without a commit, the author has not posted a DOCK-FIX for it, or,
-   * with re-review on commit turned on, the author may still be pushing.
+   * Why a new head commit is not reviewed yet: 72 h went by without a commit, the author has not posted a DOCK-FIX for it nor
+   * written in the thread since the last round, or, with re-review on commit turned on, the author may still be pushing.
    */
   private async waiting(row: ThreadRow, match: RegExpExecArray, arena: AutoReviewRecord, headSha: string, saidAt: number, settings: AutoReviewSettings): Promise<string | null> {
     const now = this.deps.now().getTime();
@@ -513,9 +522,10 @@ export class AutoReview {
     if (Math.max(at?.getTime() ?? 0, seen) - lastActivity(arena) > ON_IT_WINDOW_MS) return 'arena closed: 72 h without a new commit';
     const short = headSha.slice(0, 7);
     if (row.messages.some((message) => isFixReply(message, Math.max(saidAt, arena.startedAt.getTime())) && message.text.includes(short))) return null;
-    if (!settings.reReviewOnCommit) return 'waiting for DOCK-FIX';
+    if (authorReplied(row, Math.max(saidAt, (arena.finishedAt ?? arena.startedAt).getTime()))) return null;
+    if (!settings.reReviewOnCommit) return 'waiting for DOCK-FIX or a reply from the author';
     if (at && now - at.getTime() >= settings.reReviewWaitMinutes * 60_000) return null;
-    return `waiting for DOCK-FIX or ${settings.reReviewWaitMinutes} min after the last commit`;
+    return `waiting for DOCK-FIX, a reply from the author or ${settings.reReviewWaitMinutes} min after the last commit`;
   }
 
   /** Sends the posts that are due, unless the pull request closed, a person wrote stop dock or posting was turned off. */
@@ -667,7 +677,9 @@ export class AutoReview {
     const pulls = group.map((record) => ({ url: record.prUrl, headSha: record.headSha }));
     const answered = answeredFindings(row?.messages ?? [], Date.parse(row?.ownClaim?.at ?? '') || 0);
     const marker = reviewMarker(owner.discordUserId, first.round, pulls[0]?.headSha ?? '', markerVerdict(run));
-    const template = () => withMarker(plainText(fillTemplate(settings.message.template, reviewTemplateValues(run, pulls, first.round, row?.createdBy ?? '', answered))), marker);
+    const people = [...(this.deps.people ? await this.deps.people().catch(() => [] as string[]) : []), ...(row?.messages ?? []).filter((message) => !message.webhookId).map((message) => message.author)];
+    const author = personName(row?.createdBy ?? '', people);
+    const template = () => withMarker(plainText(fillTemplate(settings.message.template, reviewTemplateValues(run, pulls, first.round, author, answered))), marker);
     const postAt = new Date(this.deps.now().getTime() + settings.postDelayMinutes * 60_000);
     if (settings.message.format === 'template') {
       await this.deps.update(first.id, { postStatus: 'pending', postAt, postText: template() });

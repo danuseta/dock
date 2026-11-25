@@ -431,7 +431,7 @@ test('while the arena is open, a new head is reviewed again after the DOCK-FIX f
 
   const pushing = arena({ commitAt: new Date(NOW.getTime() - 2 * 60_000), messages: [message('m5', NOW, 'DOCK-FIX round 1 · head abc1234', { webhookId: '7' })] });
   assert.strictEqual(await pushing.review.tick(), 0, 'no review in the middle of a push');
-  assert.strictEqual(pushing.review.skipReason('t1'), 'waiting for DOCK-FIX or 10 min after the last commit');
+  assert.strictEqual(pushing.review.skipReason('t1'), 'waiting for DOCK-FIX, a reply from the author or 10 min after the last commit');
 
   const typed = arena({ commitAt: new Date(NOW.getTime() - 2 * 60_000), messages: [message('m5', NOW, 'DOCK-FIX round 1 · head def5678')] });
   assert.strictEqual(await typed.review.tick(), 0, 'a person typing DOCK-FIX does not skip the wait');
@@ -471,10 +471,38 @@ test('with re-review on commit off, the default, a new head waits for a DOCK-FIX
   const quiet = arena({ commitAt: new Date(NOW.getTime() - 60 * 60_000) });
   quiet.deps.settings = async () => ({ ...SETTINGS, reReviewOnCommit: undefined });
   assert.strictEqual(await quiet.review.tick(), 0, 'a merge of develop starts no round');
-  assert.strictEqual(quiet.review.skipReason('t1'), 'waiting for DOCK-FIX');
+  assert.strictEqual(quiet.review.skipReason('t1'), 'waiting for DOCK-FIX or a reply from the author');
   const fixed = arena({ messages: [message('m5', new Date(NOW.getTime() - 5 * 60_000), 'mas danu, fixed di def5678.\nDOCK-FIX round 1 · head def5678', { webhookId: '7' })] });
   fixed.deps.settings = async () => ({ ...SETTINGS, reReviewOnCommit: false });
   assert.strictEqual(await fixed.review.tick(), 1, 'a DOCK-FIX for the head still starts the next round');
+});
+
+test("the PR author's own reply after a blocker round counts as a DOCK-FIX for a new head, not for the same head, and nobody else's does", async () => {
+  const handWritten = (extra: Partial<ThreadRow['messages'][number]> = {}) => [message('m5', new Date(NOW.getTime() - 5 * 60_000), 'fixed mas danu, kindly check', extra)];
+  const byPoster = async (w: ReturnType<typeof arena>, createdById: string) => {
+    (await w.deps.rows())[0].createdById = createdById;
+    w.deps.settings = async () => ({ ...SETTINGS, reReviewOnCommit: false });
+    return w;
+  };
+  const fixed = await byPoster(arena({ messages: handWritten() }), 'u2');
+  assert.strictEqual(await fixed.review.tick(), 1);
+  assert.deepStrictEqual(fixed.records.map((record) => [record.headSha, record.round]), [['abc1234', 1], ['def5678', 2]]);
+
+  const sameHead = await byPoster(arena({ messages: handWritten() }), 'u2');
+  sameHead.deps.pull = async () => ({ open: true, headSha: 'abc1234' });
+  assert.strictEqual(await sameHead.review.tick(), 0);
+  assert.strictEqual(sameHead.review.skipReason('t1'), 'same head commit, already reviewed');
+
+  const someoneElse = await byPoster(arena({ messages: handWritten({ authorId: 'u3', author: 'Aken' }) }), 'u2');
+  assert.strictEqual(await someoneElse.review.tick(), 0);
+  assert.strictEqual(someoneElse.review.skipReason('t1'), 'waiting for DOCK-FIX or a reply from the author');
+
+  const beforeRound = await byPoster(arena({ messages: [message('m5', new Date(NOW.getTime() - 55 * 60_000), 'fixed mas danu, kindly check')] }), 'u2');
+  assert.strictEqual(await beforeRound.review.tick(), 0, 'a reply from before the last round does not count');
+
+  const webhookPost = [message('m1', new Date(NOW.getTime() - 2 * 3_600_000), `PR QRD-1473 ready review ${PR}`, { authorId: '55', author: 'pr-indra', webhookId: '55' })];
+  const viaWebhook = await byPoster(arena({ messages: [...webhookPost, ...handWritten()] }), '55');
+  assert.strictEqual(await viaWebhook.review.tick(), 1, 'a poster webhook named after the author stands for the author');
 });
 
 test('the arena closes on approve, on a closed pull request, after the last round, on stop dock and after 72 h without a commit', async () => {
@@ -537,7 +565,7 @@ test("the owner's own DOCK-REVIEW post in the thread is not an on it: it opens n
 
   const w = arena({ claim: new Date(sorted.ownClaim?.at ?? 0), messages, commitAt: new Date(NOW.getTime() - 2 * 60_000) });
   assert.strictEqual(await w.review.tick(), 0);
-  assert.strictEqual(w.review.skipReason('t1'), 'waiting for DOCK-FIX or 10 min after the last commit', 'still round 1 of the same arena');
+  assert.strictEqual(w.review.skipReason('t1'), 'waiting for DOCK-FIX, a reply from the author or 10 min after the last commit', 'still round 1 of the same arena');
 });
 
 test('a post taken for sending cannot be cancelled or edited, goes out with the last edit, and two senders post it once', async () => {
@@ -705,6 +733,19 @@ test('a skill that is not installed gets no prompt lines, and the post uses the 
   assert.deepStrictEqual([w.records[0].postStatus, w.records[0].postDetail], ['pending', null]);
   assert.match(w.records[0].postText ?? '', /^mas Indra, gak ada blocker\. lgtm catatan:\nDOCK-REVIEW on it by <@111>/);
   assert.strictEqual(w.pushes[0].title, 'QRD-1473: skill gone-skill not installed');
+});
+
+test('a thread posted by a pr-<name> webhook greets the person: the roster match, else the name without the prefix', async () => {
+  const greeting = async (people?: string[]) => {
+    const w = world({ rows: [row({ url: THREAD, createdBy: 'pr-alvin' })] });
+    if (people) w.deps.people = async () => people;
+    w.deps.settings = async () => ({ ...SETTINGS, message: { ...SETTINGS.message, format: 'template' } });
+    await w.review.tick();
+    await w.review.ledger(verdict());
+    return (w.records[0].postText ?? '').split(',')[0];
+  };
+  assert.strictEqual(await greeting(), 'mas alvin');
+  assert.strictEqual(await greeting(['Indra Kusuma', 'Alvin Pratama']), 'mas Alvin Pratama');
 });
 
 test('the template fills its placeholders from the ledger: blockers, no blocker, only notes; an unknown placeholder is empty; the marker stays', () => {
