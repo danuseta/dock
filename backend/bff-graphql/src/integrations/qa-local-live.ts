@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { GitHubAPI } from '../datasources/GitHubAPI';
 import { dockMode } from '../mode';
+import { lessonsFileFor } from './lessons-hook';
 import { StorageService } from '../storage/service';
 import { orchestratorService } from './orchestrator';
 import { orchestratorCron } from './orchestrator-cron-live';
@@ -83,6 +84,7 @@ export const qaAuto = new QaAuto({
   },
   message: (key, prompt) => orchestratorCron.taskMessage(key, prompt),
   tickets: async () => (await orchestratorService.list()).filter((run) => run.kind === 'build' && runPullRequests(run).length > 0).map((run) => run.key),
+  lessonsFile: (key) => lessonsFileFor(key),
 });
 
 const previous = orchestratorService.onLedger;

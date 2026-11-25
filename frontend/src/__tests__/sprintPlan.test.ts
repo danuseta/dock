@@ -52,7 +52,7 @@ test('the retro lists the three dependency numbers and Home ranks PLAN_DEPENDENC
 
 test('Planning shows Now, Draft and Retro, the Plan page is the Order panel of Draft, Agents keeps Office and Library, Home opens the plan, and the phone ping is wired', () => {
   const page = source('../pages/AgentsPage.tsx');
-  assert.match(page, /\['office', 'Office', Building2\], \['library', 'Library', Library\]\]/);
+  assert.match(page, /\['office', 'Office', Building2\], \['library', 'Library', Library\], \['lessons', 'Lessons', GraduationCap\]\]/);
   assert.doesNotMatch(page, /PlanningTab|<PlanTab|<RetroTab/);
   assert.match(source('../pages/PlanningPage.tsx'), /\[\['now', 'Now'\], \['draft', 'Draft'\], \['retro', 'Retro'\]\]/);
   assert.match(source('../pages/PlanningPage.tsx'), /\{tab === 'now' \? <SprintTab \/> : tab === 'draft' \? <PlanningTab initialPanel=\{route\.panel \?\? undefined\} \/> : <RetroTab onNavigate=\{onNavigate\} \/>/);

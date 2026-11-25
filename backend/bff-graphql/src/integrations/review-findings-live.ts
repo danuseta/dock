@@ -2,6 +2,7 @@ import { GitHubAPI } from '../datasources/GitHubAPI';
 import { JiraAPI } from '../datasources/JiraAPI';
 import { decrypt } from '../storage/crypto';
 import { StorageService } from '../storage/service';
+import { lessonsFileFor } from './lessons-hook';
 import { MESSAGE_KEYS, arenaSetting, messageFormat } from './auto-review';
 import { reviewOwner, screenshotsOf } from './auto-review-live';
 import { chatService } from './chat';
@@ -37,6 +38,7 @@ export const reviewFindings = new ReviewFindings({
   pendingSessions: () => storage.pendingReviewSessions(),
   newestReply: async (sessionId) => (await storage.getNewestChatMessage(sessionId, 'assistant'))?.text ?? null,
   taskMessage: (key, prompt) => orchestratorCron.taskMessage(key, prompt),
+  lessonsFile: (key) => lessonsFileFor(key),
   push: (message) => eventPush.send('needsYou', message),
   settings: async () => {
     const values = new Map((await storage.getSettingValues(REVIEW_FINDINGS_KEYS)).map((row) => [row.key, row.value]));

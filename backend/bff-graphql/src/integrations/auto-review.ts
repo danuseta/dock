@@ -1,6 +1,7 @@
 import { DISCORD_CLOSE, DISCORD_OPEN, parseDiscordBlock, readImageList, threadIdOf, type DiscordPostFiles, type DiscordPostResult } from './discord-post';
 import type { ThreadMessage, ThreadRow } from './discord-threads';
 import type { Orchestration } from './orchestrator';
+import { lessonsLines } from './lessons';
 
 /** How long an "on it" starts a review: long enough for one said while the workspace was off, through a weekend. */
 export const ON_IT_WINDOW_MS = 72 * 60 * 60 * 1000;
@@ -123,6 +124,8 @@ export interface AutoReviewDeps {
   /** Changes a post only while it is pending and still waiting for the skill message; false after an edit, a cancel or a send. */
   updateWaitingSkill(id: string, data: AutoReviewUpdate): Promise<boolean>;
   openReview(key: string, prompt: string): Promise<string>;
+  /** The ticket's lessons file for the review prompt; left out, the prompt names none. */
+  lessonsFile?(key: string): Promise<string | null>;
   /** The same steps as the LGTM button on the Agents page; true when every step went through. */
   approve(key: string): Promise<boolean>;
   push(message: PushMessage): Promise<unknown>;
@@ -142,8 +145,9 @@ export interface AutoReviewDeps {
  * The prompt of an auto review: one sous review of every pull request of the ticket, with the thread as context. With a skill,
  * the session also writes the Discord message with it for DOCK to post; it never posts anything itself.
  */
-export const reviewPrompt = (key: string, prUrls: string[], threadUrl: string, skill: string | null = null) => [
+export const reviewPrompt = (key: string, prUrls: string[], threadUrl: string, skill: string | null = null, lessons: string | null = null) => [
   `Pakai skill sous. review ${key}: ${prUrls.join(' ')}`,
+  ...lessonsLines(lessons),
   `Thread Discord pr-review: ${threadUrl} (baca dulu lewat discord-files.cjs).`,
   'Ini auto review dari DOCK karena owner bilang on it di thread itu. Jangan komentar di PR, Jira, atau Discord; tulis verdict dan temuan ke ledger seperti biasa.',
   ...(skill ? [`Setelah verdict tertulis di ledger, tulis pesan Discord hasil review pakai skill ${skill} sebagai bagian akhir balasanmu.`, ...discordBlockLines(key)] : []),
@@ -399,7 +403,8 @@ export class AutoReview {
     const records: AutoReviewRecord[] = [];
     for (const pull of due) records.push(await this.deps.create({ prUrl: pull.url, headSha: pull.headSha, ticketKey: key, threadUrl: row.url, startedAt: this.deps.now(), round: pull.round }));
     try {
-      const sessionId = await this.deps.openReview(key, reviewPrompt(key, due.map((pull) => pull.url), row.url, await this.postSkill(settings)));
+      const lessons = this.deps.lessonsFile ? await this.deps.lessonsFile(key).catch(() => null) : null;
+      const sessionId = await this.deps.openReview(key, reviewPrompt(key, due.map((pull) => pull.url), row.url, await this.postSkill(settings), lessons));
       for (const record of records) await this.deps.update(record.id, { sessionId });
       return 1;
     } catch (error) {

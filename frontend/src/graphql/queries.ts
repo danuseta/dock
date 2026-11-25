@@ -2034,3 +2034,18 @@ export const CLEAN_WORKTREES = gql`
     cleanWorktrees(paths: $paths) { path ok output at by }
   }
 `;
+
+export const GET_LESSONS = gql`
+  query GetLessons {
+    lessons {
+      unprocessed sources
+      byStatus { status count }
+      environment { id kind ticketKey text createdAt }
+      failed { id text error }
+      lessons {
+        id targetKind targetName text cause count ignored ticketKeys sessionIds status cardKey cardState cardSessionId writtenTo createdAt updatedAt
+        sources { id kind ref sessionId messageId ticketKey text cause status createdAt }
+      }
+    }
+  }
+`;

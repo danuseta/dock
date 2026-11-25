@@ -162,5 +162,18 @@ export function flowLines(profile: SousFlowProfile): string[] {
   return lines;
 }
 
+/** Settings › Sous flow › Rules as saved by Agents › Lessons: one rule per line, an empty list when none is saved or readable. */
+export function readFlowRules(raw: string | null | undefined): string[] {
+  try {
+    const value = JSON.parse(raw || '[]');
+    return Array.isArray(value) ? value.filter((line): line is string => typeof line === 'string' && line.trim() !== '').map((line) => line.trim()) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** The prompt lines the flow rules add; none without rules, so the prompt stays as before. */
+export const flowRuleLines = (rules: readonly string[]) => rules.map((rule) => `Sous flow rule: ${rule}`);
+
 /** The settings for the query, every default filled in. */
 export const storedSousFlow = (raw: string | null | undefined) => JSON.stringify(readSousFlow(raw));

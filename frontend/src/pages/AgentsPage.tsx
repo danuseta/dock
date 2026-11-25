@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client';
-import { ArrowDown, ArrowUp, Building2, ChevronLeft, ChevronRight, ClipboardList, Clock, ExternalLink, EyeOff, FileDiff, GitPullRequest, Hand, Library, MessagesSquare, Moon, Octagon, Play, Route, Square, Table2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Building2, ChevronLeft, ChevronRight, ClipboardList, Clock, ExternalLink, EyeOff, FileDiff, GitPullRequest, GraduationCap, Hand, Library, MessagesSquare, Moon, Octagon, Play, Route, Square, Table2, X } from 'lucide-react';
 import { GET_AUTO_REVIEWS, GET_CHAT_BALLOONS, GET_ORCHESTRATION, GET_ORCHESTRATIONS, GET_TICKET_REVIEW_ROUNDS } from '../graphql/queries';
 import { APPROVE_REVIEW, CONFIRM_ORCHESTRATION, DISMISS_ORCHESTRATION, STOP_ALL_AGENTS } from '../graphql/mutations';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
@@ -40,6 +40,7 @@ import { chatStore } from '../chat/store';
 import { LimitsLine } from '../chat/StatusLine';
 import { useOpenForTicket } from '../chat/useOpenForTicket';
 import { AgentsLibrary } from '../agents/library/AgentsLibrary';
+import { LessonsTab } from '../agents/lessons/LessonsTab';
 import { questionsOf } from '../decisions/questions';
 import { changesHref } from '../changes/href';
 
@@ -801,7 +802,7 @@ const OfficeTab: React.FC<AgentsPageProps & { tabs: React.ReactNode; library: bo
   );
 };
 
-/** Office shows the runs; Library edits the agent files, on the DOCK that has chat and the kit bridge. */
+/** Office shows the runs; Library edits the agent files and Lessons shows what Judge and the ledgers taught, on the DOCK that has chat and the kit bridge. */
 const AgentsPage: React.FC<AgentsPageProps> = (props) => {
   const library = hasPage(useDockMode(), '/sessions');
   const [tab, setTab] = useState<AgentsTab>(() => (library ? agentsRoute(window.location.search) : 'office'));
@@ -822,7 +823,7 @@ const AgentsPage: React.FC<AgentsPageProps> = (props) => {
   };
   const tabs = library && (
     <div className="mb-4 flex border-b border-border max-[760px]:hidden" role="tablist" aria-label="Agents">
-      {([['office', 'Office', Building2], ['library', 'Library', Library]] as const).map(([id, label, Icon]) => (
+      {([['office', 'Office', Building2], ['library', 'Library', Library], ['lessons', 'Lessons', GraduationCap]] as const).map(([id, label, Icon]) => (
         <button
           key={id}
           type="button"
@@ -842,12 +843,12 @@ const AgentsPage: React.FC<AgentsPageProps> = (props) => {
       <PageHeader>
         <div>
           <h1 className="text-balance font-display text-3xl font-black">Agents</h1>
-          <p className="mt-1 text-pretty text-secondary-foreground">The agent files Claude Code reads on the workspace: their body, model, tools, guard and look.</p>
+          <p className="mt-1 text-pretty text-secondary-foreground">{tab === 'lessons' ? 'What Judge, the ticket ledgers and your corrections taught the agents, and where each lesson is written.' : 'The agent files Claude Code reads on the workspace: their body, model, tools, guard and look.'}</p>
         </div>
       </PageHeader>
       {tabs}
-      <PhoneTabs current="library" library={library} onPick={pickPhoneTab} />
-      <AgentsLibrary />
+      <PhoneTabs current={tab} library={library} onPick={pickPhoneTab} />
+      {tab === 'lessons' ? <LessonsTab /> : <AgentsLibrary />}
     </Page>
   );
 };
