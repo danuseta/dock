@@ -4,7 +4,7 @@ import type { ReviewRound } from '@prisma/client';
 import type { ThreadMessage, ThreadRow } from '../integrations/discord-threads';
 import { ON_IT } from '../integrations/discord-reader';
 import {
-  EXPIRED_DETAIL, ROUND_QUIET_MS, ReviewFindings, findingBlock, findingsEnabled, findingsPrompt, fixMarker, isApproval, isBare, isOwnThread, parseRoundResult, replyTemplateValues, roundSummary, webhookIdOf,
+  EXPIRED_DETAIL, ROUND_QUIET_MS, ReviewFindings, findingBlock, findingsEnabled, findingsPrompt, fixMarker, isApproval, webhookReviewer, isBare, isOwnThread, parseRoundResult, replyTemplateValues, roundSummary, webhookIdOf,
   type FindingsSettings, type PushMessage, type ReviewFindingsDeps,
 } from '../integrations/review-findings';
 import { DEFAULT_REVIEW_REPLY_TEMPLATE, type PullState } from '../integrations/auto-review';
@@ -614,6 +614,16 @@ test('with the light runner on for findings the round goes to sous-light-runner 
   assert.doesNotMatch(off.w.state.sends[0].prompt, /Light settings|sous-light-runner/);
   assert.strictEqual(off.round.mode, 'full');
   assert.strictEqual(lightSettingsLine(lightSettings(new Map())), 'Light settings: lines=150 files=3 worker=sonnet browser=on blast=on loops=2 publish=push');
+});
+
+test('a reviewer webhook post without a DOCK-REVIEW line counts for the person it is named after', async () => {
+  const OTHER = '1557932387084537859';
+  const w = world({ rows: [row([POST(), message('562151', 'Shovian', T0 + 10 * MIN, 'onit'), message(OTHER, 'sous-shovian', T0 + 20 * MIN, 'mas danu, ada blocker\n1) blocker, be: agentLink dibuang waktu simpan', { webhookId: OTHER })])] });
+  assert.strictEqual(await w.tickAt(T0 + 60 * MIN), 1);
+  assert.match(w.state.sends[0].prompt, /<<<TEMUAN Shovian [^\n]*>>>\nmas danu, ada blocker/);
+  assert.strictEqual(webhookReviewer('sous-shovian', [{ id: '1', name: 'Shovian' }, { id: '2', name: 'Aken Setiawan' }]), '1');
+  assert.strictEqual(webhookReviewer('pr-bot', [{ id: '1', name: 'Shovian' }]), undefined, 'no name match');
+  assert.strictEqual(webhookReviewer('dock', [{ id: '1', name: 'Shovian' }]), undefined);
 });
 
 test('the longer DOCK-REVIEW marker with the ledger verdict still reads as the user it names', async () => {
