@@ -893,3 +893,15 @@ test('review findings queue in the last Task session; with none a Task-KEY sessi
   await assert.rejects(refused.cron.taskMessage('QRD-7', 'findings'), /send refused/);
   assert.strictEqual(refused.state.sessions.length, 0);
 });
+
+test('Agents › Lessons: the owner sheet reports every changed decision with its old status, and prompts name the lessons file', async () => {
+  const w = world({ runs: [sousRun()] });
+  const changed: Array<{ key: string; changes: Array<{ n: number; status: string; choice: string }> }> = [];
+  const deps = (w.cron as unknown as { deps: CronDeps }).deps;
+  deps.ownerChanged = async (key, changes) => { changed.push({ key, changes }); };
+  deps.lessonsFile = async (key) => `/e/lessons/${key}.md`;
+  await w.cron.submit('QRD-9', [{ issue: 2, text: 'Drop' }], [{ n: 2, choice: 'Use the new table' }, { n: 4, choice: 'not now' }]);
+  assert.deepStrictEqual(changed, [{ key: 'QRD-9', changes: [{ n: 2, status: 'GUESS', choice: 'Use the new table' }, { n: 4, status: 'USULAN', choice: 'not now' }] }]);
+  assert.strictEqual(w.state.sent[0].text, ownerReplyPrompt('QRD-9', 'Jawaban owner untuk I-2: Drop\nOwner mengubah D-2: Use the new table\nOwner mengubah D-4: not now', '/e/lessons/QRD-9.md'));
+  assert.match(w.state.sent[0].text, /\nPelajaran: \/e\/lessons\/QRD-9\.md — baca file ini sebelum mulai/);
+});

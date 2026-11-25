@@ -14,6 +14,7 @@ import { eventPush, pushService } from './push';
 import { askNotice, runDoneNotice, turnDoneNotice } from './push-notices';
 import { kitConflictNotice, kitMergeReports } from './kit-merge';
 import { ticketFlowLines } from './sous-flow-live';
+import { lessonsFileFor, ownerChanged } from './lessons-hook';
 import { ticketReadinessLine } from './ticket-readiness-live';
 
 const storage = new StorageService();
@@ -63,6 +64,8 @@ export const orchestratorCron = new OrchestratorCron({
   runs: () => orchestratorService.list(),
   saveRun: (ledger, machine) => orchestratorService.ingestLedger(ledger, new Date(), machine),
   sousFlowLines: (key) => ticketFlowLines(key),
+  lessonsFile: (key) => lessonsFileFor(key),
+  ownerChanged: (key, changes) => ownerChanged(key, changes),
   readinessLine: (key) => ticketReadinessLine(key),
   park: async (key, waiting) => {
     const row = await storage.getOrchestratorRunWithLedger(key);

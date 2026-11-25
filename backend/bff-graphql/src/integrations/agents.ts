@@ -5,7 +5,7 @@ import { isMergePath, kitResolveAction, parseKitMergeReport, skillPath, skillTex
 
 export const AGENT_OPS = ['list', 'get', 'put', 'preview', 'delete'] as const;
 export type AgentOp = typeof AGENT_OPS[number] | 'gm-log' | 'gm-rollback' | 'gm-skill-put' | 'gm-kit-resolve'
-  | 'skill-list' | 'skill-get' | 'skill-preview' | 'kit-merge-report' | 'kit-merge-file';
+  | 'skill-list' | 'skill-get' | 'skill-preview' | 'kit-merge-report' | 'kit-merge-file' | 'lessons-put';
 export const GUARD_PROFILES = ['read', 'worktree', 'browser', 'board'] as const;
 export const AGENT_MODELS = ['haiku', 'sonnet', 'opus', 'inherit'] as const;
 export const AGENT_SLUG = /^[a-z0-9][a-z0-9-]{1,47}$/;
@@ -192,6 +192,7 @@ export class AgentBridge {
     if (op.startsWith('gm-') && !state.capabilities.includes('gm')) throw new OrchestratorInputError(`The kit on ${machine} is too old for Guild Master. Update claude-config.`);
     if ((op.startsWith('skill-') || op === 'gm-skill-put') && !state.capabilities.includes('skills')) throw new OrchestratorInputError(`The kit on ${machine} is too old to edit skills. Update claude-config.`);
     if ((op.startsWith('kit-merge-') || op === 'gm-kit-resolve') && !state.capabilities.includes('kit-merge')) throw new OrchestratorInputError(`The kit on ${machine} is too old for install merges. Update claude-config.`);
+    if (op.startsWith('lessons-') && !state.capabilities.includes('lessons')) throw new OrchestratorInputError(`The kit on ${machine} is too old to write lessons files. Update claude-config.`);
     return new Promise((resolve, reject) => {
       const id = randomUUID();
       const timer = setTimeout(() => {
@@ -282,6 +283,11 @@ export class AgentBridge {
     const chosen = kitResolveAction(action);
     const value = chosen === 'edit' ? skillText(body) : null;
     return this.ask(machine, 'gm-kit-resolve', { path, action: chosen, ...(value !== null ? { text: value } : {}), ...await grant(sha(path, chosen, value)) }, parseResolve(machine, now));
+  }
+
+  /** Writes skills/<name>/lessons.md or kit/lessons/agents/<name>.md on the machine; DOCK writes these files, no owner nonce is asked. */
+  async putLessonsFile(machine: string, kind: 'skill' | 'agent', name: string, body: string) {
+    return this.ask(machine, 'lessons-put', { kind, name, text: body }, saveResult);
   }
 
   /** The manager log every Guild Master session of the machine writes to, newest first; with the log key the kit marks unsigned entries. */

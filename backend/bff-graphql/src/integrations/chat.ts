@@ -472,6 +472,8 @@ export class ChatService {
   onTurnEnded: (turn: { sessionId: string; ticketKey: string | null; failed: boolean }) => void = () => undefined;
   /** Agent file jobs waiting for a machine's bridge, handed out once on a claim. Wired by the agents bridge like cronLimit. */
   agentJobs: (machine: string) => Array<{ id: string; op: string; input: unknown }> = () => [];
+  /** The ticket's lessons file, written fresh for the turn; the bridge sets DOCK_LESSONS_FILE from it for the guard. */
+  lessonsFile: (ticketKey: string) => Promise<string | null> = async () => null;
   /** What a Guild Master turn sees of the settings (values it may change, secrets as set / not set). Wired by the settings like cronLimit. */
   gmSettings: () => Promise<unknown> = async () => ({ values: {}, secrets: {} });
   /** The cron fields a Guild Master may change and the per-ticket usage numbers it bases suggestions on. Wired like gmSettings. */
@@ -1503,6 +1505,7 @@ export class ChatService {
         // Every turn of the session runs on that Claude account instead of the machine's active one; a Judge turn is named.
         ...(session.account ? { account: session.account } : {}),
         ...(session.title.startsWith('Judge-') ? { title: session.title } : {}),
+        ...(session.ticketKey && !gm && !session.title.startsWith('Judge-') ? await this.lessonsFile(session.ticketKey).then((file) => (file ? { lessonsFile: file } : {}), () => ({})) : {}),
       };
       if (!caps) return taken;
       return {

@@ -1,5 +1,6 @@
 import { StorageService } from '../storage/service';
-import { SOUS_FLOW_CACHE, SOUS_FLOW_KEY, flowLines, profileFor, readSousFlow, type SousFlowSettings } from './sous-flow';
+import { SOUS_FLOW_CACHE, SOUS_FLOW_KEY, flowLines, flowRuleLines, profileFor, readFlowRules, readSousFlow, type SousFlowSettings } from './sous-flow';
+import { SOUS_FLOW_RULES_KEY } from './lessons';
 
 const storage = new StorageService();
 
@@ -27,7 +28,12 @@ export async function setTicketProfile(key: string, name: string | null): Promis
   return name;
 }
 
-/** The lines the ticket's flow adds to the sous prompt; none for a profile where every stage runs. */
+/** The rules Agents › Lessons wrote from flow lessons. */
+export async function sousFlowRules(): Promise<string[]> {
+  return readFlowRules((await storage.getSettingValues([SOUS_FLOW_RULES_KEY]))[0]?.value);
+}
+
+/** The lines the ticket's flow adds to the sous prompt, then the flow rules; none for a profile where every stage runs and no rule. */
 export async function ticketFlowLines(key: string): Promise<string[]> {
-  return flowLines(profileFor(await sousFlowSettings(), await ticketProfile(key)).profile);
+  return [...flowLines(profileFor(await sousFlowSettings(), await ticketProfile(key)).profile), ...flowRuleLines(await sousFlowRules())];
 }

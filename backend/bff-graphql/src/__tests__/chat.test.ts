@@ -311,6 +311,26 @@ test('a session opened with a Claude account hands it to the bridge on the claim
   assert.ok(!('account' in other.message), 'no account field without one');
 });
 
+test('a ticket session hands its lessons file to the bridge on every claim; a Judge or plain session carries none', async () => {
+  const { service } = clockedService();
+  const asked: string[] = [];
+  service.lessonsFile = async (key) => { asked.push(key); return `/e/lessons/${key}.md`; };
+  const ticket = await service.createSession({ title: 'Task-QRD-1592', ticketKey: 'QRD-1592' });
+  const judge = await service.createSession({ title: 'Judge-2026-11-25', ticketKey: 'QRD-1592' });
+  const plain = await service.createSession({ title: 'plain' });
+  await service.sendMessage(ticket.id, 'Pakai skill sous: kerjakan QRD-1592.', MACHINES);
+  const taken = await service.claim({ wait: 0 }, undefined, 'laptop') as { message: Record<string, unknown> };
+  assert.deepStrictEqual([taken.message.sessionId, taken.message.lessonsFile], [ticket.id, '/e/lessons/QRD-1592.md']);
+  await service.sendMessage(judge.id, 'Pakai skill judge: session a input /a.md until 4', MACHINES);
+  const judged = await service.claim({ wait: 0 }, undefined, 'laptop') as { message: Record<string, unknown> };
+  assert.strictEqual(judged.message.sessionId, judge.id);
+  assert.ok(!('lessonsFile' in judged.message));
+  await service.sendMessage(plain.id, 'hello', MACHINES);
+  const other = await service.claim({ wait: 0 }, undefined, 'laptop') as { message: Record<string, unknown> };
+  assert.ok(!('lessonsFile' in other.message));
+  assert.deepStrictEqual(asked, ['QRD-1592']);
+});
+
 test('a DOCK session takes one turn at a time and the bridge moves it through its states', async () => {
   const { service, sessions, advance } = clockedService();
   await service.syncSession(syncBody(), 'laptop');

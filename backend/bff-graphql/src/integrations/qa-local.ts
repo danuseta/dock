@@ -1,4 +1,5 @@
 import type { Orchestration } from './orchestrator';
+import { lessonsLines } from './lessons';
 
 export type QaTcState = 'pending' | 'running' | 'passed' | 'failed' | 'skipped' | 'blocked';
 export type QaRunState = 'running' | 'done' | 'failed';
@@ -186,8 +187,9 @@ const TICKET = /^[A-Z][A-Z0-9]+-\d+$/;
 export const isTicketKey = (key: string) => TICKET.test(key) && !key.startsWith('CARD-');
 
 /** The prompt of a QA session: the agent step that writes the tests, then the command, all inside the rules of `~/qa-local`. */
-export const qaPrompt = (key: string, prs: string[]) => [
+export const qaPrompt = (key: string, prs: string[], lessons: string | null = null) => [
   `QA lokal ${key}${prs.length ? ` setelah PR ${prs.join(' ')}` : ''}.`,
+  ...lessonsLines(lessons),
   `1. Kalau ~/qa-local/tests/${key}/ belum ada atau ac.json-nya lebih tua dari tiket, jalankan "Agent step" v2 di ~/.claude/kit/qa-local/README.md: baca tiket lewat Atlassian MCP (hanya baca), tulis ac.json, TC.md dan *.spec.ts di folder itu saja.`,
   `2. Jalankan: qonflo-qa-local ${key} (worktree wt-<nomor>-be dan -fe dipilih otomatis; pakai --be dan --fe kalau ada lebih dari satu).`,
   '3. Setelah run, hapus data tes buatan spec dari MongoDB lokal (hanya dokumen yang dibuat run ini).',
@@ -214,15 +216,18 @@ export interface QaAutoDeps {
   message(key: string, prompt: string): Promise<unknown>;
   /** The tickets that were built here and may have a REVISION waiting. */
   tickets(): Promise<string[]>;
+  /** The ticket's lessons file for the QA and REVISION prompts; left out, a prompt names none. */
+  lessonsFile?(key: string): Promise<string | null>;
 }
 
 const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
 
 /** The message that sends a REVISION run's failed test cases back to the ticket's Task session. */
-export function revisionPrompt(key: string, round: number, run: Pick<QaRun, 'runId' | 'tcs'>, dir: string): string {
+export function revisionPrompt(key: string, round: number, run: Pick<QaRun, 'runId' | 'tcs'>, dir: string, lessons: string | null = null): string {
   const failed = run.tcs.filter((tc) => tc.state === 'failed');
   return [
     `QA lokal REVISION ${key} round ${round}`,
+    ...lessonsLines(lessons),
     `Folder run: ${dir}`,
     `summary.md: ${dir}/summary.md`,
     'TC yang gagal:',
@@ -244,6 +249,10 @@ export class QaAuto {
   private readonly sending = new Set<string>();
 
   constructor(private readonly deps: QaAutoDeps) {}
+
+  private lessonsOf(key: string): Promise<string | null> {
+    return this.deps.lessonsFile ? this.deps.lessonsFile(key).catch(() => null) : Promise.resolve(null);
+  }
 
   async ledger(run: Pick<Orchestration, 'key' | 'kind' | 'machine' | 'pullRequests' | 'updatedAt'>): Promise<boolean> {
     if (run.kind !== 'build' || !isTicketKey(run.key) || !this.deps.available()) return false;
@@ -286,7 +295,7 @@ export class QaAuto {
         if (!head) return false;
         heads[url] = head;
       }
-      await this.deps.message(key, revisionPrompt(key, last.round + 1, run, this.deps.runDir(key, run.runId)));
+      await this.deps.message(key, revisionPrompt(key, last.round + 1, run, this.deps.runDir(key, run.runId), await this.lessonsOf(key)));
       await this.deps.save(key, { ...last, fixFor: run.runId, heads });
       return true;
     } finally {
@@ -310,7 +319,7 @@ export class QaAuto {
       const at = this.deps.now().toISOString();
       const fresh = { prs, at, round, fixFor: null, heads: {} };
       try {
-        const sessionId = await this.deps.open(key, qaPrompt(key, prs));
+        const sessionId = await this.deps.open(key, qaPrompt(key, prs, await this.lessonsOf(key)));
         await this.deps.save(key, { ...fresh, sessionId, error: null });
         return true;
       } catch (error) {

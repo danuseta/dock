@@ -502,6 +502,68 @@ model JudgeDay {
   note        String?
 }
 
+/// One finding a lesson is made from: a Judge session or sprint line, a closed ticket ledger, or an owner correction of a GUESS.
+/// Every source ends in a final status; pending is the count Agents › Lessons shows as not processed yet.
+model LessonSource {
+  id          String    @id @default(uuid())
+  /// judge-session | judge-sprint | ledger | owner-correction
+  kind       String
+  /// Unique per finding, so a source posted twice is kept once (judge:<findingId>, ledger:<KEY>:failure:<at>, ...).
+  ref        String    @unique
+  /// The Judge session, message, sprint or ledger item the source came from.
+  sessionId  String?
+  messageId  Int?
+  sprint     String?
+  ticketKey  String?
+  text       String
+  cause      String
+  shouldHave String    @default("")
+  /// The target and lesson the source proposes; empty when DOCK has to derive them.
+  targetKind String?
+  targetName String?
+  lesson     String?
+  /// pending | lesson | merged | code | environment
+  status     String    @default("pending")
+  lessonId   String?
+  error      String?
+  createdAt  DateTime  @default(now())
+  processedAt DateTime?
+
+  @@index([status])
+  @@index([lessonId])
+}
+
+/// A lesson a session reads before it starts: written to its target (a skill or agent lessons file, the Sous flow rules, a repo
+/// or facts file under .evidence/lessons) and gathered per ticket into .evidence/lessons/<KEY>.md.
+model Lesson {
+  id         String    @id @default(uuid())
+  /// skill | agent | flow | repo | fact | code
+  targetKind String
+  targetName String
+  text       String
+  cause      String
+  /// How often the mistake was seen: 1 on creation, +1 for each similar source merged in.
+  count      Int       @default(1)
+  /// How often a session broke this lesson after reading it (Judge cause lesson-ignored).
+  ignored    Int       @default(0)
+  /// JSON string[] of the ticket keys and of the Judge sessions the sources came from.
+  ticketKeys String    @default("[]")
+  sessionIds String    @default("[]")
+  /// active | code-card (a "make it code" request exists) | coded (the code rule shipped) | deleted
+  status     String    @default("active")
+  /// The CARD-<slug> of the "make it code" request; cardState pending waits for the owner, started runs, done shipped.
+  cardKey    String?
+  cardState  String?
+  cardSessionId String?
+  /// When the owner was last told about the pending card; told again each day until answered.
+  noticeAt   DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([status])
+  @@index([targetKind, targetName])
+}
+
 /// One sprint's dependency map. sprint is the sprint name, like RetroItem.sprint.
 model SprintPlan {
   sprint      String    @id

@@ -1318,6 +1318,84 @@ export const typeDefs = gql`
     updatedAt: String!
   }
 
+  "One finding a lesson came from: a Judge session or sprint line, a closed ledger or an owner correction."
+  type LessonSource {
+    id: ID!
+    "judge-session, judge-sprint, ledger or owner-correction."
+    kind: String!
+    ref: String!
+    sessionId: String
+    messageId: Int
+    ticketKey: String
+    text: String!
+    cause: String!
+    "pending, lesson, merged, code or environment."
+    status: String!
+    createdAt: String!
+  }
+
+  "A lesson sessions read before they start; status active, code-card, coded or deleted."
+  type Lesson {
+    id: ID!
+    "skill, agent, flow, repo, fact or code."
+    targetKind: String!
+    targetName: String!
+    text: String!
+    cause: String!
+    count: Int!
+    "How often a session broke it after reading it."
+    ignored: Int!
+    ticketKeys: [String!]!
+    sessionIds: [String!]!
+    status: String!
+    "The CARD-<slug> of the make-it-code request; cardState pending waits for the owner, started runs, done shipped."
+    cardKey: String
+    cardState: String
+    cardSessionId: String
+    "Where DOCK writes it, such as skills/demo-video/lessons.md."
+    writtenTo: String!
+    createdAt: String!
+    updatedAt: String!
+    sources: [LessonSource!]!
+  }
+
+  type LessonSourceCount {
+    status: String!
+    count: Int!
+  }
+
+  type LessonEnvironmentNotice {
+    id: ID!
+    kind: String!
+    ticketKey: String
+    text: String!
+    createdAt: String!
+  }
+
+  type LessonSourceError {
+    id: ID!
+    text: String!
+    error: String
+  }
+
+  "Agents › Lessons: unprocessed is the number of sources still pending, which should be 0."
+  type LessonsView {
+    unprocessed: Int!
+    sources: Int!
+    byStatus: [LessonSourceCount!]!
+    environment: [LessonEnvironmentNotice!]!
+    failed: [LessonSourceError!]!
+    lessons: [Lesson!]!
+  }
+
+  "What the one-off importer read and how many sources it added."
+  type LessonImport {
+    files: Int!
+    added: Int!
+    processed: Int!
+    unprocessed: Int!
+  }
+
   "One step Judge called a mistake (or not). call is the owner's answer when there is one, else Judge's call."
   type JudgeFinding {
     id: ID!
@@ -2925,6 +3003,8 @@ export const typeDefs = gql`
     judgeWaiting: [JudgeWaitingDay!]!
     "Settings › Judge as JSON (on, account, windows, idleMinutes, noonCutoff), defaults filled in."
     judgeSettings: String!
+    "Agents › Lessons: every lesson that is not deleted and the source counts."
+    lessons: LessonsView!
     "The ticket's checkpoints, oldest first."
     checkpoints(key: String!): [Checkpoint!]!
     "The Sous flow settings as JSON (profiles, mine, checkpoint, qaGuide, qaGuideField), defaults filled in."
@@ -3124,6 +3204,16 @@ export const typeDefs = gql`
     judgeAgain(sessionId: ID!): JudgeTick!
     "Saves Settings › Judge after validation and returns it normalized."
     setJudgeSettings(settings: String!): String!
+    "Changes a lesson's sentence; its target file and the ticket files are written again."
+    editLesson(id: ID!, text: String!): Lesson!
+    "Moves a lesson to another target (skill, agent, flow, repo, fact or code)."
+    retargetLesson(id: ID!, kind: String!, name: String!): Lesson!
+    "Deletes a lesson; it leaves every file it was written to."
+    deleteLesson(id: ID!): Boolean!
+    "Jadikan aturan di kode: approves the lesson's make-it-code card and starts its sous session."
+    approveLessonCode(id: ID!): Lesson!
+    "Imports the existing .evidence/judge/*.json results and the closed ledgers of the named sprints into the lesson queue."
+    importLessons(sprints: [String!]!): LessonImport!
     "Saves the Sous flow JSON after validation and returns it normalized; an empty string resets it."
     setSousFlow(flow: String!): String!
     "Gives the ticket a Sous flow profile; null makes it follow the person's own profile again."

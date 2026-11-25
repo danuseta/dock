@@ -1,6 +1,6 @@
 import { ago } from '../lib/discordThreads';
 
-export type AgentsTab = 'office' | 'library';
+export type AgentsTab = 'office' | 'library' | 'lessons';
 export type PlanningPageTab = 'now' | 'draft' | 'retro';
 const PLANNING_TABS: PlanningPageTab[] = ['now', 'draft', 'retro'];
 const PLANNING_PANELS = ['mine', 'team', 'scope', 'ac', 'qa', 'tc', 'storyboard', 'order', 'new'] as const;
@@ -33,7 +33,10 @@ export interface SprintPlan {
   tickets: PlanTicket[];
 }
 
-export const agentsRoute = (search: string): AgentsTab => (new URLSearchParams(search).get('tab') === 'library' ? 'library' : 'office');
+export const agentsRoute = (search: string): AgentsTab => {
+  const tab = new URLSearchParams(search).get('tab');
+  return tab === 'library' || tab === 'lessons' ? tab : 'office';
+};
 
 /** The tab and Draft panel of /planning: `?tab=now|draft|retro` and `?panel=`. With no tab it is Now, or Draft when a panel is named. The old Plan tab is Draft's Order panel. */
 export function planningRoute(search: string): { tab: PlanningPageTab; panel: PlanningPanelId | null } {

@@ -6,6 +6,7 @@ import { REVIEW_STATUS } from './broadcast-review';
 import { ticketSessionTitle } from './session-titles';
 import { inPublishedPlan, publishWait, sprintRevision } from './plan-publish';
 import { HOLD_NEW_SPRINT_KEY, readHoldNewSprint } from './ops-rules';
+import { lessonsLine, lessonsLines } from './lessons';
 
 export class CronInputError extends Error {}
 
@@ -383,8 +384,11 @@ const LANES_LINE = 'Do not end your turn while a subagent you started is still r
 const TEAM_LINE = 'Run the ticket with the oh-my-claudecode:team skill: its members are your workers, and you stay the lead.';
 const LANGUAGE_LINE = 'Write chat replies, reports and summaries in Bahasa Indonesia; code, comments, commit messages and pull request text stay in English.';
 
-/** The prompt for a ticket with acceptance criteria: built without stopping to ask. */
-export const startPrompt = (key: string) => [
+/** The ticket's lessons file on a line of its own, so the guard can read it from the transcript; nothing without a file. */
+const withLessons = (prompt: string, lessons: string | null) => (lessons ? `${prompt}\n${lessonsLine(lessons)}` : prompt);
+
+/** The prompt for a ticket with acceptance criteria: built without stopping to ask. `lessons` is the ticket's lessons file. */
+export const startPrompt = (key: string, lessons: string | null = null) => withLessons([
   `Build ticket ${key} with the build-ticket skill.`,
   'The ticket has acceptance criteria: do not stop to ask. When something is ambiguous, take the reading closest to the AC,',
   `record it with status.cjs decide ${key} "<what and why>", and continue.`,
@@ -398,10 +402,10 @@ export const startPrompt = (key: string) => [
   TEAM_LINE,
   LANES_LINE,
   LANGUAGE_LINE,
-].join(' ');
+].join(' '), lessons);
 
 /** The prompt for a parked ticket the owner confirmed: the AC are missing, so asking stays allowed. */
-export const confirmedPrompt = (key: string) => [
+export const confirmedPrompt = (key: string, lessons: string | null = null) => withLessons([
   `Build ticket ${key} with the build-ticket skill.`,
   CONTRACT_LINE,
   `Stop when the work is committed on the ticket branch and ready for review: set the ledger gate to "${PR_GATE_TEXT}" and wait.`,
@@ -411,10 +415,10 @@ export const confirmedPrompt = (key: string) => [
   TEAM_LINE,
   LANES_LINE,
   LANGUAGE_LINE,
-].join(' ');
+].join(' '), lessons);
 
 /** The message that continues a stalled run in its own session. */
-export const resumePrompt = (key: string, engine: CronEngine = 'omc') => (engine === 'sous' ? [
+export const resumePrompt = (key: string, engine: CronEngine = 'omc', lessons: string | null = null) => withLessons((engine === 'sous' ? [
   `Pakai skill sous. Lanjutkan tiket ${key} dari blackboard dan ledger (node $K/status.cjs show ${key}), jangan mulai dari awal.`,
   LANES_LINE,
   LANGUAGE_LINE,
@@ -423,7 +427,7 @@ export const resumePrompt = (key: string, engine: CronEngine = 'omc') => (engine
   TEAM_LINE,
   LANES_LINE,
   LANGUAGE_LINE,
-]).join(' ');
+]).join(' '), lessons);
 
 const SOUS_CRON_LINE = 'Cron run: no GATE 1; work through to an opened pull request (draft when the ledger has draft=true) and make the demo video before the pull request.';
 
@@ -431,7 +435,7 @@ const SOUS_CRON_LINE = 'Cron run: no GATE 1; work through to an opened pull requ
 export const stackLine = (key: string, parent: string) => `Stack on ${parent}: base each repo on that ticket's open PR head branch (status.cjs set ${key} stackedOn=${parent}), open this PR against it, and say in the PR body that ${parent}'s PR merges first.`;
 
 /** The cron start on engine sous: no GATE 1, the run goes as far as an opened pull request. `flow` is the ticket's Sous flow lines, none by default. */
-export const sousStartPrompt = (key: string, stackOn: string | null = null, flow: readonly string[] = []) => [
+export const sousStartPrompt = (key: string, stackOn: string | null = null, flow: readonly string[] = [], lessons: string | null = null) => withLessons([
   `Pakai skill sous: kerjakan ${key}.`,
   SOUS_CRON_LINE,
   ...(stackOn ? [stackLine(key, stackOn)] : []),
@@ -440,10 +444,10 @@ export const sousStartPrompt = (key: string, stackOn: string | null = null, flow
   LANES_LINE,
   LANGUAGE_LINE,
   ...flow,
-].join(' ');
+].join(' '), lessons);
 
 /** A parked ticket the owner confirmed, on engine sous: the AC are missing, so GATE 1 stays. */
-export const sousConfirmedPrompt = (key: string, stackOn: string | null = null, flow: readonly string[] = []) => [
+export const sousConfirmedPrompt = (key: string, stackOn: string | null = null, flow: readonly string[] = [], lessons: string | null = null) => withLessons([
   `Pakai skill sous: kerjakan ${key}.`,
   ...(stackOn ? [stackLine(key, stackOn)] : []),
   CONTRACT_LINE,
@@ -451,11 +455,12 @@ export const sousConfirmedPrompt = (key: string, stackOn: string | null = null, 
   LANES_LINE,
   LANGUAGE_LINE,
   ...flow,
-].join(' ');
+].join(' '), lessons);
 
 /** The first message of the new session an owner action on a sous ticket opens; `line` is the answer or the cancel. */
-export const ownerReplyPrompt = (key: string, line: string) => [
+export const ownerReplyPrompt = (key: string, line: string, lessons: string | null = null) => [
   `Pakai skill sous. Lanjutkan tiket ${key} dari blackboard dan ledger (node $K/status.cjs show ${key}), jangan mulai dari awal.`,
+  ...lessonsLines(lessons),
   line,
 ].join('\n');
 
@@ -521,6 +526,10 @@ export interface CronDeps {
   readinessLine?(key: string): Promise<string | null>;
   /** Sets the run's waiting text and keeps the rest of its ledger. */
   park(key: string, waiting: string): Promise<unknown>;
+  /** The ticket's lessons file, written for the session the prompt opens; left out, a prompt names none. */
+  lessonsFile?(key: string): Promise<string | null>;
+  /** The owner changed these decisions of a sous ticket (status as before the change), for Agents › Lessons. */
+  ownerChanged?(key: string, changes: Array<{ n: number; status: string; choice: string }>): Promise<unknown>;
   /** The newest cron session of each ticket; `stopped` when the owner stopped its last turn, `otherActive` when another session of the ticket works or spoke after it. */
   cronSessions(keys: string[]): Promise<Map<string, { id: string; status: string; stopped: boolean; otherActive: boolean }>>;
   openSession(input: { ticketKey: string; machine: string; title: string; origin: 'cron'; options: Record<string, string>; account?: string }): Promise<{ id: string }>;
@@ -727,7 +736,7 @@ export class OrchestratorCron {
           log.parked.push(run.key);
           continue;
         }
-        await this.deps.send(session.id, resumePrompt(run.key, run.engine === 'sous' ? 'sous' : settings.engine), this.turnOptions(settings));
+        await this.deps.send(session.id, resumePrompt(run.key, run.engine === 'sous' ? 'sous' : settings.engine, await this.lessonsOf(run.key)), this.turnOptions(settings));
         await this.deps.cacheSet(counter, count + 1);
         resumed.push(run.key);
       } catch (error) {
@@ -807,7 +816,13 @@ export class OrchestratorCron {
   }
 
   private async startPromptOf(settings: CronSettings, key: string, stackOn: string | null = null, extra: string[] = []) {
-    return settings.engine === 'sous' ? sousStartPrompt(key, stackOn, [...extra, ...(await this.flowLines(key))]) : startPrompt(key);
+    const lessons = await this.lessonsOf(key);
+    return settings.engine === 'sous' ? sousStartPrompt(key, stackOn, [...extra, ...(await this.flowLines(key))], lessons) : startPrompt(key, lessons);
+  }
+
+  /** The ticket's lessons file for its prompt; null when lessons are not wired or the file cannot be written. */
+  private async lessonsOf(key: string): Promise<string | null> {
+    return this.deps.lessonsFile ? this.deps.lessonsFile(key).catch(() => null) : null;
   }
 
   /** The ticket's Sous flow lines and its Readiness line; none when they are not wired or cannot be read, so the prompt stays as before. */
@@ -842,7 +857,8 @@ export class OrchestratorCron {
     if (!ticket) throw new CronInputError('The ticket was not found in Jira');
     const settings = { ...(await this.settings()), machine: run.machine };
     const stackOn = (await this.dependencyState(settings)).stacked.get(ticket.key) ?? null;
-    const confirmed = settings.engine === 'sous' ? sousConfirmedPrompt(ticket.key, stackOn, await this.flowLines(ticket.key)) : confirmedPrompt(ticket.key);
+    const lessons = await this.lessonsOf(ticket.key);
+    const confirmed = settings.engine === 'sous' ? sousConfirmedPrompt(ticket.key, stackOn, await this.flowLines(ticket.key), lessons) : confirmedPrompt(ticket.key, lessons);
     await this.start(ticket, settings, this.deps.now(), run.waiting === PARKED_TEXT ? confirmed : await this.startPromptOf(settings, ticket.key, stackOn));
   }
 
@@ -865,7 +881,7 @@ export class OrchestratorCron {
     if (issue != null && !open.some((item) => item.n === issue)) throw new CronInputError(`I-${issue} is not an open issue of ${key}`);
     const waited = Number(/^I-(\d+):/.exec(run.waiting ?? '')?.[1]) || null;
     const n = issue ?? waited ?? open.find((item) => item.level === 'owner')?.n ?? null;
-    await this.ownerSession(run, ownerReplyPrompt(key, n ? `Jawaban owner untuk I-${n}: ${answer}` : `Jawaban owner: ${answer}`));
+    await this.ownerSession(run, ownerReplyPrompt(key, n ? `Jawaban owner untuk I-${n}: ${answer}` : `Jawaban owner: ${answer}`, await this.lessonsOf(key)));
     return n;
   }
 
@@ -885,7 +901,11 @@ export class OrchestratorCron {
       ...answers.map((answer) => `Jawaban owner untuk I-${answer.issue}: ${ownerText(answer.text)}`),
       ...changes.map((change) => `Owner mengubah D-${change.n}: ${ownerText(change.choice)}`),
     ];
-    await this.ownerSession(run, ownerReplyPrompt(key, lines.join('\n')));
+    await this.ownerSession(run, ownerReplyPrompt(key, lines.join('\n'), await this.lessonsOf(key)));
+    if (this.deps.ownerChanged && changes.length) {
+      const status = new Map((run.decisions ?? []).map((item) => [item.n, item.status]));
+      await this.deps.ownerChanged(key, changes.map((change) => ({ n: change.n, status: status.get(change.n) ?? '', choice: change.choice }))).catch(() => undefined);
+    }
   }
 
   /**
