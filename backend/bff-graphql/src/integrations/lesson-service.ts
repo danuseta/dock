@@ -48,7 +48,7 @@ export interface LessonDeps {
 }
 
 export interface LessonView {
-  id: string; targetKind: string; targetName: string; text: string; cause: string; count: number; ignored: number; ticketKeys: string[]; sessionIds: string[];
+  id: string; targetKind: string; targetName: string; text: string; textId: string | null; cause: string; count: number; ignored: number; ticketKeys: string[]; sessionIds: string[];
   status: string; cardKey: string | null; cardState: string | null; cardSessionId: string | null; writtenTo: string; createdAt: string; updatedAt: string;
   sources: Array<{ id: string; kind: string; ref: string; sessionId: string | null; messageId: number | null; ticketKey: string | null; text: string; cause: string; status: string; createdAt: string }>;
 }
@@ -103,7 +103,7 @@ export class LessonService {
           await store.updateLessonSource(source.id, { status: 'environment', processedAt: now, error: null });
           await this.deps.notify(environmentNotice(source)).catch(() => undefined);
         } else if (derived.kind === 'code') {
-          const lesson = await this.requestCard(await store.createLesson({ targetKind: 'code', targetName: derived.name, text: derived.text, cause: source.cause, ticketKeys: merge('[]', [source.ticketKey]), sessionIds: merge('[]', [source.sessionId]) }));
+          const lesson = await this.requestCard(await store.createLesson({ targetKind: 'code', targetName: derived.name, text: derived.text, textId: derived.textId, cause: source.cause, ticketKeys: merge('[]', [source.ticketKey]), sessionIds: merge('[]', [source.sessionId]) }));
           lessons = [...lessons, lesson];
           await store.updateLessonSource(source.id, { status: 'code', lessonId: lesson.id, processedAt: now, error: null });
         } else {
@@ -111,10 +111,10 @@ export class LessonService {
           const match = findSimilar(lessons, derived, source.cause, derived.text);
           let lesson: LessonRow;
           if (match) {
-            lesson = await store.updateLesson(match.id, { count: match.count + 1, ignored: match.ignored + (ignored ? 1 : 0), ticketKeys: merge(match.ticketKeys, [source.ticketKey]), sessionIds: merge(match.sessionIds, [source.sessionId]) });
+            lesson = await store.updateLesson(match.id, { ...(!match.textId && derived.textId ? { textId: derived.textId } : {}), count: match.count + 1, ignored: match.ignored + (ignored ? 1 : 0), ticketKeys: merge(match.ticketKeys, [source.ticketKey]), sessionIds: merge(match.sessionIds, [source.sessionId]) });
             await store.updateLessonSource(source.id, { status: 'merged', lessonId: lesson.id, processedAt: now, error: null });
           } else {
-            lesson = await store.createLesson({ targetKind: derived.kind, targetName: derived.name, text: derived.text, cause: source.cause, ignored: ignored ? 1 : 0, ticketKeys: merge('[]', [source.ticketKey]), sessionIds: merge('[]', [source.sessionId]) });
+            lesson = await store.createLesson({ targetKind: derived.kind, targetName: derived.name, text: derived.text, textId: derived.textId, cause: source.cause, ignored: ignored ? 1 : 0, ticketKeys: merge('[]', [source.ticketKey]), sessionIds: merge('[]', [source.sessionId]) });
             await store.updateLessonSource(source.id, { status: 'lesson', lessonId: lesson.id, processedAt: now, error: null });
           }
           if (lesson.status === 'active' && (ignored || lesson.count >= CARD_AT_COUNT)) lesson = await this.requestCard(lesson);
@@ -189,11 +189,13 @@ export class LessonService {
     return lesson;
   }
 
-  edit(id: string, text: string): Promise<LessonView> {
+  edit(id: string, text: string, textId?: string | null): Promise<LessonView> {
     return this.serial(async () => {
       const value = String(text ?? '').replace(/\s+/g, ' ').trim();
       if (!value || value.length > MAX_TEXT) throw new LessonInputError(`A lesson is one sentence of at most ${MAX_TEXT} characters`);
-      const lesson = await this.deps.store.updateLesson((await this.live(id)).id, { text: value });
+      const translation = textId === undefined ? undefined : String(textId ?? '').replace(/\s+/g, ' ').trim();
+      if (translation && translation.length > MAX_TEXT) throw new LessonInputError(`A translation is one sentence of at most ${MAX_TEXT} characters`);
+      const lesson = await this.deps.store.updateLesson((await this.live(id)).id, { text: value, ...(translation === undefined ? {} : { textId: translation || null }) });
       await this.writeOut([groupOf(lesson)]);
       return this.viewOf(lesson);
     });
@@ -262,7 +264,7 @@ export class LessonService {
   private async viewOf(lesson: LessonRow, sources?: SourceRow[]): Promise<LessonView> {
     const own = sources ?? await this.deps.store.getLessonSources({ lessonIds: [lesson.id] });
     return {
-      id: lesson.id, targetKind: lesson.targetKind, targetName: lesson.targetName, text: lesson.text, cause: lesson.cause, count: lesson.count, ignored: lesson.ignored,
+      id: lesson.id, targetKind: lesson.targetKind, targetName: lesson.targetName, text: lesson.text, textId: lesson.textId, cause: lesson.cause, count: lesson.count, ignored: lesson.ignored,
       ticketKeys: jsonList(lesson.ticketKeys), sessionIds: jsonList(lesson.sessionIds), status: lesson.status, cardKey: lesson.cardKey, cardState: lesson.cardState,
       cardSessionId: lesson.cardSessionId, writtenTo: writtenTo(lesson), createdAt: lesson.createdAt.toISOString(), updatedAt: lesson.updatedAt.toISOString(),
       sources: own.map((source) => ({ id: source.id, kind: source.kind, ref: source.ref, sessionId: source.sessionId, messageId: source.messageId, ticketKey: source.ticketKey, text: source.text, cause: source.cause, status: source.status, createdAt: source.createdAt.toISOString() })),

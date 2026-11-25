@@ -526,6 +526,7 @@ model LessonSource {
   targetKind String?
   targetName String?
   lesson     String?
+  lessonTextId String?
   /// pending | lesson | merged | code | environment
   status     String    @default("pending")
   lessonId   String?
@@ -545,6 +546,7 @@ model Lesson {
   targetKind String
   targetName String
   text       String
+  textId     String?
   cause      String
   /// How often the mistake was seen: 1 on creation, +1 for each similar source merged in.
   count      Int       @default(1)

@@ -6,7 +6,7 @@ export type LessonFilter = 'all' | LessonTarget;
 
 export interface LessonSource { id: string; kind: string; ref: string; sessionId: string | null; messageId: number | null; ticketKey: string | null; text: string; cause: string; status: string; createdAt: string }
 export interface Lesson {
-  id: string; targetKind: string; targetName: string; text: string; cause: string; count: number; ignored: number; ticketKeys: string[]; sessionIds: string[];
+  id: string; targetKind: string; targetName: string; text: string; textId: string | null; cause: string; count: number; ignored: number; ticketKeys: string[]; sessionIds: string[];
   status: string; cardKey: string | null; cardState: string | null; cardSessionId: string | null; writtenTo: string; createdAt: string; updatedAt: string; sources: LessonSource[];
 }
 export interface LessonsData {

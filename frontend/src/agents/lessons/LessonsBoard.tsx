@@ -8,7 +8,7 @@ import {
 } from './lessonsLogic';
 
 export interface LessonActions {
-  edit(id: string, text: string): Promise<unknown>;
+  edit(id: string, text: string, textId: string): Promise<unknown>;
   retarget(id: string, kind: string, name: string): Promise<unknown>;
   remove(id: string): Promise<unknown>;
   approve(id: string): Promise<unknown>;
@@ -20,6 +20,7 @@ const errorText = (error: unknown) => (error instanceof Error ? error.message : 
 const LessonCard: React.FC<{ lesson: Lesson; actions: LessonActions; busy: boolean }> = ({ lesson, actions, busy }) => {
   const [mode, setMode] = useState<'view' | 'edit' | 'target'>('view');
   const [text, setText] = useState(lesson.text);
+  const [textId, setTextId] = useState(lesson.textId ?? '');
   const [kind, setKind] = useState(lesson.targetKind);
   const [name, setName] = useState(lesson.targetName);
   const [confirm, setConfirm] = useState(false);
@@ -38,13 +39,17 @@ const LessonCard: React.FC<{ lesson: Lesson; actions: LessonActions; busy: boole
       {mode === 'edit' ? (
         <div className="flex flex-col gap-2">
           <Textarea value={text} onChange={(event) => setText(event.target.value)} aria-label="Lesson text" rows={3} />
+          <Textarea value={textId} onChange={(event) => setTextId(event.target.value)} aria-label="Indonesian translation" placeholder="Indonesian translation" rows={2} lang="id" />
           <div className="flex gap-2">
-            <Button size="sm" variant="primary" disabled={busy || !text.trim()} onClick={() => run(() => actions.edit(lesson.id, text))}>Save</Button>
-            <Button size="sm" variant="ghost" onClick={() => { setText(lesson.text); setMode('view'); }}>Cancel</Button>
+            <Button size="sm" variant="primary" disabled={busy || !text.trim()} onClick={() => run(() => actions.edit(lesson.id, text, textId))}>Save</Button>
+            <Button size="sm" variant="ghost" onClick={() => { setText(lesson.text); setTextId(lesson.textId ?? ''); setMode('view'); }}>Cancel</Button>
           </div>
         </div>
       ) : (
-        <p className="text-pretty text-sm text-foreground">{lesson.text}</p>
+        <div>
+          <p className="text-pretty text-sm text-foreground">{lesson.text}</p>
+          {lesson.textId && <p className="mt-1 text-pretty text-sm text-muted-foreground" lang="id">{lesson.textId}</p>}
+        </div>
       )}
       {mode === 'target' && (
         <div className="flex flex-wrap items-center gap-2">

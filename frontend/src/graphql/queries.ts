@@ -2049,7 +2049,7 @@ export const GET_LESSONS = gql`
       environment { id kind ticketKey text createdAt }
       failed { id text error }
       lessons {
-        id targetKind targetName text cause count ignored ticketKeys sessionIds status cardKey cardState cardSessionId writtenTo createdAt updatedAt
+        id targetKind targetName text textId cause count ignored ticketKeys sessionIds status cardKey cardState cardSessionId writtenTo createdAt updatedAt
         sources { id kind ref sessionId messageId ticketKey text cause status createdAt }
       }
     }
