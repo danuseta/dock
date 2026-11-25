@@ -560,6 +560,8 @@ interface DayCount { started: string[]; parked: string[] }
 export class OrchestratorCron {
   private running: Promise<FillLog> | null = null;
   private readonly ownerOpening = new Set<string>();
+  /** The lines an owner answer adds for the ticket's held review round; set where the review findings are wired. */
+  reviewLines: (key: string) => Promise<string[]> = async () => [];
 
   constructor(private readonly deps: CronDeps) {}
 
@@ -881,7 +883,8 @@ export class OrchestratorCron {
     if (issue != null && !open.some((item) => item.n === issue)) throw new CronInputError(`I-${issue} is not an open issue of ${key}`);
     const waited = Number(/^I-(\d+):/.exec(run.waiting ?? '')?.[1]) || null;
     const n = issue ?? waited ?? open.find((item) => item.level === 'owner')?.n ?? null;
-    await this.ownerSession(run, ownerReplyPrompt(key, n ? `Jawaban owner untuk I-${n}: ${answer}` : `Jawaban owner: ${answer}`, await this.lessonsOf(key)));
+    const review = await this.reviewLines(key).catch(() => [] as string[]);
+    await this.ownerSession(run, ownerReplyPrompt(key, [n ? `Jawaban owner untuk I-${n}: ${answer}` : `Jawaban owner: ${answer}`, ...review].join('\n'), await this.lessonsOf(key)));
     return n;
   }
 
@@ -901,7 +904,8 @@ export class OrchestratorCron {
       ...answers.map((answer) => `Jawaban owner untuk I-${answer.issue}: ${ownerText(answer.text)}`),
       ...changes.map((change) => `Owner mengubah D-${change.n}: ${ownerText(change.choice)}`),
     ];
-    await this.ownerSession(run, ownerReplyPrompt(key, lines.join('\n'), await this.lessonsOf(key)));
+    const review = await this.reviewLines(key).catch(() => [] as string[]);
+    await this.ownerSession(run, ownerReplyPrompt(key, [...lines, ...review].join('\n'), await this.lessonsOf(key)));
     if (this.deps.ownerChanged && changes.length) {
       const status = new Map((run.decisions ?? []).map((item) => [item.n, item.status]));
       await this.deps.ownerChanged(key, changes.map((change) => ({ n: change.n, status: status.get(change.n) ?? '', choice: change.choice }))).catch(() => undefined);

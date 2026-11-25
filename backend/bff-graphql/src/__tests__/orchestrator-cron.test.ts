@@ -933,3 +933,22 @@ test('Agents › Lessons: the owner sheet reports every changed decision with it
   assert.strictEqual(w.state.sent[0].text, ownerReplyPrompt('QRD-9', 'Jawaban owner untuk I-2: Drop\nOwner mengubah D-2: Use the new table\nOwner mengubah D-4: not now', '/e/lessons/QRD-9.md'));
   assert.match(w.state.sent[0].text, /\nPelajaran: \/e\/lessons\/QRD-9\.md — baca file ini sebelum mulai/);
 });
+
+test('an owner answer carries the lines of the ticket\'s held review round after the answer; a failing lookup leaves the answer alone', async () => {
+  const w = world({ runs: [sousRun()] });
+  const asked: string[] = [];
+  w.cron.reviewLines = async (key) => { asked.push(key); return ['Round review r7 sudah dilaporkan valid=2 pushed=no', 'DOCK-REVIEW-ROUND r7 valid=<jumlah valid> invalid=<jumlah tidak valid> pushed=<yes|no|body>']; };
+  await w.cron.answer('QRD-9', 'Drop');
+  assert.deepStrictEqual(asked, ['QRD-9']);
+  assert.strictEqual(w.state.sent[0].text, ownerReplyPrompt('QRD-9', 'Jawaban owner untuk I-2: Drop\nRound review r7 sudah dilaporkan valid=2 pushed=no\nDOCK-REVIEW-ROUND r7 valid=<jumlah valid> invalid=<jumlah tidak valid> pushed=<yes|no|body>'));
+
+  const sheet = world({ runs: [sousRun()] });
+  sheet.cron.reviewLines = async () => ['DOCK-REVIEW-ROUND r7 valid=<jumlah valid> invalid=<jumlah tidak valid> pushed=<yes|no|body>'];
+  await sheet.cron.submit('QRD-9', [{ issue: 2, text: 'Drop' }], []);
+  assert.strictEqual(sheet.state.sent[0].text, ownerReplyPrompt('QRD-9', 'Jawaban owner untuk I-2: Drop\nDOCK-REVIEW-ROUND r7 valid=<jumlah valid> invalid=<jumlah tidak valid> pushed=<yes|no|body>'));
+
+  const broken = world({ runs: [sousRun()] });
+  broken.cron.reviewLines = async () => { throw new Error('database is locked'); };
+  await broken.cron.answer('QRD-9', 'Drop');
+  assert.strictEqual(broken.state.sent[0].text, ownerReplyPrompt('QRD-9', 'Jawaban owner untuk I-2: Drop'));
+});

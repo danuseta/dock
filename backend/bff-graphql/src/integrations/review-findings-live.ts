@@ -43,6 +43,7 @@ export const reviewFindings = new ReviewFindings({
   waitingReplies: (now, since) => storage.getWaitingGithubReplies(now, since),
   taskMessage: (key, prompt) => orchestratorCron.taskMessage(key, prompt),
   lessonsFile: (key) => lessonsFileFor(key),
+  ticketRounds: (key) => storage.roundsForTicket(key),
   push: (message) => eventPush.send('needsYou', message),
   settings: async () => {
     const values = new Map((await storage.getSettingValues(REVIEW_FINDINGS_KEYS)).map((row) => [row.key, row.value]));
@@ -69,4 +70,5 @@ export const reviewFindings = new ReviewFindings({
   now: () => new Date(),
 });
 
+orchestratorCron.reviewLines = (key) => reviewFindings.ownerAnswerLines(key);
 chatService.onTurnEnded = (turn) => { void reviewFindings.onTurnEnded(turn).catch((error) => console.warn('[ReviewFindings] result failed:', error instanceof Error ? error.message : 'unknown error')); };

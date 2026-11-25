@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { AutoReview, DEFAULT_REVIEW_POST_TEMPLATE, ENDED_DETAIL, MAX_REVIEW_RETRIES, markerVerdict, DEFAULT_REVIEW_REPLY_TEMPLATE, ON_IT_WINDOW_MS, WAITING_SKILL, fillTemplate, isMessageSetting, messageFormat, reviewTemplateValues, answeredFindings, currentReviews, reviewBody, reviewMarker, reviewPost, reviewPrompt, withMarker, type AutoReviewDeps, type AutoReviewRecord, type AutoReviewSettings, type PushMessage } from '../integrations/auto-review';
+import { AutoReview, DEFAULT_REVIEW_POST_TEMPLATE, ENDED_DETAIL, MAX_REVIEW_RETRIES, markerVerdict, DEFAULT_REVIEW_REPLY_TEMPLATE, ON_IT_WINDOW_MS, WAITING_SKILL, fillTemplate, isMessageSetting, messageFormat, reviewTemplateValues, answeredFindings, currentReviews, reviewBody, reviewMarker, reviewPost, reviewPrompt, TEXT_DISAGREES, textDisagrees, withMarker, type AutoReviewDeps, type AutoReviewRecord, type AutoReviewSettings, type PushMessage } from '../integrations/auto-review';
 import type { DiscordPostFiles } from '../integrations/discord-post';
 import { sortThread } from '../integrations/discord-reader';
 import type { ThreadRow } from '../integrations/discord-threads';
@@ -650,7 +650,8 @@ test('in skill mode the review prompt asks for the message with that skill in th
   const sent: Array<{ content: string; files?: DiscordPostFiles }> = [];
   w.deps.postDiscord = async (_url, content, options) => { sent.push({ content, files: options.files }); return { id: 'msg7', skipped: ['01-tooltip-dark.png'] }; };
   await w.review.tick();
-  assert.strictEqual(w.opened[0].prompt, reviewPrompt('QRD-1473', [PR], THREAD, 'review-message'));
+  assert.strictEqual(w.opened[0].prompt, reviewPrompt('QRD-1473', [PR], THREAD, 'review-message', null, 'Indra'));
+  assert.match(w.opened[0].prompt, /Author PR ini Indra: sapa "mas indra"/);
   assert.match(w.opened[0].prompt, /tulis pesan Discord hasil review pakai skill review-message/);
   assert.match(w.opened[0].prompt, /<<<DISCORD dan <<<AKHIR DISCORD>>>\.\nLampirkan screenshot cuma untuk temuan blocker\. Di teks sebut sebagai "gambar N", nomor urut pertama kali disebut; jangan pernah tulis nama file di teks\.\n/);
   assert.match(w.opened[0].prompt, /\nDi dalam blok, satu baris GAMBAR N: <nama file> \| <keterangan pendek> per gambar, nama file saja dari folder screenshots\/ di blackboard QRD-1473, maksimal 10\.\n/);
@@ -771,7 +772,7 @@ test('the message format settings: formats, skill names and template length', ()
   assert.deepStrictEqual(messageFormat('reply', new Map([['reviewReplyFormat', 'template'], ['reviewReplySkill', 'Bad Name']])), { format: 'template', skill: 'review-message', template: DEFAULT_REVIEW_REPLY_TEMPLATE });
 });
 
-test('the marker carries the ledger verdict, so a skill body that claims no blocker cannot hide one; a skill post waits at least a minute', async () => {
+test('the marker carries the ledger verdict; a skill post waits at least a minute', async () => {
   const w = world({ rows: [row({ url: THREAD })] });
   w.deps.settings = async () => ({ ...SKILL_SETTINGS, postDelayMinutes: 0 });
   const sent: string[] = [];
@@ -780,14 +781,45 @@ test('the marker carries the ledger verdict, so a skill body that claims no bloc
   await w.review.ledger(verdict({ verdict: 'request-change', findings: [finding('blocker', 'No tooltip'), finding('blocker', 'Old', '2026-10-27')] } as Partial<Orchestration>));
   const record = w.records[0];
   assert.strictEqual(record.postAt?.getTime(), NOW.getTime() + 60_000, 'a delay of 0 still waits a minute in skill mode');
-  w.deps.newestReply = async () => '<<<DISCORD\nmas indra, gak ada blocker, lgtm!\n<<<AKHIR DISCORD>>>';
+  w.deps.newestReply = async () => '<<<DISCORD\nmas indra, ada blocker 1: tooltip hilang\n<<<AKHIR DISCORD>>>';
   w.deps.now = at(1);
   await w.review.tick();
   assert.strictEqual(w.pushes.at(-1)?.title, 'QRD-1473: review post ready, sends in 1 min');
   w.deps.now = at(2);
   await w.review.tick();
-  assert.strictEqual(sent[0], 'mas indra, gak ada blocker, lgtm!\nDOCK-REVIEW on it by <@111> · round 1 · @ abc1234 · Request change · 1 blocker');
+  assert.strictEqual(sent[0], 'mas indra, ada blocker 1: tooltip hilang\nDOCK-REVIEW on it by <@111> · round 1 · @ abc1234 · Request change · 1 blocker');
   assert.strictEqual(markerVerdict({ key: 'QRD-1473', verdict: 'approve', findings: [finding('non-blocking', 'x')] } as unknown as Orchestration), 'Approve with comments · 0 blocker');
+});
+
+test('a skill message that says no blocker over a request-change verdict, or blockers over an approve, is held with one push until the owner edits it', async () => {
+  const w = world({ rows: [row({ url: THREAD })] });
+  w.deps.settings = async () => ({ ...SKILL_SETTINGS, postDelayMinutes: 0 });
+  const sent: string[] = [];
+  w.deps.postDiscord = async (_url, content) => { sent.push(content); return { id: 'msg1', skipped: [] }; };
+  await w.review.tick();
+  await w.review.ledger(verdict({ verdict: 'request-change', findings: [finding('blocker', 'Login gagal di FE lokal')] } as Partial<Orchestration>));
+  const record = w.records[0];
+  w.deps.newestReply = async () => '<<<DISCORD\nmas indra, gak ada blocker dari sisi kode, cuma FE lokal gak bisa login\n<<<AKHIR DISCORD>>>';
+  const pushes = w.pushes.length;
+  for (const minutes of [1, 2, 20, 60]) {
+    w.deps.now = at(minutes);
+    await w.review.tick();
+  }
+  assert.strictEqual(sent.length, 0, 'a contradictory review never goes out, not even as the template');
+  assert.deepStrictEqual([record.postStatus, record.postDetail], ['pending', TEXT_DISAGREES]);
+  assert.strictEqual(record.postText, 'mas indra, gak ada blocker dari sisi kode, cuma FE lokal gak bisa login\nDOCK-REVIEW on it by <@111> · round 1 · @ abc1234 · Request change · 1 blocker', 'the session text waits for the owner');
+  assert.deepStrictEqual(w.pushes.slice(pushes).map((push) => push.title), ['QRD-1473: review text and verdict disagree'], 'one push');
+  assert.strictEqual(await w.review.editPost(record.id, 'mas indra, ada blocker 1: FE lokal gak bisa login'), true);
+  await w.review.tick();
+  assert.strictEqual(sent[0], 'mas indra, ada blocker 1: FE lokal gak bisa login\nDOCK-REVIEW on it by <@111> · round 1 · @ abc1234 · Request change · 1 blocker', 'the owner edit goes out');
+
+  const marker = (verdictText: string) => reviewMarker('111', 1, 'abc1234', verdictText);
+  assert.strictEqual(textDisagrees('mas indra, ada blocker 1: tooltip hilang', marker('Approve · 0 blocker')), true);
+  assert.strictEqual(textDisagrees('Request change, tooltip hilang', marker('Approve with comments · 0 blocker')), true);
+  assert.strictEqual(textDisagrees('mas indra, gak ada blocker, lgtm', marker('Approve with comments · 0 blocker')), false);
+  assert.strictEqual(textDisagrees('QRD-1473 · Approve · 0 blocker', marker('Approve · 0 blocker')), false);
+  assert.strictEqual(textDisagrees('mas indra, ada blocker 1', marker('Request change · 1 blocker')), false);
+  assert.strictEqual(textDisagrees('mas indra, lgtm', marker('Request change · 0 blocker')), false, 'a request change with no blocker is not held');
 });
 
 test('an owner edit made after the due list was read is never overwritten by the skill message or the fallback', async () => {
@@ -886,4 +918,11 @@ test('a review session that cannot start is tried twice more on the same head, t
   assert.deepStrictEqual(w.pushes, [{ title: 'QRD-1473: review did not start', body: 'No slot. DOCK tried 3 times on this head commit; review it by hand on Agents.', url: '/agents', tag: `auto-review-${w.records[0].id}` }]);
   assert.strictEqual(await w.review.tick(), 0);
   assert.deepStrictEqual([w.review.skipReason('t1'), w.pushes.length], ['same head commit, review failed 3 times', 1]);
+});
+
+test('the skill review prompt names the PR author as the person behind a webhook post', async () => {
+  const w = world({ rows: [row({ url: THREAD, createdBy: 'pr-danu', messages: [{ id: 'h1', author: 'danu', authorId: '290342257654104075', avatar: '', mine: false, at: NOW.toISOString(), text: 'on it mas', mentions: [], attachments: [] }] } as Partial<ThreadRow>)] });
+  w.deps.settings = async () => SKILL_SETTINGS;
+  await w.review.tick();
+  assert.match(w.opened[0]?.prompt ?? '', /Author PR ini danu: sapa "mas danu" di pesan itu, bukan nama pemilik DOCK ini/);
 });

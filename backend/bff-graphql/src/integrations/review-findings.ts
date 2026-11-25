@@ -111,6 +111,8 @@ export interface ReviewFindingsDeps {
   taskMessage(key: string, prompt: string): Promise<{ sessionId: string; opened: boolean }>;
   /** The ticket's lessons file for the round's prompt; left out, the prompt names none. */
   lessonsFile?(key: string): Promise<string | null>;
+  /** Every round of a ticket, newest first; left out, an owner answer names no round. */
+  ticketRounds?(key: string): Promise<ReviewRound[]>;
   push(message: PushMessage): Promise<unknown>;
   settings(): Promise<FindingsSettings>;
   /** The pull request as GitHub has it now; null when GitHub cannot be asked. */
@@ -323,6 +325,32 @@ export const resumePrompt = (roundId: string, autoReply: boolean) => [
   `DOCK-REVIEW-ROUND ${roundId} valid=<jumlah valid> invalid=<jumlah tidak valid> pushed=<yes|no|body>`,
 ].join('\n');
 
+/** A reported round whose valid findings are still open: no reply was ever scheduled for it. */
+export const isHeldRound = (round: Pick<ReviewRound, 'status' | 'replyStatus' | 'valid'>) => round.status === 'reported' && !round.replyStatus && (round.valid ?? 0) > 0;
+
+/**
+ * The lines an owner answer on the ticket carries for a held round: after the work, the Discord block for the reviewers and
+ * the round's marker, so DOCK posts the reply instead of the session drafting one for the owner.
+ */
+export function heldRoundLines(input: { key: string; roundId: string; threadUrl: string; valid: number; pushed: boolean; reviewers: string[]; skill?: string | null }): string[] {
+  const { roundId } = input;
+  const reviewers = input.reviewers.length ? input.reviewers.join(' sama ') : 'reviewer';
+  return [
+    `Round review ${roundId} (${input.threadUrl}) sudah dilaporkan valid=${input.valid} pushed=${input.pushed ? 'yes' : 'no'}, tapi balasan ke ${reviewers} belum terkirim.`,
+    input.skill
+      ? `Setelah kerjaan ini selesai, tulis balasan Discord untuk ${reviewers} pakai skill ${input.skill}, satu poin per temuan: "fixed di <sha pendek>" atau "tidak diubah karena ...".`
+      : `Setelah kerjaan ini selesai, tulis balasan Discord untuk ${reviewers} (bahasa santai tim, satu baris per temuan: "fixed di <sha pendek>" atau "tidak diubah karena ...").`,
+    'Jangan tulis draft untuk owner salin; DOCK yang mem-post balasan itu.',
+    ...discordBlockLines(input.key),
+    'Setelah blok itu, baris terakhir persis:',
+    `DOCK-REVIEW-ROUND ${roundId} valid=<jumlah valid> invalid=<jumlah tidak valid> pushed=<yes|no|body>`,
+  ];
+}
+
+/** A marker for a round that already reported counts again when it brings new work: the fix was pushed after all, or no reply ever went out. */
+const reopens = (round: ReviewRound, result: RoundResult) => round.status === 'reported' && round.replyStatus !== 'sent' && round.replyStatus !== 'sending'
+  && (!round.replyStatus || (!round.pushed && (result.pushed || result.body === true)));
+
 export function parseRoundResult(text: string | null | undefined): RoundResult | null {
   const match = text ? MARKER.exec(text) : null;
   return match ? { roundId: match[1], valid: Number(match[2]), invalid: Number(match[3]), pushed: match[4] === 'yes', body: match[4] === 'body' } : null;
@@ -349,6 +377,8 @@ export class ReviewFindings {
   private readonly reporting = new Set<string>();
   /** Rounds each session still owes a result for; a turn end in any other session reads nothing. */
   private readonly owing = new Map<string, number>();
+  /** The held round an owner answer on each ticket asked the session to finish. */
+  private readonly reopened = new Map<string, string>();
   private seeded: Promise<void> | null = null;
   private ticks = 0;
 
@@ -489,7 +519,7 @@ export class ReviewFindings {
   async onTurnEnded(turn: TurnEnded): Promise<boolean> {
     if (!turn.ticketKey) return false;
     await this.seed();
-    if (!this.owing.has(turn.sessionId)) return false;
+    if (!this.owing.has(turn.sessionId) && !this.reopened.has(turn.ticketKey)) return false;
     const reply = await this.deps.newestReply(turn.sessionId);
     const result = parseRoundResult(reply);
     if (result && this.reporting.has(result.roundId)) return false;
@@ -503,10 +533,15 @@ export class ReviewFindings {
     try {
       const round = await this.deps.roundById(result.roundId);
       const late = round?.status === 'failed' && (round.detail === EXPIRED_DETAIL || round.detail === NO_MARKER_DETAIL);
-      if (!round || (round.sessionId !== null && round.sessionId !== turn.sessionId) || (round.status !== 'sent' && round.status !== 'sending' && !late)) return false;
-      const left = (this.owing.get(turn.sessionId) ?? 1) - 1;
-      if (left > 0) this.owing.set(turn.sessionId, left);
-      else this.owing.delete(turn.sessionId);
+      const again = Boolean(round && round.ticketKey === turn.ticketKey && reopens(round, result));
+      if (!round || (!again && ((round.sessionId !== null && round.sessionId !== turn.sessionId) || (round.status !== 'sent' && round.status !== 'sending' && !late)))) return false;
+      if (again) {
+        if (this.reopened.get(round.ticketKey) === round.id) this.reopened.delete(round.ticketKey);
+      } else {
+        const left = (this.owing.get(turn.sessionId) ?? 1) - 1;
+        if (left > 0) this.owing.set(turn.sessionId, left);
+        else this.owing.delete(turn.sessionId);
+      }
       await this.deps.update(round.id, { sessionId: turn.sessionId, status: 'reported', valid: result.valid, invalid: result.invalid, pushed: result.pushed, reportedAt: this.deps.now() });
       const delay = turn.failed ? null : await this.scheduleReply(round, result, reply).catch((error: unknown) => {
         console.warn(`[ReviewFindings] reply of round ${round.id} not scheduled:`, errorText(error));
@@ -563,6 +598,21 @@ export class ReviewFindings {
     } finally {
       this.reporting.delete(round.id);
     }
+  }
+
+  /**
+   * The lines an owner answer on the ticket adds for its newest round when that round is held; none otherwise or with auto
+   * reply off. The round is remembered, so the marker the answered session writes is read when its turn ends.
+   */
+  async ownerAnswerLines(key: string): Promise<string[]> {
+    if (!this.deps.ticketRounds) return [];
+    const settings = await this.deps.settings();
+    if (!settings.autoReply) return [];
+    const round = (await this.deps.ticketRounds(key)).find((item) => item.status !== THANKED);
+    if (!round || !isHeldRound(round)) return [];
+    this.reopened.set(key, round.id);
+    const reviewers = ((round.findings ? JSON.parse(round.findings) as StoredFindings : null)?.authors ?? []).map((author) => author.name);
+    return heldRoundLines({ key, roundId: round.id, threadUrl: round.threadUrl, valid: round.valid ?? 0, pushed: round.pushed === true, reviewers, skill: await this.replySkill(settings) });
   }
 
   /** The skill the round session writes the reply with; null for the built-in and template replies, or when the skill is not installed. */
