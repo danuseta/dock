@@ -77,6 +77,16 @@ export function stalledNotice(run: { key: string; stalledDetail?: string | null 
   };
 }
 
+/** An issue a ticket's ledger raised to the owner; it opens the ticket's session, or the sessions list when it has none. */
+export function ownerIssueNotice(issue: { key: string; n: number; text: string; sessionId: string | null }): PushMessage {
+  return {
+    title: `${issue.key}: waiting on you — I-${issue.n}`,
+    body: issue.text.trim().slice(0, MAX_BODY),
+    url: issue.sessionId ? `/sessions?session=${encodeURIComponent(issue.sessionId)}` : '/sessions',
+    tag: `owner-issue-${issue.key}-${issue.n}`,
+  };
+}
+
 /** One new post in a followed Discord channel. */
 export function discordPostNotice(post: { threadId: string; messageId: string; channel: string; author: string; text: string }): PushMessage {
   return { title: `${post.channel}: ${post.author}`, body: post.text.slice(0, MAX_BODY), url: '/discord', tag: `discord-${post.threadId}-${post.messageId}` };

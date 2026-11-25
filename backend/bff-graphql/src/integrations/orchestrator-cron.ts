@@ -1,6 +1,6 @@
 import type { TicketLink } from './jira';
 import type { PushMessage } from './push';
-import { stalledNotice, waitingNotice } from './push-notices';
+import { ownerIssueNotice, stalledNotice, waitingNotice } from './push-notices';
 import { isSettledStatus } from './attention';
 import { REVIEW_STATUS } from './broadcast-review';
 import { ticketSessionTitle } from './session-titles';
@@ -475,7 +475,7 @@ export interface CronRun {
   prBe?: string | null;
   prFe?: string | null;
   review?: string | null;
-  issues?: Array<{ n: number; level: string; status: string }>;
+  issues?: Array<{ n: number; level: string; status: string; text?: string }>;
   decisions?: Array<{ n: number; status: string }>;
 }
 
@@ -1033,14 +1033,27 @@ ${run.waiting}`, (run) => waitingNotice({ key: run.key, waiting: String(run.wait
 ${run.stalledDetail ?? ''}`, stalledNotice);
   }
 
-  /** Pushes the runs whose mark was not remembered; the remembered marks are rewritten only when they changed. */
-  private async ping(cacheKey: string, runs: CronRun[], mark: (run: CronRun) => string, notice: (run: CronRun) => PushMessage): Promise<string[]> {
+  /**
+   * One notice per open issue a ticket's ledger raised to the owner, tagged so it fires once. An issue the run's waiting
+   * text already names is announced as waiting. The first call after a phone is set up only remembers what is open already.
+   */
+  async notifyOwnerIssues(runs?: CronRun[]): Promise<string[]> {
+    if (!(await this.deps.hasPushDevices())) return [];
+    const issues = (runs ?? await this.deps.runs()).flatMap((run) => (run.issues ?? [])
+      .filter((issue) => issue.level === 'owner' && issue.status === 'open' && !(run.waiting ?? '').startsWith(`I-${issue.n}:`))
+      .map((issue) => ({ key: run.key, n: issue.n, text: issue.text ?? '' })));
+    return this.ping('notifiedOwnerIssues', issues, (issue) => `owner-issue-${issue.key}-${issue.n}`, async (issue) =>
+      ownerIssueNotice({ ...issue, sessionId: (await this.deps.lastTaskSession(issue.key).catch(() => null))?.id ?? null }));
+  }
+
+  /** Pushes the items whose mark was not remembered; the remembered marks are rewritten only when they changed. */
+  private async ping<T extends { key: string }>(cacheKey: string, runs: T[], mark: (run: T) => string, notice: (run: T) => PushMessage | Promise<PushMessage>): Promise<string[]> {
     const marks = runs.map(mark);
     const saved = await this.deps.cacheGet(cacheKey);
     const known = Array.isArray(saved) ? saved as string[] : null;
     const pinged: string[] = [];
     for (const run of known ? runs.filter((item) => !known.includes(mark(item))) : []) {
-      await this.deps.push(notice(run));
+      await this.deps.push(await notice(run));
       pinged.push(run.key);
     }
     if (!known || known.length !== marks.length || known.some((item, index) => item !== marks[index])) await this.deps.cacheSet(cacheKey, marks);
@@ -1054,6 +1067,7 @@ ${run.stalledDetail ?? ''}`, stalledNotice);
         const runs = await this.deps.runs();
         await this.notifyWaiting(runs);
         await this.notifyStalled(runs);
+        await this.notifyOwnerIssues(runs);
       }
     } catch (error) {
       console.error('[Orchestrator cron] Ping failed:', error instanceof Error ? error.message : 'unknown error');

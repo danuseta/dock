@@ -253,7 +253,8 @@ export function findingsPrompt(input: { key: string; threadUrl: string; threadId
     'Untuk setiap temuan, cek ke kode di branch head PR (gh pr view <url> --json headRefName), AC tiket, dan kontrak (rules/ticket-contract.md):',
     `1. Valid: perbaiki di branch head PR itu, jalankan type check dan tes terkait per file, stage per path (tanpa git add . atau -A, tanpa docs/), commit fix(${key}): ... tanpa trailer Co-Authored-By, lalu push ke branch itu. Owner sudah mengizinkan commit dan push tanpa go untuk round ini; lint, build:app dan test:all penuh tidak wajib.`,
     '2. Tidak valid: tulis alasannya dengan path:line, kutipan AC, atau kutipan kontrak.',
-    '3. Ragu: perlakukan sebagai tidak valid, tulis apa yang perlu diputuskan owner, jangan push tebakan.',
+    `3. Ragu: putuskan, jangan parkir ke owner. Kirim ke sous-arbiter (atau putuskan di runner), catat keputusan GUESS beserta opsi yang ditolak (node $K/status.cjs decide ${key} "<keputusan dan alasan>" --status GUESS --rejected "<opsi>: <kenapa tidak>"), perbaiki sesuai keputusan itu dan push seperti poin 1, hitung sebagai valid. Balasan ke reviewer menyebut keputusan itu dalam satu baris. GUESS dari round review tidak menahan PR.`,
+    '   Yang dinaikkan ke owner sebagai issue hanya: tooling, guard, atau akses yang rusak; membalik keputusan owner yang DECIDED; perubahan scope produk atau kontrak. Untuk temuan itu, balasan Discord-nya bilang "lagi dikonfirmasi ke owner", jangan diam.',
     '4. Valid tapi beresnya tanpa ubah kode (body PR, centang AC): tulis pushed=body di baris terakhir, bukan pushed=no.',
     'Jangan posting apa pun ke Discord, Jira, atau komentar GitHub. Jangan merge, jangan force-push, jangan ganti base branch.',
     ...(input.autoReply
