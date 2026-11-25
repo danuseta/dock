@@ -355,7 +355,12 @@ export class ReviewFindings {
         if (Date.parse(row.lastActivity) <= cursor) continue;
         const due = dueRound(row, cursor, now, webhookId);
         if (due.length) sent += await this.start(row, due);
-        else await this.thank(row, approvals(row, Math.max(cursor, now.getTime() - FINDINGS_WINDOW_MS), webhookId));
+        else {
+          const window = Math.max(cursor, now.getTime() - FINDINGS_WINDOW_MS);
+          const pending = findings(row, window, webhookId)[0];
+          const before = pending ? Date.parse(pending.at) : Infinity;
+          await this.thank(row, approvals(row, window, webhookId).filter((message) => Date.parse(message.at) < before));
+        }
       }
       return sent;
     } finally {
