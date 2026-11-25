@@ -32,12 +32,16 @@ export const ReviewSection = ({ values, set }: { values: SectionValues; set: (ke
         <Checkbox checked={values.reviewFindingsAutoReply === 'true'} onChange={(event) => set('reviewFindingsAutoReply', String(event.target.checked))} />
         <span><b className="font-semibold text-foreground">Reply after a fix</b><span className="block text-xs text-muted-foreground">When a round is fixed, or every finding was not valid, DOCK posts the DOCK-FIX reply to the thread. It waits for the same delay.</span></span>
       </label>
+      <label className="flex items-start gap-3 text-sm">
+        <Checkbox checked={values.reviewReReviewOnCommit === 'true'} onChange={(event) => set('reviewReReviewOnCommit', String(event.target.checked))} />
+        <span><b className="font-semibold text-foreground">Re-review new commits without DOCK-FIX</b><span className="block text-xs text-muted-foreground">Off: DOCK reviews a pull request again only after the author's DOCK-FIX for its new head, so a merge of develop or a rebase starts no round. On: a new head is also reviewed once its last commit is Re-review wait old.</span></span>
+      </label>
     </div>
     <div className="mt-4">
       <SettingRow label="Post delay" help="Minutes a post waits before it goes out. 0 sends it at once.">
         <Input type="number" min={REVIEW_NUMBERS.reviewPostDelayMinutes.min} max={REVIEW_NUMBERS.reviewPostDelayMinutes.max} aria-label="Post delay" className="h-9 w-24 font-mono" value={values.reviewPostDelayMinutes} onChange={(event) => set('reviewPostDelayMinutes', event.target.value)} />
       </SettingRow>
-      <SettingRow label="Re-review wait" help="Minutes DOCK waits after a fix before it reviews the new head again.">
+      <SettingRow label="Re-review wait" help="With Re-review new commits on: minutes after the last commit before DOCK reviews the new head without a DOCK-FIX.">
         <Input type="number" min={REVIEW_NUMBERS.reviewReReviewWaitMinutes.min} max={REVIEW_NUMBERS.reviewReReviewWaitMinutes.max} aria-label="Re-review wait" className="h-9 w-24 font-mono" value={values.reviewReReviewWaitMinutes} onChange={(event) => set('reviewReReviewWaitMinutes', event.target.value)} />
       </SettingRow>
       <SettingRow label="Max rounds" help="After this many rounds the arena closes and you are told, with the blockers that remain.">

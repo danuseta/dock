@@ -251,6 +251,8 @@ export const typeDefs = gql`
     autoReviewPostDiscord: Boolean!
     "Minutes a review post waits, with Cancel and Edit, before it goes out."
     reviewPostDelayMinutes: Int!
+    "Review a new head again without a DOCK-FIX once the last commit is Re-review wait old; off means only a DOCK-FIX for that head starts the next round."
+    reviewReReviewOnCommit: Boolean!
     "Minutes after the last commit before a new head is reviewed again without a DOCK-FIX."
     reviewReReviewWaitMinutes: Int!
     "Review rounds an on it allows before the arena closes."
@@ -2484,6 +2486,7 @@ export const typeDefs = gql`
     autoLgtm: String
     autoReviewPostDiscord: String
     reviewPostDelayMinutes: Int
+    reviewReReviewOnCommit: String
     reviewReReviewWaitMinutes: Int
     reviewMaxRounds: Int
     reviewFindingsToTask: String
