@@ -505,6 +505,40 @@ test("the PR author's own reply after a blocker round counts as a DOCK-FIX for a
   assert.strictEqual(await viaWebhook.review.tick(), 1, 'a poster webhook named after the author stands for the author');
 });
 
+test("a poster webhook stands for the author's Discord account its DOCK review marker names, whatever the account is called", async () => {
+  const ALVIN = '353581727135956992';
+  const reviewed = row({ id: 't2', url: 'https://discord.com/channels/1/9', claim: null, ownClaim: null, messages: [
+    message('a1', new Date(NOW.getTime() - 3 * 3_600_000), `mas danu, gak ada blocker.\nDOCK-REVIEW on it by <@${ALVIN}> · round 1 · @ abc · Approve · 0 blocker`, { authorId: '81', author: 'Alvin (DOCK)', webhookId: '81' }),
+  ] });
+  const thread = async (head: string, reply: Partial<ThreadRow['messages'][number]>, learned = true) => {
+    const w = arena({ messages: [
+      message('m1', new Date(NOW.getTime() - 2 * 3_600_000), `PR QRD-1473 ready review ${PR}`, { authorId: '1564939376637513800', author: 'pr-alvin', webhookId: '1564939376637513800' }),
+      message('m5', new Date(NOW.getTime() - 5 * 60_000), 'feedbacknya udah difix di pr #1473 (1de48f7, d7c513b)', reply),
+    ] });
+    w.deps.settings = async () => ({ ...SETTINGS, reReviewOnCommit: false });
+    w.deps.pull = async () => ({ open: true, headSha: head });
+    const rows = await w.deps.rows();
+    rows[0].createdById = '1564939376637513800';
+    if (learned) rows.push(reviewed);
+    return w;
+  };
+  const echope = { authorId: ALVIN, author: 'echope' };
+  const fixed = await thread('d7c513b', echope);
+  assert.strictEqual(await fixed.review.tick(), 1);
+  assert.deepStrictEqual(fixed.records.map((record) => [record.headSha, record.round]), [['abc1234', 1], ['d7c513b', 2]]);
+
+  const sameHead = await thread('abc1234', echope);
+  assert.strictEqual(await sameHead.review.tick(), 0);
+  assert.strictEqual(sameHead.review.skipReason('t1'), 'same head commit, already reviewed');
+
+  const someoneElse = await thread('d7c513b', { authorId: '777', author: 'Aken' });
+  assert.strictEqual(await someoneElse.review.tick(), 0);
+  assert.strictEqual(someoneElse.review.skipReason('t1'), 'waiting for DOCK-FIX or a reply from the author');
+
+  const unlearned = await thread('d7c513b', echope, false);
+  assert.strictEqual(await unlearned.review.tick(), 0, 'without a DOCK marker for the id the name alone does not match');
+});
+
 test('the arena closes on approve, on a closed pull request, after the last round, on stop dock and after 72 h without a commit', async () => {
   const fresh = new Date(NOW.getTime() - 20 * 60_000);
   const cases: Array<[Parameters<typeof arena>[0], string]> = [
@@ -747,6 +781,17 @@ test('a thread posted by a pr-<name> webhook greets the person: the roster match
   };
   assert.strictEqual(await greeting(), 'mas alvin');
   assert.strictEqual(await greeting(['Indra Kusuma', 'Alvin Pratama']), 'mas Alvin Pratama');
+
+  const ALVIN = '353581727135956992';
+  const learnedFrom = row({ id: 't2', url: 'https://discord.com/channels/1/9', claim: null, ownClaim: null, messages: [
+    message('a1', new Date(NOW.getTime() - 3 * 3_600_000), `lgtm
+DOCK-REVIEW on it by <@${ALVIN}> · round 1 · @ abc · Approve · 0 blocker`, { authorId: '81', author: 'Alvin (DOCK)', webhookId: '81' }),
+  ] });
+  const w = world({ rows: [row({ url: THREAD, createdBy: 'echope', createdById: ALVIN }), learnedFrom] });
+  w.deps.settings = async () => ({ ...SETTINGS, message: { ...SETTINGS.message, format: 'template' } });
+  await w.review.tick();
+  await w.review.ledger(verdict());
+  assert.strictEqual((w.records[0].postText ?? '').split(',')[0], 'mas Alvin', 'an account a DOCK marker names greets the person');
 });
 
 test('the template fills its placeholders from the ledger: blockers, no blocker, only notes; an unknown placeholder is empty; the marker stays', () => {

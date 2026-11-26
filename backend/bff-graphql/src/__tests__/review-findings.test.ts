@@ -2,6 +2,7 @@ import assert from 'node:assert';
 import test from 'node:test';
 import type { ReviewRound } from '@prisma/client';
 import type { ThreadMessage, ThreadRow } from '../integrations/discord-threads';
+import { learnPeople } from '../integrations/discord-people';
 import { ON_IT } from '../integrations/discord-reader';
 import {
   EXPIRED_DETAIL, GITHUB_HEAD_DETAIL, GITHUB_WAIT_MS, MAX_ROUND_ATTEMPTS, NO_MARKER_DETAIL, ROUND_QUIET_MS, WAITING_GITHUB, ReviewFindings, heldRoundLines, resumePrompt, findingBlock, findingsEnabled, findingsPrompt, fixMarker, isApproval, webhookReviewer, isBare, isChatter, personName, isOwnThread, parseRoundResult, replyTemplateValues, roundSummary, webhookIdOf,
@@ -712,6 +713,26 @@ test('an approval right after a finding still in its quiet window does not carry
   const thanks = w.state.rounds.find((round) => round.status === 'thanked');
   assert.ok(thanks, 'the approval is thanked after the finding round');
   assert.strictEqual(thanks.replyText, 'makasih mas Danu 🙏');
+});
+
+test("a teammate's DOCK review marker teaches DOCK their Discord account, so a thanks names the person and not the account", async () => {
+  const ALVIN = '353581727135956992';
+  const ALVIN_DOCK = '1600000000000000003';
+  const marked = `mas danu, gak ada blocker.
+DOCK-REVIEW on it by <@${ALVIN}> · round 1 · @ abc · Approve · 0 blocker`;
+  const learnedFrom = row([message(ALVIN_DOCK, 'Alvin (DOCK)', T0 + 5 * MIN, marked, { webhookId: ALVIN_DOCK }), message(ALVIN, 'echope', T0 + 6 * MIN, 'sip')], { id: '1566728431721259999', kind: 'bug' });
+  assert.deepStrictEqual(learnPeople([learnedFrom]), [{ id: ALVIN, person: 'Alvin', names: ['echope'] }]);
+  const fixMention = row([message(ALVIN_DOCK, 'Alvin (DOCK)', T0, `fixed
+DOCK-FIX round 1 · head abc1234 <@${ALVIN}>`, { webhookId: ALVIN_DOCK })]);
+  assert.deepStrictEqual(learnPeople([fixMention]), [], 'a DOCK-FIX mention teaches nothing');
+
+  const w = world({ rows: [row([POST(), message(ALVIN, 'echope', T0 + 10 * MIN, 'on it'), message(ALVIN, 'echope', T0 + 20 * MIN, 'mas danu, gak ada blocker.')]), learnedFrom] });
+  assert.strictEqual(await w.tickAt(T0 + 60 * MIN), 0);
+  assert.strictEqual(w.state.rounds[0].replyText, `<@${ALVIN}> makasih mas Alvin 🙏`);
+
+  const unknown = world({ rows: [row([POST(), message(ALVIN, 'echope', T0 + 10 * MIN, 'on it'), message(ALVIN, 'echope', T0 + 20 * MIN, 'mas danu, gak ada blocker.')])] });
+  await unknown.tickAt(T0 + 60 * MIN);
+  assert.strictEqual(unknown.state.rounds[0].replyText, `<@${ALVIN}> makasih mas echope 🙏`, 'an account no marker names keeps its name');
 });
 
 test('which first lines read as an approval', () => {
