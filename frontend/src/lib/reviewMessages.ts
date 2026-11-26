@@ -30,6 +30,7 @@ export const REVIEW_NUMBERS = {
   reviewPostDelayMinutes: { fallback: 2, min: 0, max: 60, label: 'Post delay' },
   reviewReReviewWaitMinutes: { fallback: 10, min: 0, max: 240, label: 'Re-review wait' },
   reviewMaxRounds: { fallback: 3, min: 1, max: 10, label: 'Max rounds' },
+  reviewOnItRetriggerHours: { fallback: 24, min: 1, max: 168, label: 'On it hours' },
 } as const;
 
 export const reviewNumberErrors = (values: Record<string, string>) => Object.entries(REVIEW_NUMBERS).flatMap(([key, range]) => {

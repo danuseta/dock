@@ -220,6 +220,8 @@ export class StorageAPI {
       reviewReReviewOnCommit: settings.reviewReReviewOnCommit === 'true',
       reviewReReviewWaitMinutes: arenaSetting('reviewReReviewWaitMinutes', settings.reviewReReviewWaitMinutes),
       reviewMaxRounds: arenaSetting('reviewMaxRounds', settings.reviewMaxRounds),
+      reviewOnItRetrigger: settings.reviewOnItRetrigger === 'true',
+      reviewOnItRetriggerHours: arenaSetting('reviewOnItRetriggerHours', settings.reviewOnItRetriggerHours),
       reviewFindingsToTask: settings.reviewFindingsToTask !== 'false',
       reviewFindingsAutoReply: settings.reviewFindingsAutoReply !== 'false',
       reviewPostFormat: post.format,
@@ -270,7 +272,7 @@ export class StorageAPI {
       if (input.prTagEnabled != null && input.prTagEnabled !== 'true' && input.prTagEnabled !== 'false') throw new Error('Invalid reviewer tag setting');
       if (input.prTagTemplate != null) normalizePrTagTemplate(String(input.prTagTemplate));
       if (input.prTagRole != null && (String(input.prTagRole).length > MAX_PR_TAG_ROLE_LENGTH || /[\r\n]/.test(String(input.prTagRole)))) throw new Error('Invalid reviewer role');
-      for (const key of ['autoReviewOnIt', 'autoLgtm', 'reviewFindingsToTask', 'autoReviewPostDiscord', 'reviewFindingsAutoReply', 'reviewReReviewOnCommit'] as const) {
+      for (const key of ['autoReviewOnIt', 'autoLgtm', 'reviewFindingsToTask', 'autoReviewPostDiscord', 'reviewFindingsAutoReply', 'reviewReReviewOnCommit', 'reviewOnItRetrigger'] as const) {
         if (input[key] != null && input[key] !== 'true' && input[key] !== 'false') throw new Error(`Invalid auto review setting: ${key}`);
       }
       for (const key of [...Object.values(MESSAGE_KEYS.post), ...Object.values(MESSAGE_KEYS.reply)]) {
