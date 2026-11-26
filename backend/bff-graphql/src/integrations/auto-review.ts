@@ -2,6 +2,7 @@ import { DISCORD_CLOSE, DISCORD_OPEN, parseDiscordBlock, readImageList, threadId
 import type { ThreadMessage, ThreadRow } from './discord-threads';
 import type { Orchestration } from './orchestrator';
 import { lessonsLines } from './lessons';
+import { knownName, learnPeople, webhookPersonId, type DiscordPerson } from './discord-people';
 import { isApproval, personName, webhookReviewer } from './review-findings';
 
 /** How long an "on it" starts a review: long enough for one said while the workspace was off, through a weekend. */
@@ -186,11 +187,12 @@ export const plainText = (text: string) => text.trim().replace(/\]\(/g, ']\u200B
 const isFixReply = (message: Pick<ThreadMessage, 'text' | 'at' | 'webhookId'>, since: number) =>
   Boolean(message.webhookId) && Date.parse(message.at) > since && /\bDOCK-FIX\b/.test(message.text);
 
-function authorReplied(row: ThreadRow, since: number): boolean {
+function authorReplied(row: ThreadRow, since: number, people: DiscordPerson[], roster: string[]): boolean {
   const humans = row.messages.filter((message) => !message.webhookId && !message.mine);
   const poster = row.messages.find((message) => message.authorId === row.createdById);
   const named = poster?.webhookId ? webhookReviewer(poster.author, [...new Map(humans.map((message) => [message.authorId, { id: message.authorId, name: message.author }])).values()]) : undefined;
-  return humans.some((message) => Date.parse(message.at) > since && (message.authorId === row.createdById || message.authorId === named));
+  const learned = poster?.webhookId ? webhookPersonId(poster.author, people, roster) : undefined;
+  return humans.some((message) => Date.parse(message.at) > since && (message.authorId === row.createdById || message.authorId === named || message.authorId === learned));
 }
 
 /** What the author answered "tidak diubah karena" to in a DOCK-FIX reply since `since`: the text before it on each such line, normalized. */
@@ -339,7 +341,8 @@ export class AutoReview {
       await this.sendDue(rows, settings);
       await this.failEnded();
       let started = 0;
-      for (const row of rows) started += await this.consider(row, settings);
+      const learned = learnPeople(rows);
+      for (const row of rows) started += await this.consider(row, settings, learned);
       return started;
     } finally {
       this.busy = false;
@@ -381,7 +384,7 @@ export class AutoReview {
    * reviewers said it after. The ones due go in one Review session for the ticket, BE and FE together, with one record per
    * pull request.
    */
-  private async consider(row: ThreadRow, settings: AutoReviewSettings): Promise<number> {
+  private async consider(row: ThreadRow, settings: AutoReviewSettings, learned: DiscordPerson[]): Promise<number> {
     if (row.kind !== 'pr') return 0;
     this.skipped.delete(row.id);
     const ownClaim = row.ownClaim === undefined ? (row.claim?.mine ? row.claim : null) : row.ownClaim;
@@ -434,7 +437,7 @@ export class AutoReview {
         reasons.push(`arena closed: ${settings.maxRounds} rounds`);
         continue;
       }
-      const waiting = arena ? await this.waiting(row, match, arena, state.headSha, saidAt, settings) : null;
+      const waiting = arena ? await this.waiting(row, match, arena, state.headSha, saidAt, settings, learned) : null;
       if (waiting) {
         reasons.push(waiting);
         continue;
@@ -450,7 +453,7 @@ export class AutoReview {
     try {
       const lessons = this.deps.lessonsFile ? await this.deps.lessonsFile(key).catch(() => null) : null;
       const people = [...(this.deps.people ? await this.deps.people().catch(() => [] as string[]) : []), ...row.messages.filter((message) => !message.webhookId).map((message) => message.author)];
-      const author = row.createdBy ? personName(row.createdBy, people) : null;
+      const author = row.createdBy ? knownName(row.createdById, personName(row.createdBy, people), learned) : null;
       const sessionId = await this.deps.openReview(key, reviewPrompt(key, due.map((pull) => pull.url), row.url, await this.postSkill(settings), lessons, author));
       for (const record of records) await this.deps.update(record.id, { sessionId });
       return 1;
@@ -530,14 +533,15 @@ export class AutoReview {
    * Why a new head commit is not reviewed yet: 72 h went by without a commit, the author has not posted a DOCK-FIX for it nor
    * written in the thread since the last round, or, with re-review on commit turned on, the author may still be pushing.
    */
-  private async waiting(row: ThreadRow, match: RegExpExecArray, arena: AutoReviewRecord, headSha: string, saidAt: number, settings: AutoReviewSettings): Promise<string | null> {
+  private async waiting(row: ThreadRow, match: RegExpExecArray, arena: AutoReviewRecord, headSha: string, saidAt: number, settings: AutoReviewSettings, learned: DiscordPerson[]): Promise<string | null> {
     const now = this.deps.now().getTime();
     const seen = this.firstSeen(match[0], headSha);
     const at = await this.deps.commitAt(match[1], match[2], headSha).catch(() => null);
     if (Math.max(at?.getTime() ?? 0, seen) - lastActivity(arena) > ON_IT_WINDOW_MS) return 'arena closed: 72 h without a new commit';
     const short = headSha.slice(0, 7);
     if (row.messages.some((message) => isFixReply(message, Math.max(saidAt, arena.startedAt.getTime())) && message.text.includes(short))) return null;
-    if (authorReplied(row, Math.max(saidAt, (arena.finishedAt ?? arena.startedAt).getTime()))) return null;
+    const roster = this.deps.people ? await this.deps.people().catch(() => [] as string[]) : [];
+    if (authorReplied(row, Math.max(saidAt, (arena.finishedAt ?? arena.startedAt).getTime()), learned, roster)) return null;
     if (!settings.reReviewOnCommit) return 'waiting for DOCK-FIX or a reply from the author';
     if (at && now - at.getTime() >= settings.reReviewWaitMinutes * 60_000) return null;
     return `waiting for DOCK-FIX, a reply from the author or ${settings.reReviewWaitMinutes} min after the last commit`;
@@ -697,12 +701,13 @@ export class AutoReview {
       await this.deps.update(first.id, { postStatus: 'skipped', postDetail: 'No Discord user id in Settings' });
       return;
     }
-    const row = (await this.deps.rows()).find((item) => item.url === first.threadUrl);
+    const rows = await this.deps.rows();
+    const row = rows.find((item) => item.url === first.threadUrl);
     const pulls = group.map((record) => ({ url: record.prUrl, headSha: record.headSha }));
     const answered = answeredFindings(row?.messages ?? [], Date.parse(row?.ownClaim?.at ?? '') || 0);
     const marker = reviewMarker(owner.discordUserId, first.round, pulls[0]?.headSha ?? '', markerVerdict(run));
     const people = [...(this.deps.people ? await this.deps.people().catch(() => [] as string[]) : []), ...(row?.messages ?? []).filter((message) => !message.webhookId).map((message) => message.author)];
-    const author = personName(row?.createdBy ?? '', people);
+    const author = knownName(row?.createdById, personName(row?.createdBy ?? '', people), learnPeople(rows));
     const template = () => withMarker(plainText(fillTemplate(settings.message.template, reviewTemplateValues(run, pulls, first.round, author, answered))), marker);
     const postAt = new Date(this.deps.now().getTime() + settings.postDelayMinutes * 60_000);
     if (settings.message.format === 'template') {
