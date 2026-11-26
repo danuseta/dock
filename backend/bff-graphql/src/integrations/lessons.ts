@@ -1,6 +1,6 @@
 // Agents › Lessons: every finding from Judge, a closed ticket ledger or an owner correction becomes a LessonSource, and every
 // source ends in a final status: a lesson, merged into a similar lesson, a "make it code" card, or environment (a notice only).
-// A lesson is written where sessions read it (a skill or agent lessons file through the kit bridge, the Sous flow rules, a repo or
+// A lesson is written where sessions read it (a skill or agent lessons file through the kit bridge, a repo or
 // facts file under .evidence/lessons) and gathered per ticket into .evidence/lessons/<KEY>.md, which the prompt names on one
 // `Pelajaran:` line and the kit guard makes the session read before it edits or commits.
 import { createHash } from 'node:crypto';

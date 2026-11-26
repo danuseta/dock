@@ -7,6 +7,7 @@ import { ticketSessionTitle } from './session-titles';
 import { inPublishedPlan, publishWait, sprintRevision } from './plan-publish';
 import { HOLD_NEW_SPRINT_KEY, readHoldNewSprint } from './ops-rules';
 import { lessonsLine, lessonsLines } from './lessons';
+import { FLOW_RULE_PREFIX } from './sous-flow';
 
 export class CronInputError extends Error {}
 
@@ -457,6 +458,23 @@ export const sousConfirmedPrompt = (key: string, stackOn: string | null = null, 
   ...flow,
 ].join(' '), lessons);
 
+/** The chat bridge refuses a message over 8000 characters; a start prompt keeps a margin under it. */
+export const START_PROMPT_MAX = 7600;
+export const FLOW_RULES_LEFT_OUT_LINE = 'Sous flow rules: left out of this message because it would be too long; read them in Settings › Sous flow › Rules and in the lessons file.';
+
+/**
+ * A start prompt that fits one chat message. Over the limit, the flow rule lines go first for one line naming where they
+ * are; still over, the other flow lines go from the end. `trimmed` says something was left out.
+ */
+export function fitStartPrompt(build: (flow: readonly string[]) => string, flow: readonly string[]): { prompt: string; trimmed: boolean } {
+  const full = build(flow);
+  if (full.length <= START_PROMPT_MAX) return { prompt: full, trimmed: false };
+  const rest = flow.filter((line) => !line.startsWith(FLOW_RULE_PREFIX));
+  const note = rest.length < flow.length ? [FLOW_RULES_LEFT_OUT_LINE] : [];
+  while (rest.length && build([...rest, ...note]).length > START_PROMPT_MAX) rest.pop();
+  return { prompt: build([...rest, ...note]).slice(0, START_PROMPT_MAX), trimmed: true };
+}
+
 /** The first message of the new session an owner action on a sous ticket opens; `line` is the answer or the cancel. */
 export const ownerReplyPrompt = (key: string, line: string, lessons: string | null = null) => [
   `Pakai skill sous. Lanjutkan tiket ${key} dari blackboard dan ledger (node $K/status.cjs show ${key}), jangan mulai dari awal.`,
@@ -560,6 +578,7 @@ interface DayCount { started: string[]; parked: string[] }
 export class OrchestratorCron {
   private running: Promise<FillLog> | null = null;
   private readonly ownerOpening = new Set<string>();
+  private readonly trimWarned = new Set<string>();
   /** The lines an owner answer adds for the ticket's held review round; set where the review findings are wired. */
   reviewLines: (key: string) => Promise<string[]> = async () => [];
 
@@ -819,7 +838,17 @@ export class OrchestratorCron {
 
   private async startPromptOf(settings: CronSettings, key: string, stackOn: string | null = null, extra: string[] = []) {
     const lessons = await this.lessonsOf(key);
-    return settings.engine === 'sous' ? sousStartPrompt(key, stackOn, [...extra, ...(await this.flowLines(key))], lessons) : startPrompt(key, lessons);
+    return settings.engine === 'sous' ? this.fitted(key, (flow) => sousStartPrompt(key, stackOn, flow, lessons), [...extra, ...(await this.flowLines(key))]) : startPrompt(key, lessons);
+  }
+
+  /** The start prompt cut to one chat message; the first cut of a ticket is logged once. */
+  private fitted(key: string, build: (flow: readonly string[]) => string, flow: readonly string[]): string {
+    const { prompt, trimmed } = fitStartPrompt(build, flow);
+    if (trimmed && !this.trimWarned.has(key)) {
+      this.trimWarned.add(key);
+      console.warn(`[Orchestrator cron] ${key} start prompt was over ${START_PROMPT_MAX} characters; flow lines were left out of it`);
+    }
+    return prompt;
   }
 
   /** The ticket's lessons file for its prompt; null when lessons are not wired or the file cannot be written. */
@@ -860,7 +889,7 @@ export class OrchestratorCron {
     const settings = { ...(await this.settings()), machine: run.machine };
     const stackOn = (await this.dependencyState(settings)).stacked.get(ticket.key) ?? null;
     const lessons = await this.lessonsOf(ticket.key);
-    const confirmed = settings.engine === 'sous' ? sousConfirmedPrompt(ticket.key, stackOn, await this.flowLines(ticket.key), lessons) : confirmedPrompt(ticket.key, lessons);
+    const confirmed = settings.engine === 'sous' ? this.fitted(ticket.key, (flow) => sousConfirmedPrompt(ticket.key, stackOn, flow, lessons), await this.flowLines(ticket.key)) : confirmedPrompt(ticket.key, lessons);
     await this.start(ticket, settings, this.deps.now(), run.waiting === PARKED_TEXT ? confirmed : await this.startPromptOf(settings, ticket.key, stackOn));
   }
 
