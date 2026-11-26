@@ -598,13 +598,13 @@ export const SET_QA_AUTO_RUN = gql`
 `;
 
 export const LESSON_FIELDS = `
-  id targetKind targetName text cause count ignored ticketKeys sessionIds status cardKey cardState cardSessionId writtenTo createdAt updatedAt
+  id targetKind targetName text textId cause count ignored ticketKeys sessionIds status cardKey cardState cardSessionId writtenTo createdAt updatedAt
   sources { id kind ref sessionId messageId ticketKey text cause status createdAt }
 `;
 
 export const EDIT_LESSON = gql`
-  mutation EditLesson($id: ID!, $text: String!) {
-    editLesson(id: $id, text: $text) { ${LESSON_FIELDS} }
+  mutation EditLesson($id: ID!, $text: String!, $textId: String) {
+    editLesson(id: $id, text: $text, textId: $textId) { ${LESSON_FIELDS} }
   }
 `;
 

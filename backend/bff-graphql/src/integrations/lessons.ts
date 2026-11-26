@@ -39,16 +39,17 @@ export interface SourceInput {
   targetKind?: LessonTarget | null;
   targetName?: string | null;
   lesson?: string | null;
+  lessonTextId?: string | null;
 }
 
 export interface SourceRow {
   id: string; kind: string; ref: string; sessionId: string | null; messageId: number | null; sprint: string | null; ticketKey: string | null;
-  text: string; cause: string; shouldHave: string; targetKind: string | null; targetName: string | null; lesson: string | null;
+  text: string; cause: string; shouldHave: string; targetKind: string | null; targetName: string | null; lesson: string | null; lessonTextId: string | null;
   status: string; lessonId: string | null; error: string | null; createdAt: Date; processedAt: Date | null;
 }
 
 export interface LessonRow {
-  id: string; targetKind: string; targetName: string; text: string; cause: string; count: number; ignored: number;
+  id: string; targetKind: string; targetName: string; text: string; textId: string | null; cause: string; count: number; ignored: number;
   ticketKeys: string; sessionIds: string; status: string; cardKey: string | null; cardState: string | null; cardSessionId: string | null;
   noticeAt: Date | null; createdAt: Date; updatedAt: Date;
 }
@@ -110,7 +111,7 @@ export function findSimilar(lessons: LessonRow[], target: { kind: string; name: 
 
 export interface JudgeFindingLike {
   messageId: number | null; cause: string; text: string; shouldHave: string; call: string;
-  target?: { kind: string; name: string } | null; lesson?: string | null;
+  target?: { kind: string; name: string } | null; lesson?: string | null; lessonId?: string | null;
 }
 
 /** The findings of one Judge session result Judge called a mistake; a finding Judge called not a mistake teaches nothing. */
@@ -129,6 +130,7 @@ export function judgeSessionSources(sessionId: string, ticketKey: string | null,
       targetKind: target ? target.kind as LessonTarget : null,
       targetName: target ? targetName(target.kind, target.name) : null,
       lesson: target && finding.lesson ? oneLine(finding.lesson) : null,
+      lessonTextId: target && finding.lesson && finding.lessonId ? oneLine(finding.lessonId) : null,
     };
   });
 }
@@ -266,12 +268,12 @@ export function ownerCorrectionSource(key: string, decision: { n: number; text: 
 }
 
 /** The target and text a source becomes, or environment when it teaches the agent nothing. */
-export function deriveLesson(source: Pick<SourceRow, 'kind' | 'cause' | 'text' | 'shouldHave' | 'targetKind' | 'targetName' | 'lesson'>): { environment: true } | { environment: false; kind: LessonTarget; name: string; text: string } {
+export function deriveLesson(source: Pick<SourceRow, 'kind' | 'cause' | 'text' | 'shouldHave' | 'targetKind' | 'targetName' | 'lesson' | 'lessonTextId'>): { environment: true } | { environment: false; kind: LessonTarget; name: string; text: string; textId: string | null } {
   if (source.cause === 'environment') return { environment: true };
   if (source.targetKind && (LESSON_TARGETS as readonly string[]).includes(source.targetKind) && source.lesson) {
-    return { environment: false, kind: source.targetKind as LessonTarget, name: targetName(source.targetKind, source.targetName), text: oneLine(source.lesson) };
+    return { environment: false, kind: source.targetKind as LessonTarget, name: targetName(source.targetKind, source.targetName), text: oneLine(source.lesson), textId: source.lessonTextId ? oneLine(source.lessonTextId) : null };
   }
-  return { environment: false, kind: 'flow', name: FLOW_NAME, text: oneLine(source.shouldHave || source.text) };
+  return { environment: false, kind: 'flow', name: FLOW_NAME, text: oneLine(source.shouldHave || source.text), textId: null };
 }
 
 // ---- Files --------------------------------------------------------------------------------------------------------

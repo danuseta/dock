@@ -743,7 +743,7 @@ export class StorageService {
   }
 
   /** A lesson source, kept once per ref: null when the ref is in the queue already. */
-  async addLessonSource(input: { kind: string; ref: string; sessionId?: string | null; messageId?: number | null; sprint?: string | null; ticketKey?: string | null; text: string; cause: string; shouldHave?: string; targetKind?: string | null; targetName?: string | null; lesson?: string | null }) {
+  async addLessonSource(input: { kind: string; ref: string; sessionId?: string | null; messageId?: number | null; sprint?: string | null; ticketKey?: string | null; text: string; cause: string; shouldHave?: string; targetKind?: string | null; targetName?: string | null; lesson?: string | null; lessonTextId?: string | null }) {
     if (await this.db.lessonSource.findUnique({ where: { ref: input.ref }, select: { id: true } })) return null;
     return this.db.lessonSource.create({ data: { ...input, shouldHave: input.shouldHave ?? '' } }).catch((error: unknown) => {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return null;

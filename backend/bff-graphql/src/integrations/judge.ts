@@ -36,7 +36,7 @@ const text = (value: unknown, max: number) => (typeof value === 'string' ? value
 
 /** Where a finding's lesson goes (Agents › Lessons); left out for environment and by a Judge result from before lessons. */
 export interface JudgeLessonTarget { kind: 'skill' | 'agent' | 'flow' | 'repo' | 'fact' | 'code'; name: string }
-export interface JudgeFindingInput { messageId: number | null; threadUrl: string | null; cause: JudgeCause; text: string; quote: string; shouldHave: string; call: JudgeCall; target: JudgeLessonTarget | null; lesson: string | null }
+export interface JudgeFindingInput { messageId: number | null; threadUrl: string | null; cause: JudgeCause; text: string; quote: string; shouldHave: string; call: JudgeCall; target: JudgeLessonTarget | null; lesson: string | null; lessonId: string | null }
 const LESSON_TARGET_KINDS = ['skill', 'agent', 'flow', 'repo', 'fact', 'code'];
 export interface JudgeResult { sessionId: string; untilMessageId: number | null; findings: JudgeFindingInput[]; ownerWaitMinutes: number }
 
@@ -75,7 +75,8 @@ export function parseJudgeResult(input: unknown): JudgeResult {
       ? { kind: String(item.target.kind) as JudgeLessonTarget['kind'], name: text(item.target.name, 120) }
       : null;
     const lesson = target ? text(item.lesson, 1500) || null : null;
-    return { messageId: messageIdOf(item.messageId), threadUrl: httpUrl(item.threadUrl), cause: cause as JudgeCause, text: body, quote: text(item.quote, 1500), shouldHave: text(item.shouldHave, 1000), call: call as JudgeCall, target: lesson ? target : null, lesson };
+    const lessonId = lesson ? text(item.lessonId, 1500) || null : null;
+    return { messageId: messageIdOf(item.messageId), threadUrl: httpUrl(item.threadUrl), cause: cause as JudgeCause, text: body, quote: text(item.quote, 1500), shouldHave: text(item.shouldHave, 1000), call: call as JudgeCall, target: lesson ? target : null, lesson, lessonId };
   });
   const wait = Number(input.ownerWaitMinutes ?? 0);
   return {

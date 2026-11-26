@@ -16,7 +16,7 @@ export const LessonsTab: React.FC = () => {
   const [approve, approveState] = useMutation(APPROVE_LESSON_CODE);
   const after = <T,>(work: Promise<T>) => work.then(async (result) => { await refetch(); return result; });
   const actions: LessonActions = {
-    edit: (id, text) => after(edit({ variables: { id, text } })),
+    edit: (id, text, textId) => after(edit({ variables: { id, text, textId } })),
     retarget: (id, kind, name) => after(retarget({ variables: { id, kind, name } })),
     remove: (id) => after(remove({ variables: { id } })),
     approve: (id) => after(approve({ variables: { id } })),
