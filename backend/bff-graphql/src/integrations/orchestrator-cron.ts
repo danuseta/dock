@@ -711,6 +711,12 @@ export class OrchestratorCron {
       } catch (error) {
         console.error(`[Orchestrator cron] ${ticket.key} failed:`, error instanceof Error ? error.message : 'unknown error');
         log.failed.push(ticket.key);
+        const counted = day.started.lastIndexOf(ticket.key);
+        if (counted >= 0) {
+          day.started.splice(counted, 1);
+          log.started = log.started.filter((key) => key !== ticket.key);
+          free += 1;
+        }
       }
     }
   }
