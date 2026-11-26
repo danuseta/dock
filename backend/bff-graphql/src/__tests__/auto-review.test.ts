@@ -38,7 +38,7 @@ function world(options: { enabled?: boolean; autoLgtm?: boolean; rows?: ThreadRo
     running: async (key) => [...records].reverse().find((record) => record.ticketKey === key && record.status === 'running') ?? null,
     staleRunning: async (before) => records.filter((record) => record.status === 'running' && record.startedAt < before),
     sessionIdle: async (sessionId) => !busy.has(sessionId),
-    create: async (data) => { const record: AutoReviewRecord = { id: `r${(n += 1)}`, sessionId: null, status: 'running', detail: null, finishedAt: null, postStatus: null, postAt: null, postText: null, postMessageId: null, postDetail: null, postImages: null, ...data }; records.push(record); return record; },
+    create: async (data) => { if (records.some((item) => item.prUrl === data.prUrl && item.headSha === data.headSha)) throw new Error('Unique constraint failed on the fields: (`prUrl`,`headSha`)'); const record: AutoReviewRecord = { id: `r${(n += 1)}`, sessionId: null, status: 'running', detail: null, finishedAt: null, postStatus: null, postAt: null, postText: null, postMessageId: null, postDetail: null, postImages: null, ...data }; records.push(record); return record; },
     update: async (id, data) => { Object.assign(records.find((record) => record.id === id) as AutoReviewRecord, data); },
     updatePending: async (id, data) => {
       const record = records.find((item) => item.id === id);
@@ -451,9 +451,9 @@ test('a DOCK-FIX that answers the blockers on the same head starts the next roun
   answered.records[0].finishedAt = settledAt;
   answered.deps.pull = async () => ({ open: true, headSha: 'abc1234' });
   assert.strictEqual(await answered.review.tick(), 1);
-  assert.deepStrictEqual(answered.records.map((record) => [record.headSha, record.round]), [['abc1234', 1], ['abc1234', 2]]);
-  answered.records[1].status = 'blockers';
-  answered.records[1].finishedAt = new Date(NOW.getTime() - 60_000);
+  assert.deepStrictEqual(answered.records.map((record) => [record.headSha, record.round, record.status, record.postStatus]), [['abc1234', 2, 'running', null]], 'the head keeps one record, which runs the next round');
+  answered.records[0].status = 'blockers';
+  answered.records[0].finishedAt = new Date(NOW.getTime() - 60_000);
   assert.strictEqual(await answered.review.tick(), 0, 'the same answer is judged once');
 
   const old = arena({ messages: [answer(new Date(NOW.getTime() - 45 * 60_000))] });
