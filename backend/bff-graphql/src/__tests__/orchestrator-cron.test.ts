@@ -981,3 +981,14 @@ test('an owner answer carries the lines of the ticket\'s held review round after
   await broken.cron.answer('QRD-9', 'Drop');
   assert.strictEqual(broken.state.sent[0].text, ownerReplyPrompt('QRD-9', 'Jawaban owner untuk I-2: Drop'));
 });
+
+test('a start whose first message is refused does not count toward the daily cap', async () => {
+  const w = world({ tickets: [ticket('QRD-1582'), ticket('QRD-1581')], config: { maxPerDay: 2, parallel: 2 } });
+  w.state.failSend = true;
+  const first = await w.cron.runFill();
+  assert.deepStrictEqual([first.started, [...first.failed].sort()], [[], ['QRD-1581', 'QRD-1582']]);
+  assert.strictEqual((await w.cron.status()).startedToday, 0);
+  w.state.failSend = false;
+  const second = await w.cron.runFill();
+  assert.deepStrictEqual(second.started.sort(), ['QRD-1581', 'QRD-1582']);
+});
