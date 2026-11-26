@@ -3,7 +3,7 @@ import type { ThreadMessage, ThreadRow } from './discord-threads';
 import type { Orchestration } from './orchestrator';
 import { lessonsLines } from './lessons';
 import { knownName, learnPeople, webhookPersonId, type DiscordPerson } from './discord-people';
-import { isApproval, personName, webhookReviewer } from './review-findings';
+import { approvals, isApproval, personName, webhookIdOf, webhookReviewer } from './review-findings';
 
 /** How long an "on it" starts a review: long enough for one said while the workspace was off, through a weekend. */
 export const ON_IT_WINDOW_MS = 72 * 60 * 60 * 1000;
@@ -11,6 +11,10 @@ const PULL = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/;
 const MAX_POST_CHARS = 2_000;
 const STOP_DOCK = /\bstop\s+dock\b/i;
 const DOCK_POST = /\bDOCK-(?:REVIEW|FIX)\b/;
+const REVIEW_POST = /^DOCK-REVIEW on it by /m;
+const VERDICT_WORDS = /\b(?:lgtm|approved?|blockers?|catatan|notes|request[\s-]*changes?)\b/i;
+const HOUR_MS = 60 * 60 * 1000;
+const RETRIGGER_GAP_MS = 24 * HOUR_MS;
 const NOT_CHANGED = /tidak\s+diubah\s+karena/i;
 const ARENA_DONE = ['lgtm', 'clean'];
 /** A line that reads as a DOCK marker in any spelling; a body never carries one, only the marker DOCK adds. */
@@ -93,6 +97,7 @@ export const ARENA_SETTINGS = {
   reviewPostDelayMinutes: { fallback: 2, min: 0, max: 60 },
   reviewReReviewWaitMinutes: { fallback: 10, min: 0, max: 240 },
   reviewMaxRounds: { fallback: 3, min: 1, max: 10 },
+  reviewOnItRetriggerHours: { fallback: 24, min: 1, max: 168 },
 } as const;
 export type ArenaSettingKey = keyof typeof ARENA_SETTINGS;
 
@@ -104,7 +109,7 @@ export const isArenaSetting = (key: ArenaSettingKey, value: unknown) => {
 /** A saved arena number, or its default when it was never saved or no longer fits. */
 export const arenaSetting = (key: ArenaSettingKey, value: string | null | undefined) => (value != null && isArenaSetting(key, value) ? Number(value) : ARENA_SETTINGS[key].fallback);
 
-export interface AutoReviewSettings { enabled: boolean; autoLgtm: boolean; post: boolean; postDelayMinutes: number; reReviewOnCommit?: boolean; reReviewWaitMinutes: number; maxRounds: number; message: MessageFormat }
+export interface AutoReviewSettings { enabled: boolean; autoLgtm: boolean; post: boolean; postDelayMinutes: number; reReviewOnCommit?: boolean; reReviewWaitMinutes: number; maxRounds: number; message: MessageFormat; onItRetrigger?: boolean; onItRetriggerHours?: number }
 export interface PullState { open: boolean; headSha: string }
 export interface AutoReviewRecord {
   id: string; prUrl: string; headSha: string; ticketKey: string; threadUrl: string; sessionId: string | null; status: string; detail: string | null; startedAt: Date; finishedAt: Date | null;
@@ -156,6 +161,9 @@ export interface AutoReviewDeps {
   /** The folder a ticket's review screenshots are uploaded from; null when the key is not one of this DOCK's blackboard tickets. */
   imageRoot(key: string): Promise<string | null>;
   people?(): Promise<string[]>;
+  /** When DOCK last started a review itself for a thread's on it without a result; null when it never did. */
+  retriggeredAt(threadId: string): Promise<Date | null>;
+  markRetriggered(threadId: string, at: Date): Promise<unknown>;
   now(): Date;
 }
 
@@ -309,6 +317,11 @@ const lastActivity = (arena: AutoReviewRecord) => Math.max(arena.startedAt.getTi
 /** The ticket of a pull request thread: the first key in its title, tags or a Jira link. */
 const ticketOf = (row: ThreadRow) => row.tickets[0] ?? null;
 
+/** Something came of the owner's on it: a DOCK review post through the owner's webhook, or a verdict the owner wrote, however short. */
+const hasResult = (row: ThreadRow, saidAt: number, webhookId: string | null) => row.messages.some((message) => Date.parse(message.at) > saidAt && (message.webhookId
+  ? Boolean(webhookId) && message.webhookId === webhookId && REVIEW_POST.test(message.text) && !/\bDOCK-FIX\b/.test(message.text)
+  : message.mine && (isApproval(message.text, null) || VERDICT_WORDS.test(message.text))));
+
 /**
  * Starts a sous review when the owner says "on it" in a pr-review thread, and acts on its verdict: an approve without an
  * open blocker is LGTM'd the way the button does it when the owner allows that, anything else is handed to the owner.
@@ -333,16 +346,20 @@ export class AutoReview {
       if (!settings.enabled) {
         this.skipped.clear();
         this.wasEnabled = false;
-        return 0;
+        if (!settings.onItRetrigger) return 0;
+      } else {
+        if (this.wasEnabled === false) this.enabledAt = this.deps.now().getTime();
+        this.wasEnabled = true;
       }
-      if (this.wasEnabled === false) this.enabledAt = this.deps.now().getTime();
-      this.wasEnabled = true;
       const rows = await this.deps.rows();
       await this.sendDue(rows, settings);
       await this.failEnded();
       let started = 0;
       const learned = learnPeople(rows);
-      for (const row of rows) started += await this.consider(row, settings, learned);
+      if (settings.enabled) for (const row of rows) started += await this.consider(row, settings, learned);
+      if (!settings.onItRetrigger) return started;
+      const webhookId = webhookIdOf((await this.deps.owner()).webhookUrl);
+      for (const row of rows) started += await this.retrigger(row, settings, learned, webhookId);
       return started;
     } finally {
       this.busy = false;
@@ -384,14 +401,14 @@ export class AutoReview {
    * reviewers said it after. The ones due go in one Review session for the ticket, BE and FE together, with one record per
    * pull request.
    */
-  private async consider(row: ThreadRow, settings: AutoReviewSettings, learned: DiscordPerson[]): Promise<number> {
+  private async consider(row: ThreadRow, settings: AutoReviewSettings, learned: DiscordPerson[], retrigger = false): Promise<number> {
     if (row.kind !== 'pr') return 0;
     this.skipped.delete(row.id);
     const ownClaim = row.ownClaim === undefined ? (row.claim?.mine ? row.claim : null) : row.ownClaim;
     if (!ownClaim) return 0;
     const saidAt = Date.parse(ownClaim.at);
     const fresh = this.deps.now().getTime() - saidAt <= ON_IT_WINDOW_MS;
-    if (this.enabledAt !== null && saidAt < this.enabledAt) return this.skip(row, ['said before the setting was turned on']);
+    if (!retrigger && this.enabledAt !== null && saidAt < this.enabledAt) return this.skip(row, ['said before the setting was turned on']);
     const key = ticketOf(row);
     if (!key) return this.skip(row, ['no ticket key']);
     const due: Array<{ url: string; headSha: string; round: number; retry?: AutoReviewRecord; again?: AutoReviewRecord }> = [];
@@ -403,12 +420,12 @@ export class AutoReview {
       const url = match[0];
       const last = await this.deps.latest(url);
       const arena = last && last.startedAt.getTime() >= saidAt ? last : null;
-      if (!arena && !fresh) {
+      if (!arena && !fresh && !retrigger) {
         reasons.push('older than 72 h');
         continue;
       }
       if (arena && (arena.status === 'running' || arena.status === 'deciding')) continue;
-      const closed = arena ? this.closed(row, arena, saidAt, settings) : null;
+      const closed = arena ? this.closed(row, arena, saidAt, settings, retrigger) : null;
       if (closed) {
         reasons.push(closed);
         continue;
@@ -429,7 +446,7 @@ export class AutoReview {
         else due.push({ url, headSha: state.headSha, round: arena ? arena.round : 1, retry: last });
         continue;
       }
-      if (last && last.headSha === state.headSha && !(arena && this.answeredOnSameHead(row, arena, state.headSha))) {
+      if (last && last.headSha === state.headSha && !retrigger && !(arena && this.answeredOnSameHead(row, arena, state.headSha))) {
         reasons.push('same head commit, already reviewed');
         continue;
       }
@@ -437,7 +454,7 @@ export class AutoReview {
         reasons.push(`arena closed: ${settings.maxRounds} rounds`);
         continue;
       }
-      const waiting = arena ? await this.waiting(row, match, arena, state.headSha, saidAt, settings, learned) : null;
+      const waiting = arena && !(retrigger && last?.headSha === state.headSha) ? await this.waiting(row, match, arena, state.headSha, saidAt, settings, learned, retrigger) : null;
       if (waiting) {
         reasons.push(waiting);
         continue;
@@ -467,6 +484,32 @@ export class AutoReview {
       }
       return this.skip(row, [`session did not start: ${detail}`]);
     }
+  }
+
+  /**
+   * The owner's on it got no result for the set hours: DOCK starts the review itself, once a day at most per thread, unless the
+   * pull request already has two approvals or a review of it is running or was posted since the on it.
+   */
+  private async retrigger(row: ThreadRow, settings: AutoReviewSettings, learned: DiscordPerson[], webhookId: string | null): Promise<number> {
+    const ownClaim = row.ownClaim === undefined ? (row.claim?.mine ? row.claim : null) : row.ownClaim;
+    const key = ticketOf(row);
+    if (row.kind !== 'pr' || !ownClaim || !key) return 0;
+    const saidAt = Date.parse(ownClaim.at);
+    const now = this.deps.now();
+    const hours = settings.onItRetriggerHours ?? ARENA_SETTINGS.reviewOnItRetriggerHours.fallback;
+    if (now.getTime() - saidAt < hours * HOUR_MS || hasResult(row, saidAt, webhookId)) return 0;
+    if (new Set(approvals(row, 0, webhookId).map((message) => message.authorId)).size >= 2) return 0;
+    const last = await this.deps.retriggeredAt(row.id);
+    if (last && now.getTime() - last.getTime() < RETRIGGER_GAP_MS) return 0;
+    for (const prUrl of row.prs) {
+      const match = PULL.exec(prUrl);
+      const record = match ? await this.deps.latest(match[0]) : null;
+      if (record && (record.status === 'running' || record.status === 'deciding' || (record.postStatus === 'sent' && record.startedAt.getTime() >= saidAt))) return 0;
+    }
+    if (!(await this.consider(row, settings, learned, true))) return 0;
+    await this.deps.markRetriggered(row.id, now);
+    await this.deps.push({ title: `${key}: on it ${hours} h without a review, DOCK started one`, body: 'The review runs like an auto review. Open Agents to follow it.', url: '/agents', tag: `auto-review-retrigger-${row.id}` });
+    return 1;
   }
 
   /** The author answered on the same head: the record of that head runs the next round, since a head has one record. */
@@ -507,11 +550,11 @@ export class AutoReview {
   }
 
   /** Why an arena no longer reviews: approved, out of rounds, or a person wrote stop dock in the thread since the on it. */
-  private closed(row: ThreadRow, arena: AutoReviewRecord, saidAt: number, settings: AutoReviewSettings): string | null {
+  private closed(row: ThreadRow, arena: AutoReviewRecord, saidAt: number, settings: AutoReviewSettings, retrigger = false): string | null {
     if (ARENA_DONE.includes(arena.status)) return 'arena closed: approved';
     if (arena.round >= settings.maxRounds && arena.status !== 'failed') return `arena closed: ${settings.maxRounds} rounds`;
     if (row.messages.some((message) => Date.parse(message.at) > saidAt && saysStop(message))) return 'arena closed: stop dock';
-    if (this.deps.now().getTime() - lastActivity(arena) > ON_IT_WINDOW_MS) return 'arena closed: 72 h without a new commit';
+    if (!retrigger && this.deps.now().getTime() - lastActivity(arena) > ON_IT_WINDOW_MS) return 'arena closed: 72 h without a new commit';
     return null;
   }
 
@@ -541,11 +584,11 @@ export class AutoReview {
    * Why a new head commit is not reviewed yet: 72 h went by without a commit, the author has not posted a DOCK-FIX for it nor
    * written in the thread since the last round, or, with re-review on commit turned on, the author may still be pushing.
    */
-  private async waiting(row: ThreadRow, match: RegExpExecArray, arena: AutoReviewRecord, headSha: string, saidAt: number, settings: AutoReviewSettings, learned: DiscordPerson[]): Promise<string | null> {
+  private async waiting(row: ThreadRow, match: RegExpExecArray, arena: AutoReviewRecord, headSha: string, saidAt: number, settings: AutoReviewSettings, learned: DiscordPerson[], retrigger = false): Promise<string | null> {
     const now = this.deps.now().getTime();
     const seen = this.firstSeen(match[0], headSha);
     const at = await this.deps.commitAt(match[1], match[2], headSha).catch(() => null);
-    if (Math.max(at?.getTime() ?? 0, seen) - lastActivity(arena) > ON_IT_WINDOW_MS) return 'arena closed: 72 h without a new commit';
+    if (!retrigger && Math.max(at?.getTime() ?? 0, seen) - lastActivity(arena) > ON_IT_WINDOW_MS) return 'arena closed: 72 h without a new commit';
     const short = headSha.slice(0, 7);
     if (row.messages.some((message) => isFixReply(message, Math.max(saidAt, arena.startedAt.getTime())) && message.text.includes(short))) return null;
     const roster = this.deps.people ? await this.deps.people().catch(() => [] as string[]) : [];

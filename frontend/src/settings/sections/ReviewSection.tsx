@@ -16,6 +16,17 @@ export const ReviewSection = ({ values, set }: { values: SectionValues; set: (ke
         <Checkbox checked={values.autoLgtm === 'true'} disabled={values.autoReviewOnIt !== 'true'} onChange={(event) => set('autoLgtm', String(event.target.checked))} />
         <span><b className="font-semibold text-foreground">LGTM when the review is clean</b><span className="block text-xs text-muted-foreground">An approve verdict with no open blocker gets the same LGTM as the button on Agents: your Pass label in Jira and a GitHub approval. You are told, so you can say it in the thread.</span></span>
       </label>
+      <div className="flex items-start gap-3 text-sm">
+        <Checkbox checked={values.reviewOnItRetrigger === 'true'} aria-label="Review an on it that has no result" onChange={(event) => set('reviewOnItRetrigger', String(event.target.checked))} />
+        <span>
+          <span className="flex flex-wrap items-center gap-2">
+            <b className="font-semibold text-foreground">Review an on it that has no result after</b>
+            <Input type="number" min={REVIEW_NUMBERS.reviewOnItRetriggerHours.min} max={REVIEW_NUMBERS.reviewOnItRetriggerHours.max} aria-label="On it hours" className="h-8 w-20 font-mono" value={values.reviewOnItRetriggerHours} onChange={(event) => set('reviewOnItRetriggerHours', event.target.value)} />
+            <span className="text-foreground">hours</span>
+          </span>
+          <span className="block text-xs text-muted-foreground">No review post from your DOCK and no verdict from you in the thread since your on it: DOCK starts the review itself, at most once a day per thread, and tells you. Works even with Review when I say on it off.</span>
+        </span>
+      </div>
       <label className="flex items-start gap-3 text-sm">
         <Checkbox checked={values.reviewFindingsToTask === 'true'} onChange={(event) => set('reviewFindingsToTask', String(event.target.checked))} />
         <span><b className="font-semibold text-foreground">Send review findings to the Task session</b><span className="block text-xs text-muted-foreground">A teammate's notes in your pr-review thread go to the ticket's Task session, which fixes the valid ones and pushes to the PR. Nothing is posted to Discord.</span></span>

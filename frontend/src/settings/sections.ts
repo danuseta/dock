@@ -54,6 +54,8 @@ export interface SavedSettings {
   reviewReReviewOnCommit?: boolean | null;
   reviewReReviewWaitMinutes?: number | null;
   reviewMaxRounds?: number | null;
+  reviewOnItRetrigger?: boolean | null;
+  reviewOnItRetriggerHours?: number | null;
   reviewFindingsAutoReply?: boolean | null;
   reviewPostFormat?: string | null;
   reviewPostSkill?: string | null;
@@ -188,6 +190,8 @@ export function savedValues(settings: SavedSettings): Record<DraftSectionId, Sec
       reviewReReviewOnCommit: String(settings.reviewReReviewOnCommit === true),
       reviewReReviewWaitMinutes: String(settings.reviewReReviewWaitMinutes ?? REVIEW_NUMBERS.reviewReReviewWaitMinutes.fallback),
       reviewMaxRounds: String(settings.reviewMaxRounds ?? REVIEW_NUMBERS.reviewMaxRounds.fallback),
+      reviewOnItRetrigger: String(settings.reviewOnItRetrigger === true),
+      reviewOnItRetriggerHours: String(settings.reviewOnItRetriggerHours ?? REVIEW_NUMBERS.reviewOnItRetriggerHours.fallback),
     },
     messages: {
       discordMessageTemplate: settings.discordMessageTemplate || DEFAULT_DISCORD_MESSAGE_TEMPLATE,
