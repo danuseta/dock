@@ -1,5 +1,5 @@
 // Agents › Lessons wired to the workspace: the Judge result and sprint summary, closed ledgers and owner corrections feed the
-// queue; lessons go to the kit bridge, the Sous flow rules and .evidence/lessons; every ticket session gets its lessons file.
+// queue; lessons go to the kit bridge and .evidence/lessons; every ticket session gets its lessons file.
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { JiraAPI } from '../datasources/JiraAPI';
@@ -12,7 +12,7 @@ import { judgeQueue } from './judge-live';
 import { lessonHooks } from './lessons-hook';
 import { LessonService } from './lesson-service';
 import {
-  LESSON_KEY, SOUS_FLOW_RULES_KEY, judgeSessionSources, judgeSprintSources, ledgerSources, lessonsDir, ownerCorrectionSource, ticketRepos,
+  LESSON_KEY, judgeSessionSources, judgeSprintSources, ledgerSources, lessonsDir, ownerCorrectionSource, ticketRepos,
   type LessonRow, type SourceRow,
 } from './lessons';
 import { orchestratorService } from './orchestrator';
@@ -60,7 +60,6 @@ export const lessonService = new LessonService({
     const result = await agentBridge.putLessonsFile(CHAT_MACHINE, kind, name, text);
     if (!result.ok) throw new Error(result.error ?? 'The kit refused the lessons file');
   },
-  writeFlowRules: async (lines) => { await storage.upsertSetting(SOUS_FLOW_RULES_KEY, JSON.stringify(lines), 'Sous flow rules written from Agents › Lessons'); },
   writeFile: writeIfChanged,
   ticketFiles: async () => (await readdir(lessonsDir(evidenceRoot())).catch(() => [] as string[])).filter((name) => name.endsWith('.md') && LESSON_KEY.test(name.slice(0, -3))).map((name) => name.slice(0, -3)),
   ticketRepos: async (key) => ticketRepos(await orchestratorService.get(key).catch(() => null), await labelsOf(key)),

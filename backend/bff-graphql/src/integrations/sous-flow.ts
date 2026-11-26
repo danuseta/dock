@@ -173,7 +173,8 @@ export function readFlowRules(raw: string | null | undefined): string[] {
 }
 
 /** The prompt lines the flow rules add; none without rules, so the prompt stays as before. */
-export const flowRuleLines = (rules: readonly string[]) => rules.map((rule) => `Sous flow rule: ${rule}`);
+export const FLOW_RULE_PREFIX = 'Sous flow rule: ';
+export const flowRuleLines = (rules: readonly string[]) => rules.map((rule) => `${FLOW_RULE_PREFIX}${rule}`);
 
 /** The settings for the query, every default filled in. */
 export const storedSousFlow = (raw: string | null | undefined) => JSON.stringify(readSousFlow(raw));
