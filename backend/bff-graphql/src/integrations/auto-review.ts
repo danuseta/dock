@@ -394,7 +394,7 @@ export class AutoReview {
     if (this.enabledAt !== null && saidAt < this.enabledAt) return this.skip(row, ['said before the setting was turned on']);
     const key = ticketOf(row);
     if (!key) return this.skip(row, ['no ticket key']);
-    const due: Array<{ url: string; headSha: string; round: number; retry?: AutoReviewRecord }> = [];
+    const due: Array<{ url: string; headSha: string; round: number; retry?: AutoReviewRecord; again?: AutoReviewRecord }> = [];
     const reasons: string[] = [];
     if (!row.prs.some((prUrl) => PULL.test(prUrl))) return this.skip(row, ['no pull request link']);
     for (const prUrl of row.prs) {
@@ -442,12 +442,13 @@ export class AutoReview {
         reasons.push(waiting);
         continue;
       }
-      due.push({ url, headSha: state.headSha, round: arena ? arena.round + 1 : 1 });
+      due.push({ url, headSha: state.headSha, round: arena ? arena.round + 1 : 1, ...(last && last.headSha === state.headSha ? { again: last } : {}) });
     }
     if (!due.length) return this.skip(row, reasons);
     const records: AutoReviewRecord[] = [];
     for (const pull of due) {
       records.push(pull.retry ? await this.restart(pull.retry, pull.round)
+        : pull.again ? await this.reviewAgain(pull.again, pull.round)
         : await this.deps.create({ prUrl: pull.url, headSha: pull.headSha, ticketKey: key, threadUrl: row.url, startedAt: this.deps.now(), round: pull.round }));
     }
     try {
@@ -466,6 +467,13 @@ export class AutoReview {
       }
       return this.skip(row, [`session did not start: ${detail}`]);
     }
+  }
+
+  /** The author answered on the same head: the record of that head runs the next round, since a head has one record. */
+  private async reviewAgain(record: AutoReviewRecord, round: number): Promise<AutoReviewRecord> {
+    const data = { status: 'running', detail: null, sessionId: null, startedAt: this.deps.now(), finishedAt: null, round, retries: 0, postStatus: null, postAt: null, postText: null, postMessageId: null, postDetail: null, postImages: null };
+    await this.deps.update(record.id, data);
+    return { ...record, ...data };
   }
 
   /** A failed review of a head commit started again in the same round: the record runs again from now, one retry more. */
