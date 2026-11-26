@@ -1,6 +1,7 @@
 import type { ReviewRound } from '@prisma/client';
 import { discordBlockLines, fillTemplate, plainText, saysStop, withMarker, type AutoReviewOwner, type MessageFormat, type PullState } from './auto-review';
 import { parseDiscordBlock, readImageList, threadIdOf, type DiscordPostFiles, type DiscordPostResult } from './discord-post';
+import { knownName, learnPeople, type DiscordPerson } from './discord-people';
 import { ON_IT } from './discord-reader';
 import type { ThreadMessage, ThreadRow } from './discord-threads';
 import { lightSettingsLine, type LightSettings } from './light-runner';
@@ -188,7 +189,7 @@ export function isApproval(text: string, verdictLine: string | null): boolean {
   return rest !== first || LGTM_FIRST.test(first);
 }
 
-const nameWords = (name: string) => name.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3 && word !== 'dock' && word !== 'sous');
+export const nameWords = (name: string) => name.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3 && word !== 'dock' && word !== 'sous');
 const peopleOf = (row: ThreadRow) => row.messages.filter((message) => !message.webhookId).map((message) => message.author);
 
 /**
@@ -405,6 +406,7 @@ export class ReviewFindings {
       const own = recent.filter((row) => isOwnThread(row, webhookId, ownTickets));
       if (!own.length) return sent;
       const latest = await this.deps.latestRounds(own.map((row) => row.id));
+      const people = learnPeople(all);
       for (const row of own) {
         const last = latest.get(row.id);
         if (last?.status === 'reported' && last.reportedAt && row.repliedAt && Date.parse(row.repliedAt) > last.reportedAt.getTime()) {
@@ -413,12 +415,12 @@ export class ReviewFindings {
         const cursor = last ? last.lastMessageAt.getTime() : -Infinity;
         if (Date.parse(row.lastActivity) <= cursor) continue;
         const due = dueRound(row, cursor, now, webhookId);
-        if (due.length) sent += await this.start(row, due);
+        if (due.length) sent += await this.start(row, due, people);
         else {
           const window = Math.max(cursor, now.getTime() - FINDINGS_WINDOW_MS);
           const pending = findings(row, window, webhookId)[0];
           const before = pending ? Date.parse(pending.at) : Infinity;
-          await this.thank(row, approvals(row, window, webhookId).filter((message) => Date.parse(message.at) < before));
+          await this.thank(row, approvals(row, window, webhookId).filter((message) => Date.parse(message.at) < before), people);
         }
       }
       return sent;
@@ -431,10 +433,10 @@ export class ReviewFindings {
    * An approval gets no fix round, only a short thanks to its authors after the post delay. The round that holds it never
    * reaches a session and moves the cursor past the approval, so the same approval is thanked once.
    */
-  private async thank(row: ThreadRow, messages: ThreadMessage[]): Promise<void> {
+  private async thank(row: ThreadRow, messages: ThreadMessage[], people: DiscordPerson[]): Promise<void> {
     if (!messages.length || !row.tickets[0] || !row.posterPrs?.length) return;
     const lastMessage = messages[messages.length - 1];
-    const authors = [...new Map(messages.map((message) => [message.authorId, { id: message.authorId, name: personName(message.author, peopleOf(row)) }])).values()];
+    const authors = [...new Map(messages.map((message) => [message.authorId, { id: message.authorId, name: knownName(message.authorId, personName(message.author, peopleOf(row)), people) }])).values()];
     let round: ReviewRound;
     try {
       round = await this.deps.create({
@@ -456,10 +458,10 @@ export class ReviewFindings {
     });
   }
 
-  private async start(row: ThreadRow, messages: ThreadMessage[]): Promise<number> {
+  private async start(row: ThreadRow, messages: ThreadMessage[], people: DiscordPerson[]): Promise<number> {
     if (!messages.length || !row.tickets[0] || !row.posterPrs?.length) return 0;
     const lastMessage = messages[messages.length - 1];
-    const authors = [...new Map(messages.map((message) => [message.authorId, { id: message.authorId, name: personName(message.author, peopleOf(row)) }])).values()];
+    const authors = [...new Map(messages.map((message) => [message.authorId, { id: message.authorId, name: knownName(message.authorId, personName(message.author, peopleOf(row)), people) }])).values()];
     const stored: StoredFindings = { since: messages[0].at, blocks: messages.map(findingBlock), authors };
     let round: ReviewRound;
     try {
