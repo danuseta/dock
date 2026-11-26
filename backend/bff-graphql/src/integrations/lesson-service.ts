@@ -34,8 +34,6 @@ export interface LessonDeps {
   evidenceRoot(): string;
   /** skills/<name>/lessons.md or kit/lessons/agents/<name>.md through the kit bridge; throws when the bridge cannot write. */
   writeKitFile(kind: 'skill' | 'agent', name: string, text: string): Promise<void>;
-  /** Settings › Sous flow › Rules: the active flow lessons as rule lines. */
-  writeFlowRules(lines: string[]): Promise<void>;
   /** Writes a file when its text differs; true when it changed. */
   writeFile(file: string, text: string): Promise<boolean>;
   /** The keys that have a per-ticket lessons file. */
@@ -56,7 +54,7 @@ export interface LessonView {
 export const writtenTo = (lesson: Pick<LessonRow, 'targetKind' | 'targetName'>) => ({
   skill: `skills/${lesson.targetName}/lessons.md`,
   agent: `kit/lessons/agents/${lesson.targetName}.md`,
-  flow: 'Settings › Sous flow › Rules',
+  flow: '.evidence/lessons/<KEY>.md',
   repo: `.evidence/lessons/${lesson.targetName}.md`,
   fact: `.evidence/lessons/${FACTS_NAME}.md`,
   code: 'a "make it code" card',
@@ -149,8 +147,7 @@ export class LessonService {
     const root = lessonsDir(this.deps.evidenceRoot());
     for (const group of todo) {
       try {
-        if (group === 'flow') await this.deps.writeFlowRules(lessons.filter((lesson) => LIVE_STATUSES.includes(lesson.status) && lesson.targetKind === 'flow').sort((a, b) => b.count - a.count).map((lesson) => lesson.text));
-        else if (group === 'fact') await this.deps.writeFile(path.join(root, `${FACTS_NAME}.md`), targetFile('fact', FACTS_NAME, lessons));
+        if (group === 'fact') await this.deps.writeFile(path.join(root, `${FACTS_NAME}.md`), targetFile('fact', FACTS_NAME, lessons));
         else {
           const at = group.indexOf(':');
           const kind = group.slice(0, at);

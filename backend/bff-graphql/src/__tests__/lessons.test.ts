@@ -60,14 +60,12 @@ function world(over: Partial<LessonDeps> = {}) {
   const notices: Array<{ title: string; tag: string }> = [];
   const files = new Map<string, string>();
   const cards: Array<{ key: string; prompt: string }> = [];
-  let flow: string[] = [];
   let kitDown = false;
   const deps: LessonDeps = {
     store: memory.store,
     now: () => NOW,
     evidenceRoot: () => root,
     writeKitFile: async (kind, name, text) => { if (kitDown) throw new Error('bridge offline'); kit.push({ kind, name, text }); },
-    writeFlowRules: async (lines) => { flow = lines; },
     writeFile: async (file, text) => { const key = file.replace(/\\/g, '/'); if (files.get(key) === text) return false; files.set(key, text); return true; },
     ticketFiles: async () => [...files.keys()].map((file) => path.posix.basename(file, '.md')).filter((name) => /^[A-Z]+-\d+$/.test(name)),
     ticketRepos: async () => ['ms-admin-worker-backend'],
@@ -76,7 +74,7 @@ function world(over: Partial<LessonDeps> = {}) {
     ...over,
   };
   const service = new LessonService(deps);
-  return { ...memory, service, kit, notices, files, cards, root, flowRules: () => flow, setKitDown: (down: boolean) => { kitDown = down; }, done: () => rmSync(root, { recursive: true, force: true }) };
+  return { ...memory, service, kit, notices, files, cards, root, setKitDown: (down: boolean) => { kitDown = down; }, done: () => rmSync(root, { recursive: true, force: true }) };
 }
 
 const finding = (over: Record<string, unknown> = {}) => ({ messageId: 76050, threadUrl: null, cause: 'self-inflicted-rework', text: 'Four ElevenLabs keys returned 401 and the video went to edge.', quote: 'q', shouldHave: 'Walk the whole ElevenLabs rotation.', call: 'mistake', target: { kind: 'skill', name: 'demo-video' }, lesson: 'Walk the whole ElevenLabs rotation (el-rotate get, park, get) before using edge.', ...over });
@@ -209,7 +207,9 @@ test('lessons are written to their targets, and a write the bridge missed is ret
     ]);
     assert.strictEqual(w.kit.length, 0);
     assert.deepStrictEqual((w.cache.get('lessons:dirty') as string[]).sort(), ['agent:sous-review-runner', 'skill:demo-video']);
-    assert.deepStrictEqual(w.flowRules(), ['After the video is replaced, edit the PR body through sous-publisher.']);
+    const ticketFile1 = (await w.service.prepareTicket('QRD-1'))!;
+    assert.match(w.files.get(ticketFile1)!, /## Sous flow[\s\S]*After the video is replaced, edit the PR body through sous-publisher\./, 'a flow lesson reaches the session through its lessons file');
+    assert.strictEqual((await w.service.overview()).lessons.find((item) => item.targetKind === 'flow')!.writtenTo, '.evidence/lessons/<KEY>.md', 'a flow lesson is not written to Settings › Sous flow › Rules');
     assert.match(w.files.get(`${w.root.replace(/\\/g, '/')}/lessons/ms-admin-worker-backend.md`) ?? '', /# Pelajaran ms-admin-worker-backend[\s\S]*- \(1×, QRD-1\) Run tsc/);
     assert.match(w.files.get(`${w.root.replace(/\\/g, '/')}/lessons/facts.md`) ?? '', /PIN is 767676/);
     w.setKitDown(false);
@@ -221,10 +221,9 @@ test('lessons are written to their targets, and a write the bridge missed is ret
 
     const lesson = w.lessons.find((item) => item.targetKind === 'flow')!;
     await w.service.edit(lesson.id, '  Edit the PR body after a new video.  ');
-    assert.deepStrictEqual(w.flowRules(), ['Edit the PR body after a new video.']);
+    assert.match(w.files.get(ticketFile1)!, /Edit the PR body after a new video\./);
     const moved = await w.service.retarget(lesson.id, 'skill', 'sous');
     assert.strictEqual(moved.writtenTo, 'skills/sous/lessons.md');
-    assert.deepStrictEqual(w.flowRules(), [], 'the old target is written again without it');
     assert.match(w.kit.at(-1)!.text, /Edit the PR body after a new video/);
     await assert.rejects(w.service.retarget(lesson.id, 'team', 'x'), /target kind/);
     await assert.rejects(w.service.edit(lesson.id, ' '), /one sentence/);

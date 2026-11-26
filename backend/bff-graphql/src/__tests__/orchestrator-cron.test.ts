@@ -2,7 +2,7 @@ import assert from 'node:assert';
 import test from 'node:test';
 import { TICKET_TITLE, isTaskTitle, nextSessionTitle, ticketSessionTitle, ticketTitleFromText } from '../integrations/session-titles';
 import {
-  CronInputError, DEFAULT_CRON_SETTINGS, MAX_RESUMES, OrchestratorCron, PARKED_TEXT, RESUME_GAVE_UP_TEXT, START_FAILED_TEXT, candidates, hasAcceptanceCriteria, labelOrder, ticketHasAcceptanceCriteria, outsideWindow, parseCronSettings,
+  CronInputError, DEFAULT_CRON_SETTINGS, FLOW_RULES_LEFT_OUT_LINE, MAX_RESUMES, START_PROMPT_MAX, fitStartPrompt, OrchestratorCron, PARKED_TEXT, RESUME_GAVE_UP_TEXT, START_FAILED_TEXT, candidates, hasAcceptanceCriteria, labelOrder, ticketHasAcceptanceCriteria, outsideWindow, parseCronSettings,
   OWNER_BUSY_TEXT, allMergedToDevelop, confirmedPrompt, dependencyState, isStackable, manualRefusal, stackLine, ownerReplyPrompt, resumePrompt, sousConfirmedPrompt, sousStartPrompt, startPrompt, wib, type CronDeps, type CronRun, type CronSettings, type CronTicket,
 } from '../integrations/orchestrator-cron';
 
@@ -645,6 +645,35 @@ test('QRD-1534: the default Sous flow leaves the cron start prompt byte for byte
   const broken = world({ tickets: [ticket('QRD-7')], config: { engine: 'sous' }, sousFlowLines: async () => { throw new Error('settings unreadable'); } });
   await broken.cron.runFill();
   assert.strictEqual(broken.state.sent[0].text, sousStartPrompt('QRD-7'), 'a flow that cannot be read adds nothing');
+});
+
+test('56 long flow rules leave the cron start prompt under the chat limit: the rules are named instead, the start goes, one warning', async () => {
+  const rules = Array.from({ length: 56 }, (_, index) => `Sous flow rule: lesson ${index} ${'x'.repeat(480)}`);
+  const line = 'Readiness 7/9: data (Test data not named)';
+  const warned: string[] = [];
+  const warn = console.warn;
+  console.warn = (...args: unknown[]) => { warned.push(args.join(' ')); };
+  try {
+    const w = world({ tickets: [ticket('QRD-1582')], config: { engine: 'sous' }, sousFlowLines: async () => ['Sous flow: stop after "plan".', ...rules], readinessLine: async () => line });
+    const log = await w.cron.runFill();
+    assert.deepStrictEqual([log.started, log.failed], [['QRD-1582'], []]);
+    const text = w.state.sent[0].text;
+    assert.ok(text.length <= 8000, String(text.length));
+    assert.strictEqual(text, `${sousStartPrompt('QRD-1582')} Sous flow: stop after "plan". ${line} ${FLOW_RULES_LEFT_OUT_LINE}`);
+  } finally {
+    console.warn = warn;
+  }
+  assert.strictEqual(warned.filter((item) => item.includes('QRD-1582')).length, 1);
+});
+
+test('fitStartPrompt leaves a short prompt as it is and drops the other flow lines from the end when the rules alone are not enough', () => {
+  const build = (flow: readonly string[]) => sousStartPrompt('QRD-1', null, flow);
+  assert.deepStrictEqual(fitStartPrompt(build, ['Sous flow: a.']), { prompt: build(['Sous flow: a.']), trimmed: false });
+  const long = 'y'.repeat(4000);
+  const cut = fitStartPrompt(build, ['Keep me.', long, long, 'Sous flow rule: r']);
+  assert.deepStrictEqual(cut, { prompt: build(['Keep me.', long, FLOW_RULES_LEFT_OUT_LINE]), trimmed: true });
+  assert.ok(cut.prompt.length <= START_PROMPT_MAX);
+  assert.deepStrictEqual(fitStartPrompt(build, ['Keep me.', long, long]), { prompt: build(['Keep me.', long]), trimmed: true }, 'no rules: no line about them');
 });
 
 test('the cron start prompt carries the Readiness line after the flow lines, and nothing when nothing is missing or it cannot be read', async () => {
