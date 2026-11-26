@@ -26,6 +26,7 @@ function world(options: { enabled?: boolean; autoLgtm?: boolean; rows?: ThreadRo
   const approved: string[] = [];
   const pushes: PushMessage[] = [];
   const busy = new Set<string>();
+  const retriggers = new Map<string, Date>();
   let n = 0;
   const deps: AutoReviewDeps = {
     settings: async () => ({ ...SETTINGS, enabled: options.enabled ?? true, autoLgtm: options.autoLgtm ?? false }),
@@ -60,9 +61,11 @@ function world(options: { enabled?: boolean; autoLgtm?: boolean; rows?: ThreadRo
     newestReply: async () => null,
     skills: async () => ['review-message'],
     imageRoot: async (key) => `/evidence/${key}/screenshots`,
+    retriggeredAt: async (threadId) => retriggers.get(threadId) ?? null,
+    markRetriggered: async (threadId, at) => { retriggers.set(threadId, at); },
     now: () => NOW,
   };
-  return { review: new AutoReview(deps), records, opened, approved, pushes, deps, busy };
+  return { review: new AutoReview(deps), records, opened, approved, pushes, deps, busy, retriggers };
 }
 
 const verdict = (extra: Partial<Orchestration> = {}) => ({
@@ -970,4 +973,98 @@ test('the skill review prompt names the PR author as the person behind a webhook
   w.deps.settings = async () => SKILL_SETTINGS;
   await w.review.tick();
   assert.match(w.opened[0]?.prompt ?? '', /Author PR ini danu: sapa "mas danu" di pesan itu, bukan nama pemilik DOCK ini/);
+});
+
+const HOUR = 3_600_000;
+const claimedAgo = (hours: number) => ({ messageId: 'm2', authorId: 'me', author: 'Danu', mine: true, at: new Date(NOW.getTime() - hours * HOUR).toISOString() });
+const RETRIGGER_PUSH = 'QRD-1473: on it 24 h without a review, DOCK started one';
+
+function retriggerWorld(extra: Partial<ThreadRow> = {}, options: Parameters<typeof world>[0] = {}) {
+  const w = world({ enabled: false, ...options, rows: [row({ claim: claimedAgo(25), ownClaim: claimedAgo(25), ...extra })] });
+  w.deps.settings = async () => ({ ...SETTINGS, enabled: options.enabled ?? false, onItRetrigger: true, onItRetriggerHours: 24 });
+  return w;
+}
+
+test('an on it without a result is left alone while the setting is off', async () => {
+  const w = world({ enabled: false, rows: [row({ claim: claimedAgo(25), ownClaim: claimedAgo(25) })] });
+  assert.strictEqual(await w.review.tick(), 0);
+  assert.deepStrictEqual([w.opened.length, w.pushes.length, w.records.length], [0, 0, 0]);
+});
+
+test('an on it with no result after 24 h starts one review round and one push, and no second one within 24 h', async () => {
+  const w = retriggerWorld();
+  assert.strictEqual(await w.review.tick(), 1);
+  assert.deepStrictEqual(w.records.map((record) => [record.prUrl, record.headSha, record.round, record.sessionId]), [[PR, 'abc1234', 1, 's1']]);
+  assert.deepStrictEqual(w.pushes.map((push) => push.title), [RETRIGGER_PUSH]);
+  Object.assign(w.records[0], { status: 'blockers', finishedAt: new Date(NOW.getTime() + HOUR) });
+  w.deps.now = () => new Date(NOW.getTime() + 2 * HOUR);
+  assert.strictEqual(await w.review.tick(), 0, 'the next look within 24 h starts nothing');
+  assert.deepStrictEqual([w.opened.length, w.pushes.length], [1, 1]);
+  assert.ok(w.retriggers.get('t1'), 'the trigger time is kept in the store');
+
+  w.deps.now = () => new Date(NOW.getTime() + 25 * HOUR);
+  assert.strictEqual(await w.review.tick(), 1, 'a day later with still no result it starts again');
+  assert.deepStrictEqual(w.records.map((record) => [record.headSha, record.round, record.status]), [['abc1234', 2, 'running']], 'the same head reuses its record');
+});
+
+test('an old on it past 72 h is still reviewed by this path, with auto review on or off', async () => {
+  for (const enabled of [false, true]) {
+    const w = retriggerWorld({ claim: claimedAgo(100), ownClaim: claimedAgo(100) }, { enabled });
+    assert.strictEqual(await w.review.tick(), 1, String(enabled));
+    assert.deepStrictEqual([w.records.length, w.pushes.map((push) => push.title)], [1, [RETRIGGER_PUSH]]);
+  }
+});
+
+test("the owner's verdict or the owner's DOCK review post after the on it is a result; a thanks or a DOCK-FIX from the owner's webhook is not", async () => {
+  const after = new Date(NOW.getTime() - 20 * HOUR);
+  const own = { authorId: 'me', author: 'Danu', mine: true };
+  const hook = { authorId: '9', author: 'Danu (DOCK)', webhookId: '9' };
+  for (const [text, extra] of [
+    ['lgtm mas', own],
+    ['mas indra, gak ada blocker', own],
+    ['ada blocker 1, cek lagi', own],
+    ['catatan: rename the column', own],
+    ['mas indra, gak ada blocker.\nDOCK-REVIEW on it by <@111> · round 1 · @ abc1234 · Approve · 0 blocker', hook],
+  ] as const) {
+    const w = retriggerWorld({ messages: [message('r1', after, text, extra)] });
+    assert.strictEqual(await w.review.tick(), 0, text);
+    assert.strictEqual(w.opened.length, 0, text);
+  }
+  for (const [text, extra] of [
+    ['makasih mas Indra 🙏', hook],
+    ['DOCK-FIX round 1 · head abc1234\n1) fixed', hook],
+    ['DOCK-REVIEW on it by <@222> · round 1 · @ abc1234 · Approve · 0 blocker', { authorId: '7', author: 'Aken (DOCK)', webhookId: '7' }],
+    ['ok nanti aku cek', own],
+  ] as const) {
+    const w = retriggerWorld({ messages: [message('r1', after, text, extra)] });
+    assert.strictEqual(await w.review.tick(), 1, text);
+  }
+  const before = retriggerWorld({ messages: [message('r1', new Date(NOW.getTime() - 30 * HOUR), 'lgtm mas', own)] });
+  assert.strictEqual(await before.review.tick(), 1, 'a verdict from before the on it is not its result');
+});
+
+test('a head that already has a record is reviewed again on that record, without a second one', async () => {
+  const w = retriggerWorld();
+  w.records.push({ id: 'old', prUrl: PR, headSha: 'abc1234', ticketKey: 'QRD-1473', threadUrl: 'https://discord.com/channels/g/t1', sessionId: 's0', status: 'blockers', detail: '1 blocker', startedAt: new Date(NOW.getTime() - 50 * HOUR), finishedAt: new Date(NOW.getTime() - 49 * HOUR), round: 1, postStatus: null, postAt: null, postText: null, postMessageId: null, postDetail: null, postImages: null });
+  assert.strictEqual(await w.review.tick(), 1);
+  assert.deepStrictEqual(w.records.map((record) => [record.id, record.status, record.sessionId, record.round]), [['old', 'running', 's1', 1]]);
+});
+
+test('a closed pull request, a review running now, two approvals or the last round spent start nothing', async () => {
+  const closed = retriggerWorld({}, { open: false });
+  assert.strictEqual(await closed.review.tick(), 0);
+  assert.deepStrictEqual([closed.opened.length, closed.pushes.length], [0, 0]);
+
+  const running = retriggerWorld();
+  running.records.push({ id: 'run', prUrl: PR, headSha: 'abc1234', ticketKey: 'QRD-1473', threadUrl: 'https://discord.com/channels/g/t1', sessionId: 's0', status: 'running', detail: null, startedAt: new Date(NOW.getTime() - 26 * HOUR), finishedAt: null, round: 1, postStatus: null, postAt: null, postText: null, postMessageId: null, postDetail: null, postImages: null });
+  running.busy.add('s0');
+  assert.strictEqual(await running.review.tick(), 0);
+
+  const approved = retriggerWorld({ onIt: ['Danu', 'Aken', 'Rizal'], messages: [message('a1', new Date(NOW.getTime() - 3 * HOUR), 'lgtm', { authorId: 'u3', author: 'Aken' }), message('a2', new Date(NOW.getTime() - 2 * HOUR), 'lgtm mas', { authorId: 'u4', author: 'Rizal' })] });
+  assert.strictEqual(await approved.review.tick(), 0);
+
+  const spent = retriggerWorld();
+  spent.records.push({ id: 'last', prUrl: PR, headSha: 'abc1234', ticketKey: 'QRD-1473', threadUrl: 'https://discord.com/channels/g/t1', sessionId: 's0', status: 'blockers', detail: '1 blocker', startedAt: new Date(NOW.getTime() - 20 * HOUR), finishedAt: new Date(NOW.getTime() - 19 * HOUR), round: 3, postStatus: null, postAt: null, postText: null, postMessageId: null, postDetail: null, postImages: null });
+  assert.strictEqual(await spent.review.tick(), 0);
+  assert.strictEqual(spent.pushes.length, 0);
 });

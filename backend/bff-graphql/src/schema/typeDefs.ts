@@ -257,6 +257,10 @@ export const typeDefs = gql`
     reviewReReviewWaitMinutes: Int!
     "Review rounds an on it allows before the arena closes."
     reviewMaxRounds: Int!
+    "DOCK starts a review when the owner's on it in a pr-review thread has no result after the set hours."
+    reviewOnItRetrigger: Boolean!
+    "Hours an on it waits for a result before DOCK starts the review itself."
+    reviewOnItRetriggerHours: Int!
     reviewFindingsToTask: Boolean!
     "Post the DOCK-FIX reply to the thread after a round is fixed or every finding was not valid."
     reviewFindingsAutoReply: Boolean!
@@ -2577,6 +2581,8 @@ export const typeDefs = gql`
     reviewReReviewOnCommit: String
     reviewReReviewWaitMinutes: Int
     reviewMaxRounds: Int
+    reviewOnItRetrigger: String
+    reviewOnItRetriggerHours: Int
     reviewFindingsToTask: String
     reviewFindingsAutoReply: String
     reviewPostFormat: String

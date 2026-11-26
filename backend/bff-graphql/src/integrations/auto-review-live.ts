@@ -24,6 +24,8 @@ const listedPulls = new Map<string, { at: number; state: Promise<PullState> }>()
 /** A commit's date never changes, so a head commit the arena waits on is asked about once. */
 const commitDates = new Map<string, Date>();
 const COMMIT_DATES = 500;
+const RETRIGGER_CACHE = 'auto-review-retrigger';
+const RETRIGGER_TTL_SECONDS = 2 * 24 * 60 * 60;
 
 function listedPull(owner: string, repo: string, number: number): Promise<PullState> {
   const key = `${owner}/${repo}#${number}`;
@@ -38,7 +40,7 @@ function listedPull(owner: string, repo: string, number: number): Promise<PullSt
 /** The auto reviews the Agents page lists: the stored ones that still say something about the pull request as it is now. */
 export const listedAutoReviews = async <T extends { prUrl: string; headSha: string; status: string }>(rows: T[]) => currentReviews(rows, listedPull);
 
-export const AUTO_REVIEW_KEYS = ['autoReviewOnIt', 'autoLgtm', 'autoReviewPostDiscord', 'reviewPostDelayMinutes', 'reviewReReviewWaitMinutes', 'reviewReReviewOnCommit', 'reviewMaxRounds', ...Object.values(MESSAGE_KEYS.post)] as const;
+export const AUTO_REVIEW_KEYS = ['autoReviewOnIt', 'autoLgtm', 'autoReviewPostDiscord', 'reviewPostDelayMinutes', 'reviewReReviewWaitMinutes', 'reviewReReviewOnCommit', 'reviewMaxRounds', 'reviewOnItRetrigger', 'reviewOnItRetriggerHours', ...Object.values(MESSAGE_KEYS.post)] as const;
 
 /** Who posts to a thread: the owner's Discord user id, webhook and name. */
 export const reviewOwner = async (): Promise<AutoReviewOwner> => {
@@ -61,6 +63,8 @@ export const autoReview = new AutoReview({
       reReviewWaitMinutes: arenaSetting('reviewReReviewWaitMinutes', values.get('reviewReReviewWaitMinutes')),
       maxRounds: arenaSetting('reviewMaxRounds', values.get('reviewMaxRounds')),
       message: messageFormat('post', values),
+      onItRetrigger: values.get('reviewOnItRetrigger') === 'true',
+      onItRetriggerHours: arenaSetting('reviewOnItRetriggerHours', values.get('reviewOnItRetriggerHours')),
     };
   },
   rows: async () => [...(await threadService.stored()).values()],
@@ -101,6 +105,11 @@ export const autoReview = new AutoReview({
   skills: () => installedSkills(),
   imageRoot: screenshotsOf,
   people: async () => (await sprintDashboardService.roster()).map((member) => member.full),
+  retriggeredAt: async (threadId) => {
+    const at = await storage.getCache(RETRIGGER_CACHE, threadId).catch(() => null);
+    return typeof at === 'string' ? new Date(at) : null;
+  },
+  markRetriggered: (threadId, at) => storage.upsertCache(RETRIGGER_CACHE, threadId, at.toISOString(), RETRIGGER_TTL_SECONDS),
   now: () => new Date(),
 });
 

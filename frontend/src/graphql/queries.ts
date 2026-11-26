@@ -302,6 +302,8 @@ export const GET_SETTINGS = gql`
       reviewReReviewOnCommit
       reviewReReviewWaitMinutes
       reviewMaxRounds
+      reviewOnItRetrigger
+      reviewOnItRetriggerHours
       reviewFindingsAutoReply
       reviewPostFormat
       reviewPostSkill
