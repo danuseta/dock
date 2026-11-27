@@ -159,7 +159,7 @@ test('each approval step reports its own failure and the others still run', asyn
 
   const unknown = approvalWorld({ passLabel: async () => passLabelOf('New Person', []) });
   const steps3 = await approveReview('QRD-9', unknown.deps);
-  assert.deepStrictEqual(steps3[0], { name: 'Jira label', ok: false, detail: 'New Person has no Pass label in the sprint roster. Add it to the roster in the sprint dashboard settings.' });
+  assert.deepStrictEqual(steps3[0], { name: 'Jira label', ok: false, detail: 'New Person has no Pass label. Add it to TEAM_PASS_LABELS in review-approval.ts.' });
   assert.ok(!unknown.calls.some((call) => call.startsWith('label')), 'no label is added when the account has none');
 });
 

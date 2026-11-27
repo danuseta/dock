@@ -219,6 +219,20 @@ export class GitHubClient {
     return response.data?.items || [];
   }
 
+  /** Pull requests of others that the token's account reviewed, updated on or after `since` (YYYY-MM-DD). */
+  async searchReviewedByMe(repos: string[], since: string) {
+    const repoQuery = repos.map((repo) => `repo:${repo}`).join(' ');
+    const response = await this.client.get('/search/issues', {
+      params: { q: `type:pr reviewed-by:@me -author:@me updated:>=${since} ${repoQuery}`, per_page: 100 },
+    });
+    return response.data?.items || [];
+  }
+
+  async getReviews(owner: string, repo: string, pullNumber: number): Promise<any[]> {
+    const response = await this.client.get(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, { params: { per_page: 100 } });
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
   async approvePullRequest(owner: string, repo: string, pullNumber: number) {
     await this.client.post(`/repos/${owner}/${repo}/pulls/${pullNumber}/reviews`, { event: 'APPROVE' });
   }

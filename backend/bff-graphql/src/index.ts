@@ -9,6 +9,7 @@ import { orchestratorCron } from './integrations/orchestrator-cron-live';
 import { orchestratorService } from './integrations/orchestrator';
 import { JiraAPI } from './datasources/JiraAPI';
 import { liveApprovalDeps } from './integrations/review-approval';
+import { livePassLabelSyncDeps, syncPassLabels } from './integrations/pass-label-sync';
 import { discordGateway, discordReader } from './integrations/discord-reader-live';
 import { discordTeam, ensureTeamChannels } from './integrations/discord-team';
 import { channelStore } from './integrations/discord-threads';
@@ -34,6 +35,8 @@ const JIRA_SYNC_MS = 5 * 60 * 1000;
 const DISCORD_TOKEN_CHECK_MS = 60 * 1000;
 /** How often the stored pr-review threads are looked at for a new "on it" of the owner. */
 const AUTO_REVIEW_MS = 60 * 1000;
+/** How often the owner's GitHub approvals are matched with their Pass label in Jira. */
+const PASS_LABEL_MS = 10 * 60 * 1000;
 /** How often auto rotate looks again without a turn, so back to main follows a reset. */
 const CLAUDE_ROTATE_MS = 5 * 60 * 1000;
 const CLAUDE_PROBE_MS = 30 * 60 * 1000;
@@ -104,6 +107,12 @@ export async function startServer(): Promise<void> {
       const reviewOnIt = () => autoReview.tick()
         .catch((error) => console.warn('[AutoReview] check failed:', error instanceof Error ? error.message : 'unknown error'));
       setInterval(reviewOnIt, AUTO_REVIEW_MS).unref();
+      // An approval on a teammate's pull request, from DOCK or straight on GitHub, puts the owner's Pass label on the ticket.
+      const passLabels = () => syncPassLabels(livePassLabelSyncDeps)
+        .then((added) => { if (added) console.log(`[PassLabel] ${added} label(s) added`); })
+        .catch((error) => console.warn('[PassLabel] sync failed:', error instanceof Error ? error.message : 'unknown error'));
+      void passLabels();
+      setInterval(passLabels, PASS_LABEL_MS).unref();
       const judgeTick = () => judgeQueue.tick()
         .catch((error) => console.warn('[Judge] check failed:', error instanceof Error ? error.message : 'unknown error'));
       setInterval(judgeTick, JUDGE_MS).unref();
