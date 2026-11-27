@@ -169,6 +169,7 @@ export const QaLocalRunsSection: React.FC<{ onTicketClick: (key: string) => void
                             )}
                             {failing.length === 0 && row.run.state === 'done' && <p className="mt-2 flex items-center gap-1.5 text-[0.8rem] text-status-merged"><CheckCircle2 size={14} aria-hidden="true" />No failed or blocked test case</p>}
                             {row.run.rule && <p className="mt-2 text-[0.75rem] text-muted-foreground">Rule: {row.run.rule}</p>}
+                            {row.fixResult && <p className="mt-1 text-[0.75rem] text-secondary-foreground"><span className="text-foreground">Fix result:</span> {row.fixResult}</p>}
                             <div className="mt-3 flex flex-wrap gap-2">
                               {canSendFix(row) && (
                                 <Button size="sm" variant="primary" disabled={busy !== null} onClick={() => fix(row)}>

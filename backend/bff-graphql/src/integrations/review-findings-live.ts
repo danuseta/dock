@@ -79,4 +79,8 @@ export const reviewFindings = new ReviewFindings({
 });
 
 orchestratorCron.reviewLines = (key) => reviewFindings.ownerAnswerLines(key);
-chatService.onTurnEnded = (turn) => { void reviewFindings.onTurnEnded(turn).catch((error) => console.warn('[ReviewFindings] result failed:', error instanceof Error ? error.message : 'unknown error')); };
+const turnEndedBefore = chatService.onTurnEnded;
+chatService.onTurnEnded = (turn) => {
+  turnEndedBefore(turn);
+  void reviewFindings.onTurnEnded(turn).catch((error) => console.warn('[ReviewFindings] result failed:', error instanceof Error ? error.message : 'unknown error'));
+};

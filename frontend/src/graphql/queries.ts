@@ -1823,7 +1823,7 @@ export const GET_QA_LOCAL_RUNS = gql`
       available
       hidden
       rows {
-        key title jiraStatus runs fixRound fixSent sessionId
+        key title jiraStatus runs fixRound fixSent sessionId fixResult
         run {
           runId state step verdict rule passed failed blocked error startedAt updatedAt finishedAt
           followsFe { key status }
