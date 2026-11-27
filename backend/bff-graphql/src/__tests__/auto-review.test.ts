@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { AutoReview, DEFAULT_REVIEW_POST_TEMPLATE, ENDED_DETAIL, MAX_REVIEW_RETRIES, markerVerdict, DEFAULT_REVIEW_REPLY_TEMPLATE, ON_IT_WINDOW_MS, WAITING_SKILL, fillTemplate, isMessageSetting, messageFormat, reviewTemplateValues, answeredFindings, currentReviews, reviewBody, reviewMarker, reviewPost, reviewPrompt, TEXT_DISAGREES, textDisagrees, withMarker, type AutoReviewDeps, type AutoReviewRecord, type AutoReviewSettings, type PushMessage } from '../integrations/auto-review';
+import { AutoReview, DEFAULT_REVIEW_POST_TEMPLATE, ENDED_DETAIL, LIMIT_DETAIL, MAX_REVIEW_RETRIES, callName, markerVerdict, DEFAULT_REVIEW_REPLY_TEMPLATE, ON_IT_WINDOW_MS, WAITING_SKILL, fillTemplate, isMessageSetting, messageFormat, reviewTemplateValues, answeredFindings, currentReviews, reviewBody, reviewMarker, reviewPost, reviewPrompt, TEXT_DISAGREES, textDisagrees, withMarker, type AutoReviewDeps, type AutoReviewRecord, type AutoReviewSettings, type PushMessage } from '../integrations/auto-review';
 import type { DiscordPostFiles } from '../integrations/discord-post';
 import { sortThread } from '../integrations/discord-reader';
 import type { ThreadRow } from '../integrations/discord-threads';
@@ -1075,4 +1075,48 @@ test('the auto review prompt downloads the thread and opens every image before j
   assert.match(prompt, /Buka setiap gambar dan PDF yang disimpan pakai Read sebelum menilai/);
   assert.match(prompt, /Teruskan path gambar itu ke subagent yang menilai \(sous-pr-reviewer, sous-arbiter\)/);
   assert.match(prompt, /sebut gambar mana yang dicek dan apa isinya terhadap AC/);
+});
+
+test('a review that stopped on the Claude usage limit costs no retry, waits 30 min and starts again; with rotation off the push says to turn it on', async () => {
+  const MIN = 60_000;
+  const w = world();
+  const errors = new Map<string, string>();
+  w.deps.sessionError = async (id) => errors.get(id) ?? null;
+  w.deps.rotationOn = async () => false;
+  await w.review.tick();
+  const record = w.records[0];
+  let now = NOW.getTime() + 16 * MIN;
+  w.deps.now = () => new Date(now);
+  errors.set('s1', "You've hit your weekly limit · resets Nov 28, 8pm (UTC)");
+  assert.strictEqual(await w.review.tick(), 0);
+  assert.deepStrictEqual([record.status, record.detail, record.retries ?? 0], ['failed', LIMIT_DETAIL, 0]);
+  assert.match(w.pushes[0].body, /Turn on auto rotate in Settings › Claude accounts/);
+  assert.strictEqual(w.review.skipReason('t1'), 'waiting for the Claude usage limit');
+  now += 31 * MIN;
+  assert.strictEqual(await w.review.tick(), 1);
+  assert.deepStrictEqual([record.status, record.retries ?? 0, record.sessionId], ['running', 0, 's2'], 'started again without spending a retry');
+});
+
+test('a review recorded as ended before DOCK told limits apart, with its retries spent, starts again when its session hit the limit', async () => {
+  const w = world();
+  w.deps.sessionError = async (id) => (id === 's9' ? "You've hit your weekly limit" : null);
+  await w.review.tick();
+  Object.assign(w.records[0], { status: 'failed', detail: ENDED_DETAIL, retries: MAX_REVIEW_RETRIES, sessionId: 's9', finishedAt: new Date(NOW.getTime() - 60 * 60_000) });
+  assert.strictEqual(await w.review.tick(), 1);
+  assert.deepStrictEqual([w.records[0].status, w.records[0].retries], ['running', MAX_REVIEW_RETRIES]);
+  Object.assign(w.records[0], { status: 'failed', detail: ENDED_DETAIL, sessionId: 's8' });
+  assert.strictEqual(await w.review.tick(), 0, 'a real failure with its retries spent stays failed');
+});
+
+test('a teammate is called by the first word of the name longer than one letter', () => {
+  assert.strictEqual(callName('M Danu Seta W'), 'danu');
+  assert.strictEqual(callName('Dwi Indra'), 'dwi');
+  assert.strictEqual(callName('Aken Setiawan'), 'aken');
+  assert.match(reviewPrompt('QRD-1684', ['https://github.com/o/r/pull/1'], 'https://discord.com/t', 'review-message', null, 'M Danu Seta W'), /sapa "mas danu"/);
+});
+
+test('an approve whose text says there is no blocker is not held for disagreeing', () => {
+  const approve = 'DOCK-REVIEW on it by <@1> · round 2 · @ 3ce74e1 · Approve with comments · 0 blocker';
+  assert.strictEqual(textDisagrees('mas danu, gak ada blocker. dua blocker kemarin udah beres di 3ce74e1: getOutput sekarang kirim 1.3.0', approve), false);
+  assert.strictEqual(textDisagrees('mas indra, ada blocker 1, belum bisa approve.', approve), true);
 });

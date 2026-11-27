@@ -86,6 +86,11 @@ export const autoReview = new AutoReview({
   running: (ticketKey) => storage.getRunningAutoReview(ticketKey),
   staleRunning: (before) => storage.getRunningAutoReviewsBefore(before),
   sessionIdle: async (sessionId) => (await storage.countChatMessagesInState(sessionId, ['taken', 'queued'])) === 0,
+  sessionError: async (sessionId) => {
+    const [session, reply] = await Promise.all([storage.getChatSession(sessionId), storage.getNewestChatMessage(sessionId, 'assistant')]);
+    return [session?.statusDetail, reply?.text?.slice(0, 300)].filter(Boolean).join('\n') || null;
+  },
+  rotationOn: async () => (await storage.getSettingValues(['claudeRotate']))[0]?.value === 'true',
   get: (id) => storage.getAutoReview(id),
   duePosts: (now) => storage.getDueAutoReviewPosts(now),
   create: (data) => storage.createAutoReview(data),
