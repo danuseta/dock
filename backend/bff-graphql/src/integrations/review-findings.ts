@@ -353,6 +353,19 @@ export function heldRoundLines(input: { key: string; roundId: string; threadUrl:
 const reopens = (round: ReviewRound, result: RoundResult) => round.status === 'reported' && round.replyStatus !== 'sent' && round.replyStatus !== 'sending'
   && (!round.replyStatus || (!round.pushed && (result.pushed || result.body === true)));
 
+type ChatTime = Date | number | string;
+const timeOf = (at: ChatTime) => (at instanceof Date ? at.getTime() : typeof at === 'number' ? at : Date.parse(at));
+
+/**
+ * The reply a turn ended with: its last assistant message, or, when a Stop hook made the session add a message after
+ * the round marker, the newest message of the same turn (after the last prompt) that carries the marker.
+ */
+export function turnReply(newest: { text: string; at: ChatTime } | null, marked: { text: string; at: ChatTime } | null, prompt: { at: ChatTime } | null): string | null {
+  if (!newest) return null;
+  if (MARKER.test(newest.text) || !marked || !MARKER.test(marked.text)) return newest.text;
+  return !prompt || timeOf(marked.at) > timeOf(prompt.at) ? marked.text : newest.text;
+}
+
 export function parseRoundResult(text: string | null | undefined): RoundResult | null {
   const match = text ? MARKER.exec(text) : null;
   return match ? { roundId: match[1], valid: Number(match[2]), invalid: Number(match[3]), pushed: match[4] === 'yes', body: match[4] === 'body' } : null;
