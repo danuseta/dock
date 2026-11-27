@@ -1045,3 +1045,12 @@ test('a Stop hook reply after the round marker still reports the round; a marker
   assert.strictEqual(turnReply(hook, null, prompt), hook.text);
   assert.strictEqual(turnReply(null, marked, prompt), null);
 });
+
+test('a finding with an attachment makes the round download the thread and open the images; none without', () => {
+  const base = { key: 'QRD-1582', threadUrl: 'https://discord.com/channels/g/t', threadId: 't', roundId: 'r1', prUrls: ['https://github.com/a/b/pull/1'], since: at(T0) };
+  const withImage = findingsPrompt({ ...base, blocks: [findingBlock(message('shov', 'Shovian', T0, 'h1 belum ada ikon', { attachments: [{ name: 'gambar-1.png', url: 'https://cdn/x.png', size: 10 } as ThreadMessage['attachments'][number]] }))] });
+  assert.match(withImage, /Ada lampiran di temuan ini: sebelum menilai, jalankan node \$K\/discord-files\.cjs t "<evidence>\/<MMDD>\/QRD-1582-discord"\./);
+  assert.match(withImage, /Buka setiap gambar dan PDF yang disimpan pakai Read sebelum menilai/);
+  const plain = findingsPrompt({ ...base, blocks: [findingBlock(message('shov', 'Shovian', T0, 'h1 belum ada ikon'))] });
+  assert.doesNotMatch(plain, /Ada lampiran di temuan ini|Buka setiap gambar/);
+});

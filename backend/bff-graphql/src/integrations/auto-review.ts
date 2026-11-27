@@ -171,10 +171,17 @@ export interface AutoReviewDeps {
  * The prompt of an auto review: one sous review of every pull request of the ticket, with the thread as context. With a skill,
  * the session also writes the Discord message with it for DOCK to post; it never posts anything itself.
  */
+/** Thread images are evidence: the session opens each one and hands it to the subagent that judges, instead of going by the file names. */
+export const threadImageLines = () => [
+  'Buka setiap gambar dan PDF yang disimpan pakai Read sebelum menilai; isinya bukti seperti teks thread. Teruskan path gambar itu ke subagent yang menilai (sous-pr-reviewer, sous-arbiter).',
+  'Di temuan, verdict, dan balasan, sebut gambar mana yang dicek dan apa isinya terhadap AC (misalnya "gambar 1: h1 ada ikon Code, AC 5 terpenuhi"). Gambar yang gagal diunduh atau dibuka ditulis juga, jangan dianggap sudah dilihat.',
+];
+
 export const reviewPrompt = (key: string, prUrls: string[], threadUrl: string, skill: string | null = null, lessons: string | null = null, author: string | null = null) => [
   `Pakai skill sous. review ${key}: ${prUrls.join(' ')}`,
   ...lessonsLines(lessons),
-  `Thread Discord pr-review: ${threadUrl} (baca dulu lewat discord-files.cjs).`,
+  `Thread Discord pr-review: ${threadUrl}. Baca dulu: node $K/discord-files.cjs ${threadUrl} "<evidence>/<MMDD>/${key}-discord" mencetak semua pesan dan menyimpan semua lampiran.`,
+  ...threadImageLines(),
   'Ini auto review dari DOCK karena owner bilang on it di thread itu. Jangan komentar di PR, Jira, atau Discord; tulis verdict dan temuan ke ledger seperti biasa.',
   ...(skill ? [`Setelah verdict tertulis di ledger, tulis pesan Discord hasil review pakai skill ${skill} sebagai bagian akhir balasanmu.`, ...discordBlockLines(key)] : []),
   ...(skill && author ? [`Author PR ini ${author}: sapa "mas ${author.split(/\s+/)[0].toLowerCase()}" di pesan itu, bukan nama pemilik DOCK ini dan bukan nama bot atau webhook.`] : []),
