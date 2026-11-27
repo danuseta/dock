@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { GitHubAPI } from '../datasources/GitHubAPI';
+import { JiraAPI } from '../datasources/JiraAPI';
 import { dockMode } from '../mode';
 import { lessonsFileFor } from './lessons-hook';
 import { StorageService } from '../storage/service';
@@ -11,6 +12,7 @@ import { QaAuto, RUN_ID, isRunVideo, isTicketKey, newestRun, parseProgress, pars
 
 const storage = new StorageService();
 const github = new GitHubAPI();
+const jira = new JiraAPI();
 const CACHE = 'qa-local';
 const PULL = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/;
 export const QA_SETTING = 'qaAutoRun';
@@ -64,25 +66,30 @@ export function qaVideoPath(key: string, runId: string, file: string): string | 
   return fs.existsSync(full) ? full : null;
 }
 
-/** Every ticket's newest local QA run for the QA queue page, RFP and Done tickets left out; status from the Jira cache, title from it or the ledger. */
+/**
+ * Every ticket's newest local QA run for the QA queue page, plus QA sessions still preparing their first run; RFP and Done
+ * tickets left out. Status and title from the cached Jira ticket, the title else from the ledger.
+ */
 export async function qaLocalRuns(): Promise<{ rows: QaLocalRow[]; hidden: number }> {
   if (!qaAvailable()) return { rows: [], hidden: 0 };
-  let keys: string[];
+  let runKeys: string[] = [];
   try {
-    keys = fs.readdirSync(path.join(qaDir(), 'runs'), { withFileTypes: true }).filter((entry) => entry.isDirectory() && isTicketKey(entry.name)).map((entry) => entry.name);
-  } catch {
-    return { rows: [], hidden: 0 };
-  }
-  const [cache, runs] = await Promise.all([storage.getAllTicketCache().catch(() => []), orchestratorService.list().catch(() => [])]);
-  const jira = new Map(cache.map((row) => [row.key, row]));
-  const ledgers = new Map(runs.map((run) => [run.key, run]));
+    runKeys = fs.readdirSync(path.join(qaDir(), 'runs'), { withFileTypes: true }).filter((entry) => entry.isDirectory() && isTicketKey(entry.name)).map((entry) => entry.name);
+  } catch { /* no runs folder yet: only preparing sessions can show */ }
+  const triggers = new Map((await storage.listCache(CACHE).catch(() => [])).filter((entry) => isTicketKey(entry.key)).map((entry) => [entry.key, readTrigger(entry.value)]));
+  const keys = [...new Set([...runKeys, ...triggers.keys()])];
+  const ledgers = new Map((await orchestratorService.list().catch(() => [])).map((run) => [run.key, run]));
   const sources = await Promise.all(keys.map(async (key) => {
     let names: string[] = [];
     try { names = fs.readdirSync(path.join(qaDir(), 'runs', key)); } catch { /* an unreadable folder counts no runs */ }
+    const trigger = triggers.get(key) ?? null;
+    const session = trigger?.sessionId ? await storage.getChatSession(trigger.sessionId).catch(() => null) : null;
+    const ticket = await jira.getTicket(key).catch(() => null);
     return {
-      key, run: latestQaRun(key), runs: names.filter((name) => RUN_ID.test(name)).length, trigger: await qaTrigger(key).catch(() => null),
-      title: jira.get(key)?.summary ?? ledgers.get(key)?.title ?? null,
-      jiraStatus: jira.get(key)?.status ?? null,
+      key, run: latestQaRun(key), runs: names.filter((name) => RUN_ID.test(name)).length, trigger,
+      sessionRunning: session?.status === 'running' || session?.status === 'queued',
+      title: ticket?.title ?? ledgers.get(key)?.title ?? null,
+      jiraStatus: ticket?.status ?? null,
     };
   }));
   return qaLocalRows(sources);

@@ -7,7 +7,7 @@ import { Badge, Button, Card, ConfirmDialog, PhoneCards } from './ui';
 import { cn } from '../lib/cn';
 import { shortTc, verdictVariant, qaVideoUrl } from '../chat/qa';
 import {
-  MAX_FIX_ROUNDS, canRunAgain, canSendFix, fixPastLimit, formatMinutes, matchesFilter, qaLocalSummary, runMinutes,
+  MAX_FIX_ROUNDS, canRunAgain, isLive, canSendFix, fixPastLimit, formatMinutes, matchesFilter, qaLocalSummary, runMinutes,
   type QaLocalFilter, type QaLocalRow, type QaLocalRuns,
 } from '../lib/qaLocalRuns';
 
@@ -19,10 +19,10 @@ const time = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-GB'
 
 const StatusCell: React.FC<{ row: QaLocalRow }> = ({ row }) => {
   const { run } = row;
-  if (run.state === 'running') {
+  if (run.state === 'running' || run.state === 'preparing') {
     return (
       <div>
-        <Badge variant="accent" className="gap-1"><Loader2 size={11} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />Running</Badge>
+        <Badge variant="accent" className="gap-1"><Loader2 size={11} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />{run.state === 'preparing' ? 'Preparing' : 'Running'}</Badge>
         <ol className="mt-1.5 flex flex-wrap gap-1" aria-label="QA steps">
           {run.steps.map((step) => (
             <li key={step.id} className={cn('rounded-xs px-1.5 py-0.5 text-[0.68rem]', step.state === 'running' ? 'bg-accent/15 text-accent' : step.state === 'done' ? 'bg-surface-2 text-status-merged' : step.state === 'failed' ? 'bg-surface-2 text-status-conflict' : 'bg-surface-2 text-muted-foreground')}>{step.label}</li>
@@ -37,7 +37,7 @@ const StatusCell: React.FC<{ row: QaLocalRow }> = ({ row }) => {
 
 const TestCases: React.FC<{ run: QaLocalRow['run'] }> = ({ run }) => {
   const total = run.testCases.length;
-  if (!total) return <span className="text-xs text-muted-foreground">No test case ran</span>;
+  if (!total) return <span className="text-xs text-muted-foreground">{run.state === 'preparing' ? 'Writing test cases' : 'No test case ran'}</span>;
   const pct = (value: number) => `${(value / total) * 100}%`;
   return (
     <div>
@@ -60,7 +60,7 @@ const TestCases: React.FC<{ run: QaLocalRow['run'] }> = ({ run }) => {
 export const QaLocalRunsSection: React.FC<{ onTicketClick: (key: string) => void }> = ({ onTicketClick }) => {
   const [pollInterval, setPollInterval] = useState(IDLE_POLL_MS);
   const { data, error } = useQuery<{ qaLocalRuns: QaLocalRuns }>(GET_QA_LOCAL_RUNS, { pollInterval, fetchPolicy: 'cache-and-network' });
-  const anyRunning = Boolean(data?.qaLocalRuns.rows.some((row) => row.run.state === 'running'));
+  const anyRunning = Boolean(data?.qaLocalRuns.rows.some(isLive));
   useEffect(() => { setPollInterval(anyRunning ? RUNNING_POLL_MS : IDLE_POLL_MS); }, [anyRunning]);
   const [runAgain] = useMutation(QA_RUN_AGAIN, { refetchQueries: ['GetQaLocalRuns'] });
   const [sendFix] = useMutation(QA_SEND_FIX, { refetchQueries: ['GetQaLocalRuns'] });
@@ -144,7 +144,7 @@ export const QaLocalRunsSection: React.FC<{ onTicketClick: (key: string) => void
                         <td className="px-4 py-3">{row.run.state === 'done' && row.run.verdict ? <Badge variant={verdictVariant(row.run.verdict)}>{row.run.verdict}</Badge> : <span className="text-muted-foreground">-</span>}</td>
                         <td className="px-4 py-3 font-mono text-xs tabular-nums">{row.fixRound} / {MAX_FIX_ROUNDS}{row.fixSent && <span className="ml-1 text-status-merged">fix sent</span>}</td>
                         <td className="whitespace-nowrap px-4 py-3 font-mono text-xs tabular-nums">{time(row.run.startedAt)}</td>
-                        <td className="whitespace-nowrap px-4 py-3 font-mono text-xs tabular-nums">{formatMinutes(minutes)}{row.run.state === 'running' ? ' so far' : ''}</td>
+                        <td className="whitespace-nowrap px-4 py-3 font-mono text-xs tabular-nums">{formatMinutes(minutes)}{isLive(row) ? ' so far' : ''}</td>
                         <td className="px-4 py-3 text-right">
                           <Button size="icon" variant="ghost" aria-expanded={expanded} aria-label={expanded ? `Hide ${row.key} details` : `Show ${row.key} details`} onClick={() => setOpen(expanded ? null : row.key)}>
                             {expanded ? <ChevronUp size={16} aria-hidden="true" /> : <ChevronDown size={16} aria-hidden="true" />}
@@ -154,7 +154,7 @@ export const QaLocalRunsSection: React.FC<{ onTicketClick: (key: string) => void
                       {expanded && (
                         <tr className="border-t border-border bg-surface-1">
                           <td colSpan={8} className="px-4 py-3">
-                            <p className="font-mono text-[0.72rem] text-muted-foreground">run {row.run.runId} · {row.runs} {row.runs === 1 ? 'run' : 'runs'} for this ticket{row.jiraStatus ? ` · Jira ${row.jiraStatus}` : ''}</p>
+                            <p className="font-mono text-[0.72rem] text-muted-foreground">{row.run.runId ? `run ${row.run.runId}` : 'QA session preparing the first run'} · {row.runs} {row.runs === 1 ? 'run' : 'runs'} for this ticket{row.jiraStatus ? ` · Jira ${row.jiraStatus}` : ''}</p>
                             {failing.length > 0 && (
                               <ul className="mt-2 flex flex-col gap-1">
                                 {failing.map((tc) => (
