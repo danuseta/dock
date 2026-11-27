@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import test from 'node:test';
 import {
-  DEFAULT_PROFILE, SOUS_STAGE_IDS, SousFlowError, allRunProfile, defaultSousFlow, flowLines, parseProfile, parseSousFlow, profileFor, readSousFlow,
+  DECIDE_ASK_LINE, DECIDE_CONTINUE_LINE, DEFAULT_PROFILE, SOUS_STAGE_IDS, SousFlowError, decideLines, guessesHold, allRunProfile, defaultSousFlow, flowLines, parseProfile, parseSousFlow, profileFor, readSousFlow,
 } from '../integrations/sous-flow';
 import { sousConfirmedPrompt, sousStartPrompt } from '../integrations/orchestrator-cron';
 
@@ -70,4 +70,17 @@ test('skip, ask first and stop become plain prompt lines', () => {
   ]);
   assert.match(sousStartPrompt('QRD-7', null, lines), /stay in English\. Sous flow: skip make the demo video/, 'the lines come after the usual prompt');
   assert.deepStrictEqual(flowLines({ skip: ['qa'], ask: [], stop: 'status' }), ['Sous flow: skip run local QA on the PR.']);
+});
+
+test('guesses hold the pull request only when Decisions asks first or the run stops at or before it', () => {
+  const profile = (ask: string[], stop: string) => ({ skip: [], ask, stop }) as never;
+  assert.strictEqual(guessesHold(profile([], 'status')), false);
+  assert.strictEqual(guessesHold(profile(['video'], 'status')), false);
+  assert.strictEqual(guessesHold(profile(['decide'], 'status')), true);
+  assert.strictEqual(guessesHold(profile([], 'decide')), true);
+  assert.strictEqual(guessesHold(profile([], 'publish')), true);
+  assert.strictEqual(guessesHold(profile([], 'discord')), false);
+  assert.deepStrictEqual(decideLines(profile([], 'status')), [DECIDE_CONTINUE_LINE]);
+  assert.deepStrictEqual(decideLines(profile(['decide'], 'status')), [DECIDE_ASK_LINE]);
+  assert.match(DECIDE_CONTINUE_LINE, /does not hold the PR\. Open it ready for review unless an issue is open/);
 });
