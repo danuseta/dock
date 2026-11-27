@@ -35,3 +35,11 @@ test('Run again once a run stopped; Send fix on a REVISION not sent yet, confirm
   assert.strictEqual(fixPastLimit(row('A', { verdict: 'REVISION' }, { fixRound: 1 })), false);
   assert.strictEqual(fixPastLimit(row('A', { verdict: 'REVISION' }, { fixRound: 2 })), true);
 });
+
+test('a preparing QA session counts as live: Running filter and card, no Run again, time so far', () => {
+  const preparing = row('QRD-1593', { state: 'preparing', verdict: null, runId: '', finishedAt: null, updatedAt: '2026-11-23T14:45:49Z' });
+  assert.strictEqual(matchesFilter(preparing, 'running'), true);
+  assert.strictEqual(qaLocalSummary([preparing]).running, 1);
+  assert.strictEqual(canRunAgain(preparing), false);
+  assert.strictEqual(formatMinutes(runMinutes(preparing.run, Date.parse('2026-11-23T14:55:49Z'))), '10m');
+});

@@ -2,7 +2,7 @@ import type { Orchestration } from './orchestrator';
 import { lessonsLines } from './lessons';
 
 export type QaTcState = 'pending' | 'running' | 'passed' | 'failed' | 'skipped' | 'blocked';
-export type QaRunState = 'running' | 'done' | 'failed';
+export type QaRunState = 'running' | 'done' | 'failed' | 'preparing';
 
 export interface QaStep { id: string; label: string; state: string }
 export interface QaTc { id: string; title: string; ac: number[]; state: QaTcState; seconds: number | null; video: string | null; note: string | null }
@@ -368,25 +368,41 @@ export interface QaLocalRow {
   sessionId: string | null;
 }
 
-export interface QaLocalSource { key: string; run: QaRun | null; runs: number; trigger: QaTrigger | null; title: string | null; jiraStatus: string | null }
+/** `sessionRunning`: the QA session of the trigger still has a turn going, so a run may be on its way. */
+export interface QaLocalSource { key: string; run: QaRun | null; runs: number; trigger: QaTrigger | null; title: string | null; jiraStatus: string | null; sessionRunning?: boolean }
 
 /** Tickets whose work is over: they leave the table. */
 export const QA_HIDDEN_STATUS = /^(?:ready ?for ?production|done(?: \/ merged)?|closed)$/i;
 
-/** The table rows: tickets with a run and not RFP or Done, running first, then the newest started; and how many were hidden. */
+/** A QA session that started after the newest run, or before any run, and still runs: it prepares the stack and the test cases. */
+export function preparingRun(source: Pick<QaLocalSource, 'run' | 'trigger' | 'sessionRunning'>): QaRun | null {
+  if (!source.sessionRunning || !source.trigger?.at) return null;
+  if (source.run && (source.run.state === 'running' || Date.parse(source.run.startedAt ?? '') >= Date.parse(source.trigger.at))) return null;
+  return {
+    key: '', runId: '', state: 'preparing', step: 'stack', steps: STEP_LABELS.map(([id, label], index) => ({ id, label, state: index === 0 ? 'running' : 'pending' })),
+    tcs: [], verdict: null, rule: null, followsFe: null, passed: 0, failed: 0, blocked: 0, error: null,
+    startedAt: source.trigger.at, updatedAt: source.trigger.at, finishedAt: null,
+  };
+}
+
+const LIVE = new Set(['running', 'preparing']);
+
+/** The table rows: tickets with a run or a QA session getting ready, not RFP or Done; live first, then the newest started; and how many were hidden. */
 export function qaLocalRows(sources: QaLocalSource[]): { rows: QaLocalRow[]; hidden: number } {
   let hidden = 0;
   const rows: QaLocalRow[] = [];
   for (const source of sources) {
-    if (!source.run || !isTicketKey(source.key)) continue;
+    if (!isTicketKey(source.key)) continue;
+    const run = preparingRun(source) ?? source.run;
+    if (!run) continue;
     if (source.jiraStatus && QA_HIDDEN_STATUS.test(source.jiraStatus.trim())) { hidden += 1; continue; }
     rows.push({
-      key: source.key, title: source.title, jiraStatus: source.jiraStatus, run: source.run, runs: source.runs,
-      fixRound: source.trigger?.round ?? 0, fixSent: Boolean(source.trigger?.fixFor && source.trigger.fixFor === source.run.runId),
+      key: source.key, title: source.title, jiraStatus: source.jiraStatus, run, runs: source.runs,
+      fixRound: source.trigger?.round ?? 0, fixSent: Boolean(run.runId && source.trigger?.fixFor === run.runId),
       sessionId: source.trigger?.sessionId ?? null,
     });
   }
   const started = (row: QaLocalRow) => Date.parse(row.run.startedAt ?? '') || 0;
-  rows.sort((a, b) => Number(b.run.state === 'running') - Number(a.run.state === 'running') || started(b) - started(a));
+  rows.sort((a, b) => Number(LIVE.has(b.run.state)) - Number(LIVE.has(a.run.state)) || started(b) - started(a));
   return { rows, hidden };
 }
