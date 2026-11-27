@@ -14,12 +14,13 @@ test('the editor lists the 15 sous stages from the ticket to the Jira status, De
   assert.equal(SOUS_STAGES.find((stage) => stage.id === 'decide')?.required, true);
 });
 
-test('nothing saved means every stage runs and goes on, checkpoints on, QA guide off', () => {
+test('nothing saved means every stage runs and Decisions asks first, checkpoints on, QA guide off', () => {
   for (const raw of [null, '', '{', '[]']) assert.deepEqual(parseSettings(raw), defaultSettings(), String(raw));
   const settings = parseSettings(null);
   assert.equal(settings.checkpoint, true);
   assert.equal(settings.qaGuide, false);
-  assert.deepEqual(settings.profiles[DEFAULT_PROFILE], allRun());
+  assert.deepEqual(settings.profiles[DEFAULT_PROFILE], { skip: [], ask: ['decide'], stop: 'status' });
+  assert.deepEqual(parseSettings(JSON.stringify({ profiles: { [DEFAULT_PROFILE]: allRun() } })).profiles[DEFAULT_PROFILE], allRun(), 'a saved continue stays continue');
 });
 
 test('Decisions cannot be skipped, but it can be the stop point; ask first and stop are one choice per stage', () => {

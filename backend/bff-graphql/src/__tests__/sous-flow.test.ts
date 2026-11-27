@@ -12,22 +12,24 @@ test('the stage list follows the kit from picking the ticket to the Jira status,
   assert.deepStrictEqual([...SOUS_STAGE_IDS], ['jira', 'block', 'park', 'plan', 'code', 'loop', 'verify', 'final', 'video', 'publish', 'decide', 'discord', 'qa', 'review', 'status']);
 });
 
-test('with nothing saved every stage runs and goes on, checkpoints are on and the QA guide is off', () => {
+test('with nothing saved every stage runs, Decisions asks first, checkpoints are on and the QA guide is off', () => {
   const flow = readSousFlow(null);
   assert.deepStrictEqual(flow, defaultSousFlow());
-  assert.deepStrictEqual(flow.profiles[DEFAULT_PROFILE], { skip: [], ask: [], stop: 'status' });
+  assert.deepStrictEqual(flow.profiles[DEFAULT_PROFILE], { skip: [], ask: ['decide'], stop: 'status' });
+  assert.strictEqual(guessesHold(flow.profiles[DEFAULT_PROFILE]), true, 'guesses wait on the owner until a teammate chooses continue');
   assert.strictEqual(flow.checkpoint, true);
   assert.strictEqual(flow.qaGuide, false);
   assert.strictEqual(flow.qaGuideField, 'customfield_10340');
   assert.deepStrictEqual(readSousFlow('{not json'), defaultSousFlow(), 'an unreadable setting falls back to the defaults');
 });
 
-test('the default flow adds no line, so the sous prompts are byte for byte as today', () => {
+test('a flow where every stage runs and goes on adds no line, so the sous prompts are byte for byte as before', () => {
   assert.deepStrictEqual(flowLines(allRunProfile()), []);
-  const lines = flowLines(profileFor(defaultSousFlow(), null).profile);
+  const lines = flowLines(profileFor(parseSousFlow(JSON.stringify({ profiles: { [DEFAULT_PROFILE]: allRunProfile() }, mine: DEFAULT_PROFILE })), null).profile);
   assert.strictEqual(sousStartPrompt('QRD-7', null, lines), TODAY_START);
   assert.strictEqual(sousConfirmedPrompt('QRD-7', null, lines), TODAY_CONFIRMED);
   assert.strictEqual(sousStartPrompt('QRD-7'), TODAY_START);
+  assert.deepStrictEqual(flowLines(profileFor(defaultSousFlow(), null).profile), ['Sous flow: after "open the PR as draft while any GUESS/USULAN decision or issue is open; DOCK marks it ready after the owner confirms in Decisions", write a checkpoint and wait for the owner to say go on before the next stage.'], 'the default asks after Decisions');
 });
 
 test('Decisions and the other required stages cannot be skipped; the stop point must run', () => {
