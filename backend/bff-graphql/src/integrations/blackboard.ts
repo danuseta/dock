@@ -7,11 +7,20 @@ export const defaultBlackboardRoot = () => process.env.DOCK_BLACKBOARD_DIR || pa
 /** The sprint boards: Sprint-<N>/<Epic>/ folders holding one materials file, or one folder, per ticket. */
 export const defaultSprintBoardsRoot = () => process.env.DOCK_SPRINT_BOARDS_DIR || path.join(os.homedir(), 'Desktop', 'blackboard');
 
-/** The screenshots folder of a ticket on this blackboard; null when the key is no ticket key or the blackboard has no board for it. */
+/**
+ * The screenshots folder of a ticket on this blackboard, its own board or one under an epic (<EPIC>/tickets/<KEY>); null
+ * when the key is no ticket key or the blackboard has no board for it.
+ */
 export async function ticketScreenshots(root: string, key: string): Promise<string | null> {
   if (!TICKET_KEY.test(key)) return null;
-  const board = await fs.stat(path.join(root, key)).catch(() => null);
-  return board?.isDirectory() ? path.join(root, key, 'screenshots') : null;
+  if (await isDir(path.join(root, key))) return path.join(root, key, 'screenshots');
+  const epics = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
+  for (const epic of epics) {
+    if (!epic.isDirectory() || !TICKET_KEY.test(epic.name)) continue;
+    const nested = path.join(root, epic.name, 'tickets', key);
+    if (await isDir(nested)) return path.join(nested, 'screenshots');
+  }
+  return null;
 }
 
 const TEXT_TYPES: Record<string, string> = {
