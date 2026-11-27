@@ -280,27 +280,49 @@ export class QaAuto {
 
   /** Sends the failed test cases of a finished REVISION run to the Task session, once per run and while fix rounds are left. */
   async revision(key: string): Promise<boolean> {
-    if (!isTicketKey(key) || !this.deps.available() || this.sending.has(key) || this.opening.has(key)) return false;
+    return (await this.sendFix(key)) === null;
+  }
+
+  /**
+   * The fix message of the newest REVISION run, to the ticket's Task session; null when it went out, else why not. `force`
+   * is the owner's confirmation to send one past the fix-round limit.
+   */
+  async sendFix(key: string, force = false): Promise<string | null> {
+    if (!isTicketKey(key)) return 'Not a ticket key';
+    if (!this.deps.available()) return 'qonflo-qa-local is not installed on this DOCK';
+    if (this.sending.has(key) || this.opening.has(key)) return 'A QA message for this ticket is already going out';
     const run = this.deps.latest(key);
-    if (!run || run.state !== 'done' || run.verdict !== 'REVISION') return false;
+    if (!run || run.state !== 'done' || run.verdict !== 'REVISION') return 'The newest QA run is not a finished REVISION';
     const last = readTrigger(await this.deps.last(key));
-    if (!last || last.round >= MAX_FIX_ROUNDS || last.fixFor === run.runId || !last.prs.length) return false;
+    if (!last || !last.prs.length) return 'This ticket has no QA trigger with pull requests';
+    if (last.fixFor === run.runId) return 'The fix for this run was already sent';
     // A run made before the trigger belongs to an earlier set of pull requests.
-    if (Date.parse(run.startedAt ?? '') < Date.parse(last.at)) return false;
+    if (Date.parse(run.startedAt ?? '') < Date.parse(last.at)) return 'The newest run is older than the current pull requests';
+    if (last.round >= MAX_FIX_ROUNDS && !force) return `The ${MAX_FIX_ROUNDS} fix rounds are used; confirm to send one more`;
     this.sending.add(key);
     try {
       const heads: Record<string, string> = {};
       for (const url of last.prs) {
         const head = await this.deps.head(url);
-        if (!head) return false;
+        if (!head) return 'GitHub did not give the pull request head';
         heads[url] = head;
       }
       await this.deps.message(key, revisionPrompt(key, last.round + 1, run, this.deps.runDir(key, run.runId), await this.lessonsOf(key)));
       await this.deps.save(key, { ...last, fixFor: run.runId, heads });
-      return true;
+      return null;
     } finally {
       this.sending.delete(key);
     }
+  }
+
+  /** QA from the start in a new QA session on the pull requests known now; the fix rounds already used stay counted. */
+  async runAgain(key: string, prs: string[]): Promise<string | null> {
+    if (!isTicketKey(key)) return 'Not a ticket key';
+    if (this.deps.latest(key)?.state === 'running') return 'A QA run is still going for this ticket';
+    const last = readTrigger(await this.deps.last(key));
+    const started = await this.start(key, prs.length ? prs : last?.prs ?? [], last?.round ?? 0);
+    if (started) return null;
+    return readTrigger(await this.deps.last(key))?.error ?? 'A QA session for this ticket is already starting';
   }
 
   /** Looks at every ticket built here for a finished REVISION run. */
@@ -330,4 +352,41 @@ export class QaAuto {
       this.opening.delete(key);
     }
   }
+}
+
+/** One ticket's newest local QA run for the QA queue page, with what its trigger says about fix rounds. */
+export interface QaLocalRow {
+  key: string;
+  title: string | null;
+  jiraStatus: string | null;
+  run: QaRun;
+  /** How many runs the ticket has. */
+  runs: number;
+  fixRound: number;
+  /** The fix message of this run already went out. */
+  fixSent: boolean;
+  sessionId: string | null;
+}
+
+export interface QaLocalSource { key: string; run: QaRun | null; runs: number; trigger: QaTrigger | null; title: string | null; jiraStatus: string | null }
+
+/** Tickets whose work is over: they leave the table. */
+export const QA_HIDDEN_STATUS = /^(?:ready ?for ?production|done(?: \/ merged)?|closed)$/i;
+
+/** The table rows: tickets with a run and not RFP or Done, running first, then the newest started; and how many were hidden. */
+export function qaLocalRows(sources: QaLocalSource[]): { rows: QaLocalRow[]; hidden: number } {
+  let hidden = 0;
+  const rows: QaLocalRow[] = [];
+  for (const source of sources) {
+    if (!source.run || !isTicketKey(source.key)) continue;
+    if (source.jiraStatus && QA_HIDDEN_STATUS.test(source.jiraStatus.trim())) { hidden += 1; continue; }
+    rows.push({
+      key: source.key, title: source.title, jiraStatus: source.jiraStatus, run: source.run, runs: source.runs,
+      fixRound: source.trigger?.round ?? 0, fixSent: Boolean(source.trigger?.fixFor && source.trigger.fixFor === source.run.runId),
+      sessionId: source.trigger?.sessionId ?? null,
+    });
+  }
+  const started = (row: QaLocalRow) => Date.parse(row.run.startedAt ?? '') || 0;
+  rows.sort((a, b) => Number(b.run.state === 'running') - Number(a.run.state === 'running') || started(b) - started(a));
+  return { rows, hidden };
 }
