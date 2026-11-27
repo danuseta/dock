@@ -32,7 +32,7 @@ const MARKER = /^DOCK-REVIEW-ROUND (\S+) valid=(\d+) invalid=(\d+) pushed=(yes|n
 const REVIEW_LINE = /^DOCK-REVIEW on it by (.+)$/m;
 /** A reviewer DOCK's verdict line that approves: its notes are not findings, so no fix round answers an approve. */
 const APPROVED = /· Approve(?: with comments)? · 0 blocker\s*$/;
-const NO_BLOCKER = /\b(?:gak|ga|gk|nggak|enggak|engga|tidak|tak|no)\s+(?:ada\s+)?blockers?\b/gi;
+export const NO_BLOCKER = /\b(?:gak|ga|gk|nggak|enggak|engga|tidak|tak|no)\s+(?:ada\s+)?blockers?\b/gi;
 const SOME_BLOCKER = /\bblockers?\b/i;
 const LGTM_FIRST = /^\W*(?:mas\s+\S+,?\s+)?(?:lgtm|approved?)\b/i;
 /** The status of a round that only thanks an approval; it never reaches a session and does not count as a fix reply. */
@@ -71,6 +71,9 @@ export interface ReplyUpdate { replyStatus?: string | null; replyAt?: Date | nul
 const shortHeads = (sha: string | string[]) => [...new Set([sha].flat().map((item) => item.slice(0, 7)))];
 
 /** The line DOCK puts under every reply after a fix; the reviewer's DOCK reviews the heads it names again. */
+/** The line under a reply that leaves a finding to the owner: no head, so the reviewer's DOCK does not review the same head again. */
+export const waitMarker = (round: number) => `DOCK-WAIT round ${round} · owner`;
+
 export const fixMarker = (round: number, sha: string | string[]) => `DOCK-FIX round ${round} · head ${shortHeads(sha).join(' ')}`;
 
 /** The placeholders of the reply template: the reviewers, what the round fixed and the session's own reply as the notes. */
@@ -334,7 +337,12 @@ export const resumePrompt = (roundId: string, autoReply: boolean) => [
 ].join('\n');
 
 /** A reported round whose valid findings are still open: no reply was ever scheduled for it. */
-export const isHeldRound = (round: Pick<ReviewRound, 'status' | 'replyStatus' | 'valid'>) => round.status === 'reported' && !round.replyStatus && (round.valid ?? 0) > 0;
+/** A reply that told the reviewer a valid finding is being confirmed with the owner. */
+export const isWaitReply = (text: string | null | undefined) => /^DOCK-WAIT round \d+ · owner$/.test((text ?? '').trim().split('\n').pop() ?? '');
+
+/** A round with valid findings still waiting on the owner: no reply yet, or only the "being confirmed" one and nothing pushed. */
+export const isHeldRound = (round: Pick<ReviewRound, 'status' | 'replyStatus' | 'valid'> & Partial<Pick<ReviewRound, 'replyText' | 'pushed'>>) =>
+  round.status === 'reported' && (round.valid ?? 0) > 0 && (!round.replyStatus || (round.replyStatus === 'sent' && !round.pushed && isWaitReply(round.replyText)));
 
 /**
  * The lines an owner answer on the ticket carries for a held round: after the work, the Discord block for the reviewers and
@@ -356,7 +364,8 @@ export function heldRoundLines(input: { key: string; roundId: string; threadUrl:
 }
 
 /** A marker for a round that already reported counts again when it brings new work: the fix was pushed after all, or no reply ever went out. */
-const reopens = (round: ReviewRound, result: RoundResult) => round.status === 'reported' && round.replyStatus !== 'sent' && round.replyStatus !== 'sending'
+const reopens = (round: ReviewRound, result: RoundResult) => round.status === 'reported' && round.replyStatus !== 'sending'
+  && (round.replyStatus !== 'sent' || isWaitReply(round.replyText))
   && (!round.replyStatus || (!round.pushed && (result.pushed || result.body === true)));
 
 type ChatTime = Date | number | string;
@@ -654,8 +663,10 @@ export class ReviewFindings {
   private async scheduleReply(round: ReviewRound, result: RoundResult, reply: string | null): Promise<number | typeof WAITING_GITHUB | null> {
     const settings = await this.deps.settings();
     const settled = result.body === true && result.valid > 0;
-    if (!settings.autoReply || !(result.pushed || settled || (result.valid === 0 && result.invalid > 0))) return null;
     const block = parseDiscordBlock(reply);
+    // A valid finding left for the owner: the session's reply says it is being confirmed, so the reviewer is not left waiting.
+    const escalated = result.valid > 0 && !result.pushed && !settled && Boolean(block);
+    if (!settings.autoReply || !(result.pushed || settled || escalated || (result.valid === 0 && result.invalid > 0))) return null;
     const { format, skill, template } = settings.reply;
     const fallback = format === 'skill' && (!block || !(await this.replySkill(settings)));
     if (!block && format === 'builtin') return null;
@@ -678,7 +689,7 @@ export class ReviewFindings {
     const mine = authorsOf(round);
     const answered = (other: ReviewRound) => short.every((sha) => headsOf(other).includes(sha)) && mine.every((id) => authorsOf(other).includes(id));
     const skip = !settled && replies.some(answered) ? 'Already replied for this head'
-      : replies.filter((other) => authorsOf(other).some((id) => mine.includes(id))).length >= settings.maxRounds ? `${settings.maxRounds} replies to this reviewer` : null;
+      : replies.filter((other) => !isWaitReply(other.replyText) && authorsOf(other).some((id) => mine.includes(id))).length >= settings.maxRounds ? `${settings.maxRounds} replies to this reviewer` : null;
     if (skip) {
       await this.deps.update(round.id, { replyStatus: 'skipped', replyDetail: skip });
       return null;
@@ -692,7 +703,7 @@ export class ReviewFindings {
     const mentions = authors.filter((author) => USER_ID.test(author.id)).map((author) => `<@${author.id}>`).join(' ');
     const delay = settings.delayMinutes;
     await this.deps.update(round.id, {
-      replyStatus: 'pending', replyAt: new Date(this.deps.now().getTime() + delay * 60_000), replyText: withMarker(`${mentions ? `${mentions} ` : ''}${plainText(body)}`, fixMarker(number, heads)),
+      replyStatus: 'pending', replyAt: new Date(this.deps.now().getTime() + delay * 60_000), replyText: withMarker(`${mentions ? `${mentions} ` : ''}${plainText(body)}`, escalated ? waitMarker(number) : fixMarker(number, heads)),
       replyImages: block?.images.length ? JSON.stringify(block.images) : null, replyDetail: null,
     });
     if (fallback) {
