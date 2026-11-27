@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { MAX_FIX_ROUNDS, QaAuto, isRunVideo, newestRun, parseProgress, parseResults, qaLocalRows, qaPrompt, readTrigger, revisionPrompt, runPullRequests, type QaAutoDeps, type QaRun, type QaTrigger } from '../integrations/qa-local';
+import { MAX_FIX_ROUNDS, QaAuto, isRunVideo, newestRun, parseProgress, parseQaFix, parseResults, qaFixText, qaLocalRows, qaPrompt, readTrigger, revisionPrompt, runPullRequests, type QaAutoDeps, type QaRun, type QaTrigger } from '../integrations/qa-local';
 import type { RunPullRequest } from '../integrations/orchestrator';
 
 const NOW = new Date('2026-11-04T08:00:00.000Z');
@@ -208,7 +208,9 @@ test('a finished REVISION run sends its failed test cases to the Task session on
   assert.ok(lines.includes(`summary.md: ${DIR}/summary.md`));
   assert.ok(lines.includes(`- QRD-1286-TC001 | AC 1, 2 | own avatar | catatan: avatar missing | video: ${DIR}/videos/QRD-1286-TC001.webm`));
   assert.ok(!messages[0].prompt.includes('TC002'));
-  assert.strictEqual(lines[lines.length - 1], 'Pakai skill sous: perbaiki temuan QA lokal ini lewat light runner di PR yang sama, push ke branch PR, lalu selesai. Jangan buka PR baru.');
+  assert.ok(lines.some((line) => line.startsWith('Sebelum mengubah kode, reproduksi tiap TC:') && line.includes(`${DIR}/pw-output/<TC>/error-context.md`)), 'each TC is reproduced first');
+  assert.ok(lines.some((line) => line.includes('Kalau PR itu sudah merged: lanjutkan di branch yang sama') && line.includes('buka PR baru dari branch itu ke develop')));
+  assert.strictEqual(lines[lines.length - 1], 'Baris terakhir balasanmu persis: QA-FIX 20261104T073000Z lalu satu entri per TC gagal, dipisah spasi: <TC>=fixed:<sha pendek>, <TC>=not-a-bug, atau <TC>=flaky (contoh: QA-FIX 20261104T073000Z QRD-1286-TC001=fixed:1a2b3c4).');
   assert.deepStrictEqual(saved[0].trigger, { ...trig(), fixFor: RUN_ID, heads: HEADS });
   const again = world({ last: saved[0].trigger, run: finished('REVISION'), heads: HEADS });
   assert.strictEqual(await again.auto.revision('QRD-1286'), false);
@@ -327,4 +329,35 @@ test('a QA session still preparing shows as a live row before its run folder exi
   assert.strictEqual(rows[0].fixSent, false);
   const newer = qaLocalRows([{ key: 'QRD-1596', run: { ...finished('LOLOS'), startedAt: '2026-11-27T12:30:00.000Z' }, runs: 2, trigger, title: null, jiraStatus: null, sessionRunning: true }]);
   assert.strictEqual(newer.rows[0].run.state, 'done', 'a run started after the trigger is that session\'s run');
+});
+
+test('the QA-FIX line of a Task session reads per TC, and lands on the trigger only for the run its fix message was about', async () => {
+  const text = 'Selesai.\nQA-FIX 20261104T073000Z QRD-1286-TC013=fixed:18b53dd7e TC015=not-a-bug QRD-1286-TC018=flaky junk=x';
+  const report = parseQaFix(text)!;
+  assert.deepStrictEqual(report, { runId: RUN_ID, items: [{ tc: 'QRD-1286-TC013', result: 'fixed', sha: '18b53dd7e' }, { tc: 'TC015', result: 'not-a-bug', sha: null }, { tc: 'QRD-1286-TC018', result: 'flaky', sha: null }] });
+  assert.strictEqual(qaFixText(report), 'TC013 fixed 18b53dd · TC015 not a bug · TC018 flaky');
+  assert.strictEqual(parseQaFix('no marker here'), null);
+  assert.strictEqual(parseQaFix('QA-FIX notarun TC1=fixed:abcdef1'), null);
+  const sent = world({ last: trig({ fixFor: RUN_ID }) });
+  assert.strictEqual(await sent.auto.fixReported('QRD-1286', text), true);
+  assert.deepStrictEqual(sent.saved[0].trigger.fixResult, report);
+  assert.strictEqual(readTrigger(sent.saved[0].trigger)?.fixResult?.items.length, 3, 'the saved result reads back');
+  const other = world({ last: trig({ fixFor: '20261105T000000Z' }) });
+  assert.strictEqual(await other.auto.fixReported('QRD-1286', text), false, 'a QA-FIX for another run changes nothing');
+  const { rows } = qaLocalRows([{ key: 'QRD-1286', run: finished('REVISION'), runs: 1, trigger: { ...trig({ fixFor: RUN_ID }), fixResult: report }, title: null, jiraStatus: null }]);
+  assert.strictEqual(rows[0].fixResult, 'TC013 fixed 18b53dd · TC015 not a bug · TC018 flaky');
+});
+
+test('QA starts on its own only for pull requests still open; Run again always checks the tests against the current UI', async () => {
+  const merged = world();
+  assert.strictEqual(await merged.auto.ledger(build({ pullRequests: [{ ...pr(BE), status: 'merged' }, { ...pr(FE), status: 'merged' }] })), false);
+  assert.strictEqual(merged.opened.length, 0);
+  const one = world();
+  assert.strictEqual(await one.auto.ledger(build({ pullRequests: [{ ...pr(BE), status: 'merged' }, pr(FE)] })), true);
+  assert.match(one.opened[0].prompt, new RegExp('setelah PR ' + FE.replace(/[/.]/g, '\$&') + '\.'));
+  assert.match(qaPrompt('QRD-1286', [FE]), /1b\. Test yang sudah ada mungkin ditulis untuk UI lama.*Kalau file itu tidak ada atau head-nya berbeda, cek setup dijalankan\./);
+  const again = world({ last: trig(), run: finished('LOLOS') });
+  assert.strictEqual(await again.auto.runAgain('QRD-1286', [FE]), null);
+  assert.match(again.opened[0].prompt, /\(Run again dari owner\)\./);
+  assert.match(again.opened[0].prompt, /Karena ini Run again, cek setup selalu dijalankan\./);
 });

@@ -11,6 +11,7 @@ export interface QaLocalRow {
   fixRound: number;
   fixSent: boolean;
   sessionId: string | null;
+  fixResult?: string | null;
 }
 export interface QaLocalRuns { available: boolean; hidden: number; rows: QaLocalRow[] }
 

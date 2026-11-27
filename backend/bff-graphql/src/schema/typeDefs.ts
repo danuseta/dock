@@ -2866,6 +2866,8 @@ export const typeDefs = gql`
     "The fix message of this run already went out."
     fixSent: Boolean!
     sessionId: String
+    "What the Task session found for this run's failed test cases, from its QA-FIX line: 'TC013 fixed 18b53dd · TC015 not a bug'."
+    fixResult: String
   }
 
   type QaLocalRuns {
