@@ -3,6 +3,7 @@ import { useQuery } from '@apollo/client';
 import { FlaskConical, Link2, RefreshCw } from 'lucide-react';
 import { GET_QA_QUEUE } from '../graphql/queries';
 import { LoadingSkeleton } from '../components/LoadingSkeleton';
+import { QaLocalRunsSection } from '../components/QaLocalRunsSection';
 import { Badge, Button, Card, Checkbox, Page, PageHeader, PhoneCards } from '../components/ui';
 import { cn } from '../lib/cn';
 import { EVERYONE, QA_QUEUE_REFRESH_MS, filterQueue, formatWait, moreText, peopleOf, shortName, waitText, type QaQueue, type QaQueueKind } from '../lib/qaQueue';
@@ -103,6 +104,7 @@ const QaQueuePage: React.FC<QaQueuePageProps> = ({ onTicketClick }) => {
       </Card>
       {queue && moreText(queue) && <p className="mt-3 text-pretty text-xs text-status-warn" role="status">Only the first 500 tickets are read from Jira; {moreText(queue)} are not shown.</p>}
       <p className="mt-3 text-pretty text-xs text-muted-foreground">Sorted by time entered UAT CHECK. "Waiting on QRD-x" shows when the QA bot adds the QA-WAIT-DEPENDENCY label, from the is blocked by link; counted apart from ESCALATED.</p>
+      <QaLocalRunsSection onTicketClick={onTicketClick} />
     </Page>
   );
 };

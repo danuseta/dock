@@ -66,7 +66,7 @@ import { decisionGate } from '../integrations/decision-gate';
 import { doctorReports } from '../integrations/doctor';
 import { claudeUsage } from '../integrations/claude-usage';
 import { claudeAccounts, claudeAccountsState, cycleAvailable } from '../integrations/claude-accounts-live';
-import { latestQaRun, qaAuto, qaAvailable, qaEnabled, qaTrigger, QA_SETTING } from '../integrations/qa-local-live';
+import { latestQaRun, qaAuto, qaAvailable, qaEnabled, qaLocalRuns, qaTrigger, QA_SETTING } from '../integrations/qa-local-live';
 import { isTicketKey, runPullRequests } from '../integrations/qa-local';
 import { deployGateFor } from '../integrations/deploy-gate-live';
 import { agentLooks } from '../integrations/agent-looks';
@@ -627,6 +627,11 @@ export const resolvers = {
     claudeAccounts: () => claudeAccountsState(),
     kamus: () => readKamus(blackboard),
     qaLocal: (_: unknown, { ticketKey }: { ticketKey?: string | null }) => qaLocalState(ticketKey),
+    qaLocalRuns: async () => {
+      if (!qaAvailable()) return { available: false, rows: [], hidden: 0 };
+      const { rows, hidden } = await qaLocalRuns();
+      return { available: true, hidden, rows: rows.map((row) => ({ ...row, run: { ...row.run, testCases: row.run.tcs } })) };
+    },
     deployGate: (_: unknown, { ticketKey }: { ticketKey: string }) => {
       if (!isTicketKey(ticketKey)) throw new GraphQLError('ticketKey must be a ticket key such as QRD-1292', { extensions: { code: 'BAD_USER_INPUT' } });
       return deployGateFor(ticketKey);
@@ -1283,6 +1288,21 @@ export const resolvers = {
         throw new GraphQLError(error instanceof Error ? error.message : 'The usage probe failed', { extensions: { code: 'BAD_USER_INPUT' } });
       }
     },
+    qaRunAgain: async (_: unknown, { ticketKey }: { ticketKey: string }) => {
+      requireQa();
+      const key = ticketKey.trim().toUpperCase();
+      const run = isTicketKey(key) ? await orchestratorService.get(key) : null;
+      const refused = await qaAuto.runAgain(key, run ? runPullRequests(run) : []);
+      if (refused) throw new GraphQLError(refused, { extensions: { code: 'BAD_USER_INPUT' } });
+      return qaLocalState(key);
+    },
+    qaSendFix: async (_: unknown, { ticketKey, force }: { ticketKey: string; force?: boolean | null }) => {
+      requireQa();
+      const key = ticketKey.trim().toUpperCase();
+      const refused = await qaAuto.sendFix(key, force === true);
+      if (refused) throw new GraphQLError(refused, { extensions: { code: 'BAD_USER_INPUT' } });
+      return qaLocalState(key);
+    },
     runQa: async (_: unknown, { ticketKey }: { ticketKey: string }) => {
       requireQa();
       const key = ticketKey.trim().toUpperCase();
@@ -1464,7 +1484,7 @@ export const resolvers = {
 
 export const protectedQueries = [
   'kamus',
-  'dashboard', 'ticketPullRequests', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'githubQuota', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'installedSkills', 'reviewRoundsForTicket', 'claudeAccounts', 'qaLocal', 'deployGate', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
+  'dashboard', 'ticketPullRequests', 'ticketDetail', 'ticketRelationGroup', 'needsAttention', 'githubQuota', 'discordThreads', 'ticketChanges', 'pullFilePatch', 'pullFileLines', 'autoReviews', 'installedSkills', 'reviewRoundsForTicket', 'claudeAccounts', 'qaLocal', 'qaLocalRuns', 'deployGate', 'jiraProjects', 'githubRepos', 'quickLinks', 'calendarEvents', 'monitors',
   'dockerRuntime', 'dockerContainerLogs', 'orchestrations', 'orchestration', 'ingestTokens', 'elevenLabsKeys', 'elevenLabsQuota', 'devServers', 'devServerLog', 'demoVideos', 'demoStorage',
   'chatSessions', 'chatSession', 'chatSessionStates', 'chatMessages', 'chatActivity', 'chatSessionWorkers', 'chatActivityDetail', 'chatSearch', 'chatBridge', 'chatMachines', 'chatStatus', 'chatBalloons',
   'chatCommands', 'chatMachineOptions', 'doctorReports', 'claudeUsage', 'claudeSessionUsage', 'claudeTicketUsage', 'agentLooks', 'libraryAgents', 'libraryAgent', 'librarySkillFiles', 'librarySkillFile', 'kitMergeReports', 'kitConflictFile', 'guildMasterLog', 'guildMasterParty',
@@ -1565,7 +1585,7 @@ export const protectedMutations = [
   'createIngestToken',
   'useClaudeAccount',
   'refreshClaudeUsage',
-  'runQa',
+  'runQa', 'qaRunAgain', 'qaSendFix',
   'setQaAutoRun',
   'setClaudeRotation',
   'revokeIngestToken',

@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { QaAuto, isRunVideo, newestRun, parseProgress, parseResults, qaPrompt, readTrigger, revisionPrompt, runPullRequests, type QaAutoDeps, type QaRun, type QaTrigger } from '../integrations/qa-local';
+import { MAX_FIX_ROUNDS, QaAuto, isRunVideo, newestRun, parseProgress, parseResults, qaLocalRows, qaPrompt, readTrigger, revisionPrompt, runPullRequests, type QaAutoDeps, type QaRun, type QaTrigger } from '../integrations/qa-local';
 import type { RunPullRequest } from '../integrations/orchestrator';
 
 const NOW = new Date('2026-11-04T08:00:00.000Z');
@@ -269,4 +269,46 @@ test('a trigger cached before fix rounds existed reads with the defaults', async
   assert.strictEqual(await auto.ledger(build({ pullRequests: [pr(BE)] })), false);
   assert.strictEqual(opened.length, 0);
   assert.match(revisionPrompt('QRD-1', 2, finished('REVISION'), '/d'), /^QA lokal REVISION QRD-1 round 2\n/);
+});
+
+test('Send fix from the QA queue says why it cannot go, and past the fix-round limit only with the owner confirming', async () => {
+  const sent = world({ last: trig(), run: finished('REVISION'), heads: HEADS });
+  assert.strictEqual(await sent.auto.sendFix('QRD-1286'), null);
+  assert.strictEqual(sent.messages.length, 1);
+  assert.strictEqual(await world({ last: trig({ fixFor: RUN_ID }), run: finished('REVISION'), heads: HEADS }).auto.sendFix('QRD-1286'), 'The fix for this run was already sent');
+  assert.strictEqual(await world({ last: trig(), run: finished('LOLOS'), heads: HEADS }).auto.sendFix('QRD-1286'), 'The newest QA run is not a finished REVISION');
+  const spent = world({ last: trig({ round: MAX_FIX_ROUNDS }), run: finished('REVISION'), heads: HEADS });
+  assert.strictEqual(await spent.auto.sendFix('QRD-1286'), 'The 2 fix rounds are used; confirm to send one more');
+  assert.strictEqual(spent.messages.length, 0);
+  assert.strictEqual(await spent.auto.sendFix('QRD-1286', true), null);
+  assert.match(spent.messages[0].prompt, /^QA lokal REVISION QRD-1286 round 3/);
+  assert.strictEqual(await world({ last: trig({ round: MAX_FIX_ROUNDS }), run: finished('REVISION'), heads: HEADS }).auto.revision('QRD-1286'), false, 'the automatic path never goes past the limit');
+});
+
+test('Run again opens a new QA session and keeps the fix rounds already used; not while a run is going', async () => {
+  const again = world({ last: trig({ round: 1, fixFor: RUN_ID }), run: finished('REVISION') });
+  assert.strictEqual(await again.auto.runAgain('QRD-1286', [BE]), null);
+  assert.strictEqual(again.opened.length, 1);
+  assert.deepStrictEqual([again.saved[0].trigger.round, again.saved[0].trigger.prs, again.saved[0].trigger.fixFor], [1, [BE], null]);
+  const running = world({ last: trig(), run: { ...finished('REVISION'), state: 'running' } });
+  assert.strictEqual(await running.auto.runAgain('QRD-1286', [BE]), 'A QA run is still going for this ticket');
+  assert.strictEqual(running.opened.length, 0);
+  const noPrs = world({ last: trig() , run: finished('LOLOS') });
+  assert.strictEqual(await noPrs.auto.runAgain('QRD-1286', []), null);
+  assert.deepStrictEqual(noPrs.saved[0].trigger.prs, [BE, FE], 'the pull requests of the last trigger when none are known now');
+});
+
+test('the QA queue rows leave out RFP and Done tickets and folders that are no ticket, running first then newest', () => {
+  const run = (state: 'running' | 'done', startedAt: string) => ({ ...finished('LOLOS'), state, startedAt });
+  const { rows, hidden } = qaLocalRows([
+    { key: 'QRD-1559', run: run('done', '2026-11-19T11:56:27Z'), runs: 2, trigger: null, title: 'old', jiraStatus: 'ReadyForProduction' },
+    { key: 'QRD-1570', run: run('done', '2026-11-23T14:45:49Z'), runs: 2, trigger: trig({ round: 1, fixFor: RUN_ID, sessionId: 'qa-1' }), title: 'Lab page', jiraStatus: 'UAT MERGED' },
+    { key: 'QRD-1594', run: run('running', '2026-11-27T12:37:09Z'), runs: 1, trigger: null, title: 'Skill authoring', jiraStatus: 'UAT MERGED' },
+    { key: 'QRD-1565', run: run('done', '2026-11-25T11:59:03Z'), runs: 2, trigger: null, title: null, jiraStatus: 'Done' },
+    { key: 'QRD-1600', run: null, runs: 0, trigger: null, title: null, jiraStatus: null },
+    { key: 'PROBE-1x', run: run('done', '2026-11-27T00:00:00Z'), runs: 1, trigger: null, title: null, jiraStatus: null },
+  ]);
+  assert.deepStrictEqual(rows.map((row) => row.key), ['QRD-1594', 'QRD-1570']);
+  assert.strictEqual(hidden, 2);
+  assert.deepStrictEqual([rows[1].fixRound, rows[1].fixSent, rows[1].sessionId], [1, true, 'qa-1']);
 });

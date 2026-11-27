@@ -7,7 +7,7 @@ import { lessonsFileFor } from './lessons-hook';
 import { StorageService } from '../storage/service';
 import { orchestratorService } from './orchestrator';
 import { orchestratorCron } from './orchestrator-cron-live';
-import { QaAuto, isRunVideo, isTicketKey, newestRun, parseProgress, parseResults, readTrigger, runPullRequests, type QaRun } from './qa-local';
+import { QaAuto, RUN_ID, isRunVideo, isTicketKey, newestRun, parseProgress, parseResults, qaLocalRows, readTrigger, runPullRequests, type QaLocalRow, type QaRun } from './qa-local';
 
 const storage = new StorageService();
 const github = new GitHubAPI();
@@ -62,6 +62,30 @@ export function qaVideoPath(key: string, runId: string, file: string): string | 
   if (!qaAvailable() || !isTicketKey(key) || !/^\d{8}T\d{6}Z$/.test(runId) || !isRunVideo(file)) return null;
   const full = path.join(qaDir(), 'runs', key, runId, file);
   return fs.existsSync(full) ? full : null;
+}
+
+/** Every ticket's newest local QA run for the QA queue page, RFP and Done tickets left out; status from the Jira cache, title from it or the ledger. */
+export async function qaLocalRuns(): Promise<{ rows: QaLocalRow[]; hidden: number }> {
+  if (!qaAvailable()) return { rows: [], hidden: 0 };
+  let keys: string[];
+  try {
+    keys = fs.readdirSync(path.join(qaDir(), 'runs'), { withFileTypes: true }).filter((entry) => entry.isDirectory() && isTicketKey(entry.name)).map((entry) => entry.name);
+  } catch {
+    return { rows: [], hidden: 0 };
+  }
+  const [cache, runs] = await Promise.all([storage.getAllTicketCache().catch(() => []), orchestratorService.list().catch(() => [])]);
+  const jira = new Map(cache.map((row) => [row.key, row]));
+  const ledgers = new Map(runs.map((run) => [run.key, run]));
+  const sources = await Promise.all(keys.map(async (key) => {
+    let names: string[] = [];
+    try { names = fs.readdirSync(path.join(qaDir(), 'runs', key)); } catch { /* an unreadable folder counts no runs */ }
+    return {
+      key, run: latestQaRun(key), runs: names.filter((name) => RUN_ID.test(name)).length, trigger: await qaTrigger(key).catch(() => null),
+      title: jira.get(key)?.summary ?? ledgers.get(key)?.title ?? null,
+      jiraStatus: jira.get(key)?.status ?? null,
+    };
+  }));
+  return qaLocalRows(sources);
 }
 
 export const qaEnabled = async () => (await storage.getSettingValues([QA_SETTING])).some((row) => row.key === QA_SETTING && row.value === 'true');
