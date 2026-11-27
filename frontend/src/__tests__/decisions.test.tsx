@@ -200,3 +200,10 @@ test('the guesses DOCK kept on a done ticket are listed with their text and are 
   assert.deepStrictEqual(autoKeptGuesses([run, done]), [{ key: 'QRD-10', n: 4, text: 'Backoff 1s to 30s' }, { key: 'QRD-10', n: 6, text: 'Keep the last state in sessionStorage' }]);
   assert.deepStrictEqual(questionsOf(done), [], 'a kept guess is not asked again');
 });
+
+test('a ticket the Home query cached without its AC still shows its question instead of breaking the page', () => {
+  const partial = { ...run, ac: undefined } as unknown as AgentRun;
+  const view = renderToStaticMarkup(<QuestionView run={partial} question={questionsOf(run)[0]} number={1} total={3} sentCount={0} readOnly={null} guessesLeft={0} onKeepAll={() => undefined} onChange={() => undefined} onPrevious={() => undefined} onNext={() => undefined} />);
+  assert.match(view, /Issue 3/);
+  assert.doesNotMatch(view, /Acceptance criteria/);
+});

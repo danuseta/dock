@@ -165,3 +165,28 @@ test('guesses on a done or merged build are kept as built, once, and open issues
   assert.deepStrictEqual(await keepFinishedGuesses({ list, gate }), [], 'a second sweep keeps nothing again');
   assert.strictEqual(written.length, 2);
 });
+
+test('Sous flow Decisions continue: guesses do not hold the pull requests; ask first holds them; an open issue always holds', async () => {
+  const withHold = (hold: boolean | Error) => {
+    const cache = new Map<string, unknown>();
+    const calls: string[] = [];
+    const gate = new DecisionGate({
+      getCache: async (namespace, key) => cache.get(`${namespace}:${key}`) ?? null,
+      upsertCache: async (namespace, key, value) => { cache.set(`${namespace}:${key}`, JSON.parse(JSON.stringify(value))); },
+      markReady: async (owner, repo, number) => { calls.push(`${owner}/${repo}#${number}`); return true; },
+      event: async () => undefined,
+      afterReady: async () => undefined,
+      guessesHold: async () => { if (hold instanceof Error) throw hold; return hold; },
+    });
+    return { gate, calls };
+  };
+  const go = withHold(false);
+  assert.deepStrictEqual(await go.gate.settle(build()), ['https://github.com/o/be/pull/1', 'https://github.com/o/fe/pull/2'], 'continue: D-2 and D-3 are confirmed later');
+  const ask = withHold(true);
+  assert.deepStrictEqual(await ask.gate.settle(build()), [], 'ask first: the guesses wait on the owner');
+  assert.deepStrictEqual(ask.calls, []);
+  const unreadable = withHold(new Error('db'));
+  assert.deepStrictEqual(await unreadable.gate.settle(build()), [], 'an unreadable flow holds, as before');
+  const asked = withHold(false);
+  assert.deepStrictEqual(await asked.gate.settle(build({ issues: [issue(5, 'open')] })), [], 'an open issue still waits on the owner');
+});

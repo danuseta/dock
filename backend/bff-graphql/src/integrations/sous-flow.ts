@@ -162,6 +162,18 @@ export function flowLines(profile: SousFlowProfile): string[] {
   return lines;
 }
 
+/**
+ * Whether sous's guesses hold the pull request as a draft until the owner confirms them: only when the Decisions stage
+ * asks first, or the run stops at or before it. On continue the PR goes up for review and the owner confirms later.
+ */
+export const guessesHold = (profile: SousFlowProfile) => profile.ask.includes('decide') || stageIndex(profile.stop) <= stageIndex('decide');
+
+/** The line every sous prompt carries for the Decisions stage, so the runner opens the PR the way the gate will treat it. */
+export const DECIDE_CONTINUE_LINE = 'Sous flow: Decisions continue: a GUESS or USULAN decision does not hold the PR. Open it ready for review unless an issue is open, the rounds are spent or production data is touched; the owner confirms the guesses later in DOCK Decisions, so do not write that the ticket waits for the owner about them.';
+export const DECIDE_ASK_LINE = 'Sous flow: Decisions ask first: open the PR as a draft while any GUESS or USULAN decision is in force; DOCK marks it ready once the owner confirmed every one.';
+
+export const decideLines = (profile: SousFlowProfile) => [guessesHold(profile) ? DECIDE_ASK_LINE : DECIDE_CONTINUE_LINE];
+
 /** Settings › Sous flow › Rules as saved by Agents › Lessons: one rule per line, an empty list when none is saved or readable. */
 export function readFlowRules(raw: string | null | undefined): string[] {
   try {
