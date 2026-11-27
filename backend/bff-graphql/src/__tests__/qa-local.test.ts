@@ -312,3 +312,19 @@ test('the QA queue rows leave out RFP and Done tickets and folders that are no t
   assert.strictEqual(hidden, 2);
   assert.deepStrictEqual([rows[1].fixRound, rows[1].fixSent, rows[1].sessionId], [1, true, 'qa-1']);
 });
+
+test('a QA session still preparing shows as a live row before its run folder exists, and only while its session runs', () => {
+  const trigger = trig({ at: '2026-11-27T12:09:01.000Z', sessionId: 'qa-1593' });
+  const old = { ...finished('LOLOS'), startedAt: '2026-11-26T08:00:00.000Z' };
+  const { rows } = qaLocalRows([
+    { key: 'QRD-1593', run: null, runs: 0, trigger, title: 'MCP server copy', jiraStatus: 'UAT MERGED', sessionRunning: true },
+    { key: 'QRD-1596', run: old, runs: 1, trigger, title: null, jiraStatus: null, sessionRunning: true },
+    { key: 'QRD-1597', run: null, runs: 0, trigger, title: null, jiraStatus: null, sessionRunning: false },
+    { key: 'QRD-1559', run: finished('LOLOS'), runs: 1, trigger: null, title: null, jiraStatus: 'Done' },
+  ]);
+  assert.deepStrictEqual(rows.map((row) => [row.key, row.run.state, row.run.step]), [['QRD-1593', 'preparing', 'stack'], ['QRD-1596', 'preparing', 'stack']]);
+  assert.strictEqual(rows[0].run.startedAt, '2026-11-27T12:09:01.000Z');
+  assert.strictEqual(rows[0].fixSent, false);
+  const newer = qaLocalRows([{ key: 'QRD-1596', run: { ...finished('LOLOS'), startedAt: '2026-11-27T12:30:00.000Z' }, runs: 2, trigger, title: null, jiraStatus: null, sessionRunning: true }]);
+  assert.strictEqual(newer.rows[0].run.state, 'done', 'a run started after the trigger is that session\'s run');
+});

@@ -83,6 +83,16 @@ export class StorageService {
     return JSON.parse(cache.value);
   }
 
+  /** Every live entry of a namespace, keyed without the namespace prefix. */
+  async listCache(namespace: string): Promise<Array<{ key: string; value: unknown }>> {
+    const prefix = this.cacheKey(namespace, '');
+    const now = new Date();
+    const rows = await this.db.cacheEntry.findMany({ where: { key: { startsWith: prefix } } });
+    return rows.filter((row) => !row.expiresAt || row.expiresAt > now).flatMap((row) => {
+      try { return [{ key: row.key.slice(prefix.length), value: JSON.parse(row.value) as unknown }]; } catch { return []; }
+    });
+  }
+
   upsertCache(namespace: string, key: string, value: unknown, ttlSeconds = 3600) {
     const cacheKey = this.cacheKey(namespace, key);
     const expiresAt = ttlSeconds > 0 ? new Date(Date.now() + ttlSeconds * 1000) : null;
