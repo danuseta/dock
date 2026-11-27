@@ -5,7 +5,7 @@ import type { ThreadMessage, ThreadRow } from '../integrations/discord-threads';
 import { learnPeople } from '../integrations/discord-people';
 import { ON_IT } from '../integrations/discord-reader';
 import {
-  EXPIRED_DETAIL, GITHUB_HEAD_DETAIL, GITHUB_WAIT_MS, MAX_ROUND_ATTEMPTS, NO_MARKER_DETAIL, ROUND_QUIET_MS, WAITING_GITHUB, ReviewFindings, heldRoundLines, resumePrompt, findingBlock, findingsEnabled, findingsPrompt, fixMarker, isApproval, webhookReviewer, isBare, isChatter, personName, isOwnThread, parseRoundResult, replyTemplateValues, roundSummary, webhookIdOf,
+  EXPIRED_DETAIL, GITHUB_HEAD_DETAIL, GITHUB_WAIT_MS, MAX_ROUND_ATTEMPTS, NO_MARKER_DETAIL, ROUND_QUIET_MS, WAITING_GITHUB, ReviewFindings, heldRoundLines, resumePrompt, findingBlock, findingsEnabled, findingsPrompt, fixMarker, isApproval, webhookReviewer, isBare, isChatter, personName, isOwnThread, parseRoundResult, replyTemplateValues, roundSummary, turnReply, webhookIdOf,
   type FindingsSettings, type PushMessage, type ReviewFindingsDeps,
 } from '../integrations/review-findings';
 import { DEFAULT_REVIEW_REPLY_TEMPLATE, type PullState } from '../integrations/auto-review';
@@ -1031,4 +1031,17 @@ test('after an owner answer a second marker that pushed schedules the reply from
   assert.strictEqual(w.state.pushes.length, pushes, 'no second notification');
   await w.tickAt(w.state.now.getTime() + 10 * MIN);
   assert.strictEqual(w.state.posts.length, 1, 'no second reply');
+});
+
+test('a Stop hook reply after the round marker still reports the round; a marker from an earlier turn does not', () => {
+  const marker = 'fixed\nDOCK-REVIEW-ROUND r1 valid=1 invalid=0 pushed=yes';
+  const prompt = { at: new Date('2026-11-27T03:45:32Z') };
+  const marked = { text: marker, at: new Date('2026-11-27T03:53:50Z') };
+  const hook = { text: 'Tidak perlu catatan baru.', at: new Date('2026-11-27T03:53:53Z') };
+  assert.strictEqual(turnReply(hook, marked, prompt), marker);
+  assert.strictEqual(parseRoundResult(turnReply(hook, marked, prompt))?.roundId, 'r1');
+  assert.strictEqual(turnReply(hook, marked, { at: new Date('2026-11-27T04:00:00Z') }), hook.text, 'the marker belongs to an earlier turn');
+  assert.strictEqual(turnReply(marked, marked, prompt), marker);
+  assert.strictEqual(turnReply(hook, null, prompt), hook.text);
+  assert.strictEqual(turnReply(null, marked, prompt), null);
 });

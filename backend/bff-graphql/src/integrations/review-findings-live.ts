@@ -12,7 +12,7 @@ import { installedSkills } from './installed-skills';
 import { LIGHT_KEYS, lightForFindings, lightSettings } from './light-runner';
 import { orchestratorCron } from './orchestrator-cron-live';
 import { eventPush } from './push';
-import { ReviewFindings, findingsEnabled, webhookIdOf } from './review-findings';
+import { ReviewFindings, findingsEnabled, turnReply, webhookIdOf } from './review-findings';
 
 const storage = new StorageService();
 const jira = new JiraAPI();
@@ -36,7 +36,15 @@ export const reviewFindings = new ReviewFindings({
   expire: (before, maxAttempts, detail) => storage.expireSentRounds(before, maxAttempts, detail),
   roundById: (id) => storage.getReviewRound(id),
   pendingSessions: () => storage.pendingReviewSessions(),
-  newestReply: async (sessionId) => (await storage.getNewestChatMessage(sessionId, 'assistant'))?.text ?? null,
+  newestReply: async (sessionId) => {
+    const newest = await storage.getNewestChatMessage(sessionId, 'assistant');
+    if (!newest || newest.text.includes('DOCK-REVIEW-ROUND ')) return newest?.text ?? null;
+    const [marked, prompt] = await Promise.all([
+      storage.getNewestChatMessage(sessionId, 'assistant', 'DOCK-REVIEW-ROUND '),
+      storage.getNewestChatMessage(sessionId, 'user'),
+    ]);
+    return turnReply(newest, marked, prompt);
+  },
   roundReply: async (sessionId, roundId) => (await storage.getNewestChatMessage(sessionId, 'assistant', `DOCK-REVIEW-ROUND ${roundId} `))?.text ?? null,
   owedRound: (sessionId) => storage.getOldestSentRoundForSession(sessionId),
   sessionIdle: async (sessionId) => (await storage.countChatMessagesInState(sessionId, ['taken', 'queued'])) === 0,
