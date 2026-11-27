@@ -4,6 +4,7 @@ import { StorageService } from '../storage/service';
 import { autoBroadcast } from './broadcast';
 import { liveLedgerConfirm, writeConfirmations, type ConfirmedDecision } from './ledger-confirm';
 import { DEFAULT_MACHINE, STALE_ACTIVE_MS, orchestratorService, type Orchestration } from './orchestrator';
+import { ticketGuessesHold } from './sous-flow-live';
 
 /** Decisions sous took on the owner's behalf: the owner confirms or changes each one before the pull requests are reviewed. */
 const GUESSED = new Set(['GUESS', 'USULAN']);
@@ -41,6 +42,8 @@ export interface GateDeps {
   afterReady(run: GateRun): Promise<unknown>;
   /** Writes confirmations into the ticket's ledger where it lives; 'skipped' when the ledger is on another machine. */
   writeLedger?(key: string, machine: string, decisions: ConfirmedDecision[], auto?: string | null): Promise<'written' | 'skipped'>;
+  /** Whether the ticket's guesses hold its pull requests until confirmed (Sous flow › Decisions ask first); held when absent or unreadable. */
+  guessesHold?(key: string): Promise<boolean>;
 }
 
 const numbers = (value: unknown) => (Array.isArray(value) ? value.filter((item): item is number => Number.isInteger(item) && item > 0) : []);
@@ -103,7 +106,8 @@ export class DecisionGate {
     const urls = [run.prBe, run.prFe].filter((url): url is string => Boolean(url) && !record.ready.includes(url!));
     if (!urls.length) return [];
     const pending = ownerPending(run, record.confirmed);
-    if (pending.issues.length || pending.decisions.length) return [];
+    if (pending.issues.length) return [];
+    if (pending.decisions.length && (!this.deps.guessesHold || await this.deps.guessesHold(run.key).catch(() => true))) return [];
     const checked: string[] = [];
     const marked: string[] = [];
     for (const url of urls) {
@@ -167,4 +171,5 @@ export const decisionGate = new DecisionGate({
   event: (key, kind, detail) => orchestratorService.recordEvent(key, kind, detail),
   afterReady: (run) => (dockMode() === 'workspace' ? autoBroadcast.afterLedger(run) : Promise.resolve()),
   writeLedger: (key, machine, decisions, auto) => writeConfirmations(liveLedgerConfirm((ledger, from) => orchestratorService.ingestLedger(ledger, new Date(), from)), key, machine, decisions, auto ?? null),
+  guessesHold: (key) => ticketGuessesHold(key),
 });

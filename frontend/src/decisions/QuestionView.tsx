@@ -32,6 +32,7 @@ export const QuestionView: React.FC<QuestionViewProps> = ({ run, question, numbe
   const options = [...question.options, { key: OWN, label: question.kind === 'issue' ? 'Write my own answer' : 'Change it to what I write', effect: OWN_EFFECT[question.kind], labelId: OWN_ID[question.kind] }];
   const sent = Boolean(draft?.sent);
   const pullRequests = (run.pullRequests ?? []).filter((pr) => pr.status === 'open' || pr.status === 'draft');
+  const acLines = run.ac ?? [];
   return (
     <article className="grid h-full @min-[860px]:grid-cols-[minmax(0,1fr)_320px]" aria-labelledby="decision-question">
       <div className="flex min-w-0 flex-col p-7 max-[760px]:p-4">
@@ -113,10 +114,10 @@ export const QuestionView: React.FC<QuestionViewProps> = ({ run, question, numbe
         {pullRequests.length > 0 && (
           <p><span className="text-foreground">Pull requests.</span> {pullRequests.map((pr) => <a key={pr.url} href={pr.url} target="_blank" rel="noreferrer" className="mr-2 underline-offset-2 hover:underline">{pr.repo}#{pr.number}</a>)}</p>
         )}
-        {run.ac.length > 0 && (
+        {acLines.length > 0 && (
           <details>
-            <summary className="cursor-pointer text-foreground">Acceptance criteria ({run.ac.length})</summary>
-            <ol className="mt-1.5 flex list-decimal flex-col gap-1 pl-5">{run.ac.map((item) => <li key={item.n} className="text-pretty">{item.text}</li>)}</ol>
+            <summary className="cursor-pointer text-foreground">Acceptance criteria ({acLines.length})</summary>
+            <ol className="mt-1.5 flex list-decimal flex-col gap-1 pl-5">{acLines.map((item) => <li key={item.n} className="text-pretty">{item.text}</li>)}</ol>
           </details>
         )}
         {sentCount > 0 && <p className="border-t border-border pt-2.5 text-pretty"><span className="text-foreground">Also on this ticket.</span> {sentCount === 1 ? 'One answer was sent and waits' : `${sentCount} answers were sent and wait`} for sous.</p>}

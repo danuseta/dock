@@ -31,7 +31,7 @@ function toSearch(ticket: string, q: number) {
 
 /** The questions sous left for the owner, ticket by ticket, answered like an exam and submitted per ticket. */
 const DecisionsPage: React.FC = () => {
-  const { data, loading, error } = useQuery(GET_ORCHESTRATIONS, { ...CACHED_QUERY_OPTIONS, pollInterval: 30000 });
+  const { data, loading, error } = useQuery(GET_ORCHESTRATIONS, { ...CACHED_QUERY_OPTIONS, returnPartialData: false, pollInterval: 30000 });
   const [submitDecisions, { loading: submitting }] = useMutation(SUBMIT_DECISIONS, { refetchQueries: ['GetOrchestrations', 'GetOwnerQuestions'], awaitRefetchQueries: true });
   const readOnly = monitorsOnly(useDockMode()) ? 'This DOCK only monitors. Answer on the workspace DOCK.' : null;
   const [place, setPlace] = useState(() => fromSearch(window.location.search));
