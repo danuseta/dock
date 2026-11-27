@@ -18,6 +18,19 @@ export function reviewDecisionOf(reviews: ReviewLike[]): ReviewDecision {
   return standing.includes('APPROVED') ? 'approved' : 'none';
 }
 
+/** The standing vote of one reviewer: their latest approving or requesting review, null when none or dismissed. */
+export function reviewerVote(reviews: ReviewLike[], login: string): 'APPROVED' | 'CHANGES_REQUESTED' | null {
+  const me = login.toLowerCase();
+  let vote: 'APPROVED' | 'CHANGES_REQUESTED' | null = null;
+  for (const review of reviews) {
+    if ((review.user?.login || '').toLowerCase() !== me) continue;
+    const state = String(review.state || '').toUpperCase();
+    if (state === 'APPROVED' || state === 'CHANGES_REQUESTED') vote = state;
+    else if (state === 'DISMISSED') vote = null;
+  }
+  return vote;
+}
+
 interface CheckRunLike { status?: string; conclusion?: string | null }
 
 const RANK: Record<ChecksState, number> = { none: 0, passing: 1, pending: 2, failing: 3 };
