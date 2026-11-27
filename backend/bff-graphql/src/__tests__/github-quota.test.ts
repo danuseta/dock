@@ -264,3 +264,14 @@ test('the budget reads remaining and reset from a response and blocks only on a 
   clock.now = START + 3_600_001;
   assert.deepStrictEqual(budget.state('k'), { limited: false, remaining: null, resetAt: null }, 'a past reset reads as unknown');
 });
+
+test('a search answer counts against the search quota, so background requests after it still go out', async () => {
+  const budget = new GitHubBudget(() => START);
+  budget.record('k', 200, { 'x-ratelimit-resource': 'core', 'x-ratelimit-remaining': '4990', 'x-ratelimit-reset': String(START / 1000 + 3600) });
+  budget.record('k', 200, { 'x-ratelimit-resource': 'search', 'x-ratelimit-remaining': '29', 'x-ratelimit-reset': String(START / 1000 + 60) });
+  assert.strictEqual(budget.state('k').remaining, 4990);
+  const release = await budget.acquire('k', false);
+  release();
+  budget.record('k', 403, { 'x-ratelimit-resource': 'search', 'x-ratelimit-remaining': '0' }, 'API rate limit exceeded');
+  assert.strictEqual(budget.state('k').limited, false, 'a used-up search quota does not stop core requests');
+});

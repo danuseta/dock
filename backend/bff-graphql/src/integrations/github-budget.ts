@@ -90,6 +90,10 @@ export class GitHubBudget {
 
   /** Reads the rate limit headers of a response; a 403 or 429 that says the quota is used up blocks until the reset. */
   record(key: string, status: number | undefined, headers: Headers = {}, message = '') {
+    // Search and GraphQL count against their own quotas (search: 30 a minute); reading them as the core quota made
+    // every background request after a search look like the last few of the hour.
+    const resource = String(headers['x-ratelimit-resource'] ?? 'core').toLowerCase();
+    if (resource !== 'core') return;
     const state = this.stateOf(key);
     const remaining = headerNumber(headers, 'x-ratelimit-remaining');
     const reset = headerNumber(headers, 'x-ratelimit-reset');

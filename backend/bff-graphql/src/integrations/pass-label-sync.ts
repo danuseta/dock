@@ -35,6 +35,7 @@ export async function syncPassLabels(deps: PassLabelSyncDeps): Promise<number> {
   const label = await deps.passLabel();
   const since = new Date(deps.now().getTime() - PASS_LABEL_LOOKBACK_DAYS * 86400000).toISOString().slice(0, 10);
   let added = 0;
+  let voteFailed = false;
   const labelled = new Set<string>();
   for (const pull of await deps.reviewed(since)) {
     const key = ticketOf(pull.title);
@@ -46,7 +47,11 @@ export async function syncPassLabels(deps: PassLabelSyncDeps): Promise<number> {
       await deps.settle(pull.url, label, 0);
       continue;
     }
-    const vote = await deps.vote(pull).catch(() => undefined);
+    const vote = await deps.vote(pull).catch((error) => {
+      if (!voteFailed) console.warn(`[PassLabel] ${pull.url} review read failed, tried again next run:`, error instanceof Error ? error.message : 'unknown error');
+      voteFailed = true;
+      return undefined;
+    });
     if (vote === undefined) continue;
     if (vote !== 'APPROVED') {
       await deps.settle(pull.url, label, UNAPPROVED_RECHECK_SECONDS);
