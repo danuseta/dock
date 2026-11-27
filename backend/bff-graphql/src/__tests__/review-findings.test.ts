@@ -494,6 +494,9 @@ async function sentRound(change: (w: ReturnType<typeof world>) => void = () => u
   await w.tickAt(INDRA_NOTES + ROUND_QUIET_MS);
   return { w, round: w.state.rounds[0] };
 }
+const MARKER_ONLY = (roundId: string, result: string) => `Belum ada balasan.
+DOCK-REVIEW-ROUND ${roundId} ${result}`;
+
 const REPLY = (roundId: string, result = 'valid=1 invalid=0 pushed=yes') => [
   'Sudah difix.',
   '<<<DISCORD',
@@ -531,7 +534,7 @@ test('after a push the block is posted 2 min later with the reviewers mentioned,
   assert.strictEqual(w.state.posts.length, 1, 'sent once');
 });
 
-test('a reply is posted when every finding was not valid; not when a valid finding was not pushed, the turn failed, the block is empty or the setting is off', async () => {
+test('a reply is posted when every finding was not valid or a valid one went to the owner with a block; not without a block, a failed turn, an empty block or the setting off', async () => {
   const invalid = await sentRound();
   invalid.w.state.replies.set('task-9', REPLY(invalid.round.id, 'valid=0 invalid=2 pushed=no'));
   await report(invalid.w);
@@ -540,7 +543,13 @@ test('a reply is posted when every finding was not valid; not when a valid findi
   const unpushed = await sentRound();
   unpushed.w.state.replies.set('task-9', REPLY(unpushed.round.id, 'valid=1 invalid=0 pushed=no'));
   await report(unpushed.w);
-  assert.strictEqual(unpushed.round.replyStatus, null);
+  assert.strictEqual(unpushed.round.replyStatus, 'pending', 'a valid finding left for the owner is answered with the block');
+  assert.strictEqual((unpushed.round.replyText ?? '').split('\n').at(-1), 'DOCK-WAIT round 1 · owner', 'no head, so the reviewer does not review the same head again');
+
+  const silent = await sentRound();
+  silent.w.state.replies.set('task-9', MARKER_ONLY(silent.round.id, 'valid=1 invalid=0 pushed=no'));
+  await report(silent.w);
+  assert.strictEqual(silent.round.replyStatus, null, 'without a block the round waits for the owner');
 
   const body = await sentRound();
   body.w.state.replies.set('task-9', REPLY(body.round.id, 'valid=1 invalid=0 pushed=body'));
@@ -987,7 +996,7 @@ test('a reply that failed on the head before the retry existed is picked up; one
 test('an owner answer on a ticket whose round is held names the round, asks for the Discord block and the marker; none once replied', async () => {
   const { w, round } = await sentRound();
   w.deps.ticketRounds = async (key) => w.state.rounds.filter((item) => item.ticketKey === key).reverse();
-  w.state.replies.set('task-9', REPLY(round.id, 'valid=2 invalid=0 pushed=no'));
+  w.state.replies.set('task-9', MARKER_ONLY(round.id, 'valid=2 invalid=0 pushed=no'));
   await report(w);
   assert.deepStrictEqual([round.status, round.pushed, round.replyStatus], ['reported', false, null]);
   const lines = await w.findings.ownerAnswerLines('QRD-1292');
@@ -1006,7 +1015,7 @@ test('an owner answer on a ticket whose round is held names the round, asks for 
 test('after an owner answer a second marker that pushed schedules the reply from the new session; a repeat after the reply went out changes nothing', async () => {
   const { w, round } = await sentRound();
   w.deps.ticketRounds = async (key) => w.state.rounds.filter((item) => item.ticketKey === key).reverse();
-  w.state.replies.set('task-9', REPLY(round.id, 'valid=2 invalid=0 pushed=no'));
+  w.state.replies.set('task-9', MARKER_ONLY(round.id, 'valid=2 invalid=0 pushed=no'));
   await report(w);
   const owner = { sessionId: 'owner-1', ticketKey: 'QRD-1292', failed: false };
   w.state.replies.set('owner-1', REPLY(round.id, 'valid=2 invalid=0 pushed=yes'));
@@ -1053,4 +1062,22 @@ test('a finding with an attachment makes the round download the thread and open 
   assert.match(withImage, /Buka setiap gambar dan PDF yang disimpan pakai Read sebelum menilai/);
   const plain = findingsPrompt({ ...base, blocks: [findingBlock(message('shov', 'Shovian', T0, 'h1 belum ada ikon'))] });
   assert.doesNotMatch(plain, /Ada lampiran di temuan ini|Buka setiap gambar/);
+});
+
+test('a "being confirmed" reply keeps the round held: the owner answer reopens it and the fix pushed after it is replied to', async () => {
+  const { w, round } = await sentRound();
+  w.deps.ticketRounds = async (key) => w.state.rounds.filter((item) => item.ticketKey === key).reverse();
+  w.state.replies.set('task-9', REPLY(round.id, 'valid=1 invalid=0 pushed=no'));
+  await report(w);
+  await w.tickAt(w.state.now.getTime() + 3 * MIN);
+  assert.deepStrictEqual([round.replyStatus, w.state.posts.length], ['sent', 1]);
+  assert.strictEqual((round.replyText ?? '').split('\n').at(-1), 'DOCK-WAIT round 1 · owner');
+  assert.ok((await w.findings.ownerAnswerLines('QRD-1292')).length > 0, 'still held for the owner');
+  const owner = { sessionId: 'owner-1', ticketKey: 'QRD-1292', failed: false };
+  w.state.replies.set('owner-1', REPLY(round.id, 'valid=1 invalid=0 pushed=yes'));
+  assert.strictEqual(await w.findings.onTurnEnded(owner), true);
+  assert.deepStrictEqual([round.pushed, round.replyStatus], [true, 'pending']);
+  assert.strictEqual((round.replyText ?? '').split('\n').at(-1), 'DOCK-FIX round 1 · head b71e0d4');
+  await w.tickAt(w.state.now.getTime() + 10 * MIN);
+  assert.strictEqual(w.state.posts.length, 2, 'the fix reply goes out after the "being confirmed" one');
 });

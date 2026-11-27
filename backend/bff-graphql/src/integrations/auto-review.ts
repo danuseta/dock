@@ -3,7 +3,7 @@ import type { ThreadMessage, ThreadRow } from './discord-threads';
 import type { Orchestration } from './orchestrator';
 import { lessonsLines } from './lessons';
 import { knownName, learnPeople, webhookPersonId, type DiscordPerson } from './discord-people';
-import { approvals, isApproval, personName, webhookIdOf, webhookReviewer } from './review-findings';
+import { NO_BLOCKER, approvals, isApproval, personName, webhookIdOf, webhookReviewer } from './review-findings';
 
 /** How long an "on it" starts a review: long enough for one said while the workspace was off, through a weekend. */
 export const ON_IT_WINDOW_MS = 72 * 60 * 60 * 1000;
@@ -38,6 +38,10 @@ const skillDelay = (settings: Pick<AutoReviewSettings, 'postDelayMinutes'>) => M
 /** A running review whose session went idle this long after it started, with no verdict in the ledger, has ended without one. */
 export const ENDED_WAIT_MS = 15 * 60_000;
 export const ENDED_DETAIL = 'review session ended without a verdict';
+/** A review whose session stopped on the Claude account's usage limit: it costs no retry and starts again after a wait. */
+export const LIMIT_DETAIL = 'review session stopped on the Claude usage limit';
+export const LIMIT_WAIT_MS = 30 * 60_000;
+export const isUsageLimit = (text: string | null | undefined) => /hit your (?:\w+ )?limit|usage limit|out of (?:extra )?usage/i.test(text ?? '');
 /** How many times a failed review of one head commit is started again, in the same round. */
 export const MAX_REVIEW_RETRIES = 2;
 const PLACEHOLDER =/\{\{\s*(\w+)\s*\}\}/g;
@@ -136,6 +140,10 @@ export interface AutoReviewDeps {
   staleRunning(before: Date): Promise<AutoReviewRecord[]>;
   /** True when the session has no turn running and no message queued. */
   sessionIdle(sessionId: string): Promise<boolean>;
+  /** The error a session ended with ("You've hit your weekly limit ..."), or null. */
+  sessionError?(sessionId: string): Promise<string | null>;
+  /** True when Settings › Claude accounts rotates to another account at a limit. */
+  rotationOn?(): Promise<boolean>;
   get(id: string): Promise<AutoReviewRecord | null>;
   /** Pending posts whose time has come, oldest first. */
   duePosts(now: Date): Promise<AutoReviewRecord[]>;
@@ -177,6 +185,12 @@ export const threadImageLines = () => [
   'Di temuan, verdict, dan balasan, sebut gambar mana yang dicek dan apa isinya terhadap AC (misalnya "gambar 1: h1 ada ikon Code, AC 5 terpenuhi"). Gambar yang gagal diunduh atau dibuka ditulis juga, jangan dianggap sudah dilihat.',
 ];
 
+/** What a teammate is called: the first word of the name longer than one letter, so "M Danu Seta W" is danu. */
+export const callName = (name: string) => {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  return (words.find((word) => word.replace(/\W/g, '').length > 1) ?? words[0] ?? '').toLowerCase();
+};
+
 export const reviewPrompt = (key: string, prUrls: string[], threadUrl: string, skill: string | null = null, lessons: string | null = null, author: string | null = null) => [
   `Pakai skill sous. review ${key}: ${prUrls.join(' ')}`,
   ...lessonsLines(lessons),
@@ -184,7 +198,7 @@ export const reviewPrompt = (key: string, prUrls: string[], threadUrl: string, s
   ...threadImageLines(),
   'Ini auto review dari DOCK karena owner bilang on it di thread itu. Jangan komentar di PR, Jira, atau Discord; tulis verdict dan temuan ke ledger seperti biasa.',
   ...(skill ? [`Setelah verdict tertulis di ledger, tulis pesan Discord hasil review pakai skill ${skill} sebagai bagian akhir balasanmu.`, ...discordBlockLines(key)] : []),
-  ...(skill && author ? [`Author PR ini ${author}: sapa "mas ${author.split(/\s+/)[0].toLowerCase()}" di pesan itu, bukan nama pemilik DOCK ini dan bukan nama bot atau webhook.`] : []),
+  ...(skill && author ? [`Author PR ini ${author}: sapa "mas ${callName(author)}" di pesan itu, bukan nama pemilik DOCK ini dan bukan nama bot atau webhook.`] : []),
 ].join('\n');
 
 /**
@@ -264,7 +278,7 @@ export function reviewBody(run: ReviewLedger, pulls: Array<{ url: string; headSh
 /** The message opens as an approval while the marker's ledger verdict has blockers, or opens with blockers over an approve. */
 export function textDisagrees(body: string, marker: string): boolean {
   if (MARKER_BLOCKED.test(marker)) return isApproval(body, null);
-  if (MARKER_APPROVED.test(marker)) return !isApproval(body, null) && BLOCKER_FIRST.test(body.trim().split('\n')[0] ?? '');
+  if (MARKER_APPROVED.test(marker)) return !isApproval(body, null) && BLOCKER_FIRST.test((body.trim().split('\n')[0] ?? '').replace(NO_BLOCKER, ' '));
   return false;
 }
 
@@ -418,7 +432,7 @@ export class AutoReview {
     if (!retrigger && this.enabledAt !== null && saidAt < this.enabledAt) return this.skip(row, ['said before the setting was turned on']);
     const key = ticketOf(row);
     if (!key) return this.skip(row, ['no ticket key']);
-    const due: Array<{ url: string; headSha: string; round: number; retry?: AutoReviewRecord; again?: AutoReviewRecord }> = [];
+    const due: Array<{ url: string; headSha: string; round: number; retry?: AutoReviewRecord; again?: AutoReviewRecord; free?: boolean }> = [];
     const reasons: string[] = [];
     if (!row.prs.some((prUrl) => PULL.test(prUrl))) return this.skip(row, ['no pull request link']);
     for (const prUrl of row.prs) {
@@ -449,8 +463,10 @@ export class AutoReview {
         continue;
       }
       if (last && last.headSha === state.headSha && last.status === 'failed') {
-        if ((last.retries ?? 0) >= MAX_REVIEW_RETRIES) reasons.push(`same head commit, review failed ${MAX_REVIEW_RETRIES + 1} times`);
-        else due.push({ url, headSha: state.headSha, round: arena ? arena.round : 1, retry: last });
+        const limited = await this.limited(last);
+        if (limited && this.deps.now().getTime() - (last.finishedAt ?? last.startedAt).getTime() < LIMIT_WAIT_MS) reasons.push('waiting for the Claude usage limit');
+        else if (!limited && (last.retries ?? 0) >= MAX_REVIEW_RETRIES) reasons.push(`same head commit, review failed ${MAX_REVIEW_RETRIES + 1} times`);
+        else due.push({ url, headSha: state.headSha, round: arena ? arena.round : 1, retry: last, free: limited });
         continue;
       }
       if (last && last.headSha === state.headSha && !retrigger && !(arena && this.answeredOnSameHead(row, arena, state.headSha))) {
@@ -471,7 +487,7 @@ export class AutoReview {
     if (!due.length) return this.skip(row, reasons);
     const records: AutoReviewRecord[] = [];
     for (const pull of due) {
-      records.push(pull.retry ? await this.restart(pull.retry, pull.round)
+      records.push(pull.retry ? await this.restart(pull.retry, pull.round, pull.free)
         : pull.again ? await this.reviewAgain(pull.again, pull.round)
         : await this.deps.create({ prUrl: pull.url, headSha: pull.headSha, ticketKey: key, threadUrl: row.url, startedAt: this.deps.now(), round: pull.round }));
     }
@@ -527,8 +543,8 @@ export class AutoReview {
   }
 
   /** A failed review of a head commit started again in the same round: the record runs again from now, one retry more. */
-  private async restart(record: AutoReviewRecord, round: number): Promise<AutoReviewRecord> {
-    const data = { status: 'running', detail: null, sessionId: null, startedAt: this.deps.now(), finishedAt: null, round, retries: (record.retries ?? 0) + 1 };
+  private async restart(record: AutoReviewRecord, round: number, free = false): Promise<AutoReviewRecord> {
+    const data = { status: 'running', detail: null, sessionId: null, startedAt: this.deps.now(), finishedAt: null, round, retries: free ? (record.retries ?? 0) : (record.retries ?? 0) + 1 };
     await this.deps.update(record.id, data);
     return { ...record, ...data };
   }
@@ -543,10 +559,20 @@ export class AutoReview {
     const pushed = new Set<string>();
     for (const record of await this.deps.staleRunning(new Date(now.getTime() - ENDED_WAIT_MS))) {
       if (this.deciding.has(record.id) || (record.sessionId && !(await this.deps.sessionIdle(record.sessionId)))) continue;
-      await this.deps.update(record.id, { status: 'failed', detail: ENDED_DETAIL, finishedAt: now });
+      const limited = Boolean(record.sessionId && this.deps.sessionError && isUsageLimit(await this.deps.sessionError(record.sessionId).catch(() => null)));
+      await this.deps.update(record.id, { status: 'failed', detail: limited ? LIMIT_DETAIL : ENDED_DETAIL, finishedAt: now });
       const group = record.sessionId ?? record.id;
       if (pushed.has(group)) continue;
       pushed.add(group);
+      if (limited) {
+        const rotating = this.deps.rotationOn ? await this.deps.rotationOn().catch(() => true) : true;
+        await this.deps.push({
+          title: `${record.ticketKey}: ${LIMIT_DETAIL}`,
+          body: rotating ? 'DOCK starts the review again in 30 min.' : 'DOCK starts the review again in 30 min. Turn on auto rotate in Settings › Claude accounts so the next account takes over at a limit.',
+          url: '/agents', tag: `auto-review-${record.id}`,
+        });
+        continue;
+      }
       const left = (record.retries ?? 0) < MAX_REVIEW_RETRIES;
       await this.deps.push({
         title: `${record.ticketKey}: ${ENDED_DETAIL}`,
@@ -554,6 +580,13 @@ export class AutoReview {
         url: '/agents', tag: `auto-review-${record.id}`,
       });
     }
+  }
+
+  /** A failed review that stopped on the Claude usage limit, also one recorded before DOCK told it apart: its retries do not count. */
+  private async limited(record: AutoReviewRecord): Promise<boolean> {
+    if (record.detail === LIMIT_DETAIL) return true;
+    if (record.detail !== ENDED_DETAIL || !record.sessionId || !this.deps.sessionError) return false;
+    return isUsageLimit(await this.deps.sessionError(record.sessionId).catch(() => null));
   }
 
   /** Why an arena no longer reviews: approved, out of rounds, or a person wrote stop dock in the thread since the on it. */
