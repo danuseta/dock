@@ -8,7 +8,8 @@ import { lessonsFileFor } from './lessons-hook';
 import { StorageService } from '../storage/service';
 import { orchestratorService } from './orchestrator';
 import { orchestratorCron } from './orchestrator-cron-live';
-import { QaAuto, RUN_ID, isRunVideo, isTicketKey, newestRun, parseProgress, parseResults, qaLocalRows, readTrigger, runPullRequests, type QaLocalRow, type QaRun } from './qa-local';
+import { chatService } from './chat';
+import { QA_FIX, QaAuto, RUN_ID, isRunVideo, isTicketKey, newestRun, parseProgress, parseResults, qaLocalRows, readTrigger, runPullRequests, type QaLocalRow, type QaRun } from './qa-local';
 
 const storage = new StorageService();
 const github = new GitHubAPI();
@@ -122,4 +123,14 @@ const previous = orchestratorService.onLedger;
 orchestratorService.onLedger = (run) => {
   previous(run);
   void qaAuto.ledger(run).catch((error) => console.warn('[QaLocal] start failed:', error instanceof Error ? error.message : 'unknown error'));
+};
+
+// A Task session ends a QA fix with a QA-FIX line; its result per TC is kept for the QA queue row.
+const turnEndedBefore = chatService.onTurnEnded;
+chatService.onTurnEnded = (turn) => {
+  turnEndedBefore(turn);
+  if (!turn.ticketKey || turn.failed || !qaAvailable()) return;
+  void storage.getNewestChatMessage(turn.sessionId, 'assistant', `${QA_FIX} `)
+    .then((message) => qaAuto.fixReported(turn.ticketKey!, message?.text ?? null))
+    .catch((error) => console.warn('[QaLocal] fix result failed:', error instanceof Error ? error.message : 'unknown error'));
 };

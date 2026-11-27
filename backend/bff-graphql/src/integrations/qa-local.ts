@@ -27,7 +27,8 @@ export interface QaRun {
 }
 export interface QaFollowsFe { key: string; status: string | null }
 /** `round` counts the fix rounds already used (0 at the first run); `fixFor` is the run a fix message went out for; `heads` maps each pull request to its head SHA at that moment. */
-export interface QaTrigger { prs: string[]; sessionId: string | null; at: string; error: string | null; round: number; fixFor: string | null; heads: Record<string, string> }
+/** `fixResult`: what the Task session's QA-FIX line said about the run in `fixFor`. */
+export interface QaTrigger { prs: string[]; sessionId: string | null; at: string; error: string | null; round: number; fixFor: string | null; heads: Record<string, string>; fixResult?: { runId: string; items: Array<{ tc: string; result: 'fixed' | 'not-a-bug' | 'flaky'; sha: string | null }> } }
 /** The most fix rounds a ticket gets; a REVISION after that waits for the owner. */
 export const MAX_FIX_ROUNDS = 2;
 
@@ -45,7 +46,19 @@ export function readTrigger(value: unknown): QaTrigger | null {
     round: typeof raw.round === 'number' && Number.isFinite(raw.round) ? raw.round : 0,
     fixFor: str(raw.fixFor),
     heads,
+    ...(readFixResult(raw.fixResult) ? { fixResult: readFixResult(raw.fixResult)! } : {}),
   };
+}
+
+function readFixResult(value: unknown): QaTrigger['fixResult'] | null {
+  const raw = record(value);
+  if (typeof raw.runId !== 'string' || !Array.isArray(raw.items)) return null;
+  const items = raw.items.flatMap((item) => {
+    const entry = record(item);
+    return typeof entry.tc === 'string' && (entry.result === 'fixed' || entry.result === 'not-a-bug' || entry.result === 'flaky')
+      ? [{ tc: entry.tc, result: entry.result as 'fixed' | 'not-a-bug' | 'flaky', sha: str(entry.sha) }] : [];
+  });
+  return items.length ? { runId: raw.runId, items } : null;
 }
 
 export const RUN_ID = /^\d{8}T\d{6}Z$/;
@@ -187,10 +200,11 @@ const TICKET = /^[A-Z][A-Z0-9]+-\d+$/;
 export const isTicketKey = (key: string) => TICKET.test(key) && !key.startsWith('CARD-');
 
 /** The prompt of a QA session: the agent step that writes the tests, then the command, all inside the rules of `~/qa-local`. */
-export const qaPrompt = (key: string, prs: string[], lessons: string | null = null) => [
-  `QA lokal ${key}${prs.length ? ` setelah PR ${prs.join(' ')}` : ''}.`,
+export const qaPrompt = (key: string, prs: string[], lessons: string | null = null, rerun = false) => [
+  `QA lokal ${key}${prs.length ? ` setelah PR ${prs.join(' ')}` : ''}${rerun ? ' (Run again dari owner)' : ''}.`,
   ...lessonsLines(lessons),
   `1. Kalau ~/qa-local/tests/${key}/ belum ada atau ac.json-nya lebih tua dari tiket, jalankan "Agent step" v2 di ~/.claude/kit/qa-local/README.md: baca tiket lewat Atlassian MCP (hanya baca), tulis ac.json, TC.md dan *.spec.ts di folder itu saja.`,
+  `1b. Test yang sudah ada mungkin ditulis untuk UI lama (develop bisa memindah halaman atau mengganti tombol). Bandingkan head worktree FE dan BE sekarang (git -C <worktree> rev-parse HEAD) dengan ~/qa-local/tests/${key}/written.json. ${rerun ? 'Karena ini Run again, cek setup selalu dijalankan.' : 'Kalau file itu tidak ada atau head-nya berbeda, cek setup dijalankan.'} Cek setup: naikkan stack, jalankan satu TC saja; kalau gagal sebelum assertion bagian Then (navigasi, tombol, form persiapan), lihat UI di head ini lalu perbarui helper dan langkah persiapan di spec dan cara_membuat di plan/plan.json, tanpa mengubah assertion Then, sampai TC itu lewat persiapan. Setelah itu tulis written.json berisi {"fe": "<sha>", "be": "<sha>", "at": "<waktu ISO>"}.`,
   `2. Jalankan: qonflo-qa-local ${key} (worktree wt-<nomor>-be dan -fe dipilih otomatis; pakai --be dan --fe kalau ada lebih dari satu).`,
   '3. Setelah run, hapus data tes buatan spec dari MongoDB lokal (hanya dokumen yang dibuat run ini).',
   '4. Laporkan per TC: id, AC, PASS/FAIL/BLOCKED, path video, path summary.md, dan prediksi verdict beserta aturan judge.md yang dipakai.',
@@ -232,12 +246,37 @@ export function revisionPrompt(key: string, round: number, run: Pick<QaRun, 'run
     `summary.md: ${dir}/summary.md`,
     'TC yang gagal:',
     ...failed.map((tc) => `- ${tc.id} | AC ${tc.ac.length ? tc.ac.join(', ') : '-'} | ${oneLine(tc.title)} | catatan: ${tc.note ? oneLine(tc.note) : '-'} | video: ${tc.video ? `${dir}/${tc.video}` : '-'}`),
-    'Pakai skill sous: perbaiki temuan QA lokal ini lewat light runner di PR yang sama, push ke branch PR, lalu selesai. Jangan buka PR baru.',
+    `Sebelum mengubah kode, reproduksi tiap TC: baca ${dir}/pw-output/<TC>/error-context.md dan kodenya, tulis path:line. TC yang gagal karena persiapan test (halaman atau tombol yang dituju sudah tidak ada), data uji, atau hanya kadang-kadang, dicatat dengan buktinya dan kodenya tidak diubah.`,
+    'Pakai skill sous: perbaiki temuan QA lokal ini lewat light runner di PR yang sama dan push ke branch PR. Kalau PR itu sudah merged: lanjutkan di branch yang sama (merge develop dulu, tanpa rebase dan force push), push, lalu buka PR baru dari branch itu ke develop; owner mengizinkannya. Selain itu jangan buka PR baru.',
+    `Baris terakhir balasanmu persis: ${QA_FIX} ${run.runId} lalu satu entri per TC gagal, dipisah spasi: <TC>=fixed:<sha pendek>, <TC>=not-a-bug, atau <TC>=flaky (contoh: ${QA_FIX} ${run.runId} ${failed[0]?.id ?? `${key}-TC001`}=fixed:1a2b3c4).`,
   ].join('\n');
 }
 
-/** Pull request links of a build run, sorted, so the same set compares equal. */
-export const runPullRequests = (run: Pick<Orchestration, 'pullRequests'>) => [...new Set(run.pullRequests.map((pr) => pr.url).filter((url) => /\/pull\/\d+/.test(url)))].sort();
+export const QA_FIX = 'QA-FIX';
+export type QaFixResult = 'fixed' | 'not-a-bug' | 'flaky';
+export interface QaFixItem { tc: string; result: QaFixResult; sha: string | null }
+export interface QaFixReport { runId: string; items: QaFixItem[] }
+
+/** The QA-FIX line a Task session ends a QA fix with: the run it answers and what came of each failed TC; null when absent. */
+export function parseQaFix(text: string | null | undefined): QaFixReport | null {
+  const line = String(text ?? '').split('\n').map((item) => item.trim()).reverse().find((item) => item.startsWith(`${QA_FIX} `));
+  const parts = line ? line.split(/\s+/).slice(1) : [];
+  if (!parts.length || !RUN_ID.test(parts[0])) return null;
+  const items: QaFixItem[] = [];
+  for (const part of parts.slice(1)) {
+    const match = /^([A-Z][A-Z0-9]*-\d+-TC\d+[A-Za-z]?|TC\d+[A-Za-z]?)=(fixed(?::([0-9a-f]{6,40}))?|not-a-bug|flaky)$/.exec(part);
+    if (match) items.push({ tc: match[1], result: match[2].startsWith('fixed') ? 'fixed' : match[2] as QaFixResult, sha: match[3] ?? null });
+  }
+  return items.length ? { runId: parts[0], items } : null;
+}
+
+/** "TC013 fixed 18b53dd · TC015 not a bug" for the QA queue row. */
+export const qaFixText = (report: QaFixReport) => report.items.map((item) => `${item.tc.replace(/^.*-(TC\d+[A-Za-z]?)$/, '$1')} ${item.result === 'fixed' ? `fixed${item.sha ? ` ${item.sha.slice(0, 7)}` : ''}` : item.result === 'not-a-bug' ? 'not a bug' : 'flaky'}`).join(' · ');
+
+/** Pull request links of a build run, sorted, so the same set compares equal; `openOnly` leaves out merged and closed ones. */
+export const runPullRequests = (run: Pick<Orchestration, 'pullRequests'>, openOnly = false) => [...new Set(run.pullRequests
+  .filter((pr) => !openOnly || pr.status === 'open' || pr.status === 'draft')
+  .map((pr) => pr.url).filter((url) => /\/pull\/\d+/.test(url)))].sort();
 
 /**
  * Starts one QA session on this workspace when a ticket built here gets its pull requests, once per set of pull requests.
@@ -263,7 +302,8 @@ export class QaAuto {
     if (run.machine !== (await this.deps.machine())) return false;
     const last = readTrigger(await this.deps.last(run.key));
     if (last?.fixFor) return this.afterFix(run.key, last);
-    const prs = runPullRequests(run);
+    // Only pull requests still open start QA on their own; a merged one gets QA from the owner's Run again.
+    const prs = runPullRequests(run, true);
     if (!prs.length) return false;
     if (last && last.prs.join(' ') === prs.join(' ')) return false;
     return this.start(run.key, prs);
@@ -315,12 +355,22 @@ export class QaAuto {
     }
   }
 
+  /** The Task session's QA-FIX line for the run its fix message was about: kept on the trigger for the QA queue. */
+  async fixReported(key: string, text: string | null): Promise<boolean> {
+    const report = parseQaFix(text);
+    if (!report || !isTicketKey(key)) return false;
+    const last = readTrigger(await this.deps.last(key));
+    if (!last || last.fixFor !== report.runId) return false;
+    await this.deps.save(key, { ...last, fixResult: report });
+    return true;
+  }
+
   /** QA from the start in a new QA session on the pull requests known now; the fix rounds already used stay counted. */
   async runAgain(key: string, prs: string[]): Promise<string | null> {
     if (!isTicketKey(key)) return 'Not a ticket key';
     if (this.deps.latest(key)?.state === 'running') return 'A QA run is still going for this ticket';
     const last = readTrigger(await this.deps.last(key));
-    const started = await this.start(key, prs.length ? prs : last?.prs ?? [], last?.round ?? 0);
+    const started = await this.start(key, prs.length ? prs : last?.prs ?? [], last?.round ?? 0, true);
     if (started) return null;
     return readTrigger(await this.deps.last(key))?.error ?? 'A QA session for this ticket is already starting';
   }
@@ -334,14 +384,14 @@ export class QaAuto {
   }
 
   /** A QA session for a ticket now, from the panel's button; the pull requests it records are the ones known now. */
-  async start(key: string, prs: string[], round = 0): Promise<boolean> {
+  async start(key: string, prs: string[], round = 0, rerun = false): Promise<boolean> {
     if (this.opening.has(key)) return false;
     this.opening.add(key);
     try {
       const at = this.deps.now().toISOString();
       const fresh = { prs, at, round, fixFor: null, heads: {} };
       try {
-        const sessionId = await this.deps.open(key, qaPrompt(key, prs, await this.lessonsOf(key)));
+        const sessionId = await this.deps.open(key, qaPrompt(key, prs, await this.lessonsOf(key), rerun));
         await this.deps.save(key, { ...fresh, sessionId, error: null });
         return true;
       } catch (error) {
@@ -366,6 +416,8 @@ export interface QaLocalRow {
   /** The fix message of this run already went out. */
   fixSent: boolean;
   sessionId: string | null;
+  /** What the Task session found for this run's failed TCs, from its QA-FIX line. */
+  fixResult: string | null;
 }
 
 /** `sessionRunning`: the QA session of the trigger still has a turn going, so a run may be on its way. */
@@ -400,6 +452,7 @@ export function qaLocalRows(sources: QaLocalSource[]): { rows: QaLocalRow[]; hid
       key: source.key, title: source.title, jiraStatus: source.jiraStatus, run, runs: source.runs,
       fixRound: source.trigger?.round ?? 0, fixSent: Boolean(run.runId && source.trigger?.fixFor === run.runId),
       sessionId: source.trigger?.sessionId ?? null,
+      fixResult: run.runId && source.trigger?.fixResult?.runId === run.runId ? qaFixText(source.trigger.fixResult) : null,
     });
   }
   const started = (row: QaLocalRow) => Date.parse(row.run.startedAt ?? '') || 0;
