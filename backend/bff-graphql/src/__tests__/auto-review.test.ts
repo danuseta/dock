@@ -1068,3 +1068,11 @@ test('a closed pull request, a review running now, two approvals or the last rou
   assert.strictEqual(await spent.review.tick(), 0);
   assert.strictEqual(spent.pushes.length, 0);
 });
+
+test('the auto review prompt downloads the thread and opens every image before judging', () => {
+  const prompt = reviewPrompt('QRD-1582', ['https://github.com/o/fe/pull/1281'], 'https://discord.com/channels/g/1575436424176468061');
+  assert.match(prompt, /node \$K\/discord-files\.cjs https:\/\/discord\.com\/channels\/g\/1575436424176468061 "<evidence>\/<MMDD>\/QRD-1582-discord"/);
+  assert.match(prompt, /Buka setiap gambar dan PDF yang disimpan pakai Read sebelum menilai/);
+  assert.match(prompt, /Teruskan path gambar itu ke subagent yang menilai \(sous-pr-reviewer, sous-arbiter\)/);
+  assert.match(prompt, /sebut gambar mana yang dicek dan apa isinya terhadap AC/);
+});
