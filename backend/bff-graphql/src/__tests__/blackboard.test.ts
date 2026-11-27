@@ -153,6 +153,11 @@ test('a ticket screenshots folder is given only for a ticket key with a board on
     writeFileSync(path.join(root, 'QRD-1474'), 'a file, not a board');
     assert.strictEqual(await ticketScreenshots(root, 'QRD-1473'), path.join(root, 'QRD-1473', 'screenshots'));
     for (const key of ['QRD-1474', 'QRD-9999', '../QRD-1473', 'qrd-1473', 'QRD-1473/..', '']) assert.strictEqual(await ticketScreenshots(root, key), null, key);
+    mkdirSync(path.join(root, 'QRD-1567', 'tickets', 'QRD-1582', 'screenshots'), { recursive: true });
+    assert.strictEqual(await ticketScreenshots(root, 'QRD-1582'), path.join(root, 'QRD-1567', 'tickets', 'QRD-1582', 'screenshots'), 'a board under its epic');
+    assert.strictEqual(await ticketScreenshots(root, 'QRD-1567'), path.join(root, 'QRD-1567', 'screenshots'), 'the epic board itself');
+    writeFileSync(path.join(root, 'QRD-1567', 'tickets', 'QRD-1583'), 'a file, not a board');
+    assert.strictEqual(await ticketScreenshots(root, 'QRD-1583'), null);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
