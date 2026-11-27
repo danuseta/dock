@@ -61,8 +61,11 @@ const stageIndex = (id: SousStageId) => SOUS_STAGE_IDS.indexOf(id);
 /** Every stage runs and goes on. */
 export const allRunProfile = (): SousFlowProfile => ({ skip: [], ask: [], stop: LAST_STAGE });
 
+/** A DOCK that never saved its Sous flow: every stage runs, and the Decisions stage asks first, so guesses wait on the owner. */
+export const defaultProfile = (): SousFlowProfile => ({ skip: [], ask: ['decide'], stop: LAST_STAGE });
+
 export const defaultSousFlow = (): SousFlowSettings => ({
-  profiles: { [DEFAULT_PROFILE]: allRunProfile() },
+  profiles: { [DEFAULT_PROFILE]: defaultProfile() },
   mine: DEFAULT_PROFILE,
   checkpoint: true,
   qaGuide: false,
