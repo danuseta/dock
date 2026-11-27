@@ -35,12 +35,14 @@ export const stageIndex = (id: string) => IDS.indexOf(id as SousStageId);
 export const stageOf = (id: string) => SOUS_STAGES.find((stage) => stage.id === id) ?? null;
 export const allRun = (): SousFlowProfile => ({ skip: [], ask: [], stop: LAST });
 export const isAllRun = (profile: SousFlowProfile) => profile.skip.length === 0 && profile.ask.length === 0 && profile.stop === LAST;
-export const defaultSettings = (): SousFlowSettings => ({ profiles: { [DEFAULT_PROFILE]: allRun() }, mine: DEFAULT_PROFILE, checkpoint: true, qaGuide: false, qaGuideField: 'customfield_10340' });
+/** A DOCK that never saved its Sous flow, as the BE reads it: every stage runs and Decisions asks first. */
+export const defaultProfile = (): SousFlowProfile => ({ skip: [], ask: ['decide'], stop: LAST });
+export const defaultSettings = (): SousFlowSettings => ({ profiles: { [DEFAULT_PROFILE]: defaultProfile() }, mine: DEFAULT_PROFILE, checkpoint: true, qaGuide: false, qaGuideField: 'customfield_10340' });
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const ids = (value: unknown): SousStageId[] => (Array.isArray(value) ? value.filter((id): id is SousStageId => IDS.includes(id as SousStageId)) : []);
 
-/** The settings from the sousFlow query; an empty or unreadable value is the default, where every stage runs. */
+/** The settings from the sousFlow query; an empty or unreadable value is the default: every stage runs, Decisions asks first. */
 export function parseSettings(raw: string | null | undefined): SousFlowSettings {
   const fallback = defaultSettings();
   if (!raw) return fallback;
