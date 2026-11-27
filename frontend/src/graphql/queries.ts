@@ -1817,6 +1817,24 @@ export const GET_QA_LOCAL = gql`
   }
 `;
 
+export const GET_QA_LOCAL_RUNS = gql`
+  query GetQaLocalRuns {
+    qaLocalRuns {
+      available
+      hidden
+      rows {
+        key title jiraStatus runs fixRound fixSent sessionId
+        run {
+          runId state step verdict rule passed failed blocked error startedAt updatedAt finishedAt
+          followsFe { key status }
+          steps { id label state }
+          testCases { id title ac state seconds video note }
+        }
+      }
+    }
+  }
+`;
+
 export const GET_DEPLOY_GATE = gql`
   query GetDeployGate($ticketKey: String!) {
     deployGate(ticketKey: $ticketKey) { key ready summary repos { repo pull state mergeSha runUrl finishedAt detail } }

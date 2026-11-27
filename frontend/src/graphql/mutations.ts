@@ -591,6 +591,18 @@ export const RUN_QA = gql`
   }
 `;
 
+export const QA_RUN_AGAIN = gql`
+  mutation QaRunAgain($ticketKey: String!) {
+    qaRunAgain(ticketKey: $ticketKey) { ${QA_LOCAL_FIELDS} }
+  }
+`;
+
+export const QA_SEND_FIX = gql`
+  mutation QaSendFix($ticketKey: String!, $force: Boolean) {
+    qaSendFix(ticketKey: $ticketKey, force: $force) { ${QA_LOCAL_FIELDS} }
+  }
+`;
+
 export const SET_QA_AUTO_RUN = gql`
   mutation SetQaAutoRun($on: Boolean!) {
     setQaAutoRun(on: $on) { ${QA_LOCAL_FIELDS} }

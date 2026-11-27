@@ -2854,6 +2854,27 @@ export const typeDefs = gql`
     summary: String!
   }
 
+  "One ticket's newest local QA run for the QA queue page."
+  type QaLocalRow {
+    key: String!
+    title: String
+    jiraStatus: String
+    run: QaRun!
+    "How many runs the ticket has."
+    runs: Int!
+    fixRound: Int!
+    "The fix message of this run already went out."
+    fixSent: Boolean!
+    sessionId: String
+  }
+
+  type QaLocalRuns {
+    available: Boolean!
+    rows: [QaLocalRow!]!
+    "Tickets with runs left out because they are ReadyForProduction or Done."
+    hidden: Int!
+  }
+
   "Local QA with qonflo-qa-local; available only on a workspace DOCK where it is installed."
   type QaLocal {
     available: Boolean!
@@ -2932,6 +2953,8 @@ export const typeDefs = gql`
     claudeAccounts: ClaudeAccounts!
     "The local QA state, and the newest run and QA session of a ticket when one is given."
     qaLocal(ticketKey: String): QaLocal!
+    "Every ticket's newest local QA run on this DOCK; tickets in ReadyForProduction or Done are left out and counted in hidden."
+    qaLocalRuns: QaLocalRuns!
     "Whether the ticket's merged pull requests are deployed (Settings deployWorkflows names each repo's deploy workflow)."
     deployGate(ticketKey: String!): DeployGate!
     """Pull requests and Jira labels of up to 10 tickets by key; extra keys are ignored."""
@@ -3180,6 +3203,10 @@ export const typeDefs = gql`
     refreshClaudeUsage: ClaudeAccounts!
     "Start a QA-<key> session that writes the ticket's tests when needed and runs qonflo-qa-local."
     runQa(ticketKey: String!): QaLocal!
+    "QA from the start in a new QA session; the fix rounds already used stay counted."
+    qaRunAgain(ticketKey: String!): QaLocal!
+    "Sends the newest REVISION run's failed test cases to the ticket's Task session; force sends one past the fix-round limit."
+    qaSendFix(ticketKey: String!, force: Boolean): QaLocal!
     "Run QA on its own when a ticket built on this workspace gets its pull requests."
     setQaAutoRun(on: Boolean!): QaLocal!
     setClaudeRotation(enabled: Boolean!, fiveHour: Int!, sevenDay: Int!, backToMain: Boolean!): ClaudeAccounts!
