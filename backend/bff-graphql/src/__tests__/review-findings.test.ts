@@ -335,7 +335,8 @@ test('ten messages of 2000 characters give a prompt of at most 8000 with the mar
   assert.ok(prompt.length <= 8000, String(prompt.length));
   assert.match(prompt, /^Pakai skill sous\. Lanjutkan tiket QRD-1292/);
   assert.match(prompt, /\n3\. Ragu: putuskan, jangan parkir ke owner\. .*status\.cjs decide QRD-1292 .*--status GUESS --rejected .*GUESS dari round review tidak menahan PR\./);
-  assert.match(prompt, /dinaikkan ke owner sebagai issue hanya: tooling, guard, atau akses yang rusak; membalik keputusan owner yang DECIDED; perubahan scope produk atau kontrak\..*"lagi dikonfirmasi ke owner"/);
+  assert.match(prompt, /Temuan yang valid menurut AC atau kontrak diperbaiki seperti poin 1, walaupun fix-nya membalik keputusan GUESS .*status\.cjs decide QRD-1292 .*--replaces <n>.*bukan pertanyaan ke owner\./);
+  assert.match(prompt, /dinaikkan ke owner sebagai issue hanya: tooling, guard, atau akses yang rusak; membalik keputusan DECIDED yang didukung teks AC, kontrak, atau kata-kata owner sendiri; perubahan scope produk atau kontrak\..*"lagi dikonfirmasi ke owner"/);
   assert.doesNotMatch(prompt, /jangan push tebakan/);
   assert.match(prompt.split('\n').at(-1)!, /^DOCK-REVIEW-ROUND r1 valid=<jumlah valid> invalid=<jumlah tidak valid> pushed=<yes\|no\|body>$/);
   assert.ok(roundTexts(prompt).every((block) => block.split('<<<AKHIR TEMUAN>>>')[0].length <= 1600));

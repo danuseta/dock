@@ -2,6 +2,7 @@ import { StorageAPI } from './StorageAPI';
 import { GitHubClient, GitHubService, SearchPRsOptions, githubQuotaOf } from '../integrations/github';
 import type { GitHubQuotaState } from '../integrations/github-budget';
 import type { PullRequestProblem } from '../integrations/attention';
+import { reviewerVote } from '../integrations/pr-signals';
 import { dockIssueError, issuesRepo, toDockIssue } from '../integrations/dock-issues';
 
 const PROBLEM_LABEL: Record<PullRequestProblem, string> = { CONFLICT: 'Merge conflict', PR_CHANGES_REQUESTED: 'Changes requested', PR_CHECKS_FAILING: 'Checks failing' };
@@ -9,6 +10,7 @@ const PROBLEM_LABEL: Record<PullRequestProblem, string> = { CONFLICT: 'Merge con
 export class GitHubAPI {
   private storageAPI: StorageAPI;
   private githubService: GitHubService;
+  private login = '';
   private authInFlight: Promise<{
     headers: { Authorization: string };
     repos: string;
@@ -157,6 +159,28 @@ export class GitHubAPI {
     if (!auth.hasToken) throw new Error('GitHub token is not configured in Settings');
     const date = await new GitHubClient(auth.headers.Authorization.replace('Bearer ', ''), { priority: true }).getCommitDate(owner, repo, sha);
     return date ? new Date(date) : null;
+  }
+
+  /** Pull requests of others the owner reviewed since a day, in the configured repos; [] without a token or repos. */
+  async reviewedByMe(since: string): Promise<Array<{ title: string; url: string; owner: string; repo: string; number: number }>> {
+    const auth = await this.getAuth();
+    const repos = auth.repos.split(',').map((repo: string) => repo.trim()).filter(Boolean);
+    if (!auth.hasToken || !repos.length) return [];
+    const items = await new GitHubClient(auth.headers.Authorization.replace('Bearer ', '')).searchReviewedByMe(repos, since);
+    return items.map((item: any) => {
+      const [owner, repo] = String(item.repository_url || '').split('/').slice(-2);
+      return { title: String(item.title || ''), url: String(item.html_url || ''), owner, repo, number: Number(item.number) };
+    }).filter((item: { owner: string; repo: string; number: number }) => item.owner && item.repo && item.number > 0);
+  }
+
+  /** The owner's standing vote on a pull request; null when none. Throws when there is no token or GitHub refuses. */
+  async myVote(owner: string, repo: string, pullNumber: number): Promise<'APPROVED' | 'CHANGES_REQUESTED' | null> {
+    const auth = await this.getAuth();
+    if (!auth.hasToken) throw new Error('GitHub token is not configured in Settings');
+    const client = new GitHubClient(auth.headers.Authorization.replace('Bearer ', ''));
+    if (!this.login) this.login = String((await client.validateCredentials())?.login ?? '');
+    if (!this.login) throw new Error('GitHub did not name the token account');
+    return reviewerVote(await client.getReviews(owner, repo, pullNumber), this.login);
   }
 
   /** Submits an APPROVE review; throws when there is no token or GitHub refuses. */

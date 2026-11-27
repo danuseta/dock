@@ -23,10 +23,22 @@ const reason = (error: unknown) => {
   return error instanceof Error ? error.message : 'unknown error';
 };
 
-/** The roster token of the named Jira account; the label is never guessed from the name (Aken's is kenPass). */
-export function passLabelOf(displayName: string, roster: RosterMember[]): string {
+/** The team's Jira accounts and their Pass labels, so approving needs no sprint dashboard setup. Add a developer here. */
+export const TEAM_PASS_LABELS: Readonly<Record<string, string>> = {
+  'M Danu Seta W': 'danuPass',
+  'Dwi Indra': 'indraPass',
+  'Aken Setiawan': 'kenPass',
+  'Alvin Theofilus Sutikno': 'alvinPass',
+  'Muhammad Shovian Hadi Al-Baihaqy': 'shovianPass',
+  'Yusril Izza': 'yusrilPass',
+};
+
+/** The team token of the named Jira account, else its roster token; the label is never guessed from the name (Aken's is kenPass). */
+export function passLabelOf(displayName: string, roster: RosterMember[] = []): string {
+  const team = TEAM_PASS_LABELS[displayName.trim()];
+  if (team) return team;
   const member = roster.find((entry) => entry.full === displayName);
-  if (!member) throw new Error(`${displayName || 'The Jira account'} has no Pass label in the sprint roster. Add it to the roster in the sprint dashboard settings.`);
+  if (!member) throw new Error(`${displayName || 'The Jira account'} has no Pass label. Add it to TEAM_PASS_LABELS in review-approval.ts.`);
   return member.token;
 }
 
@@ -102,7 +114,10 @@ const jiraAPI = new JiraAPI();
 const githubAPI = new GitHubAPI();
 
 export const liveApprovalDeps: ApprovalDeps = {
-  passLabel: async () => passLabelOf(await jiraAPI.displayName(), await sprintDashboardService.roster()),
+  passLabel: async () => {
+    const name = await jiraAPI.displayName();
+    return TEAM_PASS_LABELS[name.trim()] ?? passLabelOf(name, await sprintDashboardService.roster());
+  },
   addLabel: (key, label) => jiraAPI.addLabel(key, label),
   pullRequests: (key) => githubAPI.getPullRequestsForTicket(key),
   approve: (owner, repo, pullNumber) => githubAPI.approvePullRequest(owner, repo, pullNumber),
