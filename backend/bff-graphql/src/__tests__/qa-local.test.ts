@@ -113,7 +113,7 @@ test('the QA prompt names the ticket, the command and what it must not touch', (
 
 const trig = (extra: Partial<QaTrigger> = {}): QaTrigger => ({ prs: [BE, FE], sessionId: 'old', at: '2026-11-04T07:00:00.000Z', error: null, round: 0, fixFor: null, heads: {}, ...extra });
 
-function world(options: { available?: boolean; enabled?: boolean; machine?: string; last?: QaTrigger | null; failOpen?: boolean; run?: QaRun | null; heads?: Record<string, string | null>; failMessage?: boolean } = {}) {
+function world(options: { available?: boolean; enabled?: boolean; machine?: string; last?: QaTrigger | null; failOpen?: boolean; run?: QaRun | null; heads?: Record<string, string | null>; failMessage?: boolean; open?: string[] } = {}) {
   const saved: Array<{ key: string; trigger: QaTrigger }> = [];
   const opened: Array<{ key: string; prompt: string }> = [];
   const messages: Array<{ key: string; prompt: string }> = [];
@@ -137,6 +137,7 @@ function world(options: { available?: boolean; enabled?: boolean; machine?: stri
       messages.push({ key, prompt });
     },
     tickets: async () => ['QRD-1286'],
+    openPrs: async () => options.open ?? [BE, FE],
   };
   return { auto: new QaAuto(deps), saved, opened, messages };
 }
@@ -262,6 +263,44 @@ test('QA runs again, one round on, only after a pull request head changed since 
   const unknown = world({ last: waiting, heads: {} });
   assert.strictEqual(await unknown.auto.ledger(build()), false);
   assert.strictEqual(unknown.opened.length, 0);
+});
+
+test('a fix on a new pull request, after the old one merged, starts QA one round on that pull request', async () => {
+  const NEW = 'https://github.com/qonekid/ms-client-dashboard-frontend/pull/1500';
+  const waiting = trig({ prs: [FE], fixFor: RUN_ID, heads: { [FE]: 'bbb222' } });
+  const merged = world({ last: waiting, heads: { [FE]: 'bbb222', [NEW]: 'ddd444' } });
+  assert.strictEqual(await merged.auto.ledger(build({ pullRequests: [{ ...pr(FE), status: 'merged' }, pr(NEW)] })), true);
+  assert.deepStrictEqual([merged.opened.length, merged.saved[0].trigger.prs, merged.saved[0].trigger.round], [1, [NEW], 1]);
+  const ticked = world({ last: waiting, open: [NEW], heads: { [FE]: 'bbb222' } });
+  await ticked.auto.tick();
+  assert.deepStrictEqual([ticked.opened.length, ticked.saved[0].trigger.prs], [1, [NEW]]);
+});
+
+test('the tick starts QA after a fix only when a head moved, and not while a run is going', async () => {
+  const waiting = trig({ fixFor: RUN_ID, heads: HEADS });
+  const same = world({ last: waiting, heads: HEADS });
+  await same.auto.tick();
+  assert.strictEqual(same.opened.length, 0);
+  const moved = world({ last: waiting, heads: { [BE]: 'aaa111', [FE]: 'ccc333' } });
+  await moved.auto.tick();
+  assert.deepStrictEqual([moved.opened.length, moved.saved[0].trigger.round], [1, 1]);
+  const running = world({ last: waiting, run: { ...finished('REVISION'), state: 'running' }, heads: { [BE]: 'aaa111', [FE]: 'ccc333' } });
+  await running.auto.tick();
+  assert.strictEqual(running.opened.length, 0);
+});
+
+test('a QA-FIX line with a fixed TC starts QA at once when the head already moved', async () => {
+  const waiting = trig({ fixFor: RUN_ID, heads: HEADS });
+  const moved = world({ last: waiting, heads: { [BE]: 'aaa111', [FE]: 'ccc333' } });
+  assert.strictEqual(await moved.auto.fixReported('QRD-1286', `QA-FIX ${RUN_ID} QRD-1286-TC001=fixed:ccc333`), true);
+  assert.strictEqual(moved.opened.length, 1);
+  assert.strictEqual(moved.saved[1].trigger.round, 1);
+  const flaky = world({ last: waiting, heads: { [BE]: 'aaa111', [FE]: 'ccc333' } });
+  assert.strictEqual(await flaky.auto.fixReported('QRD-1286', `QA-FIX ${RUN_ID} QRD-1286-TC001=flaky`), true);
+  assert.strictEqual(flaky.opened.length, 0);
+  const unpushed = world({ last: waiting, heads: HEADS });
+  assert.strictEqual(await unpushed.auto.fixReported('QRD-1286', `QA-FIX ${RUN_ID} QRD-1286-TC001=fixed:ccc333`), true);
+  assert.strictEqual(unpushed.opened.length, 0);
 });
 
 test('a trigger cached before fix rounds existed reads with the defaults', async () => {

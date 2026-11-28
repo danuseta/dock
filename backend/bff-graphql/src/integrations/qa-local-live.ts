@@ -117,6 +117,10 @@ export const qaAuto = new QaAuto({
   },
   message: (key, prompt) => orchestratorCron.taskMessage(key, prompt),
   tickets: async () => (await orchestratorService.list()).filter((run) => run.kind === 'build' && runPullRequests(run).length > 0).map((run) => run.key),
+  openPrs: async (key) => {
+    const run = (await orchestratorService.list()).find((item) => item.kind === 'build' && item.key === key);
+    return run ? runPullRequests(run, true) : [];
+  },
   lessonsFile: (key) => lessonsFileFor(key),
 });
 
