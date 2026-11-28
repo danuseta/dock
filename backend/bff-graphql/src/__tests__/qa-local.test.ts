@@ -210,7 +210,8 @@ test('a finished REVISION run sends its failed test cases to the Task session on
   assert.ok(!messages[0].prompt.includes('TC002'));
   assert.ok(lines.some((line) => line.startsWith('Sebelum mengubah kode, reproduksi tiap TC:') && line.includes(`${DIR}/pw-output/<TC>/error-context.md`)), 'each TC is reproduced first');
   assert.ok(lines.some((line) => line.includes('Kalau PR itu sudah merged: lanjutkan di branch yang sama') && line.includes('buka PR baru dari branch itu ke develop')));
-  assert.strictEqual(lines[lines.length - 1], 'Baris terakhir balasanmu persis: QA-FIX 20261104T073000Z lalu satu entri per TC gagal, dipisah spasi: <TC>=fixed:<sha pendek>, <TC>=not-a-bug, atau <TC>=flaky (contoh: QA-FIX 20261104T073000Z QRD-1286-TC001=fixed:1a2b3c4).');
+  assert.strictEqual(lines[lines.length - 1], 'Baris terakhir balasanmu persis: QA-FIX 20261104T073000Z lalu satu entri per TC gagal, dipisah spasi: <TC>=fixed:<sha pendek>, <TC>=not-a-bug, <TC>=out-of-scope, atau <TC>=flaky (contoh: QA-FIX 20261104T073000Z QRD-1286-TC001=fixed:1a2b3c4).');
+  assert.ok(lines.some((line) => line.includes('bug lama') && line.includes('out-of-scope')), 'an old bug on the touched screen is fixed small or reported out-of-scope');
   assert.deepStrictEqual(saved[0].trigger, { ...trig(), fixFor: RUN_ID, heads: HEADS });
   const again = world({ last: saved[0].trigger, run: finished('REVISION'), heads: HEADS });
   assert.strictEqual(await again.auto.revision('QRD-1286'), false);
@@ -315,6 +316,21 @@ test('the QA queue rows leave out RFP and Done tickets and folders that are no t
   assert.deepStrictEqual([rows[1].fixRound, rows[1].fixSent, rows[1].sessionId], [1, true, 'qa-1']);
 });
 
+test('the QA queue rows hide UAT TESTED tickets labelled QA-DONE-PASSED and no other UAT status', () => {
+  const run = { ...finished('LOLOS'), state: 'done' as const, startedAt: '2026-11-27T10:00:00Z' };
+  const source = (key: string, jiraStatus: string, jiraLabels?: string[]) => ({ key, run, runs: 1, trigger: null, title: null, jiraStatus, jiraLabels });
+  const { rows, hidden } = qaLocalRows([
+    source('QRD-1', 'UAT TESTED', ['QA-DONE-PASSED']),
+    source('QRD-2', 'UAT TESTED', ['other']),
+    source('QRD-3', 'UAT TESTED'),
+    source('QRD-4', 'UAT CHECK', ['QA-DONE-PASSED']),
+    source('QRD-5', 'ReadyForProduction', []),
+    source('QRD-6', 'Done / MERGED', ['QA-DONE-PASSED']),
+  ]);
+  assert.deepStrictEqual(rows.map((row) => row.key).sort(), ['QRD-2', 'QRD-3', 'QRD-4']);
+  assert.strictEqual(hidden, 3);
+});
+
 test('a QA session still preparing shows as a live row before its run folder exists, and only while its session runs', () => {
   const trigger = trig({ at: '2026-11-27T12:09:01.000Z', sessionId: 'qa-1593' });
   const old = { ...finished('LOLOS'), startedAt: '2026-11-26T08:00:00.000Z' };
@@ -336,6 +352,9 @@ test('the QA-FIX line of a Task session reads per TC, and lands on the trigger o
   const report = parseQaFix(text)!;
   assert.deepStrictEqual(report, { runId: RUN_ID, items: [{ tc: 'QRD-1286-TC013', result: 'fixed', sha: '18b53dd7e' }, { tc: 'TC015', result: 'not-a-bug', sha: null }, { tc: 'QRD-1286-TC018', result: 'flaky', sha: null }] });
   assert.strictEqual(qaFixText(report), 'TC013 fixed 18b53dd · TC015 not a bug · TC018 flaky');
+  const scoped = parseQaFix('QA-FIX 20261127T145642Z QRD-1593-TC012=out-of-scope QRD-1593-TC013=fixed:1a2b3c4')!;
+  assert.deepStrictEqual(scoped.items.map((item) => item.result), ['out-of-scope', 'fixed']);
+  assert.strictEqual(qaFixText(scoped), 'TC012 out of scope · TC013 fixed 1a2b3c4');
   assert.strictEqual(parseQaFix('no marker here'), null);
   assert.strictEqual(parseQaFix('QA-FIX notarun TC1=fixed:abcdef1'), null);
   const sent = world({ last: trig({ fixFor: RUN_ID }) });
