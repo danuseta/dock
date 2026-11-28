@@ -230,6 +230,8 @@ export interface QaAutoDeps {
   message(key: string, prompt: string): Promise<unknown>;
   /** The tickets that were built here and may have a REVISION waiting. */
   tickets(): Promise<string[]>;
+  /** The ticket's pull requests still open now, from its build run. */
+  openPrs(key: string): Promise<string[]>;
   /** The ticket's lessons file for the QA and REVISION prompts; left out, a prompt names none. */
   lessonsFile?(key: string): Promise<string | null>;
 }
@@ -282,7 +284,7 @@ export const runPullRequests = (run: Pick<Orchestration, 'pullRequests'>, openOn
 /**
  * Starts one QA session on this workspace when a ticket built here gets its pull requests, once per set of pull requests.
  * Off unless the owner turned it on and `qonflo-qa-local` is installed. A REVISION run goes back to the ticket's Task
- * session (at most twice); when a pull request head moves after that, QA starts again.
+ * session (at most twice); when a pull request head moves after that, or the fix comes as a new pull request, QA starts again.
  */
 export class QaAuto {
   private readonly opening = new Set<string>();
@@ -302,7 +304,7 @@ export class QaAuto {
     if (!(await this.deps.enabled())) return false;
     if (run.machine !== (await this.deps.machine())) return false;
     const last = readTrigger(await this.deps.last(run.key));
-    if (last?.fixFor) return this.afterFix(run.key, last);
+    if (last?.fixFor) return this.afterFix(run.key, last, runPullRequests(run, true));
     // Only pull requests still open start QA on their own; a merged one gets QA from the owner's Run again.
     const prs = runPullRequests(run, true);
     if (!prs.length) return false;
@@ -310,13 +312,26 @@ export class QaAuto {
     return this.start(run.key, prs);
   }
 
-  /** QA again, one round on, once a pull request of the ticket has a head other than the one the fix message saw. */
-  private async afterFix(key: string, last: QaTrigger): Promise<boolean> {
+  /**
+   * QA again, one round on, once a pull request of the ticket has a head other than the one the fix message saw, or an
+   * open pull request the fix message did not see (the fix of a merged pull request goes up as a new one).
+   */
+  private async afterFix(key: string, last: QaTrigger, open: string[]): Promise<boolean> {
+    if (this.deps.latest(key)?.state === 'running') return false;
+    const prs = open.length ? open : last.prs;
+    if (open.some((url) => !(url in last.heads))) return this.start(key, prs, last.round + 1);
     for (const url of Object.keys(last.heads)) {
       const head = await this.deps.head(url).catch(() => null);
-      if (head && head !== last.heads[url]) return this.start(key, last.prs, last.round + 1);
+      if (head && head !== last.heads[url]) return this.start(key, prs, last.round + 1);
     }
     return false;
+  }
+
+  /** The fix-message wait of a ticket, checked against its pull requests open now. */
+  private async fixLanded(key: string): Promise<boolean> {
+    const last = readTrigger(await this.deps.last(key));
+    if (!last?.fixFor) return false;
+    return this.afterFix(key, last, await this.deps.openPrs(key));
   }
 
   /** Sends the failed test cases of a finished REVISION run to the Task session, once per run and while fix rounds are left. */
@@ -363,6 +378,7 @@ export class QaAuto {
     const last = readTrigger(await this.deps.last(key));
     if (!last || last.fixFor !== report.runId) return false;
     await this.deps.save(key, { ...last, fixResult: report });
+    if (report.items.some((item) => item.result === 'fixed') && await this.deps.enabled()) await this.fixLanded(key);
     return true;
   }
 
@@ -376,11 +392,12 @@ export class QaAuto {
     return readTrigger(await this.deps.last(key))?.error ?? 'A QA session for this ticket is already starting';
   }
 
-  /** Looks at every ticket built here for a finished REVISION run. */
+  /** Looks at every ticket built here for a finished REVISION run, and for a fix that went up after its fix message. */
   async tick(): Promise<void> {
     if (!this.deps.available() || !(await this.deps.enabled())) return;
     for (const key of await this.deps.tickets()) {
       await this.revision(key).catch((error) => console.warn('[QaLocal] fix message failed:', error instanceof Error ? error.message : 'unknown error'));
+      await this.fixLanded(key).catch((error) => console.warn('[QaLocal] start after fix failed:', error instanceof Error ? error.message : 'unknown error'));
     }
   }
 
