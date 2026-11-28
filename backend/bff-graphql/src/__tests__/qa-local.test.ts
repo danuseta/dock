@@ -442,3 +442,8 @@ test('the QA prompt runs qonflo-qa-local apart from the session and waits in the
   assert.match(prompt, /setsid nohup qonflo-qa-local QRD-1593/);
   assert.match(prompt, /Jangan memakai run_in_background atau Monitor lalu mengakhiri giliran/);
 });
+
+test('a ticket whose QA session ended before the first run lists as not run, marked stopped', () => {
+  const rows = qaNotRunRows([{ key: 'QRD-1647', title: 'Agent Hub', status: 'UAT MERGED', sprintName: 'QRD Sprint 28' }, { key: 'QRD-1711', title: 'Lab', status: 'PR Review' }], new Set(), () => ({ prs: 1, openPrs: 1 }), new Set(['QRD-1647']));
+  assert.deepStrictEqual(rows.map((row) => [row.key, row.stopped]), [['QRD-1647', true], ['QRD-1711', false]]);
+});
