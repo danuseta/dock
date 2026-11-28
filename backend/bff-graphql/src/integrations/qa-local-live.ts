@@ -68,8 +68,8 @@ export function qaVideoPath(key: string, runId: string, file: string): string | 
 }
 
 /**
- * Every ticket's newest local QA run for the QA queue page, plus QA sessions still preparing their first run; RFP and Done
- * tickets left out. Status and title from the cached Jira ticket, the title else from the ledger.
+ * Every ticket's newest local QA run for the QA queue page, plus QA sessions still preparing their first run; RFP, Done
+ * and QA-passed UAT TESTED tickets left out. Status and title from the cached Jira ticket, the title else from the ledger.
  */
 export async function qaLocalRuns(): Promise<{ rows: QaLocalRow[]; hidden: number }> {
   if (!qaAvailable()) return { rows: [], hidden: 0 };
@@ -91,6 +91,7 @@ export async function qaLocalRuns(): Promise<{ rows: QaLocalRow[]; hidden: numbe
       sessionRunning: session?.status === 'running' || session?.status === 'queued',
       title: ticket?.title ?? ledgers.get(key)?.title ?? null,
       jiraStatus: ticket?.status ?? null,
+      jiraLabels: Array.isArray(ticket?.labels) ? ticket.labels.map(String) : [],
     };
   }));
   return qaLocalRows(sources);
