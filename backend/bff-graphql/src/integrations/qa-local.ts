@@ -206,6 +206,7 @@ export const qaPrompt = (key: string, prs: string[], lessons: string | null = nu
   `1. Kalau ~/qa-local/tests/${key}/ belum ada atau ac.json-nya lebih tua dari tiket, jalankan "Agent step" v2 di ~/.claude/kit/qa-local/README.md: baca tiket lewat Atlassian MCP (hanya baca), tulis ac.json, TC.md dan *.spec.ts di folder itu saja.`,
   `1b. Test yang sudah ada mungkin ditulis untuk UI lama (develop bisa memindah halaman atau mengganti tombol). Bandingkan head worktree FE dan BE sekarang (git -C <worktree> rev-parse HEAD) dengan ~/qa-local/tests/${key}/written.json. ${rerun ? 'Karena ini Run again, cek setup selalu dijalankan.' : 'Kalau file itu tidak ada atau head-nya berbeda, cek setup dijalankan.'} Cek setup: naikkan stack, jalankan satu TC saja; kalau gagal sebelum assertion bagian Then (navigasi, tombol, form persiapan), lihat UI di head ini lalu perbarui helper dan langkah persiapan di spec dan cara_membuat di plan/plan.json, tanpa mengubah assertion Then, sampai TC itu lewat persiapan. Setelah itu tulis written.json berisi {"fe": "<sha>", "be": "<sha>", "at": "<waktu ISO>"}.`,
   `2. Jalankan: qonflo-qa-local ${key} (worktree wt-<nomor>-be dan -fe dipilih otomatis; pakai --be dan --fe kalau ada lebih dari satu).`,
+  `2b. Run ini lama dan ikut mati kalau giliranmu selesai. Jalankan terlepas dari sesi: setsid nohup qonflo-qa-local ${key} ... > /tmp/qa-${key}.log 2>&1 &, lalu tunggu di foreground: ulangi Bash (timeout paling lama 600000 ms) yang membaca state di progress.json run terbaru (~/qa-local/runs/${key}/) sampai bukan running. Jangan memakai run_in_background atau Monitor lalu mengakhiri giliran sebelum run selesai.`,
   '3. Setelah run, hapus data tes buatan spec dari MongoDB lokal (hanya dokumen yang dibuat run ini).',
   '4. Laporkan per TC: id, AC, PASS/FAIL/BLOCKED, path video, path summary.md, dan prediksi verdict beserta aturan judge.md yang dipakai.',
   `5. Jalankan: node ~/.claude/kit/deploy-gate.cjs ${key} dan laporkan hasilnya. Tiket baru boleh dipindah ke UAT CHECK setelah QA lokal lolos DAN deploy-gate menjawab ready (semua PR yang merge sudah ter-deploy ke UAT).`,
@@ -436,10 +437,12 @@ export interface QaLocalRow {
   sessionId: string | null;
   /** What the Task session found for this run's failed TCs, from its QA-FIX line. */
   fixResult: string | null;
+  /** The ticket's Jira sprint, null when Jira did not say. */
+  sprint: string | null;
 }
 
 /** `sessionRunning`: the QA session of the trigger still has a turn going, so a run may be on its way. */
-export interface QaLocalSource { key: string; run: QaRun | null; runs: number; trigger: QaTrigger | null; title: string | null; jiraStatus: string | null; jiraLabels?: string[]; sessionRunning?: boolean }
+export interface QaLocalSource { key: string; run: QaRun | null; runs: number; trigger: QaTrigger | null; title: string | null; jiraStatus: string | null; jiraLabels?: string[]; sessionRunning?: boolean; sprint?: string | null }
 
 /** Tickets whose work is over: they leave the table. */
 export const QA_HIDDEN_STATUS = /^(?:ready ?for ?production|done(?: \/ merged)?|closed)$/i;
@@ -478,9 +481,35 @@ export function qaLocalRows(sources: QaLocalSource[]): { rows: QaLocalRow[]; hid
       fixRound: source.trigger?.round ?? 0, fixSent: Boolean(run.runId && source.trigger?.fixFor === run.runId),
       sessionId: source.trigger?.sessionId ?? null,
       fixResult: run.runId && source.trigger?.fixResult?.runId === run.runId ? qaFixText(source.trigger.fixResult) : null,
+      sprint: source.sprint ?? null,
     });
   }
   const started = (row: QaLocalRow) => Date.parse(row.run.startedAt ?? '') || 0;
   rows.sort((a, b) => Number(LIVE.has(b.run.state)) - Number(LIVE.has(a.run.state)) || started(b) - started(a));
   return { rows, hidden };
+}
+
+/** A ticket of the owner that never had a QA local run or session. `openPrs`: open or draft pull requests, the ones Run QA may test. */
+export interface QaNotRunRow { key: string; title: string | null; jiraStatus: string | null; sprint: string | null; prs: number; openPrs: number }
+
+/**
+ * The owner's tickets with no run and no QA trigger, leaving out the ones the table hides (RFP, Done, Closed, UAT TESTED
+ * with QA-DONE-PASSED). A merged pull request does not count as one to run: QA of merged work waits for UAT CHECK.
+ */
+export function qaNotRunRows(
+  tickets: Array<{ key: string; title?: string | null; status?: string | null; sprintName?: string | null; labels?: unknown }>,
+  known: Set<string>,
+  prsOf: (key: string) => { prs: number; openPrs: number },
+): QaNotRunRow[] {
+  const rows: QaNotRunRow[] = [];
+  const seen = new Set<string>();
+  for (const ticket of tickets) {
+    const key = String(ticket.key ?? '');
+    if (!isTicketKey(key) || known.has(key) || seen.has(key)) continue;
+    const labels = Array.isArray(ticket.labels) ? ticket.labels.map(String) : [];
+    if (qaHidden(ticket.status ?? null, labels)) continue;
+    seen.add(key);
+    rows.push({ key, title: ticket.title ?? null, jiraStatus: ticket.status ?? null, sprint: ticket.sprintName ?? null, ...prsOf(key) });
+  }
+  return rows;
 }
