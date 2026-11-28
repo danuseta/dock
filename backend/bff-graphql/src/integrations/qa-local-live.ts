@@ -9,7 +9,7 @@ import { StorageService } from '../storage/service';
 import { orchestratorService } from './orchestrator';
 import { orchestratorCron } from './orchestrator-cron-live';
 import { chatService } from './chat';
-import { QA_FIX, QaAuto, RUN_ID, isRunVideo, isTicketKey, newestRun, parseProgress, parseResults, qaLocalRows, readTrigger, runPullRequests, type QaLocalRow, type QaRun } from './qa-local';
+import { QA_FIX, QaAuto, RUN_ID, isRunVideo, isTicketKey, newestRun, parseProgress, parseResults, qaLocalRows, qaNotRunRows, readTrigger, runPullRequests, type QaLocalRow, type QaNotRunRow, type QaRun } from './qa-local';
 
 const storage = new StorageService();
 const github = new GitHubAPI();
@@ -71,8 +71,8 @@ export function qaVideoPath(key: string, runId: string, file: string): string | 
  * Every ticket's newest local QA run for the QA queue page, plus QA sessions still preparing their first run; RFP, Done
  * and QA-passed UAT TESTED tickets left out. Status and title from the cached Jira ticket, the title else from the ledger.
  */
-export async function qaLocalRuns(): Promise<{ rows: QaLocalRow[]; hidden: number }> {
-  if (!qaAvailable()) return { rows: [], hidden: 0 };
+export async function qaLocalRuns(): Promise<{ rows: QaLocalRow[]; hidden: number; notRun: QaNotRunRow[] }> {
+  if (!qaAvailable()) return { rows: [], hidden: 0, notRun: [] };
   let runKeys: string[] = [];
   try {
     runKeys = fs.readdirSync(path.join(qaDir(), 'runs'), { withFileTypes: true }).filter((entry) => entry.isDirectory() && isTicketKey(entry.name)).map((entry) => entry.name);
@@ -92,9 +92,15 @@ export async function qaLocalRuns(): Promise<{ rows: QaLocalRow[]; hidden: numbe
       title: ticket?.title ?? ledgers.get(key)?.title ?? null,
       jiraStatus: ticket?.status ?? null,
       jiraLabels: Array.isArray(ticket?.labels) ? ticket.labels.map(String) : [],
+      sprint: ticket?.sprintName ?? null,
     };
   }));
-  return qaLocalRows(sources);
+  const mine = await jira.getTickets().catch(() => []);
+  const notRun = qaNotRunRows(mine, new Set(keys), (key) => {
+    const run = ledgers.get(key);
+    return run?.kind === 'build' ? { prs: runPullRequests(run).length, openPrs: runPullRequests(run, true).length } : { prs: 0, openPrs: 0 };
+  });
+  return { ...qaLocalRows(sources), notRun };
 }
 
 export const qaEnabled = async () => (await storage.getSettingValues([QA_SETTING])).some((row) => row.key === QA_SETTING && row.value === 'true');
