@@ -212,7 +212,8 @@ test('a finished REVISION run sends its failed test cases to the Task session on
   assert.ok(lines.some((line) => line.startsWith('Sebelum mengubah kode, reproduksi tiap TC:') && line.includes(`${DIR}/pw-output/<TC>/error-context.md`)), 'each TC is reproduced first');
   assert.ok(lines.some((line) => line.includes('Kalau PR itu sudah merged: lanjutkan di branch yang sama') && line.includes('buka PR baru dari branch itu ke develop')));
   assert.strictEqual(lines[lines.length - 1], 'Baris terakhir balasanmu persis: QA-FIX 20261104T073000Z lalu satu entri per TC gagal, dipisah spasi: <TC>=fixed:<sha pendek>, <TC>=not-a-bug, <TC>=out-of-scope, atau <TC>=flaky (contoh: QA-FIX 20261104T073000Z QRD-1286-TC001=fixed:1a2b3c4).');
-  assert.ok(lines.some((line) => line.includes('bug lama') && line.includes('out-of-scope')), 'an old bug on the touched screen is fixed small or reported out-of-scope');
+  assert.ok(lines.some((line) => line.includes('Tiga syarat owner') && line.includes('komponen bersama') && line.includes('Jangan membuat Decision')), 'a code bug is fixed here, shared component included, with no Decision');
+  assert.ok(lines.some((line) => line.includes('out-of-scope') && line.includes('menunggu tiket lain')), 'out-of-scope is only a wait on another ticket');
   assert.deepStrictEqual(saved[0].trigger, { ...trig(), fixFor: RUN_ID, heads: HEADS });
   const again = world({ last: saved[0].trigger, run: finished('REVISION'), heads: HEADS });
   assert.strictEqual(await again.auto.revision('QRD-1286'), false);
@@ -446,4 +447,17 @@ test('the QA prompt runs qonflo-qa-local apart from the session and waits in the
 test('a ticket whose QA session ended before the first run lists as not run, marked stopped', () => {
   const rows = qaNotRunRows([{ key: 'QRD-1647', title: 'Agent Hub', status: 'UAT MERGED', sprintName: 'QRD Sprint 28' }, { key: 'QRD-1711', title: 'Lab', status: 'PR Review' }], new Set(), () => ({ prs: 1, openPrs: 1 }), new Set(['QRD-1647']));
   assert.deepStrictEqual(rows.map((row) => [row.key, row.stopped]), [['QRD-1647', true], ['QRD-1711', false]]);
+});
+
+test('Run again carries the previous QA-FIX: not-a-bug specs get fixed, waits on another ticket are Blocked', async () => {
+  const report = { runId: RUN_ID, items: [{ tc: 'QRD-1286-TC001', result: 'not-a-bug' as const, sha: null }, { tc: 'QRD-1286-TC002', result: 'out-of-scope' as const, sha: null }] };
+  const { auto, opened } = world({ last: trig({ fixFor: RUN_ID, fixResult: report }) });
+  assert.strictEqual(await auto.runAgain('QRD-1286', [BE]), null);
+  const prompt = opened[0].prompt;
+  assert.match(prompt, /Ronde sebelumnya \(QA-FIX 20261104T073000Z\) menurut Task session: not-a-bug QRD-1286-TC001; out-of-scope QRD-1286-TC002;/);
+  assert.match(prompt, /Then boleh diubah hanya kalau Then lama tidak berasal dari kalimat AC/);
+  assert.match(prompt, /Blocked \[DEPENDENSI\]/);
+  const plain = world({ last: trig() });
+  await plain.auto.runAgain('QRD-1286', [BE]);
+  assert.doesNotMatch(plain.opened[0].prompt, /Ronde sebelumnya/);
 });

@@ -199,10 +199,24 @@ export const isRunVideo = (file: string) => /^videos\/[A-Za-z0-9][A-Za-z0-9._-]*
 const TICKET = /^[A-Z][A-Z0-9]+-\d+$/;
 export const isTicketKey = (key: string) => TICKET.test(key) && !key.startsWith('CARD-');
 
+/** What the Task session said about the previous run's failed TCs, so the QA session fixes wrong specs and marks waits. */
+function priorLines(key: string, prior: QaTrigger['fixResult'] | null): string[] {
+  const of = (result: QaFixResult) => (prior?.items ?? []).filter((item) => item.result === result).map((item) => item.tc);
+  const wrong = of('not-a-bug');
+  const waiting = of('out-of-scope');
+  if (!prior || (!wrong.length && !waiting.length)) return [];
+  return [
+    `Ronde sebelumnya (QA-FIX ${prior.runId}) menurut Task session:${wrong.length ? ` not-a-bug ${wrong.join(', ')};` : ''}${waiting.length ? ` out-of-scope ${waiting.join(', ')};` : ''} alasannya ada di finding terbaru ledger (node ~/.claude/kit/status.cjs show ${key}).`,
+    ...(wrong.length ? ['Untuk tiap TC not-a-bug, bandingkan spec dengan AC dan storyboard sebelum run: perbaiki persiapan dan helper; Then boleh diubah hanya kalau Then lama tidak berasal dari kalimat AC, dan tulis alasannya di TC.md.'] : []),
+    ...(waiting.length ? ['TC out-of-scope yang menunggu tiket lain yang belum merge dinilai Blocked [DEPENDENSI] dengan nama tiketnya, bukan Failed.'] : []),
+  ];
+}
+
 /** The prompt of a QA session: the agent step that writes the tests, then the command, all inside the rules of `~/qa-local`. */
-export const qaPrompt = (key: string, prs: string[], lessons: string | null = null, rerun = false) => [
+export const qaPrompt = (key: string, prs: string[], lessons: string | null = null, rerun = false, prior: QaTrigger['fixResult'] | null = null) => [
   `QA lokal ${key}${prs.length ? ` setelah PR ${prs.join(' ')}` : ''}${rerun ? ' (Run again dari owner)' : ''}.`,
   ...lessonsLines(lessons),
+  ...priorLines(key, prior),
   `1. Kalau ~/qa-local/tests/${key}/ belum ada atau ac.json-nya lebih tua dari tiket, jalankan "Agent step" v2 di ~/.claude/kit/qa-local/README.md: baca tiket lewat Atlassian MCP (hanya baca), tulis ac.json, TC.md dan *.spec.ts di folder itu saja.`,
   `1b. Test yang sudah ada mungkin ditulis untuk UI lama (develop bisa memindah halaman atau mengganti tombol). Bandingkan head worktree FE dan BE sekarang (git -C <worktree> rev-parse HEAD) dengan ~/qa-local/tests/${key}/written.json. ${rerun ? 'Karena ini Run again, cek setup selalu dijalankan.' : 'Kalau file itu tidak ada atau head-nya berbeda, cek setup dijalankan.'} Cek setup: naikkan stack, jalankan satu TC saja; kalau gagal sebelum assertion bagian Then (navigasi, tombol, form persiapan), lihat UI di head ini lalu perbarui helper dan langkah persiapan di spec dan cara_membuat di plan/plan.json, tanpa mengubah assertion Then, sampai TC itu lewat persiapan. Setelah itu tulis written.json berisi {"fe": "<sha>", "be": "<sha>", "at": "<waktu ISO>"}.`,
   `2. Jalankan: qonflo-qa-local ${key} (worktree wt-<nomor>-be dan -fe dipilih otomatis; pakai --be dan --fe kalau ada lebih dari satu).`,
@@ -250,7 +264,7 @@ export function revisionPrompt(key: string, round: number, run: Pick<QaRun, 'run
     'TC yang gagal:',
     ...failed.map((tc) => `- ${tc.id} | AC ${tc.ac.length ? tc.ac.join(', ') : '-'} | ${oneLine(tc.title)} | catatan: ${tc.note ? oneLine(tc.note) : '-'} | video: ${tc.video ? `${dir}/${tc.video}` : '-'}`),
     `Sebelum mengubah kode, reproduksi tiap TC: baca ${dir}/pw-output/<TC>/error-context.md dan kodenya, tulis path:line. TC yang gagal karena persiapan test (halaman atau tombol yang dituju sudah tidak ada), data uji, atau hanya kadang-kadang, dicatat dengan buktinya dan kodenya tidak diubah.`,
-    'TC yang gagal karena bug lama (sudah ada sebelum PR ini) di layar atau flow yang disentuh tiket ini tetap diperbaiki atas nama tiket ini, asal kecil: masuk batas light (jumlah file dan baris), satu repo, dan tidak mengubah komponen bersama yang dipakai layar lain. Kalau lebih besar dari itu, kodenya tidak diubah: catat keputusannya dan tulis usulan tiket bug, hasilnya out-of-scope. not-a-bug hanya untuk perilaku yang memang benar menurut AC.',
+    'Tiga syarat owner untuk tiap TC gagal: tetap sesuai AC tiket Jira, tidak mem-break fitur lain, dan TC lolos persis seperti Then-nya. Bug di kode, termasuk bug lama (sudah ada sebelum PR ini) dan bug di komponen bersama, diperbaiki atas nama tiket ini dengan perubahan sesempit mungkin plus test untuk perilaku lain yang lewat kode itu; batas light boleh dilewati untuk perbaikan ini; hasilnya fixed. Spec yang salah menurut AC atau storyboard: kode tidak diubah, tulis alasannya dengan kutipan AC sebagai finding, hasilnya not-a-bug (QA membetulkan spec di run berikutnya). TC yang menunggu tiket lain yang belum merge: sebut tiketnya, hasilnya out-of-scope. Jangan membuat Decision (status.cjs decide) untuk hasil ini; cukup finding di ledger.',
     'Pakai skill sous: perbaiki temuan QA lokal ini lewat light runner di PR yang sama dan push ke branch PR. Kalau PR itu sudah merged: lanjutkan di branch yang sama (merge develop dulu, tanpa rebase dan force push), push, lalu buka PR baru dari branch itu ke develop; owner mengizinkannya. Selain itu jangan buka PR baru.',
     `Baris terakhir balasanmu persis: ${QA_FIX} ${run.runId} lalu satu entri per TC gagal, dipisah spasi: <TC>=fixed:<sha pendek>, <TC>=not-a-bug, <TC>=out-of-scope, atau <TC>=flaky (contoh: ${QA_FIX} ${run.runId} ${failed[0]?.id ?? `${key}-TC001`}=fixed:1a2b3c4).`,
   ].join('\n');
@@ -320,10 +334,10 @@ export class QaAuto {
   private async afterFix(key: string, last: QaTrigger, open: string[]): Promise<boolean> {
     if (this.deps.latest(key)?.state === 'running') return false;
     const prs = open.length ? open : last.prs;
-    if (open.some((url) => !(url in last.heads))) return this.start(key, prs, last.round + 1);
+    if (open.some((url) => !(url in last.heads))) return this.start(key, prs, last.round + 1, false, last.fixResult ?? null);
     for (const url of Object.keys(last.heads)) {
       const head = await this.deps.head(url).catch(() => null);
-      if (head && head !== last.heads[url]) return this.start(key, prs, last.round + 1);
+      if (head && head !== last.heads[url]) return this.start(key, prs, last.round + 1, false, last.fixResult ?? null);
     }
     return false;
   }
@@ -388,7 +402,7 @@ export class QaAuto {
     if (!isTicketKey(key)) return 'Not a ticket key';
     if (this.deps.latest(key)?.state === 'running') return 'A QA run is still going for this ticket';
     const last = readTrigger(await this.deps.last(key));
-    const started = await this.start(key, prs.length ? prs : last?.prs ?? [], last?.round ?? 0, true);
+    const started = await this.start(key, prs.length ? prs : last?.prs ?? [], last?.round ?? 0, true, last?.fixResult ?? null);
     if (started) return null;
     return readTrigger(await this.deps.last(key))?.error ?? 'A QA session for this ticket is already starting';
   }
@@ -403,14 +417,14 @@ export class QaAuto {
   }
 
   /** A QA session for a ticket now, from the panel's button; the pull requests it records are the ones known now. */
-  async start(key: string, prs: string[], round = 0, rerun = false): Promise<boolean> {
+  async start(key: string, prs: string[], round = 0, rerun = false, prior: QaTrigger['fixResult'] | null = null): Promise<boolean> {
     if (this.opening.has(key)) return false;
     this.opening.add(key);
     try {
       const at = this.deps.now().toISOString();
       const fresh = { prs, at, round, fixFor: null, heads: {} };
       try {
-        const sessionId = await this.deps.open(key, qaPrompt(key, prs, await this.lessonsOf(key), rerun));
+        const sessionId = await this.deps.open(key, qaPrompt(key, prs, await this.lessonsOf(key), rerun, prior));
         await this.deps.save(key, { ...fresh, sessionId, error: null });
         return true;
       } catch (error) {
