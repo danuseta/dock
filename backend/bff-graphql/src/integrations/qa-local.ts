@@ -28,7 +28,7 @@ export interface QaRun {
 export interface QaFollowsFe { key: string; status: string | null }
 /** `round` counts the fix rounds already used (0 at the first run); `fixFor` is the run a fix message went out for; `heads` maps each pull request to its head SHA at that moment. */
 /** `fixResult`: what the Task session's QA-FIX line said about the run in `fixFor`. */
-export interface QaTrigger { prs: string[]; sessionId: string | null; at: string; error: string | null; round: number; fixFor: string | null; heads: Record<string, string>; fixResult?: { runId: string; items: Array<{ tc: string; result: 'fixed' | 'not-a-bug' | 'flaky'; sha: string | null }> } }
+export interface QaTrigger { prs: string[]; sessionId: string | null; at: string; error: string | null; round: number; fixFor: string | null; heads: Record<string, string>; fixResult?: { runId: string; items: Array<{ tc: string; result: QaFixResult; sha: string | null }> } }
 /** The most fix rounds a ticket gets; a REVISION after that waits for the owner. */
 export const MAX_FIX_ROUNDS = 2;
 
@@ -55,8 +55,8 @@ function readFixResult(value: unknown): QaTrigger['fixResult'] | null {
   if (typeof raw.runId !== 'string' || !Array.isArray(raw.items)) return null;
   const items = raw.items.flatMap((item) => {
     const entry = record(item);
-    return typeof entry.tc === 'string' && (entry.result === 'fixed' || entry.result === 'not-a-bug' || entry.result === 'flaky')
-      ? [{ tc: entry.tc, result: entry.result as 'fixed' | 'not-a-bug' | 'flaky', sha: str(entry.sha) }] : [];
+    return typeof entry.tc === 'string' && (entry.result === 'fixed' || entry.result === 'not-a-bug' || entry.result === 'out-of-scope' || entry.result === 'flaky')
+      ? [{ tc: entry.tc, result: entry.result as QaFixResult, sha: str(entry.sha) }] : [];
   });
   return items.length ? { runId: raw.runId, items } : null;
 }
@@ -247,13 +247,14 @@ export function revisionPrompt(key: string, round: number, run: Pick<QaRun, 'run
     'TC yang gagal:',
     ...failed.map((tc) => `- ${tc.id} | AC ${tc.ac.length ? tc.ac.join(', ') : '-'} | ${oneLine(tc.title)} | catatan: ${tc.note ? oneLine(tc.note) : '-'} | video: ${tc.video ? `${dir}/${tc.video}` : '-'}`),
     `Sebelum mengubah kode, reproduksi tiap TC: baca ${dir}/pw-output/<TC>/error-context.md dan kodenya, tulis path:line. TC yang gagal karena persiapan test (halaman atau tombol yang dituju sudah tidak ada), data uji, atau hanya kadang-kadang, dicatat dengan buktinya dan kodenya tidak diubah.`,
+    'TC yang gagal karena bug lama (sudah ada sebelum PR ini) di layar atau flow yang disentuh tiket ini tetap diperbaiki atas nama tiket ini, asal kecil: masuk batas light (jumlah file dan baris), satu repo, dan tidak mengubah komponen bersama yang dipakai layar lain. Kalau lebih besar dari itu, kodenya tidak diubah: catat keputusannya dan tulis usulan tiket bug, hasilnya out-of-scope. not-a-bug hanya untuk perilaku yang memang benar menurut AC.',
     'Pakai skill sous: perbaiki temuan QA lokal ini lewat light runner di PR yang sama dan push ke branch PR. Kalau PR itu sudah merged: lanjutkan di branch yang sama (merge develop dulu, tanpa rebase dan force push), push, lalu buka PR baru dari branch itu ke develop; owner mengizinkannya. Selain itu jangan buka PR baru.',
-    `Baris terakhir balasanmu persis: ${QA_FIX} ${run.runId} lalu satu entri per TC gagal, dipisah spasi: <TC>=fixed:<sha pendek>, <TC>=not-a-bug, atau <TC>=flaky (contoh: ${QA_FIX} ${run.runId} ${failed[0]?.id ?? `${key}-TC001`}=fixed:1a2b3c4).`,
+    `Baris terakhir balasanmu persis: ${QA_FIX} ${run.runId} lalu satu entri per TC gagal, dipisah spasi: <TC>=fixed:<sha pendek>, <TC>=not-a-bug, <TC>=out-of-scope, atau <TC>=flaky (contoh: ${QA_FIX} ${run.runId} ${failed[0]?.id ?? `${key}-TC001`}=fixed:1a2b3c4).`,
   ].join('\n');
 }
 
 export const QA_FIX = 'QA-FIX';
-export type QaFixResult = 'fixed' | 'not-a-bug' | 'flaky';
+export type QaFixResult = 'fixed' | 'not-a-bug' | 'out-of-scope' | 'flaky';
 export interface QaFixItem { tc: string; result: QaFixResult; sha: string | null }
 export interface QaFixReport { runId: string; items: QaFixItem[] }
 
@@ -264,14 +265,14 @@ export function parseQaFix(text: string | null | undefined): QaFixReport | null 
   if (!parts.length || !RUN_ID.test(parts[0])) return null;
   const items: QaFixItem[] = [];
   for (const part of parts.slice(1)) {
-    const match = /^([A-Z][A-Z0-9]*-\d+-TC\d+[A-Za-z]?|TC\d+[A-Za-z]?)=(fixed(?::([0-9a-f]{6,40}))?|not-a-bug|flaky)$/.exec(part);
+    const match = /^([A-Z][A-Z0-9]*-\d+-TC\d+[A-Za-z]?|TC\d+[A-Za-z]?)=(fixed(?::([0-9a-f]{6,40}))?|not-a-bug|out-of-scope|flaky)$/.exec(part);
     if (match) items.push({ tc: match[1], result: match[2].startsWith('fixed') ? 'fixed' : match[2] as QaFixResult, sha: match[3] ?? null });
   }
   return items.length ? { runId: parts[0], items } : null;
 }
 
 /** "TC013 fixed 18b53dd · TC015 not a bug" for the QA queue row. */
-export const qaFixText = (report: QaFixReport) => report.items.map((item) => `${item.tc.replace(/^.*-(TC\d+[A-Za-z]?)$/, '$1')} ${item.result === 'fixed' ? `fixed${item.sha ? ` ${item.sha.slice(0, 7)}` : ''}` : item.result === 'not-a-bug' ? 'not a bug' : 'flaky'}`).join(' · ');
+export const qaFixText = (report: QaFixReport) => report.items.map((item) => `${item.tc.replace(/^.*-(TC\d+[A-Za-z]?)$/, '$1')} ${item.result === 'fixed' ? `fixed${item.sha ? ` ${item.sha.slice(0, 7)}` : ''}` : item.result === 'not-a-bug' ? 'not a bug' : item.result === 'out-of-scope' ? 'out of scope' : 'flaky'}`).join(' · ');
 
 /** Pull request links of a build run, sorted, so the same set compares equal; `openOnly` leaves out merged and closed ones. */
 export const runPullRequests = (run: Pick<Orchestration, 'pullRequests'>, openOnly = false) => [...new Set(run.pullRequests
@@ -421,10 +422,17 @@ export interface QaLocalRow {
 }
 
 /** `sessionRunning`: the QA session of the trigger still has a turn going, so a run may be on its way. */
-export interface QaLocalSource { key: string; run: QaRun | null; runs: number; trigger: QaTrigger | null; title: string | null; jiraStatus: string | null; sessionRunning?: boolean }
+export interface QaLocalSource { key: string; run: QaRun | null; runs: number; trigger: QaTrigger | null; title: string | null; jiraStatus: string | null; jiraLabels?: string[]; sessionRunning?: boolean }
 
 /** Tickets whose work is over: they leave the table. */
 export const QA_HIDDEN_STATUS = /^(?:ready ?for ?production|done(?: \/ merged)?|closed)$/i;
+
+/** Work over, or UAT TESTED with the QA-DONE-PASSED label: QA has nothing left to run. */
+export function qaHidden(status: string | null, labels: string[] = []): boolean {
+  const name = (status ?? '').trim();
+  if (!name) return false;
+  return QA_HIDDEN_STATUS.test(name) || (/^uat ?tested$/i.test(name) && labels.some((label) => label.toLowerCase() === 'qa-done-passed'));
+}
 
 /** A QA session that started after the newest run, or before any run, and still runs: it prepares the stack and the test cases. */
 export function preparingRun(source: Pick<QaLocalSource, 'run' | 'trigger' | 'sessionRunning'>): QaRun | null {
@@ -439,7 +447,7 @@ export function preparingRun(source: Pick<QaLocalSource, 'run' | 'trigger' | 'se
 
 const LIVE = new Set(['running', 'preparing']);
 
-/** The table rows: tickets with a run or a QA session getting ready, not RFP or Done; live first, then the newest started; and how many were hidden. */
+/** The table rows: tickets with a run or a QA session getting ready, not RFP, Done or UAT TESTED with QA-DONE-PASSED; live first, then the newest started; and how many were hidden. */
 export function qaLocalRows(sources: QaLocalSource[]): { rows: QaLocalRow[]; hidden: number } {
   let hidden = 0;
   const rows: QaLocalRow[] = [];
@@ -447,7 +455,7 @@ export function qaLocalRows(sources: QaLocalSource[]): { rows: QaLocalRow[]; hid
     if (!isTicketKey(source.key)) continue;
     const run = preparingRun(source) ?? source.run;
     if (!run) continue;
-    if (source.jiraStatus && QA_HIDDEN_STATUS.test(source.jiraStatus.trim())) { hidden += 1; continue; }
+    if (qaHidden(source.jiraStatus, source.jiraLabels)) { hidden += 1; continue; }
     rows.push({
       key: source.key, title: source.title, jiraStatus: source.jiraStatus, run, runs: source.runs,
       fixRound: source.trigger?.round ?? 0, fixSent: Boolean(run.runId && source.trigger?.fixFor === run.runId),

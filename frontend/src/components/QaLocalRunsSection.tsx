@@ -118,7 +118,7 @@ export const QaLocalRunsSection: React.FC<{ onTicketClick: (key: string) => void
             {item.label}<span className="ml-1 font-mono text-xs tabular-nums opacity-70">{counts[item.id]}</span>
           </Button>
         ))}
-        {qa.hidden > 0 && <span className="text-xs text-muted-foreground">RFP and Done tickets hidden ({qa.hidden})</span>}
+        {qa.hidden > 0 && <span className="text-xs text-muted-foreground">RFP, Done and QA-passed tickets hidden ({qa.hidden})</span>}
       </div>
       <Card className="overflow-hidden p-0">
         {rows.length === 0 ? <p className="px-4 py-6 text-sm text-muted-foreground">No QA local run{filter === 'all' ? '' : ' in this filter'}.</p> : (
