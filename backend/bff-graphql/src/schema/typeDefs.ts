@@ -2880,6 +2880,8 @@ export const typeDefs = gql`
     sprint: String
     prs: Int!
     openPrs: Int!
+    "A QA session started and ended before the first run."
+    stopped: Boolean!
   }
 
   type QaLocalRuns {

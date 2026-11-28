@@ -14,7 +14,7 @@ export interface QaLocalRow {
   fixResult?: string | null;
   sprint?: string | null;
 }
-export interface QaNotRunRow { key: string; title: string | null; jiraStatus: string | null; sprint: string | null; prs: number; openPrs: number }
+export interface QaNotRunRow { key: string; title: string | null; jiraStatus: string | null; sprint: string | null; prs: number; openPrs: number; stopped?: boolean }
 export interface QaLocalRuns { available: boolean; hidden: number; rows: QaLocalRow[]; notRun: QaNotRunRow[] }
 
 export type QaLocalFilter = 'all' | 'running' | 'action' | 'lolos' | 'notrun';

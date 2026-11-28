@@ -189,6 +189,7 @@ export const QaLocalRunsSection: React.FC<{ onTicketClick: (key: string) => void
         <td className="px-4 py-3">
           <Badge variant="warn" className="gap-1"><CircleDashed size={11} aria-hidden="true" />Not run</Badge>
           {row.jiraStatus && <p className="mt-1 text-[0.7rem] text-muted-foreground">{row.jiraStatus}</p>}
+          {row.stopped && <p className="mt-1 max-w-[220px] text-[0.7rem] text-status-conflict">QA session stopped before the first run</p>}
         </td>
         <td className="px-4 py-3 text-xs text-muted-foreground">{row.prs ? `${row.openPrs} open of ${row.prs} PR` : 'No PR'}</td>
         <td className="px-4 py-3 text-muted-foreground">-</td>
