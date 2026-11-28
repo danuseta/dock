@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import test from 'node:test';
-import { MAX_FIX_ROUNDS, QaAuto, isRunVideo, newestRun, parseProgress, parseQaFix, parseResults, qaFixText, qaLocalRows, qaPrompt, readTrigger, revisionPrompt, runPullRequests, type QaAutoDeps, type QaRun, type QaTrigger } from '../integrations/qa-local';
+import { MAX_FIX_ROUNDS, QaAuto, isRunVideo, newestRun, parseProgress, parseQaFix, parseResults, qaFixText, qaLocalRows, qaNotRunRows, qaPrompt, readTrigger, revisionPrompt, runPullRequests, type QaAutoDeps, type QaRun, type QaTrigger } from '../integrations/qa-local';
 import type { RunPullRequest } from '../integrations/orchestrator';
 
 const NOW = new Date('2026-11-04T08:00:00.000Z');
@@ -418,4 +418,27 @@ test('QA starts on its own only for pull requests still open; Run again always c
   assert.strictEqual(await again.auto.runAgain('QRD-1286', [FE]), null);
   assert.match(again.opened[0].prompt, /\(Run again dari owner\)\./);
   assert.match(again.opened[0].prompt, /Karena ini Run again, cek setup selalu dijalankan\./);
+});
+
+test('tickets with no run and no trigger list as not run, hidden ones and known ones left out, with their sprint and pull requests', () => {
+  const prs: Record<string, { prs: number; openPrs: number }> = { 'QRD-1711': { prs: 1, openPrs: 1 }, 'QRD-1684': { prs: 1, openPrs: 0 } };
+  const rows = qaNotRunRows([
+    { key: 'QRD-1711', title: 'Lab folder', status: 'PR Review', sprintName: 'QRD Sprint 28' },
+    { key: 'QRD-1684', title: 'Warn on switch', status: 'UAT MERGED', sprintName: 'QRD Sprint 28' },
+    { key: 'QRD-1698', title: 'Mentions', status: 'To Do', sprintName: 'QRD Sprint 28' },
+    { key: 'QRD-1593', title: 'Online', status: 'UAT MERGED', sprintName: 'QRD Sprint 28' },
+    { key: 'QRD-1275', title: 'Version store', status: 'Done / MERGED', sprintName: 'QRD Sprint 26' },
+    { key: 'QRD-1600', title: 'Passed', status: 'UAT TESTED', sprintName: 'QRD Sprint 28', labels: ['QA-DONE-PASSED'] },
+    { key: 'QRD-1601', title: 'Tested, not passed yet', status: 'UAT TESTED', sprintName: null },
+    { key: 'CARD-notes', title: 'card', status: 'To Do' },
+  ], new Set(['QRD-1593']), (key) => prs[key] ?? { prs: 0, openPrs: 0 });
+  assert.deepStrictEqual(rows.map((row) => [row.key, row.sprint, row.prs, row.openPrs]), [
+    ['QRD-1711', 'QRD Sprint 28', 1, 1], ['QRD-1684', 'QRD Sprint 28', 1, 0], ['QRD-1698', 'QRD Sprint 28', 0, 0], ['QRD-1601', null, 0, 0],
+  ]);
+});
+
+test('the QA prompt runs qonflo-qa-local apart from the session and waits in the foreground', () => {
+  const prompt = qaPrompt('QRD-1593', []);
+  assert.match(prompt, /setsid nohup qonflo-qa-local QRD-1593/);
+  assert.match(prompt, /Jangan memakai run_in_background atau Monitor lalu mengakhiri giliran/);
 });

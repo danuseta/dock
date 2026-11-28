@@ -628,9 +628,9 @@ export const resolvers = {
     kamus: () => readKamus(blackboard),
     qaLocal: (_: unknown, { ticketKey }: { ticketKey?: string | null }) => qaLocalState(ticketKey),
     qaLocalRuns: async () => {
-      if (!qaAvailable()) return { available: false, rows: [], hidden: 0 };
-      const { rows, hidden } = await qaLocalRuns();
-      return { available: true, hidden, rows: rows.map((row) => ({ ...row, run: { ...row.run, testCases: row.run.tcs } })) };
+      if (!qaAvailable()) return { available: false, rows: [], hidden: 0, notRun: [] };
+      const { rows, hidden, notRun } = await qaLocalRuns();
+      return { available: true, hidden, notRun, rows: rows.map((row) => ({ ...row, run: { ...row.run, testCases: row.run.tcs } })) };
     },
     deployGate: (_: unknown, { ticketKey }: { ticketKey: string }) => {
       if (!isTicketKey(ticketKey)) throw new GraphQLError('ticketKey must be a ticket key such as QRD-1292', { extensions: { code: 'BAD_USER_INPUT' } });

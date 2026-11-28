@@ -1822,8 +1822,9 @@ export const GET_QA_LOCAL_RUNS = gql`
     qaLocalRuns {
       available
       hidden
+      notRun { key title jiraStatus sprint prs openPrs }
       rows {
-        key title jiraStatus runs fixRound fixSent sessionId fixResult
+        key title jiraStatus runs fixRound fixSent sessionId fixResult sprint
         run {
           runId state step verdict rule passed failed blocked error startedAt updatedAt finishedAt
           followsFe { key status }

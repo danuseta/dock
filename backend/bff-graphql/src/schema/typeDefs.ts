@@ -2868,11 +2868,25 @@ export const typeDefs = gql`
     sessionId: String
     "What the Task session found for this run's failed test cases, from its QA-FIX line: 'TC013 fixed 18b53dd · TC015 not a bug'."
     fixResult: String
+    "The ticket's Jira sprint."
+    sprint: String
+  }
+
+  "One of the owner's tickets that never had a QA local run. openPrs counts open or draft pull requests, the ones Run QA tests."
+  type QaNotRunRow {
+    key: String!
+    title: String
+    jiraStatus: String
+    sprint: String
+    prs: Int!
+    openPrs: Int!
   }
 
   type QaLocalRuns {
     available: Boolean!
     rows: [QaLocalRow!]!
+    "The owner's tickets with no run yet, hidden ones left out."
+    notRun: [QaNotRunRow!]!
     "Tickets with runs left out because they are ReadyForProduction or Done."
     hidden: Int!
   }
