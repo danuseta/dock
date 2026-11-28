@@ -489,17 +489,18 @@ export function qaLocalRows(sources: QaLocalSource[]): { rows: QaLocalRow[]; hid
   return { rows, hidden };
 }
 
-/** A ticket of the owner that never had a QA local run or session. `openPrs`: open or draft pull requests, the ones Run QA may test. */
-export interface QaNotRunRow { key: string; title: string | null; jiraStatus: string | null; sprint: string | null; prs: number; openPrs: number }
+/** A ticket of the owner that never had a QA local run. `stopped`: a QA session started and ended before the first run. `openPrs`: open or draft pull requests, the ones Run QA may test. */
+export interface QaNotRunRow { key: string; title: string | null; jiraStatus: string | null; sprint: string | null; prs: number; openPrs: number; stopped: boolean }
 
 /**
- * The owner's tickets with no run and no QA trigger, leaving out the ones the table hides (RFP, Done, Closed, UAT TESTED
+ * The owner's tickets with no row in the run table (no run, no QA session still going), leaving out the ones the table hides (RFP, Done, Closed, UAT TESTED
  * with QA-DONE-PASSED). A merged pull request does not count as one to run: QA of merged work waits for UAT CHECK.
  */
 export function qaNotRunRows(
   tickets: Array<{ key: string; title?: string | null; status?: string | null; sprintName?: string | null; labels?: unknown }>,
   known: Set<string>,
   prsOf: (key: string) => { prs: number; openPrs: number },
+  stopped: Set<string> = new Set(),
 ): QaNotRunRow[] {
   const rows: QaNotRunRow[] = [];
   const seen = new Set<string>();
@@ -509,7 +510,7 @@ export function qaNotRunRows(
     const labels = Array.isArray(ticket.labels) ? ticket.labels.map(String) : [];
     if (qaHidden(ticket.status ?? null, labels)) continue;
     seen.add(key);
-    rows.push({ key, title: ticket.title ?? null, jiraStatus: ticket.status ?? null, sprint: ticket.sprintName ?? null, ...prsOf(key) });
+    rows.push({ key, title: ticket.title ?? null, jiraStatus: ticket.status ?? null, sprint: ticket.sprintName ?? null, ...prsOf(key), stopped: stopped.has(key) });
   }
   return rows;
 }

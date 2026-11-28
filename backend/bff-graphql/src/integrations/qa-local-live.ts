@@ -95,12 +95,14 @@ export async function qaLocalRuns(): Promise<{ rows: QaLocalRow[]; hidden: numbe
       sprint: ticket?.sprintName ?? null,
     };
   }));
+  const table = qaLocalRows(sources);
+  const shown = new Set(sources.filter((source) => source.run || table.rows.some((row) => row.key === source.key)).map((source) => source.key));
   const mine = await jira.getTickets().catch(() => []);
-  const notRun = qaNotRunRows(mine, new Set(keys), (key) => {
+  const notRun = qaNotRunRows(mine, shown, (key) => {
     const run = ledgers.get(key);
     return run?.kind === 'build' ? { prs: runPullRequests(run).length, openPrs: runPullRequests(run, true).length } : { prs: 0, openPrs: 0 };
-  });
-  return { ...qaLocalRows(sources), notRun };
+  }, new Set(triggers.keys()));
+  return { ...table, notRun };
 }
 
 export const qaEnabled = async () => (await storage.getSettingValues([QA_SETTING])).some((row) => row.key === QA_SETTING && row.value === 'true');
